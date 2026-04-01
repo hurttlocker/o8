@@ -57,16 +57,6 @@ import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import { isTauri } from '@/lib/tauri/bridge';
 import { deriveWorkflowStage, describeWorkflowStage, pickDominantWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
-import {
-  buildFirstMergeCelebrationState,
-  FIRST_MERGE_CELEBRATION_MESSAGE,
-  formatCelebrationDuration,
-  formatCelebrationLineDelta,
-  markFirstMergeCelebrated,
-  readFirstMergeCelebrated,
-  type FirstMergeCelebrationPayload,
-  type FirstMergeCelebrationState,
-} from '@/lib/ftux/first-merge';
 
 // ── Types ──
 
@@ -185,23 +175,6 @@ interface CIHoverDetail {
   summaryLine: string | null;
 }
 
-interface WorkspaceFtuxSnapshot {
-  workspaceId: string;
-  repo: string;
-  repoPath: string;
-  branch: string;
-  sessionKey: string;
-  status: AgentDetail['workspaceStatus'] | null;
-  pr: AgentDetail['pr'];
-  localDiff?: AgentDetail['localDiff'];
-  readiness?: RepoReadiness;
-  workflowStage?: WorkflowStageBadge | null;
-  lifecycle?: {
-    repoSlug?: string | null;
-    firstSeenAt?: string;
-  } | null;
-}
-
 const THEME_ACCENT = 'var(--t-accent, #ef4444)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(239, 68, 68, 0.08))';
 const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(239, 68, 68, 0.14))';
@@ -209,6 +182,7 @@ const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(239, 68, 68, 0.22))';
 const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(239, 68, 68, 0.15))';
 const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+const EMPTY_STATE_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
 
 function mergeRiskLabel(detail: PRHoverDetail | null): { label: string; color: string } {
   if (!detail) return { label: 'warming', color: '#64748b' };
@@ -722,6 +696,241 @@ function ActivityDock({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function GhostPulseBar({
+  width,
+  height = 8,
+  opacity = 1,
+}: {
+  width: string | number;
+  height?: number;
+  opacity?: number;
+}) {
+  return (
+    <div
+      style={{
+        width,
+        height,
+        borderRadius: 999,
+        background: 'linear-gradient(90deg, rgba(148, 163, 184, 0.2) 0%, rgba(148, 163, 184, 0.34) 50%, rgba(148, 163, 184, 0.18) 100%)',
+        opacity,
+      }}
+    />
+  );
+}
+
+function AgentPanelEmptyState() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.985 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -10, scale: 0.985 }}
+      transition={EMPTY_STATE_SPRING}
+      style={{
+        marginTop: 10,
+        marginRight: 4,
+        marginBottom: 8,
+        marginLeft: 4,
+        padding: 14,
+        borderRadius: 14,
+        border: '1px solid var(--t-panel-border)',
+        background: `linear-gradient(180deg, ${THEME_PANEL_GLASS} 0%, ${THEME_BG_CARD} 100%)`,
+        boxShadow: '0 12px 28px rgba(4, 8, 14, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.35)',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              lineHeight: 1.4,
+              color: 'var(--t-text)',
+              letterSpacing: '-0.02em',
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            Your agents appear here as they work.
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              lineHeight: 1.55,
+              color: 'var(--t-text-muted)',
+              letterSpacing: '-0.01em',
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            Start one from the chat.
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[0, 1].map((index) => (
+            <div
+              key={index}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 12px 11px',
+                borderRadius: 14,
+                border: '1px solid rgba(148, 163, 184, 0.16)',
+                background: 'rgba(255, 255, 255, 0.36)',
+                opacity: index === 0 ? 0.92 : 0.72,
+              }}
+            >
+              <div
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 14,
+                  background: 'linear-gradient(180deg, rgba(37, 99, 235, 0.12) 0%, rgba(148, 163, 184, 0.16) 100%)',
+                  border: '1px solid rgba(37, 99, 235, 0.12)',
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <GhostPulseBar width={index === 0 ? '48%' : '42%'} height={10} />
+                  <GhostPulseBar width={54} height={18} opacity={0.78} />
+                </div>
+                <GhostPulseBar width={index === 0 ? '72%' : '64%'} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <GhostPulseBar width={80} height={18} opacity={0.78} />
+                  <GhostPulseBar width={58} height={18} opacity={0.68} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function ActivityFeedEmptyState({
+  missingGitHubScope,
+  repoLabel,
+}: {
+  missingGitHubScope: boolean;
+  repoLabel: string;
+}) {
+  const helperText = missingGitHubScope
+    ? 'Add a repo with the control above to give this feed a live lane.'
+    : `Start one from the chat and ${repoLabel} activity will flow here naturally.`;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.99 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.985 }}
+      transition={EMPTY_STATE_SPRING}
+      style={{
+        paddingTop: 10,
+        paddingRight: 2,
+        paddingBottom: 12,
+        paddingLeft: 2,
+      }}
+    >
+      <div
+        style={{
+          borderRadius: 14,
+          border: '1px solid var(--t-panel-border)',
+          background: `linear-gradient(180deg, ${THEME_PANEL_GLASS} 0%, ${THEME_BG_CARD} 100%)`,
+          boxShadow: '0 12px 28px rgba(4, 8, 14, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.3)',
+          padding: 14,
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                lineHeight: 1.45,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.02em',
+                fontFamily: 'system-ui, sans-serif',
+              }}
+            >
+              Commits, PRs, and CI runs stream here once agents are active.
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                lineHeight: 1.55,
+                color: 'var(--t-text-muted)',
+                letterSpacing: '-0.01em',
+                fontFamily: 'system-ui, sans-serif',
+              }}
+            >
+              {helperText}
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              padding: 12,
+              borderRadius: 14,
+              border: '1px solid rgba(148, 163, 184, 0.14)',
+              background: 'rgba(255, 255, 255, 0.32)',
+            }}
+          >
+            {[0, 1, 2].map((index) => (
+              <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    position: 'relative',
+                    width: 18,
+                    height: 26,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      bottom: 0,
+                      left: '50%',
+                      width: 1,
+                      transform: 'translateX(-50%)',
+                      background: 'linear-gradient(180deg, rgba(148, 163, 184, 0.12) 0%, rgba(148, 163, 184, 0.26) 50%, rgba(148, 163, 184, 0.12) 100%)',
+                    }}
+                  />
+                  <div
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      background: index === 0 ? 'rgba(37, 99, 235, 0.24)' : 'rgba(148, 163, 184, 0.22)',
+                      border: '1px solid rgba(148, 163, 184, 0.18)',
+                      position: 'relative',
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <GhostPulseBar width={index === 0 ? '52%' : index === 1 ? '48%' : '44%'} height={9} />
+                    <GhostPulseBar width={46} height={16} opacity={0.72} />
+                  </div>
+                  <GhostPulseBar width={index === 0 ? '78%' : index === 1 ? '66%' : '58%'} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -1647,7 +1856,6 @@ const ActivityFeed = memo(function ActivityFeed({
   activeRepo: externalRepo,
   activeAgentKey,
   refreshKey,
-  firstMergeCelebration,
 }: {
   events: EventEntry[];
   commits: { hash: string; message: string; age: string }[];
@@ -1661,7 +1869,6 @@ const ActivityFeed = memo(function ActivityFeed({
   activeRepo?: string | null;
   activeAgentKey?: string | null;
   refreshKey?: number;
-  firstMergeCelebration?: FirstMergeCelebrationState | null;
 }) {
   const [extras, setExtras] = useState<{ issues: ActivityItem[]; prs: ActivityItem[]; ciRuns: ActivityItem[]; repoCommits: ActivityItem[] }>({ issues: [], prs: [], ciRuns: [], repoCommits: [] });
   const [remoteScopeError, setRemoteScopeError] = useState<string | null>(null);
@@ -2085,25 +2292,13 @@ const ActivityFeed = memo(function ActivityFeed({
   }, [filtered]);
   const groupedHeaderStickyTop = repoPickerOpen ? 0 : 116;
   const missingGitHubScope = allRepos.length === 0 && !externalPanelRepo && !activeAgentRepo;
-  const celebrationDurationLabel = firstMergeCelebration
-    ? formatCelebrationDuration(firstMergeCelebration.durationMs)
-    : null;
-  const celebrationLineDelta = firstMergeCelebration
-    ? formatCelebrationLineDelta(firstMergeCelebration.additions, firstMergeCelebration.deletions)
-    : null;
 
-  if (!items.length && !firstMergeCelebration) {
+  if (!items.length) {
     return (
-      <div style={{ padding: '24px 14px', textAlign: 'center' }}>
-        <div style={{ fontSize: 12, color: 'var(--t-text-muted)', fontWeight: 500 }}>
-          {missingGitHubScope ? 'Connect GitHub to load repo activity' : 'No recent activity'}
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--t-text-faint)', marginTop: 4 }}>
-          {missingGitHubScope
-            ? 'Authenticate GitHub and register a repository so issues, PRs, CI, and commits can flow here.'
-            : 'Commits, issues, PRs, and CI runs will appear here'}
-        </div>
-      </div>
+      <ActivityFeedEmptyState
+        missingGitHubScope={missingGitHubScope}
+        repoLabel={repoLabel}
+      />
     );
   }
 
@@ -2406,225 +2601,20 @@ const ActivityFeed = memo(function ActivityFeed({
         </div>
       </div>
 
-      <AnimatePresence>
-        {firstMergeCelebration ? (
-          <motion.div
-            initial={{ opacity: 0, y: -12, scale: 0.985 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -14, scale: 0.985 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            style={{ padding: '2px 8px 10px' }}
-          >
-            <div
-              style={{
-                borderRadius: 14,
-                padding: 1,
-                background: 'var(--t-celebration-wash)',
-                boxShadow: '0 14px 32px var(--t-celebration-glow)',
-              }}
-            >
-              <div
-                style={{
-                  position: 'relative',
-                  overflow: 'hidden',
-                  borderRadius: 14,
-                  border: '1px solid var(--t-celebration-border)',
-                  background: 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)',
-                  backdropFilter: 'blur(16px)',
-                  WebkitBackdropFilter: 'blur(16px)',
-                  padding: '12px 12px 11px',
-                }}
-              >
-                <motion.div
-                  aria-hidden
-                  initial={{ opacity: 0.3, x: '-24%' }}
-                  animate={{ opacity: [0.3, 0.7, 0.18], x: ['-24%', '18%', '58%'] }}
-                  transition={{ duration: 3.4, times: [0, 0.48, 1], ease: 'easeInOut' }}
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    background: 'var(--t-celebration-wash)',
-                    pointerEvents: 'none',
-                  }}
-                />
-                <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '-0.02em',
-                      textTransform: 'uppercase',
-                      color: 'var(--t-celebration)',
-                      fontFamily: 'system-ui, sans-serif',
-                    }}
-                  >
-                    First merge
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      lineHeight: 1.45,
-                      fontWeight: 600,
-                      letterSpacing: '-0.02em',
-                      color: 'var(--t-text)',
-                      fontFamily: 'system-ui, sans-serif',
-                    }}
-                  >
-                    {FIRST_MERGE_CELEBRATION_MESSAGE}
-                  </div>
-                  <motion.div
-                    animate={{
-                      scale: [1, 1.01, 1],
-                      boxShadow: [
-                        '0 0 0 1px var(--t-celebration-border), 0 0 0 0 var(--t-celebration-glow)',
-                        '0 0 0 1px var(--t-celebration-border), 0 12px 26px var(--t-celebration-glow)',
-                        '0 0 0 1px var(--t-celebration-border), 0 0 0 0 var(--t-celebration-glow)',
-                      ],
-                    }}
-                    transition={{ duration: 2.8, times: [0, 0.42, 1], ease: 'easeInOut' }}
-                    style={{
-                      borderRadius: 14,
-                      border: '1px solid var(--t-celebration-border)',
-                      background: 'var(--t-panel)',
-                      padding: '10px 12px',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        justifyContent: 'space-between',
-                        gap: 10,
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            lineHeight: 1.4,
-                            color: 'var(--t-text)',
-                            letterSpacing: '-0.02em',
-                            fontFamily: 'system-ui, sans-serif',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {firstMergeCelebration.prNumber
-                            ? `PR #${firstMergeCelebration.prNumber} ${firstMergeCelebration.prTitle}`
-                            : firstMergeCelebration.prTitle}
-                        </div>
-                        <div
-                          style={{
-                            marginTop: 2,
-                            fontSize: 10,
-                            lineHeight: 1.35,
-                            color: 'var(--t-text-faint)',
-                            fontFamily: '"SF Mono", ui-monospace, monospace',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {`${shortRepoLabel(firstMergeCelebration.repo)} · ${firstMergeCelebration.branch}`}
-                        </div>
-                      </div>
-                      <div
-                        style={{
-                          flexShrink: 0,
-                          padding: '3px 8px',
-                          borderRadius: 10,
-                          border: '1px solid var(--t-celebration-border)',
-                          background: 'var(--t-celebration-soft)',
-                          color: 'var(--t-celebration)',
-                          fontSize: 10,
-                          fontWeight: 700,
-                          letterSpacing: '-0.01em',
-                          fontFamily: 'system-ui, sans-serif',
-                        }}
-                      >
-                        Merged
-                      </div>
-                    </div>
-                  </motion.div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    {celebrationDurationLabel ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          minHeight: 28,
-                          padding: '0 10px',
-                          borderRadius: 10,
-                          background: 'var(--t-celebration-soft)',
-                          border: '1px solid var(--t-celebration-border)',
-                          color: 'var(--t-text-secondary)',
-                          fontSize: 10,
-                          fontWeight: 600,
-                          letterSpacing: '-0.01em',
-                          fontFamily: 'system-ui, sans-serif',
-                        }}
-                      >
-                        <span style={{ color: 'var(--t-text-faint)' }}>Dispatch to merge</span>
-                        <span style={{ color: 'var(--t-text)', fontWeight: 700 }}>{celebrationDurationLabel}</span>
-                      </span>
-                    ) : null}
-                    {celebrationLineDelta ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          minHeight: 28,
-                          padding: '0 10px',
-                          borderRadius: 10,
-                          background: 'var(--t-panel)',
-                          border: '1px solid var(--t-panel-border)',
-                          color: 'var(--t-text-secondary)',
-                          fontSize: 10,
-                          fontWeight: 600,
-                          letterSpacing: '-0.01em',
-                          fontFamily: 'system-ui, sans-serif',
-                        }}
-                      >
-                        <span style={{ color: 'var(--t-text-faint)' }}>Lines changed</span>
-                        <span style={{ color: 'var(--t-text)', fontWeight: 700 }}>{celebrationLineDelta}</span>
-                      </span>
-                    ) : null}
-                    {firstMergeCelebration.changedFiles > 0 ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          minHeight: 28,
-                          padding: '0 10px',
-                          borderRadius: 10,
-                          background: 'var(--t-panel)',
-                          border: '1px solid var(--t-panel-border)',
-                          color: 'var(--t-text-secondary)',
-                          fontSize: 10,
-                          fontWeight: 600,
-                          letterSpacing: '-0.01em',
-                          fontFamily: 'system-ui, sans-serif',
-                        }}
-                      >
-                        {firstMergeCelebration.changedFiles} file{firstMergeCelebration.changedFiles === 1 ? '' : 's'}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-
       {/* No results for filter */}
       {filtered.length === 0 ? (
-        <div style={{ padding: '16px 14px', fontSize: 11, color: 'var(--t-text-muted)', textAlign: 'center' }}>
-          No {filter === 'all' ? '' : filter} activity
+        <div
+          style={{
+            padding: '16px 14px',
+            fontSize: 11,
+            color: 'var(--t-text-muted)',
+            textAlign: 'center',
+            lineHeight: 1.5,
+            letterSpacing: '-0.01em',
+            fontFamily: 'system-ui, sans-serif',
+          }}
+        >
+          {`${filter === 'all' ? 'Activity' : `${FILTER_TABS.find((tab) => tab.key === filter)?.label ?? filter} activity`} will appear here as ${repoLabel} work lands.`}
         </div>
       ) : null}
 
@@ -2672,32 +2662,11 @@ const ActivityFeed = memo(function ActivityFeed({
             const prDetail = item.kind === 'pr' ? prHoverDetails[key] ?? null : null;
             const ciDetail = item.kind === 'ci' ? ciHoverDetails[key] ?? null : null;
             const mergeRisk = item.kind === 'pr' ? mergeRiskLabel(prDetail) : null;
-            const isCelebratedPr = item.kind === 'pr'
-              && Boolean(
-                firstMergeCelebration
-                && item.number === firstMergeCelebration.prNumber
-                && item.repo === firstMergeCelebration.repo,
-              );
-            const rowBaseBackground = isCelebratedPr ? 'var(--t-celebration-soft)' : 'transparent';
-            const rowHoverBackground = isCelebratedPr ? 'var(--t-celebration-soft)' : 'rgba(37,99,235,0.04)';
 
             return (
-              <motion.div
+              <div
                 key={key}
                 onClick={clickable ? handleClick : undefined}
-                initial={isCelebratedPr ? { opacity: 0.92, scale: 0.992 } : false}
-                animate={isCelebratedPr ? {
-                  opacity: 1,
-                  scale: [1, 1.008, 1],
-                  boxShadow: [
-                    '0 0 0 1px var(--t-celebration-border), 0 0 0 0 var(--t-celebration-glow)',
-                    '0 12px 26px var(--t-celebration-glow), 0 0 0 1px var(--t-celebration-border)',
-                    '0 0 0 1px var(--t-celebration-border), 0 0 0 0 var(--t-celebration-glow)',
-                  ],
-                } : { opacity: 1, scale: 1, boxShadow: 'none' }}
-                transition={isCelebratedPr
-                  ? { duration: 2.8, times: [0, 0.42, 1], ease: 'easeInOut' }
-                  : { type: 'spring', stiffness: 400, damping: 30 }}
                 style={{
                   display: 'flex',
                   alignItems: 'flex-start',
@@ -2706,14 +2675,10 @@ const ActivityFeed = memo(function ActivityFeed({
                   position: 'relative',
                   cursor: clickable ? 'pointer' : 'default',
                   transition: 'background 100ms ease',
-                  borderRadius: 12,
-                  border: isCelebratedPr ? '1px solid var(--t-celebration-border)' : '1px solid transparent',
-                  background: rowBaseBackground,
-                  transformOrigin: 'center',
                 }}
                 onMouseEnter={(e) => {
                   openHoverCard(key, (e.currentTarget as HTMLDivElement).getBoundingClientRect());
-                  if (clickable) (e.currentTarget as HTMLDivElement).style.background = rowHoverBackground;
+                  if (clickable) (e.currentTarget as HTMLDivElement).style.background = 'rgba(37,99,235,0.04)';
                 }}
                 onMouseMove={(e) => {
                   if (hoveredItemKey === key) {
@@ -2722,7 +2687,7 @@ const ActivityFeed = memo(function ActivityFeed({
                 }}
                 onMouseLeave={(e) => {
                   scheduleHoverClose();
-                  if (clickable) (e.currentTarget as HTMLDivElement).style.background = rowBaseBackground;
+                  if (clickable) (e.currentTarget as HTMLDivElement).style.background = 'transparent';
                 }}
               >
                 {/* Icon dot */}
@@ -3241,7 +3206,7 @@ const ActivityFeed = memo(function ActivityFeed({
                     ) : null}
                   </BlueGlassHoverCard>
                 ) : null}
-              </motion.div>
+              </div>
             );
           })}
         </div>
@@ -3962,7 +3927,6 @@ export const AgentPanel = memo(function AgentPanel({
   onOpenDeploy,
   onOpenMemory,
   onAgentsUpdate,
-  onFirstMergeCelebration,
   onAgentKill,
   lifecycleEvents,
   orchestratorPackets = [],
@@ -3998,7 +3962,6 @@ export const AgentPanel = memo(function AgentPanel({
   onOpenDeploy?: (project?: string) => void;
   onOpenMemory?: () => void;
   onAgentsUpdate?: (agents: AgentDetail[]) => void;
-  onFirstMergeCelebration?: (celebration: FirstMergeCelebrationState) => void;
   onAgentKill?: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   lifecycleEvents?: Map<string, { state: string; exitCode?: number; ts: number }>;
   orchestratorPackets?: OrchestratorPacket[];
@@ -4017,7 +3980,6 @@ export const AgentPanel = memo(function AgentPanel({
   const [reposOpen, setReposOpen] = useState(true);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
-  const [firstMergeCelebration, setFirstMergeCelebration] = useState<FirstMergeCelebrationState | null>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
@@ -4028,37 +3990,9 @@ export const AgentPanel = memo(function AgentPanel({
     count: 0,
     hasError: false,
   });
-  const firstMergeCelebratedRef = useRef(false);
-  const observedWorkspaceMergeStateRef = useRef<Map<string, boolean>>(new Map());
+  const activityAutoOpenedRef = useRef(false);
   const hasSelectedRepo = Boolean(selectedRepoLocalPath);
   const scopedRepo = hasSelectedRepo ? (selectedRepo ?? null) : activeRepo;
-
-  useEffect(() => {
-    firstMergeCelebratedRef.current = readFirstMergeCelebrated();
-  }, []);
-
-  useEffect(() => {
-    if (!firstMergeCelebration) return;
-    setActivityOpen(true);
-    const timeoutMs = Math.max(0, firstMergeCelebration.endsAt - Date.now());
-    const timer = window.setTimeout(() => {
-      setFirstMergeCelebration((current) => (
-        current?.startedAt === firstMergeCelebration.startedAt ? null : current
-      ));
-    }, timeoutMs);
-    return () => window.clearTimeout(timer);
-  }, [firstMergeCelebration]);
-
-  const triggerFirstMergeCelebration = useCallback((payload: FirstMergeCelebrationPayload) => {
-    if (firstMergeCelebratedRef.current) return;
-
-    const celebration = buildFirstMergeCelebrationState(payload);
-    firstMergeCelebratedRef.current = true;
-    markFirstMergeCelebrated();
-    setFirstMergeCelebration(celebration);
-    setActivityOpen(true);
-    onFirstMergeCelebration?.(celebration);
-  }, [onFirstMergeCelebration]);
 
   const launchRepoTask = useCallback(async (request: RepoTaskLaunchRequest) => {
     if (onLaunchWorkspaceTask) {
@@ -4210,55 +4144,19 @@ export const AgentPanel = memo(function AgentPanel({
           repoReadiness?: RepoReadiness;
           workflowStage?: WorkflowStageBadge | null;
         }>();
-        let celebrationCandidate: FirstMergeCelebrationPayload | null = null;
         if (wsRes?.ok) {
-          const wsData = await wsRes.json() as { workspaces?: WorkspaceFtuxSnapshot[] };
-          const previousMergeStates = observedWorkspaceMergeStateRef.current;
-          const nextMergeStates = new Map<string, boolean>();
-          const primingMergeTransitions = previousMergeStates.size === 0;
+          const wsData = await wsRes.json();
           for (const ws of wsData.workspaces ?? []) {
             if (ws.sessionKey) {
               wsMap.set(ws.sessionKey, {
                 branch: ws.branch,
                 pr: ws.pr,
                 localDiff: ws.localDiff,
-                workspaceStatus: ws.status ?? undefined,
+                workspaceStatus: ws.status,
                 repoReadiness: ws.readiness,
                 workflowStage: ws.workflowStage ?? null,
               });
             }
-
-            const isMergedWorkspace = ws.pr?.state === 'merged' || ws.status === 'done';
-            nextMergeStates.set(ws.workspaceId, isMergedWorkspace);
-
-            if (
-              !primingMergeTransitions
-              && !celebrationCandidate
-              && previousMergeStates.get(ws.workspaceId) === false
-              && isMergedWorkspace
-              && ws.pr
-            ) {
-              const firstSeenAt = ws.lifecycle?.firstSeenAt ? new Date(ws.lifecycle.firstSeenAt).getTime() : Number.NaN;
-              celebrationCandidate = {
-                workspaceId: ws.workspaceId,
-                repo: ws.lifecycle?.repoSlug?.trim() || ws.repo,
-                repoPath: ws.repoPath,
-                branch: ws.branch,
-                sessionKey: ws.sessionKey,
-                prNumber: ws.pr.number,
-                prTitle: ws.pr.title,
-                prUrl: ws.pr.url ?? null,
-                additions: ws.pr.additions,
-                deletions: ws.pr.deletions,
-                changedFiles: ws.pr.changedFiles,
-                durationMs: Number.isFinite(firstSeenAt) ? Math.max(0, Date.now() - firstSeenAt) : null,
-                mergedAt: Date.now(),
-              };
-            }
-          }
-          observedWorkspaceMergeStateRef.current = nextMergeStates;
-          if (primingMergeTransitions) {
-            celebrationCandidate = null;
           }
         }
 
@@ -4323,9 +4221,6 @@ export const AgentPanel = memo(function AgentPanel({
 
         if (onAgentsUpdate) onAgentsUpdate(filteredAgents);
         setAgents(prev => arraysMatchBy(prev, filteredAgents, agentFp) ? prev : filteredAgents);
-        if (celebrationCandidate) {
-          triggerFirstMergeCelebration(celebrationCandidate);
-        }
       } catch { /* silent */ }
       finally {
         if (!inventoryLoadedRef.current) {
@@ -4477,8 +4372,8 @@ export const AgentPanel = memo(function AgentPanel({
       ?? (issues[0] ? `Issue #${issues[0].number} · ${issues[0].title}` : null)
       ?? (commits[0]?.message ?? compactActivitySummaryLabel(visibleActivityEvents[0]?.title))
     : (hasRegisteredRepos
-      ? 'GitHub activity across your registered repos.'
-      : 'Connect GitHub and add a repo to load activity.');
+      ? 'Commits, PRs, and CI runs stream here once agents are active.'
+      : 'Commits, PRs, and CI runs stream here once a repo is attached.');
   const activitySummary = compactActivitySummaryLabel(latestEventSummary);
   const launchIntent = launchIntentNonce > 0 && currentLaunchRepoPath
     ? { repoPath: currentLaunchRepoPath, nonce: launchIntentNonce }
@@ -4487,6 +4382,15 @@ export const AgentPanel = memo(function AgentPanel({
     ? { nonce: addRepoIntentNonce }
     : null;
   const titlebarSpacerHeight = isTauri() ? 38 : 10;
+
+  useEffect(() => {
+    if (activityAutoOpenedRef.current) return;
+    if (inventoryLoading || repoRegistryState.loading) return;
+    if (agents.length === 0) {
+      setActivityOpen(true);
+      activityAutoOpenedRef.current = true;
+    }
+  }, [agents.length, inventoryLoading, repoRegistryState.loading]);
 
   return (
     <div style={{
@@ -4645,6 +4549,12 @@ export const AgentPanel = memo(function AgentPanel({
           />
         </SidebarSection>
 
+        <AnimatePresence initial={false}>
+          {!inventoryLoading && agents.length === 0 ? (
+            <AgentPanelEmptyState key="agent-panel-empty-state" />
+          ) : null}
+        </AnimatePresence>
+
         <div
           style={{
             flex: 1,
@@ -4681,7 +4591,6 @@ export const AgentPanel = memo(function AgentPanel({
               activeRepo={effectiveScopedRepo}
               activeAgentKey={hasSelectedRepo ? null : (expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null)}
               refreshKey={activityRefreshKey}
-              firstMergeCelebration={firstMergeCelebration}
             />
           </ActivityDock>
         </div>
