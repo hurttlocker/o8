@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `e5b7819` feat: mobile wave 1
 - `7c9fe82` chore: commit agent work + cleanup untracked files
 - `276c93b` perf: P1 bundle + network optimizations
 - `a648a89` perf: P0 performance fixes
