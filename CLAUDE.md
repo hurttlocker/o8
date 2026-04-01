@@ -163,6 +163,7 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 - **Gateway communication goes through WebSocket RPC** — `wsRpc()` in `gateway-client.ts` is the primary path. It opens a short-lived WS, does challenge-response auth (client ID must be `'gateway-client'`), sends the RPC, returns the result. This replaced the CLI fallback that was hanging indefinitely.
 - **`getGatewayStatus()` must call `runStatusSnapshot()` directly** on cold start — never rely on the background refresh loop for initial data. The background loop is only for cache refreshes.
 - **`npx tsc --noEmit` before every commit**
+- **Respect the 600-line file ceiling** — if your changes would push a file past 600 lines, decompose first. Extract helpers, hooks, or modules before adding new logic. Layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) are explicitly waived.
 - **Apple HIG**: 44px touch targets, 14px card radii, spring curves
 - **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props
 - **Build for all three runtimes** — OpenClaw, Codex, Claude Code. Never commit to one provider.

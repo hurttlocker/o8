@@ -298,6 +298,7 @@ async function buildPacketPrompt(packet: OrchestratorPacket, allPackets: Orchest
     dependencySections.length > 0 ? 'Dependency handoff context:' : null,
     ...dependencySections,
     ...fileSizeSections,
+    'Files in this repository follow a 600-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');
 }
