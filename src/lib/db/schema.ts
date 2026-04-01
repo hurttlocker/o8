@@ -252,6 +252,42 @@ export const githubPullRequests = sqliteTable('github_pull_requests', {
 });
 
 // ══════════════════════════════════════════════════════════════════
+//  Approvals — durable approval and audit history
+// ══════════════════════════════════════════════════════════════════
+
+export const approvals = sqliteTable('approvals', {
+  id: text('id').primaryKey(),
+  source: text('source', { enum: ['llm-chat', 'runtime', 'test'] }).notNull(),
+  runtime: text('runtime').notNull(),
+  agent: text('agent').notNull(),
+  sessionKey: text('session_key').notNull(),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  summary: text('summary').notNull(),
+  toolName: text('tool_name'),
+  argsJson: text('args_json'),
+  command: text('command'),
+  editable: integer('editable', { mode: 'boolean' }),
+  diffJson: text('diff_json'),
+  risk: text('risk', { enum: ['low', 'medium', 'high'] }).notNull(),
+  metadataJson: text('metadata_json'),
+  policyRuleId: text('policy_rule_id'),
+  status: text('status', { enum: ['pending', 'approved', 'rejected'] }).notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  resolvedAt: integer('resolved_at'),
+  resolutionJson: text('resolution_json'),
+  auditJson: text('audit_json').notNull().default('[]'),
+  fingerprint: text('fingerprint').notNull(),
+  continuationJson: text('continuation_json'),
+}, (table) => ({
+  statusCreatedIdx: index('idx_approvals_status_created').on(table.status, table.createdAt),
+  sessionKeyCreatedIdx: index('idx_approvals_session_key_created').on(table.sessionKey, table.createdAt),
+  fingerprintStatusIdx: index('idx_approvals_fingerprint_status').on(table.fingerprint, table.status),
+  resolvedAtIdx: index('idx_approvals_resolved_at').on(table.resolvedAt),
+}));
+
+// ══════════════════════════════════════════════════════════════════
 //  Lane Registry — durable multi-process orchestration state
 // ══════════════════════════════════════════════════════════════════
 
