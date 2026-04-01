@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `1ace6ac` fix: orchestrator-reviewed merges skip redundant approval gate
 - `391ef6d` fix: auto-prune stale worktrees after lane merge
 
 ## 2026-03-31
