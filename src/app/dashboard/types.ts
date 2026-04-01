@@ -1,7 +1,10 @@
+import type { Dispatch, SetStateAction } from 'react';
 import type { CanvasTab } from '@/components/desktop/Canvas';
+import type { WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { WorkspaceSidePanelRepo } from '@/components/desktop/WorkspaceSidePanel';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
+import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
 
 export interface WorkspaceChatTargetOption {
@@ -80,4 +83,27 @@ export interface CanvasTileState {
 export interface FtuxFirstChangedFile {
   path: string;
   workspace: string | null;
+}
+
+export type WorkspaceLifecycleMutationAction = 'archive' | 'restore' | 'mark_read';
+
+export interface UseWorkspaceLifecycleArgs {
+  currentReviewAgent: PaletteAgentSummary | null;
+  globalRepoPath: string | null;
+  scopedRepoAgents: PaletteAgentSummary[];
+  selectedSessionAgent: PaletteAgentSummary | null;
+  workspaceTerminalPreferredRepoPath: string | null;
+  wsStatus: WsConnectionState;
+}
+
+export interface UseWorkspaceLifecycleResult {
+  archivedWorkspaceCandidate: WorkspaceLifecycleRecordView | null;
+  currentWorkspaceLifecycleRecord: WorkspaceLifecycleRecordView | null;
+  mutateWorkspaceLifecycle: (action: WorkspaceLifecycleMutationAction, workspaceId: string) => Promise<void>;
+  nextAttentionWorkspace: WorkspaceLifecycleRecordView | null;
+  refreshWorkspaceLifecycle: () => Promise<void>;
+  setWorkspaceLifecycleRecords: Dispatch<SetStateAction<WorkspaceLifecycleRecordView[]>>;
+  setWorkspaceLifecycleSummary: Dispatch<SetStateAction<WorkspaceLifecycleSummaryView>>;
+  workspaceLifecycleRecords: WorkspaceLifecycleRecordView[];
+  workspaceLifecycleSummary: WorkspaceLifecycleSummaryView;
 }
