@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `a648a89` perf: P0 performance fixes
 - `e161191` feat: wire recommendMergeOrder() into merge pipeline
 - `56443ba` feat: merge gate file size block + operator override
 - `5d82401` fix: Security hardening
