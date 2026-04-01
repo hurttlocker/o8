@@ -19,6 +19,17 @@ export function hasLaneBinding(packet: OrchestratorPacket) {
   );
 }
 
+export function clearStaleLaneBinding(packet: OrchestratorPacket): OrchestratorPacket {
+  if (!packet.lane || packet.lane.sessionKey) {
+    return packet;
+  }
+
+  return {
+    ...packet,
+    lane: null,
+  };
+}
+
 function buildPacketLookup(packets: OrchestratorPacket[]) {
   return new Map(packets.map((packet) => [packet.id, packet] as const));
 }
@@ -80,14 +91,24 @@ export function getDispatchableWave(packets: OrchestratorPacket[]): Orchestrator
   const graph = buildDependencyGraph(packets);
   const blockedByPacketId = new Map(graph.map((node) => [node.packetId, node.blockedBy] as const));
 
-  return packets.filter((packet) => {
+  return packets.flatMap((packet) => {
     const blockedBy = blockedByPacketId.get(packet.id) ?? [];
-    return packet.queueState === 'queued'
-      && packet.status === 'queued'
+    const canRecoverDispatch = packet.status === 'recovering' && !packet.lane?.sessionKey;
+    const candidate = canRecoverDispatch ? clearStaleLaneBinding(packet) : packet;
+    const canDispatch = packet.status === 'queued' || canRecoverDispatch;
+
+    if (
+      packet.queueState === 'queued'
+      && canDispatch
       && packet.releaseState !== 'released'
       && Boolean(packet.workspaceTargetPath)
-      && !hasLaneBinding(packet)
-      && blockedBy.length === 0;
+      && !hasLaneBinding(candidate)
+      && blockedBy.length === 0
+    ) {
+      return [candidate];
+    }
+
+    return [];
   });
 }
 
