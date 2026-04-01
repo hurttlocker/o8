@@ -2870,9 +2870,8 @@ function RepoCard({
                             </span>
                           </button>
                           {sessionsExpanded ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                               {orderedBranchAgents.map((agent) => {
-                                const runtimeTone = runtimeBadgeTone(agent.runtime);
                                 const statusTone = sessionStatusTone(agent.status);
                                 const isSelectedSession = activeSessionKey === agent.sessionKey;
                                 return (
@@ -2888,48 +2887,38 @@ function RepoCard({
                                       width: '100%',
                                       display: 'flex',
                                       alignItems: 'center',
-                                      gap: 10,
-                                      padding: '8px 10px',
-                                      borderRadius: 12,
-                                      border: isSelectedSession ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-                                      background: isSelectedSession ? THEME_ACCENT_SOFT : 'rgba(255, 255, 255, 0.56)',
+                                      gap: 8,
+                                      padding: '5px 6px',
+                                      borderRadius: 8,
+                                      border: 'none',
+                                      background: isSelectedSession ? 'var(--t-accent-soft)' : 'transparent',
                                       color: 'var(--t-text)',
                                       cursor: onSelectSession ? 'pointer' : 'default',
                                       fontFamily: '-apple-system, system-ui, sans-serif',
                                       textAlign: 'left',
-                                      boxShadow: isSelectedSession ? `0 0 0 1px ${THEME_ACCENT_RING}` : 'none',
-                                      transition: 'background 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
+                                      transition: 'background 120ms ease',
                                       opacity: onSelectSession ? 1 : 0.78,
                                     }}
                                   >
+                                    {/* Status dot */}
                                     <span
-                                      title={runtimeTone.label}
                                       style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        width: 28,
-                                        height: 28,
-                                        borderRadius: 999,
-                                        background: runtimeTone.background,
-                                        border: `1px solid ${runtimeTone.border}`,
-                                        color: runtimeTone.color,
-                                        fontSize: 10,
-                                        fontWeight: 700,
-                                        letterSpacing: '-0.01em',
+                                        width: 6,
+                                        height: 6,
+                                        borderRadius: '50%',
+                                        background: statusTone.color,
+                                        boxShadow: `0 0 6px ${statusTone.glow}`,
                                         flexShrink: 0,
                                       }}
-                                    >
-                                      {runtimeTone.shortLabel}
-                                    </span>
+                                    />
                                     <span style={{ flex: 1, minWidth: 0 }}>
                                       <span
                                         style={{
                                           display: 'block',
-                                          fontSize: 11.5,
-                                          fontWeight: 620,
+                                          fontSize: 11,
+                                          fontWeight: 600,
                                           lineHeight: 1.35,
-                                          color: 'var(--t-text)',
+                                          color: isSelectedSession ? 'var(--t-accent)' : 'var(--t-text)',
                                           overflow: 'hidden',
                                           textOverflow: 'ellipsis',
                                           whiteSpace: 'nowrap',
@@ -2941,7 +2930,7 @@ function RepoCard({
                                         style={{
                                           display: 'block',
                                           marginTop: 1,
-                                          fontSize: 10,
+                                          fontSize: 9,
                                           lineHeight: 1.3,
                                           color: 'var(--t-text-faint)',
                                           overflow: 'hidden',
@@ -2949,30 +2938,18 @@ function RepoCard({
                                           whiteSpace: 'nowrap',
                                         }}
                                       >
-                                        {runtimeTone.label}
+                                        {agent.runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
                                       </span>
                                     </span>
                                     <span
                                       style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 6,
                                         flexShrink: 0,
-                                        fontSize: 10,
-                                        fontWeight: 700,
+                                        fontSize: 9,
+                                        fontWeight: 600,
                                         color: statusTone.color,
                                       }}
                                     >
-                                      <span
-                                        style={{
-                                          width: 7,
-                                          height: 7,
-                                          borderRadius: '50%',
-                                          background: statusTone.color,
-                                          boxShadow: `0 0 10px ${statusTone.glow}`,
-                                        }}
-                                      />
-                                      <span>{statusTone.label}</span>
+                                      {statusTone.label}
                                     </span>
                                   </button>
                                 );

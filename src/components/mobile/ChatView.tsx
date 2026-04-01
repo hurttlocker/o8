@@ -13,6 +13,7 @@ import {
   mediaHref,
 } from './utils';
 import { isSlashCommandText } from '@/lib/slash-commands';
+import { measureHeight, useStreamingHeight } from '@/lib/pretext';
 
 // ── Memoized message bubble — only re-renders when its own data changes ──
 
@@ -400,23 +401,55 @@ export function ChatView({
   const transcriptRef = useRef(transcriptEntries);
   useEffect(() => { transcriptRef.current = transcriptEntries; }, [transcriptEntries]);
 
+  // [pretext] Track container width in a ref (NOT state) so estimateSize
+  // remains stable — writing to a ref never triggers a re-render or causes
+  // the virtualizer to recalculate all item sizes and jump scroll position.
+  const containerWidthRef = useRef<number>(
+    typeof window !== 'undefined' ? window.innerWidth - 32 : 300,
+  );
+  useEffect(() => {
+    const node = listRef.current;
+    if (!node) return;
+    containerWidthRef.current = node.clientWidth || window.innerWidth - 32;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        if (w > 0) containerWidthRef.current = w;
+      }
+    });
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []); // mount-only — listRef.current is stable
+
   const estimateSize = useCallback((index: number) => {
     const entry = transcriptRef.current[index];
     if (!entry) return 80;
     const text = entry.text ?? '';
-    const textLen = text.length;
     const hasMedia = Boolean(entry.media?.length);
+    const mediaExtra = hasMedia ? 240 : 0;
     // Count code blocks — they render much taller
     const codeBlocks = (text.match(/```/g) ?? []).length / 2;
     const codeExtra = Math.floor(codeBlocks) * 120;
-    // Count line breaks — better proxy for height than char count
+
+    if (entry.role === 'system' && text.toLowerCase().includes('compaction')) return 44;
+
+    const measuredWidth = containerWidthRef.current;
+    if (measuredWidth > 0 && text) {
+      // [pretext] Zero-reflow height measurement — pure math after Canvas prepare()
+      const font = entry.role === 'user' ? 'body' : 'body';
+      const measured = measureHeight(text, font, measuredWidth - 32);
+      // 52px base (card chrome) + measured text height + code block overhead + media
+      const base = entry.role === 'user' ? 52 : 64;
+      return Math.max(base, base + measured + codeExtra + mediaExtra);
+    }
+
+    // Fallback when width not yet measured (first render before ResizeObserver fires)
+    const textLen = text.length;
     const lineBreaks = (text.match(/\n/g) ?? []).length;
     const lineHeight = lineBreaks * 22;
-    if (entry.role === 'user') return Math.max(52, 52 + Math.ceil(textLen / 50) * 22 + (hasMedia ? 240 : 0));
-    if (entry.role === 'system' && text.toLowerCase().includes('compaction')) return 44;
-    // Use the larger of char-based or line-based estimate
+    if (entry.role === 'user') return Math.max(52, 52 + Math.ceil(textLen / 50) * 22 + mediaExtra);
     const charEstimate = Math.ceil(textLen / 45) * 22;
-    return Math.max(80, 64 + Math.max(charEstimate, lineHeight) + codeExtra + (hasMedia ? 240 : 0));
+    return Math.max(80, 64 + Math.max(charEstimate, lineHeight) + codeExtra + mediaExtra);
   }, []);
 
   // Track scrollMargin via state to avoid render-time ref access (#195).
@@ -535,6 +568,19 @@ export function ChatView({
     return -1;
   }, [transcriptEntries]);
 
+  // [pretext] Streaming preview height — called unconditionally (hook ordering rule).
+  // measureHeight is pure math (~0.09ms) so this is negligible cost even when streaming.
+  // Using state-based width here (streaming card is outside the virtualizer — safe to be reactive).
+  const [streamingContainerWidth] = useState<number>(
+    typeof window !== 'undefined' ? Math.max(window.innerWidth - 56, 200) : 300,
+  );
+  const streamingPreviewHeight = useStreamingHeight(
+    streamingText ?? '',
+    'body',
+    streamingContainerWidth,
+    1.4,
+  );
+
   return (
     <>
       <style>{`@keyframes session-fade-in { from { opacity: 0.4; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
@@ -650,7 +696,8 @@ export function ChatView({
                   <span className="remodex-typing-dot" />
                 </div>
               </div>
-              <div className="remodex-streaming-preview" style={{ maxHeight: 60, overflow: 'hidden', fontSize: '0.85rem', lineHeight: 1.4, color: '#475569' }}>{formatStreamingPreview(streamingText)}</div>
+              {/* [pretext] Explicit height instead of maxHeight+overflow to eliminate DOM reflow on each token */}
+              <div className="remodex-streaming-preview" style={{ height: Math.min(streamingPreviewHeight || 22, 60), overflow: 'hidden', fontSize: '0.85rem', lineHeight: 1.4, color: '#475569' }}>{formatStreamingPreview(streamingText)}</div>
             </article>
           );
         }

@@ -1111,8 +1111,8 @@ function PreviewToolbar({ preview, selectionEnabled, onToggleSelection, onRefres
       height: 32,
       paddingLeft: 12,
       paddingRight: 8,
-      background: '#f1f5f9',
-      borderBottom: '1px solid #e2e8f0',
+      background: 'var(--t-bg-subtle)',
+      borderBottom: '1px solid var(--t-divider)',
       gap: 8,
       flexShrink: 0,
     }}>
@@ -2618,7 +2618,7 @@ const PreviewPane = memo(function PreviewPane({ previews, onElementSelect, onRef
       flex: 1,
       minHeight: 0,
       gap: 1,
-      background: '#e2e8f0',
+      background: 'var(--t-divider-strong)',
     }}>
       {previews.map((p) => (
         <div key={p.id} style={{
@@ -2626,7 +2626,7 @@ const PreviewPane = memo(function PreviewPane({ previews, onElementSelect, onRef
           display: 'flex',
           flexDirection: 'column',
           minWidth: 0,
-          background: '#ffffff',
+          background: 'var(--t-panel)',
         }}>
           <PreviewToolbar
             preview={p}
@@ -5488,7 +5488,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         />
 
         {/* Terminal panels — all mounted, only active is visible */}
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#fff' }}>
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#ffffff' }}>
           {visibleTabs.map((tab) => (
             tab.kind === 'llm-chat' ? (
               <div key={tab.id} style={{

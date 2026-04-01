@@ -4,6 +4,7 @@ import { useState, useMemo, memo } from 'react';
 import { ContextUsageRing } from '@/components/ContextUsageRing';
 import type { MobileInboxSnapshot, MobileInboxItem } from '@/lib/mobile/types';
 import type { AgentSummary } from '@/lib/fleet/types';
+import { usePretextTruncation } from '@/lib/pretext';
 
 interface ActivityFeedProps {
   snapshot: MobileInboxSnapshot;
@@ -31,6 +32,10 @@ function ApprovalCard({ item, onApprove, onDeny }: {
   onApprove: () => void;
   onDeny: () => void;
 }) {
+  // [pretext] Truncate detail text without DOM layout — card width = screen - 28px container padding - 32px card padding
+  const cardWidth = typeof window !== 'undefined' ? window.innerWidth - 60 : 300;
+  const { truncated: detailText } = usePretextTruncation(item.detail ?? '', 'small', cardWidth, 3);
+
   return (
     <div style={{
       padding: '14px 16px',
@@ -79,15 +84,12 @@ function ApprovalCard({ item, onApprove, onDeny }: {
         {item.title}
       </p>
 
-      {/* Detail */}
+      {/* Detail — [pretext] usePretextTruncation replaces -webkit-line-clamp to avoid DOM reflow */}
       <p style={{
         margin: '0 0 12px', fontSize: 12, color: '#64748b',
         lineHeight: 1.4,
-        overflow: 'hidden', textOverflow: 'ellipsis',
-        display: '-webkit-box', WebkitLineClamp: 3,
-        WebkitBoxOrient: 'vertical' as const,
       }}>
-        {item.detail}
+        {detailText}
       </p>
 
       {/* Action buttons */}

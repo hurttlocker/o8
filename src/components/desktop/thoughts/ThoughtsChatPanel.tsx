@@ -202,8 +202,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [draftInjection?.id, draftInjection?.text, open]);
 
+  // Auto-scroll — RAF-batched to avoid forced layout during streaming
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    requestAnimationFrame(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
   }, [chatMessages, orchStream.messages]);
 
   useEffect(() => {

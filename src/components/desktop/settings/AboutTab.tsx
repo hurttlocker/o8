@@ -152,7 +152,21 @@ export function AboutTab() {
                 color: '#2563eb', fontSize: 12, fontWeight: 600, cursor: 'pointer',
               }}
             >
-              ▸ Run Setup Wizard
+              ▸ Reset + Run Onboarding
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('cortex-trigger-onboarding'));
+              }}
+              style={{
+                padding: '8px 14px', borderRadius: 10,
+                border: '1px solid rgba(37, 99, 235, 0.3)',
+                background: 'rgba(37, 99, 235, 0.06)',
+                color: '#2563eb', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              ▸ Preview Onboarding
             </button>
             <button
               type="button"

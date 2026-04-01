@@ -7,10 +7,11 @@
  * Glass frost aesthetic matching mermaid modal.
  */
 
-import { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, FileText, FilePlus, FileMinus, FileEdit, X } from 'lucide-react';
 import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
+import { measureHeight } from '@/lib/pretext';
 
 interface ChangedFile {
   path: string;
@@ -60,6 +61,35 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
   const [fileDetail, setFileDetail] = useState<FileDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  // [pretext] Track diff preview pane width for zero-reflow line height measurement.
+  const [diffPaneWidth, setDiffPaneWidth] = useState(0);
+  const diffPaneObserverRef = useRef<ResizeObserver | null>(null);
+
+  const diffPaneRefCallback = useCallback((node: HTMLDivElement | null) => {
+    if (diffPaneObserverRef.current) {
+      diffPaneObserverRef.current.disconnect();
+      diffPaneObserverRef.current = null;
+    }
+    if (node) {
+      setDiffPaneWidth(node.clientWidth);
+      const observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const w = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+          setDiffPaneWidth(w);
+        }
+      });
+      observer.observe(node);
+      diffPaneObserverRef.current = observer;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (diffPaneObserverRef.current) {
+        diffPaneObserverRef.current.disconnect();
+      }
+    };
+  }, []);
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -299,8 +329,8 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
             )}
           </div>
 
-          {/* Diff preview */}
-          <div style={{
+          {/* Diff preview — ref tracked for Pretext width measurement */}
+          <div ref={diffPaneRefCallback} style={{
             flex: 1,
             overflowY: 'auto',
             background: 'transparent',
@@ -361,21 +391,21 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                     {fileDetail.commitSummary} — {fileDetail.commitAuthor} ({fileDetail.commitAge})
                   </div>
                 ) : null}
-                {/* Diff content */}
+                {/* Diff content — font-size 12px / lineHeight 1.5 matches FONTS['mono'] in pretext engine */}
                 <pre style={{
                   margin: 0,
                   paddingTop: 14,
                   paddingRight: 16,
                   paddingBottom: 14,
                   paddingLeft: 16,
-                  fontSize: '0.8rem',
-                  lineHeight: 1.65,
+                  fontSize: 12,
+                  lineHeight: 1.5,
                   fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   color: 'var(--t-text)',
                 }}>
-                  {renderDiffLines(fileDetail.preview)}
+                  {renderDiffLines(fileDetail.preview, diffPaneWidth > 32 ? diffPaneWidth - 32 : 0)}
                 </pre>
               </div>
             ) : (
@@ -398,8 +428,9 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
   );
 });
 
-/** Render diff lines with +/- coloring */
-function renderDiffLines(text: string) {
+// [pretext] Render diff lines with +/- coloring and explicit heights when containerWidth is known.
+// containerWidth should be the available content width (pre paddingLeft/Right already subtracted by caller).
+function renderDiffLines(text: string, containerWidth: number = 0) {
   return text.split('\n').map((line, i) => {
     let color = 'var(--t-text)';
     let bg = 'transparent';
@@ -417,8 +448,16 @@ function renderDiffLines(text: string) {
       color = 'var(--t-text-secondary)';
     }
 
+    // [pretext] Set explicit height to eliminate browser reflow for text measurement.
+    const measuredHeight = containerWidth > 0
+      ? measureHeight(line || '\u00A0', 'mono', containerWidth, 1.5, 'pre-wrap')
+      : 0;
+    const rowStyle: React.CSSProperties = measuredHeight > 0
+      ? { color, background: bg, paddingTop: 1, paddingBottom: 1, height: measuredHeight, overflow: 'hidden' }
+      : { color, background: bg, paddingTop: 1, paddingBottom: 1 };
+
     return (
-      <div key={i} style={{ color, background: bg, paddingTop: 1, paddingBottom: 1 }}>
+      <div key={i} style={rowStyle}>
         {line || '\u00A0'}
       </div>
     );
