@@ -14,6 +14,8 @@ import type { ChildProcess } from 'node:child_process';
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
+import { listActiveLanesWithSessions } from '@/lib/lane/registry';
+import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 
 // ── Types ──
 
@@ -42,6 +44,140 @@ export type OrchestratorEvent =
 const CLAUDE_BIN = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
 const MCP_SERVER_PATH = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/cortex-mcp-server.ts');
 const MCP_CONFIG_DIR = join(homedir(), '.cortex-ide', 'mcp');
+const LOG_PREFIX = '[orchestrator-rehydrate]';
+
+let startupRehydrationPromise: Promise<void> | null = null;
+let startupRehydrationComplete = false;
+
+function normalizeRepoPath(repoPath: string): string {
+  return resolve(repoPath).replace(/\/+$/, '');
+}
+
+function extractClaudeSessionId(sessionKey: string): string | null {
+  return sessionKey.startsWith('claude-code:')
+    ? sessionKey.slice('claude-code:'.length) || null
+    : null;
+}
+
+function compareRehydrationCandidates(left: RuntimeSession, right: RuntimeSession) {
+  const rank = (session: RuntimeSession) => {
+    if (session.status === 'idle') return 0;
+    if (session.status === 'reviewing') return 1;
+    if (session.status === 'waiting') return 2;
+    if (session.status === 'running') return 3;
+    return 4;
+  };
+
+  const rankDelta = rank(left) - rank(right);
+  if (rankDelta !== 0) {
+    return rankDelta;
+  }
+
+  return right.lastActivityAt.getTime() - left.lastActivityAt.getTime();
+}
+
+function buildRehydratedSession(repoPath: string, claudeSessionId: string, createdAt: number): OrchestratorSession {
+  return {
+    sessionName: orchestratorSessionName(repoPath),
+    repoPath,
+    claudeSessionId,
+    status: 'ready',
+    proc: null,
+    createdAt,
+  };
+}
+
+export async function rehydrateOrchestratorSessions(): Promise<void> {
+  if (startupRehydrationComplete) {
+    return;
+  }
+  if (startupRehydrationPromise) {
+    return startupRehydrationPromise;
+  }
+
+  startupRehydrationPromise = (async () => {
+    const activeLanes = listActiveLanesWithSessions();
+    if (activeLanes.length === 0) {
+      startupRehydrationComplete = true;
+      return;
+    }
+
+    const runtimeIds = [...new Set(['claude-code', ...activeLanes.map((lane) => lane.runtime)])];
+    const discoveredByRuntime = new Map<string, RuntimeSession[]>();
+
+    for (const runtimeId of runtimeIds) {
+      const runtime = getRuntime(runtimeId);
+      if (!runtime?.capabilities.discover) {
+        continue;
+      }
+
+      try {
+        discoveredByRuntime.set(runtimeId, await runtime.discoverSessions());
+      } catch (error) {
+        console.warn(
+          `${LOG_PREFIX} Failed to discover ${runtimeId} sessions during startup rehydration: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    const liveLaneSessionKeys = new Set<string>();
+    const reposNeedingRehydration = new Set<string>();
+
+    for (const lane of activeLanes) {
+      if (!lane.sessionKey) continue;
+      const runtimeSessions = discoveredByRuntime.get(lane.runtime) ?? [];
+      if (!runtimeSessions.some((session) => session.sessionKey === lane.sessionKey)) {
+        continue;
+      }
+
+      liveLaneSessionKeys.add(lane.sessionKey);
+      reposNeedingRehydration.add(normalizeRepoPath(lane.repoPath));
+    }
+
+    if (reposNeedingRehydration.size === 0) {
+      startupRehydrationComplete = true;
+      return;
+    }
+
+    const claudeSessions = (discoveredByRuntime.get('claude-code') ?? [])
+      .filter((session) => session.status !== 'failed')
+      .filter((session) => !liveLaneSessionKeys.has(session.sessionKey));
+
+    let rehydratedCount = 0;
+
+    for (const repoPath of reposNeedingRehydration) {
+      const sessionName = orchestratorSessionName(repoPath);
+      if (sessions.has(sessionName)) {
+        continue;
+      }
+
+      const candidate = claudeSessions
+        .filter((session) => normalizeRepoPath(session.cwd) === repoPath)
+        .sort(compareRehydrationCandidates)[0];
+      const claudeSessionId = candidate ? extractClaudeSessionId(candidate.sessionKey) : null;
+      if (!candidate || !claudeSessionId) {
+        continue;
+      }
+
+      sessions.set(
+        sessionName,
+        buildRehydratedSession(repoPath, claudeSessionId, candidate.lastActivityAt.getTime()),
+      );
+      rehydratedCount += 1;
+      console.log(`${LOG_PREFIX} Rehydrated ${sessionName} from ${candidate.sessionKey}`);
+    }
+
+    console.log(
+      `${LOG_PREFIX} Startup scan checked ${activeLanes.length} active lane${activeLanes.length === 1 ? '' : 's'} and restored ${rehydratedCount} orchestrator session${rehydratedCount === 1 ? '' : 's'}`,
+    );
+    startupRehydrationComplete = true;
+  })()
+    .finally(() => {
+      startupRehydrationPromise = null;
+    });
+
+  return startupRehydrationPromise;
+}
 
 /** Resolve repo slug from git remote, cached per session. */
 function detectRepoSlug(repoPath: string): string {
@@ -176,17 +312,25 @@ function repoHash(repoPath: string): string {
 }
 
 export function orchestratorSessionName(repoPath: string): string {
-  return `cortex-orchestrator-${repoHash(repoPath)}`;
+  return `cortex-orchestrator-${repoHash(normalizeRepoPath(repoPath))}`;
 }
 
 export function getOrchestratorSession(repoPath: string): OrchestratorSession | null {
+  void rehydrateOrchestratorSessions().catch(() => {
+    // Startup rehydration is best-effort; callers can still create a fresh session.
+  });
   return sessions.get(orchestratorSessionName(repoPath)) ?? null;
 }
 
 // ── Ensure session exists ──
 
 export function ensureOrchestratorSession(repoPath: string): OrchestratorSession {
-  const sessionName = orchestratorSessionName(repoPath);
+  void rehydrateOrchestratorSessions().catch(() => {
+    // Startup rehydration is best-effort; callers can still create a fresh session.
+  });
+
+  const normalizedRepoPath = normalizeRepoPath(repoPath);
+  const sessionName = orchestratorSessionName(normalizedRepoPath);
   const existing = sessions.get(sessionName);
 
   if (existing && existing.status !== 'dead') {
@@ -195,14 +339,14 @@ export function ensureOrchestratorSession(repoPath: string): OrchestratorSession
 
   const session: OrchestratorSession = {
     sessionName,
-    repoPath,
+    repoPath: normalizedRepoPath,
     claudeSessionId: null,
     status: 'ready',
     proc: null,
     createdAt: Date.now(),
   };
   sessions.set(sessionName, session);
-  console.log(`[orchestrator-session] Created ${sessionName} for ${repoPath}`);
+  console.log(`[orchestrator-session] Created ${sessionName} for ${normalizedRepoPath}`);
   return session;
 }
 

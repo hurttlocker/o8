@@ -8,6 +8,7 @@ import {
   createEmptyOrchestratorMissionState,
   normalizeOrchestratorMissionState,
   reconcileOrchestratorMissionState,
+  updateOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
 
 const ORCHESTRATOR_DIR = join(homedir(), '.cortex-ide');
@@ -23,7 +24,7 @@ function ensureControlPlaneDir() {
   mkdirSync(ORCHESTRATOR_DIR, { recursive: true });
 }
 
-export function readOrchestratorControlPlaneState(): OrchestratorMissionState {
+function readPersistedControlPlaneState(): OrchestratorMissionState {
   try {
     const raw = readFileSync(ORCHESTRATOR_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<OrchestratorControlPlaneFile>;
@@ -31,6 +32,12 @@ export function readOrchestratorControlPlaneState(): OrchestratorMissionState {
   } catch {
     return createEmptyOrchestratorMissionState();
   }
+}
+
+export function readOrchestratorControlPlaneState(): OrchestratorMissionState {
+  const mission = readPersistedControlPlaneState();
+  updateOrchestratorMissionState(mission);
+  return mission;
 }
 
 export function writeOrchestratorControlPlaneState(state: OrchestratorMissionState) {
@@ -41,6 +48,7 @@ export function writeOrchestratorControlPlaneState(state: OrchestratorMissionSta
   };
   writeFileSync(ORCHESTRATOR_TMP_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
   renameSync(ORCHESTRATOR_TMP_PATH, ORCHESTRATOR_PATH);
+  updateOrchestratorMissionState(next.mission);
   return next.mission;
 }
 
