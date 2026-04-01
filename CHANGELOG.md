@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `56443ba` feat: merge gate file size block + operator override
 - `5d82401` fix: Security hardening
 - `3b8e054` fix: session-lost auto-recovery in lane dispatch pipeline
 - `22107ff` refactor: extract wave 5 — usePaletteActions, tileRegistry (,)
