@@ -6,6 +6,8 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `c47e4d1` fix: rehydrate orchestrator sessions and mission state on cold start
+- `23bdb79` fix: rehydrate orchestrator sessions and mission state on cold start
 - `1ace6ac` fix: orchestrator-reviewed merges skip redundant approval gate
 - `391ef6d` fix: auto-prune stale worktrees after lane merge
 
