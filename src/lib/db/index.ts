@@ -15,6 +15,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as schema from './schema';
+import { migrateLegacyApprovalStoreIfNeeded } from '@/lib/approvals/storage-migration';
 import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
 
 // ── Data directory ──
@@ -94,6 +95,9 @@ export function getDbPath(): string {
  * When we move to PostgreSQL, we'll use proper migrations.
  */
 function ensureTables(sqlite: Database.Database): void {
+  const approvalsTablePreviouslyMissing = !sqlite
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'approvals'`)
+    .get();
   const lanesTablePreviouslyMissing = !sqlite
     .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'lanes'`)
     .get();
@@ -267,6 +271,33 @@ function ensureTables(sqlite: Database.Database): void {
       merged_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS approvals (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      runtime TEXT NOT NULL,
+      agent TEXT NOT NULL,
+      session_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      tool_name TEXT,
+      args_json TEXT,
+      command TEXT,
+      editable INTEGER,
+      diff_json TEXT,
+      risk TEXT NOT NULL,
+      metadata_json TEXT,
+      policy_rule_id TEXT,
+      status TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      resolved_at INTEGER,
+      resolution_json TEXT,
+      audit_json TEXT NOT NULL DEFAULT '[]',
+      fingerprint TEXT NOT NULL,
+      continuation_json TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS lanes (
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
@@ -298,6 +329,10 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_github_prs_repo_number ON github_pull_requests(repo_full_name, number);
 
     -- Indexes for common queries
+    CREATE INDEX IF NOT EXISTS idx_approvals_status_created ON approvals(status, created_at);
+    CREATE INDEX IF NOT EXISTS idx_approvals_session_key_created ON approvals(session_key, created_at);
+    CREATE INDEX IF NOT EXISTS idx_approvals_fingerprint_status ON approvals(fingerprint, status);
+    CREATE INDEX IF NOT EXISTS idx_approvals_resolved_at ON approvals(resolved_at);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_user_period ON usage_logs(user_id, billing_period);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_created ON usage_logs(created_at);
     CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
@@ -317,6 +352,7 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_lane_events_timestamp ON lane_events(timestamp);
   `);
 
+  migrateLegacyApprovalStoreIfNeeded(sqlite, { approvalsTablePreviouslyMissing });
   migrateLegacyLaneStoreIfNeeded(sqlite, { lanesTablePreviouslyMissing });
 }
 
