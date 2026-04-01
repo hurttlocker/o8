@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, isNotNull, ne } from 'drizzle-orm';
-import { getDb, laneEvents, lanes } from '@/lib/db';
+import { and, asc, desc, eq, isNotNull, ne, notInArray } from 'drizzle-orm';
+import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import type { LaneLifecycleEventPayload } from '@/lib/realtime/types';
 import type {
@@ -214,6 +214,7 @@ export function createLane(opts: {
   worktreePath?: string;
   actor?: LaneEventActor;
 }): Lane {
+  const db = getSqlite();
   const id = generateLaneId();
   const now = nowIso();
   const lane: Lane = {
@@ -235,14 +236,16 @@ export function createLane(opts: {
     lastEventLabel: null,
   };
 
-  getLaneDb().insert(lanes).values(lane).run();
-  appendEvent(id, 'open_lane', opts.actor ?? 'system', {
-    repoPath: opts.repoPath,
-    branch: opts.branch,
-    runtime: opts.runtime,
-    packetId: opts.packetId ?? null,
-  });
-  publishLaneLifecycleEvent(lane, null, now);
+  db.transaction(() => {
+    getLaneDb().insert(lanes).values(lane).run();
+    appendEvent(id, 'open_lane', opts.actor ?? 'system', {
+      repoPath: opts.repoPath,
+      branch: opts.branch,
+      runtime: opts.runtime,
+      packetId: opts.packetId ?? null,
+    });
+    publishLaneLifecycleEvent(lane, null, now);
+  })();
 
   console.log(`[lane-registry] Created lane ${id} for ${opts.repoPath} @ ${opts.branch}`);
   return lane;
@@ -273,21 +276,34 @@ export function listActiveLanesWithSessions(): Lane[] {
 }
 
 export function findLaneBySession(sessionKey: string): Lane | null {
-  return listLanes().find((lane) => lane.sessionKey === sessionKey) ?? null;
+  const row = getLaneDb()
+    .select()
+    .from(lanes)
+    .where(eq(lanes.sessionKey, sessionKey))
+    .get();
+  return mapLaneRow(row);
 }
 
 export function findLaneByPacket(packetId: string): Lane | null {
-  return listLanes().find((lane) => lane.packetId === packetId) ?? null;
+  const row = getLaneDb()
+    .select()
+    .from(lanes)
+    .where(eq(lanes.packetId, packetId))
+    .get();
+  return mapLaneRow(row);
 }
 
 export function findLaneByRepoAndBranch(repoPath: string, branch: string): Lane | null {
-  return listLanes().find(
-    (lane) =>
-      lane.repoPath === repoPath &&
-      lane.branch === branch &&
-      lane.status !== 'archived' &&
-      lane.status !== 'completed',
-  ) ?? null;
+  const row = getLaneDb()
+    .select()
+    .from(lanes)
+    .where(and(
+      eq(lanes.repoPath, repoPath),
+      eq(lanes.branch, branch),
+      notInArray(lanes.status, ['archived', 'completed']),
+    ))
+    .get();
+  return mapLaneRow(row);
 }
 
 export function updateLane(
@@ -295,50 +311,66 @@ export function updateLane(
   updates: Partial<Pick<Lane, 'status' | 'sessionKey' | 'worktreePath' | 'writerToken' | 'label' | 'lastEventAt' | 'lastEventLabel' | 'packetId'>>,
   actor: LaneEventActor = 'system',
 ): Lane | null {
-  const lane = getLane(laneId);
-  if (!lane) return null;
+  const db = getSqlite();
+  let updatedLane: Lane | null = null;
+  let previousStatus: LaneStatus | null = null;
+  let statusChanged = false;
+  let lifecycleTimestamp: string | null = null;
 
-  const now = nowIso();
-  const changes: Record<string, unknown> = {};
-  const nextValues: Partial<typeof lanes.$inferInsert> = {};
-  const updatableKeys: Array<keyof typeof updates> = [
-    'status',
-    'sessionKey',
-    'worktreePath',
-    'writerToken',
-    'label',
-    'lastEventAt',
-    'lastEventLabel',
-    'packetId',
-  ];
-
-  for (const key of updatableKeys) {
-    const value = updates[key];
-    if (value !== undefined && lane[key as keyof Lane] !== value) {
-      (nextValues as Record<string, unknown>)[key] = value;
-      changes[key] = value;
+  db.transaction(() => {
+    const lane = getLane(laneId);
+    if (!lane) {
+      return;
     }
-  }
 
-  if (Object.keys(changes).length === 0) return lane;
+    previousStatus = lane.status;
+    const now = nowIso();
+    lifecycleTimestamp = now;
+    const changes: Record<string, unknown> = {};
+    const nextValues: Partial<typeof lanes.$inferInsert> = {};
+    const updatableKeys: Array<keyof typeof updates> = [
+      'status',
+      'sessionKey',
+      'worktreePath',
+      'writerToken',
+      'label',
+      'lastEventAt',
+      'lastEventLabel',
+      'packetId',
+    ];
 
-  nextValues.updatedAt = now;
-  const statusChanged = nextValues.status !== undefined;
-  updateLaneRecord(laneId, nextValues);
+    for (const key of updatableKeys) {
+      const value = updates[key];
+      if (value !== undefined && lane[key as keyof Lane] !== value) {
+        (nextValues as Record<string, unknown>)[key] = value;
+        changes[key] = value;
+      }
+    }
 
-  if (statusChanged) {
-    appendEvent(laneId, 'status_change', actor, { status: changes.status });
-  } else {
-    appendEvent(laneId, 'update', actor, changes);
-  }
+    if (Object.keys(changes).length === 0) {
+      updatedLane = lane;
+      return;
+    }
 
-  const updatedLane = getLane(laneId);
+    nextValues.updatedAt = now;
+    statusChanged = nextValues.status !== undefined;
+    updateLaneRecord(laneId, nextValues);
+
+    if (statusChanged) {
+      appendEvent(laneId, 'status_change', actor, { status: changes.status });
+    } else {
+      appendEvent(laneId, 'update', actor, changes);
+    }
+
+    updatedLane = getLane(laneId);
+  })();
+
   if (!updatedLane) {
-    return null;
+    return updatedLane;
   }
 
-  if (statusChanged) {
-    publishLaneLifecycleEvent(updatedLane, lane.status, now);
+  if (statusChanged && previousStatus) {
+    publishLaneLifecycleEvent(updatedLane, previousStatus, lifecycleTimestamp ?? nowIso());
   }
 
   return updatedLane;
@@ -395,150 +427,154 @@ export function detachSession(
 }
 
 export function getLaneEvents(laneId: string, limit = 50): LaneEvent[] {
-  const events = getLaneDb()
+  return getLaneDb()
     .select()
     .from(laneEvents)
     .where(eq(laneEvents.laneId, laneId))
-    .orderBy(asc(laneEvents.timestamp))
+    .orderBy(desc(laneEvents.timestamp))
+    .limit(limit)
     .all()
-    .map(mapLaneEventRow);
-
-  return events.slice(-limit);
+    .map(mapLaneEventRow)
+    .reverse();
 }
 
-export function getAllEvents(limit = 100): LaneEvent[] {
-  const events = getLaneDb()
+export function getAllEvents(limit = 200): LaneEvent[] {
+  return getLaneDb()
     .select()
     .from(laneEvents)
-    .orderBy(asc(laneEvents.timestamp))
+    .orderBy(desc(laneEvents.timestamp))
+    .limit(limit)
     .all()
-    .map(mapLaneEventRow);
-
-  return events.slice(-limit);
+    .map(mapLaneEventRow)
+    .reverse();
 }
 
 export function reconcileLanesWithSessions(
   activeSessions: Array<{ sessionKey: string; runtimeId: string; cwd: string; branch?: string; status: string }>,
 ) {
-  const currentLanes = listLanes();
-  const sessionByKey = new Map(activeSessions.map((session) => [session.sessionKey, session]));
-  const laneBySession = new Map(
-    currentLanes
-      .filter((lane) => lane.sessionKey)
-      .map((lane) => [lane.sessionKey!, lane.id] as const),
-  );
+  const db = getSqlite();
 
-  for (const lane of currentLanes) {
-    if (lane.status === 'archived' || lane.status === 'completed') continue;
+  db.transaction(() => {
+    const currentLanes = listLanes();
+    const sessionByKey = new Map(activeSessions.map((session) => [session.sessionKey, session]));
+    const laneBySession = new Map(
+      currentLanes
+        .filter((lane) => lane.sessionKey)
+        .map((lane) => [lane.sessionKey!, lane.id] as const),
+    );
 
-    if (lane.sessionKey) {
-      const session = sessionByKey.get(lane.sessionKey);
-      if (!session) {
-        console.log('[session-lifecycle] session_lost detected', {
-          laneId: lane.id,
-          sessionKey: lane.sessionKey,
-          status: lane.status,
-        });
-        const nextValues: Partial<typeof lanes.$inferInsert> = {
-          sessionKey: null,
-          updatedAt: nowIso(),
-        };
-        let lifecycleTimestamp: string | null = null;
+    for (const lane of currentLanes) {
+      if (lane.status === 'archived' || lane.status === 'completed') continue;
 
-        if (lane.status === 'running' || lane.status === 'launching') {
-          const now = nowIso();
-          nextValues.status = 'paused';
-          nextValues.lastEventAt = now;
-          nextValues.lastEventLabel = 'session_lost';
-          lifecycleTimestamp = now;
-          appendEvent(lane.id, 'session_lost', 'system', { lostSessionKey: lane.sessionKey });
+      if (lane.sessionKey) {
+        const session = sessionByKey.get(lane.sessionKey);
+        if (!session) {
+          console.log('[session-lifecycle] session_lost detected', {
+            laneId: lane.id,
+            sessionKey: lane.sessionKey,
+            status: lane.status,
+          });
+          const nextValues: Partial<typeof lanes.$inferInsert> = {
+            sessionKey: null,
+            updatedAt: nowIso(),
+          };
+          let lifecycleTimestamp: string | null = null;
+
+          if (lane.status === 'running' || lane.status === 'launching') {
+            const now = nowIso();
+            nextValues.status = 'paused';
+            nextValues.lastEventAt = now;
+            nextValues.lastEventLabel = 'session_lost';
+            lifecycleTimestamp = now;
+            appendEvent(lane.id, 'session_lost', 'system', { lostSessionKey: lane.sessionKey });
+          }
+
+          updateLaneRecord(lane.id, nextValues);
+          if (nextValues.status) {
+            const updatedLane = getLane(lane.id);
+            if (updatedLane) {
+              publishLaneLifecycleEvent(updatedLane, lane.status, lifecycleTimestamp ?? nowIso());
+            }
+          }
+          laneBySession.delete(lane.sessionKey);
+          continue;
         }
 
-        updateLaneRecord(lane.id, nextValues);
-        if (nextValues.status) {
-          const updatedLane = getLane(lane.id);
-          if (updatedLane) {
-            publishLaneLifecycleEvent(updatedLane, lane.status, lifecycleTimestamp ?? nowIso());
+        const nextValues: Partial<typeof lanes.$inferInsert> = {};
+        let lifecycleTimestamp: string | null = null;
+        if (session.status === 'running' && lane.status !== 'running') {
+          const now = nowIso();
+          nextValues.status = 'running';
+          nextValues.lastEventAt = now;
+          nextValues.lastEventLabel = 'session_running';
+          lifecycleTimestamp = now;
+        } else if (session.status === 'waiting' && lane.status === 'running') {
+          const now = nowIso();
+          nextValues.status = 'awaiting_input';
+          nextValues.lastEventAt = now;
+          nextValues.lastEventLabel = 'awaiting_input';
+          lifecycleTimestamp = now;
+        } else if (session.status === 'reviewing' && lane.status !== 'reviewing') {
+          const now = nowIso();
+          nextValues.status = 'reviewing';
+          nextValues.lastEventAt = now;
+          nextValues.lastEventLabel = 'review_ready';
+          lifecycleTimestamp = now;
+        }
+
+        if (Object.keys(nextValues).length > 0) {
+          nextValues.updatedAt = nowIso();
+          updateLaneRecord(lane.id, nextValues);
+          if (nextValues.status) {
+            const updatedLane = getLane(lane.id);
+            if (updatedLane) {
+              publishLaneLifecycleEvent(updatedLane, lane.status, lifecycleTimestamp ?? nowIso());
+            }
           }
         }
-        laneBySession.delete(lane.sessionKey);
         continue;
       }
 
-      const nextValues: Partial<typeof lanes.$inferInsert> = {};
-      let lifecycleTimestamp: string | null = null;
-      if (session.status === 'running' && lane.status !== 'running') {
-        const now = nowIso();
-        nextValues.status = 'running';
-        nextValues.lastEventAt = now;
-        nextValues.lastEventLabel = 'session_running';
-        lifecycleTimestamp = now;
-      } else if (session.status === 'waiting' && lane.status === 'running') {
-        const now = nowIso();
-        nextValues.status = 'awaiting_input';
-        nextValues.lastEventAt = now;
-        nextValues.lastEventLabel = 'awaiting_input';
-        lifecycleTimestamp = now;
-      } else if (session.status === 'reviewing' && lane.status !== 'reviewing') {
-        const now = nowIso();
-        nextValues.status = 'reviewing';
-        nextValues.lastEventAt = now;
-        nextValues.lastEventLabel = 'review_ready';
-        lifecycleTimestamp = now;
-      }
+      if (lane.status === 'idle' || lane.status === 'paused') {
+        const match = activeSessions.find(
+          (session) =>
+            session.runtimeId === lane.runtime &&
+            (session.cwd === lane.repoPath || session.cwd === lane.worktreePath) &&
+            session.branch === lane.branch &&
+            !laneBySession.has(session.sessionKey),
+        );
 
-      if (Object.keys(nextValues).length > 0) {
-        nextValues.updatedAt = nowIso();
-        updateLaneRecord(lane.id, nextValues);
-        if (nextValues.status) {
-          const updatedLane = getLane(lane.id);
-          if (updatedLane) {
-            publishLaneLifecycleEvent(updatedLane, lane.status, lifecycleTimestamp ?? nowIso());
+        if (match) {
+          console.log('[session-lifecycle] session reconnected', {
+            laneId: lane.id,
+            newSessionKey: match.sessionKey,
+          });
+          const now = nowIso();
+          const nextStatus: LaneStatus = match.status === 'running' ? 'running' : 'paused';
+          updateLaneRecord(lane.id, {
+            sessionKey: match.sessionKey,
+            ownership: 'attached',
+            status: nextStatus,
+            updatedAt: now,
+            lastEventAt: now,
+            lastEventLabel: 'session_discovered',
+          });
+
+          appendEvent(lane.id, 'attach_session', 'system', {
+            sessionKey: match.sessionKey,
+            discoveredFrom: 'reconciliation',
+          });
+          if (nextStatus !== lane.status) {
+            const updatedLane = getLane(lane.id);
+            if (updatedLane) {
+              publishLaneLifecycleEvent(updatedLane, lane.status, now);
+            }
           }
+          laneBySession.set(match.sessionKey, lane.id);
         }
       }
-      continue;
     }
-
-    if (lane.status === 'idle' || lane.status === 'paused') {
-      const match = activeSessions.find(
-        (session) =>
-          session.runtimeId === lane.runtime &&
-          (session.cwd === lane.repoPath || session.cwd === lane.worktreePath) &&
-          session.branch === lane.branch &&
-          !laneBySession.has(session.sessionKey),
-      );
-
-      if (match) {
-        console.log('[session-lifecycle] session reconnected', {
-          laneId: lane.id,
-          newSessionKey: match.sessionKey,
-        });
-        const now = nowIso();
-        const nextStatus: LaneStatus = match.status === 'running' ? 'running' : 'paused';
-        updateLaneRecord(lane.id, {
-          sessionKey: match.sessionKey,
-          ownership: 'attached',
-          status: nextStatus,
-          updatedAt: now,
-          lastEventAt: now,
-          lastEventLabel: 'session_discovered',
-        });
-
-        appendEvent(lane.id, 'attach_session', 'system', {
-          sessionKey: match.sessionKey,
-          discoveredFrom: 'reconciliation',
-        });
-        if (nextStatus !== lane.status) {
-          const updatedLane = getLane(lane.id);
-          if (updatedLane) {
-            publishLaneLifecycleEvent(updatedLane, lane.status, now);
-          }
-        }
-        laneBySession.set(match.sessionKey, lane.id);
-      }
-    }
-  }
+  })();
 }
 
 export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lane | null {

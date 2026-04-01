@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetState
 import type { NavSection } from '@/components/desktop/NavRail';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
+import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type {
@@ -123,7 +124,7 @@ export function useGlobalRepoState({
   }, [globalRepoEntry?.localPath]);
 
   const loadRegisteredRepos = useCallback(async () => {
-    const response = await fetch('/api/panel/repos');
+    const response = await fetchOnce('/api/panel/repos');
     const data = await response.json() as { repos?: RepoRegistryEntry[] };
     const repos = data.repos ?? [];
     setGlobalRepoEntries(repos);

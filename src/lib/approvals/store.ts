@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gte, or, sql, type SQL } from 'drizzle-orm';
 import { approvals as approvalsTable, getDb } from '@/lib/db';
 import type { EventSeverity } from '@/lib/fleet/types';
 import { findLaneByPacket } from '@/lib/lane/registry';
@@ -22,6 +22,9 @@ interface OrchestratorReviewRecordInput {
   approved: boolean;
   diffSha?: string;
 }
+
+const APPROVAL_CONTEXT_LOOKUP_LIMIT = 100;
+const APPROVAL_CONTEXT_LOOKBACK_MS = 1000 * 60 * 60 * 24 * 90;
 
 function getApprovalDb() {
   const db = getDb();
@@ -110,7 +113,8 @@ function toApprovalValues(approval: ApprovalRecord): ApprovalInsert {
 }
 
 function toApprovalUpdateValues(approval: ApprovalRecord): Omit<ApprovalInsert, 'id'> {
-  const { id: _id, ...values } = toApprovalValues(approval);
+  const { id, ...values } = toApprovalValues(approval);
+  void id;
   return values;
 }
 
@@ -124,16 +128,6 @@ function updateApprovalRecord(approval: ApprovalRecord) {
     .set(toApprovalUpdateValues(approval))
     .where(eq(approvalsTable.id, approval.id))
     .run();
-}
-
-function listAllApprovals() {
-  return getApprovalDb()
-    .select()
-    .from(approvalsTable)
-    .orderBy(desc(approvalsTable.createdAt))
-    .all()
-    .map((row) => mapApprovalRow(row)!)
-    .filter((approval): approval is ApprovalRecord => approval !== null);
 }
 
 function normalizeForFingerprint(value: unknown): unknown {
@@ -402,6 +396,112 @@ function normalizeApprovalLookupValue(value?: string | null) {
   return value?.trim() ?? '';
 }
 
+function combinePredicates(
+  predicates: SQL<unknown>[],
+  operator: 'and' | 'or',
+): SQL<unknown> | undefined {
+  if (predicates.length === 0) {
+    return undefined;
+  }
+  if (predicates.length === 1) {
+    return predicates[0];
+  }
+  return operator === 'and' ? and(...predicates)! : or(...predicates)!;
+}
+
+function escapeSqlLikePattern(value: string) {
+  return value
+    .replaceAll('\\', '\\\\')
+    .replaceAll('%', '\\%')
+    .replaceAll('_', '\\_');
+}
+
+function approvalMetadataEquals(field: 'Packet' | 'Lane', value: string): SQL<unknown> {
+  const path = field === 'Packet' ? '$.Packet' : '$.Lane';
+  return sql<boolean>`json_extract(${approvalsTable.metadataJson}, ${path}) = ${value}`;
+}
+
+function approvalSessionKeyContains(value: string): SQL<unknown> {
+  return sql<boolean>`${approvalsTable.sessionKey} LIKE ${`%${escapeSqlLikePattern(value)}%`} ESCAPE '\\'`;
+}
+
+function buildApprovalContextMatchPredicate(options: {
+  packetId?: string;
+  laneId?: string;
+  sessionKey?: string;
+}): SQL<unknown> | undefined {
+  const packetId = normalizeApprovalLookupValue(options.packetId);
+  const laneId = normalizeApprovalLookupValue(options.laneId);
+  const sessionKey = normalizeApprovalLookupValue(options.sessionKey);
+  const predicates: SQL<unknown>[] = [];
+
+  if (sessionKey) {
+    predicates.push(eq(approvalsTable.sessionKey, sessionKey));
+  }
+  if (packetId) {
+    predicates.push(approvalMetadataEquals('Packet', packetId));
+    predicates.push(approvalSessionKeyContains(packetId));
+  }
+  if (laneId) {
+    predicates.push(approvalMetadataEquals('Lane', laneId));
+    predicates.push(approvalSessionKeyContains(laneId));
+  }
+
+  return combinePredicates(predicates, 'or');
+}
+
+function mapApprovalRows(rows: ApprovalRow[]) {
+  return rows
+    .map((row) => mapApprovalRow(row)!)
+    .filter((approval): approval is ApprovalRecord => approval !== null);
+}
+
+function queryApprovals(where: SQL<unknown>) {
+  return mapApprovalRows(
+    getApprovalDb()
+      .select()
+      .from(approvalsTable)
+      .where(where)
+      .orderBy(desc(approvalsTable.createdAt))
+      .limit(APPROVAL_CONTEXT_LOOKUP_LIMIT)
+      .all(),
+  );
+}
+
+function listApprovalCandidatesForContext(options: {
+  packetId?: string;
+  laneId?: string;
+  sessionKey?: string;
+}) {
+  const packetId = normalizeApprovalLookupValue(options.packetId);
+  const laneId = normalizeApprovalLookupValue(options.laneId);
+  const sessionKey = normalizeApprovalLookupValue(options.sessionKey);
+  const createdAfter = Date.now() - APPROVAL_CONTEXT_LOOKBACK_MS;
+  const rowsById = new Map<string, ApprovalRecord>();
+
+  if (sessionKey) {
+    for (const approval of queryApprovals(and(
+      eq(approvalsTable.sessionKey, sessionKey),
+      gte(approvalsTable.createdAt, createdAfter),
+    )!)) {
+      rowsById.set(approval.id, approval);
+    }
+  }
+
+  const additionalPredicate = buildApprovalContextMatchPredicate({ packetId, laneId });
+  if (additionalPredicate) {
+    for (const approval of queryApprovals(and(
+      gte(approvalsTable.createdAt, createdAfter),
+      additionalPredicate,
+    )!)) {
+      rowsById.set(approval.id, approval);
+    }
+  }
+
+  return Array.from(rowsById.values())
+    .sort((left, right) => right.createdAt - left.createdAt);
+}
+
 function scoreApprovalContextMatch(
   approval: ApprovalRecord,
   options: { packetId?: string; laneId?: string; sessionKey?: string },
@@ -426,7 +526,7 @@ function scoreApprovalContextMatch(
 }
 
 export function listApprovalsForContext(options: { packetId?: string; laneId?: string; sessionKey?: string }) {
-  return listAllApprovals()
+  return listApprovalCandidatesForContext(options)
     .map((approval) => ({
       approval,
       score: scoreApprovalContextMatch(approval, options),
@@ -615,13 +715,19 @@ export function listOrchestratorReviews(packetId: string) {
   }
 
   const lane = findLaneByPacket(normalizedPacketId);
-  return getApprovalDb()
-    .select()
-    .from(approvalsTable)
-    .where(eq(approvalsTable.toolName, 'orchestrator_review'))
-    .all()
-    .map((row) => mapApprovalRow(row)!)
-    .filter((approval): approval is ApprovalRecord => approval !== null)
+  const contextPredicate = buildApprovalContextMatchPredicate({
+    packetId: normalizedPacketId,
+    laneId: lane?.id ?? undefined,
+  });
+  if (!contextPredicate) {
+    return [] as ApprovalAuditEvent[];
+  }
+
+  return queryApprovals(and(
+    eq(approvalsTable.toolName, 'orchestrator_review'),
+    gte(approvalsTable.createdAt, Date.now() - APPROVAL_CONTEXT_LOOKBACK_MS),
+    contextPredicate,
+  )!)
     .filter((approval) => isOrchestratorReviewApproval(approval, normalizedPacketId, lane?.id ?? null))
     .flatMap((approval) => approval.audit.filter((event) => event.type === 'orchestrator_review'))
     .sort((left, right) => right.timestamp - left.timestamp);
