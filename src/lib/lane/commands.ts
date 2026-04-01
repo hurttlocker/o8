@@ -513,8 +513,22 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           } catch { /* nothing to commit */ }
         }
 
-        // Perform merge (no pre-check — merge-tree --write-tree is overly strict
-        // and reports false conflicts on divergent histories that merge cleanly)
+        // ── Rebase onto latest baseBranch HEAD ──
+        // When parallel agents dispatch from the same HEAD, later branches become
+        // stale after earlier merges. Rebasing first auto-resolves same-file-
+        // different-section changes that would otherwise look like conflicts.
+        let rebaseFailed = false;
+        try {
+          await execFileAsync('git', ['rebase', lane.baseBranch], { cwd: lane.worktreePath });
+          console.log(`[lane-merge] Rebased ${lane.branch} onto ${lane.baseBranch}`);
+        } catch {
+          // Rebase had true conflicts — abort and fall through to direct merge
+          try { await execFileAsync('git', ['rebase', '--abort'], { cwd: lane.worktreePath }); } catch { /* already clean */ }
+          rebaseFailed = true;
+          console.log(`[lane-merge] Rebase failed for ${lane.branch}, attempting direct merge`);
+        }
+
+        // Perform merge
         const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: lane.repoPath })).stdout.trim();
         await execFileAsync('git', ['checkout', lane.baseBranch], { cwd: lane.repoPath });
 
@@ -526,7 +540,13 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
           setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_conflicts');
           const message = mergeErr instanceof Error ? mergeErr.message : 'Merge failed.';
-          return { ok: false, laneId: command.laneId, note: message };
+          return {
+            ok: false,
+            laneId: command.laneId,
+            note: rebaseFailed
+              ? `Rebase failed, merge also failed: ${message}`
+              : `Merge failed after rebase: ${message}`,
+          };
         }
 
         await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
