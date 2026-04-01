@@ -19,24 +19,6 @@ const topVeilStyle: CSSProperties = {
   zIndex: 10,
 };
 
-function BackIcon() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M15 18 9 12l6-6" />
-    </svg>
-  );
-}
-
 function MoreIcon() {
   return (
     <svg
@@ -80,6 +62,8 @@ function HeaderIconButton({
 
 function screenTitle(activeView: TopBarProps['activeView']) {
   switch (activeView) {
+    case 'squad':
+      return 'Recent';
     case 'fleet':
       return 'Agents';
     case 'memory':
@@ -105,7 +89,6 @@ export const TopBar = memo(function TopBar({
   compactLine,
   activeScreen,
   onNavigate,
-  onBackToIndex,
   onOpenControls,
 }: TopBarProps) {
   const { colors } = useTheme();
@@ -116,13 +99,12 @@ export const TopBar = memo(function TopBar({
 
   const isThreadView = activeView === 'chat';
   const primaryText = '#F5F5F7';
-  const secondaryText = '#8E8E93';
   const chromeBackground = 'rgba(0, 0, 0, 0.8)';
   const chromeBorder = 'rgba(255, 255, 255, 0.08)';
   const threadTitle = compactLine(
     selectedSession?.currentTask ?? selectedSession?.name,
     selectedSession?.name ?? 'Code',
-    30,
+    28,
   );
   const headerStyle: CSSProperties = {
     position: 'fixed',
@@ -176,14 +158,6 @@ export const TopBar = memo(function TopBar({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   };
-  const subtitleStyle: CSSProperties = {
-    margin: '2px 0 0',
-    color: secondaryText,
-    fontFamily,
-    fontSize: '0.74rem',
-    fontWeight: 500,
-    letterSpacing: '-0.01em',
-  };
   const spacerStyle: CSSProperties = {
     display: 'block',
     width: 44,
@@ -196,25 +170,14 @@ export const TopBar = memo(function TopBar({
     <>
       <div style={topVeilStyle} aria-hidden="true" />
       <header style={headerStyle}>
-        {isThreadView ? (
-          <HeaderIconButton
-            label="Back to code list"
-            onClick={onBackToIndex}
-            style={iconButtonStyle}
-          >
-            <BackIcon />
-          </HeaderIconButton>
-        ) : (
-          <SpeedDialButton
-            activeScreen={activeScreen}
-            onNavigate={onNavigate}
-            approvalCount={pendingApprovalsCount}
-          />
-        )}
+        <SpeedDialButton
+          activeScreen={activeScreen}
+          onNavigate={onNavigate}
+          approvalCount={pendingApprovalsCount}
+        />
 
         <div style={copyStyle}>
           <h1 style={titleStyle}>{isThreadView ? threadTitle : screenTitle(activeView)}</h1>
-          {isThreadView ? <p style={subtitleStyle}>Remote control</p> : null}
         </div>
 
         {isThreadView ? (

@@ -7,17 +7,16 @@ import {
 } from 'react';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot, MobileReviewFileResponse, MobileTranscriptEntry } from '@/lib/mobile/types';
-import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
 import {
   agentDisplayName,
   compactLine,
-  pickCurrentSession,
+  pickHomeSession,
   renderMessageBody,
 } from './mobile/utils';
 import dynamic from 'next/dynamic';
 import { ChatView } from './mobile/ChatView';
 import { ComposeBar } from './mobile/ComposeBar';
-import { SquadRail } from './mobile/SquadRail';
+import { RecentSessionPicker, SessionAgentPill } from './mobile/RecentSessionPicker';
 import { TopBar } from './mobile/TopBar';
 import { MobileFloatingActionButton } from './mobile/ReferencePrimitives';
 
@@ -51,7 +50,7 @@ const RecallPanel = dynamic(() => import('./mobile/RecallPanel'), { ssr: false }
 const MemoryHealth = dynamic(() => import('./mobile/MemoryHealth'), { ssr: false });
 const GraphExplorer = dynamic(() => import('./mobile/GraphExplorer'), { ssr: false });
 const CortexStatus = dynamic(() => import('./mobile/CortexStatus'), { ssr: false });
-const SessionInfoSheet = dynamic(() => import('./mobile/SessionInfoSheet').then((m) => ({ default: m.SessionInfoSheet })), { ssr: false });
+const SessionPickerSheet = dynamic(() => import('./mobile/SessionPickerSheet').then((m) => ({ default: m.SessionPickerSheet })), { ssr: false });
 
 // Extracted hooks (#43 — hooks extraction)
 import { useMobileState } from './mobile/hooks/useMobileState';
@@ -78,20 +77,6 @@ interface MobileRemoteShellProps {
   initialTranscript?: { sessionKey: string; transcript: MobileTranscriptEntry[] };
   initialReviewFile?: MobileReviewFileResponse['file'] | null;
   initialOwnedReviewPacket?: RuntimeReviewPacket | null;
-}
-
-function formatSessionAge(lastEventAt: string): string {
-  const parsed = new Date(lastEventAt).getTime();
-  if (Number.isNaN(parsed)) {
-    return lastEventAt;
-  }
-  const diff = Date.now() - parsed;
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ${mins % 60}m`;
-  return `${Math.floor(hours / 24)}d`;
 }
 
 function MobileRemoteShellInner({
@@ -169,7 +154,7 @@ function MobileRemoteShellInner({
     draftBySession, actionStateBySession, actionNoteBySession,
     draftAttachmentsBySession, pendingOwnedTurnBySession,
     enhancing, preEnhanceDraft,
-    controlsOpen, alertsOpen, sessionInfoOpen,
+    controlsOpen, alertsOpen, sessionPickerOpen,
     pendingApprovals, resolvedApprovals,
     surfaceRefreshing, expandedMedia, scrollY,
     isScrolling, headerVisible, viewportTopOffset,
@@ -178,7 +163,7 @@ function MobileRemoteShellInner({
     // Setters
     setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setSurfaceNote,
     setDraftBySession, setPendingOwnedTurnBySession,
-    setControlsOpen, setAlertsOpen, setSessionInfoOpen,
+    setControlsOpen, setAlertsOpen, setSessionPickerOpen,
     setPendingApprovals, setResolvedApprovals,
     setExpandedMedia, setComposeHeight, setWaitingForResponse,
     setDiffOpen, setSnapshot,
@@ -215,7 +200,7 @@ function MobileRemoteShellInner({
 
   // ── Swipe right from left edge to go back to chat ──
   useSwipeBack(
-    () => { if (activeView !== 'squad' && activeView !== 'chat') setActiveView('squad'); },
+    () => { if (activeView !== 'squad' && activeView !== 'chat') setActiveView(selectedSession ? 'chat' : 'squad'); },
     activeView !== 'squad' && activeView !== 'chat',
   );
 
@@ -245,9 +230,19 @@ function MobileRemoteShellInner({
         if (matchingSession) return matchingSession.id;
         return currentId;
       }
-      return currentId || (pickCurrentSession(snapshot)?.id ?? '');
+      return currentId || (pickHomeSession(snapshot)?.id ?? '');
     });
   }, [snapshot, setSelectedId, state.selectedSessionKeyHint]);
+
+  useEffect(() => {
+    if (activeView !== 'squad' || selectedSession) return;
+    const homeSession = pickHomeSession(snapshot);
+    if (!homeSession) return;
+    setSelectedId(homeSession.id);
+    setSelectedSessionKeyHint(homeSession.sessionKey);
+    setSelectedSessionFallback(homeSession);
+    setActiveView('chat');
+  }, [activeView, selectedSession, setActiveView, setSelectedId, setSelectedSessionFallback, setSelectedSessionKeyHint, snapshot]);
 
   const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
   const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
@@ -311,11 +306,14 @@ function MobileRemoteShellInner({
   const hasTerminalSession = Boolean(selectedSession?.tmuxSession);
   const isIndexView = activeView === 'squad';
   const isThreadView = activeView === 'chat';
-  const isAuxView = !isIndexView && !isThreadView;
+  const showRecentPicker = isIndexView || (isThreadView && !selectedSession);
+  const showThreadSurface = isThreadView && Boolean(selectedSession);
+  const returnToHome = () => setActiveView(selectedSession ? 'chat' : 'squad');
   const detailTab = detailTabState.sessionId === selectedSession?.id
     ? detailTabState.tab
     : 'chat';
   const terminalActive = hasTerminalSession && detailTab === 'terminal';
+  const recentSessions = snapshot.sessions.slice(0, 5);
   const linkedWorktree = selectedReviewPacket?.worktree;
   const showWorktreeActions = Boolean(
     isOwnedCodexSession
@@ -391,7 +389,7 @@ function MobileRemoteShellInner({
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
               case 'chat':
-                setActiveView('squad');
+                returnToHome();
                 break;
               case 'fleet':
                 setActiveView('fleet');
@@ -413,7 +411,6 @@ function MobileRemoteShellInner({
                 break;
             }
           }}
-          onBackToIndex={() => setActiveView('squad')}
           onOpenControls={() => setControlsOpen(true)}
         />
         <PullToRefresh onRefresh={async () => { await refreshInbox(true); await new Promise(r => setTimeout(r, 600)); }}>
@@ -424,31 +421,30 @@ function MobileRemoteShellInner({
               snapshot={snapshot}
               onAgentSelect={(sessionKey) => {
                 actions.handleSessionFocus(sessionKey);
-                setActiveView('squad');
               }}
-              onBack={() => setActiveView('squad')}
+              onBack={returnToHome}
               onLaunch={() => setLaunchOpen(true)}
             />
           ) : null}
           {activeView === 'settings' ? (
-            <SettingsView onBack={() => setActiveView('squad')} />
+            <SettingsView onBack={returnToHome} />
           ) : null}
           {activeView === 'memory' ? (
             <MemoryPage
-              onBack={() => setActiveView('squad')}
+              onBack={returnToHome}
               onInjectText={(text: string) => {
                 if (!selectedSessionKey) return;
                 setDraftBySession((prev) => ({
                   ...prev,
                   [selectedSessionKey]: (prev[selectedSessionKey] ?? '') + (prev[selectedSessionKey] ? '\n' : '') + text,
                 }));
-                setActiveView('squad');
+                setActiveView('chat');
               }}
             />
           ) : null}
           {activeView === 'issues' ? (
             <IssuesPage
-              onBack={() => setActiveView('squad')}
+              onBack={returnToHome}
               onOpenPR={(repo, prNumber) => {
                 setPrReviewRepo(repo);
                 setPrReviewNumber(prNumber);
@@ -459,10 +455,9 @@ function MobileRemoteShellInner({
           {activeView === 'activity' ? (
             <ActivityFeed
               snapshot={snapshot}
-              onBack={() => setActiveView('squad')}
+              onBack={returnToHome}
               onAgentSelect={(sessionKey) => {
                 actions.handleSessionFocus(sessionKey);
-                setActiveView('squad');
               }}
               onApprove={(item) => {
                 if (item.sessionKey && item.approvalId) {
@@ -484,23 +479,23 @@ function MobileRemoteShellInner({
           {activeView === 'costs' ? (
             <CostsDashboard
               snapshot={snapshot}
-              onBack={() => setActiveView('squad')}
+              onBack={returnToHome}
               onSessionSelect={(sessionId) => {
                 actions.handleSessionFocus(sessionId);
               }}
               compactLine={compactLine}
             />
           ) : null}
-          {isIndexView ? (
-            <SquadRail
-              snapshot={snapshot}
-              selectedSession={selectedSession}
-              onSessionFocus={actions.handleSessionFocus}
-              onLaunch={() => setLaunchOpen(true)}
+          {showRecentPicker ? (
+            <RecentSessionPicker
+              sessions={recentSessions}
               compactLine={compactLine}
+              agentDisplayName={agentDisplayName}
+              onSessionSelect={actions.handleSessionFocus}
+              onLaunch={() => setLaunchOpen(true)}
             />
           ) : null}
-          {hasTerminalSession && isThreadView ? (
+          {hasTerminalSession && showThreadSurface ? (
             <div
               style={{
                 display: 'flex',
@@ -543,7 +538,7 @@ function MobileRemoteShellInner({
               </button>
             </div>
           ) : null}
-          {isThreadView ? (
+          {showThreadSurface ? (
           terminalActive ? (
             <MobileTerminal tmuxSession={selectedSession!.tmuxSession!} />
           ) : (
@@ -554,6 +549,12 @@ function MobileRemoteShellInner({
                 .map((note, index) => (
                   <p key={`${note}-${index}`} className="remodex-reference-thread-note">{note}</p>
                 ))}
+              <SessionAgentPill
+                session={selectedSession!}
+                compactLine={compactLine}
+                agentDisplayName={agentDisplayName}
+                onClick={() => setSessionPickerOpen(true)}
+              />
               <ChatView
                 transcriptEntries={transcriptEntries}
                 selectedSession={selectedSession}
@@ -611,7 +612,7 @@ function MobileRemoteShellInner({
         </div>
         </PageTransition>
         </PullToRefresh>
-        {isIndexView ? (
+        {showRecentPicker ? (
           <div className="remodex-reference-fab-wrap">
             <MobileFloatingActionButton label="Launch new remote session" onClick={() => setLaunchOpen(true)}>
               +
@@ -619,7 +620,7 @@ function MobileRemoteShellInner({
           </div>
         ) : null}
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'} data-scrolling={isScrolling && !isComposerPrimed ? 'true' : 'false'}>
-          {!terminalActive && isThreadView ? (
+          {!terminalActive && showThreadSurface ? (
             <div
               className="remodex-compose-shell"
               style={neomorphicSurfaceStyle('slate', {
@@ -654,7 +655,7 @@ function MobileRemoteShellInner({
                 fileInputRef={fileInputRef}
                 handlers={actions.composeBarHandlers}
                 onOpenRecall={() => setCortexRecallOpen(true)}
-                onModelPillTap={() => setSessionInfoOpen(true)}
+                onModelPillTap={() => setSessionPickerOpen(true)}
                 streamingText={streamingText}
                 agentRunning={waitingForResponse}
               />
@@ -746,19 +747,16 @@ function MobileRemoteShellInner({
         }}
         variant="mobile"
       />
-      <SessionInfoSheet
-        open={sessionInfoOpen}
-        onClose={() => setSessionInfoOpen(false)}
-        sessionKey={selectedSessionKey}
-        modelName={selectedSession?.model}
-        status={selectedSession?.status}
-        contextPercent={selectedSession?.context?.usedPercent ?? 0}
-        totalTokens={selectedSession?.tokenUsage?.totalTokens ?? 0}
-        contextTokens={selectedSession?.tokenUsage?.remainingTokens ? (selectedSession.tokenUsage.totalTokens ?? 0) + (selectedSession.tokenUsage.remainingTokens ?? 0) : 0}
-        messageCount={transcriptEntries.length}
-        sessionAge={selectedSession?.lastEventAt ? formatSessionAge(selectedSession.lastEventAt) : undefined}
-        onCopyKey={actions.handleCopySelectedSessionKey}
-        onExpandMedia={(media) => { setSessionInfoOpen(false); setExpandedMedia(media); }}
+      <SessionPickerSheet
+        open={sessionPickerOpen}
+        sessions={snapshot.sessions}
+        selectedSessionKey={selectedSessionKey}
+        onClose={() => setSessionPickerOpen(false)}
+        onSelectSession={(sessionKey) => {
+          setSessionPickerOpen(false);
+          actions.handleSessionFocus(sessionKey);
+          setActiveView('chat');
+        }}
       />
       {/* SpeedDial now lives in TopBar — no more FAB */}
       <PRReviewSheet
