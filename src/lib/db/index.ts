@@ -331,6 +331,7 @@ function ensureTables(sqlite: Database.Database): void {
     -- Indexes for common queries
     CREATE INDEX IF NOT EXISTS idx_approvals_status_created ON approvals(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_approvals_session_key_created ON approvals(session_key, created_at);
+    CREATE INDEX IF NOT EXISTS idx_approvals_tool_name ON approvals(tool_name, status);
     CREATE INDEX IF NOT EXISTS idx_approvals_fingerprint_status ON approvals(fingerprint, status);
     CREATE INDEX IF NOT EXISTS idx_approvals_resolved_at ON approvals(resolved_at);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_user_period ON usage_logs(user_id, billing_period);

@@ -26,6 +26,7 @@ import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
+import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
@@ -228,7 +229,7 @@ function DashboardInner() {
 
   const refreshWorkspaceLifecycle = useCallback(async () => {
     try {
-      const response = await fetch('/api/panel/workspaces', {
+      const response = await fetchOnce('/api/panel/workspaces', {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
       });
@@ -683,7 +684,7 @@ function DashboardInner() {
     let cancelled = false;
 
     function fetchCount() {
-      fetch('/api/panel/approvals?status=all')
+      fetchOnce('/api/panel/approvals?status=all')
         .then((r) => r.json())
         .then((data) => {
           if (cancelled) return;
@@ -1652,7 +1653,7 @@ function DashboardInner() {
     let cancelled = false;
     const poll = async () => {
       try {
-        const res = await fetch('/api/lanes?active=true');
+        const res = await fetchOnce('/api/lanes?active=true');
         if (!res.ok || cancelled) return;
         const data = await res.json() as { lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null }> };
         const summaries: DomainLaneSummary[] = (data.lanes ?? [])
