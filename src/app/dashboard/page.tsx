@@ -9,7 +9,7 @@ import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import type { CanvasTab } from '@/components/desktop/Canvas';
-import { UniversalSearch, type CommandPaletteAction, type CommandPaletteStateTone } from '@/components/shared/UniversalSearch';
+import { UniversalSearch } from '@/components/shared/UniversalSearch';
 // GraphExplorer3D lazy-loaded below
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import type { ApprovalRecord } from '@/lib/approvals/types';
@@ -18,7 +18,7 @@ import { ThemeProvider } from '@/lib/theme/context';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
 import { NavRail, type NavSection } from '@/components/desktop/NavRail';
-import { ContextualPanel, type ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
+import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { readTimelineVisible, subscribeTimelineVisible } from '@/lib/appearance/timeline';
@@ -44,7 +44,6 @@ import {
 } from '@/lib/orchestrator/store';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
-import { deriveWorkflowStage, describeWorkflowStage } from '@/lib/workflows/status';
 import type {
   CanvasTileState,
   PaletteAgentSummary,
@@ -57,59 +56,43 @@ import {
   type GuidedDiscoveryAction,
 } from './ftux';
 import {
-  attentionRank,
   buildOrchestrationPacketBadge,
   buildOrchestrationPacketDraft,
   buildWorkspaceChatTargetOptions,
   clearRepoScopeFromTileLayout,
-  collectOpenTerminalRepoPaths,
   collectRepoScopedTileIds,
   collectTerminalLeafIds,
   findCanvasLeafByRepoPath,
   findTerminalLeafByRepoPath,
   findUnscopedCanvasLeaf,
   findUnscopedTerminalLeaf,
-  formatAttentionDetail,
   openedLaneSessionsCache,
   packetStatusFromLaneStatus,
-  paletteSessionDetail,
-  paletteSessionRuntime,
-  paletteSessionTitle,
-  paletteWorkflowLabel,
   parseIssueNumber,
   pathBelongsToRepoScope,
-  readinessTone,
-  repoReadinessDetail,
   repoSlugFromAgent,
   repoSlugFromRemote,
-  repoWorktreeDetail,
-  sameWorkspaceLaneState,
   sameWorkspaceSidePanelRepo,
   sessionBelongsToRepoScope,
-  shortenPath,
   summarizeLifecycleRecords,
-  workflowTone,
-  worktreeStageLabel,
-  worktreeStageTone,
 } from './utils';
 import { useFtuxMilestones } from './hooks/useFtuxMilestones';
 import { useGlobalRepoState } from './hooks/useGlobalRepoState';
 import { useOrchestratorMission } from './hooks/useOrchestratorMission';
+import { usePaletteActions } from './hooks/usePaletteActions';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useTileLayout } from './hooks/useTileLayout';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
+import { createTileRegistry } from './tileRegistry';
 
 /* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
-const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
-const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then(m => ({ default: m.Canvas })));
 const LazySettingsPage = lazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage').then(m => ({ default: m.AnalyticsPage })));
 const LazyGraphExplorer3D = lazy(() => import('@/components/desktop/GraphExplorer3D').then(m => ({ default: m.GraphExplorer3D })));
 const LazyThoughtsCard = lazy(() => import('@/components/desktop/ThoughtsCard').then(m => ({ default: m.ThoughtsCard })));
 const LazySetupWizard = lazy(() => import('@/components/desktop/SetupWizard').then(m => ({ default: m.SetupWizard })));
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
-import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
-import { TileContainer, type TileContentRegistry } from '@/components/desktop/TileContainer';
+import { TileContainer } from '@/components/desktop/TileContainer';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import {
   type DetectedLocalhostPreview,
@@ -128,14 +111,12 @@ import {
   replaceTileContent,
   resizeTile,
   serializeTileLayout,
-  collectLeafContentKinds,
   countLeaves,
   splitTile,
   wrapRootWithSplit,
 } from '@/lib/tiles/operations';
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
-const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
 const DEFAULT_LEFT_PANEL_WIDTH = 200;
 const DEFAULT_RIGHT_PANEL_WIDTH = 280;
 const MIN_RIGHT_PANEL_WIDTH = 240;
@@ -1827,1066 +1808,101 @@ function DashboardInner() {
     void mutateWorkspaceLifecycle('mark_read', currentWorkspaceLifecycleRecord.id).catch(() => undefined);
   }, [currentWorkspaceLifecycleRecord, mutateWorkspaceLifecycle]);
 
-  const paletteActions = useMemo<CommandPaletteAction[]>(() => {
-    const actions: CommandPaletteAction[] = [];
-    const workflowContextAgent = currentReviewAgent ?? selectedSessionAgent ?? scopedRepoAgents[0] ?? null;
-    const workflowContextStage = workflowContextAgent
-      ? deriveWorkflowStage({
-          runtimeStatus: workflowContextAgent.status ?? null,
-          workspaceStatus: workflowContextAgent.workspaceStatus ?? null,
-          lifecycleState: workflowContextAgent.lifecycleState ?? null,
-          latestText: workflowContextAgent.currentTask ?? workflowContextAgent.runtimeSurface?.lifecycle?.summary ?? '',
-          lastActivityAt: workflowContextAgent.lastEventAt ? new Date(workflowContextAgent.lastEventAt).getTime() : null,
-          hasMessages: Boolean(workflowContextAgent.currentTask?.trim()),
-          readinessState: workflowContextAgent.repoReadiness?.state ?? globalRepoEntry?.readiness?.state ?? null,
-        })
-      : deriveWorkflowStage({
-          readinessState: globalRepoEntry?.readiness?.state ?? null,
-          latestText: '',
-        });
-    const workflowContextGuidance = describeWorkflowStage({
-      stage: workflowContextStage,
-      runtimeStatus: workflowContextAgent?.status ?? null,
-      workspaceStatus: workflowContextAgent?.workspaceStatus ?? null,
-      lifecycleState: workflowContextAgent?.lifecycleState ?? null,
-      latestText: workflowContextAgent?.currentTask ?? workflowContextAgent?.runtimeSurface?.lifecycle?.summary ?? '',
-      lastActivityAt: workflowContextAgent?.lastEventAt ? new Date(workflowContextAgent.lastEventAt).getTime() : null,
-      hasMessages: Boolean(workflowContextAgent?.currentTask?.trim()),
-      readinessState: workflowContextAgent?.repoReadiness?.state ?? globalRepoEntry?.readiness?.state ?? null,
-      readinessSummary: workflowContextAgent?.repoReadiness?.summary ?? globalRepoEntry?.readiness?.summary ?? null,
-      readinessNextAction: workflowContextAgent?.repoReadiness?.nextAction ?? globalRepoEntry?.readiness?.nextAction ?? null,
-    });
-    const repoAttention = globalRepoEntries
-      .filter((entry) => entry.readiness?.state === 'blocked' || entry.readiness?.state === 'needs_setup')
-      .sort((a, b) => {
-        const aScore = attentionRank(a.readiness?.label ?? '');
-        const bScore = attentionRank(b.readiness?.label ?? '');
-        if (aScore !== bScore) return bScore - aScore;
-        return a.name.localeCompare(b.name);
-      })
-      .slice(0, 4);
-
-    for (const entry of repoAttention) {
-      actions.push({
-        id: `repo-attention:${entry.id}`,
-        category: 'attention',
-        title: `${entry.readiness?.label}: ${entry.name}`,
-        detail: repoReadinessDetail(entry),
-        stateLabel: entry.readiness?.label,
-        stateTone: readinessTone(entry.readiness?.state),
-        keywords: [entry.name, entry.localPath, entry.readiness?.summary ?? '', entry.readiness?.nextAction ?? ''],
-        priority: attentionRank(entry.readiness?.label ?? ''),
-        run: () => focusRepoSetup(entry),
-      });
-    }
-
-    const attentionCandidates = paletteAgents
-      .map((agent) => {
-        const status = paletteWorkflowLabel(agent);
-        return {
-          agent,
-          status,
-          score: attentionRank(status) + Math.min(agent.alerts ?? 0, 8) * 12,
-        };
-      })
-      .filter((entry) => entry.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 4);
-
-    for (const { agent, status, score } of attentionCandidates) {
-      actions.push({
-        id: `attention:${agent.sessionKey}`,
-        category: 'attention',
-        title: `${status}: ${agent.name}`,
-        detail: formatAttentionDetail(agent),
-        stateLabel: status,
-        stateTone: agent.repoReadiness
-          ? readinessTone(agent.repoReadiness.state)
-          : workflowTone(status),
-        keywords: [agent.sessionKey, agent.currentTask ?? '', repoSlugFromAgent(agent) ?? '', agent.workspace ?? '', status],
-        priority: score,
-        run: () => {
-          setSidebarVisible(true);
-          setActiveSessionKey(agent.sessionKey);
-        },
-      });
-    }
-
-    const liveSessionCandidates = paletteAgents
-      .filter((agent) => Boolean(agent.sessionKey))
-      .sort((a, b) => {
-        if (a.isCurrentSession !== b.isCurrentSession) return a.isCurrentSession ? -1 : 1;
-        const aRepoMatch = repoSlugFromAgent(a) === globalRepo || a.workspace === globalRepoEntry?.localPath;
-        const bRepoMatch = repoSlugFromAgent(b) === globalRepo || b.workspace === globalRepoEntry?.localPath;
-        if (aRepoMatch !== bRepoMatch) return aRepoMatch ? -1 : 1;
-        const aRank = attentionRank(paletteWorkflowLabel(a));
-        const bRank = attentionRank(paletteWorkflowLabel(b));
-        if (aRank !== bRank) return bRank - aRank;
-        const aTime = a.lastEventAt ? new Date(a.lastEventAt).getTime() : 0;
-        const bTime = b.lastEventAt ? new Date(b.lastEventAt).getTime() : 0;
-        return bTime - aTime;
-      })
-      .slice(0, 6);
-
-    for (const agent of liveSessionCandidates) {
-      const workflowLabel = paletteWorkflowLabel(agent);
-      const repoReadinessState = agent.repoReadiness?.state ?? null;
-      actions.push({
-        id: `session:focus:${agent.sessionKey}`,
-        category: 'workspace',
-        title: `Focus ${paletteSessionTitle(agent)}`,
-        detail: paletteSessionDetail(agent),
-        stateLabel: workflowLabel,
-        stateTone: repoReadinessState ? readinessTone(repoReadinessState) : workflowTone(workflowLabel),
-        keywords: [
-          agent.name,
-          paletteSessionRuntime(agent),
-          agent.currentTask ?? '',
-          agent.workspace ?? '',
-          agent.branch ?? '',
-          repoSlugFromAgent(agent) ?? '',
-          'focus session',
-          'switch session',
-          agent.sessionKey,
-        ],
-        priority: agent.isCurrentSession ? 460 : 430,
-        run: () => handleSelectSession(agent.sessionKey),
-      });
-    }
-
-    if (globalRepoEntry) {
-      const repoReadinessLabel = globalRepoEntry.readiness?.label;
-      const repoReadinessTone = readinessTone(globalRepoEntry.readiness?.state);
-      const repoReadinessSummary = repoReadinessDetail(globalRepoEntry);
-
-      actions.push({
-        id: 'workspace:launch-agent',
-        category: 'workspace',
-        title: 'Launch workspace agent',
-        detail: globalRepoEntry.readiness
-          ? `${repoReadinessLabel}: ${repoReadinessSummary}`
-          : `Start a fresh CLI session in ${globalRepoEntry.name}.`,
-        stateLabel: repoReadinessLabel,
-        stateTone: repoReadinessTone,
-        keywords: [globalRepoEntry.name, globalRepoEntry.localPath, globalRepo ?? '', 'launch', 'workspace', 'agent'],
-        priority: 320,
-        run: () => handleLaunchWorkspaceAgent({
-          repoPath: globalRepoEntry.localPath,
-          createNew: true,
-        }),
-      });
-
-      actions.push({
-        id: 'workspace:repo-setup',
-        category: 'workspace',
-        title: 'Open current repo setup',
-        detail: globalRepoEntry.readiness
-          ? repoReadinessSummary
-          : `Edit saved env, build, and dev commands for ${globalRepoEntry.name}.`,
-        stateLabel: repoReadinessLabel,
-        stateTone: repoReadinessTone,
-        keywords: [globalRepoEntry.name, 'repo setup', 'env', 'build', 'dev', 'profile'],
-        priority: 300,
-        run: handleFocusCurrentRepoSetup,
-      });
-
-      actions.push({
-        id: 'workspace:create-worktree',
-        category: 'workspace',
-        title: 'Create workspace worktree',
-        detail: selectedRepoWorktreesLoading
-          ? `Checking worktree health for ${globalRepoEntry.name}…`
-          : repoWorktreeDetail(selectedRepoWorktrees),
-        stateLabel: globalRepoEntry.readiness?.label ?? (selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe ? 'Blocked' : 'Ready'),
-        stateTone: globalRepoEntry.readiness
-          ? readinessTone(globalRepoEntry.readiness.state)
-          : selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe
-            ? 'red'
-            : 'blue',
-        keywords: ['create worktree', 'new workspace', 'workspace branch', globalRepoEntry.name],
-        priority: 298,
-        run: () => openRepoWorkspaceModal(globalRepoEntry),
-      });
-
-      if (selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe) {
-        actions.push({
-          id: 'workspace:review-worktree-conflicts',
-          category: 'attention',
-          title: `Blocked: ${globalRepoEntry.name} worktree conflicts`,
-          detail: `${selectedRepoWorktrees.conflicts.count} overlapping worktree file${selectedRepoWorktrees.conflicts.count === 1 ? '' : 's'} need operator attention before stacking more work.`,
-          stateLabel: 'Blocked',
-          stateTone: 'red',
-          keywords: ['worktree conflict', 'overlap', 'blocked', globalRepoEntry.name],
-          priority: 410,
-          run: () => focusRepoSetup(globalRepoEntry),
-        });
-      }
-
-      actions.push({
-        id: 'workspace:open-cli-surface',
-        category: 'workspace',
-        title: 'Open workspace CLI surface',
-        detail: `Focus the main workspace terminal for ${globalRepoEntry.name}.`,
-        stateLabel: 'Ready',
-        stateTone: 'blue',
-        keywords: ['workspace cli', 'workspace terminal', 'terminal', 'focus terminal'],
-        priority: 295,
-        run: async () => {
-          const target = await waitForWorkspaceTerminalTarget({
-            repoPath: globalRepoEntry.localPath,
-          });
-          if (!target) {
-            throw new Error('No workspace CLI surface is available right now. Reload the workspace and try again.');
-          }
-        },
-      });
-
-      if (globalRepoEntry.readiness?.state === 'needs_setup' && globalRepoEntry.setup.installCommand) {
-        actions.push({
-          id: 'workspace:run-setup',
-          category: 'recovery',
-          title: `Run saved setup for ${globalRepoEntry.name}`,
-          detail: `Execute ${globalRepoEntry.setup.installCommand} in the operator terminal.`,
-          stateLabel: globalRepoEntry.readiness.label,
-          stateTone: readinessTone(globalRepoEntry.readiness.state),
-          keywords: [globalRepoEntry.setup.installCommand, 'install deps', 'setup', 'bootstrap', globalRepoEntry.name],
-          priority: 340,
-          run: () => {
-            handleRunInTerminal(`cd ${JSON.stringify(globalRepoEntry.localPath)} && ${globalRepoEntry.setup.installCommand}`);
-          },
-        });
-      }
-
-      if (selectedSessionWorktree?.path) {
-        actions.push({
-          id: 'workspace:finder-worktree',
-          category: 'workspace',
-          title: 'Open current worktree in Finder',
-          detail: `${selectedSessionWorktree.id} · ${selectedSessionWorktree.path}`,
-          stateLabel: worktreeStageLabel(selectedSessionWorktree.status),
-          stateTone: worktreeStageTone(selectedSessionWorktree.status),
-          keywords: [selectedSessionWorktree.id, selectedSessionWorktree.path, 'worktree', 'finder', 'workspace path'],
-          priority: 246,
-          run: async () => {
-            const response = await fetch('/api/panel/open-in', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ editor: 'finder', repo: selectedSessionWorktree.path }),
-            });
-            const data = await response.json().catch(() => ({})) as { error?: string };
-            if (!response.ok) {
-              throw new Error(data.error || 'Unable to open the current worktree in Finder.');
-            }
-          },
-        });
-
-        actions.push({
-          id: 'recovery:copy-worktree-path',
-          category: 'recovery',
-          title: 'Copy current worktree path',
-          detail: shortenPath(selectedSessionWorktree.path),
-          stateLabel: worktreeStageLabel(selectedSessionWorktree.status),
-          stateTone: worktreeStageTone(selectedSessionWorktree.status),
-          keywords: [selectedSessionWorktree.id, selectedSessionWorktree.path, 'copy worktree path', 'worktree'],
-          priority: 226,
-          run: async () => {
-            await navigator.clipboard.writeText(selectedSessionWorktree.path);
-          },
-        });
-      }
-
-      actions.push({
-        id: 'workspace:finder',
-        category: 'workspace',
-        title: 'Open current repo in Finder',
-        detail: shortenPath(globalRepoEntry.localPath),
-        keywords: [globalRepoEntry.localPath, 'finder', 'folder', 'open repo'],
-        priority: 250,
-        run: () => handleOpenRepoInDesktop('finder'),
-      });
-
-      actions.push({
-        id: 'workspace:terminal-app',
-        category: 'workspace',
-        title: 'Open current repo in Terminal',
-        detail: shortenPath(globalRepoEntry.localPath),
-        keywords: [globalRepoEntry.localPath, 'terminal app', 'open in terminal', 'open repo'],
-        priority: 248,
-        run: () => handleOpenRepoInDesktop('terminal'),
-      });
-
-      actions.push({
-        id: 'workspace:copy-path',
-        category: 'recovery',
-        title: 'Copy current repo path',
-        detail: shortenPath(globalRepoEntry.localPath),
-        keywords: [globalRepoEntry.localPath, 'copy path', 'cwd', 'repo path'],
-        priority: 220,
-        run: async () => {
-          await navigator.clipboard.writeText(globalRepoEntry.localPath);
-        },
-      });
-
-      if (staleSelectedRepoWorktrees.length > 0) {
-        actions.push({
-          id: 'recovery:prune-stale-worktrees',
-          category: 'recovery',
-          title: `Prune stale worktrees in ${globalRepoEntry.name}`,
-          detail: `${staleSelectedRepoWorktrees.length} stale worktree${staleSelectedRepoWorktrees.length === 1 ? '' : 's'} will be removed. ${repoWorktreeDetail(selectedRepoWorktrees)}`,
-          stateLabel: selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe ? 'Blocked' : 'Ready',
-          stateTone: selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe ? 'red' : 'blue',
-          keywords: ['prune stale worktrees', 'cleanup worktrees', 'stale worktree', globalRepoEntry.name],
-          priority: 345,
-          run: async () => {
-            const confirmed = window.confirm(
-              `Prune ${staleSelectedRepoWorktrees.length} stale worktree${staleSelectedRepoWorktrees.length === 1 ? '' : 's'} for ${globalRepoEntry.name}?\n\nThis removes the stale worktree directories and their branches.`,
-            );
-            if (!confirmed) {
-              return;
-            }
-            const response = await fetch('/api/worktrees', {
-              method: 'DELETE',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ repo: globalRepoEntry.localPath, action: 'prune' }),
-            });
-            const data = await response.json().catch(() => ({})) as { error?: string };
-            if (!response.ok) {
-              throw new Error(data.error || 'Unable to prune stale worktrees.');
-            }
-            setSelectedRepoWorktreeRefreshNonce((current) => current + 1);
-          },
-        });
-      }
-    } else {
-      actions.push({
-        id: 'workspace:open-folder',
-        category: 'workspace',
-        title: 'Open folder',
-        detail: 'Register a local checkout and make it the active workspace.',
-        keywords: ['open folder', 'repo', 'workspace', 'register repo'],
-        priority: 320,
-        run: handleOpenFolder,
-      });
-
-      actions.push({
-        id: 'workspace:open-cli-surface-empty',
-        category: 'workspace',
-        title: 'Open workspace CLI surface',
-        detail: 'Focus the main workspace terminal even before a repo is selected.',
-        stateLabel: 'Ready',
-        stateTone: 'blue',
-        keywords: ['workspace cli', 'workspace terminal', 'terminal', 'focus terminal'],
-        priority: 260,
-        run: async () => {
-          const target = await waitForWorkspaceTerminalTarget();
-          if (!target) {
-            throw new Error('No workspace CLI surface is available right now. Reload the workspace and try again.');
-          }
-        },
-      });
-    }
-
-    if (globalRepoEntry) {
-      actions.push({
-        id: 'workspace:open-folder-anyway',
-        category: 'workspace',
-        title: 'Open another folder',
-        detail: 'Register or switch to a different local checkout.',
-        keywords: ['open folder', 'switch repo', 'add repo', 'workspace'],
-        priority: 180,
-        run: handleOpenFolder,
-      });
-    }
-
-    if (currentReviewAgent?.pr?.number) {
-      const reviewRepo = repoSlugFromAgent(currentReviewAgent) || globalRepo;
-      if (reviewRepo) {
-        const reviewReadiness = globalRepoEntry?.readiness ?? currentReviewAgent.repoReadiness ?? null;
-        const reviewStage = currentReviewAgent.workflowStage ?? deriveWorkflowStage({
-          runtimeStatus: currentReviewAgent.status ?? null,
-          workspaceStatus: currentReviewAgent.workspaceStatus ?? null,
-          lifecycleState: currentReviewAgent.lifecycleState ?? null,
-          latestText: currentReviewAgent.currentTask ?? '',
-          lastActivityAt: currentReviewAgent.lastEventAt ? new Date(currentReviewAgent.lastEventAt).getTime() : null,
-          hasMessages: Boolean(currentReviewAgent.currentTask?.trim()),
-          readinessState: reviewReadiness?.state ?? null,
-          prState: currentReviewAgent.pr.state ?? 'open',
-        });
-        const reviewGuidance = describeWorkflowStage({
-          stage: reviewStage,
-          runtimeStatus: currentReviewAgent.status ?? null,
-          workspaceStatus: currentReviewAgent.workspaceStatus ?? null,
-          lifecycleState: currentReviewAgent.lifecycleState ?? null,
-          latestText: currentReviewAgent.currentTask ?? '',
-          lastActivityAt: currentReviewAgent.lastEventAt ? new Date(currentReviewAgent.lastEventAt).getTime() : null,
-          hasMessages: Boolean(currentReviewAgent.currentTask?.trim()),
-          readinessState: reviewReadiness?.state ?? null,
-          readinessSummary: reviewReadiness?.summary ?? null,
-          readinessNextAction: reviewReadiness?.nextAction ?? null,
-          prState: currentReviewAgent.pr.state ?? 'open',
-        });
-        const reviewStateLabel = reviewStage?.label ?? reviewReadiness?.label ?? 'Reviewing';
-        const reviewStateTone = reviewStage ? workflowTone(reviewStage.label) : reviewReadiness ? readinessTone(reviewReadiness.state) : 'purple';
-        actions.push({
-          id: 'review:open-pr',
-          category: 'review',
-          title: `Review current PR #${currentReviewAgent.pr.number}`,
-          detail: reviewGuidance.nextAction ? `${currentReviewAgent.pr.title} · ${reviewGuidance.nextAction}` : currentReviewAgent.pr.title,
-          stateLabel: reviewStateLabel,
-          stateTone: reviewStateTone,
-          keywords: [reviewRepo, currentReviewAgent.pr.title, 'pull request', 'review pr', 'open pr', String(currentReviewAgent.pr.number)],
-          priority: 310,
-          run: () => handleReviewPR(currentReviewAgent.pr!.number, reviewRepo),
-        });
-
-        actions.push({
-          id: 'review:launch-pr',
-          category: 'review',
-          title: `Launch PR #${currentReviewAgent.pr.number} review`,
-          detail: reviewGuidance.nextAction ?? 'Open a CLI review lane with current repo readiness context.',
-          stateLabel: reviewStateLabel,
-          stateTone: reviewStateTone,
-          keywords: [reviewRepo, 'launch review', 'pr review', currentReviewAgent.pr.title],
-          priority: 290,
-          run: () => handleLaunchWorkspaceRepoTask({
-            kind: 'pr',
-            repo: reviewRepo,
-            number: currentReviewAgent.pr!.number,
-            title: currentReviewAgent.pr!.title,
-            branch: currentReviewAgent.branch,
-          }),
-        });
-
-        actions.push({
-          id: 'review:checks',
-          category: 'review',
-          title: 'Open current checks',
-          detail: reviewGuidance.detail,
-          stateLabel: reviewStateLabel,
-          stateTone: reviewStateTone,
-          keywords: [reviewRepo, 'checks', 'ci', 'status checks'],
-          priority: 280,
-          run: () => handleOpenCI(reviewRepo),
-        });
-
-        actions.push({
-          id: 'review:merge',
-          category: 'review',
-          title: `Merge current PR #${currentReviewAgent.pr.number}`,
-          detail: reviewGuidance.mergeDetail,
-          stateLabel: reviewStateLabel,
-          stateTone: reviewStateTone,
-          keywords: [reviewRepo, 'merge pr', 'merge pull request', currentReviewAgent.pr.title],
-          priority: 260,
-          disabled: !reviewGuidance.mergeAllowed,
-          unavailableReason: !reviewGuidance.mergeAllowed ? reviewGuidance.mergeDetail : undefined,
-          run: async () => {
-            const response = await fetch(`/api/panel/prs/${currentReviewAgent.pr!.number}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'merge', repo: reviewRepo }),
-            });
-            const data = await response.json().catch(() => ({})) as { error?: string };
-            if (!response.ok) {
-              throw new Error(data.error || 'Unable to merge the current pull request.');
-            }
-            handleReviewPR(currentReviewAgent.pr!.number, reviewRepo);
-          },
-        });
-      }
-    }
-
-    if (!currentReviewAgent?.pr?.number && globalRepo) {
-      actions.push({
-        id: 'review:checks-only',
-        category: 'review',
-        title: 'Open current checks',
-        detail: `Inspect the latest CI state for ${globalRepo}.`,
-        stateLabel: globalRepoEntry?.readiness?.label ?? 'Reviewing',
-        stateTone: globalRepoEntry?.readiness ? readinessTone(globalRepoEntry.readiness.state) : 'purple',
-        keywords: [globalRepo, 'checks', 'ci', 'status checks'],
-        priority: 240,
-        run: () => handleOpenCI(globalRepo),
-      });
-    }
-
-    if (currentIssueTarget) {
-      actions.push({
-        id: 'review:open-issue',
-        category: 'review',
-        title: `Open current issue #${currentIssueTarget.number}`,
-        detail: `${currentIssueTarget.repo} · ${currentIssueTarget.title}`,
-        stateLabel: globalRepoEntry?.readiness?.label ?? 'Working',
-        stateTone: globalRepoEntry?.readiness ? readinessTone(globalRepoEntry.readiness.state) : 'green',
-        keywords: [currentIssueTarget.repo, 'issue', currentIssueTarget.title, String(currentIssueTarget.number)],
-        priority: 275,
-        run: () => handleSelectIssue(currentIssueTarget.number, currentIssueTarget.repo),
-      });
-    }
-
-    actions.push({
-      id: 'settings:connectors',
-      category: 'settings',
-      title: 'Open connector settings',
-      detail: 'GitHub auth, broker status, and repo access.',
-      keywords: ['settings', 'connectors', 'github', 'broker'],
-      priority: 210,
-      run: () => handleOpenSettingsTab('connectors'),
-    });
-
-    actions.push({
-      id: 'settings:agents',
-      category: 'settings',
-      title: 'Open agent settings',
-      detail: 'Agent defaults, model choices, and runtime controls.',
-      keywords: ['settings', 'agents', 'models', 'runtime'],
-      priority: 205,
-      run: () => handleOpenSettingsTab('agents'),
-    });
-
-    actions.push({
-      id: 'settings:memory',
-      category: 'settings',
-      title: 'Open memory settings',
-      detail: 'Cortex memory, embeddings, and maintenance.',
-      keywords: ['settings', 'memory', 'cortex', 'embeddings'],
-      priority: 200,
-      run: () => handleOpenSettingsTab('memory'),
-    });
-
-    actions.push({
-      id: 'settings:appearance',
-      category: 'settings',
-      title: 'Open appearance settings',
-      detail: 'Theme and desktop shell behavior.',
-      keywords: ['settings', 'appearance', 'theme', 'nav rail'],
-      priority: 195,
-      run: () => handleOpenSettingsTab('appearance'),
-    });
-
-    actions.push({
-      id: 'recovery:setup',
-      category: 'recovery',
-      title: 'Rerun setup',
-      detail: 'Open the setup flow and recheck local tools and providers.',
-      stateLabel: wsStatus === 'disconnected' ? 'Blocked' : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? 'Waiting' : undefined,
-      stateTone: wsStatus === 'disconnected' ? 'red' : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? 'amber' : undefined,
-      keywords: ['rerun setup', 'setup wizard', 'doctor', 'recovery'],
-      priority: wsStatus === 'connected' ? 170 : 260,
-      run: () => setSetupWizardOpen(true),
-    });
-
-    if (wsStatus !== 'connected') {
-      actions.push({
-        id: 'recovery:workspace-bridge',
-        category: 'recovery',
-        title: wsStatus === 'disconnected' ? 'Workspace bridge disconnected' : 'Workspace bridge reconnecting',
-        detail: wsStatus === 'disconnected'
-          ? 'Saved tabs stay local, but live session updates are paused until the bridge comes back.'
-          : 'Live session updates are resyncing. Reload only if the workspace does not recover on its own.',
-        stateLabel: wsStatus === 'disconnected' ? 'Blocked' : 'Waiting',
-        stateTone: wsStatus === 'disconnected' ? 'red' : 'amber',
-        keywords: ['workspace bridge', 'disconnected', 'reconnecting', 'ws', 'reload workspace'],
-        priority: wsStatus === 'disconnected' ? 520 : 300,
-        run: () => window.location.reload(),
-      });
-    }
-
-    if (activeSessionKey && !selectedSessionAgent && paletteAgents.length > 0) {
-      const fallbackSession = paletteAgents.find((agent) => agent.isCurrentSession) ?? paletteAgents[0];
-      actions.push({
-        id: 'recovery:missing-session',
-        category: 'recovery',
-        title: 'Selected session is no longer live',
-        detail: 'The current chat selection fell out of the live inventory. Jump to a monitored session or reload the workspace snapshot.',
-        stateLabel: 'Blocked',
-        stateTone: 'red',
-        keywords: ['missing session', 'session unavailable', activeSessionKey].filter((keyword): keyword is string => Boolean(keyword)),
-        priority: 510,
-        run: () => {
-          if (fallbackSession) {
-            setActiveSessionKey(fallbackSession.sessionKey);
-            setChatVisible(true);
-            setRightPanelMode('chat');
-            return;
-          }
-          window.location.reload();
-        },
-      });
-    }
-
-    actions.push({
-      id: 'recovery:restore',
-      category: 'recovery',
-      title: 'Restore workspace tabs',
-      detail: 'Reload the dashboard and reattach saved workspace tabs in place.',
-      keywords: ['restore session', 'restore tabs', 'reload workspace', 'recover'],
-      priority: wsStatus === 'connected' ? 160 : 250,
-      run: () => window.location.reload(),
-    });
-
-    if (nextAttentionWorkspace) {
-      actions.push({
-        id: `workspace:attention:${nextAttentionWorkspace.id}`,
-        category: 'attention',
-        title: 'Open next workspace needing attention',
-        detail: nextAttentionWorkspace.attentionDetail,
-        stateLabel: nextAttentionWorkspace.attentionLabel,
-        stateTone: nextAttentionWorkspace.workflowStage
-          ? workflowTone(nextAttentionWorkspace.workflowStage.label)
-          : 'amber',
-        keywords: [
-          'next workspace',
-          'next attention',
-          nextAttentionWorkspace.repo,
-          nextAttentionWorkspace.branch,
-          nextAttentionWorkspace.workspacePath,
-        ],
-        priority: 330 + Math.min(nextAttentionWorkspace.attentionRank, 120),
-        run: async () => {
-          const matchingRepo = globalRepoEntries.find((entry) => (
-            nextAttentionWorkspace.repoPath === entry.localPath
-            || nextAttentionWorkspace.workspacePath.startsWith(`${entry.localPath}/`)
-          )) ?? null;
-          if (matchingRepo) {
-            await handleSelectRegisteredRepo(matchingRepo.id);
-          }
-          setActiveWorkspace(nextAttentionWorkspace.workspacePath);
-          setSidebarVisible(true);
-          setChatVisible(true);
-          if (nextAttentionWorkspace.sessionKey) {
-            setActiveSessionKey(nextAttentionWorkspace.sessionKey);
-            setRightPanelMode('chat');
-            return;
-          }
-          setRightPanelMode('workspace');
-        },
-      });
-    }
-
-    if (currentWorkspaceLifecycleRecord) {
-      actions.push({
-        id: `workspace:archive:${currentWorkspaceLifecycleRecord.id}`,
-        category: 'workspace',
-        title: 'Archive workspace',
-        detail: currentWorkspaceLifecycleRecord.archive.detail,
-        stateLabel: currentWorkspaceLifecycleRecord.workflowStage?.label ?? currentWorkspaceLifecycleRecord.attentionLabel,
-        stateTone: currentWorkspaceLifecycleRecord.workflowStage
-          ? workflowTone(currentWorkspaceLifecycleRecord.workflowStage.label)
-          : 'slate',
-        keywords: [
-          'archive workspace',
-          'archive lane',
-          currentWorkspaceLifecycleRecord.repo,
-          currentWorkspaceLifecycleRecord.branch,
-        ],
-        priority: 120,
-        disabled: !currentWorkspaceLifecycleRecord.archive.available,
-        unavailableReason: currentWorkspaceLifecycleRecord.archive.unavailableReason,
-        run: async () => {
-          if (!currentWorkspaceLifecycleRecord.archive.available) return;
-          await mutateWorkspaceLifecycle('archive', currentWorkspaceLifecycleRecord.id);
-        },
-      });
-    } else {
-      actions.push({
-        id: 'workspace:archive-unavailable',
-        category: 'workspace',
-        title: 'Archive workspace',
-        detail: workflowContextGuidance.archiveDetail,
-        stateLabel: workflowContextStage?.label ?? 'Unavailable',
-        stateTone: workflowContextStage ? workflowTone(workflowContextStage.label) : 'slate',
-        keywords: ['archive workspace', 'archive lane', 'archive'],
-        priority: 12,
-        disabled: true,
-        unavailableReason: workflowContextGuidance.archiveUnavailableReason,
-        run: () => undefined,
-      });
-    }
-
-    if (archivedWorkspaceCandidate) {
-      actions.push({
-        id: `workspace:resume:${archivedWorkspaceCandidate.id}`,
-        category: 'workspace',
-        title: 'Resume archived workspace',
-        detail: archivedWorkspaceCandidate.resume.detail,
-        stateLabel: 'Archived',
-        stateTone: 'slate',
-        keywords: [
-          'resume workspace',
-          'resume archived workspace',
-          'restore archived workspace',
-          archivedWorkspaceCandidate.repo,
-          archivedWorkspaceCandidate.branch,
-        ],
-        priority: 115,
-        disabled: !archivedWorkspaceCandidate.resume.available,
-        unavailableReason: archivedWorkspaceCandidate.resume.unavailableReason,
-        run: async () => {
-          if (!archivedWorkspaceCandidate.resume.available) return;
-          await mutateWorkspaceLifecycle('restore', archivedWorkspaceCandidate.id);
-          const matchingRepo = globalRepoEntries.find((entry) => (
-            archivedWorkspaceCandidate.repoPath === entry.localPath
-            || archivedWorkspaceCandidate.workspacePath.startsWith(`${entry.localPath}/`)
-          )) ?? null;
-          if (matchingRepo) {
-            await handleSelectRegisteredRepo(matchingRepo.id);
-          }
-          setActiveWorkspace(archivedWorkspaceCandidate.workspacePath);
-          setRightPanelMode('workspace');
-          setChatVisible(true);
-        },
-      });
-    } else {
-      actions.push({
-        id: 'workspace:resume-unavailable',
-        category: 'workspace',
-        title: 'Resume archived workspace',
-        detail: workflowContextGuidance.resumeDetail,
-        stateLabel: workflowContextStage?.label ?? 'Unavailable',
-        stateTone: workflowContextStage ? workflowTone(workflowContextStage.label) : 'slate',
-        keywords: ['resume workspace', 'resume archived workspace', 'resume'],
-        priority: 11,
-        disabled: true,
-        unavailableReason: workflowContextGuidance.resumeUnavailableReason,
-        run: () => undefined,
-      });
-    }
-
-    return actions;
-  }, [
+  const paletteActions = usePaletteActions({
     activeSessionKey,
+    archivedWorkspaceCandidate,
     currentIssueTarget,
     currentReviewAgent,
+    currentWorkspaceLifecycleRecord,
+    focusRepoSetup,
     globalRepo,
-    globalRepoEntry,
     globalRepoEntries,
+    globalRepoEntry,
     handleFocusCurrentRepoSetup,
     handleLaunchWorkspaceAgent,
     handleLaunchWorkspaceRepoTask,
-    handleSelectSession,
-    handleReviewPR,
+    handleOpenCI,
     handleOpenFolder,
     handleOpenRepoInDesktop,
     handleOpenSettingsTab,
-    handleOpenCI,
+    handleReviewPR,
     handleRunInTerminal,
-    handleSelectRegisteredRepo,
     handleSelectIssue,
-    openRepoWorkspaceModal,
-    paletteAgents,
-    focusRepoSetup,
-    currentWorkspaceLifecycleRecord,
-    archivedWorkspaceCandidate,
+    handleSelectRegisteredRepo,
+    handleSelectSession,
     mutateWorkspaceLifecycle,
     nextAttentionWorkspace,
+    openRepoWorkspaceModal,
+    paletteAgents,
+    scopedRepoAgents,
     selectedRepoWorktrees,
     selectedRepoWorktreesLoading,
-    selectedSessionWorktree,
     selectedSessionAgent,
-    scopedRepoAgents,
+    selectedSessionWorktree,
     staleSelectedRepoWorktrees,
     waitForWorkspaceTerminalTarget,
     wsStatus,
-  ]);
+    setActiveSessionKey,
+    setActiveWorkspace,
+    setChatVisible,
+    setSelectedRepoWorktreeRefreshNonce,
+    setSetupWizardOpen,
+    setSidebarVisible,
+    setRightPanelMode,
+  });
 
-  const tileRegistry = useMemo<TileContentRegistry>(() => ({
-    workspace: {
-      label: 'Workspace',
-      description: 'Empty repo workspace pane that will pick up the next terminal or inspector surface you open.',
-      render: ({ active }) => (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flex: 1,
-          minWidth: 0,
-          minHeight: 0,
-          background: 'linear-gradient(180deg, rgba(6,10,18,0.98) 0%, rgba(12,18,30,0.98) 100%)',
-          color: '#e2e8f0',
-        }}>
-          <div style={{
-            width: 48,
-            height: 48,
-            borderRadius: 16,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'rgba(148,163,184,0.08)',
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: active ? 'rgba(96,165,250,0.26)' : 'rgba(148,163,184,0.12)',
-            marginBottom: 14,
-          }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
-          </div>
-          <div style={{
-            fontSize: 14,
-            fontWeight: 700,
-            letterSpacing: '-0.02em',
-            marginBottom: 6,
-          }}>
-            Empty workspace
-          </div>
-          <div style={{
-            maxWidth: 320,
-            textAlign: 'center',
-            fontSize: 12,
-            lineHeight: 1.6,
-            color: 'rgba(226,232,240,0.72)',
-            marginBottom: 16,
-          }}>
-            Split first, then open a repo surface. Cortex will route the next workspace tab into this pane automatically.
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              window.localStorage.removeItem(TILE_LAYOUT_STORAGE_KEY);
-              setTileLayout(createDefaultTileLayout());
-              setTileLayoutHydrated(true);
-            }}
-            style={{
-              padding: '8px 20px',
-              borderRadius: 8,
-              border: '1px solid rgba(96,165,250,0.3)',
-              background: 'rgba(96,165,250,0.08)',
-              color: '#93c5fd',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Reset Layout
-          </button>
-        </div>
-      ),
-    },
-    terminal: {
-      label: 'Workspace',
-      description: 'Multi-tab terminal and chat workspace for active sessions.',
-      singleton: true,
-      hideHeader: true,
-      // closable determined dynamically in TileContainer (last terminal is protected)
-      render: ({ tileId, content }) => {
-        const firstTerminalLeafId = (() => {
-          const firstLeaf = getFirstLeaf(tileLayout.root);
-          return firstLeaf.content.kind === 'terminal' ? firstLeaf.id : null;
-        })();
-        const hasScopedTerminalLeaf = collectOpenTerminalRepoPaths(tileLayout.root).length > 0;
-        const tileRepoEntry = content.kind === 'terminal' && content.repoPath
-          ? workspaceScopeEntries.find((repo) => repo.localPath === content.repoPath) ?? null
-          : null;
-        const isFreshSplitTile = content.kind === 'terminal' && !content.repoPath && tileId !== 'tile-root';
-        const isPrimaryUnscopedTerminal = content.kind === 'terminal'
-          && !content.repoPath
-          && !hasScopedTerminalLeaf
-          && firstTerminalLeafId === tileId;
-        const effectiveSplitCreated = isFreshSplitTile && !isPrimaryUnscopedTerminal;
-        const tilePreferredRepo = tileRepoEntry ? {
-          name: tileRepoEntry.name,
-          localPath: tileRepoEntry.localPath,
-          branch: tileRepoEntry.branch ?? tileRepoEntry.readiness?.currentBranch ?? null,
-          readiness: tileRepoEntry.readiness ?? null,
-          ...(tileRepoEntry.remoteUrl ? { remoteUrl: tileRepoEntry.remoteUrl } : {}),
-          ...(tileRepoEntry.registryRepoId ? { registryRepoId: tileRepoEntry.registryRepoId } : {}),
-          ...(tileRepoEntry.isWorktree ? { isWorktree: true, worktreeStatus: tileRepoEntry.worktreeStatus ?? null } : {}),
-        } : isPrimaryUnscopedTerminal
-          ? workspaceTerminalPreferredRepo
-        : isFreshSplitTile
-          ? null
-          : workspaceTerminalPreferredRepo;
-        const canCloseTerminalTile = collectLeafContentKinds(tileLayout.root).filter((kind) => kind === 'terminal').length > 1;
-        const openRepoPaths = Array.from(new Set(collectOpenTerminalRepoPaths(tileLayout.root, tileId)));
-
-        return (
-          <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, rgba(6,10,18,0.98) 0%, rgba(12,18,30,0.98) 100%)', color: '#94a3b8', fontSize: 13 }}>Loading workspace...</div>}>
-          <LazyWorkspaceTerminal
-            key={`workspace-terminal:${tileId}:${workspaceTerminalResetNonceByTileId[tileId] ?? 0}`}
-            ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
-            stateScope={tileId}
-            defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
-            autoCreateDefaultTab={tileId === 'tile-root' || workspaceScopeEntries.length > 0}
-            preferredRepo={tilePreferredRepo}
-            splitCreated={content.kind === 'terminal' ? effectiveSplitCreated : false}
-            availableRepos={workspaceScopeEntries}
-            openRepoPaths={openRepoPaths}
-            canCloseTile={canCloseTerminalTile}
-            onActiveChatSessionChange={(sessionKey) => {
-              setWorkspaceChatSessionByTileId((current) => (
-                current[tileId] === (sessionKey ?? undefined)
-                  ? current
-                  : { ...current, [tileId]: sessionKey ?? undefined }
-              ));
-            }}
-            onChatSessionsChange={(sessions) => {
-              setWorkspaceChatSessionsByTileId((current) => {
-                const previous = current[tileId] ?? [];
-                const same = previous.length === sessions.length
-                  && previous.every((session, index) => (
-                    session.sessionKey === sessions[index]?.sessionKey
-                    && session.status === sessions[index]?.status
-                    && session.name === sessions[index]?.name
-                  ));
-                if (same) return current;
-                return { ...current, [tileId]: sessions };
-              });
-            }}
-            onActiveLaneChange={(lane) => {
-              setWorkspaceLaneByTileId((current) => (
-                sameWorkspaceLaneState(current[tileId], lane)
-                  ? current
-                  : { ...current, [tileId]: lane }
-              ));
-            }}
-            onRepoScopeChange={(repoPath) => setTerminalTileRepoScope(tileId, repoPath)}
-            onActiveRepoContextChange={(repo) => {
-              if (activeTileId !== tileId) return;
-              setWorkspaceSidePanelRepoContext((current) => sameWorkspaceSidePanelRepo(current, repo) ? current : repo);
-            }}
-            onSelectRepoScope={(repo) => {
-              const currentRepoPath = tilePreferredRepo?.localPath ?? null;
-              if (currentRepoPath === repo.localPath) {
-                setActiveTileId(tileId);
-                setActiveWorkspace(repo.localPath);
-              } else {
-                const targetTileId = ensureWorkspaceTerminalTile(repo.localPath, tileId);
-                if (targetTileId) {
-                  setActiveTileId(targetTileId);
-                }
-                setActiveWorkspace(repo.localPath);
-              }
-              const matched = repo.registryRepoId
-                ? globalRepoEntries.find((entry) => entry.id === repo.registryRepoId) ?? null
-                : globalRepoEntries.find((entry) => entry.localPath === repo.localPath) ?? null;
-              if (matched) {
-                void handleSelectRegisteredRepo(matched.id);
-              }
-            }}
-            onLaunchRepoAgent={(repo) => {
-              void handleLaunchWorkspaceAgent({
-                repoPath: repo.localPath,
-                createNew: true,
-              }).catch((error) => {
-                window.alert(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
-              });
-            }}
-            onOpenRepoGitLog={(repo) => handleOpenGitLog(repo.localPath)}
-            onOpenRepoCI={(repo) => {
-              const repoSlug = repoSlugFromRemote(repo.remoteUrl);
-              if (repoSlug) handleOpenCI(repoSlug);
-            }}
-            onOpenRepoDiff={(repo) => openWorkspaceSidePanel('diff', repo ? {
-              name: repo.name,
-              localPath: repo.localPath,
-              branch: repo.branch ?? null,
-              readiness: repo.readiness ?? null,
-              remoteUrl: repo.remoteUrl,
-            } : null)}
-            onInjectChatContext={handleAgentPanelChatInjection}
-            onSelectCommit={handleSelectCommit}
-            onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
-            onSplitVertical={() => handleSplitTile(tileId, 'vertical')}
-            onSplitHorizontal={() => handleSplitTile(tileId, 'horizontal')}
-            onCloseTile={() => handleCloseTile(tileId)}
-            sendTerminalCreate={sendTerminalCreate}
-            sendTerminalAttach={sendTerminalAttach}
-            sendTerminalInput={sendTerminalInput}
-            sendTerminalResize={sendTerminalResize}
-            sendTerminalDetach={sendTerminalDetach}
-            termWsConnected={termWsConnected}
-            onPreviewDetected={handlePreviewDetected}
-            onPreviewSelection={handlePreviewSelection}
-            showPreviewPane={false}
-          />
-          </Suspense>
-        );
-      },
-    },
-    preview: {
-      label: 'Preview',
-      description: 'Tabbed localhost previews detected from the workspace terminal.',
-      singleton: true,
-      render: ({ content, tileId }) => (
-        <LocalhostPreviewTabs
-          previews={workspacePreviews}
-          selectedPreviewId={content.kind === 'preview' ? content.selectedPreviewId ?? null : null}
-          onSelectPreview={(previewId) => handleSelectPreviewTile(tileId, previewId)}
-          onClosePreview={(previewId) => handleClosePreviewTileItem(tileId, previewId)}
-          onElementSelect={handlePreviewSelection}
-        />
-      ),
-    },
-    canvas: {
-      label: 'Inspector',
-      description: 'Legacy canvas surface for diffs, issues, PRs, and session replay.',
-      render: ({ tileId, content }) => {
-        const tileState = canvasStateByTileId[tileId] ?? { tabs: [], activeTabId: null, revealKey: 0 };
-        const tileRepoEntry = content.kind === 'canvas' && content.repoPath
-          ? globalRepoEntries.find((repo) => repo.localPath === content.repoPath) ?? null
-          : null;
-
-        return (
-          <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading inspector...</div>}>
-            <LazyCanvas
-              tabs={tileState.tabs}
-              activeTabId={tileState.activeTabId}
-              onSelectTab={(tabId) => selectCanvasTab(tileId, tabId)}
-              onCloseTab={(tabId) => closeCanvasTab(tileId, tabId)}
-              selectedRepo={repoSlugFromRemote(tileRepoEntry?.remoteUrl) ?? null}
-              onInjectChatContext={handleAgentPanelChatInjection}
-              onSelectCommit={handleSelectCommit}
-              onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
-            />
-          </Suspense>
-        );
-      },
-    },
-    thoughts: {
-      label: 'Thoughts',
-      description: 'Docked command surface for tasks, approvals, and fast agent chat.',
-      singleton: true,
-      render: ({ tileId }) => (
-        <Suspense fallback={null}>
-        <LazyThoughtsCard
-          open
-          docked
-          onClose={() => handleCloseTile(tileId)}
-          agents={parsedAgents}
-          draftInjection={!thoughtsOpen ? thoughtsDraftInjection : null}
-          missionState={thoughtsMissionState}
-          workspaceTargets={orchestratorWorkspaceTargets}
-          onMissionStateChange={handleThoughtsMissionStateChange}
-          onLaunchPacket={launchOrchestrationPacket}
-          onFocusPacket={focusOrchestrationPacketLane}
-        />
-        </Suspense>
-      ),
-    },
-    'contextual-panel': {
-      label: 'Global Terminal',
-      description: 'Global operator shell for scratch commands, quick command execution, and non-repo-specific utilities.',
-      singleton: true,
-      hideHeader: true,
-      render: ({ tileId }) => (
-        <ContextualPanel
-          ref={(handle) => registerContextualPanelHandle(tileId, handle)}
-          sendTerminalCreate={sendTerminalCreate}
-          sendTerminalAttach={sendTerminalAttach}
-          sendTerminalInput={sendTerminalInput}
-          sendTerminalResize={sendTerminalResize}
-          sendTerminalDetach={sendTerminalDetach}
-          sendAgentKill={sendAgentKill}
-          termWsConnected={termWsConnected}
-          onSplitVertical={() => handleSplitTile(tileId, 'vertical')}
-          onSplitHorizontal={() => handleSplitTile(tileId, 'horizontal')}
-          onClose={() => handleCloseTile(tileId)}
-        />
-      ),
-    },
+  const tileRegistry = useMemo(() => createTileRegistry({
+    activeTileId,
+    canvasStateByTileId,
+    closeCanvasTab,
+    ensureWorkspaceTerminalTile,
+    focusOrchestrationPacketLane,
+    globalRepoEntries,
+    handleAgentPanelChatInjection,
+    handleClosePreviewTileItem,
+    handleCloseTile,
+    handleLaunchWorkspaceAgent,
+    handleLaunchWorkspaceRepoTask,
+    handleOpenCI,
+    handleOpenGitLog,
+    handlePreviewDetected,
+    handlePreviewSelection,
+    handleSelectCommit,
+    handleSelectPreviewTile,
+    handleSelectRegisteredRepo,
+    handleSplitTile,
+    handleThoughtsMissionStateChange,
+    launchOrchestrationPacket,
+    openWorkspaceSidePanel,
+    orchestratorWorkspaceTargets,
+    parsedAgents,
+    registerContextualPanelHandle,
+    registerWorkspaceTerminalHandle,
+    selectCanvasTab,
+    setActiveTileId,
+    setActiveWorkspace,
+    setTileLayout,
+    setTileLayoutHydrated,
+    setTerminalTileRepoScope,
+    setWorkspaceChatSessionByTileId,
+    setWorkspaceChatSessionsByTileId,
+    setWorkspaceLaneByTileId,
+    setWorkspaceSidePanelRepoContext,
+    sendAgentKill,
+    sendTerminalAttach,
+    sendTerminalCreate,
+    sendTerminalDetach,
+    sendTerminalInput,
+    sendTerminalResize,
+    termWsConnected,
+    thoughtsDraftInjection,
+    thoughtsMissionState,
+    thoughtsOpen,
+    tileLayout,
+    workspacePreviews,
+    workspaceScopeEntries,
+    workspaceTerminalPreferredRepo,
+    workspaceTerminalResetNonceByTileId,
   }), [
     canvasStateByTileId,
     closeCanvasTab,
@@ -2913,7 +1929,15 @@ function DashboardInner() {
     registerWorkspaceTerminalHandle,
     workspaceScopeEntries,
     selectCanvasTab,
+    setActiveTileId,
+    setActiveWorkspace,
+    setTileLayout,
+    setTileLayoutHydrated,
     setTerminalTileRepoScope,
+    setWorkspaceChatSessionByTileId,
+    setWorkspaceChatSessionsByTileId,
+    setWorkspaceLaneByTileId,
+    setWorkspaceSidePanelRepoContext,
     sendAgentKill,
     sendTerminalAttach,
     sendTerminalCreate,
@@ -2921,7 +1945,7 @@ function DashboardInner() {
     sendTerminalInput,
     sendTerminalResize,
     termWsConnected,
-    tileLayout.root,
+    tileLayout,
     thoughtsDraftInjection,
     thoughtsMissionState,
     thoughtsOpen,
