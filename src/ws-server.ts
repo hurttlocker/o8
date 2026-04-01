@@ -10,6 +10,7 @@
  *   chat    — streaming text deltas
  *   inbox   — session list updates (pushed on change)
  *   history — transcript updates (pushed on change)
+ *   lane-lifecycle — lane status transitions (pushed on change)
  *   review  — review file updates (pushed on change)
  *   pong    — keepalive response
  *
@@ -32,6 +33,7 @@
  *                        drops are invisible to the user.
  *   terminal (other)  — DURABLE: lifecycle events (created/exited/error) queued.
  *   agent-lifecycle   — DURABLE: queued under backpressure.
+ *   lane-lifecycle    — DURABLE: queued under backpressure.
  *   review            — DURABLE: queued under backpressure.
  *   conflicts         — DURABLE: queued under backpressure.
  *   pong              — LOSSY: keepalive response, loss is harmless.
@@ -69,10 +71,12 @@ import {
   startHeadlessSprintLoop,
 } from '@/lib/orchestrator/headless-loop';
 import type {
+  LaneLifecycleEventPayload,
   RealtimeBatchMessage,
   RealtimeEventEnvelope,
   RealtimeHealthDescriptor,
   RealtimeInternalRequest,
+  RealtimeMutationRecord,
   RealtimeStreamKey,
   RealtimeSubscription,
 } from './lib/realtime/types';
@@ -700,6 +704,26 @@ const lastRealtimeFingerprint = {
 
 function currentIsoTime() {
   return new Date().toISOString();
+}
+
+function mutationToLaneLifecyclePayload(
+  mutation: RealtimeMutationRecord,
+): LaneLifecycleEventPayload | null {
+  if (mutation.action !== 'lane-lifecycle') return null;
+  if (!mutation.laneId || !mutation.laneStatus || !mutation.branch || !mutation.repoPath || !mutation.timestamp) {
+    return null;
+  }
+
+  return {
+    laneId: mutation.laneId,
+    packetId: mutation.packetId ?? null,
+    status: mutation.laneStatus,
+    previousStatus: mutation.previousStatus ?? null,
+    sessionKey: mutation.sessionKey ?? null,
+    branch: mutation.branch,
+    repoPath: mutation.repoPath,
+    timestamp: mutation.timestamp,
+  };
 }
 
 function clampRealtimeLog() {
@@ -2362,6 +2386,11 @@ const httpServer = createServer((req, res) => {
           },
         );
         broadcastRealtimeEvents([event]);
+        const laneLifecyclePayload = mutationToLaneLifecyclePayload(payload.mutation);
+        if (laneLifecyclePayload) {
+          broadcast({ channel: 'lane-lifecycle', event: 'update', data: laneLifecyclePayload });
+          console.log(`[lane-lifecycle] Broadcast ${laneLifecyclePayload.laneId} ${laneLifecyclePayload.previousStatus ?? 'new'} -> ${laneLifecyclePayload.status}`);
+        }
 
         if (payload.refreshTargets?.includes('global')) {
           scheduleRealtimeRuntimeRefresh({ fresh: payload.fresh, reason: payload.mutation.action });
