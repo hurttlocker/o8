@@ -548,6 +548,7 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
     laneId: lane.id,
     commitMessage: input.commitMessage?.trim() || undefined,
     reviewSummary: mapReviewSummary(packet),
+    orchestratorReviewed: packet.review?.approved === true,
     actor: 'orchestrator',
   });
 
