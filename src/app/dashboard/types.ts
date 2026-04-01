@@ -76,3 +76,8 @@ export interface CanvasTileState {
   activeTabId: string | null;
   revealKey: number;
 }
+
+export interface FtuxFirstChangedFile {
+  path: string;
+  workspace: string | null;
+}
