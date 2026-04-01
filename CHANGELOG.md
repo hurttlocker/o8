@@ -6,6 +6,8 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `2bba0bf` feat: lane lifecycle WebSocket channel
+- `b79ae61` feat: lane lifecycle WebSocket channel for real-time status streaming
 - `0dd778d` feat: migrate approval store from JSON to SQLite
 - `3b8deb9` feat: migrate approval store from JSON to SQLite
 - `c47e4d1` fix: rehydrate orchestrator sessions and mission state on cold start
