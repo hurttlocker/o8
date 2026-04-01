@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `22107ff` refactor: extract wave 5 — usePaletteActions, tileRegistry (,)
 - `a9961db` feat: add FILE_SIZE_WAIVERS for layout orchestrators and multiplexers
 - `5d0f9e8` refactor: extract wave 4 hooks — useTileLayout, useWorkspaceTerminal (,)
 - `e7dd4b3` feat: skeleton map file size check at dispatch time
