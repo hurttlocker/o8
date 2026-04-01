@@ -1,21 +1,33 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { FileText, Image as ImageIcon } from 'lucide-react';
+import { ChevronDown, FileText, Image as ImageIcon } from 'lucide-react';
 import type { MobileTranscriptMedia, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { ChatViewProps } from './types';
+import { CodeBlock } from './CodeBlock';
 import { MediaLightbox } from './MediaLightbox';
-import { MobileActivitySummaryRow, MobileArtifactCard } from './ReferencePrimitives';
+import { useTheme } from './ThemeContext';
 import {
+  diffLineTone,
   formatStreamingPreview,
   isImageMedia,
   mediaHref,
 } from './utils';
 import { isSlashCommandText } from '@/lib/slash-commands';
 import { measureHeight, useStreamingHeight } from '@/lib/pretext';
-
-// ── Memoized message bubble — only re-renders when its own data changes ──
 
 interface MessageBubbleProps {
   entry: ChatViewProps['transcriptEntries'][number];
@@ -29,45 +41,40 @@ interface MessageBubbleProps {
   onToggleExpanded: (id: string) => void;
 }
 
-function formatCount(count: number, singular: string, plural = `${singular}s`) {
-  return `${count} ${count === 1 ? singular : plural}`;
+interface BodyElementProps {
+  children?: ReactNode;
+  className?: string;
+  code?: string;
+  language?: string;
+  style?: CSSProperties;
 }
 
-function summarizeToolCalls(toolCalls: MobileTranscriptToolCall[] | undefined) {
-  if (!toolCalls?.length) {
-    return null;
-  }
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
-  let commandCount = 0;
-  let readCount = 0;
-  let editCount = 0;
-  let otherCount = 0;
+function useChatPalette() {
+  const { colors } = useTheme();
 
-  toolCalls.forEach((tool) => {
-    const name = tool.name.toLowerCase();
-    if (name === 'exec' || name === 'exec_command' || name === 'write_stdin') {
-      commandCount += 1;
-      return;
-    }
-    if (name === 'read' || name === 'read_file') {
-      readCount += 1;
-      return;
-    }
-    if (name === 'write' || name === 'write_file' || name === 'edit' || name === 'edit_file') {
-      editCount += 1;
-      return;
-    }
-    otherCount += 1;
-  });
-
-  const parts: string[] = [];
-  if (commandCount > 0) parts.push(`Ran ${formatCount(commandCount, 'command')}`);
-  if (readCount > 0) parts.push(`read ${formatCount(readCount, 'file')}`);
-  if (editCount > 0) parts.push(`edited ${formatCount(editCount, 'file')}`);
-  if (otherCount > 0 || parts.length === 0) parts.push(`ran ${formatCount(otherCount || toolCalls.length, 'tool')}`);
-
-  return parts.join(', ');
+  return useMemo(() => ({
+    background: colors.bg,
+    userBubble: colors.blueAccent,
+    userText: '#FFFFFF',
+    assistantBubble: 'rgba(44,44,46,0.9)',
+    assistantText: colors.text,
+    secondaryText: colors.textSecondary,
+    tertiaryText: colors.textTertiary,
+    toolRowBg: 'rgba(28,28,30,0.6)',
+    toolRowBorder: 'rgba(255,255,255,0.08)',
+    codeBlockBg: 'rgba(28,28,30,1.0)',
+    codeInlineBg: 'rgba(255,255,255,0.10)',
+    mutedBorder: colors.border,
+    mutedSurface: 'rgba(28,28,30,0.82)',
+    elevatedShadow: '0 18px 38px rgba(0, 0, 0, 0.34)',
+    green: colors.green,
+    red: colors.red,
+  }), [colors]);
 }
+
+type ChatPalette = ReturnType<typeof useChatPalette>;
 
 function toolDetail(tool: MobileTranscriptToolCall) {
   const args = tool.args ?? {};
@@ -84,6 +91,56 @@ function toolDetail(tool: MobileTranscriptToolCall) {
   return typeof detail === 'string' ? detail : tool.name;
 }
 
+function humanizeToolName(name: string) {
+  return name
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function toolStatusLabel(status?: MobileTranscriptToolCall['status']) {
+  if (status === 'done') return 'Done';
+  if (status === 'running') return 'Running';
+  if (status === 'calling') return 'Calling';
+  return 'Queued';
+}
+
+function toolStatusColor(status: MobileTranscriptToolCall['status'] | undefined, palette: ChatPalette) {
+  if (status === 'done') return palette.green;
+  if (status === 'running' || status === 'calling') return palette.userBubble;
+  return palette.tertiaryText;
+}
+
+function formatCodeLanguage(language?: string) {
+  if (!language) return 'Code';
+  if (language === 'tool-output') return 'Exec Output';
+  const aliases: Record<string, string> = {
+    ts: 'TypeScript',
+    tsx: 'TypeScript',
+    js: 'JavaScript',
+    jsx: 'JavaScript',
+    py: 'Python',
+    rb: 'Ruby',
+    sh: 'Shell',
+    bash: 'Shell',
+    zsh: 'Shell',
+    json: 'JSON',
+    yaml: 'YAML',
+    yml: 'YAML',
+    css: 'CSS',
+    html: 'HTML',
+    sql: 'SQL',
+    md: 'Markdown',
+    diff: 'Diff',
+    rust: 'Rust',
+    go: 'Go',
+    mermaid: 'Mermaid',
+    toml: 'TOML',
+    xml: 'XML',
+    graphql: 'GraphQL',
+  };
+  return aliases[language.toLowerCase()] ?? language;
+}
+
 function extractArtifactPreview(text: string) {
   const match = text.match(/```(?:([^\n]*))\n([\s\S]*?)```/);
   if (!match) {
@@ -95,7 +152,12 @@ function extractArtifactPreview(text: string) {
   return { bodyText, preview: preview || null };
 }
 
-function buildArtifact(entryText: string, toolCalls: MobileTranscriptToolCall[] | undefined, selectedReviewFile: ChatViewProps['selectedReviewFile'], isLatest: boolean) {
+function buildArtifact(
+  entryText: string,
+  toolCalls: MobileTranscriptToolCall[] | undefined,
+  selectedReviewFile: ChatViewProps['selectedReviewFile'],
+  isLatest: boolean,
+) {
   const fileTool = [...(toolCalls ?? [])].reverse().find((tool) => {
     const name = tool.name.toLowerCase();
     return name === 'write' || name === 'write_file' || name === 'edit' || name === 'edit_file' || name === 'read' || name === 'read_file';
@@ -135,6 +197,399 @@ function buildArtifact(entryText: string, toolCalls: MobileTranscriptToolCall[] 
   };
 }
 
+function mergeElementStyle(style: unknown): CSSProperties {
+  if (!style || typeof style !== 'object') {
+    return {};
+  }
+  return style as CSSProperties;
+}
+
+function richTextStyleFor(
+  tag: string,
+  className: string | undefined,
+  existingStyle: CSSProperties,
+  palette: ChatPalette,
+  tone: 'user' | 'assistant',
+): CSSProperties {
+  const bodyColor = tone === 'user' ? palette.userText : palette.assistantText;
+  const inlineCodeBg = tone === 'user' ? 'rgba(255,255,255,0.16)' : palette.codeInlineBg;
+
+  if (className?.includes('remodex-rich-text')) {
+    return {
+      display: 'grid',
+      gap: 10,
+      minWidth: 0,
+      color: bodyColor,
+    };
+  }
+
+  if (className?.includes('remodex-rich-heading')) {
+    const isMinorHeading = /remodex-rich-heading-[23]/.test(className);
+    return {
+      margin: 0,
+      color: bodyColor,
+      fontSize: isMinorHeading ? 14 : 16,
+      fontWeight: 700,
+      lineHeight: isMinorHeading ? 1.4 : 1.3,
+      letterSpacing: isMinorHeading ? '0.01em' : '-0.01em',
+    };
+  }
+
+  if (className?.includes('remodex-rich-paragraph')) {
+    return {
+      margin: 0,
+      color: bodyColor,
+      fontSize: 15,
+      lineHeight: 1.48,
+      whiteSpace: 'pre-wrap',
+    };
+  }
+
+  if (className?.includes('remodex-rich-list')) {
+    return {
+      margin: 0,
+      paddingLeft: 18,
+      display: 'grid',
+      gap: 6,
+      color: bodyColor,
+      fontSize: 15,
+      lineHeight: 1.48,
+    };
+  }
+
+  if (tag === 'div' && existingStyle.overflowX === 'auto') {
+    return {
+      overflowX: 'auto',
+      margin: '10px 0 0',
+      borderRadius: 10,
+      border: `1px solid ${palette.toolRowBorder}`,
+      background: palette.codeBlockBg,
+      boxShadow: 'none',
+    };
+  }
+
+  switch (tag) {
+    case 'p':
+      return {
+        margin: 0,
+        color: bodyColor,
+        fontSize: 15,
+        lineHeight: 1.48,
+        whiteSpace: 'pre-wrap',
+      };
+    case 'ul':
+    case 'ol':
+      return {
+        margin: 0,
+        paddingLeft: 18,
+        display: 'grid',
+        gap: 6,
+        color: bodyColor,
+        fontSize: 15,
+        lineHeight: 1.48,
+      };
+    case 'li':
+      return {
+        color: bodyColor,
+      };
+    case 'strong':
+      return {
+        color: bodyColor,
+        fontWeight: 650,
+      };
+    case 'em':
+      return {
+        color: bodyColor,
+      };
+    case 'code':
+      return {
+        padding: '2px 6px',
+        borderRadius: 6,
+        background: inlineCodeBg,
+        color: bodyColor,
+        fontFamily: '"SF Mono", Menlo, monospace',
+        fontSize: 13,
+      };
+    case 'table':
+      return {
+        width: '100%',
+        borderCollapse: 'collapse',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+      };
+    case 'th':
+      return {
+        textAlign: existingStyle.textAlign ?? 'left',
+        padding: '10px 12px',
+        color: palette.secondaryText,
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        borderBottom: `1px solid ${palette.toolRowBorder}`,
+        whiteSpace: 'nowrap',
+      };
+    case 'td':
+      return {
+        textAlign: existingStyle.textAlign ?? 'left',
+        padding: '10px 12px',
+        color: bodyColor,
+        fontSize: 13,
+        borderBottom: `1px solid rgba(255,255,255,0.06)`,
+      };
+    case 'tr':
+      return {
+        background: existingStyle.backgroundColor ? 'rgba(255,255,255,0.02)' : undefined,
+      };
+    default:
+      return {};
+  }
+}
+
+function restyleMessageBodyNode(
+  node: ReactNode,
+  palette: ChatPalette,
+  tone: 'user' | 'assistant',
+): ReactNode {
+  if (Array.isArray(node)) {
+    return node.map((child) => restyleMessageBodyNode(child, palette, tone));
+  }
+
+  if (!isValidElement<BodyElementProps>(node)) {
+    return node;
+  }
+
+  if (node.type === CodeBlock) {
+    const { code = '', language } = node.props;
+    return <PremiumCodeBlock key={node.key ?? undefined} code={code} language={language} />;
+  }
+
+  const children = node.props.children == null
+    ? node.props.children
+    : Children.map(node.props.children, (child) => restyleMessageBodyNode(child, palette, tone));
+
+  if (typeof node.type === 'string') {
+    const existingStyle = mergeElementStyle(node.props.style);
+    const style = {
+      ...existingStyle,
+      ...richTextStyleFor(node.type, node.props.className, existingStyle, palette, tone),
+    };
+
+    return cloneElement(node, {
+      ...node.props,
+      className: undefined,
+      style,
+    }, children);
+  }
+
+  return cloneElement(node, { ...node.props }, children);
+}
+
+function renderStyledMessageBody(
+  renderMessageBody: ChatViewProps['renderMessageBody'],
+  text: string,
+  keyPrefix: string,
+  palette: ChatPalette,
+  tone: 'user' | 'assistant',
+) {
+  return restyleMessageBodyNode(renderMessageBody(text, keyPrefix), palette, tone);
+}
+
+const PremiumCodeBlock = memo(function PremiumCodeBlock({
+  code,
+  language,
+}: {
+  code: string;
+  language?: string;
+}) {
+  const palette = useChatPalette();
+  const isMermaid = language?.toLowerCase() === 'mermaid';
+  const [expanded, setExpanded] = useState(isMermaid);
+
+  if (isMermaid) {
+    return <CodeBlock code={code} language={language} />;
+  }
+
+  const headerStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    width: '100%',
+    padding: '10px 12px 8px',
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    color: palette.secondaryText,
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    ...({ WebkitTapHighlightColor: 'transparent' } as CSSProperties),
+  } satisfies CSSProperties;
+
+  const preStyle = {
+    margin: 0,
+    padding: 12,
+    background: palette.codeBlockBg,
+    color: palette.assistantText,
+    fontFamily: '"SF Mono", Menlo, monospace',
+    fontSize: 13,
+    lineHeight: 1.5,
+    whiteSpace: 'pre',
+    overflowX: 'auto',
+    borderTop: `1px solid ${palette.toolRowBorder}`,
+    ...({ WebkitOverflowScrolling: 'touch' } as CSSProperties),
+  } satisfies CSSProperties;
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        borderRadius: 10,
+        overflow: 'hidden',
+        background: palette.codeBlockBg,
+        border: `1px solid ${palette.toolRowBorder}`,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        style={headerStyle}
+      >
+        <span>{formatCodeLanguage(language)}</span>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            color: palette.tertiaryText,
+          }}
+        >
+          <span style={{ fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>{code.split('\n').length} lines</span>
+          <ChevronDown
+            size={14}
+            strokeWidth={2}
+            style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 180ms ease' }}
+          />
+        </span>
+      </button>
+      {expanded ? (
+        <pre style={preStyle}>
+          <code>{code}</code>
+        </pre>
+      ) : null}
+    </div>
+  );
+});
+
+const ArtifactPreviewCard = memo(function ArtifactPreviewCard({
+  action,
+  path,
+  preview,
+}: {
+  action: string;
+  path: string;
+  preview: string;
+}) {
+  const palette = useChatPalette();
+  const previewLines = preview.split('\n').filter(Boolean).slice(0, 10);
+
+  if (!previewLines.length) {
+    return null;
+  }
+
+  return (
+    <div
+      style={{
+        overflow: 'hidden',
+        borderRadius: 10,
+        border: `1px solid ${palette.toolRowBorder}`,
+        background: palette.toolRowBg,
+      }}
+    >
+      <div
+        style={{
+          display: 'grid',
+          gap: 6,
+          padding: '10px 12px',
+          borderBottom: `1px solid ${palette.toolRowBorder}`,
+        }}
+      >
+        <span
+          style={{
+            color: palette.secondaryText,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {action}
+        </span>
+        <code
+          style={{
+            display: 'block',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            padding: '6px 8px',
+            borderRadius: 8,
+            background: palette.codeBlockBg,
+            color: palette.assistantText,
+            fontFamily: '"SF Mono", Menlo, monospace',
+            fontSize: 12,
+          }}
+        >
+          {path}
+        </code>
+      </div>
+      <div style={{ display: 'grid' }}>
+        {previewLines.map((line, index) => {
+          const tone = diffLineTone(line);
+          const rowBackground = tone === 'add'
+            ? 'rgba(48,209,88,0.10)'
+            : tone === 'remove'
+              ? 'rgba(255,69,58,0.10)'
+              : tone === 'meta' || tone === 'hunk'
+                ? 'rgba(10,132,255,0.10)'
+                : 'transparent';
+          const rowColor = tone === 'add'
+            ? palette.green
+            : tone === 'remove'
+              ? palette.red
+              : tone === 'meta' || tone === 'hunk'
+                ? '#7CC3FF'
+                : palette.assistantText;
+
+          return (
+            <div
+              key={`${path}-${index}`}
+              style={{
+                padding: '4px 12px',
+                background: rowBackground,
+              }}
+            >
+              <code
+                style={{
+                  display: 'block',
+                  color: rowColor,
+                  fontFamily: '"SF Mono", Menlo, monospace',
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {line}
+              </code>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
 const MessageBubble = memo(function MessageBubble({
   entry,
   isLatest,
@@ -146,41 +601,69 @@ const MessageBubble = memo(function MessageBubble({
   onOpenDiff,
   onToggleExpanded,
 }: MessageBubbleProps) {
+  const palette = useChatPalette();
   const isUser = entry.role === 'user';
   const hasText = Boolean(entry.text.trim());
   const hasMedia = Boolean(entry.media?.length);
-  const fadeClass = isNewMessage ? ' remodex-turn-new' : '';
+  const bubbleAnimation = isNewMessage ? 'chatview-message-fade-in 220ms ease-out' : undefined;
 
   if (isUser) {
     const isSlashCommand = isSlashCommandText(entry.text);
     return (
-      <div className={`remodex-user-turn-wrap${fadeClass}`}>
-        {hasMedia ? <MediaGrid media={entry.media ?? []} setExpandedMedia={setExpandedMedia} /> : null}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: 8,
+          width: '100%',
+          animation: bubbleAnimation,
+        }}
+      >
+        {hasMedia ? (
+          <MediaGrid
+            media={entry.media ?? []}
+            setExpandedMedia={setExpandedMedia}
+            align="right"
+            maxWidth="80%"
+          />
+        ) : null}
         {hasText ? (
           <div
-            className="remodex-user-bubble"
-            style={isSlashCommand ? {
-              background: 'rgba(15, 23, 42, 0.92)',
-              color: '#f8fafc',
-              border: '1px solid rgba(148, 163, 184, 0.18)',
-              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.14)',
-            } : undefined}
+            style={{
+              width: 'fit-content',
+              maxWidth: '80%',
+              padding: '10px 14px',
+              borderRadius: 14,
+              background: palette.userBubble,
+              color: palette.userText,
+              boxShadow: palette.elevatedShadow,
+            }}
           >
             {isSlashCommand ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span style={{
-                  fontSize: '0.68rem',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  color: '#93c5fd',
-                }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginBottom: 6,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    color: 'rgba(255,255,255,0.72)',
+                  }}
+                >
                   Slash Command
                 </span>
               </div>
             ) : null}
-            <div style={isSlashCommand ? { fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: '0.88rem' } : undefined}>
-              {renderMessageBody(entry.text, `${entry.id}-user`)}
+            <div style={isSlashCommand ? { fontFamily: '"SF Mono", Menlo, monospace', fontSize: 14 } : undefined}>
+              {renderStyledMessageBody(renderMessageBody, entry.text, `${entry.id}-user`, palette, 'user')}
             </div>
           </div>
         ) : null}
@@ -190,43 +673,172 @@ const MessageBubble = memo(function MessageBubble({
 
   const isCompaction = entry.type === 'compaction'
     || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
+
   if (isCompaction) {
     return (
-      <div className="remodex-compaction-card">
-        <span className="remodex-compaction-icon" aria-hidden="true">⟳</span>
-        <span className="remodex-compaction-label">Context compacted</span>
-        {entry.timestampLabel ? <span className="remodex-compaction-time">{entry.timestampLabel}</span> : null}
+      <div
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          padding: '8px 12px',
+          borderRadius: 999,
+          background: 'rgba(28,28,30,0.72)',
+          color: palette.secondaryText,
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: '0.01em',
+          animation: bubbleAnimation,
+        }}
+      >
+        <span aria-hidden="true">⟳</span>
+        <span>Context compacted</span>
+        {entry.timestampLabel ? (
+          <span style={{ color: palette.tertiaryText, fontSize: 11 }}>
+            {entry.timestampLabel}
+          </span>
+        ) : null}
       </div>
     );
   }
 
-  const activitySummary = summarizeToolCalls(entry.toolCalls);
   const artifactData = buildArtifact(entry.text, entry.toolCalls, selectedReviewFile, isLatest);
 
   return (
-    <article className={`remodex-message-card remodex-message-card-assistant${fadeClass}`}>
-      {activitySummary ? (
-        <MobileActivitySummaryRow
-          summary={activitySummary}
-          expanded={isExpanded}
-          onClick={() => onToggleExpanded(entry.id)}
-        />
-      ) : null}
-      {isExpanded && entry.toolCalls?.length ? (
-        <div className="remodex-reference-tool-detail-stack">
-          {entry.toolCalls.map((tool, index) => (
-            <div key={`${entry.id}-${tool.name}-${index}`} className="remodex-reference-tool-detail">
-              <span className="remodex-reference-tool-name">{tool.name}</span>
-              <code className="remodex-reference-tool-copy">{toolDetail(tool)}</code>
-            </div>
-          ))}
+    <article
+      style={{
+        display: 'grid',
+        gap: 8,
+        width: 'fit-content',
+        maxWidth: '85%',
+        padding: '10px 14px',
+        borderRadius: 14,
+        background: palette.assistantBubble,
+        color: palette.assistantText,
+        boxShadow: palette.elevatedShadow,
+        animation: bubbleAnimation,
+      }}
+    >
+      {entry.toolCalls?.length ? (
+        <div style={{ display: 'grid', gap: 6 }}>
+          {entry.toolCalls.map((tool, index) => {
+            const statusColor = toolStatusColor(tool.status, palette);
+            return (
+              <button
+                key={`${entry.id}-${tool.name}-${index}`}
+                type="button"
+                onClick={() => onToggleExpanded(entry.id)}
+                aria-expanded={isExpanded}
+                style={{
+                  display: 'grid',
+                  gap: isExpanded ? 8 : 0,
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: `1px solid ${palette.toolRowBorder}`,
+                  background: palette.toolRowBg,
+                  color: palette.assistantText,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  ...({ WebkitTapHighlightColor: 'transparent' } as CSSProperties),
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      minWidth: 0,
+                    }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: '50%',
+                        background: statusColor,
+                        flexShrink: 0,
+                        animation: tool.status === 'running' || tool.status === 'calling'
+                          ? 'chatview-thinking-pulse 1.4s ease-in-out infinite'
+                          : undefined,
+                      }}
+                    />
+                    <span
+                      style={{
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 13,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {humanizeToolName(tool.name)}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      color: palette.secondaryText,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span style={{ fontSize: 11 }}>{toolStatusLabel(tool.status)}</span>
+                    <ChevronDown
+                      size={14}
+                      strokeWidth={2}
+                      style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 180ms ease' }}
+                    />
+                  </div>
+                </div>
+                {isExpanded ? (
+                  <code
+                    style={{
+                      display: 'block',
+                      color: palette.secondaryText,
+                      fontFamily: '"SF Mono", Menlo, monospace',
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {toolDetail(tool)}
+                  </code>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       ) : null}
-      {hasMedia ? <MediaGrid media={entry.media ?? []} setExpandedMedia={setExpandedMedia} /> : null}
-      {artifactData.bodyText.trim() ? renderMessageBody(artifactData.bodyText, `${entry.id}-assistant`) : null}
+
+      {hasMedia ? (
+        <MediaGrid
+          media={entry.media ?? []}
+          setExpandedMedia={setExpandedMedia}
+          align="left"
+          maxWidth="100%"
+        />
+      ) : null}
+
+      {artifactData.bodyText.trim()
+        ? renderStyledMessageBody(renderMessageBody, artifactData.bodyText, `${entry.id}-assistant`, palette, 'assistant')
+        : null}
+
       {artifactData.artifact ? (
         <div
-          className="remodex-reference-artifact-button"
           role={isLatest && selectedReviewFile ? 'button' : undefined}
           tabIndex={isLatest && selectedReviewFile ? 0 : undefined}
           onClick={isLatest && selectedReviewFile ? onOpenDiff : undefined}
@@ -236,8 +848,12 @@ const MessageBubble = memo(function MessageBubble({
               onOpenDiff();
             }
           } : undefined}
+          style={{
+            cursor: isLatest && selectedReviewFile ? 'pointer' : 'default',
+            outline: 'none',
+          }}
         >
-          <MobileArtifactCard
+          <ArtifactPreviewCard
             action={artifactData.artifact.action}
             path={artifactData.artifact.path}
             preview={artifactData.artifact.preview}
@@ -248,36 +864,47 @@ const MessageBubble = memo(function MessageBubble({
   );
 });
 
-// ── Media grid (extracted for memo boundary) ──
-
 function MediaGrid({
   media,
   setExpandedMedia,
+  align = 'left',
+  maxWidth = '100%',
 }: {
   media: MobileTranscriptMedia[];
   setExpandedMedia: (media: MobileTranscriptMedia | null) => void;
+  align?: 'left' | 'right';
+  maxWidth?: CSSProperties['maxWidth'];
 }) {
+  const palette = useChatPalette();
   const images = media.filter(isImageMedia);
-  const files = media.filter(m => !isImageMedia(m));
+  const files = media.filter((item) => !isImageMedia(item));
   const imgCount = images.length;
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', gap: 0,
-      width: '100%',
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        width: '100%',
+        maxWidth,
+        alignSelf: align === 'right' ? 'flex-end' : 'flex-start',
+      }}
+    >
       {imgCount > 0 ? (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: imgCount === 1 ? '1fr' : '1fr 1fr',
-          gap: 2,
-          borderRadius: 14,
-          overflow: 'hidden',
-          width: '100%',
-          marginBottom: 0,
-        }}>
-          {images.map((item, i) => {
-            const span = imgCount === 3 && i === 0;
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: imgCount === 1 ? '1fr' : '1fr 1fr',
+            gap: 2,
+            borderRadius: 14,
+            overflow: 'hidden',
+            width: '100%',
+            background: palette.codeBlockBg,
+          }}
+        >
+          {images.map((item, index) => {
+            const span = imgCount === 3 && index === 0;
             return (
               <button
                 key={item.path}
@@ -285,12 +912,15 @@ function MediaGrid({
                 onClick={() => setExpandedMedia(item)}
                 style={{
                   gridColumn: span ? '1 / -1' : undefined,
-                  margin: 0, padding: 0, border: 'none',
-                  background: '#e5e5ea',
-                  cursor: 'pointer', display: 'block',
-                  WebkitTapHighlightColor: 'transparent',
+                  margin: 0,
+                  padding: 0,
+                  border: 'none',
+                  background: palette.codeBlockBg,
+                  cursor: 'pointer',
+                  display: 'block',
                   overflow: 'hidden',
                   lineHeight: 0,
+                  ...({ WebkitTapHighlightColor: 'transparent' } as CSSProperties),
                 }}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -313,17 +943,65 @@ function MediaGrid({
       ) : null}
 
       {files.map((item) => (
-        <div key={item.path} className="remodex-media-card remodex-media-card-file">
-          <div className="remodex-media-file-icon">
+        <div
+          key={item.path}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+            gap: 12,
+            alignItems: 'center',
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: `1px solid ${palette.toolRowBorder}`,
+            background: palette.toolRowBg,
+          }}
+        >
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              display: 'grid',
+              placeItems: 'center',
+              borderRadius: 10,
+              background: palette.codeBlockBg,
+              color: palette.assistantText,
+            }}
+          >
             {item.kind === 'pdf' ? <FileText size={18} strokeWidth={2.1} /> : <ImageIcon size={18} strokeWidth={2.1} />}
           </div>
-          <div className="remodex-media-file-copy">
-            <strong>{item.name}</strong>
-            <span>{item.kind === 'pdf' ? 'PDF artifact' : 'File artifact'}</span>
+          <div style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+            <strong
+              style={{
+                color: palette.assistantText,
+                fontSize: 13,
+                lineHeight: 1.35,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {item.name}
+            </strong>
+            <span style={{ color: palette.secondaryText, fontSize: 11 }}>
+              {item.kind === 'pdf' ? 'PDF artifact' : 'File artifact'}
+            </span>
           </div>
-          <div className="remodex-media-file-actions">
-            <a href={mediaHref(item.path)} target="_blank" rel="noreferrer">Open</a>
-            <a href={mediaHref(item.path, true)} download={item.name}>Save</a>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <a
+              href={mediaHref(item.path)}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: '#7CC3FF', fontSize: 12, textDecoration: 'none' }}
+            >
+              Open
+            </a>
+            <a
+              href={mediaHref(item.path, true)}
+              download={item.name}
+              style={{ color: '#7CC3FF', fontSize: 12, textDecoration: 'none' }}
+            >
+              Save
+            </a>
           </div>
         </div>
       ))}
@@ -331,7 +1009,31 @@ function MediaGrid({
   );
 }
 
-// ── Virtualized chat view ──
+function shouldShowTimestamp(entries: ChatViewProps['transcriptEntries'], index: number) {
+  const entry = entries[index];
+  if (!entry?.timestampLabel) {
+    return false;
+  }
+
+  if (entry.type === 'compaction') {
+    return false;
+  }
+
+  const previousEntry = index > 0 ? entries[index - 1] : null;
+  if (!previousEntry) {
+    return true;
+  }
+
+  if (previousEntry.role !== entry.role) {
+    return true;
+  }
+
+  if (typeof previousEntry.timestamp === 'number' && typeof entry.timestamp === 'number') {
+    return entry.timestamp - previousEntry.timestamp >= FIVE_MINUTES_MS;
+  }
+
+  return false;
+}
 
 export function ChatView({
   transcriptEntries,
@@ -355,6 +1057,7 @@ export function ChatView({
   onLoadMore,
   hasMoreHistory = true,
 }: ChatViewProps) {
+  const palette = useChatPalette();
   const listRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
@@ -362,25 +1065,18 @@ export function ChatView({
   const [canLoadMore, setCanLoadMore] = useState(hasMoreHistory);
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
   const toggleExpanded = useCallback((id: string) => {
-    setExpandedMessageId((prev) => prev === id ? null : id);
+    setExpandedMessageId((prev) => (prev === id ? null : id));
   }, []);
   const latestVisibleEntryRef = useRef<{ sessionKey?: string; entryId: string | null }>({
     sessionKey: selectedSession?.sessionKey,
     entryId: transcriptEntries[transcriptEntries.length - 1]?.id ?? null,
   });
   const initialScrollSessionRef = useRef<string | null>(null);
-
-  // Track which messages are "new" (not yet seen) via state, avoiding
-  // render-time ref access (#195). The effect computes the new set and
-  // updates the seen ref in one pass. The setState here is intentional —
-  // this is derived state that depends on a mutable ref and cannot be
-  // computed in useMemo without accessing the ref during render.
   const [newMessageIds, setNewMessageIds] = useState<Set<string>>(new Set());
 
-  /* eslint-disable react-hooks/set-state-in-effect -- derived from mutable ref, cannot use useMemo (#195) */
   useEffect(() => {
     if (!hydrated || !seenMessageIdsRef.current || seenMessageIdsRef.current.size === 0) {
-      setNewMessageIds(prev => prev.size === 0 ? prev : new Set());
+      setNewMessageIds((prev) => (prev.size === 0 ? prev : new Set()));
       return;
     }
     const ids = new Set<string>();
@@ -390,20 +1086,12 @@ export function ChatView({
         seenMessageIdsRef.current.add(entry.id);
       }
     }
-    setNewMessageIds(prev => ids.size === 0 && prev.size === 0 ? prev : ids);
+    setNewMessageIds((prev) => (ids.size === 0 && prev.size === 0 ? prev : ids));
   }, [hydrated, transcriptEntries, seenMessageIdsRef]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Stable estimateSize — must NOT depend on transcriptEntries to avoid
-  // virtualizer recalculating all sizes on every poll update, which causes
-  // scroll position to jump randomly on mobile.
-  // Synced via effect to avoid render-time ref mutation (#195).
   const transcriptRef = useRef(transcriptEntries);
   useEffect(() => { transcriptRef.current = transcriptEntries; }, [transcriptEntries]);
 
-  // [pretext] Track container width in a ref (NOT state) so estimateSize
-  // remains stable — writing to a ref never triggers a re-render or causes
-  // the virtualizer to recalculate all item sizes and jump scroll position.
   const containerWidthRef = useRef<number>(
     typeof window !== 'undefined' ? window.innerWidth - 32 : 300,
   );
@@ -413,13 +1101,13 @@ export function ChatView({
     containerWidthRef.current = node.clientWidth || window.innerWidth - 32;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const w = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
-        if (w > 0) containerWidthRef.current = w;
+        const width = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        if (width > 0) containerWidthRef.current = width;
       }
     });
     ro.observe(node);
     return () => ro.disconnect();
-  }, []); // mount-only — listRef.current is stable
+  }, []);
 
   const estimateSize = useCallback((index: number) => {
     const entry = transcriptRef.current[index];
@@ -427,7 +1115,6 @@ export function ChatView({
     const text = entry.text ?? '';
     const hasMedia = Boolean(entry.media?.length);
     const mediaExtra = hasMedia ? 240 : 0;
-    // Count code blocks — they render much taller
     const codeBlocks = (text.match(/```/g) ?? []).length / 2;
     const codeExtra = Math.floor(codeBlocks) * 120;
 
@@ -435,15 +1122,11 @@ export function ChatView({
 
     const measuredWidth = containerWidthRef.current;
     if (measuredWidth > 0 && text) {
-      // [pretext] Zero-reflow height measurement — pure math after Canvas prepare()
-      const font = entry.role === 'user' ? 'body' : 'body';
-      const measured = measureHeight(text, font, measuredWidth - 32);
-      // 52px base (card chrome) + measured text height + code block overhead + media
+      const measured = measureHeight(text, 'body', measuredWidth - 48);
       const base = entry.role === 'user' ? 52 : 64;
       return Math.max(base, base + measured + codeExtra + mediaExtra);
     }
 
-    // Fallback when width not yet measured (first render before ResizeObserver fires)
     const textLen = text.length;
     const lineBreaks = (text.match(/\n/g) ?? []).length;
     const lineHeight = lineBreaks * 22;
@@ -452,12 +1135,10 @@ export function ChatView({
     return Math.max(80, 64 + Math.max(charEstimate, lineHeight) + codeExtra + mediaExtra);
   }, []);
 
-  // Track scrollMargin via state to avoid render-time ref access (#195).
   const [scrollMargin, setScrollMargin] = useState(0);
-  /* eslint-disable react-hooks/set-state-in-effect -- resetting local UI state when the virtualized transcript is replaced */
   useEffect(() => {
     if (listRef.current) setScrollMargin(listRef.current.offsetTop);
-  }, [transcriptEntries.length]); // re-measure when list size changes
+  }, [transcriptEntries.length]);
 
   const getItemKey = useCallback((index: number) => transcriptRef.current[index]?.id ?? `row-${index}`, []);
   const virtualizer = useWindowVirtualizer({
@@ -501,9 +1182,7 @@ export function ChatView({
       ids: transcriptIds,
     };
   }, [selectedSession?.sessionKey, transcriptIds, virtualizer]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
-  /* eslint-disable react-hooks/set-state-in-effect -- local badge state depends on transcript append events */
   useEffect(() => {
     if (!selectedSession?.sessionKey || transcriptEntries.length === 0) return;
     if (initialScrollSessionRef.current === selectedSession.sessionKey) return;
@@ -512,7 +1191,6 @@ export function ChatView({
     requestAnimationFrame(() => onScrollToLatestMessage(true));
   }, [selectedSession?.sessionKey, transcriptEntries.length, onScrollToLatestMessage]);
 
-  // Track scroll position to determine stick-to-bottom + new message pill
   useEffect(() => {
     const handleScroll = () => {
       const distanceFromBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
@@ -524,8 +1202,6 @@ export function ChatView({
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Keep the newest turn in view after a send/response cycle, but preserve
-  // manual scroll control when the user intentionally browses older history.
   useEffect(() => {
     const latestEntry = transcriptEntries[transcriptEntries.length - 1] ?? null;
     const previous = latestVisibleEntryRef.current;
@@ -555,22 +1231,17 @@ export function ChatView({
       entryId: latestEntry.id,
     };
   }, [selectedSession?.sessionKey, transcriptEntries, waitingForResponse, onScrollToLatestMessage]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   const hasEntries = transcriptEntries.length > 0;
   const virtualItems = virtualizer.getVirtualItems();
 
-  // Pre-compute once: index of last assistant message (O(1) per item instead of O(n))
   const lastAssistantIndex = useMemo(() => {
-    for (let i = transcriptEntries.length - 1; i >= 0; i--) {
-      if (transcriptEntries[i].role === 'assistant') return i;
+    for (let index = transcriptEntries.length - 1; index >= 0; index -= 1) {
+      if (transcriptEntries[index].role === 'assistant') return index;
     }
     return -1;
   }, [transcriptEntries]);
 
-  // [pretext] Streaming preview height — called unconditionally (hook ordering rule).
-  // measureHeight is pure math (~0.09ms) so this is negligible cost even when streaming.
-  // Using state-based width here (streaming card is outside the virtualizer — safe to be reactive).
   const [streamingContainerWidth] = useState<number>(
     typeof window !== 'undefined' ? Math.max(window.innerWidth - 56, 200) : 300,
   );
@@ -581,16 +1252,68 @@ export function ChatView({
     1.4,
   );
 
+  const loadMoreButtonStyle = {
+    padding: '10px 18px',
+    borderRadius: 999,
+    border: `1px solid ${palette.toolRowBorder}`,
+    background: palette.mutedSurface,
+    color: palette.secondaryText,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: loadingMore ? 'default' : 'pointer',
+    opacity: loadingMore ? 0.5 : 1,
+    touchAction: 'manipulation',
+    ...({ WebkitTapHighlightColor: 'transparent' } as CSSProperties),
+  } satisfies CSSProperties;
+
   return (
     <>
-      <style>{`@keyframes session-fade-in { from { opacity: 0.4; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+      <style>{`
+        @keyframes chatview-session-fade-in {
+          from { opacity: 0.4; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes chatview-message-fade-in {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes chatview-thinking-pulse {
+          0%, 100% { opacity: 0.42; }
+          50% { opacity: 1; }
+        }
+        @keyframes chatview-jump-pill-in {
+          from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        @keyframes chatview-refresh-slide {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+        @keyframes chatview-shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        @keyframes chatview-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes chatview-compact-pulse {
+          0%, 100% { transform: translateX(-30%); opacity: 0.72; }
+          50% { transform: translateX(8%); opacity: 1; }
+        }
+      `}</style>
+
       <div
         ref={listRef}
-        className="remodex-message-stack"
         key={selectedSession?.sessionKey ?? 'none'}
-        style={{ animation: 'session-fade-in 0.2s ease-out' }}
+        style={{
+          display: 'block',
+          minHeight: 0,
+          paddingTop: 8,
+          background: palette.background,
+          animation: 'chatview-session-fade-in 0.2s ease-out',
+        }}
       >
-        {/* Load earlier messages */}
         {hasEntries && onLoadMore && canLoadMore ? (
           <div style={{ textAlign: 'center', padding: '12px 0 4px' }}>
             <button
@@ -602,35 +1325,37 @@ export function ChatView({
                 if (added === 0) setCanLoadMore(false);
                 setLoadingMore(false);
               }}
-              onTouchEnd={async (e) => {
-                e.preventDefault();
+              onTouchEnd={async (event) => {
+                event.preventDefault();
                 if (loadingMore) return;
                 setLoadingMore(true);
                 const added = await (onLoadMore?.() ?? Promise.resolve(0));
                 if (added === 0) setCanLoadMore(false);
                 setLoadingMore(false);
               }}
-              style={{
-                padding: '10px 18px', borderRadius: 999, border: '1px solid rgba(219, 211, 198, 0.7)',
-                background: 'rgba(255,255,255,0.82)',
-                color: '#61584d', fontSize: 13, fontWeight: 600,
-                cursor: loadingMore ? 'default' : 'pointer',
-                opacity: loadingMore ? 0.5 : 1,
-                WebkitTapHighlightColor: 'transparent',
-                touchAction: 'manipulation',
-                boxShadow: '0 10px 24px rgba(71, 61, 51, 0.06)',
-              }}
+              style={loadMoreButtonStyle}
             >
               {loadingMore ? 'Loading...' : 'Load earlier messages'}
             </button>
           </div>
         ) : null}
+
         {hasEntries ? (
           <div style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
             {virtualItems.map((virtualRow) => {
               const entry = transcriptEntries[virtualRow.index];
+              const previousEntry = virtualRow.index > 0 ? transcriptEntries[virtualRow.index - 1] : null;
               const isLatest = virtualRow.index === lastAssistantIndex;
               const isNew = newMessageIds.has(entry.id);
+              const showTimestamp = shouldShowTimestamp(transcriptEntries, virtualRow.index);
+              const rowGap = previousEntry ? (previousEntry.role === entry.role ? 4 : 16) : 0;
+              const rowAlign = entry.type === 'compaction'
+                ? 'center'
+                : entry.role === 'user'
+                  ? 'flex-end'
+                  : entry.role === 'system'
+                    ? 'center'
+                    : 'flex-start';
 
               return (
                 <div
@@ -645,41 +1370,95 @@ export function ChatView({
                     transform: `translateY(${virtualRow.start - (virtualizer.options.scrollMargin ?? 0)}px)`,
                   }}
                 >
-                  <MessageBubble
-                  entry={entry}
-                    isLatest={isLatest}
-                    isNewMessage={isNew}
-                    isExpanded={expandedMessageId === entry.id}
-                    selectedReviewFile={selectedReviewFile}
-                    renderMessageBody={renderMessageBody}
-                    setExpandedMedia={setExpandedMedia}
-                    onOpenDiff={onOpenDiff}
-                    onToggleExpanded={toggleExpanded}
-                  />
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: rowAlign,
+                      paddingTop: rowGap,
+                    }}
+                  >
+                    {showTimestamp ? (
+                      <div
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          justifyContent: rowAlign,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span
+                          style={{
+                            color: palette.tertiaryText,
+                            fontSize: 11,
+                            lineHeight: 1.2,
+                          }}
+                        >
+                          {entry.timestampLabel}
+                        </span>
+                      </div>
+                    ) : null}
+
+                    <MessageBubble
+                      entry={entry}
+                      isLatest={isLatest}
+                      isNewMessage={isNew}
+                      isExpanded={expandedMessageId === entry.id}
+                      selectedReviewFile={selectedReviewFile}
+                      renderMessageBody={renderMessageBody}
+                      setExpandedMedia={setExpandedMedia}
+                      onOpenDiff={onOpenDiff}
+                      onToggleExpanded={toggleExpanded}
+                    />
+                  </div>
                 </div>
               );
             })}
           </div>
         ) : transcriptLoading ? (
-          <div className="remodex-skeleton-stack">
-            <div className="remodex-skeleton-bubble remodex-skeleton-assistant" />
-            <div className="remodex-skeleton-bubble remodex-skeleton-user" />
-            <div className="remodex-skeleton-bubble remodex-skeleton-assistant remodex-skeleton-wide" />
-            <div className="remodex-skeleton-bubble remodex-skeleton-user remodex-skeleton-short" />
+          <div style={{ display: 'grid', gap: 16, paddingTop: 8 }}>
+            {[
+              { width: '75%', alignSelf: 'flex-start', background: 'linear-gradient(90deg, rgba(44,44,46,0.9) 25%, rgba(58,58,60,0.9) 50%, rgba(44,44,46,0.9) 75%)', height: 52 },
+              { width: '55%', alignSelf: 'flex-end', background: 'linear-gradient(90deg, rgba(10,132,255,0.7) 25%, rgba(42,152,255,0.85) 50%, rgba(10,132,255,0.7) 75%)', height: 52 },
+              { width: '85%', alignSelf: 'flex-start', background: 'linear-gradient(90deg, rgba(44,44,46,0.9) 25%, rgba(58,58,60,0.9) 50%, rgba(44,44,46,0.9) 75%)', height: 84 },
+              { width: '40%', alignSelf: 'flex-end', background: 'linear-gradient(90deg, rgba(10,132,255,0.7) 25%, rgba(42,152,255,0.85) 50%, rgba(10,132,255,0.7) 75%)', height: 40 },
+            ].map((bubble, index) => (
+              <div
+                key={index}
+                style={{
+                  width: bubble.width,
+                  height: bubble.height,
+                  alignSelf: bubble.alignSelf,
+                  borderRadius: 14,
+                  background: bubble.background,
+                  backgroundSize: '200% 100%',
+                  animation: 'chatview-shimmer 1.6s ease-in-out infinite',
+                }}
+              />
+            ))}
           </div>
         ) : (
-          <div className="remodex-loading-card">
+          <div
+            style={{
+              marginTop: 12,
+              padding: '14px 16px',
+              borderRadius: 14,
+              background: palette.mutedSurface,
+              color: palette.secondaryText,
+              fontSize: 14,
+              lineHeight: 1.5,
+            }}
+          >
             {isOwnedCodexSession
               ? 'No run history yet — waiting for the first readable output.'
               : 'No transcript turns visible yet — latest activity may have been tool-heavy or compacted.'}
           </div>
         )}
-        {/* Bottom breathing room — keeps last message above compose bar + action buttons */}
+
         <div style={{ height: Math.max(composeHeight, 120) + 24 }} aria-hidden="true" />
       </div>
 
       {(() => {
-        // Detect active compaction — last message mentions compact while waiting
         const lastEntry = transcriptEntries[transcriptEntries.length - 1];
         const isCompacting = (waitingForResponse || actionState === 'steering')
           && lastEntry
@@ -687,93 +1466,99 @@ export function ChatView({
 
         if (streamingText && !isCompacting) {
           return (
-            <article className="remodex-message-card remodex-message-card-assistant remodex-streaming-card">
-              <div className="remodex-message-header">
-                <span className="remodex-speaker-label">{selectedSession ? agentDisplayName(selectedSession) : 'Assistant'}</span>
-                <div className="remodex-typing-bubble-dots" style={{ display: 'inline-flex', marginLeft: 6 }}>
-                  <span className="remodex-typing-dot" />
-                  <span className="remodex-typing-dot" />
-                  <span className="remodex-typing-dot" />
+            <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 8 }}>
+              <article
+                style={{
+                  width: 'fit-content',
+                  maxWidth: '85%',
+                  display: 'grid',
+                  gap: 8,
+                  padding: '10px 14px',
+                  borderRadius: 14,
+                  background: palette.assistantBubble,
+                  color: palette.assistantText,
+                  boxShadow: palette.elevatedShadow,
+                }}
+              >
+                <span
+                  style={{
+                    color: palette.secondaryText,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    animation: 'chatview-thinking-pulse 1.4s ease-in-out infinite',
+                  }}
+                >
+                  Thinking...
+                </span>
+                <div
+                  style={{
+                    height: Math.min(streamingPreviewHeight || 22, 60),
+                    overflow: 'hidden',
+                    color: palette.assistantText,
+                    fontSize: 14,
+                    lineHeight: 1.4,
+                    opacity: 0.9,
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {formatStreamingPreview(streamingText)}
                 </div>
-              </div>
-              {/* [pretext] Explicit height instead of maxHeight+overflow to eliminate DOM reflow on each token */}
-              <div className="remodex-streaming-preview" style={{ height: Math.min(streamingPreviewHeight || 22, 60), overflow: 'hidden', fontSize: '0.85rem', lineHeight: 1.4, color: '#475569' }}>{formatStreamingPreview(streamingText)}</div>
-            </article>
+              </article>
+            </div>
           );
         }
 
         if (isCompacting) {
           return (
-            <div style={{
-              margin: '8px 14px',
-              padding: '14px 16px',
-              borderRadius: 16,
-              background: 'rgba(255,149,0,0.06)',
-              border: '1px solid rgba(255,149,0,0.15)',
-              backdropFilter: 'blur(20px) saturate(1.6)',
-              WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-              display: 'flex', flexDirection: 'column', gap: 8,
-            }}>
-              {/* Header with spinner */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-              }}>
-                <div style={{
-                  width: 18, height: 18, borderRadius: '50%',
-                  border: '2.5px solid rgba(255,149,0,0.25)',
-                  borderTopColor: '#ff9500',
-                  animation: 'spin 1s linear infinite',
-                  flexShrink: 0,
-                }} />
-                <span style={{
-                  fontSize: 14, fontWeight: 700,
-                  color: '#ff9500',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                }}>
+            <div
+              style={{
+                marginTop: 8,
+                padding: '14px 16px',
+                borderRadius: 14,
+                background: 'rgba(28,28,30,0.86)',
+                border: '1px solid rgba(255,149,0,0.18)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                ...({ WebkitBackdropFilter: 'blur(18px)', backdropFilter: 'blur(18px)' } as CSSProperties),
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div
+                  style={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: '50%',
+                    border: '2px solid rgba(255,149,0,0.24)',
+                    borderTopColor: '#ff9500',
+                    animation: 'chatview-spin 1s linear infinite',
+                    flexShrink: 0,
+                  }}
+                />
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#ffb340' }}>
                   Compacting context
                 </span>
               </div>
-
-              {/* Description */}
-              <p style={{
-                margin: 0, fontSize: 12, lineHeight: 1.5,
-                color: '#8e8e93',
-              }}>
+              <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: palette.secondaryText }}>
                 {selectedSession ? agentDisplayName(selectedSession) : 'Agent'} is compressing context to free up memory. Messages you send now will be queued and delivered after compaction completes.
               </p>
-
-              {/* Animated progress bar */}
-              <div style={{
-                height: 4, borderRadius: 2,
-                background: 'rgba(255,149,0,0.12)',
-                overflow: 'hidden',
-              }}>
-                <div style={{
-                  height: '100%', borderRadius: 2,
-                  background: 'linear-gradient(90deg, #ff9500, #ffcc00)',
-                  width: '65%',
-                  animation: 'compactPulse 2s ease-in-out infinite',
-                }} />
-              </div>
-
-              {/* Tip */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '6px 10px',
-                borderRadius: 8,
-                background: 'rgba(255,149,0,0.04)',
-              }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                  stroke="#ff9500" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="16" x2="12" y2="12" />
-                  <line x1="12" y1="8" x2="12.01" y2="8" />
-                </svg>
-                <span style={{
-                  fontSize: 11, color: '#8e8e93', fontWeight: 500,
-                }}>
-                  Usually takes 10–30 seconds
-                </span>
+              <div
+                style={{
+                  height: 4,
+                  borderRadius: 999,
+                  overflow: 'hidden',
+                  background: 'rgba(255,149,0,0.10)',
+                }}
+              >
+                <div
+                  style={{
+                    width: '68%',
+                    height: '100%',
+                    borderRadius: 999,
+                    background: 'linear-gradient(90deg, #ff9500, #ffd60a)',
+                    animation: 'chatview-compact-pulse 1.8s ease-in-out infinite',
+                  }}
+                />
               </div>
             </div>
           );
@@ -781,12 +1566,19 @@ export function ChatView({
 
         if (waitingForResponse || actionState === 'steering') {
           return (
-            <div className="remodex-typing-bubble">
-              <span className="remodex-typing-bubble-label">{selectedSession ? agentDisplayName(selectedSession) : 'Assistant'}</span>
-              <div className="remodex-typing-bubble-dots">
-                <span className="remodex-typing-dot" />
-                <span className="remodex-typing-dot" />
-                <span className="remodex-typing-dot" />
+            <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 8 }}>
+              <div
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 14,
+                  background: 'rgba(28,28,30,0.82)',
+                  color: palette.secondaryText,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  animation: 'chatview-thinking-pulse 1.4s ease-in-out infinite',
+                }}
+              >
+                Thinking...
               </div>
             </div>
           );
@@ -815,20 +1607,17 @@ export function ChatView({
             width: 36,
             height: 36,
             borderRadius: 999,
-            border: '1px solid rgba(255,255,255,0.76)',
-            background: 'rgba(255,255,255,0.92)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
-            color: '#413a31',
+            border: `1px solid ${palette.toolRowBorder}`,
+            background: 'rgba(28,28,30,0.92)',
+            color: palette.assistantText,
             fontSize: 14,
             fontWeight: 600,
-            boxShadow: '0 12px 30px rgba(71, 61, 51, 0.12)',
             cursor: 'pointer',
-            animation: 'pill-bounce-in 0.3s ease-out',
+            animation: 'chatview-jump-pill-in 0.3s ease-out',
+            ...({ WebkitBackdropFilter: 'blur(16px)', backdropFilter: 'blur(16px)' } as CSSProperties),
           }}
         >
           ↓
-          <style>{`@keyframes pill-bounce-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }`}</style>
         </button>
       ) : null}
 
@@ -839,14 +1628,12 @@ export function ChatView({
             top: 0,
             left: 0,
             right: 0,
-            height: '3px',
-            background: 'linear-gradient(90deg, transparent, #007aff, transparent)',
-            animation: 'stale-slide 1.5s ease-in-out infinite',
+            height: 3,
+            background: 'linear-gradient(90deg, transparent, #0A84FF, transparent)',
+            animation: 'chatview-refresh-slide 1.5s ease-in-out infinite',
             zIndex: 10,
           }}
-        >
-          <style>{`@keyframes stale-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }`}</style>
-        </div>
+        />
       ) : null}
 
       <MediaLightbox media={expandedMedia} onClose={() => setExpandedMedia(null)} />

@@ -31,6 +31,15 @@ interface ColorPalette {
   notifBorder: string;
   dismissBg: string;
   pillTextInactive: string;
+  activityTimelineLine: string;
+  activityCardBg: string;
+  activityCardBorder: string;
+  activityStatusCoding: string;
+  activityStatusThinking: string;
+  activityStatusTesting: string;
+  activityStatusError: string;
+  activityStatusSuccess: string;
+  activityStatusIdle: string;
 }
 
 const DARK_COLORS: ColorPalette = {
@@ -60,6 +69,15 @@ const DARK_COLORS: ColorPalette = {
   notifBorder: 'rgba(10,132,255,0.18)',
   dismissBg: 'rgba(10,132,255,0.12)',
   pillTextInactive: 'rgba(100,160,255,0.7)',
+  activityTimelineLine: 'rgba(255,255,255,0.06)',
+  activityCardBg: 'rgba(28,28,30,0.82)',
+  activityCardBorder: 'rgba(255,255,255,0.06)',
+  activityStatusCoding: '#0A84FF',
+  activityStatusThinking: '#64D2FF',
+  activityStatusTesting: '#FF9F0A',
+  activityStatusError: '#FF453A',
+  activityStatusSuccess: '#30D158',
+  activityStatusIdle: '#636366',
 };
 
 interface ThemeContextValue {

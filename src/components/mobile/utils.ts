@@ -81,6 +81,17 @@ export function pickCurrentSession(snapshot: MobileInboxSnapshot) {
     ?? snapshot.sessions[0];
 }
 
+function isHomeSession(session: SessionSummary, snapshot: MobileInboxSnapshot) {
+  if (session.isCurrentSession) return true;
+  if (snapshot.primarySessionKey && session.sessionKey === snapshot.primarySessionKey) return true;
+  if (session.runtimeSurface?.lifecycle?.availability === 'running') return true;
+  return ['running', 'reviewing', 'blocked', 'waiting'].includes(session.status);
+}
+
+export function pickHomeSession(snapshot: MobileInboxSnapshot) {
+  return snapshot.sessions.find((session) => isHomeSession(session, snapshot));
+}
+
 /**
  * Strip markdown syntax and return a very short "live tail" of the response.
  * Apple notification style: just enough to show activity, never a wall of text.
