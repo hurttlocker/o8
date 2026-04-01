@@ -237,6 +237,147 @@ const statusDotColor: Record<string, string> = {
   error: '#ef4444',
 };
 
+// ── Animated Status Indicator — Infinity Glow ──
+
+const STATUS_INDICATOR_KEYFRAMES = `
+@keyframes o8-dash-travel {
+  0%   { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -100; }
+}
+@keyframes o8-dash-travel-fast {
+  0%   { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -100; }
+}
+@keyframes o8-dash-pulse {
+  0%, 100% { stroke-dashoffset: 0; filter: brightness(1); }
+  50%      { stroke-dashoffset: -50; filter: brightness(1.4); }
+}
+`;
+let _keyframesInjected = false;
+function _ensureKeyframes() {
+  if (typeof document !== 'undefined' && !_keyframesInjected) {
+    const sheet = document.createElement('style');
+    sheet.textContent = STATUS_INDICATOR_KEYFRAMES;
+    document.head.appendChild(sheet);
+    _keyframesInjected = true;
+  }
+}
+
+const INFINITY_PATH = 'M-12,0 C-12,-7 -4,-7 0,0 C4,7 12,7 12,0 C12,-7 4,-7 0,0 C-4,7 -12,7 -12,0Z';
+
+type IndicatorMode = 'idle' | 'thinking' | 'working' | 'attention' | 'error' | 'offline';
+
+/**
+ * InfinityGlow — the o8 status indicator.
+ * An infinity/figure-8 path with a glowing highlight that travels along it.
+ * Speed and intensity vary by agent state.
+ */
+function InfinityGlow({ color, mode = 'idle', size = 1 }: {
+  color: string;
+  mode?: IndicatorMode;
+  size?: number;
+}) {
+  _ensureKeyframes();
+
+  const w = Math.round(28 * size);
+  const h = Math.round(14 * size);
+  const stroke = 1.2 * size;
+
+  // Idle: static dim path, no animation
+  if (mode === 'idle') {
+    return (
+      <svg width={w} height={h} viewBox="-14 -8 28 16" style={{ overflow: 'visible', flexShrink: 0 }}>
+        <path d={INFINITY_PATH} fill="none" stroke={`${color}33`} strokeWidth={stroke} strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  // Offline: very faint static path
+  if (mode === 'offline') {
+    return (
+      <svg width={w} height={h} viewBox="-14 -8 28 16" style={{ overflow: 'visible', flexShrink: 0, opacity: 0.35 }}>
+        <path d={INFINITY_PATH} fill="none" stroke={`${color}22`} strokeWidth={stroke} strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  // Animation config per mode
+  const config = {
+    thinking:  { speed: 3.2, dashOn: 10, dashOff: 40, glow: 0.4, pathOpacity: '18' },
+    working:   { speed: 1.8, dashOn: 14, dashOff: 36, glow: 0.7, pathOpacity: '22' },
+    attention: { speed: 1.2, dashOn: 18, dashOff: 32, glow: 0.9, pathOpacity: '28' },
+    error:     { speed: 0.8, dashOn: 20, dashOff: 30, glow: 1.0, pathOpacity: '30' },
+  }[mode] ?? { speed: 3, dashOn: 10, dashOff: 40, glow: 0.4, pathOpacity: '18' };
+
+  return (
+    <svg width={w} height={h} viewBox="-14 -8 28 16" style={{ overflow: 'visible', flexShrink: 0 }}>
+      {/* Dim background path */}
+      <path d={INFINITY_PATH} fill="none" stroke={`${color}${config.pathOpacity}`} strokeWidth={stroke} strokeLinecap="round" />
+      {/* Glow layer */}
+      <path
+        d={INFINITY_PATH}
+        fill="none"
+        stroke={color}
+        strokeWidth={stroke + 2}
+        strokeLinecap="round"
+        strokeDasharray={`${config.dashOn} ${config.dashOff}`}
+        style={{
+          animation: `o8-dash-travel ${config.speed}s linear infinite`,
+          filter: `blur(3px)`,
+          opacity: config.glow * 0.5,
+        }}
+      />
+      {/* Bright traveling highlight */}
+      <path
+        d={INFINITY_PATH}
+        fill="none"
+        stroke={color}
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeDasharray={`${config.dashOn} ${config.dashOff}`}
+        style={{
+          animation: `o8-dash-travel ${config.speed}s linear infinite`,
+          filter: `drop-shadow(0 0 2px ${color})`,
+        }}
+      />
+    </svg>
+  );
+}
+
+/** Map agent group state into indicator animation mode */
+function indicatorMode(opts: {
+  activeCount: number;
+  blockedCount: number;
+  mergeReadyCount: number;
+  reviewingCount: number;
+  waitingCount: number;
+}): IndicatorMode {
+  if (opts.blockedCount > 0) return 'error';
+  if (opts.activeCount > 0) return 'working';
+  if (opts.mergeReadyCount > 0) return 'attention';
+  if (opts.reviewingCount > 0) return 'thinking';
+  if (opts.waitingCount > 0) return 'thinking';
+  return 'idle';
+}
+
+/** Map individual agent state into indicator mode */
+function agentIndicatorMode(opts: {
+  isRunning: boolean;
+  isFailed: boolean;
+  isStalled: boolean;
+  isMergeReady: boolean;
+  isReviewing: boolean;
+  isWaiting: boolean;
+}): IndicatorMode {
+  if (opts.isFailed) return 'error';
+  if (opts.isStalled) return 'error';
+  if (opts.isRunning) return 'working';
+  if (opts.isMergeReady) return 'attention';
+  if (opts.isReviewing) return 'thinking';
+  if (opts.isWaiting) return 'thinking';
+  return 'idle';
+}
+
 const severityColor: Record<string, string> = {
   success: '#22c55e',
   info: '#3b82f6',
@@ -1196,13 +1337,17 @@ const AgentCard = memo(function AgentCard({
               letterSpacing: '0.01em',
               flexShrink: 0,
             }}>
-              <span style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: chipTone,
-                boxShadow: activeAgents.length > 0 ? `0 0 10px ${chipTone}66` : 'none',
-              }} />
+              <InfinityGlow
+                color={chipTone}
+                size={0.5}
+                mode={indicatorMode({
+                  activeCount: activeAgents.length,
+                  blockedCount: blockedAgents.length,
+                  mergeReadyCount: mergeReadyAgents.length,
+                  reviewingCount: reviewingAgents.length,
+                  waitingCount: waitingAgents.length,
+                })}
+              />
               {statusLabel}
             </span>
             {expanded && primaryPr ? (
@@ -1545,30 +1690,13 @@ const AgentCard = memo(function AgentCard({
                 e.currentTarget.style.background = isRunning || isMergeReady ? 'rgba(34,197,94,0.08)' : isReviewing ? 'rgba(167,139,250,0.08)' : isWaiting ? 'rgba(245,158,11,0.08)' : 'transparent';
               }}
             >
-              {/* Status dot with glow / reviewing pulse */}
-              <span style={{
-                position: 'relative',
-                width: 7, height: 7,
-                flexShrink: 0,
-                marginTop: 5,
-              }}>
-                {isReviewing && (
-                  <span style={{
-                    position: 'absolute',
-                    inset: 0,
-                    borderRadius: '50%',
-                    background: '#a78bfa',
-                    animation: 'reviewingRing 2s cubic-bezier(0.4, 0, 0.2, 1) infinite',
-                  }} />
-                )}
-                <span style={{
-                  position: 'relative',
-                  display: 'block',
-                  width: 7, height: 7, borderRadius: '50%',
-                  background: isReviewing ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : agentDot,
-                  boxShadow: isRunning || isMergeReady ? `0 0 8px ${agentDot}` : isReviewing ? '0 0 8px rgba(167, 139, 250, 0.5)' : 'none',
-                  animation: isReviewing ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
-                }} />
+              {/* Infinity glow status indicator */}
+              <span style={{ flexShrink: 0, marginTop: 3, display: 'flex', alignItems: 'center' }}>
+                <InfinityGlow
+                  color={agentDot}
+                  size={0.65}
+                  mode={agentIndicatorMode({ isRunning, isFailed, isStalled, isMergeReady, isReviewing, isWaiting })}
+                />
               </span>
 
               {/* Main content */}
