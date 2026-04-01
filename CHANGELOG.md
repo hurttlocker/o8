@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `84868d4` refactor: extract useFtuxMilestones hook
 - `f0f79e3` refactor: extract useSetupWizard hook
 - `2d79576` refactor: extract FTUX presentational components
 - `cbeaa2e` refactor: extract dashboard utils.ts
