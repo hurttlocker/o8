@@ -1,12 +1,19 @@
+import { dirname } from 'node:path';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { getDispatchableWave } from '@/lib/orchestrator/dag';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import { getAllCached, type FileSkeleton } from '@/lib/skeleton';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorLaneBinding, OrchestratorMissionState, OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
 
 export const MAX_PARALLEL_DISPATCHES = 4;
+export const FILE_SIZE_BLOCK_THRESHOLD_LINES = 600;
+const FILE_SIZE_WARNING_BUFFER_LINES = 100;
+const FILE_SIZE_WARNING_THRESHOLD_LINES = FILE_SIZE_BLOCK_THRESHOLD_LINES - FILE_SIZE_WARNING_BUFFER_LINES;
+const MAX_THRESHOLD_GUIDANCE_FILES = 6;
+const PATH_TEXT_CHAR_PATTERN = /[A-Za-z0-9._/-]/;
 
 function formatChangedFiles(changedFiles: string[]) {
   if (changedFiles.length === 0) {
@@ -90,6 +97,120 @@ function buildReviewLessonSections(
   return sections;
 }
 
+function buildPacketScopeText(packet: OrchestratorPacket): string {
+  return [packet.title, packet.summary]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join('\n')
+    .replace(/\\/g, '/')
+    .toLowerCase();
+}
+
+function hasPathTokenBoundary(text: string, index: number): boolean {
+  if (index < 0 || index >= text.length) {
+    return true;
+  }
+  return !PATH_TEXT_CHAR_PATTERN.test(text[index] ?? '');
+}
+
+function includesPathToken(text: string, candidate: string): boolean {
+  let fromIndex = 0;
+
+  while (fromIndex < text.length) {
+    const matchIndex = text.indexOf(candidate, fromIndex);
+    if (matchIndex === -1) {
+      return false;
+    }
+
+    const beforeIndex = matchIndex - 1;
+    const afterIndex = matchIndex + candidate.length;
+    if (hasPathTokenBoundary(text, beforeIndex) && hasPathTokenBoundary(text, afterIndex)) {
+      return true;
+    }
+
+    fromIndex = matchIndex + candidate.length;
+  }
+
+  return false;
+}
+
+function packetMentionsSkeletonFile(scopeText: string, file: FileSkeleton): boolean {
+  const normalizedPath = file.relativePath.toLowerCase();
+  if (includesPathToken(scopeText, normalizedPath)) {
+    return true;
+  }
+
+  let directoryPath = dirname(file.relativePath).replace(/\\/g, '/').toLowerCase();
+  while (directoryPath && directoryPath !== '.') {
+    if (includesPathToken(scopeText, `${directoryPath}/`)) {
+      return true;
+    }
+
+    const parentDirectory = dirname(directoryPath).replace(/\\/g, '/').toLowerCase();
+    if (parentDirectory === directoryPath) {
+      break;
+    }
+    directoryPath = parentDirectory;
+  }
+
+  return false;
+}
+
+function formatThresholdFiles(files: FileSkeleton[]): string {
+  if (files.length === 0) {
+    return '';
+  }
+
+  const sorted = [...files].sort((left, right) => (
+    right.lineCount - left.lineCount || left.relativePath.localeCompare(right.relativePath)
+  ));
+
+  if (sorted.length <= MAX_THRESHOLD_GUIDANCE_FILES) {
+    return sorted.map((file) => `${file.relativePath} (${file.lineCount}L)`).join(', ');
+  }
+
+  return `${sorted.slice(0, MAX_THRESHOLD_GUIDANCE_FILES).map((file) => `${file.relativePath} (${file.lineCount}L)`).join(', ')} (+${sorted.length - MAX_THRESHOLD_GUIDANCE_FILES} more)`;
+}
+
+export function checkFileSizeThresholds(packet: OrchestratorPacket): string[] {
+  const repoPath = packet.workspaceTargetPath;
+  if (!repoPath) {
+    return [];
+  }
+
+  const scopeText = buildPacketScopeText(packet);
+  if (!scopeText) {
+    return [];
+  }
+
+  const matchedFiles = getAllCached(repoPath).filter((file) => packetMentionsSkeletonFile(scopeText, file));
+  if (matchedFiles.length === 0) {
+    return [];
+  }
+
+  const blockFiles = matchedFiles.filter((file) => file.lineCount > FILE_SIZE_BLOCK_THRESHOLD_LINES);
+  const warningFiles = matchedFiles.filter((file) => (
+    file.lineCount > FILE_SIZE_WARNING_THRESHOLD_LINES
+    && file.lineCount <= FILE_SIZE_BLOCK_THRESHOLD_LINES
+  ));
+
+  if (blockFiles.length === 0 && warningFiles.length === 0) {
+    return [];
+  }
+
+  return [
+    'File size governance:',
+    blockFiles.length > 0
+      ? `Block threshold hit (> ${FILE_SIZE_BLOCK_THRESHOLD_LINES} lines): ${formatThresholdFiles(blockFiles)}.`
+      : null,
+    warningFiles.length > 0
+      ? `Warning threshold hit (> ${FILE_SIZE_WARNING_THRESHOLD_LINES} lines): ${formatThresholdFiles(warningFiles)}.`
+      : null,
+    `Decompose before implementing. Extract a helper, module, or split responsibility before adding significant new logic to flagged files.`,
+    `If a flagged file still needs edits, keep the diff surgical and surface any required follow-up refactor, review handoff, or operator decision explicitly.`,
+  ].filter((value): value is string => Boolean(value));
+}
+
 async function buildDependencyContextSections(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
@@ -142,8 +263,12 @@ async function buildDependencyContextSections(
 
 async function buildPacketPrompt(packet: OrchestratorPacket, allPackets: OrchestratorPacket[]) {
   const dependencySections = await buildDependencyContextSections(packet, allPackets);
+  const fileSizeSections = checkFileSizeThresholds(packet);
   if (dependencySections.length > 0) {
     console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
+  }
+  if (fileSizeSections.length > 0) {
+    console.log(`[dispatch] Injected file size governance guidance for packet ${packet.id}`);
   }
 
   return [
@@ -153,6 +278,7 @@ async function buildPacketPrompt(packet: OrchestratorPacket, allPackets: Orchest
     packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
     dependencySections.length > 0 ? 'Dependency handoff context:' : null,
     ...dependencySections,
+    ...fileSizeSections,
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');
 }
