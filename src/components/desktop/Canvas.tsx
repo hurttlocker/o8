@@ -18,6 +18,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  AnimatePresence,
+  motion,
+} from 'framer-motion';
+import {
   AlertCircle,
   BookOpen,
   Check,
@@ -154,6 +158,13 @@ function readinessTone(readiness?: RepoReadiness | null) {
   }
 }
 
+type CanvasEmptyMode = 'idle' | 'welcome';
+
+function canvasEmptyRepoLabel(selectedRepo?: string | null) {
+  if (!selectedRepo) return null;
+  return selectedRepo.split('/').pop() ?? selectedRepo;
+}
+
 // ── Main Canvas ──
 
 export const Canvas = memo(function Canvas({
@@ -190,10 +201,6 @@ export const Canvas = memo(function Canvas({
     return () => cancelAnimationFrame(raf);
   }, [tabs.length, syncScrollState]);
 
-  if (tabs.length === 0) {
-    return <CanvasEmpty />;
-  }
-
   return (
     <div style={{
       flex: 1,
@@ -203,148 +210,152 @@ export const Canvas = memo(function Canvas({
       background: 'var(--t-bg-subtle)',
       borderTop: '1px solid var(--t-divider)',
     }}>
-      {/* Tab bar — hidden when embedded in ContextualPanel */}
-      {!embedded && <div style={{
-        position: 'relative',
-        height: 36,
-        flexShrink: 0,
-        background: 'var(--t-panel-translucent)',
-        backdropFilter: 'blur(20px) saturate(1.6)',
-        WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-        borderBottom: '1px solid var(--t-divider)',
-      }}>
-        {/* Scroll left arrow */}
-        {canScrollLeft && (
-          <div
-            onClick={() => scrollTabs('left')}
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: 28,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'linear-gradient(to right, var(--t-panel-translucent) 60%, transparent)',
-              zIndex: 2,
-              cursor: 'pointer',
-              color: 'var(--t-text-secondary)',
-              transition: 'opacity 150ms ease',
-            }}
-          >
-            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-          </div>
-        )}
-        {/* Scroll right arrow */}
-        {canScrollRight && (
-          <div
-            onClick={() => scrollTabs('right')}
-            style={{
-              position: 'absolute',
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: 28,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'linear-gradient(to left, var(--t-panel-translucent) 60%, transparent)',
-              zIndex: 2,
-              cursor: 'pointer',
-              color: 'var(--t-text-secondary)',
-              transition: 'opacity 150ms ease',
-            }}
-          >
-            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-          </div>
-        )}
-        <div
-          ref={tabScrollRef}
-          onScroll={syncScrollState}
-          onMouseEnter={syncScrollState}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 0,
-            height: '100%',
-            paddingLeft: 8,
-            paddingRight: 8,
-            overflowX: 'auto',
-            overflowY: 'hidden',
-            scrollbarWidth: 'none',
-          }}
-        >
-        {tabs.map((tab) => {
-          const isActive = tab.id === activeTabId;
-          return (
-            <div
-              key={tab.id}
-              onClick={() => onSelectTab(tab.id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                height: 28,
-                padding: '0 10px',
-                marginRight: 2,
-                borderRadius: 8,
-                fontSize: 12,
-                fontWeight: isActive ? 600 : 400,
-                color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
-                background: isActive ? 'var(--t-panel)' : 'transparent',
-                boxShadow: isActive
-                  ? 'var(--t-panel-shadow)'
-                  : 'none',
-                cursor: 'pointer',
-                transition: 'all 150ms ease',
-                flexShrink: 0,
-                letterSpacing: '-0.01em',
-                userSelect: 'none',
-              }}
-            >
-              <TabIcon kind={tab.kind} size={13} />
-              <span style={{
-                maxWidth: 140,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
-                {tab.label}
-              </span>
+      {tabs.length > 0 ? (
+        <>
+          {/* Tab bar — hidden when embedded in ContextualPanel */}
+          {!embedded && <div style={{
+            position: 'relative',
+            height: 36,
+            flexShrink: 0,
+            background: 'var(--t-panel-translucent)',
+            backdropFilter: 'blur(20px) saturate(1.6)',
+            WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+            borderBottom: '1px solid var(--t-divider)',
+          }}>
+            {/* Scroll left arrow */}
+            {canScrollLeft && (
               <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseTab(tab.id);
-                }}
+                onClick={() => scrollTabs('left')}
                 style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 28,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  width: 16,
-                  height: 16,
-                  borderRadius: 4,
-                  marginLeft: 2,
-                  color: 'var(--t-text-muted)',
+                  background: 'linear-gradient(to right, var(--t-panel-translucent) 60%, transparent)',
+                  zIndex: 2,
                   cursor: 'pointer',
-                  transition: 'all 100ms ease',
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = 'var(--t-divider)';
-                  (e.currentTarget as HTMLDivElement).style.color = '#ef4444';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-                  (e.currentTarget as HTMLDivElement).style.color = 'var(--t-text-muted)';
+                  color: 'var(--t-text-secondary)',
+                  transition: 'opacity 150ms ease',
                 }}
               >
-                <X size={11} />
+                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
               </div>
+            )}
+            {/* Scroll right arrow */}
+            {canScrollRight && (
+              <div
+                onClick={() => scrollTabs('right')}
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 28,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'linear-gradient(to left, var(--t-panel-translucent) 60%, transparent)',
+                  zIndex: 2,
+                  cursor: 'pointer',
+                  color: 'var(--t-text-secondary)',
+                  transition: 'opacity 150ms ease',
+                }}
+              >
+                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              </div>
+            )}
+            <div
+              ref={tabScrollRef}
+              onScroll={syncScrollState}
+              onMouseEnter={syncScrollState}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0,
+                height: '100%',
+                paddingLeft: 8,
+                paddingRight: 8,
+                overflowX: 'auto',
+                overflowY: 'hidden',
+                scrollbarWidth: 'none',
+              }}
+            >
+            {tabs.map((tab) => {
+              const isActive = tab.id === activeTabId;
+              return (
+                <div
+                  key={tab.id}
+                  onClick={() => onSelectTab(tab.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    height: 28,
+                    padding: '0 10px',
+                    marginRight: 2,
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: isActive ? 600 : 400,
+                    color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                    background: isActive ? 'var(--t-panel)' : 'transparent',
+                    boxShadow: isActive
+                      ? 'var(--t-panel-shadow)'
+                      : 'none',
+                    cursor: 'pointer',
+                    transition: 'all 150ms ease',
+                    flexShrink: 0,
+                    letterSpacing: '-0.01em',
+                    userSelect: 'none',
+                  }}
+                >
+                  <TabIcon kind={tab.kind} size={13} />
+                  <span style={{
+                    maxWidth: 140,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {tab.label}
+                  </span>
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab(tab.id);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 16,
+                      height: 16,
+                      borderRadius: 4,
+                      marginLeft: 2,
+                      color: 'var(--t-text-muted)',
+                      cursor: 'pointer',
+                      transition: 'all 100ms ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.background = 'var(--t-divider)';
+                      (e.currentTarget as HTMLDivElement).style.color = '#ef4444';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+                      (e.currentTarget as HTMLDivElement).style.color = 'var(--t-text-muted)';
+                    }}
+                  >
+                    <X size={11} />
+                  </div>
+                </div>
+              );
+            })}
             </div>
-          );
-        })}
-        </div>
-      </div>}
+          </div>}
+        </>
+      ) : null}
 
       {/* Tab content */}
       <div style={{
@@ -354,17 +365,37 @@ export const Canvas = memo(function Canvas({
         display: 'flex',
         flexDirection: 'column',
       }}>
-        {activeTab ? (
-          <TabContent
-            tab={activeTab}
-            selectedRepo={selectedRepo}
-            onSelectCommit={onSelectCommit}
-            onInjectChatContext={onInjectChatContext}
-            onLaunchWorkspaceTask={onLaunchWorkspaceTask}
-          />
-        ) : (
-          <CanvasEmpty />
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          {activeTab ? (
+            <motion.div
+              key={activeTab.id}
+              style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+              initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            >
+              <TabContent
+                tab={activeTab}
+                selectedRepo={selectedRepo}
+                onSelectCommit={onSelectCommit}
+                onInjectChatContext={onInjectChatContext}
+                onLaunchWorkspaceTask={onLaunchWorkspaceTask}
+              />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="canvas-empty"
+              style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+              initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            >
+              <CanvasEmpty selectedRepo={selectedRepo} mode="idle" />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
@@ -444,7 +475,7 @@ const TabContent = memo(function TabContent({
     case 'memory':
       return <Suspense fallback={null}><LazyGraphExplorer3D /></Suspense>;
     case 'welcome':
-      return <CanvasEmpty />;
+      return <CanvasEmpty selectedRepo={selectedRepo} mode="welcome" />;
     case 'timeline':
       return <TimelineExpanded />;
     case 'audit-log':
@@ -454,7 +485,7 @@ const TabContent = memo(function TabContent({
     case 'preview':
       return <PortPreview url={tab.resourceId} port={parseInt(tab.meta?.port ?? '0', 10)} repo={tab.meta?.repo} />;
     default:
-      return <CanvasEmpty />;
+      return <CanvasEmpty selectedRepo={selectedRepo} mode="idle" />;
   }
 });
 
@@ -2277,25 +2308,306 @@ function PortPreview({ url, port, repo }: { url: string; port: number; repo?: st
 
 // ── Empty State ──
 
-function CanvasEmpty() {
+function CanvasEmpty({ selectedRepo, mode = 'idle' }: { selectedRepo?: string | null; mode?: CanvasEmptyMode }) {
+  const repoLabel = canvasEmptyRepoLabel(selectedRepo);
+  const title = mode === 'welcome'
+    ? 'Canvas ready'
+    : 'Content will appear here';
+  const subtitle = repoLabel
+    ? `Click an issue, file, or transcript from ${repoLabel} and the inspector will open here.`
+    : 'Click an issue, file, or transcript and the inspector will open here.';
+
   return (
     <div style={{
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      alignItems: 'center',
       justifyContent: 'center',
-      height: '100%',
-      minHeight: 200,
+      minHeight: 280,
+      padding: 24,
+      position: 'relative',
+      overflow: 'hidden',
+      background: 'linear-gradient(180deg, var(--t-bg-subtle) 0%, var(--t-bg) 100%)',
     }}>
-      <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.1, color: 'var(--t-text-muted)' }}>◇</div>
-      <p style={{
-        fontSize: 13,
-        color: 'var(--t-text-faint)',
-        letterSpacing: '-0.01em',
-      }}>
-        Select an issue, agent, or file to open here
-      </p>
+      <div style={{
+        position: 'absolute',
+        inset: -60,
+        pointerEvents: 'none',
+        background: 'radial-gradient(circle at 16% 18%, var(--t-accent-soft, rgba(37, 99, 235, 0.08)) 0%, transparent 34%), radial-gradient(circle at 82% 22%, rgba(148, 163, 184, 0.16) 0%, transparent 30%), radial-gradient(circle at 50% 92%, rgba(37, 99, 235, 0.06) 0%, transparent 34%)',
+        opacity: 0.9,
+      }} />
+
+      <motion.div
+        layout
+        style={{
+          position: 'relative',
+          maxWidth: 840,
+          width: '100%',
+          margin: '0 auto',
+          borderRadius: 14,
+          border: '1px solid var(--t-divider)',
+          background: 'var(--t-panel-translucent)',
+          backdropFilter: 'blur(22px) saturate(1.5)',
+          WebkitBackdropFilter: 'blur(22px) saturate(1.5)',
+          boxShadow: 'var(--t-panel-shadow)',
+          overflow: 'hidden',
+        }}
+        initial={{ opacity: 0, y: 10, scale: 0.994 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.994 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+      >
+        <div style={{
+          padding: 20,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 18,
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 16,
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '4px 10px',
+                borderRadius: 10,
+                border: '1px solid var(--t-divider-subtle)',
+                background: 'var(--t-divider-subtle)',
+                color: 'var(--t-text-muted)',
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+              }}>
+                <span style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: THEME_ACCENT,
+                  opacity: 0.8,
+                  flexShrink: 0,
+                }} />
+                Canvas
+              </div>
+              <div style={{
+                marginTop: 12,
+                fontSize: 22,
+                lineHeight: 1.12,
+                fontWeight: 650,
+                letterSpacing: '-0.02em',
+                color: 'var(--t-text)',
+                fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+              }}>
+                {title}
+              </div>
+              <div style={{
+                marginTop: 8,
+                maxWidth: 620,
+                fontSize: 13,
+                lineHeight: 1.55,
+                color: 'var(--t-text-muted)',
+                letterSpacing: '-0.01em',
+                fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+              }}>
+                {subtitle}
+              </div>
+            </div>
+
+            {repoLabel ? (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                minHeight: 28,
+                padding: '0 10px',
+                borderRadius: 10,
+                border: '1px solid var(--t-divider-subtle)',
+                background: 'rgba(255, 255, 255, 0.46)',
+                color: 'var(--t-text-secondary)',
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: '-0.01em',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                flexShrink: 0,
+              }}>
+                {repoLabel}
+              </div>
+            ) : null}
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 12,
+          }}>
+            {[
+              {
+                label: 'Issue',
+                accent: THEME_ACCENT,
+                badge: 'Issue #128',
+                lines: [72, 88, 63],
+                footer: 'Status · review pending',
+              },
+              {
+                label: 'File',
+                accent: 'var(--t-text-secondary)',
+                badge: 'src/app/dashboard/page.tsx',
+                lines: [92, 84, 68, 76, 54],
+                footer: 'File preview · ready',
+              },
+              {
+                label: 'Transcript',
+                accent: 'var(--t-text-secondary)',
+                badge: 'Session replay',
+                lines: [86, 74, 92, 60],
+                footer: 'Transcript · live context',
+              },
+            ].map((card, index) => (
+              <motion.div
+                key={card.label}
+                style={{
+                  borderRadius: 14,
+                  border: '1px solid var(--t-divider-subtle)',
+                  background: 'linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.38) 100%)',
+                  padding: 14,
+                  minHeight: 160,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  opacity: 0.92,
+                }}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 30, delay: index * 0.05 }}
+              >
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                }}>
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    minHeight: 24,
+                    padding: '0 10px',
+                    borderRadius: 10,
+                    border: '1px solid var(--t-divider-subtle)',
+                    background: THEME_ACCENT_SOFT,
+                    color: card.accent,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                  }}>
+                    {card.label}
+                  </div>
+                  <div style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: 999,
+                    border: '1px solid var(--t-divider-subtle)',
+                    background: 'rgba(255,255,255,0.55)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--t-text-faint)',
+                  }}>
+                    <svg width={8} height={8} viewBox="0 0 8 8" fill="currentColor" style={{ display: 'block' }}>
+                      <circle cx="4" cy="4" r="4" />
+                    </svg>
+                  </div>
+                </div>
+
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  flex: 1,
+                  minHeight: 0,
+                }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    letterSpacing: '-0.01em',
+                    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                  }}>
+                    <div style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 3,
+                      background: 'var(--t-divider-subtle)',
+                      border: '1px solid var(--t-divider)',
+                    }} />
+                    {card.badge}
+                  </div>
+
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: '1px solid var(--t-divider-subtle)',
+                    background: 'rgba(255,255,255,0.5)',
+                  }}>
+                    {card.lines.map((width, lineIndex) => (
+                      <div
+                        key={`${card.label}-${lineIndex}`}
+                        style={{
+                          height: lineIndex === 0 ? 12 : 10,
+                          width: `${width}%`,
+                          borderRadius: 999,
+                          background: lineIndex === 0
+                            ? 'linear-gradient(90deg, var(--t-divider-subtle) 0%, rgba(37, 99, 235, 0.14) 100%)'
+                            : 'var(--t-divider-subtle)',
+                          opacity: lineIndex === 0 ? 0.88 : 0.7,
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{
+                  marginTop: 'auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  fontSize: 11,
+                  lineHeight: 1.4,
+                  color: 'var(--t-text-faint)',
+                  letterSpacing: '-0.01em',
+                  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                }}>
+                  <span>{card.footer}</span>
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '2px 8px',
+                    borderRadius: 10,
+                    border: '1px solid var(--t-divider-subtle)',
+                    background: 'rgba(255,255,255,0.5)',
+                  }}>
+                    preview
+                  </span>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }
