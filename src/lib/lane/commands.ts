@@ -513,6 +513,11 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           } catch { /* nothing to commit */ }
         }
 
+        // Resolve actual branch name from the worktree (may differ from lane.branch
+        // when the worktree manager generates its own branch naming convention)
+        const actualBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: lane.worktreePath })).stdout.trim();
+        console.log(`[lane-merge] Actual worktree branch: ${actualBranch} (lane.branch: ${lane.branch})`);
+
         // ── Rebase onto latest baseBranch HEAD ──
         // When parallel agents dispatch from the same HEAD, later branches become
         // stale after earlier merges. Rebasing first auto-resolves same-file-
@@ -520,20 +525,20 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         let rebaseFailed = false;
         try {
           await execFileAsync('git', ['rebase', lane.baseBranch], { cwd: lane.worktreePath });
-          console.log(`[lane-merge] Rebased ${lane.branch} onto ${lane.baseBranch}`);
+          console.log(`[lane-merge] Rebased ${actualBranch} onto ${lane.baseBranch}`);
         } catch {
           // Rebase had true conflicts — abort and fall through to direct merge
           try { await execFileAsync('git', ['rebase', '--abort'], { cwd: lane.worktreePath }); } catch { /* already clean */ }
           rebaseFailed = true;
-          console.log(`[lane-merge] Rebase failed for ${lane.branch}, attempting direct merge`);
+          console.log(`[lane-merge] Rebase failed for ${actualBranch}, attempting direct merge`);
         }
 
-        // Perform merge
+        // Perform merge using the actual branch ref
         const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: lane.repoPath })).stdout.trim();
         await execFileAsync('git', ['checkout', lane.baseBranch], { cwd: lane.repoPath });
 
         try {
-          await execFileAsync('git', ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${lane.branch})`, lane.branch], { cwd: lane.repoPath });
+          await execFileAsync('git', ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${actualBranch})`, actualBranch], { cwd: lane.repoPath });
         } catch (mergeErr) {
           // Real conflict — rollback
           try { await execFileAsync('git', ['merge', '--abort'], { cwd: lane.repoPath }); } catch { /* already clean */ }
