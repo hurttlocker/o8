@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, memo } from 'react';
+import { useState, useRef, memo, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { useTheme } from './ThemeContext';
 
 export type MobileScreen = 'chat' | 'fleet' | 'memory' | 'approvals' | 'costs' | 'settings' | 'issues';
 
@@ -54,8 +55,48 @@ export const SpeedDialButton = memo(function SpeedDialButton({
   onNavigate,
   approvalCount = 0,
 }: SpeedDialProps) {
+  const { colors } = useTheme();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const primaryText = '#F5F5F7';
+  const secondaryText = '#8E8E93';
+  const surfaceBorder = 'rgba(255, 255, 255, 0.08)';
+  const closedBackground = 'rgba(0, 0, 0, 0.8)';
+  const openBackground = 'rgba(0, 0, 0, 0.88)';
+  const pillBackground = 'rgba(18, 18, 20, 0.82)';
+  const pillActiveBackground = 'rgba(28, 28, 30, 0.94)';
+  const menuButtonStyle: CSSProperties = {
+    width: 44,
+    height: 44,
+    minWidth: 44,
+    minHeight: 44,
+    borderRadius: 999,
+    background: open ? openBackground : closedBackground,
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: `1px solid ${surfaceBorder}`,
+    color: primaryText,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    boxShadow: open
+      ? '0 14px 30px rgba(0, 0, 0, 0.34)'
+      : '0 10px 24px rgba(0, 0, 0, 0.24)',
+    transition: 'background 220ms ease, box-shadow 220ms ease, transform 180ms ease',
+    WebkitTapHighlightColor: 'transparent',
+    position: 'relative',
+    padding: 0,
+  };
+  const backdropStyle: CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0, 0, 0, 0.38)',
+    backdropFilter: 'blur(12px) saturate(1.02)',
+    WebkitBackdropFilter: 'blur(12px) saturate(1.02)',
+    animation: 'menuFrostIn 200ms ease',
+    zIndex: 9997,
+  };
 
   // Close-on-outside-tap handled by frost backdrop onClick.
   // No document-level touchstart listener — it was killing pill taps
@@ -68,33 +109,15 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         type="button"
         onClick={() => setOpen(v => !v)}
         aria-label="Navigation menu"
-        style={{
-          width: 42, height: 42,
-          borderRadius: 999,
-          background: open ? 'rgba(255,255,255,0.94)' : 'rgba(255,255,255,0.78)',
-          backdropFilter: 'blur(18px) saturate(1.08)',
-          WebkitBackdropFilter: 'blur(18px) saturate(1.08)',
-          border: '1px solid rgba(255,255,255,0.72)',
-          color: '#2f2b27',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          boxShadow: open
-            ? '0 12px 30px rgba(71, 61, 51, 0.12), inset 0 1px 0 rgba(255,255,255,0.88)'
-            : '0 8px 24px rgba(71, 61, 51, 0.08), inset 0 1px 0 rgba(255,255,255,0.76)',
-          transition: 'background 220ms ease, box-shadow 220ms ease, transform 180ms ease',
-          WebkitTapHighlightColor: 'transparent',
-          position: 'relative',
-        }}
+        style={menuButtonStyle}
       >
         <div style={{
-          width: 16, height: 12,
+          width: 18, height: 12,
           display: 'flex', flexDirection: 'column',
           justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span style={{
-            display: 'block', width: 16, height: 1.5, borderRadius: 1,
+            display: 'block', width: 18, height: 1.5, borderRadius: 1,
             background: 'currentColor',
             transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
             transform: open ? 'translateY(5.25px) rotate(45deg)' : 'none',
@@ -117,10 +140,10 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           <span style={{
             position: 'absolute', top: -4, right: -4,
             width: 16, height: 16, borderRadius: '50%',
-            background: '#171717', color: '#fff',
+            background: colors.blueAccent, color: '#fff',
             fontSize: 9, fontWeight: 700,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '2px solid #f7f3eb',
+            border: `2px solid ${closedBackground}`,
           }}>
             {approvalCount}
           </span>
@@ -133,15 +156,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           {/* Frost backdrop — separate layer, closes menu on tap */}
           <div
             onClick={() => setOpen(false)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(247,243,235,0.34)',
-              backdropFilter: 'blur(10px) saturate(1.04)',
-              WebkitBackdropFilter: 'blur(10px) saturate(1.04)',
-              animation: 'menuFrostIn 200ms ease',
-              zIndex: 9997,
-            }}
+            style={backdropStyle}
           />
 
           {/* Floating pills — separate layer above frost */}
@@ -190,25 +205,27 @@ export const SpeedDialButton = memo(function SpeedDialButton({
                 <span style={{
                   padding: '10px 15px',
                   borderRadius: 999,
-                  background: isActive ? 'rgba(255,255,255,0.96)' : 'rgba(255,255,255,0.82)',
-                  border: '1px solid rgba(255,255,255,0.72)',
-                  color: '#2f2b27',
+                  background: isActive ? pillActiveBackground : pillBackground,
+                  border: `1px solid ${surfaceBorder}`,
+                  color: isActive ? primaryText : secondaryText,
                   fontSize: 13,
                   fontWeight: isActive ? 700 : 600,
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   letterSpacing: '-0.01em',
                   boxShadow: isActive
-                    ? '0 12px 30px rgba(71, 61, 51, 0.12)'
-                    : '0 8px 20px rgba(71, 61, 51, 0.08)',
+                    ? '0 14px 30px rgba(0, 0, 0, 0.28)'
+                    : '0 10px 24px rgba(0, 0, 0, 0.18)',
                   position: 'relative',
                   pointerEvents: 'none',
+                  backdropFilter: 'blur(20px)',
+                  WebkitBackdropFilter: 'blur(20px)',
                 }}>
                   {item.label}
                   {item.screen === 'approvals' && approvalCount > 0 && (
                     <span style={{
                       position: 'absolute', top: -5, right: -5,
                       width: 16, height: 16, borderRadius: '50%',
-                      background: '#171717', color: '#fff',
+                      background: colors.blueAccent, color: '#fff',
                       fontSize: 9, fontWeight: 700,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
@@ -219,18 +236,20 @@ export const SpeedDialButton = memo(function SpeedDialButton({
 
                 {/* Icon circle */}
                 <span style={{
-                  width: 42, height: 42,
+                  width: 44, height: 44,
                   borderRadius: 999,
-                  background: isActive ? 'rgba(255,255,255,0.96)' : 'rgba(255,255,255,0.82)',
-                  border: '1px solid rgba(255,255,255,0.72)',
-                  color: '#2f2b27',
+                  background: isActive ? pillActiveBackground : pillBackground,
+                  border: `1px solid ${surfaceBorder}`,
+                  color: isActive ? primaryText : secondaryText,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   boxShadow: isActive
-                    ? '0 12px 30px rgba(71, 61, 51, 0.12)'
-                    : '0 8px 20px rgba(71, 61, 51, 0.08)',
+                    ? '0 14px 30px rgba(0, 0, 0, 0.28)'
+                    : '0 10px 24px rgba(0, 0, 0, 0.18)',
                   pointerEvents: 'none',
+                  backdropFilter: 'blur(20px)',
+                  WebkitBackdropFilter: 'blur(20px)',
                 }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor"
