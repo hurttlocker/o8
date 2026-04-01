@@ -17,19 +17,16 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import Image from 'next/image';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import { ContextUsageRing } from '@/components/ContextUsageRing';
 import {
-  ArrowUp,
   ChevronDown,
   ChevronRight,
   FolderOpen,
-  Loader2,
-  Plus,
   SlidersHorizontal,
   Sparkles,
-  Square,
 } from 'lucide-react';
 import {
   PaperPlaneRight,
@@ -79,11 +76,10 @@ import type { OrchestratorPacket, WorkspaceLaneState } from '@/lib/orchestrator/
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
-const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
 const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
-const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
 const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+const EMPTY_STATE_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
 
 const O_PLACEHOLDERS = [
   'Orchestrate something...',
@@ -187,7 +183,7 @@ function cleanBranchLabel(branch?: string | null) {
 }
 
 function sessionLaneTitle(session?: SessionSummary) {
-  if (!session) return 'No lane selected';
+  if (!session) return 'Choose a lane';
   if (session.orchestrationPacket?.title?.trim()) {
     return session.orchestrationPacket.title.trim();
   }
@@ -247,32 +243,13 @@ function sessionStateChip(session?: SessionSummary): SessionPickerChip | null {
 }
 
 function sessionPickerTitle(session?: SessionSummary) {
-  if (!session) return 'No lane selected';
+  if (!session) return 'Choose a lane';
   return compactLine(sessionLaneTitle(session), sessionLaneTitle(session), 36);
 }
 
 function sessionHeaderTitle(session?: SessionSummary) {
-  if (!session) return 'No lane selected';
+  if (!session) return 'Choose a lane';
   return compactLine(sessionLaneTitle(session), sessionLaneTitle(session), 42);
-}
-
-function sessionPickerSubtitle(session?: SessionSummary) {
-  if (!session) return '';
-  if (session.orchestrationPacket) {
-    const repoLabel = sessionRepoLabel(session);
-    const branchLabel = cleanBranchLabel(session.branch);
-    const detail = [repoLabel, branchLabel].filter((value): value is string => Boolean(value)).join(' · ');
-    return compactLine(detail || 'Workspace lane', 'Workspace lane', 42);
-  }
-  const taskSummary = sessionTaskSummary(session, 42);
-  if (taskSummary) return taskSummary;
-  const branchLabel = cleanBranchLabel(session.branch);
-  if (branchLabel) return compactLine(branchLabel, branchLabel, 42);
-  const taskLabel = sessionTaskLabel(session);
-  if (taskLabel) return compactLine(taskLabel, taskLabel, 42);
-  const folderLabel = sessionLocalFolderLabel(session);
-  if (folderLabel) return compactLine(folderLabel, folderLabel, 42);
-  return '';
 }
 
 function sessionPickerRowSubtitle(session: SessionSummary) {
@@ -311,24 +288,6 @@ function sessionPickerChips(session?: SessionSummary): SessionPickerChip[] {
   return chips;
 }
 
-function sessionChipStyles(tone: SessionPickerChipTone) {
-  switch (tone) {
-    case 'green':
-      return { color: '#4ade80', background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.2)' };
-    case 'purple':
-      return { color: '#c084fc', background: 'rgba(167, 139, 250, 0.14)', border: '1px solid rgba(167, 139, 250, 0.22)' };
-    case 'amber':
-      return { color: '#fbbf24', background: 'rgba(245, 158, 11, 0.13)', border: '1px solid rgba(245, 158, 11, 0.22)' };
-    case 'red':
-      return { color: '#f87171', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.2)' };
-    case 'slate':
-      return { color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-divider)' };
-    case 'blue':
-    default:
-      return { color: THEME_ACCENT, background: THEME_ACCENT_SOFT, border: `1px solid ${THEME_ACCENT_BORDER}` };
-  }
-}
-
 function buildPickerFallbackSnapshot(sessions: SessionSummary[], selectedKey: string): MobileInboxSnapshot | null {
   if (sessions.length === 0) return null;
   return {
@@ -356,6 +315,338 @@ function composeFooterLeadLabel(session?: SessionSummary, statusOverride?: strin
   if (rawStatus === 'waiting') return 'Waiting';
   if (rawStatus === 'blocked' || rawStatus === 'failed') return 'Blocked';
   return session ? sessionRuntimeLabel(session) : null;
+}
+
+type ChatStarterPrompt = {
+  label: string;
+  detail: string;
+  text: string;
+};
+
+function compactChatScopeLabel(value?: string | null, max = 30) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed
+    .replace(/\.git$/i, '')
+    .replace(/^~\//, '')
+    .replace(/^\/Users\/[^/]+\//, '')
+    .replace(/^\/home\/[^/]+\//, '')
+    .trim();
+  const parts = cleaned.split(/[\\/]/).filter(Boolean);
+  const label = parts[parts.length - 1] ?? cleaned;
+  return compactLine(label, cleaned, max);
+}
+
+function resolveChatScopeLabel(
+  selectedSession: SessionSummary | undefined,
+  selectedOrchestratorPacket: { title?: string | null; referenceLabel?: string | null } | null | undefined,
+  selectedOrchestratorRepoPath: string | null | undefined,
+  workspaceLane: { title?: string | null; repoPath?: string | null } | undefined,
+) {
+  return compactChatScopeLabel(
+    workspaceLane?.title?.trim()
+      || selectedOrchestratorPacket?.title?.trim()
+      || selectedSession?.orchestrationPacket?.title?.trim()
+      || selectedSession?.runtimeSurface?.reviewContext?.repoSlug?.trim()
+      || selectedOrchestratorRepoPath?.trim()
+      || workspaceLane?.repoPath?.trim()
+      || selectedSession?.workspace?.trim()
+      || selectedSession?.branch?.trim()
+      || null,
+  );
+}
+
+function buildChatStarterPrompts(
+  scopeLabel: string | null,
+  taskLabel: string | null,
+  repoLabel: string | null,
+  noLaneSelected: boolean,
+): ChatStarterPrompt[] {
+  const focusLabel = taskLabel ?? scopeLabel ?? 'the lane';
+  const repoFocusLabel = repoLabel ?? scopeLabel ?? 'the current repo';
+  return [
+    {
+      label: taskLabel ? `Summarize ${taskLabel}` : `Summarize ${focusLabel}`,
+      detail: noLaneSelected
+        ? 'Prefills the draft for the lane you pick next'
+        : `Scoped to ${scopeLabel ?? repoFocusLabel}`,
+      text: taskLabel
+        ? `Summarize ${taskLabel} and call out the next step.`
+        : `Summarize ${focusLabel} and call out the next step.`,
+    },
+    {
+      label: 'Inspect the next file',
+      detail: repoLabel ? `Start with ${repoLabel}` : 'Good for first-pass triage',
+      text: repoLabel
+        ? `Inspect the most relevant file in ${repoLabel} and explain why it matters.`
+        : 'Inspect the most relevant file and explain why it matters.',
+    },
+    {
+      label: 'Draft a concise update',
+      detail: noLaneSelected
+        ? 'Keeps a ready-to-send draft while you choose a lane'
+        : 'Useful for status notes and handoffs',
+      text: scopeLabel
+        ? `Draft a concise update for ${scopeLabel}.`
+        : 'Draft a concise update for the current work.',
+    },
+  ];
+}
+
+function ChatEmptyState({
+  scopeLabel,
+  title,
+  body,
+  primaryActionLabel,
+  onPrimaryAction,
+  prompts,
+  onPromptSelect,
+}: {
+  scopeLabel: string | null;
+  title: string;
+  body: string;
+  primaryActionLabel?: string;
+  onPrimaryAction?: () => void;
+  prompts: ChatStarterPrompt[];
+  onPromptSelect: (prompt: ChatStarterPrompt) => void;
+}) {
+  const [primaryHover, setPrimaryHover] = useState(false);
+  const [hoveredPrompt, setHoveredPrompt] = useState<string | null>(null);
+
+  return (
+    <div style={{
+      flex: 1,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingTop: 16,
+      paddingRight: 18,
+      paddingBottom: 18,
+      paddingLeft: 18,
+    }}>
+      <div style={{
+        width: '100%',
+        maxWidth: 420,
+        borderRadius: 14,
+        border: '1px solid var(--t-divider-subtle)',
+        background: 'linear-gradient(180deg, var(--t-panel-translucent) 0%, var(--t-bg-card, rgba(148, 163, 184, 0.08)) 100%)',
+        boxShadow: 'var(--t-panel-shadow)',
+        paddingTop: 18,
+        paddingRight: 16,
+        paddingBottom: 16,
+        paddingLeft: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {scopeLabel ? (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              alignSelf: 'flex-start',
+              minHeight: 20,
+              paddingTop: 0,
+              paddingRight: 8,
+              paddingBottom: 0,
+              paddingLeft: 8,
+              borderRadius: 10,
+              background: 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))',
+              border: '1px solid var(--t-accent-border, rgba(37, 99, 235, 0.22))',
+              color: 'var(--t-accent, #2563eb)',
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}>
+              {scopeLabel}
+            </span>
+          ) : null}
+          <div style={{
+            fontSize: 18,
+            fontWeight: 700,
+            lineHeight: 1.2,
+            letterSpacing: '-0.02em',
+            color: 'var(--t-text)',
+          }}>
+            {title}
+          </div>
+          <div style={{
+            fontSize: 13,
+            lineHeight: 1.5,
+            letterSpacing: '-0.01em',
+            color: 'var(--t-text-muted)',
+          }}>
+            {body}
+          </div>
+        </div>
+
+        <div
+          aria-hidden="true"
+          style={{
+            borderRadius: 14,
+            border: '1px solid var(--t-divider-subtle)',
+            background: 'var(--t-panel, rgba(255, 255, 255, 0.72))',
+            paddingTop: 12,
+            paddingRight: 12,
+            paddingBottom: 12,
+            paddingLeft: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{
+              width: 48,
+              height: 10,
+              borderRadius: 999,
+              background: 'var(--t-divider-subtle)',
+            }} />
+            <div style={{
+              width: 20,
+              height: 10,
+              borderRadius: 999,
+              background: 'var(--t-divider-subtle)',
+              opacity: 0.7,
+            }} />
+            <div style={{ flex: 1 }} />
+            <div style={{
+              width: 54,
+              height: 10,
+              borderRadius: 999,
+              background: 'var(--t-divider-subtle)',
+              opacity: 0.6,
+            }} />
+          </div>
+          <div style={{
+            width: '88%',
+            height: 12,
+            borderRadius: 999,
+            background: 'linear-gradient(90deg, var(--t-divider-subtle) 0%, var(--t-divider) 100%)',
+            opacity: 0.8,
+          }} />
+          <div style={{
+            width: '72%',
+            height: 12,
+            borderRadius: 999,
+            background: 'linear-gradient(90deg, var(--t-divider-subtle) 0%, var(--t-divider) 100%)',
+            opacity: 0.72,
+          }} />
+          <div style={{
+            width: '60%',
+            height: 12,
+            borderRadius: 999,
+            background: 'linear-gradient(90deg, var(--t-divider-subtle) 0%, var(--t-divider) 100%)',
+            opacity: 0.64,
+          }} />
+        </div>
+
+        {primaryActionLabel && onPrimaryAction ? (
+          <button
+            type="button"
+            onClick={onPrimaryAction}
+            onMouseEnter={() => setPrimaryHover(true)}
+            onMouseLeave={() => setPrimaryHover(false)}
+            style={{
+              minHeight: 44,
+              paddingTop: 10,
+              paddingRight: 14,
+              paddingBottom: 10,
+              paddingLeft: 14,
+              borderRadius: 12,
+              border: '1px solid var(--t-accent-border, rgba(37, 99, 235, 0.22))',
+              background: primaryHover
+                ? 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))'
+                : 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))',
+              color: 'var(--t-accent, #2563eb)',
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              cursor: 'pointer',
+              fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif',
+              transition: 'transform 160ms ease, background-color 160ms ease, border-color 160ms ease',
+            }}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              {primaryActionLabel}
+              <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1, opacity: 0.8 }}>&gt;</span>
+            </span>
+          </button>
+        ) : null}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'var(--t-text-faint)',
+          }}>
+            Starter prompts
+          </div>
+          {prompts.map((prompt) => {
+            const isHovered = hoveredPrompt === prompt.label;
+            return (
+              <button
+                key={prompt.label}
+                type="button"
+                onClick={() => onPromptSelect(prompt)}
+                onMouseEnter={() => setHoveredPrompt(prompt.label)}
+                onMouseLeave={() => setHoveredPrompt(null)}
+                style={{
+                  minHeight: 44,
+                  paddingTop: 10,
+                  paddingRight: 12,
+                  paddingBottom: 10,
+                  paddingLeft: 12,
+                  borderRadius: 12,
+                  border: `1px solid ${isHovered ? 'var(--t-accent-border, rgba(37, 99, 235, 0.22))' : 'var(--t-divider-subtle)'}`,
+                  background: isHovered ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))' : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+                  color: 'var(--t-text)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  textAlign: 'left',
+                  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif',
+                  transition: 'transform 160ms ease, background-color 160ms ease, border-color 160ms ease',
+                }}
+              >
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: 650,
+                    letterSpacing: '-0.01em',
+                    color: 'var(--t-text)',
+                  }}>
+                    {prompt.label}
+                  </span>
+                  <span style={{
+                    fontSize: 11,
+                    lineHeight: 1.4,
+                    letterSpacing: '-0.01em',
+                    color: 'var(--t-text-muted)',
+                  }}>
+                    {prompt.detail}
+                  </span>
+                </span>
+                <span aria-hidden="true" style={{
+                  flexShrink: 0,
+                  fontSize: 16,
+                  lineHeight: 1,
+                  color: 'var(--t-text-faint)',
+                }}>
+                  &gt;
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function mediaHref(path: string): string {
@@ -1533,7 +1824,6 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
   projectGroups,
   selectedSession,
   activeTitle,
-  activeSubtitle,
   activeChips,
   emptyStateLabel,
   connectionDotColor,
@@ -1550,7 +1840,6 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
   projectGroups: ProjectGroup[];
   selectedSession: SessionSummary | undefined;
   activeTitle: string;
-  activeSubtitle: string;
   activeChips: SessionPickerChip[];
   emptyStateLabel: string;
   connectionDotColor: string;
@@ -2045,8 +2334,17 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
             <div className="remodex-skeleton-bubble remodex-skeleton-user remodex-skeleton-short" />
           </div>
         ) : visibleTranscript.length === 0 && !showActiveTurn ? (
-          <div className="remodex-loading-card">
-            No transcript visible yet — waiting for activity.
+          <div
+            className="remodex-loading-card"
+            style={{
+              maxWidth: 340,
+              marginRight: 'auto',
+              marginLeft: 'auto',
+              textAlign: 'center',
+              lineHeight: 1.6,
+            }}
+          >
+            This lane appears here as it starts working. Send the first note below and the panel will fill itself in.
           </div>
         ) : (
           groupedTranscript.map((group, groupIndex) => {
@@ -3153,6 +3451,15 @@ export const DesktopComposePane = memo(function DesktopComposePane({
   chatSendDisabled: boolean;
   canInterruptSelected: boolean;
 }) {
+  const composePlaceholder = useMemo(() => {
+    const basis = `${selectedSession?.sessionKey ?? ''}:${currentAgentName}`;
+    let hash = 0;
+    for (let i = 0; i < basis.length; i += 1) {
+      hash = (hash * 31 + basis.charCodeAt(i)) >>> 0;
+    }
+    return O_PLACEHOLDERS[hash % O_PLACEHOLDERS.length];
+  }, [currentAgentName, selectedSession?.sessionKey]);
+
   return (
     <div style={{
       paddingTop: 10,
@@ -3260,7 +3567,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
               void send();
             }
           }}
-          placeholder={O_PLACEHOLDERS[Math.floor(Date.now() / 60000) % O_PLACEHOLDERS.length]}
+          placeholder={composePlaceholder}
           style={{
             height: composeHeight,
             minHeight: 60,
@@ -3762,8 +4069,8 @@ export function AgentPanelChat({
     selectedOrchestratorPacket,
     selectedSession,
     transcript.length,
-    workspaceLane,
-    workspaceScopeProvided,
+      workspaceLane,
+      workspaceScopeProvided,
   ]);
   const pickerEmptyStateLabel = useMemo(
     () => (
@@ -3774,29 +4081,104 @@ export function AgentPanelChat({
             ? 'Lane missing'
             : laneTranscriptState === 'waiting_activity'
               ? 'Waiting for first activity'
-              : 'No lane selected')
+              : 'Choose a lane to begin')
         : ((loading || connectionState !== 'connected' || stablePickerSessions.length > 0) ? 'Refreshing sessions…' : 'No IDE sessions yet')
     ),
     [connectionState, laneTranscriptState, loading, stablePickerSessions.length, workspaceScopeProvided],
   );
+
+  const showWorkspaceEmptyState = workspaceScopeProvided && laneTranscriptState === 'no_lane';
+  const showLaneWaitingState = workspaceScopeProvided && laneTranscriptState === 'waiting_activity';
+  const showLaneRecoveringState = workspaceScopeProvided && laneTranscriptState === 'recovering';
+  const showLaneMissingState = workspaceScopeProvided && laneTranscriptState === 'missing';
+  const chatEmptyScopeLabel = useMemo(
+    () => resolveChatScopeLabel(selectedSession, selectedOrchestratorPacket, selectedOrchestratorRepoPath, workspaceLane ?? undefined),
+    [selectedOrchestratorPacket, selectedOrchestratorRepoPath, selectedSession, workspaceLane],
+  );
+  const chatEmptyTaskLabel = useMemo(
+    () => sessionTaskLabel(selectedSession) ?? selectedOrchestratorPacket?.referenceLabel ?? null,
+    [selectedOrchestratorPacket?.referenceLabel, selectedSession],
+  );
+  const chatEmptyRepoLabel = useMemo(
+    () => compactChatScopeLabel(
+      selectedSession?.runtimeSurface?.reviewContext?.repoSlug?.trim()
+        || selectedOrchestratorRepoPath?.trim()
+        || workspaceLane?.repoPath?.trim()
+        || selectedSession?.workspace?.trim()
+        || null,
+    ),
+    [selectedOrchestratorRepoPath, selectedSession, workspaceLane?.repoPath],
+  );
+  const chatEmptyCopy = useMemo<{
+    title: string;
+    body: string;
+    scopeLabel: string | null;
+    prompts: ChatStarterPrompt[];
+    primaryActionLabel?: string;
+  }>(() => {
+    const prompts = buildChatStarterPrompts(
+      chatEmptyScopeLabel,
+      chatEmptyTaskLabel,
+      chatEmptyRepoLabel,
+      showWorkspaceEmptyState,
+    );
+
+    if (showWorkspaceEmptyState) {
+      return {
+        title: 'Pick a lane to anchor this chat',
+        body: chatEmptyRepoLabel
+          ? `Choose a lane first. I'll keep the draft attached to ${chatEmptyRepoLabel} once it is active.`
+          : "Choose a lane first. I'll keep the draft attached to the active workspace once it is live.",
+        primaryActionLabel: 'Choose a lane',
+        scopeLabel: chatEmptyRepoLabel ?? null,
+        prompts,
+      };
+    }
+
+    if (showLaneWaitingState) {
+      return {
+        title: chatEmptyTaskLabel
+          ? `Ready for ${chatEmptyTaskLabel}`
+          : chatEmptyScopeLabel
+            ? `Ready for ${chatEmptyScopeLabel}`
+            : 'Ready when you are',
+        body: chatEmptyTaskLabel && chatEmptyScopeLabel
+          ? `I'll keep replies scoped to ${chatEmptyScopeLabel} and surface the next useful move for ${chatEmptyTaskLabel}.`
+          : chatEmptyScopeLabel
+            ? `I'll keep replies scoped to ${chatEmptyScopeLabel} and surface the next useful move as soon as activity lands.`
+            : "I'll keep replies scoped to the active lane and surface the next useful move as soon as activity lands.",
+        scopeLabel: chatEmptyScopeLabel ?? chatEmptyRepoLabel,
+        prompts,
+      };
+    }
+
+    return {
+      title: 'Ready when you are',
+      body: chatEmptyScopeLabel
+        ? `I'll keep replies scoped to ${chatEmptyScopeLabel}.`
+        : "Start with a prompt and I'll keep replies scoped once a lane is active.",
+      scopeLabel: chatEmptyScopeLabel ?? chatEmptyRepoLabel,
+      prompts,
+    };
+  }, [chatEmptyRepoLabel, chatEmptyScopeLabel, chatEmptyTaskLabel, showLaneWaitingState, showWorkspaceEmptyState]);
+  const handleEmptyStatePromptSelect = useCallback((prompt: ChatStarterPrompt) => {
+    setDraft(prompt.text);
+    composeRef.current?.focus();
+    if (showWorkspaceEmptyState) {
+      setPickerOpen(true);
+    }
+  }, [showWorkspaceEmptyState]);
 
   // ── Derived header values ──
   const activeTitle = useMemo(() => {
     if (workspaceLane?.title) return workspaceLane.title;
     if (!headerSession) {
       if (selectedOrchestratorPacket?.title?.trim()) return selectedOrchestratorPacket.title.trim();
-      return workspaceScopeProvided ? 'No lane selected' : 'Select session';
+      return workspaceScopeProvided ? 'Choose a lane' : 'Select session';
     }
     return sessionHeaderTitle(headerSession);
   }, [headerSession, selectedOrchestratorPacket?.title, workspaceLane?.title, workspaceScopeProvided]);
 
-  const activeSubtitle = useMemo(() => {
-    if (workspaceLane?.subtitle) return workspaceLane.subtitle;
-    if (!headerSession) {
-      return selectedOrchestratorRepoPath ?? '';
-    }
-    return sessionPickerSubtitle(headerSession);
-  }, [headerSession, selectedOrchestratorRepoPath, workspaceLane?.subtitle]);
   const activeChips = useMemo(() => {
     if (workspaceLane) {
       const runtimeTone = workspaceLane.runtime ? orchestratorRuntimeTone(workspaceLane.runtime) : null;
@@ -3858,10 +4240,6 @@ export function AgentPanelChat({
           : '#8e8e93';
 
   const currentAgentName = selectedSession ? getAgentName(selectedSession) : (selectedOrchestratorPacket?.title ?? 'Assistant');
-  const showWorkspaceEmptyState = workspaceScopeProvided && laneTranscriptState === 'no_lane';
-  const showLaneWaitingState = workspaceScopeProvided && laneTranscriptState === 'waiting_activity';
-  const showLaneRecoveringState = workspaceScopeProvided && laneTranscriptState === 'recovering';
-  const showLaneMissingState = workspaceScopeProvided && laneTranscriptState === 'missing';
   const sidebarCapabilities = useMemo<SidebarRuntimeCapabilities>(
     () => deriveSidebarRuntimeCapabilities(selectedSession),
     [selectedSession],
@@ -4726,7 +5104,6 @@ export function AgentPanelChat({
             projectGroups={projectGroups}
             selectedSession={selectedSession}
             activeTitle={activeTitle}
-            activeSubtitle={activeSubtitle}
             activeChips={activeChips}
             emptyStateLabel={pickerEmptyStateLabel}
             connectionDotColor={connectionDotColor}
@@ -4818,206 +5195,198 @@ export function AgentPanelChat({
         </div>
       ) : null}
 
-      {showWorkspaceEmptyState ? (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
-            paddingRight: 18,
-            paddingBottom: 18,
-            paddingLeft: 18,
-          }}
-        >
-          <div
-            className="remodex-loading-card"
+      <AnimatePresence initial={false} mode="wait">
+        {showWorkspaceEmptyState || showLaneWaitingState ? (
+          <motion.div
+            key="chat-empty"
+            initial={{ opacity: 0, y: 10, scale: 0.992 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.992 }}
+            transition={EMPTY_STATE_SPRING}
             style={{
-              maxWidth: 320,
-              textAlign: 'center',
-              lineHeight: 1.6,
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>No lane selected</div>
-            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
-              Focus or launch a workspace lane from the center surface.
-            </div>
-          </div>
-        </div>
-      ) : showLaneWaitingState ? (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
-            paddingRight: 18,
-            paddingBottom: 18,
-            paddingLeft: 18,
-          }}
-        >
-          <div
-            className="remodex-loading-card"
-            style={{
-              maxWidth: 320,
-              textAlign: 'center',
-              lineHeight: 1.6,
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>
-              Waiting for first activity
-            </div>
-            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
-              The lane is attached. Transcript activity will appear here as soon as the runtime emits its first event.
-            </div>
-          </div>
-        </div>
-      ) : showLaneRecoveringState ? (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
-            paddingRight: 18,
-            paddingBottom: 18,
-            paddingLeft: 18,
-          }}
-        >
-          <div
-            className="remodex-loading-card"
-            style={{
-              maxWidth: 320,
-              textAlign: 'center',
-              lineHeight: 1.6,
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>
-              Recovering lane
-            </div>
-            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
-              This lane is reattaching to the workspace after restore. Hold here until the runtime inventory settles.
-            </div>
-          </div>
-        </div>
-      ) : showLaneMissingState ? (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
-            paddingRight: 18,
-            paddingBottom: 18,
-            paddingLeft: 18,
-          }}
-        >
-          <div
-            className="remodex-loading-card"
-            style={{
-              maxWidth: 320,
-              textAlign: 'center',
-              lineHeight: 1.6,
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>
-              Lane missing
-            </div>
-            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
-              The selected lane no longer has a live workspace binding. Re-focus a live lane or relaunch it from Thoughts.
-            </div>
-          </div>
-        </div>
-      ) : (
-        <>
-          <DesktopTranscriptPane
-            loading={loading}
-            transcript={transcript}
-            currentAgentName={currentAgentName}
-            onOpenMermaid={onOpenMermaid}
-            onRunInTerminal={onRunInTerminal}
-            streamingText={streamingText}
-            agentRunning={agentRunning}
-            activityHeadline={liveActivityHeadline}
-            liveToolCalls={liveToolCalls}
-            onOpenDiff={onOpenDiff ? onOpenDiff : () => setDiffOpen(true)}
-            onOpenFile={onOpenFile}
-            currentWorkspace={selectedSession?.workspace}
-            runtimeCapabilities={sidebarCapabilities}
-            approvals={approvals}
-            resolvingApprovalId={resolvingApprovalId}
-            onResolveApproval={handleApprovalResolve}
-            scrollRef={scrollRef}
-            handleScroll={handleScroll}
-            showScrollPill={showScrollPill}
-            scrollToBottom={scrollToBottom}
-            getIsNewEntry={getIsNewEntry}
-            topInset={wsConnected ? headerOverlayHeight + 8 : 12}
-          />
-          {/* ── Resize Handle ── */}
-          <div
-            onMouseDown={(e) => {
-              e.preventDefault();
-              const startY = e.clientY;
-              const startH = composeHeight;
-              const onMove = (ev: MouseEvent) => {
-                const delta = startY - ev.clientY;
-                setComposeHeight(Math.min(Math.max(startH + delta, 60), 400));
-              };
-              const onUp = () => {
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-              };
-              document.addEventListener('mousemove', onMove);
-              document.addEventListener('mouseup', onUp);
-            }}
-            style={{
-              height: 8,
-              cursor: 'row-resize',
+              flex: 1,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              flexShrink: 0,
+              paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
             }}
           >
-            <div style={{
-              width: 36,
-              height: 4,
-              borderRadius: 2,
-              backgroundColor: 'var(--t-divider)',
-              transition: 'background-color 150ms',
-            }} />
-          </div>
+            <ChatEmptyState
+              scopeLabel={chatEmptyCopy.scopeLabel}
+              title={chatEmptyCopy.title}
+              body={chatEmptyCopy.body}
+              primaryActionLabel={chatEmptyCopy.primaryActionLabel}
+              onPrimaryAction={chatEmptyCopy.primaryActionLabel ? () => setPickerOpen(true) : undefined}
+              prompts={chatEmptyCopy.prompts}
+              onPromptSelect={handleEmptyStatePromptSelect}
+            />
+          </motion.div>
+        ) : showLaneRecoveringState ? (
+          <motion.div
+            key="chat-recovering"
+            initial={{ opacity: 0, y: 10, scale: 0.992 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.992 }}
+            transition={EMPTY_STATE_SPRING}
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
+              paddingRight: 18,
+              paddingBottom: 18,
+              paddingLeft: 18,
+            }}
+          >
+            <div
+              className="remodex-loading-card"
+              style={{
+                maxWidth: 320,
+                textAlign: 'center',
+                lineHeight: 1.6,
+              }}
+            >
+              <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>
+                Recovering lane
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
+                This lane is reattaching to the workspace after restore. Hold here until the runtime inventory settles.
+              </div>
+            </div>
+          </motion.div>
+        ) : showLaneMissingState ? (
+          <motion.div
+            key="chat-missing"
+            initial={{ opacity: 0, y: 10, scale: 0.992 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.992 }}
+            transition={EMPTY_STATE_SPRING}
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
+              paddingRight: 18,
+              paddingBottom: 18,
+              paddingLeft: 18,
+            }}
+          >
+            <div
+              className="remodex-loading-card"
+              style={{
+                maxWidth: 320,
+                textAlign: 'center',
+                lineHeight: 1.6,
+              }}
+            >
+              <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>
+                Lane missing
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
+                The selected lane no longer has a live workspace binding. Re-focus a live lane or relaunch it from Thoughts.
+              </div>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="chat-live"
+            initial={{ opacity: 0, y: 10, scale: 0.992 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.992 }}
+            transition={EMPTY_STATE_SPRING}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <DesktopTranscriptPane
+              loading={loading}
+              transcript={transcript}
+              currentAgentName={currentAgentName}
+              onOpenMermaid={onOpenMermaid}
+              onRunInTerminal={onRunInTerminal}
+              streamingText={streamingText}
+              agentRunning={agentRunning}
+              activityHeadline={liveActivityHeadline}
+              liveToolCalls={liveToolCalls}
+              onOpenDiff={onOpenDiff ? onOpenDiff : () => setDiffOpen(true)}
+              onOpenFile={onOpenFile}
+              currentWorkspace={selectedSession?.workspace}
+              runtimeCapabilities={sidebarCapabilities}
+              approvals={approvals}
+              resolvingApprovalId={resolvingApprovalId}
+              onResolveApproval={handleApprovalResolve}
+              scrollRef={scrollRef}
+              handleScroll={handleScroll}
+              showScrollPill={showScrollPill}
+              scrollToBottom={scrollToBottom}
+              getIsNewEntry={getIsNewEntry}
+              topInset={wsConnected ? headerOverlayHeight + 8 : 12}
+            />
+            <div
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startY = e.clientY;
+                const startH = composeHeight;
+                const onMove = (ev: MouseEvent) => {
+                  const delta = startY - ev.clientY;
+                  setComposeHeight(Math.min(Math.max(startH + delta, 60), 400));
+                };
+                const onUp = () => {
+                  document.removeEventListener('mousemove', onMove);
+                  document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+              }}
+              style={{
+                height: 8,
+                cursor: 'row-resize',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{
+                width: 36,
+                height: 4,
+                borderRadius: 2,
+                backgroundColor: 'var(--t-divider)',
+                transition: 'background-color 150ms',
+              }} />
+            </div>
 
-          <DesktopComposePane
-            pendingFiles={pendingFiles}
-            removePendingFile={removePendingFile}
-            selectedSession={selectedSession}
-            composeRef={composeRef}
-            draft={draft}
-            setDraft={setDraft}
-            showSlashSuggestions={showSlashSuggestions}
-            slashSuggestions={slashSuggestions}
-            composeHeight={composeHeight}
-            currentAgentName={currentAgentName}
-            send={send}
-            fileInputRef={fileInputRef}
-            enhancing={enhancing}
-            enhance={enhance}
-            agentRunning={agentRunning}
-            streamingText={streamingText}
-            sending={sending}
-            stopping={stopping}
-            stopRun={stopRun}
-            chatSendDisabled={chatSendDisabled}
-            canInterruptSelected={canInterruptSelected}
-          />
-        </>
-      )}
+            <DesktopComposePane
+              pendingFiles={pendingFiles}
+              removePendingFile={removePendingFile}
+              selectedSession={selectedSession}
+              composeRef={composeRef}
+              draft={draft}
+              setDraft={setDraft}
+              showSlashSuggestions={showSlashSuggestions}
+              slashSuggestions={slashSuggestions}
+              composeHeight={composeHeight}
+              currentAgentName={currentAgentName}
+              send={send}
+              fileInputRef={fileInputRef}
+              enhancing={enhancing}
+              enhance={enhance}
+              agentRunning={agentRunning}
+              streamingText={streamingText}
+              sending={sending}
+              stopping={stopping}
+              stopRun={stopRun}
+              chatSendDisabled={chatSendDisabled}
+              canInterruptSelected={canInterruptSelected}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
       {diffOpen ? <DiffModal onClose={() => setDiffOpen(false)} /> : null}
       <style>{`
         @keyframes sidebarActiveTurnIn {
