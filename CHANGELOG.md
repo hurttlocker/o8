@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `5d0f9e8` refactor: extract wave 4 hooks — useTileLayout, useWorkspaceTerminal (,)
 - `e7dd4b3` feat: skeleton map file size check at dispatch time
 - `156e05e` refactor: extract wave 3 hooks
 - `5122754` feat: InfinityGlow animated status indicator for agent cards
