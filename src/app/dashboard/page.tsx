@@ -62,7 +62,14 @@ import {
 } from '@/lib/ftux/milestones';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
-import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
+import { deriveWorkflowStage, describeWorkflowStage } from '@/lib/workflows/status';
+import type {
+  CanvasTileState,
+  PaletteAgentSummary,
+  RepoWorktreeSummary,
+  WorkspaceChatTargetOption,
+  WorkspaceScopeEntry,
+} from './types';
 
 /* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
 const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
@@ -403,12 +410,6 @@ function buildOrchestrationPacketDraft(
   ].filter((value): value is string => Boolean(value)).join('\n');
 }
 
-interface WorkspaceChatTargetOption {
-  sessionKey: string;
-  label: string;
-  detail: string | null;
-}
-
 function buildWorkspaceChatTargetOptions(sessions: MobileInboxSnapshot['sessions']): WorkspaceChatTargetOption[] {
   const runtimeCounts = new Map<string, number>();
   const runtimeOrdinals = new Map<string, number>();
@@ -435,67 +436,6 @@ function buildWorkspaceChatTargetOptions(sessions: MobileInboxSnapshot['sessions
   });
 }
 
-interface PaletteAgentSummary {
-  id: string;
-  name: string;
-  status?: string;
-  currentTask?: string;
-  sessionKey: string;
-  alerts?: number;
-  approvalStatus?: string;
-  isCurrentSession?: boolean;
-  lastEventAt?: string;
-  workspace?: string;
-  branch?: string;
-  workspaceStatus?: string;
-  lifecycleState?: string;
-  workflowStage?: WorkflowStageBadge | null;
-  runtime?: string;
-  localDiff?: {
-    changedFiles?: number;
-    additions?: number;
-    deletions?: number;
-  };
-  activity?: {
-    headline?: string;
-    filePath?: string;
-    timestamp?: number;
-  };
-  repoReadiness?: RepoReadiness;
-  pr?: {
-    number: number;
-    title: string;
-    state?: 'open' | 'merged' | 'closed';
-    url?: string;
-  };
-  runtimeSurface?: {
-    cwd?: string | null;
-    lifecycle?: {
-      availability?: string;
-      summary?: string;
-    };
-    reviewContext?: {
-      repoSlug?: string | null;
-    };
-  };
-  worktree?: WorktreeInfo | null;
-}
-
-interface RepoWorktreeSummary {
-  worktrees: WorktreeInfo[];
-  conflicts: {
-    safe: boolean;
-    count: number;
-  };
-  totalDiskUsage: number;
-}
-
-interface WorkspaceScopeEntry extends WorkspaceSidePanelRepo {
-  registryRepoId?: string;
-  isWorktree?: boolean;
-  worktreeStatus?: WorktreeInfo['status'] | null;
-}
-
 function repoEntryToWorkspaceScope(repo: RepoRegistryEntry): WorkspaceScopeEntry {
   return {
     registryRepoId: repo.id,
@@ -505,12 +445,6 @@ function repoEntryToWorkspaceScope(repo: RepoRegistryEntry): WorkspaceScopeEntry
     readiness: repo.readiness ?? null,
     remoteUrl: repo.remoteUrl ?? undefined,
   };
-}
-
-interface CanvasTileState {
-  tabs: CanvasTab[];
-  activeTabId: string | null;
-  revealKey: number;
 }
 
 function repoSlugFromAgent(agent?: PaletteAgentSummary | null) {
