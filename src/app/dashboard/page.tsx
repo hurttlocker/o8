@@ -28,7 +28,6 @@ import { readTimelineVisible, subscribeTimelineVisible, writeTimelineVisible } f
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
-import type { DetectionResult } from '@/components/desktop/SetupWizard';
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -92,7 +91,6 @@ import {
   findUnscopedCanvasLeaf,
   findUnscopedTerminalLeaf,
   formatAttentionDetail,
-  normalizeDetection,
   packetStatusFromLaneStatus,
   paletteSessionDetail,
   paletteSessionRuntime,
@@ -115,6 +113,7 @@ import {
   worktreeStageLabel,
   worktreeStageTone,
 } from './utils';
+import { useSetupWizard } from './hooks/useSetupWizard';
 
 /* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
 const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
@@ -385,50 +384,7 @@ function DashboardInner() {
     scheduleThoughtsMissionPersist(updated);
   }, [scheduleThoughtsMissionPersist]);
 
-  // ── Setup wizard state ──
-  const [setupWizardOpen, setSetupWizardOpen] = useState(false);
-  const [setupDetection, setSetupDetection] = useState<DetectionResult | null>(null);
-  const setupCheckedRef = useRef(false);
-
-  useEffect(() => {
-    if (setupCheckedRef.current) return;
-    setupCheckedRef.current = true;
-    (async () => {
-      try {
-        const configRes = await fetch('/api/setup/config');
-        if (!configRes.ok) return;
-        const config = await configRes.json();
-        if (config.completedAt) return; // Already completed setup
-        // Show the onboarding screen immediately — detection runs in background
-        setSetupWizardOpen(true);
-        try {
-          const detectRes = await fetch('/api/setup/detect');
-          if (detectRes.ok) {
-            const rawDetection = await detectRes.json() as Record<string, unknown>;
-            setSetupDetection(normalizeDetection(rawDetection));
-          }
-        } catch { /* detection is optional for onboarding */ }
-      } catch { /* silent — don't block dashboard */ }
-    })();
-  }, []);
-
-  const handleSetupComplete = useCallback(async () => {
-    setSetupWizardOpen(false);
-    try {
-      await fetch('/api/setup/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completedAt: new Date().toISOString() }),
-      });
-    } catch { /* silent */ }
-  }, []);
-
-  // Dev: trigger onboarding from settings without resetting config
-  useEffect(() => {
-    const handler = () => setSetupWizardOpen(true);
-    window.addEventListener('cortex-trigger-onboarding', handler);
-    return () => window.removeEventListener('cortex-trigger-onboarding', handler);
-  }, []);
+  const { handleSetupComplete, setSetupWizardOpen, setupWizardOpen } = useSetupWizard();
 
   const refreshWorkspaceLifecycle = useCallback(async () => {
     try {
