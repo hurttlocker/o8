@@ -13,10 +13,12 @@
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { CortexTaskBoard } from './CortexTaskBoard';
+import type { FirstMergeCelebrationState } from '@/lib/ftux/first-merge';
 
 // ── Types ──
 
@@ -336,10 +338,12 @@ export function SessionTimeline({
   onExpand,
   repoPath,
   repoName,
+  firstMergeCelebration,
 }: {
   onExpand?: () => void;
   repoPath?: string | null;
   repoName?: string | null;
+  firstMergeCelebration?: FirstMergeCelebrationState | null;
 }) {
   const { segments, windowMinutes, loading } = useTimelineData();
   const liveSessions = useTimelineSessions();
@@ -349,6 +353,43 @@ export function SessionTimeline({
   const [hoverMin, setHoverMin] = useState<number | null>(null);
   const [hoverClientX, setHoverClientX] = useState<number | null>(null);
   const [hoverBarTop, setHoverBarTop] = useState<number>(0);
+  const celebrationWash = (
+    <AnimatePresence>
+      {firstMergeCelebration ? (
+        <motion.div
+          initial={{ opacity: 0, scaleX: 0.08 }}
+          animate={{ opacity: 0.96, scaleX: 1 }}
+          exit={{ opacity: 0, scaleX: 1 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            borderRadius: 6,
+            overflow: 'hidden',
+            transformOrigin: 'left center',
+            background: 'var(--t-celebration-wash)',
+            boxShadow: 'inset 0 0 0 1px var(--t-celebration-border), 0 0 24px var(--t-celebration-glow)',
+            pointerEvents: 'none',
+            zIndex: 5,
+          }}
+        >
+          <motion.div
+            initial={{ x: '-38%' }}
+            animate={{ x: '42%' }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 3.1, ease: 'easeInOut' }}
+            style={{
+              position: 'absolute',
+              inset: '-20% auto -20% -12%',
+              width: '42%',
+              background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.14) 48%, transparent 100%)',
+              filter: 'blur(8px)',
+            }}
+          />
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
 
   const fallbackWindowMinutes = useMemo(() => {
     const now = new Date();
@@ -975,6 +1016,7 @@ export function SessionTimeline({
           position: 'relative',
           overflow: 'hidden',
         }}>
+          {celebrationWash}
           <div style={{
             position: 'absolute',
             inset: 0,
@@ -1034,6 +1076,7 @@ export function SessionTimeline({
           boxShadow: 'inset 0 0 0 1px rgba(148, 163, 184, 0.08)',
         }}
       >
+        {celebrationWash}
         {/* System-wide occupancy backbone — keeps concurrent IDE activity reading as full-width time coverage */}
         {activityWindows.map((window, index) => (
           <div
