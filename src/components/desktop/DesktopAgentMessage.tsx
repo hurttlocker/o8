@@ -20,6 +20,7 @@ import type {
 } from '@/lib/mobile/types';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { MessageActions } from './MessageActions';
+import { usePretextHeight } from '@/lib/pretext';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -379,7 +380,7 @@ function MediaGrid({
             borderRadius: 12,
             border: tint === 'user' ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(226, 232, 240, 0.95)',
             background: tint === 'user' ? 'rgba(255,255,255,0.10)' : 'rgba(248, 250, 252, 0.98)',
-            color: tint === 'user' ? '#ffffff' : '#0f172a',
+            color: tint === 'user' ? '#ffffff' : 'var(--t-text)',
           }}
         >
           <span style={{
@@ -449,6 +450,18 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   const isCompaction = entry.type === 'compaction'
     || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
 
+  // Pretext: pre-calculate user message height (plain text, pre-wrap).
+  // ThoughtsCard is absolutely positioned z-9999 — reflows are extra expensive
+  // because the browser recalculates the stacking context. Width ~100% of panel
+  // minus padding (16px × 2 + 12px × 2 = 56px).
+  const userTextHeight = usePretextHeight(
+    isUser ? displayText : '',
+    'small', // 13px matches user bubble fontSize
+    340 - 32, // approximate max-width minus padding
+    1.55,
+    'pre-wrap',
+  );
+
   if (isCompaction) {
     return (
       <CompactionNode
@@ -483,6 +496,8 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
             fontSize: 13,
             lineHeight: 1.55,
             letterSpacing: '-0.01em',
+            // Pretext: explicit minHeight eliminates reflow in z-9999 stacking context
+            ...(userTextHeight > 0 ? { minHeight: userTextHeight } : {}),
           }}>
             {displayText}
           </div>
@@ -535,7 +550,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       {hasText ? (
         <div style={{
           maxWidth: '100%',
-          color: entry.role === 'system' ? '#475569' : '#0f172a',
+          color: entry.role === 'system' ? 'var(--t-text-secondary)' : 'var(--t-text)',
           fontSize: 14,
           lineHeight: 1.65,
           wordBreak: 'break-word',

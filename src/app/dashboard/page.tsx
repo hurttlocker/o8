@@ -72,6 +72,7 @@ const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage'
 const LazyGraphExplorer3D = lazy(() => import('@/components/desktop/GraphExplorer3D').then(m => ({ default: m.GraphExplorer3D })));
 const LazyThoughtsCard = lazy(() => import('@/components/desktop/ThoughtsCard').then(m => ({ default: m.ThoughtsCard })));
 const LazySetupWizard = lazy(() => import('@/components/desktop/SetupWizard').then(m => ({ default: m.SetupWizard })));
+const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
 
 const FTUX_REVEAL_DURATION_MS = 5200;
 const FTUX_SPRING_TRANSITION = { type: 'spring' as const, stiffness: 400, damping: 30 };
@@ -1093,13 +1094,15 @@ function DashboardInner() {
         if (!configRes.ok) return;
         const config = await configRes.json();
         if (config.completedAt) return; // Already completed setup
-        const detectRes = await fetch('/api/setup/detect');
-        if (!detectRes.ok) return;
-        const rawDetection = await detectRes.json() as Record<string, unknown>;
-        // Normalize: API returns tools as array, wizard expects named object + apiKeys array
-        const detection = normalizeDetection(rawDetection);
-        setSetupDetection(detection);
+        // Show the onboarding screen immediately — detection runs in background
         setSetupWizardOpen(true);
+        try {
+          const detectRes = await fetch('/api/setup/detect');
+          if (detectRes.ok) {
+            const rawDetection = await detectRes.json() as Record<string, unknown>;
+            setSetupDetection(normalizeDetection(rawDetection));
+          }
+        } catch { /* detection is optional for onboarding */ }
       } catch { /* silent — don't block dashboard */ }
     })();
   }, []);
@@ -1113,6 +1116,13 @@ function DashboardInner() {
         body: JSON.stringify({ completedAt: new Date().toISOString() }),
       });
     } catch { /* silent */ }
+  }, []);
+
+  // Dev: trigger onboarding from settings without resetting config
+  useEffect(() => {
+    const handler = () => setSetupWizardOpen(true);
+    window.addEventListener('cortex-trigger-onboarding', handler);
+    return () => window.removeEventListener('cortex-trigger-onboarding', handler);
   }, []);
 
   const refreshWorkspaceLifecycle = useCallback(async () => {
@@ -5799,12 +5809,13 @@ function DashboardInner() {
       />
       </Suspense>
 
-      {/* ── First Launch Setup Wizard ── */}
-      {setupWizardOpen && setupDetection && (
+      {/* ── First Launch Onboarding ── */}
+      {setupWizardOpen && (
         <Suspense fallback={null}>
-        <LazySetupWizard detection={setupDetection} onComplete={handleSetupComplete} />
+          <LazyOnboarding onComplete={handleSetupComplete} />
         </Suspense>
       )}
+
     </div>
   );
 }
