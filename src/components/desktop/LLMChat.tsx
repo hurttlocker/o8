@@ -121,6 +121,22 @@ interface QueuedContextCard {
   preview?: string;
 }
 
+interface PersonalizedFtuxState {
+  greeting: {
+    headline: string;
+    statsLine: string;
+    topicsLine: string | null;
+  };
+  prompts: Array<{
+    iconKey: 'tree' | 'search' | 'file' | 'diff' | 'rocket';
+    text: string;
+    description: string;
+  }>;
+  profile: {
+    focusedRepoName: string | null;
+  };
+}
+
 function buildQueuedContextCard(injection: { id: string; text: string; reason?: string }): QueuedContextCard {
   const lines = injection.text
     .split('\n')
@@ -1701,6 +1717,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
   const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handledDraftInjectionRef = useRef<string | null>(null);
   const [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
+  const [personalizedFtux, setPersonalizedFtux] = useState<PersonalizedFtuxState | null>(null);
 
   // Apply code to a file
   const handleApplyToFile = useCallback((code: string, language: string) => {
@@ -1913,6 +1930,41 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       setModelResolved(true);
     })();
   }, [modelResolved, tabId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const params = new URLSearchParams();
+        if (preferredRepo?.name?.trim()) {
+          params.set('repoName', preferredRepo.name.trim());
+        }
+        if (preferredRepo?.localPath?.trim()) {
+          params.set('repoPath', preferredRepo.localPath.trim());
+        }
+
+        const url = params.toString()
+          ? `/api/v2/chat/ftux?${params.toString()}`
+          : '/api/v2/chat/ftux';
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) throw new Error('FTUX request failed');
+
+        const data = await res.json() as PersonalizedFtuxState;
+        if (!cancelled) {
+          setPersonalizedFtux(data);
+        }
+      } catch {
+        if (!cancelled) {
+          setPersonalizedFtux(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preferredRepo?.localPath, preferredRepo?.name, tabId]);
 
   // Auto-save chat history (debounced)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2585,6 +2637,20 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
   }, [handleSend, showFilePicker, fileSuggestions, filePickerIndex, handleFileSelect, showSlashPicker, input, slashIndex]);
 
   const isEmpty = messages.length === 0 && !isStreaming;
+  const emptyStatePrompts = personalizedFtux?.prompts?.length
+    ? personalizedFtux.prompts
+    : SUGGESTED_PROMPTS.slice(0, 4);
+  const emptyStateHeadline = personalizedFtux?.greeting.headline ?? (() => {
+    const h = new Date().getHours();
+    return h < 12 ? 'Good morning.' : h < 17 ? 'Good afternoon.' : 'Good evening.';
+  })();
+  const emptyStateStats = personalizedFtux?.greeting.statsLine ?? (
+    preferredRepo?.name
+      ? `Ready to work in ${preferredRepo.name}.`
+      : `${model.label} is ready when you are.`
+  );
+  const emptyStateTopicsLine = personalizedFtux?.greeting.topicsLine;
+  const emptyStateRepoLabel = personalizedFtux?.profile.focusedRepoName ?? preferredRepo?.name ?? null;
 
   const groupedHistory = (() => {
     const groups = new Map<string, typeof historyItems>();
@@ -2998,51 +3064,93 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
             alignItems: 'center',
             justifyContent: 'center',
             height: '100%',
-            gap: 32,
+            gap: 24,
             animation: 'llmFadeIn 400ms ease-out',
           }}>
-            {/* Greeting */}
             <div style={{
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: 8,
+              gap: 12,
+              maxWidth: 640,
+              width: '100%',
             }}>
+              {emptyStateRepoLabel ? (
+                <div style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: 30,
+                  paddingTop: 6,
+                  paddingBottom: 6,
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  borderRadius: 999,
+                  border: `1px solid ${THEME_ACCENT_BORDER}`,
+                  background: THEME_ACCENT_SOFT,
+                  color: THEME_ACCENT,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '-0.01em',
+                }}>
+                  {emptyStateRepoLabel}
+                </div>
+              ) : null}
+
               <div style={{
-                fontSize: 28,
-                fontWeight: 300,
+                fontSize: 34,
+                fontWeight: 600,
+                color: 'var(--t-text-strong)',
+                letterSpacing: '-0.02em',
+                lineHeight: 1.08,
+                textAlign: 'center',
+              }}>
+                {emptyStateHeadline}
+              </div>
+
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: 42,
+                paddingTop: 10,
+                paddingBottom: 10,
+                paddingLeft: 16,
+                paddingRight: 16,
+                borderRadius: 999,
+                border: '1px solid var(--t-panel-border)',
+                background: THEME_BG_CARD,
                 color: 'var(--t-text-secondary)',
-                letterSpacing: '-0.03em',
-                lineHeight: 1.2,
-              }}>
-                {(() => {
-                  const h = new Date().getHours();
-                  return h < 12 ? 'Good morning.' : h < 17 ? 'Good afternoon.' : 'Good evening.';
-                })()}
-              </div>
-              <div style={{
-                fontSize: 11,
+                fontSize: 13,
                 fontWeight: 500,
-                color: 'var(--t-text-muted)',
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase' as const,
+                letterSpacing: '-0.01em',
+                textAlign: 'center',
               }}>
-                {model.label}
+                {emptyStateStats}
               </div>
+
+              {emptyStateTopicsLine ? (
+                <div style={{
+                  maxWidth: 560,
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  color: 'var(--t-text-muted)',
+                  letterSpacing: '-0.01em',
+                  textAlign: 'center',
+                }}>
+                  {emptyStateTopicsLine}
+                </div>
+              ) : null}
             </div>
 
-            {/* Suggested prompts — editorial grid */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: 1,
-              maxWidth: 520,
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              gap: 12,
+              maxWidth: 640,
               width: '100%',
-              border: '0.5px solid var(--t-divider-subtle)',
-              borderRadius: 14,
-              overflow: 'hidden',
             }}>
-              {SUGGESTED_PROMPTS.map((prompt, i) => (
+              {emptyStatePrompts.map((prompt, i) => (
                 <button
                   key={i}
                   type="button"
@@ -3052,36 +3160,54 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
                   }}
                   style={{
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'flex-start',
-                    gap: 10,
-                    paddingTop: 16,
-                    paddingBottom: 16,
-                    paddingLeft: 16,
-                    paddingRight: 16,
-                    background: 'transparent',
-                    border: 'none',
-                    borderRight: i % 2 === 0 ? '0.5px solid var(--t-divider-subtle)' : 'none',
-                    borderBottom: i < 4 ? '0.5px solid var(--t-divider-subtle)' : 'none',
+                    justifyContent: 'space-between',
+                    gap: 18,
+                    minHeight: 132,
+                    paddingTop: 18,
+                    paddingBottom: 18,
+                    paddingLeft: 18,
+                    paddingRight: 18,
+                    background: THEME_PANEL_GLASS,
+                    border: '1px solid var(--t-panel-border)',
+                    borderRadius: 14,
+                    boxShadow: 'var(--t-panel-shadow)',
                     cursor: 'pointer',
                     textAlign: 'left',
-                    transition: 'background 150ms ease',
+                    transition: 'background 150ms ease, border-color 150ms ease, transform 150ms ease',
                     animation: `llmFadeIn 400ms ease-out ${100 + i * 50}ms both`,
                   }}
                   onMouseEnter={(e) => {
-                    (e.currentTarget).style.background = 'rgba(37, 99, 235, 0.04)';
+                    (e.currentTarget).style.background = THEME_ACCENT_SOFT;
+                    (e.currentTarget).style.borderColor = THEME_ACCENT_BORDER;
+                    (e.currentTarget).style.transform = 'translateY(-1px)';
                   }}
                   onMouseLeave={(e) => {
-                    (e.currentTarget).style.background = 'transparent';
+                    (e.currentTarget).style.background = THEME_PANEL_GLASS;
+                    (e.currentTarget).style.borderColor = 'var(--t-panel-border)';
+                    (e.currentTarget).style.transform = 'translateY(0)';
                   }}
                 >
-                  <div style={{ color: 'var(--t-text-faint)', marginTop: 1 }}>
-                    <PromptIcon d={PROMPT_ICONS[prompt.iconKey]} size={16} />
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    background: THEME_ACCENT_SOFT,
+                    color: THEME_ACCENT,
+                    flexShrink: 0,
+                  }}>
+                    <PromptIcon d={PROMPT_ICONS[prompt.iconKey]} size={18} />
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text-secondary)', letterSpacing: '-0.01em', lineHeight: '1.3' }}>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text-strong)', letterSpacing: '-0.02em', lineHeight: '1.25' }}>
                       {prompt.text}
                     </span>
-                    <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--t-text-muted)', lineHeight: '1.4', letterSpacing: '-0.005em' }}>
+                    <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text-muted)', lineHeight: '1.45', letterSpacing: '-0.01em' }}>
                       {prompt.description}
                     </span>
                   </div>
