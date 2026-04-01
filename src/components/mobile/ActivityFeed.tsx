@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useMemo, memo } from 'react';
-import { ContextUsageRing } from '@/components/ContextUsageRing';
-import type { MobileInboxSnapshot, MobileInboxItem } from '@/lib/mobile/types';
-import type { AgentSummary } from '@/lib/fleet/types';
+import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
+import type { MobileInboxItem, MobileInboxSnapshot } from '@/lib/mobile/types';
 import { usePretextTruncation } from '@/lib/pretext';
+import { useTheme } from './ThemeContext';
 
 interface ActivityFeedProps {
   snapshot: MobileInboxSnapshot;
@@ -16,6 +16,22 @@ interface ActivityFeedProps {
 }
 
 type ActivityFilter = 'all' | 'approvals' | 'alerts' | 'agents' | 'reviews';
+type ActivityTone = 'coding' | 'thinking' | 'testing' | 'error' | 'success' | 'idle';
+type ThemeColors = ReturnType<typeof useTheme>['colors'];
+
+interface ActivityPalette {
+  background: string;
+  cardBg: string;
+  cardBorder: string;
+  timelineLine: string;
+  textPrimary: string;
+  textSecondary: string;
+  textTertiary: string;
+  doneText: string;
+  status: Record<ActivityTone, string>;
+}
+
+const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif';
 
 function formatRelativeTime(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -27,246 +43,530 @@ function formatRelativeTime(isoDate: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function ApprovalCard({ item, onApprove, onDeny }: {
-  item: MobileInboxItem;
-  onApprove: () => void;
-  onDeny: () => void;
+function buildPalette(colors: ThemeColors): ActivityPalette {
+  return {
+    background: colors.bg,
+    cardBg: colors.activityCardBg,
+    cardBorder: colors.activityCardBorder,
+    timelineLine: colors.activityTimelineLine,
+    textPrimary: colors.text,
+    textSecondary: colors.textSecondary,
+    textTertiary: colors.textTertiary,
+    doneText: colors.blueAccent,
+    status: {
+      coding: colors.activityStatusCoding,
+      thinking: colors.activityStatusThinking,
+      testing: colors.activityStatusTesting,
+      error: colors.activityStatusError,
+      success: colors.activityStatusSuccess,
+      idle: colors.activityStatusIdle,
+    },
+  };
+}
+
+function toneFromSeverity(severity: EventSeverity, fallback: ActivityTone): ActivityTone {
+  if (severity === 'critical') return 'error';
+  if (severity === 'success') return 'success';
+  if (severity === 'warning') return 'testing';
+  return fallback;
+}
+
+function includesKeyword(value: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => value.includes(keyword));
+}
+
+function toneForAgent(agent: AgentSummary): ActivityTone {
+  if (agent.status === 'failed') return 'error';
+  if (agent.status === 'idle') return 'idle';
+
+  const taskText = `${agent.currentTask ?? ''} ${agent.activity?.headline ?? ''}`.toLowerCase();
+  if (includesKeyword(taskText, ['test', 'jest', 'playwright', 'cypress', 'lint', 'typecheck', 'qa', 'spec'])) {
+    return 'testing';
+  }
+  if (agent.status === 'waiting' || agent.status === 'blocked' || agent.status === 'reviewing' || includesKeyword(taskText, ['think', 'plan', 'review'])) {
+    return 'thinking';
+  }
+
+  return 'coding';
+}
+
+function labelForAgent(tone: ActivityTone): string {
+  if (tone === 'testing') return 'Testing';
+  if (tone === 'thinking') return 'Thinking';
+  if (tone === 'error') return 'Error';
+  if (tone === 'idle') return 'Idle';
+  return 'Coding';
+}
+
+function toneForApproval(item: MobileInboxItem): ActivityTone {
+  return toneFromSeverity(item.severity, 'testing');
+}
+
+function toneForAlert(item: MobileInboxItem): ActivityTone {
+  return toneFromSeverity(item.severity, 'thinking');
+}
+
+function toneForReview(item: MobileInboxItem): ActivityTone {
+  return toneFromSeverity(item.severity, 'thinking');
+}
+
+function toneForFilter(filter: ActivityFilter): ActivityTone {
+  if (filter === 'approvals') return 'testing';
+  if (filter === 'reviews') return 'thinking';
+  if (filter === 'alerts') return 'error';
+  if (filter === 'agents') return 'coding';
+  return 'coding';
+}
+
+function cardStyle(palette: ActivityPalette): CSSProperties {
+  return {
+    width: '100%',
+    padding: 12,
+    borderRadius: 14,
+    background: palette.cardBg,
+    border: `1px solid ${palette.cardBorder}`,
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+  };
+}
+
+function headerTextStyle(palette: ActivityPalette): CSSProperties {
+  return {
+    margin: 0,
+    fontSize: 14,
+    fontWeight: 600,
+    color: palette.textPrimary,
+    fontFamily: SYSTEM_FONT,
+    lineHeight: 1.35,
+  };
+}
+
+function bodyTextStyle(palette: ActivityPalette): CSSProperties {
+  return {
+    margin: 0,
+    fontSize: 12,
+    lineHeight: 1.45,
+    color: palette.textSecondary,
+    fontFamily: SYSTEM_FONT,
+  };
+}
+
+function timestampStyle(palette: ActivityPalette): CSSProperties {
+  return {
+    margin: 0,
+    fontSize: 11,
+    lineHeight: 1.2,
+    color: palette.textTertiary,
+    fontFamily: SYSTEM_FONT,
+    flexShrink: 0,
+  };
+}
+
+function TimelineItem({
+  palette,
+  tone,
+  children,
+}: {
+  palette: ActivityPalette;
+  tone: ActivityTone;
+  children: ReactNode;
 }) {
-  // [pretext] Truncate detail text without DOM layout — card width = screen - 28px container padding - 32px card padding
-  const cardWidth = typeof window !== 'undefined' ? window.innerWidth - 60 : 300;
-  const { truncated: detailText } = usePretextTruncation(item.detail ?? '', 'small', cardWidth, 3);
-
   return (
-    <div style={{
-      padding: '14px 16px',
-      borderRadius: 16,
-      background: 'rgba(255,149,0,0.04)',
-      border: '1px solid rgba(255,149,0,0.12)',
-      backdropFilter: 'blur(20px) saturate(1.6)',
-      WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-      width: '100%',
-      boxSizing: 'border-box',
-      overflow: 'hidden',
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        marginBottom: 8,
-      }}>
-        <span style={{
-          width: 28, height: 28, borderRadius: 8,
-          background: 'rgba(255,149,0,0.1)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="#ff9500" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-          </svg>
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <span style={{
-            fontSize: 14, fontWeight: 700, color: '#0a0a0a',
-            fontFamily: '-apple-system, system-ui, sans-serif',
-          }}>
-            Approval Required
-          </span>
-        </div>
-        <span style={{ fontSize: 11, color: '#8e8e93' }}>
-          {item.timestampLabel || ''}
-        </span>
-      </div>
-
-      {/* Title */}
-      <p style={{
-        margin: '0 0 6px', fontSize: 13, fontWeight: 600,
-        color: '#1a1a1a', lineHeight: 1.4,
-      }}>
-        {item.title}
-      </p>
-
-      {/* Detail — [pretext] usePretextTruncation replaces -webkit-line-clamp to avoid DOM reflow */}
-      <p style={{
-        margin: '0 0 12px', fontSize: 12, color: '#64748b',
-        lineHeight: 1.4,
-      }}>
-        {detailText}
-      </p>
-
-      {/* Action buttons */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          type="button"
-          onClick={onApprove}
-          style={{
-            flex: 1, padding: '10px',
-            borderRadius: 10, border: 'none',
-            background: '#34c759', color: '#fff',
-            fontSize: 13, fontWeight: 700,
-            cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-          Approve
-        </button>
-        <button
-          type="button"
-          onClick={onDeny}
-          style={{
-            flex: 1, padding: '10px',
-            borderRadius: 10,
-            border: '1px solid rgba(255,59,48,0.15)',
-            background: 'rgba(255,59,48,0.06)',
-            color: '#ff3b30',
-            fontSize: 13, fontWeight: 700,
-            cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent',
-          }}
-        >
-          Deny
-        </button>
-      </div>
+    <div style={{ position: 'relative', paddingLeft: 16 }}>
+      <span
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          top: 18,
+          left: -6,
+          width: 12,
+          height: 12,
+          borderRadius: '50%',
+          background: palette.status[tone],
+          border: `2px solid ${palette.background}`,
+          boxSizing: 'border-box',
+        }}
+      />
+      {children}
     </div>
   );
 }
 
-function AlertCard({ item }: { item: MobileInboxItem }) {
-  const isError = item.severity === 'critical';
+function EventIcon({
+  kind,
+  tone,
+  palette,
+}: {
+  kind: 'approval' | 'alert' | 'review' | 'agent';
+  tone: ActivityTone;
+  palette: ActivityPalette;
+}) {
+  const color = palette.status[tone];
 
   return (
-    <div style={{
-      padding: '12px 16px',
-      borderRadius: 14,
-      background: isError ? 'rgba(255,59,48,0.04)' : 'rgba(0,122,255,0.03)',
-      border: `1px solid ${isError ? 'rgba(255,59,48,0.12)' : 'rgba(0,122,255,0.08)'}`,
-      width: '100%',
-      boxSizing: 'border-box',
-      overflow: 'hidden',
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-      }}>
-        <span style={{
-          width: 24, height: 24, borderRadius: 6,
-          background: isError ? 'rgba(255,59,48,0.1)' : 'rgba(0,122,255,0.08)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-            stroke={isError ? '#ff3b30' : '#007aff'}
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            {isError
-              ? <><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></>
-              : <><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></>
-            }
-          </svg>
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{
-            margin: 0, fontSize: 13, fontWeight: 600,
-            color: '#0a0a0a',
-          }}>
-            {item.title}
-          </p>
-          <p style={{
-            margin: '2px 0 0', fontSize: 11, color: '#8e8e93',
-          }}>
-            {item.detail.slice(0, 80)}{item.detail.length > 80 ? '…' : ''}
-          </p>
-        </div>
-        <span style={{ fontSize: 10, color: '#c7c7cc', flexShrink: 0 }}>
-          {item.timestampLabel || ''}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function AgentEventCard({ agent, onSelect }: { agent: AgentSummary; onSelect: () => void }) {
-  const statusLabel = agent.status === 'running' ? 'Working' :
-    agent.status === 'idle' ? 'Idle' :
-    agent.status === 'failed' ? 'Failed' :
-    agent.status === 'waiting' ? 'Waiting' : agent.status;
-  const statusColor = agent.status === 'running' ? '#34c759' :
-    agent.status === 'failed' ? '#ff3b30' :
-    agent.status === 'waiting' ? '#ff9f0a' : '#8e8e93';
-  const contextPercent = Math.round(agent.context?.usedPercent ?? 0);
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <span
+      aria-hidden="true"
       style={{
-        width: '100%',
-        padding: '12px 16px',
-        borderRadius: 14,
-        background: 'rgba(0,122,255,0.03)',
-        border: '1px solid rgba(0,122,255,0.08)',
-        display: 'flex', alignItems: 'center', gap: 10,
-        cursor: 'pointer',
-        WebkitTapHighlightColor: 'transparent',
-        textAlign: 'left',
-        boxSizing: 'border-box',
-        overflow: 'hidden',
-      }}
-    >
-      <div style={{
-        position: 'relative',
         width: 28,
         height: 28,
+        borderRadius: 10,
+        border: `1px solid ${palette.cardBorder}`,
+        background: palette.background,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
-      }}>
-        <ContextUsageRing percent={contextPercent} size={28} />
-        <span style={{
-          position: 'absolute',
-          right: -1,
-          bottom: -1,
+        color,
+      }}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {kind === 'approval' ? (
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        ) : null}
+        {kind === 'review' ? (
+          <>
+            <circle cx="18" cy="18" r="3" />
+            <circle cx="6" cy="6" r="3" />
+            <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+            <path d="M6 9v12" />
+          </>
+        ) : null}
+        {kind === 'agent' ? (
+          <>
+            <path d="m8 9-3 3 3 3" />
+            <path d="m16 9 3 3-3 3" />
+            <path d="m13 7-2 10" />
+          </>
+        ) : null}
+        {kind === 'alert' ? (
+          tone === 'success' ? (
+            <>
+              <circle cx="12" cy="12" r="9" />
+              <path d="m8.5 12.5 2.5 2.5 4.5-5" />
+            </>
+          ) : (
+            <>
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 8v4" />
+              <path d="M12 16h.01" />
+            </>
+          )
+        ) : null}
+      </svg>
+    </span>
+  );
+}
+
+function SectionHeader({
+  label,
+  tone,
+  palette,
+}: {
+  label: string;
+  tone: ActivityTone;
+  palette: ActivityPalette;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+      <span
+        aria-hidden="true"
+        style={{
           width: 8,
           height: 8,
           borderRadius: '50%',
-          background: statusColor,
-          borderWidth: 1.5,
-          borderStyle: 'solid',
-          borderColor: '#fff',
-          boxShadow: agent.status === 'running' ? `0 0 6px ${statusColor}50` : 'none',
-          animationName: agent.status === 'running' ? 'activityPulse' : 'none',
-          animationDuration: agent.status === 'running' ? '2s' : undefined,
-          animationTimingFunction: agent.status === 'running' ? 'ease-in-out' : undefined,
-          animationIterationCount: agent.status === 'running' ? 'infinite' : undefined,
-        }} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <span style={{
-          fontSize: 14, fontWeight: 700, color: '#0a0a0a',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-        }}>
-          {agent.name}
-        </span>
-        <span style={{
-          fontSize: 11, fontWeight: 600, color: statusColor,
-          marginLeft: 6,
-        }}>
-          {statusLabel}
-        </span>
-        {agent.currentTask && (
-          <p style={{
-            margin: '2px 0 0', fontSize: 12, color: '#64748b',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {agent.currentTask}
-          </p>
-        )}
-      </div>
-      <span style={{ fontSize: 10, color: '#c7c7cc', flexShrink: 0 }}>
-        {formatRelativeTime(agent.lastEventAt)}
+          background: palette.status[tone],
+          flexShrink: 0,
+        }}
+      />
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: palette.status[tone],
+          fontFamily: SYSTEM_FONT,
+        }}
+      >
+        {label}
       </span>
-    </button>
+    </div>
+  );
+}
+
+function ApprovalCard({
+  item,
+  onApprove,
+  onDeny,
+  palette,
+}: {
+  item: MobileInboxItem;
+  onApprove: () => void;
+  onDeny: () => void;
+  palette: ActivityPalette;
+}) {
+  const tone = toneForApproval(item);
+  const accent = palette.status[tone];
+  const cardWidth = typeof window !== 'undefined' ? Math.max(window.innerWidth - 96, 220) : 280;
+  const { truncated: detailText } = usePretextTruncation(item.detail ?? '', 'small', cardWidth, 3);
+
+  return (
+    <TimelineItem palette={palette} tone={tone}>
+      <div style={cardStyle(palette)}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <EventIcon kind="approval" tone={tone} palette={palette} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ ...bodyTextStyle(palette), marginBottom: 3, color: accent, fontWeight: 600 }}>
+              Approval required
+            </p>
+            <p style={headerTextStyle(palette)}>{item.title}</p>
+          </div>
+          <span style={timestampStyle(palette)}>{item.timestampLabel || ''}</span>
+        </div>
+        <p style={{ ...bodyTextStyle(palette), marginTop: 10 }}>
+          {detailText}
+        </p>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button
+            type="button"
+            onClick={onApprove}
+            style={{
+              flex: 1,
+              minHeight: 44,
+              borderRadius: 12,
+              border: `1px solid ${palette.status.success}`,
+              background: palette.status.success,
+              color: palette.background,
+              fontSize: 13,
+              fontWeight: 700,
+              fontFamily: SYSTEM_FONT,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            onClick={onDeny}
+            style={{
+              flex: 1,
+              minHeight: 44,
+              borderRadius: 12,
+              border: `1px solid ${palette.status.error}`,
+              background: palette.cardBg,
+              color: palette.status.error,
+              fontSize: 13,
+              fontWeight: 700,
+              fontFamily: SYSTEM_FONT,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Deny
+          </button>
+        </div>
+      </div>
+    </TimelineItem>
+  );
+}
+
+function AlertCard({
+  item,
+  palette,
+}: {
+  item: MobileInboxItem;
+  palette: ActivityPalette;
+}) {
+  const tone = toneForAlert(item);
+
+  return (
+    <TimelineItem palette={palette} tone={tone}>
+      <div style={cardStyle(palette)}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <EventIcon kind="alert" tone={tone} palette={palette} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={headerTextStyle(palette)}>{item.title}</p>
+            <p style={{ ...bodyTextStyle(palette), marginTop: 4 }}>
+              {item.detail.slice(0, 120)}{item.detail.length > 120 ? '…' : ''}
+            </p>
+          </div>
+          <span style={timestampStyle(palette)}>{item.timestampLabel || ''}</span>
+        </div>
+      </div>
+    </TimelineItem>
+  );
+}
+
+function ReviewCard({
+  item,
+  palette,
+  onOpen,
+}: {
+  item: MobileInboxItem;
+  palette: ActivityPalette;
+  onOpen: () => void;
+}) {
+  const tone = toneForReview(item);
+
+  return (
+    <TimelineItem palette={palette} tone={tone}>
+      <button
+        type="button"
+        onClick={onOpen}
+        style={{
+          ...cardStyle(palette),
+          minHeight: 64,
+          cursor: 'pointer',
+          WebkitTapHighlightColor: 'transparent',
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <EventIcon kind="review" tone={tone} palette={palette} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={headerTextStyle(palette)}>{item.title}</p>
+            <p
+              style={{
+                ...bodyTextStyle(palette),
+                marginTop: 4,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {item.detail}
+            </p>
+          </div>
+          <span style={timestampStyle(palette)}>{item.timestampLabel || ''}</span>
+        </div>
+      </button>
+    </TimelineItem>
+  );
+}
+
+function AgentEventCard({
+  agent,
+  palette,
+  onSelect,
+}: {
+  agent: AgentSummary;
+  palette: ActivityPalette;
+  onSelect: () => void;
+}) {
+  const tone = toneForAgent(agent);
+  const accent = palette.status[tone];
+  const statusLabel = labelForAgent(tone);
+  const contextPercent = Math.round(agent.context?.usedPercent ?? 0);
+
+  return (
+    <TimelineItem palette={palette} tone={tone}>
+      <button
+        type="button"
+        onClick={onSelect}
+        style={{
+          ...cardStyle(palette),
+          minHeight: 72,
+          cursor: 'pointer',
+          WebkitTapHighlightColor: 'transparent',
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <EventIcon kind="agent" tone={tone} palette={palette} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 14,
+                fontWeight: 600,
+                color: palette.textPrimary,
+                fontFamily: SYSTEM_FONT,
+                lineHeight: 1.35,
+              }}
+            >
+              {agent.name}
+            </p>
+            <p style={{ ...bodyTextStyle(palette), marginTop: 3, color: accent, fontWeight: 600 }}>
+              {statusLabel} • {contextPercent}% context
+            </p>
+            {agent.currentTask ? (
+              <p
+                style={{
+                  ...bodyTextStyle(palette),
+                  marginTop: 6,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {agent.currentTask}
+              </p>
+            ) : null}
+          </div>
+          <span style={timestampStyle(palette)}>{formatRelativeTime(agent.lastEventAt)}</span>
+        </div>
+      </button>
+    </TimelineItem>
+  );
+}
+
+function EmptyState({
+  palette,
+  title,
+  detail,
+}: {
+  palette: ActivityPalette;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div style={{ ...cardStyle(palette), padding: 20, textAlign: 'center' }}>
+      <svg
+        width="32"
+        height="32"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={palette.status.coding}
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ margin: '0 auto 12px', display: 'block' }}
+      >
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+      </svg>
+      <p
+        style={{
+          margin: 0,
+          fontSize: 15,
+          fontWeight: 600,
+          color: palette.textPrimary,
+          fontFamily: SYSTEM_FONT,
+        }}
+      >
+        {title}
+      </p>
+      <p
+        style={{
+          margin: '6px 0 0',
+          fontSize: 12,
+          lineHeight: 1.45,
+          color: palette.textSecondary,
+          fontFamily: SYSTEM_FONT,
+        }}
+      >
+        {detail}
+      </p>
+    </div>
   );
 }
 
@@ -279,62 +579,102 @@ export const ActivityFeed = memo(function ActivityFeed({
   onReviewPR,
 }: ActivityFeedProps) {
   const [filter, setFilter] = useState<ActivityFilter>('all');
+  const { colors } = useTheme();
 
-  const approvals = useMemo(() =>
-    snapshot.items.filter(i => i.kind === 'approval'),
-    [snapshot.items]
+  const palette = useMemo(() => buildPalette(colors), [colors]);
+
+  const approvals = useMemo(
+    () => snapshot.items.filter((item) => item.kind === 'approval'),
+    [snapshot.items],
   );
-  const alerts = useMemo(() =>
-    snapshot.items.filter(i => i.kind === 'alert'),
-    [snapshot.items]
+  const alerts = useMemo(
+    () => snapshot.items.filter((item) => item.kind === 'alert'),
+    [snapshot.items],
   );
-  const agentEvents = useMemo(() =>
-    [...snapshot.sessions].sort((a, b) =>
-      new Date(b.lastEventAt).getTime() - new Date(a.lastEventAt).getTime()
-    ),
-    [snapshot.sessions]
+  const agentEvents = useMemo(
+    () => [...snapshot.sessions].sort((left, right) => (
+      new Date(right.lastEventAt).getTime() - new Date(left.lastEventAt).getTime()
+    )),
+    [snapshot.sessions],
   );
-  const reviewItems = useMemo(() =>
-    snapshot.items.filter(i => i.kind === 'review'),
-    [snapshot.items]
+  const reviewItems = useMemo(
+    () => snapshot.items.filter((item) => item.kind === 'review'),
+    [snapshot.items],
   );
 
-  const FILTERS: { id: ActivityFilter; label: string; count: number }[] = [
-    { id: 'all', label: 'All', count: approvals.length + alerts.length + agentEvents.length + reviewItems.length },
+  const totalCount = approvals.length + alerts.length + agentEvents.length + reviewItems.length;
+  const visibleCount = filter === 'all'
+    ? totalCount
+    : filter === 'approvals'
+      ? approvals.length
+      : filter === 'alerts'
+        ? alerts.length
+        : filter === 'agents'
+          ? agentEvents.length
+          : reviewItems.length;
+
+  const filters: Array<{ id: ActivityFilter; label: string; count: number }> = [
+    { id: 'all', label: 'All', count: totalCount },
     { id: 'approvals', label: 'Approvals', count: approvals.length },
     { id: 'reviews', label: 'Reviews', count: reviewItems.length },
     { id: 'alerts', label: 'Alerts', count: alerts.length },
     { id: 'agents', label: 'Agents', count: agentEvents.length },
   ];
 
+  const timelineListStyle: CSSProperties = {
+    display: 'grid',
+    gap: 12,
+    marginLeft: 20,
+    borderLeft: `1px solid ${palette.timelineLine}`,
+  };
+
   return (
-    <div style={{
-      padding: '0 14px 24px',
-      display: 'flex', flexDirection: 'column', gap: 14,
-      width: '100%',
-      maxWidth: '100%',
-      boxSizing: 'border-box',
-      overflow: 'hidden',
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        paddingTop: 8,
-      }}>
+    <div
+      style={{
+        padding: '0 14px 24px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        background: palette.background,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 12,
+          paddingTop: 8,
+        }}
+      >
         <div>
-          <h2 style={{
-            margin: 0, fontSize: 28, fontWeight: 800,
-            fontFamily: '-apple-system, system-ui, sans-serif',
-            color: '#0a0a0a', letterSpacing: '-0.03em',
-          }}>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 28,
+              fontWeight: 800,
+              letterSpacing: '-0.03em',
+              fontFamily: SYSTEM_FONT,
+              color: palette.textPrimary,
+            }}
+          >
             Activity
           </h2>
-          <p style={{
-            margin: '2px 0 0', fontSize: 13,
-            color: '#8e8e93', fontWeight: 500,
-          }}>
+          <p
+            style={{
+              margin: '4px 0 0',
+              fontSize: 13,
+              fontWeight: 500,
+              color: palette.textSecondary,
+              fontFamily: SYSTEM_FONT,
+            }}
+          >
             {approvals.length > 0
-              ? `${approvals.length} pending approval${approvals.length !== 1 ? 's' : ''}`
+              ? `${approvals.length} pending approval${approvals.length === 1 ? '' : 's'}`
               : 'All caught up'}
           </p>
         </div>
@@ -342,12 +682,16 @@ export const ActivityFeed = memo(function ActivityFeed({
           type="button"
           onClick={onBack}
           style={{
-            padding: '6px 14px', borderRadius: 10,
-            background: 'rgba(0,122,255,0.08)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            border: '1px solid rgba(0,122,255,0.12)',
-            color: '#007aff', fontSize: 13, fontWeight: 600,
+            minWidth: 44,
+            minHeight: 44,
+            padding: '0 16px',
+            borderRadius: 14,
+            border: `1px solid ${palette.cardBorder}`,
+            background: palette.cardBg,
+            color: palette.doneText,
+            fontSize: 13,
+            fontWeight: 600,
+            fontFamily: SYSTEM_FONT,
             cursor: 'pointer',
             WebkitTapHighlightColor: 'transparent',
           }}
@@ -356,247 +700,156 @@ export const ActivityFeed = memo(function ActivityFeed({
         </button>
       </div>
 
-      {/* Filter segmented control */}
-      <div style={{
-        display: 'flex', padding: 3,
-        borderRadius: 10,
-        background: 'rgba(0,122,255,0.04)',
-        border: '1px solid rgba(0,122,255,0.08)',
-        gap: 1,
-        overflowX: 'auto',
-        WebkitOverflowScrolling: 'touch',
-        scrollbarWidth: 'none',
-      }}>
-        {FILTERS.map((f) => {
-          const active = filter === f.id;
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none',
+        }}
+      >
+        {filters.map((item) => {
+          const active = filter === item.id;
+          const tone = toneForFilter(item.id);
+          const accent = palette.status[tone];
+
           return (
             <button
-              key={f.id}
+              key={item.id}
               type="button"
-              onClick={() => setFilter(f.id)}
+              onClick={() => setFilter(item.id)}
               style={{
-                flex: '1 0 auto', padding: '7px 6px',
-                borderRadius: 8, border: 'none',
-                background: active ? '#fff' : 'transparent',
-                boxShadow: active ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                minHeight: 44,
+                padding: '0 14px',
+                borderRadius: 14,
+                border: `1px solid ${active ? palette.cardBorder : palette.timelineLine}`,
+                background: active ? palette.cardBg : palette.background,
+                color: active ? palette.textPrimary : palette.textSecondary,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                whiteSpace: 'nowrap',
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: SYSTEM_FONT,
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
-                transition: 'all 200ms ease',
-                minWidth: 0,
-                whiteSpace: 'nowrap',
               }}
             >
-              <span style={{
-                fontSize: 10, fontWeight: 600,
-                color: active ? '#0a0a0a' : '#8e8e93',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-              }}>
-                {f.label}
-              </span>
-              {f.count > 0 && (
-                <span style={{
-                  minWidth: 14, height: 14, borderRadius: 7,
-                  padding: '0 3px',
-                  background: active && f.id === 'approvals' ? '#ff9500' : active ? '#007aff' : 'rgba(0,0,0,0.06)',
-                  color: active ? '#fff' : '#8e8e93',
-                  fontSize: 9, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {f.count}
+              <span>{item.label}</span>
+              {item.count > 0 ? (
+                <span
+                  style={{
+                    minWidth: 20,
+                    height: 20,
+                    padding: '0 6px',
+                    borderRadius: 999,
+                    background: active ? accent : palette.cardBg,
+                    color: active ? palette.background : palette.textSecondary,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  {item.count}
                 </span>
-              )}
+              ) : null}
             </button>
           );
         })}
       </div>
 
-      {/* Approvals section */}
-      {(filter === 'all' || filter === 'approvals') && approvals.length > 0 && (
+      {(filter === 'all' || filter === 'approvals') && approvals.length > 0 ? (
         <section>
-          {filter === 'all' && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              marginBottom: 8,
-            }}>
-              <span style={{
-                width: 6, height: 6, borderRadius: '50%',
-                background: '#ff9500',
-              }} />
-              <span style={{
-                fontSize: 12, fontWeight: 700,
-                color: '#ff9500',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-              }}>
-                Pending Approvals
-              </span>
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', overflow: 'hidden' }}>
+          {filter === 'all' ? (
+            <SectionHeader label="Pending Approvals" tone="testing" palette={palette} />
+          ) : null}
+          <div style={timelineListStyle}>
             {approvals.map((item) => (
               <ApprovalCard
                 key={item.id}
                 item={item}
                 onApprove={() => onApprove(item)}
                 onDeny={() => onDeny(item)}
+                palette={palette}
               />
             ))}
           </div>
         </section>
-      )}
+      ) : null}
 
-      {/* Alerts section */}
-      {(filter === 'all' || filter === 'alerts') && alerts.length > 0 && (
+      {(filter === 'all' || filter === 'alerts') && alerts.length > 0 ? (
         <section>
-          {filter === 'all' && (
-            <span style={{
-              display: 'block', fontSize: 12, fontWeight: 700,
-              color: '#ff3b30',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              marginBottom: 8,
-            }}>
-              Alerts
-            </span>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', overflow: 'hidden' }}>
+          {filter === 'all' ? (
+            <SectionHeader label="Alerts" tone="error" palette={palette} />
+          ) : null}
+          <div style={timelineListStyle}>
             {alerts.map((item) => (
-              <AlertCard key={item.id} item={item} />
+              <AlertCard key={item.id} item={item} palette={palette} />
             ))}
           </div>
         </section>
-      )}
+      ) : null}
 
-      {/* Reviews section */}
-      {(filter === 'all' || filter === 'reviews') && reviewItems.length > 0 && (
+      {(filter === 'all' || filter === 'reviews') && reviewItems.length > 0 ? (
         <section>
-          {filter === 'all' && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              marginBottom: 8,
-            }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#af52de' }} />
-              <span style={{
-                fontSize: 12, fontWeight: 700, color: '#af52de',
-                textTransform: 'uppercase', letterSpacing: '0.05em',
-              }}>
-                Pull Requests
-              </span>
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', overflow: 'hidden' }}>
+          {filter === 'all' ? (
+            <SectionHeader label="Pull Requests" tone="thinking" palette={palette} />
+          ) : null}
+          <div style={timelineListStyle}>
             {reviewItems.map((item) => (
-              <button
+              <ReviewCard
                 key={item.id}
-                type="button"
-                onClick={() => {
-                  // Extract PR number from title (e.g. "PR #123: title")
+                item={item}
+                palette={palette}
+                onOpen={() => {
                   const match = item.title.match(/#(\d+)/);
                   if (match && onReviewPR && item.sessionKey) {
-                    onReviewPR(item.sessionKey, parseInt(match[1]));
-                  } else {
-                    onAgentSelect(item.sessionKey || '');
+                    onReviewPR(item.sessionKey, Number.parseInt(match[1], 10));
+                    return;
                   }
+                  onAgentSelect(item.sessionKey || '');
                 }}
-                style={{
-                  width: '100%', padding: '12px 16px',
-                  borderRadius: 14,
-                  background: 'rgba(175,82,222,0.03)',
-                  border: '1px solid rgba(175,82,222,0.1)',
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  cursor: 'pointer',
-                  WebkitTapHighlightColor: 'transparent',
-                  textAlign: 'left',
-                  boxSizing: 'border-box',
-                  overflow: 'hidden',
-                }}
-              >
-                <span style={{
-                  width: 28, height: 28, borderRadius: 8,
-                  background: 'rgba(175,82,222,0.08)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                    stroke="#af52de" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="18" cy="18" r="3" />
-                    <circle cx="6" cy="6" r="3" />
-                    <path d="M13 6h3a2 2 0 0 1 2 2v7" />
-                    <path d="M6 9v12" />
-                  </svg>
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: '#0a0a0a' }}>
-                    {item.title}
-                  </p>
-                  <p style={{
-                    margin: '2px 0 0', fontSize: 11, color: '#8e8e93',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {item.detail}
-                  </p>
-                </div>
-                <span style={{ fontSize: 10, color: '#c7c7cc', flexShrink: 0 }}>
-                  {item.timestampLabel || ''}
-                </span>
-              </button>
+              />
             ))}
           </div>
         </section>
-      )}
+      ) : null}
 
-      {/* Agent activity section */}
-      {(filter === 'all' || filter === 'agents') && agentEvents.length > 0 && (
+      {(filter === 'all' || filter === 'agents') && agentEvents.length > 0 ? (
         <section>
-          {filter === 'all' && (
-            <span style={{
-              display: 'block', fontSize: 12, fontWeight: 700,
-              color: '#007aff',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              marginBottom: 8,
-            }}>
-              Agent Activity
-            </span>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', overflow: 'hidden' }}>
+          {filter === 'all' ? (
+            <SectionHeader label="Agent Activity" tone="coding" palette={palette} />
+          ) : null}
+          <div style={timelineListStyle}>
             {agentEvents.map((agent) => (
               <AgentEventCard
                 key={agent.id}
                 agent={agent}
+                palette={palette}
                 onSelect={() => onAgentSelect(agent.sessionKey)}
               />
             ))}
           </div>
         </section>
-      )}
+      ) : null}
 
-      {/* Empty state */}
-      {approvals.length === 0 && alerts.length === 0 && agentEvents.length === 0 && (
-        <div style={{
-          padding: '40px 20px', textAlign: 'center',
-        }}>
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
-            stroke="rgba(0,122,255,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-            style={{ margin: '0 auto 12px' }}>
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg>
-          <p style={{ fontSize: 15, fontWeight: 600, color: '#8e8e93', margin: 0 }}>
-            No activity yet
-          </p>
-          <p style={{ fontSize: 12, color: '#c7c7cc', margin: '4px 0 0' }}>
-            Agent events, approvals, and alerts will appear here.
-          </p>
-        </div>
-      )}
-
-      <style>{`
-        @keyframes activityPulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-      `}</style>
+      {visibleCount === 0 ? (
+        <EmptyState
+          palette={palette}
+          title={filter === 'all' ? 'No activity yet' : `No ${filter} yet`}
+          detail={
+            filter === 'all'
+              ? 'Agent events, approvals, alerts, and reviews will appear here.'
+              : 'This lane will fill as new activity arrives.'
+          }
+        />
+      ) : null}
     </div>
   );
 });

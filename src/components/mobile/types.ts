@@ -200,7 +200,6 @@ export interface TopBarProps {
   compactLine: CompactLine;
   activeScreen: import('./SpeedDial').MobileScreen;
   onNavigate: (screen: import('./SpeedDial').MobileScreen) => void;
-  onBackToIndex: () => void;
   onOpenControls: () => void;
 }
 

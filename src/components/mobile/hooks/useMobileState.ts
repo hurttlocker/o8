@@ -12,7 +12,7 @@ import type {
 } from '@/lib/mobile/types';
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { DraftAttachment, PendingOwnedTurn } from '../types';
-import { pickCurrentSession } from '../utils';
+import { pickHomeSession } from '../utils';
 
 export interface MobileStateInit {
   initialSnapshot: MobileInboxSnapshot;
@@ -21,18 +21,18 @@ export interface MobileStateInit {
   initialOwnedReviewPacket?: RuntimeReviewPacket | null;
 }
 
-const MOBILE_SELECTED_SESSION_KEY_STORAGE = 'cortex.mobile.selected-session-key';
-
 export function useMobileState(init: MobileStateInit) {
   const { initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket } = init;
-  const initialSession = pickCurrentSession(initialSnapshot);
+  const initialSession = pickHomeSession(initialSnapshot);
 
   // ── Core state ──
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot>(initialSnapshot);
   const [selectedId, setSelectedId] = useState(() => initialSession?.id ?? '');
   const [selectedSessionKeyHint, setSelectedSessionKeyHint] = useState(() => initialSession?.sessionKey ?? '');
   const [selectedSessionFallback, setSelectedSessionFallback] = useState<MobileInboxSnapshot['sessions'][number] | null>(() => initialSession ?? null);
-  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory' | 'issues'>('squad');
+  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory' | 'issues'>(() => (
+    initialSession ? 'chat' : 'squad'
+  ));
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
 
@@ -83,7 +83,7 @@ export function useMobileState(init: MobileStateInit) {
   // ── UI chrome ──
   const [controlsOpen, setControlsOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
-  const [sessionInfoOpen, setSessionInfoOpen] = useState(false);
+  const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<MobileApprovalCard[]>(() => initialSnapshot.approvals ?? []);
   const [resolvedApprovals, setResolvedApprovals] = useState<Record<string, 'approved' | 'rejected'>>({});
   const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
@@ -156,48 +156,23 @@ export function useMobileState(init: MobileStateInit) {
     [selectedId, selectedSessionKeyHint, snapshot],
   );
   const hasPinnedSelection = Boolean(selectedSessionKeyHint || selectedId || selectedSessionFallback?.sessionKey);
-  const liveFallbackSession = pickCurrentSession(snapshot);
+  const homeSession = pickHomeSession(snapshot);
+  const missingPinnedFallback = snapshot.sessions.length === 0 && hasPinnedSelection
+    ? (selectedSessionFallback ?? undefined)
+    : undefined;
   const selectedSession = selectedSessionFromSnapshot
-    ?? (snapshot.sessions.length === 0
-      ? (hasPinnedSelection ? (selectedSessionFallback ?? undefined) : liveFallbackSession)
-      : liveFallbackSession);
+    ?? missingPinnedFallback
+    ?? (!hasPinnedSelection ? homeSession : undefined);
   const selectedSessionKey = selectedSessionFromSnapshot?.sessionKey
-    ?? (snapshot.sessions.length === 0
-      ? (hasPinnedSelection ? selectedSessionKeyHint || selectedSessionFallback?.sessionKey : liveFallbackSession?.sessionKey)
-      : liveFallbackSession?.sessionKey);
+    ?? missingPinnedFallback?.sessionKey
+    ?? (snapshot.sessions.length === 0 && hasPinnedSelection
+      ? selectedSessionKeyHint || selectedSessionFallback?.sessionKey
+      : undefined)
+    ?? (!hasPinnedSelection ? homeSession?.sessionKey : undefined);
   const isChatSession = selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code' || selectedSession?.runtime === 'chat';
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
   const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const savedSessionKey = window.localStorage.getItem(MOBILE_SELECTED_SESSION_KEY_STORAGE)?.trim();
-    if (!savedSessionKey || savedSessionKey === selectedSessionKeyHint) return;
-    console.info('[mobile] restoring session from storage', {
-      savedSessionKey,
-      selectedSessionKeyHint,
-      availableSessionKeys: snapshot.sessions.map((session) => session.sessionKey),
-    });
-    setSelectedSessionKeyHint(savedSessionKey);
-    const matchingSession = snapshot.sessions.find((session) => session.sessionKey === savedSessionKey);
-    if (!matchingSession) {
-      console.info('[mobile] stored session not present in initial snapshot', { savedSessionKey });
-      setSelectedId('');
-      setSelectedSessionFallback(null);
-      return;
-    }
-    setSelectedId(matchingSession.id);
-    setSelectedSessionFallback(matchingSession);
-  // Intentionally one-time restore: later session churn should not re-run storage hydration.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!selectedSessionKeyHint) return;
-    window.localStorage.setItem(MOBILE_SELECTED_SESSION_KEY_STORAGE, selectedSessionKeyHint);
-  }, [selectedSessionKeyHint]);
 
   useEffect(() => {
     if (!selectedSessionFromSnapshot) return;
@@ -233,11 +208,25 @@ export function useMobileState(init: MobileStateInit) {
       });
       return;
     }
-    const nextSession = pickCurrentSession(snapshot);
-    if (!nextSession) return;
-    const recoveryKey = `${selectedSessionFallback.sessionKey}->${nextSession.sessionKey}`;
+    const nextSession = pickHomeSession(snapshot);
+    const recoveryKey = `${selectedSessionFallback.sessionKey}->${nextSession?.sessionKey ?? 'picker'}`;
     if (recoveredSelectionRef.current === recoveryKey) return;
     recoveredSelectionRef.current = recoveryKey;
+    if (!nextSession) {
+      console.info('[mobile] selected session missing and no active home session is available; clearing selection', {
+        missingId: selectedSessionFallback.id,
+        missingSessionKey: selectedSessionFallback.sessionKey,
+        selectedId,
+        selectedSessionKeyHint,
+        availableSessionKeys: snapshot.sessions.map((session) => session.sessionKey),
+      });
+      setSelectedId('');
+      setSelectedSessionKeyHint('');
+      setSelectedSessionFallback(null);
+      setActiveView('squad');
+      setSurfaceNote('No active session is available. Pick a recent thread.');
+      return;
+    }
     console.info('[mobile] selected session missing from latest snapshot; recovering to live fallback', {
       missingId: selectedSessionFallback.id,
       missingSessionKey: selectedSessionFallback.sessionKey,
@@ -251,7 +240,7 @@ export function useMobileState(init: MobileStateInit) {
     setSelectedSessionKeyHint(nextSession.sessionKey);
     setSelectedSessionFallback(nextSession);
     setSurfaceNote(`Recovered to ${nextSession.name}. Previous session is no longer live.`);
-  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, setSelectedId, setSelectedSessionFallback, setSelectedSessionKeyHint, setSurfaceNote, snapshot]);
+  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, setActiveView, setSelectedId, setSelectedSessionFallback, setSelectedSessionKeyHint, setSurfaceNote, snapshot]);
 
   return {
     // Core state + setters
@@ -294,7 +283,7 @@ export function useMobileState(init: MobileStateInit) {
     // UI chrome
     controlsOpen, setControlsOpen,
     alertsOpen, setAlertsOpen,
-    sessionInfoOpen, setSessionInfoOpen,
+    sessionPickerOpen, setSessionPickerOpen,
     pendingApprovals, setPendingApprovals,
     resolvedApprovals, setResolvedApprovals,
     surfaceRefreshing, setSurfaceRefreshing,
