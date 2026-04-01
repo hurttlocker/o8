@@ -6,6 +6,14 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `f49352c` fix: remove duplicate framer-motion import in SessionTimeline
+- `551e995` feat: FTUX progressive feature reveal
+- `43dd538` feat: FTUX first-merge celebration state
+- `366bd6f` feat: FTUX mobile QR prompt
+- `34f9348` feat: FTUX First Mission Card contextual CTA
+- `932ee1c` feat: FTUX empty states for all dashboard panels
+- `bd6c7c8` feat: FTUX warm dashboard state
+- `23b1bdb` feat: FTUX personalized chat greeting
 - `2bba0bf` feat: lane lifecycle WebSocket channel
 - `b79ae61` feat: lane lifecycle WebSocket channel for real-time status streaming
 - `0dd778d` feat: migrate approval store from JSON to SQLite
