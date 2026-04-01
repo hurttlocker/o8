@@ -25,7 +25,7 @@ const execFileAsync = promisify(execFile);
  * size is inherent to their role (wiring many hooks/components together).
  * Relative paths from repo root, forward-slash separated.
  */
-const FILE_SIZE_WAIVERS = new Set([
+export const FILE_SIZE_WAIVERS = new Set([
   'src/app/dashboard/page.tsx',   // Layout orchestrator — wires 10+ hooks, providers, JSX tree
   'src/ws-server.ts',             // WebSocket multiplexer — channel handlers are co-located by design
 ]);
