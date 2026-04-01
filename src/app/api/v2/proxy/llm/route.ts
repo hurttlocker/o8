@@ -21,6 +21,7 @@ import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt, buildUnscopedSystemPrompt } from '@/lib/llm/context';
 import { parseInlineMarkdownDataImages } from '@/lib/llm/inline-images';
+import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
 import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
 import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
 import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, type ToolResult } from '@/lib/llm/tools';
@@ -384,6 +385,14 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   const toolOverrides = rawToolOverrides ?? {};
   const tabId = request.headers.get('x-tab-id')?.trim() || '';
   const { repoRoot: scopedRepoRoot } = await resolveRepoScopeFromHeaders(request.headers);
+  const nonSystemMessages = rawMessages.filter((message) => message.role !== 'system');
+  const priorSystemMessages = rawMessages
+    .filter((message) => message.role === 'system')
+    .map((message) => message.content.trim())
+    .filter(Boolean);
+  const assistantMessageCount = nonSystemMessages.filter((message) => message.role === 'assistant').length;
+  const userMessageCount = nonSystemMessages.filter((message) => message.role === 'user').length;
+  const isFreshChatTurn = assistantMessageCount === 0 && userMessageCount <= 1;
 
   // Inject workspace context as system prompt (Phase 1)
   let systemPrompt = scopedRepoRoot
@@ -392,7 +401,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
   // Phase A: Cortex memory recall — search for relevant facts based on user's message
   let recallInfo: { factCount: number; queryMs: number } | null = null;
-  const lastUserMsg = [...rawMessages].reverse().find(m => m.role === 'user');
+  const lastUserMsg = [...nonSystemMessages].reverse().find(m => m.role === 'user');
   if (lastUserMsg?.content) {
     try {
       const recall = await recallMemories(lastUserMsg.content);
@@ -406,10 +415,25 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     }
   }
 
-  const hasSystem = rawMessages.some(m => m.role === 'system');
-  const messages: Message[] = hasSystem
-    ? rawMessages
-    : [{ role: 'system', content: systemPrompt }, ...rawMessages];
+  if (isFreshChatTurn) {
+    try {
+      const ftux = await getPersonalizedChatFtuxPayload({
+        userName: auth?.user.name,
+        scopedRepoRoot,
+      });
+      if (ftux.systemContext.trim()) {
+        systemPrompt += `\n\n${ftux.systemContext}`;
+      }
+    } catch (error) {
+      console.warn('[llm-proxy] Failed to load fresh-chat FTUX context:', error);
+    }
+  }
+
+  if (priorSystemMessages.length > 0) {
+    systemPrompt += `\n\n${priorSystemMessages.join('\n\n')}`;
+  }
+
+  const messages: Message[] = [{ role: 'system', content: systemPrompt }, ...nonSystemMessages];
 
   if (!PROVIDERS[provider]) {
     return new Response(
