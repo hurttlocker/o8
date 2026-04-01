@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { dirname } from 'node:path';
+import { promisify } from 'node:util';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
-import { getDispatchableWave } from '@/lib/orchestrator/dag';
+import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { getAllCached, type FileSkeleton } from '@/lib/skeleton';
@@ -14,6 +16,8 @@ const FILE_SIZE_WARNING_BUFFER_LINES = 100;
 const FILE_SIZE_WARNING_THRESHOLD_LINES = FILE_SIZE_BLOCK_THRESHOLD_LINES - FILE_SIZE_WARNING_BUFFER_LINES;
 const MAX_THRESHOLD_GUIDANCE_FILES = 6;
 const PATH_TEXT_CHAR_PATTERN = /[A-Za-z0-9._/-]/;
+const SESSION_RECOVERY_COMMIT_MESSAGE = 'auto-commit: session recovery';
+const execFileAsync = promisify(execFile);
 
 /**
  * Files explicitly allowed to exceed the 600-line threshold.
@@ -313,14 +317,92 @@ function createLaneBinding(packet: OrchestratorPacket, laneId: string, sessionKe
 }
 
 interface DispatchResult {
+  kind: 'launched' | 'awaiting_review';
+  laneId: string | null;
+  sessionKey: string | null;
+  lane?: OrchestratorLaneBinding | null;
+}
+
+interface LaunchDispatchResult {
   laneId: string;
   sessionKey: string | null;
+}
+
+interface RecoveryDispatchContext {
+  lane: OrchestratorLaneBinding | null;
+  worktreePath: string | null;
+}
+
+function isDispatchReadyStatus(packet: OrchestratorPacket) {
+  return packet.status === 'queued' || packet.status === 'recovering';
+}
+
+async function hasUncommittedWorktreeChanges(worktreePath: string): Promise<boolean> {
+  const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+    cwd: worktreePath,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return stdout.trim().length > 0;
+}
+
+async function autoCommitRecoveryWorktree(worktreePath: string): Promise<void> {
+  await execFileAsync('git', ['add', '-A'], {
+    cwd: worktreePath,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  await execFileAsync('git', ['commit', '-m', SESSION_RECOVERY_COMMIT_MESSAGE], {
+    cwd: worktreePath,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+}
+
+async function dispatchOrRecoverPacket(
+  packet: OrchestratorPacket,
+  allPackets: OrchestratorPacket[],
+  recoveryContext?: RecoveryDispatchContext | null,
+): Promise<DispatchResult> {
+  if (packet.status === 'recovering' && recoveryContext?.worktreePath) {
+    const hasUncommittedChanges = await hasUncommittedWorktreeChanges(recoveryContext.worktreePath);
+    if (hasUncommittedChanges) {
+      await autoCommitRecoveryWorktree(recoveryContext.worktreePath);
+
+      if (recoveryContext.lane?.laneId) {
+        const reviewResult = await dispatchLaneCommand({
+          verb: 'request_review',
+          laneId: recoveryContext.lane.laneId,
+          actor: 'orchestrator',
+        });
+        if (!reviewResult.ok) {
+          throw new Error(reviewResult.note || 'Unable to request review after session recovery.');
+        }
+      }
+
+      return {
+        kind: 'awaiting_review',
+        laneId: recoveryContext.lane?.laneId ?? null,
+        sessionKey: null,
+        lane: recoveryContext.lane
+          ? {
+              ...recoveryContext.lane,
+              sessionKey: null,
+            }
+          : null,
+      };
+    }
+  }
+
+  const launchResult = await dispatchPacket(packet, allPackets);
+  return {
+    kind: 'launched',
+    laneId: launchResult.laneId,
+    sessionKey: launchResult.sessionKey,
+  };
 }
 
 async function dispatchPacket(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
-): Promise<DispatchResult> {
+): Promise<LaunchDispatchResult> {
   const laneResult = await dispatchLaneCommand({
     verb: 'open_lane',
     packetId: packet.id,
@@ -360,22 +442,24 @@ export function getDispatchBlocker(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
 ): string | null {
-  if (packet.queueState !== 'queued') {
+  const candidate = packet.status === 'recovering' ? clearStaleLaneBinding(packet) : packet;
+
+  if (candidate.queueState !== 'queued') {
     return 'Not queued';
   }
-  if (packet.status !== 'queued') {
-    return `Status is ${packet.status}`;
+  if (!isDispatchReadyStatus(candidate)) {
+    return `Status is ${candidate.status}`;
   }
-  const dependency = packetReleaseBlockedBy(packet, allPackets);
+  const dependency = packetReleaseBlockedBy(candidate, allPackets);
   if (dependency) {
     return `Blocked by ${dependency.id}`;
   }
-  if (!packet.workspaceTargetPath) {
+  if (!candidate.workspaceTargetPath) {
     return 'No workspace target';
   }
-  if (packet.lane?.laneId || packet.lane?.sessionKey || (packet.lane?.tileId && packet.lane?.tabId)) {
+  if (candidate.lane?.laneId || candidate.lane?.sessionKey || (candidate.lane?.tileId && candidate.lane?.tabId)) {
     // Allow retry if the lane's last event was a launch failure
-    const lastEvent = packet.lane?.lastEventLabel ?? '';
+    const lastEvent = candidate.lane?.lastEventLabel ?? '';
     if (lastEvent === 'launch_error' || lastEvent === 'launch_failed') {
       // Clear the stale binding so dispatchPacket can re-open/re-launch
     } else {
@@ -394,9 +478,23 @@ export async function runDispatchTick(
   state: OrchestratorMissionState,
 ): Promise<OrchestratorMissionState> {
   let nextState = normalizeOrchestratorMissionState(state);
+  const recoveryContextByPacketId = new Map(
+    nextState.packets.flatMap((packet) => (
+      packet.status === 'recovering'
+        ? [[packet.id, {
+            lane: packet.lane ?? null,
+            worktreePath: packet.lane?.repoPath ?? null,
+          }] as const]
+        : []
+    )),
+  );
 
   const dispatchablePackets = getDispatchableWave(nextState.packets)
-    .filter((packet) => getDispatchBlocker(packet, nextState.packets) === null);
+    .map((packet) => ({
+      packet,
+      recoveryContext: recoveryContextByPacketId.get(packet.id) ?? null,
+    }))
+    .filter(({ packet }) => getDispatchBlocker(packet, nextState.packets) === null);
 
   if (dispatchablePackets.length === 0) {
     return nextState;
@@ -404,19 +502,32 @@ export async function runDispatchTick(
 
   for (let index = 0; index < dispatchablePackets.length; index += MAX_PARALLEL_DISPATCHES) {
     const batch = dispatchablePackets.slice(index, index + MAX_PARALLEL_DISPATCHES);
-    console.log(`[dag-scheduler] Dispatching ${batch.length} packets in parallel: ${batch.map((packet) => packet.id).join(', ')}`);
+    console.log(`[dag-scheduler] Dispatching ${batch.length} packets in parallel: ${batch.map(({ packet }) => packet.id).join(', ')}`);
 
-    const results = await Promise.allSettled(batch.map((packet) => dispatchPacket(packet, nextState.packets)));
+    const results = await Promise.allSettled(
+      batch.map(({ packet, recoveryContext }) => dispatchOrRecoverPacket(packet, nextState.packets, recoveryContext)),
+    );
     nextState = normalizeOrchestratorMissionState({
       ...nextState,
       packets: nextState.packets.map((candidate) => {
-        const batchIndex = batch.findIndex((packet) => packet.id === candidate.id);
+        const batchIndex = batch.findIndex(({ packet }) => packet.id === candidate.id);
         if (batchIndex === -1) {
           return candidate;
         }
 
         const result = results[batchIndex];
         if (result.status === 'fulfilled') {
+          if (result.value.kind === 'awaiting_review') {
+            return {
+              ...candidate,
+              status: 'awaiting_review',
+              blockedReason: null,
+              lastEventAt: new Date().toISOString(),
+              lastEventLabel: 'session_recovery_autocommit',
+              lane: result.value.lane ?? candidate.lane ?? null,
+            };
+          }
+
           void publishRealtimeMutation({
             mutation: {
               mutationId: `packet-dispatch-${candidate.id}-${Date.now()}`,
@@ -426,7 +537,7 @@ export async function runDispatchTick(
               runtime: candidate.runtime,
               surfaceId: result.value.sessionKey ?? undefined,
               sessionKey: result.value.sessionKey ?? undefined,
-              laneId: result.value.laneId,
+              laneId: result.value.laneId ?? undefined,
               packetId: candidate.id,
               packetTitle: candidate.title,
               packetReferenceLabel: candidate.referenceLabel,
@@ -444,7 +555,7 @@ export async function runDispatchTick(
             ...candidate,
             status: 'launching',
             blockedReason: null,
-            lane: createLaneBinding(candidate, result.value.laneId, result.value.sessionKey),
+            lane: createLaneBinding(candidate, result.value.laneId!, result.value.sessionKey),
           };
         }
 

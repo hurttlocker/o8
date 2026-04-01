@@ -434,6 +434,11 @@ export function reconcileLanesWithSessions(
     if (lane.sessionKey) {
       const session = sessionByKey.get(lane.sessionKey);
       if (!session) {
+        console.log('[session-lifecycle] session_lost detected', {
+          laneId: lane.id,
+          sessionKey: lane.sessionKey,
+          status: lane.status,
+        });
         const nextValues: Partial<typeof lanes.$inferInsert> = {
           sessionKey: null,
           updatedAt: nowIso(),
@@ -505,6 +510,10 @@ export function reconcileLanesWithSessions(
       );
 
       if (match) {
+        console.log('[session-lifecycle] session reconnected', {
+          laneId: lane.id,
+          newSessionKey: match.sessionKey,
+        });
         const now = nowIso();
         const nextStatus: LaneStatus = match.status === 'running' ? 'running' : 'paused';
         updateLaneRecord(lane.id, {
