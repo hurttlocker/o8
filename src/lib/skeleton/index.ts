@@ -252,7 +252,7 @@ export function searchSymbols(
 export { renderSkeleton } from './renderer';
 export { walkRepo } from './walker';
 export { parseFile, hashFile, hashContent } from './parser';
-export { clearRepo, getChunksForFile, getChunksForRepo, getChunkStats } from './store';
+export { clearRepo, getAllCached, getChunksForFile, getChunksForRepo, getChunkStats } from './store';
 export {
   ensureBooted,
   triggerScan,
