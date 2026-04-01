@@ -4307,26 +4307,33 @@ export const AgentPanel = memo(function AgentPanel({
         if (repoRes?.ok) {
           const repoData = await repoRes.json() as { repos?: Array<{ localPath: string }> };
           hasRegisteredRepoSnapshot = true;
-          registeredRepoPaths = new Set((repoData.repos ?? [])
+          const repoPaths = Array.from(new Set((repoData.repos ?? [])
             .map((repo) => repo.localPath.trim().replace(/\/+$/, ''))
-            .filter(Boolean));
-          const summaries = await Promise.all(
-            (repoData.repos ?? []).map(async (repo) => {
-              try {
-                const res = await fetch(`/api/worktrees?repo=${encodeURIComponent(repo.localPath)}`);
-                if (!res.ok) return null;
-                return await res.json() as { worktrees?: WorktreeInfo[] };
-              } catch {
-                return null;
-              }
-            }),
-          );
+            .filter(Boolean)));
+          registeredRepoPaths = new Set(repoPaths);
 
-          for (const summary of summaries) {
-            for (const worktree of summary?.worktrees ?? []) {
-              if (worktree.sessionKey) {
-                worktreeMap.set(worktree.sessionKey, worktree);
+          if (repoPaths.length > 0) {
+            try {
+              const res = await fetch('/api/worktrees/batch', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ repoPaths }),
+              });
+
+              if (res.ok) {
+                const worktreesByRepo = await res.json() as Record<string, WorktreeInfo[]>;
+                for (const repoPath of repoPaths) {
+                  for (const worktree of worktreesByRepo[repoPath] ?? []) {
+                    if (worktree.sessionKey) {
+                      worktreeMap.set(worktree.sessionKey, worktree);
+                    }
+                  }
+                }
               }
+            } catch {
+              // Best-effort enrichment only.
             }
           }
         }

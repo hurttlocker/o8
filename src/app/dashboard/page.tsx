@@ -4,7 +4,7 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
-import { DesktopWebSocketProvider, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
+import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
@@ -43,7 +43,7 @@ import {
   updateOrchestratorMissionState,
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
-import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
+import type { RealtimeEventEnvelope } from '@/lib/realtime/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import type {
   CanvasTileState,
@@ -123,6 +123,42 @@ const DEFAULT_RIGHT_PANEL_WIDTH = 280;
 const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
 
+function approvalInboxFingerprint(snapshot: MobileInboxSnapshot | null | undefined): string | null {
+  if (!snapshot) return null;
+
+  const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
+  const items = Array.isArray(snapshot.items) ? snapshot.items : [];
+  const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+  const summaryApprovals = typeof snapshot.summary?.approvals === 'number' ? snapshot.summary.approvals : 0;
+
+  const pendingApprovals = approvals
+    .map((approval) => `${approval.id}:${approval.sessionKey}:${approval.createdAt}`)
+    .join('|');
+  const approvalItems = items
+    .filter((item) => item.kind === 'approval' || Boolean(item.approvalId))
+    .map((item) => `${item.id}:${item.approvalId ?? ''}:${item.sessionKey ?? ''}`)
+    .join('|');
+  const pendingSessions = sessions
+    .filter((session) => session.approvalStatus === 'pending')
+    .map((session) => `${session.sessionKey}:${session.lastEventAt ?? ''}`)
+    .join('|');
+
+  return `${summaryApprovals}:${pendingApprovals}:${approvalItems}:${pendingSessions}`;
+}
+
+function reviewPayloadTouchesApprovals(data: Record<string, unknown>): boolean {
+  const event = typeof data.event === 'string' ? data.event.toLowerCase() : '';
+  const kind = typeof data.kind === 'string' ? data.kind.toLowerCase() : '';
+  const title = typeof data.title === 'string' ? data.title.toLowerCase() : '';
+
+  return event.includes('approval')
+    || kind.includes('approval')
+    || title.includes('approval')
+    || typeof data.approvalId === 'string'
+    || typeof data.approvalStatus === 'string'
+    || typeof data.policyRuleId === 'string';
+}
+
 export default function DashboardPage() {
   return (
     <ThemeProvider>
@@ -177,12 +213,43 @@ function DashboardInner() {
     setThoughtsMissionState,
     thoughtsMissionState,
   } = useOrchestratorMission();
-  const [wsStatus, setWsStatus] = useState<WsConnectionState>('connecting');
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [mobileRemoteHref, setMobileRemoteHref] = useState('/mobile');
   const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
   const lastMarkedWorkspaceReadRef = useRef<string>('');
+  const approvalRefreshRef = useRef<() => void>(() => {});
+  const lastApprovalInboxFingerprintRef = useRef<string | null>(null);
+
+  const triggerApprovalRefreshFromInbox = useCallback((snapshot: MobileInboxSnapshot | null | undefined) => {
+    const nextFingerprint = approvalInboxFingerprint(snapshot);
+    if (nextFingerprint === null) return;
+    if (lastApprovalInboxFingerprintRef.current === null) {
+      lastApprovalInboxFingerprintRef.current = nextFingerprint;
+      return;
+    }
+    if (lastApprovalInboxFingerprintRef.current === nextFingerprint) return;
+    lastApprovalInboxFingerprintRef.current = nextFingerprint;
+    approvalRefreshRef.current();
+  }, []);
+
+  const approvalWsCallbacks = useMemo(() => ({
+    onInboxUpdate: (data: Record<string, unknown>) => {
+      triggerApprovalRefreshFromInbox(data as unknown as MobileInboxSnapshot);
+    },
+    onReviewUpdate: (data: Record<string, unknown>) => {
+      if (reviewPayloadTouchesApprovals(data)) {
+        approvalRefreshRef.current();
+      }
+    },
+    onRealtimeEvent: (event: RealtimeEventEnvelope) => {
+      if (event.channel !== 'mobile' || event.event !== 'mobile.inbox.snapshot') return;
+      const payload = event.data as { inbox?: MobileInboxSnapshot };
+      triggerApprovalRefreshFromInbox(payload.inbox);
+    },
+  }), [triggerApprovalRefreshFromInbox]);
+
+  const { connectionState: wsStatus } = useSharedDesktopWs(undefined, approvalWsCallbacks);
 
   useEffect(() => subscribeTimelineVisible(setTimelineVisible), []);
 
@@ -683,7 +750,7 @@ function DashboardInner() {
   useEffect(() => {
     let cancelled = false;
 
-    function fetchCount() {
+    const fetchCount = () => {
       fetchOnce('/api/panel/approvals?status=all')
         .then((r) => r.json())
         .then((data) => {
@@ -693,12 +760,15 @@ function DashboardInner() {
           setResolvedApprovalCount(approvals.filter((approval) => approval.status !== 'pending').length);
         })
         .catch(() => {});
-    }
-    // Keep approval and resolution state fairly fresh so discovery cues track the operator flow.
-    const initTimer = setTimeout(fetchCount, 1_500);
-    const id = setInterval(fetchCount, 5_000);
+    };
+
+    approvalRefreshRef.current = fetchCount;
+    // Keep a slower fallback poll in place; WS push handles the fast path.
+    const initTimer = setTimeout(() => { approvalRefreshRef.current(); }, 1_500);
+    const id = setInterval(() => { approvalRefreshRef.current(); }, 30_000);
     return () => {
       cancelled = true;
+      approvalRefreshRef.current = () => {};
       clearTimeout(initTimer);
       clearInterval(id);
     };
