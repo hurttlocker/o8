@@ -24,7 +24,7 @@ import { NavRail, type NavSection } from '@/components/desktop/NavRail';
 import { ContextualPanel, type ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
-import { readTimelineVisible, subscribeTimelineVisible, writeTimelineVisible } from '@/lib/appearance/timeline';
+import { readTimelineVisible, subscribeTimelineVisible } from '@/lib/appearance/timeline';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
@@ -52,13 +52,6 @@ import {
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
-import {
-  areAllFtuxMilestonesSeen,
-  readFtuxMilestones,
-  writeFtuxMilestones,
-  type FtuxMilestoneId,
-  type FtuxMilestonesState,
-} from '@/lib/ftux/milestones';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, describeWorkflowStage } from '@/lib/workflows/status';
@@ -70,8 +63,6 @@ import type {
   WorkspaceScopeEntry,
 } from './types';
 import {
-  FTUX_AGENT_PANEL_TARGET_WIDTH,
-  FTUX_REVEAL_DURATION_MS,
   FTUX_SPRING_TRANSITION,
   GuidedDiscoveryCoachmark,
   GuidedDiscoveryHalo,
@@ -113,6 +104,7 @@ import {
   worktreeStageLabel,
   worktreeStageTone,
 } from './utils';
+import { useFtuxMilestones } from './hooks/useFtuxMilestones';
 import { useSetupWizard } from './hooks/useSetupWizard';
 
 /* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
@@ -233,101 +225,33 @@ function DashboardInner() {
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
-  const [ftuxMilestones, setFtuxMilestones] = useState<FtuxMilestonesState>(() => readFtuxMilestones());
-  const [ftuxQueuedMilestones, setFtuxQueuedMilestones] = useState<FtuxMilestoneId[]>([]);
-  const [activeFtuxMilestone, setActiveFtuxMilestone] = useState<FtuxMilestoneId | null>(null);
-  const [ftuxFirstChangedFile, setFtuxFirstChangedFile] = useState<{ path: string; workspace: string | null } | null>(null);
   const [mobileRemoteHref, setMobileRemoteHref] = useState('/mobile');
   const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
   const lastMarkedWorkspaceReadRef = useRef<string>('');
   const thoughtsPersistTimerRef = useRef<number | null>(null);
-  const ftuxMilestonesRef = useRef<FtuxMilestonesState>(ftuxMilestones);
-  const activeFtuxMilestoneRef = useRef<FtuxMilestoneId | null>(null);
-  const ftuxDormant = useMemo(() => areAllFtuxMilestonesSeen(ftuxMilestones), [ftuxMilestones]);
 
   useEffect(() => subscribeTimelineVisible(setTimelineVisible), []);
-
-  useEffect(() => {
-    ftuxMilestonesRef.current = ftuxMilestones;
-  }, [ftuxMilestones]);
-
-  useEffect(() => {
-    activeFtuxMilestoneRef.current = activeFtuxMilestone;
-  }, [activeFtuxMilestone]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setMobileRemoteHref(`${window.location.origin}/mobile`);
   }, []);
 
-  const enqueueFtuxMilestone = useCallback((milestoneId: FtuxMilestoneId) => {
-    if (ftuxMilestonesRef.current[milestoneId].seen) {
-      return false;
-    }
-
-    const next = {
-      ...ftuxMilestonesRef.current,
-      [milestoneId]: { seen: true },
-    };
-
-    ftuxMilestonesRef.current = next;
-    setFtuxMilestones(next);
-    writeFtuxMilestones(next);
-    setFtuxQueuedMilestones((current) => (
-      current.includes(milestoneId) || activeFtuxMilestoneRef.current === milestoneId
-        ? current
-        : [...current, milestoneId]
-    ));
-    return true;
-  }, []);
-
-  const dismissFtuxMilestone = useCallback(() => {
-    setActiveFtuxMilestone(null);
-  }, []);
-
-  useEffect(() => {
-    if (activeFtuxMilestone || ftuxQueuedMilestones.length === 0) {
-      return;
-    }
-
-    const [nextMilestone, ...remaining] = ftuxQueuedMilestones;
-    setFtuxQueuedMilestones(remaining);
-    setActiveFtuxMilestone(nextMilestone);
-  }, [activeFtuxMilestone, ftuxQueuedMilestones]);
-
-  useEffect(() => {
-    if (!activeFtuxMilestone) {
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setActiveFtuxMilestone((current) => (current === activeFtuxMilestone ? null : current));
-    }, FTUX_REVEAL_DURATION_MS);
-
-    return () => window.clearTimeout(timeout);
-  }, [activeFtuxMilestone]);
-
-  useEffect(() => {
-    if (activeFtuxMilestone !== 'firstAgentSpawned') {
-      return;
-    }
-
-    if (!sidebarVisible) {
-      setSidebarVisible(true);
-    }
-    setLeftWidth((current) => Math.max(current, FTUX_AGENT_PANEL_TARGET_WIDTH));
-  }, [activeFtuxMilestone, sidebarVisible]);
-
-  useEffect(() => {
-    if (activeFtuxMilestone !== 'firstCompletion') {
-      return;
-    }
-
-    if (!timelineVisible) {
-      writeTimelineVisible(true);
-      setTimelineVisible(true);
-    }
-  }, [activeFtuxMilestone, timelineVisible]);
+  const {
+    activeFtuxMilestone,
+    dismissFtuxMilestone,
+    enqueueFtuxMilestone,
+    ftuxDormant,
+    ftuxFirstChangedFile,
+    ftuxMilestones,
+    setFtuxFirstChangedFile,
+  } = useFtuxMilestones({
+    sidebarVisible,
+    setLeftWidth,
+    setSidebarVisible,
+    setTimelineVisible,
+    timelineVisible,
+  });
 
   // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
   useEffect(() => {
@@ -3178,6 +3102,7 @@ function DashboardInner() {
     ftuxMilestones.firstAgentSpawned.seen,
     ftuxMilestones.firstFileChange.seen,
     handleSelectFile,
+    setFtuxFirstChangedFile,
   ]);
 
   useEffect(() => {
