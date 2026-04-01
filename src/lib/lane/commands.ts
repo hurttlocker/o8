@@ -14,6 +14,7 @@ import type {
   LaneEventActor,
   Lane,
 } from '@/lib/lane/types';
+import type { ApprovalRisk } from '@/lib/approvals/types';
 import {
   createLane,
   getLane,
@@ -26,6 +27,7 @@ import { getLanePolicy, isProtectedBranch } from '@/lib/lane/policy';
 import { isLaneAutoReviewActive } from '@/lib/lane/auto-review';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
+import { FILE_SIZE_BLOCK_THRESHOLD_LINES, FILE_SIZE_WAIVERS } from '@/lib/orchestrator/dispatch';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { parseGitDiff } from '@/lib/worktree/diff-parser';
@@ -93,7 +95,7 @@ function buildLanePolicyContext(
   lane: Pick<Lane, 'id' | 'repoPath'>,
   verb: 'create_pr' | 'merge',
   actor: LaneEventActor,
-  opts?: { orchestratorReviewed?: boolean },
+  opts?: { orchestratorReviewed?: boolean; fileSizeLimitExceeded?: boolean },
 ) {
   // Auto-approve when: (a) headless auto-review is active, or
   // (b) the orchestrator already reviewed and approved the packet.
@@ -103,9 +105,141 @@ function buildLanePolicyContext(
     verb,
     laneId: lane.id,
     autoReview,
+    fileSizeLimitExceeded: opts?.fileSizeLimitExceeded === true,
   }, {
     workspacePath: lane.repoPath,
   });
+}
+
+function formatOversizedFiles(files: Array<{ path: string; lineCount: number }>) {
+  if (files.length === 0) {
+    return 'none';
+  }
+
+  const labels = files.map((file) => `${file.path} (${file.lineCount}L)`);
+  if (labels.length <= 4) {
+    return labels.join(', ');
+  }
+
+  return `${labels.slice(0, 4).join(', ')} (+${labels.length - 4} more)`;
+}
+
+async function getOversizedChangedFilesForLane(
+  lane: Pick<Lane, 'baseBranch' | 'worktreePath'>,
+) {
+  if (!lane.worktreePath) {
+    return [];
+  }
+
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execFileAsync = promisify(execFile);
+
+  try {
+    const result = await execFileAsync('git', ['diff', '--name-only', `${lane.baseBranch}...HEAD`], {
+      cwd: lane.worktreePath,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const changedFiles = Array.from(new Set(
+      result.stdout
+        .split('\n')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ));
+
+    const lineCounts = await Promise.allSettled(
+      changedFiles.map(async (filePath) => {
+        const wcResult = await execFileAsync('wc', ['-l', filePath], {
+          cwd: lane.worktreePath!,
+          maxBuffer: 256 * 1024,
+        });
+        const match = wcResult.stdout.match(/^\s*(\d+)/);
+        if (!match) {
+          return null;
+        }
+
+        return {
+          path: filePath,
+          lineCount: Number.parseInt(match[1], 10),
+        };
+      }),
+    );
+
+    return lineCounts
+      .flatMap((entry) => (entry.status === 'fulfilled' && entry.value ? [entry.value] : []))
+      .filter((file) => !FILE_SIZE_WAIVERS.has(file.path) && file.lineCount > FILE_SIZE_BLOCK_THRESHOLD_LINES)
+      .sort((left, right) => right.lineCount - left.lineCount || left.path.localeCompare(right.path));
+  } catch {
+    return [];
+  }
+}
+
+async function createLaneActionApproval(
+  lane: Lane,
+  actor: LaneEventActor,
+  input: {
+    verb: 'merge' | 'create_pr';
+    commitMessage?: string;
+    reviewSummary?: string;
+    title: string;
+    description: string;
+    summary: string;
+    risk: ApprovalRisk;
+    policyRuleId: string;
+    metadata?: Record<string, string>;
+    note: string;
+  },
+): Promise<LaneCommandResult> {
+  const rawDiff = await getDiffForLane(lane);
+  const files = parseGitDiff(rawDiff);
+  const approval = createApproval({
+    source: 'runtime',
+    runtime: lane.runtime,
+    agent: lane.label || lane.branch,
+    sessionKey: lane.sessionKey || `lane:${lane.id}`,
+    title: input.title,
+    description: input.description,
+    summary: input.summary,
+    diff: {
+      path: 'multi-file',
+      after: rawDiff || undefined,
+      files,
+    },
+    risk: input.risk,
+    policyRuleId: input.policyRuleId,
+    metadata: {
+      Lane: lane.id,
+      Branch: lane.branch,
+      Base: lane.baseBranch,
+      Runtime: lane.runtime,
+      ...(lane.packetId ? { Packet: lane.packetId } : {}),
+      ...input.metadata,
+    },
+    continuation: {
+      kind: 'lane',
+      laneId: lane.id,
+      verb: input.verb,
+      commitMessage: input.commitMessage,
+    },
+  });
+  await recordReviewLessonsForApproval(approval.id, lane, input.reviewSummary, files);
+  setLaneStatus(lane.id, 'awaiting_input', actor, 'approval_required');
+  void publishRealtimeMutation({
+    mutation: {
+      mutationId: `approval-create-${approval.id}`,
+      source: 'desktop',
+      action: 'approve',
+      sessionKey: approval.sessionKey,
+      surfaceId: approval.sessionKey,
+      status: 'pending',
+      note: `Approval required: ${approval.title}`,
+      createdAt: new Date().toISOString(),
+    },
+    refreshTargets: ['global', 'mobileInbox'],
+    sessionKeys: [approval.sessionKey],
+    fresh: true,
+  });
+  return { ok: false, laneId: lane.id, note: input.note, approvalId: approval.id };
 }
 
 export async function dispatch(command: LaneCommand): Promise<LaneCommandResult> {
@@ -316,55 +450,17 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       // Policy gate — require approval for PR creation
       const prPolicy = evaluatePolicy(buildLanePolicyContext(lane, 'create_pr', actor));
       if (prPolicy.requiresApproval && actor !== 'user') {
-        const rawDiff = await getDiffForLane(lane);
-        const files = parseGitDiff(rawDiff);
-        const approval = createApproval({
-          source: 'runtime',
-          runtime: lane.runtime,
-          agent: lane.label || lane.branch,
-          sessionKey: lane.sessionKey || `lane:${lane.id}`,
+        return createLaneActionApproval(lane, actor, {
+          verb: 'create_pr',
+          commitMessage: command.commitMessage,
+          reviewSummary: command.reviewSummary,
           title: 'Create pull request',
           description: command.reviewSummary || `Create PR from lane "${lane.label}" (${lane.branch} → ${lane.baseBranch})`,
           summary: `Create PR: ${lane.branch} → ${lane.baseBranch}`,
-          diff: {
-            path: 'multi-file',
-            after: rawDiff || undefined,
-            files,
-          },
           risk: prPolicy.risk,
           policyRuleId: prPolicy.ruleId,
-          metadata: {
-            Lane: lane.id,
-            Branch: lane.branch,
-            Base: lane.baseBranch,
-            Runtime: lane.runtime,
-            ...(lane.packetId ? { Packet: lane.packetId } : {}),
-          },
-          continuation: {
-            kind: 'lane',
-            laneId: command.laneId,
-            verb: 'create_pr',
-            commitMessage: command.commitMessage,
-          },
+          note: `Approval required: ${prPolicy.reason}`,
         });
-        await recordReviewLessonsForApproval(approval.id, lane, command.reviewSummary, files);
-        setLaneStatus(command.laneId, 'awaiting_input', actor, 'approval_required');
-        void publishRealtimeMutation({
-          mutation: {
-            mutationId: `approval-create-${approval.id}`,
-            source: 'desktop',
-            action: 'approve',
-            sessionKey: approval.sessionKey,
-            surfaceId: approval.sessionKey,
-            status: 'pending',
-            note: `Approval required: ${approval.title}`,
-            createdAt: new Date().toISOString(),
-          },
-          refreshTargets: ['global', 'mobileInbox'],
-          sessionKeys: [approval.sessionKey],
-          fresh: true,
-        });
-        return { ok: false, laneId: command.laneId, note: `Approval required: ${prPolicy.reason}`, approvalId: approval.id };
       }
 
       if (prPolicy.ruleId === 'auto_approve_orchestrator_review') {
@@ -429,60 +525,52 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
 
+      const oversizedFiles = await getOversizedChangedFilesForLane(lane);
+      if (oversizedFiles.length > 0) {
+        const largestFile = oversizedFiles[0];
+        const fileSizePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor, {
+          orchestratorReviewed: command.orchestratorReviewed,
+          fileSizeLimitExceeded: true,
+        }));
+
+        if (fileSizePolicy.requiresApproval && actor !== 'user') {
+          return createLaneActionApproval(lane, actor, {
+            verb: 'merge',
+            commitMessage: command.commitMessage,
+            reviewSummary: command.reviewSummary,
+            title: 'Override file size limit',
+            description: `Merge blocked by file size governance. Oversized changed file${oversizedFiles.length === 1 ? '' : 's'}: ${formatOversizedFiles(oversizedFiles)}. Operator approval is required to override.`,
+            summary: `File size limit override: ${lane.branch} → ${lane.baseBranch}`,
+            risk: fileSizePolicy.risk,
+            policyRuleId: fileSizePolicy.ruleId,
+            metadata: {
+              'File path': oversizedFiles.length === 1
+                ? largestFile.path
+                : `${largestFile.path} (+${oversizedFiles.length - 1} more)`,
+              'Current line count': String(largestFile.lineCount),
+              Threshold: String(FILE_SIZE_BLOCK_THRESHOLD_LINES),
+            },
+            note: `Approval required: ${fileSizePolicy.reason}`,
+          });
+        }
+      }
+
       // Policy gate — require approval for merge
       const mergePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor, {
         orchestratorReviewed: command.orchestratorReviewed,
       }));
       if (mergePolicy.requiresApproval && actor !== 'user') {
-        const rawDiff = await getDiffForLane(lane);
-        const files = parseGitDiff(rawDiff);
-        const approval = createApproval({
-          source: 'runtime',
-          runtime: lane.runtime,
-          agent: lane.label || lane.branch,
-          sessionKey: lane.sessionKey || `lane:${lane.id}`,
+        return createLaneActionApproval(lane, actor, {
+          verb: 'merge',
+          commitMessage: command.commitMessage,
+          reviewSummary: command.reviewSummary,
           title: 'Merge lane',
           description: command.reviewSummary || `Merge lane "${lane.label}" (${lane.branch} → ${lane.baseBranch})`,
           summary: `Merge: ${lane.branch} → ${lane.baseBranch}`,
-          diff: {
-            path: 'multi-file',
-            after: rawDiff || undefined,
-            files,
-          },
           risk: mergePolicy.risk,
           policyRuleId: mergePolicy.ruleId,
-          metadata: {
-            Lane: lane.id,
-            Branch: lane.branch,
-            Base: lane.baseBranch,
-            Runtime: lane.runtime,
-            ...(lane.packetId ? { Packet: lane.packetId } : {}),
-          },
-          continuation: {
-            kind: 'lane',
-            laneId: command.laneId,
-            verb: 'merge',
-            commitMessage: command.commitMessage,
-          },
+          note: `Approval required: ${mergePolicy.reason}`,
         });
-        await recordReviewLessonsForApproval(approval.id, lane, command.reviewSummary, files);
-        setLaneStatus(command.laneId, 'awaiting_input', actor, 'approval_required');
-        void publishRealtimeMutation({
-          mutation: {
-            mutationId: `approval-create-${approval.id}`,
-            source: 'desktop',
-            action: 'approve',
-            sessionKey: approval.sessionKey,
-            surfaceId: approval.sessionKey,
-            status: 'pending',
-            note: `Approval required: ${approval.title}`,
-            createdAt: new Date().toISOString(),
-          },
-          refreshTargets: ['global', 'mobileInbox'],
-          sessionKeys: [approval.sessionKey],
-          fresh: true,
-        });
-        return { ok: false, laneId: command.laneId, note: `Approval required: ${mergePolicy.reason}`, approvalId: approval.id };
       }
 
       if (mergePolicy.ruleId === 'auto_approve_orchestrator_review') {
