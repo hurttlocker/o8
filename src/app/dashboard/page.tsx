@@ -28,9 +28,11 @@ import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import type { DetectionResult } from '@/components/desktop/SetupWizard';
+import { WarmCompletionBadge, WarmRuntimeBar, WarmSidebarState } from '@/components/desktop/WarmDashboardState';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
+import type { SetupConfig, SetupWarmRuntimeAvailability, SetupWarmState } from '@/lib/setup/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type {
@@ -108,6 +110,46 @@ function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
     summary: String(raw.summary ?? ''),
   };
 }
+
+function buildWarmRuntimeAvailability(detection: DetectionResult | null | undefined): SetupWarmRuntimeAvailability[] {
+  if (!detection) return [];
+  return [
+    {
+      id: 'claude-code',
+      label: 'Claude Code',
+      detected: detection.tools.claudeCode.detected,
+      version: detection.tools.claudeCode.version,
+    },
+    {
+      id: 'codex',
+      label: 'Codex',
+      detected: detection.tools.codex.detected,
+      version: detection.tools.codex.version,
+    },
+    {
+      id: 'gemini',
+      label: 'Gemini CLI',
+      detected: detection.tools.gemini.detected,
+      version: detection.tools.gemini.version,
+    },
+  ];
+}
+
+function countDetectedRuntimes(runtimes: SetupWarmRuntimeAvailability[]) {
+  return runtimes.filter((runtime) => runtime.detected).length;
+}
+
+function mergeWarmState(current: SetupWarmState | null | undefined, patch: Partial<SetupWarmState>): SetupWarmState {
+  return {
+    ...current,
+    ...patch,
+    repos: patch.repos ?? current?.repos,
+    runtimes: patch.runtimes ?? current?.runtimes,
+    profile: patch.profile ?? current?.profile ?? null,
+  };
+}
+
+const SETUP_BADGE_ACK_STORAGE_KEY = 'cortex-setup-completion-badge-ack';
 
 function repoSlugFromRemote(remoteUrl?: string | null) {
   const url = (remoteUrl ?? '').replace(/\.git$/, '');
@@ -785,8 +827,25 @@ function DashboardInner() {
 
   // ── Setup wizard state ──
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
+  const [setupConfig, setSetupConfig] = useState<SetupConfig | null>(null);
   const [setupDetection, setSetupDetection] = useState<DetectionResult | null>(null);
+  const [setupCompletionBadgeVisible, setSetupCompletionBadgeVisible] = useState(false);
   const setupCheckedRef = useRef(false);
+  const currentWarmRuntimeSnapshot = useMemo(
+    () => buildWarmRuntimeAvailability(setupDetection),
+    [setupDetection],
+  );
+  const acknowledgeSetupCompletionBadge = useCallback((completedAt?: string | null) => {
+    setSetupCompletionBadgeVisible(false);
+    if (!completedAt || typeof window === 'undefined') return;
+    window.localStorage.setItem(SETUP_BADGE_ACK_STORAGE_KEY, completedAt);
+  }, []);
+  const showSetupCompletionBadgeForCompletion = useCallback((completedAt?: string | null) => {
+    if (!completedAt || typeof window === 'undefined') return;
+    const acknowledged = window.localStorage.getItem(SETUP_BADGE_ACK_STORAGE_KEY);
+    if (acknowledged === completedAt) return;
+    setSetupCompletionBadgeVisible(true);
+  }, []);
 
   useEffect(() => {
     if (setupCheckedRef.current) return;
@@ -795,8 +854,12 @@ function DashboardInner() {
       try {
         const configRes = await fetch('/api/setup/config');
         if (!configRes.ok) return;
-        const config = await configRes.json();
-        if (config.completedAt) return; // Already completed setup
+        const config = await configRes.json() as SetupConfig;
+        setSetupConfig(config);
+        if (config.completedAt) {
+          showSetupCompletionBadgeForCompletion(config.completedAt);
+          return;
+        }
         const detectRes = await fetch('/api/setup/detect');
         if (!detectRes.ok) return;
         const rawDetection = await detectRes.json() as Record<string, unknown>;
@@ -806,18 +869,26 @@ function DashboardInner() {
         setSetupWizardOpen(true);
       } catch { /* silent — don't block dashboard */ }
     })();
-  }, []);
+  }, [showSetupCompletionBadgeForCompletion]);
 
-  const handleSetupComplete = useCallback(async () => {
-    setSetupWizardOpen(false);
-    try {
-      await fetch('/api/setup/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completedAt: new Date().toISOString() }),
-      });
-    } catch { /* silent */ }
-  }, []);
+  useEffect(() => {
+    if (!setupCompletionBadgeVisible) return;
+
+    const completedAt = setupConfig?.completedAt ?? null;
+    const handleDismiss = () => acknowledgeSetupCompletionBadge(completedAt);
+    const timeoutId = window.setTimeout(handleDismiss, 10_000);
+
+    window.addEventListener('pointerdown', handleDismiss, { once: true });
+    window.addEventListener('keydown', handleDismiss, { once: true });
+    window.addEventListener('wheel', handleDismiss, { once: true });
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener('pointerdown', handleDismiss);
+      window.removeEventListener('keydown', handleDismiss);
+      window.removeEventListener('wheel', handleDismiss);
+    };
+  }, [acknowledgeSetupCompletionBadge, setupCompletionBadgeVisible, setupConfig?.completedAt]);
 
   const refreshWorkspaceLifecycle = useCallback(async () => {
     try {
@@ -1058,6 +1129,45 @@ function DashboardInner() {
     setGlobalRepoEntries(repos);
     return repos;
   }, []);
+  const warmSetupState = setupConfig?.warmState ?? null;
+  const warmRepoEntries = useMemo(
+    () => (globalRepoEntries.length > 0 ? globalRepoEntries : warmSetupState?.repos ?? []),
+    [globalRepoEntries, warmSetupState?.repos],
+  );
+  const warmRuntimeAvailability = useMemo(() => {
+    if ((warmSetupState?.runtimes?.length ?? 0) > 0) {
+      return warmSetupState?.runtimes ?? [];
+    }
+    return currentWarmRuntimeSnapshot;
+  }, [currentWarmRuntimeSnapshot, warmSetupState?.runtimes]);
+  const warmProfileContext = warmSetupState?.profile ?? null;
+  const warmCompletionRepoCount = warmSetupState?.repoCount ?? warmRepoEntries.length;
+  const warmCompletionRuntimeCount = warmSetupState?.runtimeCount ?? countDetectedRuntimes(warmRuntimeAvailability);
+
+  const handleOpenWarmRepo = useCallback((repo: RepoRegistryEntry) => {
+    setGlobalRepoId(repo.id);
+    setGlobalRepoBranch(repo.readiness?.currentBranch ?? repo.defaultBranch ?? 'main');
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('cortex-global-repo-id', repo.id);
+    }
+    window.dispatchEvent(new CustomEvent(OPEN_REPO_WORKSPACE_EVENT, {
+      detail: {
+        repoId: repo.id,
+        repoPath: repo.localPath,
+      },
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (globalRepoId || warmRepoEntries.length === 0) return;
+    const savedId = typeof window !== 'undefined' ? sessionStorage.getItem('cortex-global-repo-id') : null;
+    const fallbackRepo = (savedId
+      ? warmRepoEntries.find((repo) => repo.id === savedId) ?? null
+      : null) ?? warmRepoEntries[0] ?? null;
+    if (!fallbackRepo) return;
+    setGlobalRepoId(fallbackRepo.id);
+    setGlobalRepoBranch(fallbackRepo.readiness?.currentBranch ?? fallbackRepo.defaultBranch ?? 'main');
+  }, [globalRepoId, warmRepoEntries]);
 
   // Fetch registered repos on mount — prefer saved repo, otherwise restore the first registered repo
   useEffect(() => {
@@ -1080,6 +1190,53 @@ function DashboardInner() {
         setGlobalRepoEntries([]);
       });
   }, [loadRegisteredRepos]);
+
+  const handleSetupComplete = useCallback(async () => {
+    setSetupWizardOpen(false);
+
+    const completedAt = new Date().toISOString();
+    const reposForWarmState = globalRepoEntries.length > 0
+      ? globalRepoEntries
+      : (warmSetupState?.repos ?? []);
+    const runtimesForWarmState = currentWarmRuntimeSnapshot.length > 0
+      ? currentWarmRuntimeSnapshot
+      : (warmSetupState?.runtimes ?? []);
+    const nextWarmState = mergeWarmState(warmSetupState, {
+      completedAt,
+      repos: reposForWarmState,
+      repoCount: reposForWarmState.length,
+      runtimes: runtimesForWarmState,
+      runtimeCount: countDetectedRuntimes(runtimesForWarmState),
+    });
+    const nextConfig: SetupConfig = {
+      ...(setupConfig ?? { setupComplete: true }),
+      setupComplete: true,
+      completedAt,
+      warmState: nextWarmState,
+    };
+
+    setSetupConfig(nextConfig);
+    setSetupCompletionBadgeVisible(true);
+
+    try {
+      const response = await fetch('/api/setup/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          setupComplete: true,
+          completedAt,
+          warmState: nextWarmState,
+        }),
+      });
+      if (!response.ok) return;
+      const payload = await response.json() as { config?: SetupConfig };
+      if (payload.config) {
+        setSetupConfig(payload.config);
+      }
+    } catch {
+      // Warm state is still kept locally for this session if persistence fails.
+    }
+  }, [currentWarmRuntimeSnapshot, globalRepoEntries, setupConfig, warmSetupState]);
 
   const handleSelectRegisteredRepo = useCallback(async (repoId: string | null) => {
     setGlobalRepoId(repoId);
@@ -4861,6 +5018,8 @@ function DashboardInner() {
         )}
       />
 
+      <WarmRuntimeBar runtimes={warmRuntimeAvailability} />
+
       {/* ── Session Timeline ── */}
       {timelineVisible && <SessionTimeline
         repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
@@ -4971,6 +5130,12 @@ function DashboardInner() {
         overflow: 'hidden',
         position: 'relative',
       }}>
+        <WarmSidebarState
+          repos={warmRepoEntries}
+          selectedRepoId={globalRepoId}
+          profile={warmProfileContext}
+          onOpenRepo={handleOpenWarmRepo}
+        />
         <AgentPanel
           activeSessionKey={activeSessionKey ?? null}
           selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
@@ -5190,6 +5355,11 @@ function DashboardInner() {
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
       <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
+      <WarmCompletionBadge
+        visible={setupCompletionBadgeVisible}
+        repoCount={warmCompletionRepoCount}
+        runtimeCount={warmCompletionRuntimeCount}
+      />
       </div>{/* end main layout */}
 
       {/* ── Thoughts Card (floating overlay — sits on top of everything) ── */}
