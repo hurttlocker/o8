@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import type { RealtimeEventEnvelope, RealtimeSubscription } from '@/lib/realtime/types';
+import type { LaneLifecycleEventPayload, RealtimeEventEnvelope, RealtimeSubscription } from '@/lib/realtime/types';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -33,6 +33,7 @@ export interface DesktopWsCallbacks {
   onTerminalImage?: (sessionName: string, imageB64: string, filename: string) => void;
   // Agent lifecycle channel
   onAgentLifecycle?: (sessionName: string, state: string, exitCode?: number) => void;
+  onLaneLifecycle?: (event: LaneLifecycleEventPayload) => void;
 }
 
 interface UseDesktopWebSocketResult {
@@ -246,6 +247,12 @@ export function useDesktopWebSocket(
               data.state as string,
               data.exitCode as number | undefined,
             );
+          }
+          break;
+
+        case 'lane-lifecycle':
+          if (data) {
+            cbRef.current.onLaneLifecycle?.(data as unknown as LaneLifecycleEventPayload);
           }
           break;
 
