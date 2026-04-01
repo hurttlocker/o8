@@ -58,6 +58,7 @@ import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
+import type { FirstMergeCelebrationState } from '@/lib/ftux/first-merge';
 
 /* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
 const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
@@ -747,6 +748,7 @@ function DashboardInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
+  const [firstMergeCelebration, setFirstMergeCelebration] = useState<FirstMergeCelebrationState | null>(null);
   const [chatVisible, setChatVisible] = useState(true);
   const rightPanelMode = 'workspace' as const;
   const setRightPanelMode = (_mode: 'chat' | 'workspace') => { /* v1: right panel is always workspace */ };
@@ -769,6 +771,17 @@ function DashboardInner() {
   const thoughtsPersistTimerRef = useRef<number | null>(null);
 
   useEffect(() => subscribeTimelineVisible(setTimelineVisible), []);
+
+  useEffect(() => {
+    if (!firstMergeCelebration) return;
+    const timeoutMs = Math.max(0, firstMergeCelebration.endsAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setFirstMergeCelebration((current) => (
+        current?.startedAt === firstMergeCelebration.startedAt ? null : current
+      ));
+    }, timeoutMs);
+    return () => window.clearTimeout(timer);
+  }, [firstMergeCelebration]);
 
   // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
   useEffect(() => {
@@ -3297,6 +3310,10 @@ function DashboardInner() {
     setAgentsJson(JSON.stringify(agents));
   }, [updateAgents]);
 
+  const handleFirstMergeCelebration = useCallback((celebration: FirstMergeCelebrationState) => {
+    setFirstMergeCelebration(celebration);
+  }, []);
+
   // ── Run command in bottom terminal ──
   const handleRunInTerminal = useCallback((command: string) => {
     const tileId = ensureTileKind('contextual-panel', {
@@ -5024,6 +5041,7 @@ function DashboardInner() {
       {timelineVisible && <SessionTimeline
         repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
         repoName={globalRepoEntry?.name ?? null}
+        firstMergeCelebration={firstMergeCelebration}
         onExpand={() => {
           openCanvasTab({
             id: 'timeline:session',
@@ -5159,6 +5177,7 @@ function DashboardInner() {
           onOpenDeploy={handleOpenDeploy}
           onOpenMemory={handleOpenMemory}
           onAgentsUpdate={handleAgentsUpdate}
+          onFirstMergeCelebration={handleFirstMergeCelebration}
           onAgentKill={sendAgentKill}
           lifecycleEvents={lifecycleEvents}
           orchestratorPackets={thoughtsMissionState.packets}
