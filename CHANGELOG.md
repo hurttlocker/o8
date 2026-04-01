@@ -4,8 +4,129 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-03-31
+
+- `25402ec` fix: Launch workspace button uses blue accent when idle
+- `b695932` chore: remove lane registry JSON bandaids after SQLite migration
+- `eac770c` fix: MCP operator delegates to Next.js API — eliminate restart cycle
+- `4f26174` feat: migrate lane registry from JSON to SQLite — kill cross-process clobber
+- `468caa6` test: pipeline e2e verification
+- `703f31b` fix: directBranchMerge fuzzy-matches worktree branch from packet slug
+- `71824b1` fix: lane registry merge-on-write prevents cross-process clobber
+- `b6ca368` fix: lane binding survives MCP restart + direct branch merge fallback
+- `fd0baca` feat: sprint 6 wave 3
+- `5b95644` fix: governance pipeline
+- `a18bc0a` perf: sprint 6 wave 2
+- `61f5d8f` chore: sprint 6 wave 1
+- `e3321db` feat: supervisor fleet coordination
+- `89e8115` fix: white terminal theme for Global Terminal (ContextualPanel)
+- `7ab0a7d` fix: white terminal theme to match workspace panels
+- `dd15fa2` fix: unblock MCP dispatch pipeline
+- `cbb7fe1` refactor: redesign AuditLogPanel to luxury editorial style
+- `5af03fa` refactor: route all canvas tabs to workspace, deprecate Inspector panel
+- `67d7083` feat: route Audit Log to workspace tab instead of Inspector panel
+- `74ee353` docs: how o8 works
+- `0386c4b` feat: sprint 5
+- `72ddf13` feat: sprint 4
+- `559197f` fix: restore supervisor grace period order, fix progress status default
+- `9fb9baa` feat: sprint 3
+- `2659285` feat: sprint 2
+- `ee4cd90` fix: auto-open LLM chat on dashboard load, no more idle screen
+- `b351f89` fix: worktree isolation for dispatch + stderr noise filtering
+- `cec9caa` fix: chat text colors for white-bg panels, narrow side panels for more workspace
+- `f8f0693` fix: audit corrections for sprint 1
+- `31cb37b` fix: LLM proxy timeout + fallback chain, chat bubble & error styling
+- `ff3a21c` feat: structured multi-file diff in approval review gate
+- `babf50d` fix: remove hardcoded ~/clawd paths from MCP config and agent runtime workspace validation
+- `fe2a36d` feat: supervisor completion triggers lane review transition
+- `9eb53b0` feat: agent runtime PreToolUse hook script for policy enforcement
+- `df5857f` feat: one-shot send-as-task from ThoughtsCard chat
+- `f388970` feat: server-side packet auto-dispatch loop
+- `24173f2` feat: integrate native shell-plugin-mcp for native app automation in dev builds
+- `3e409e6` perf: JSONL tail-reads, cache-first actions, fingerprint optimization, sleep removal
+- `947b47a` perf: strip JSON pretty-printing from MCP server responses
+- `69cb8ad` fix: UI audit
+
+## 2026-03-30
+
+- `a58cd34` feat: native shell vibrancy polish, operator bridge fix, ghost session eviction, right panel cleanup
+- `e827aa6` chore: remove 337 lines of dead code — lane header, overflow menu remnants
+- `2b3d202` docs: operator MCP bridge
+- `f008f58` feat: operator MCP bridge — agent runtime as o8 control surface
+- `b09f43b` fix: GitHub rate limit backoff, activity feed polish, brand doc alignment
+- `7644e08` feat: workspace UI overhaul
+- `125caca` feat: UI polish pass
+
+## 2026-03-29
+
+- `49ee448` fix: move approvals into Review tab instead of separate slide-over
+- `78a1155` fix: convert Approvals from full-page takeover to slide-over panel
+- `5700772` fix: filter idle worktree branches from sidebar, add disclosure
+- `0c95e74` fix: kill "Ad hoc" terminology, sanitize debug text in cards
+- `2577fe4` fix: harden agent tab detection with isAgentRuntimeTab guard
+- `0c9cdd5` fix: agent tabs always show connecting state, never welcome screen
+- `caef4ff` fix: lane tab sync survives HMR, transcript connecting state
+- `66334d5` fix: agent transcript display
+- `1ddad39` fix: auto-open chat tabs for delegated lane sessions
+- `52b9ba3` feat: o8 brand mark — three-circle logo in accent blue
+- `3d04797` fix: polish pass
+- `b1507b5` feat: orchestrator loop — plan, delegate, review, approve
+- `234f8c0` feat: governance engine
+- `8b97308` feat: refine o8 product brief from 3-turn brainstormer session
+- `2776758` feat: add brainstormer agent (Opus) with multi-turn delegation pattern
+- `c13ceab` chore: rename Rainwater to o8 across all user-facing surfaces, clean repo bloat
+- `75c90b2` feat: add REVIEW.md, agent delegation table in AI provider.md, update agent descriptions
+- `ca15b5c` feat: add o8 product brief, update AI provider.md with orchestrator model, create subagents
+- `a43a45a` fix: resolve 6 smoke test audit issues
+- `6c5d722` feat: scrollable workspace lane tabs with transparent arrow overlays
+- `4ee4a7f` fix: default WorkspaceSidePanel view to 'diff' instead of 'blank'
+- `572e8d9` fix: remove output state from workspace repo-sync effect deps
+- `0c28ed0` fix: WorkspaceSidePanel render loop + switch dev to webpack for stable HMR
+- `bebc4a8` fix: revert right panel default to chat (WorkspaceSidePanel render loop)
+- `3511143` fix: replace ResizeObserver with event-driven scroll state
+- `d46c0d1` fix: prevent render loop in tab scroll observer
+- `cf6807e` feat: tab scroll arrows, tool cards in Thoughts, right panel defaults to review
+- `1a7fcb7` fix: supervisor completion grace period, issues pagination, chat restore, HMR loop
+- `df8bff5` feat: workspace tab shows issue context + diagnostics settings tab (,)
+- `6494b4d` fix: chat/approval recovery + runtime truthfulness (,)
+- `716dbdd` fix: sanitize transcript viewer, filter stale agents, repo readiness gate (,,)
+- `4a09026` feat: one-click issue launch icon + lane-scoped review rail (,)
+- `4436c2c` fix: Security hardening
+- `31a87d7` fix: ThoughtsCard dedup, alert accent blue, issues sync pagination (closes)
+- `5b3dff6` fix: bridge-aware agent liveness, orchestrator stream dedup, worktree auto-prune
+
+## 2026-03-28
+
+- `dbcdcb7` fix: stabilize workspace agent runtime lane tabs
+- `8c71a34` fix: bind workspace tab to agent runtime session key on orchestrator launch
+- `e9c9c67` fix: wire supervisor env, inventory filter, workspace tab binding, render loop
+- `e222467` Revert "fix: use red accent for agent panel header (closes)"
+- `7a1d2b6` fix: use red accent for agent panel header (closes)
+- `09f3f32` fix: neutralize alerts tray palette for issue
+- `9b91cc7` fix: correct supervisor all-done summary status and stuck detection
+- `6fc1e9c` feat: add orchestrator MCP server, delegation tools, and agent supervisor
+- `862652c` fix: rewrite orchestrator stream to use structured JSON output
+- `281a490` feat: add GitHub issues to ThoughtsCard Mission Control
+- `fd7409a` fix: resolve workspace lane restore race on reload
+
+## 2026-03-27
+
+- `e00bffd` fix: clear stale workspace state and scope llm history
+- `27749b5` fix: recover stranded kanban ui integrations
+- `463ff8d` feat: add translucent desktop dark mode shell
+- `aac8e09` feat: harden workspace shell and terminal sessions
+- `5c76535` feat: add Rainwater board and restore system-wide timeline
+- `682b533` fix: persist repo workspace panes across reopen
+- `578e411` feat: move repo selection into workspace headers
+
 ## 2026-03-26
 
+- `1a791e3` fix: align workspace session and review flow
+- `3b14ddb` fix: normalize pr detail arrays in canvas
+- `1e6f1e2` fix: guard missing pr reviews in canvas
+- `06fd8fd` fix: clarify review panel pr action
+- `24b6ae1` feat: fix branch-scoped review flow
+- `f8dabac` fix: polish workspace review companion surfaces
 - `551c390` fix: stage workspace review context before send
 - `b6e1953` fix: tighten workspace review panel flow
 - `c0eacdb` feat: turn workspace side panel into repo companion surface
