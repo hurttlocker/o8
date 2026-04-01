@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, ne } from 'drizzle-orm';
 import { getDb, laneEvents, lanes } from '@/lib/db';
 import type {
   Lane,
@@ -128,6 +128,27 @@ function getOrderedLaneList(): Lane[] {
     .filter((lane): lane is Lane => lane !== null);
 }
 
+function getFilteredLaneList(
+  whereClause?: ReturnType<typeof and>,
+): Lane[] {
+  const rows = whereClause
+    ? getLaneDb()
+      .select()
+      .from(lanes)
+      .where(whereClause)
+      .orderBy(asc(lanes.createdAt))
+      .all()
+    : getLaneDb()
+      .select()
+      .from(lanes)
+      .orderBy(asc(lanes.createdAt))
+      .all();
+
+  return rows
+    .map((row) => mapLaneRow(row)!)
+    .filter((lane): lane is Lane => lane !== null);
+}
+
 export function createLane(opts: {
   repoPath: string;
   branch: string;
@@ -183,9 +204,18 @@ export function listLanes(): Lane[] {
 }
 
 export function listActiveLanes(): Lane[] {
-  return listLanes().filter(
-    (lane) => lane.status !== 'archived' && lane.status !== 'completed',
-  );
+  return getFilteredLaneList(and(
+    ne(lanes.status, 'archived'),
+    ne(lanes.status, 'completed'),
+  ));
+}
+
+export function listActiveLanesWithSessions(): Lane[] {
+  return getFilteredLaneList(and(
+    ne(lanes.status, 'archived'),
+    ne(lanes.status, 'completed'),
+    isNotNull(lanes.sessionKey),
+  ));
 }
 
 export function findLaneBySession(sessionKey: string): Lane | null {

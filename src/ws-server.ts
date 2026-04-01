@@ -54,6 +54,7 @@ import {
   ensureOrchestratorSession,
   sendToOrchestrator,
   getOrchestratorSession,
+  rehydrateOrchestratorSessions,
 } from './lib/lane/orchestrator-session';
 import {
   startSupervisorLoop,
@@ -2692,13 +2693,6 @@ if (reviewPollTimer.unref) reviewPollTimer.unref();
 // - On WS disconnect, a 10s grace period allows hot-reload reconnects before killing.
 // - cortex-codex-*/cortex-claude-* sessions persist indefinitely (stall detector manages them).
 
-// Start everything
-startPollingLoops();
-startBrowserDiscoveryRealtimeLoop();
-startAttachedBrowserRefreshLoop();
-scheduleRealtimeRuntimeRefresh({ reason: 'startup', fresh: false });
-scheduleRealtimeMobileInboxRefresh(500);
-
 httpServer.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
     console.log(`[ws-server] Port ${WS_PORT} in use — killing stale process...`);
@@ -2729,141 +2723,159 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // Agent-launched sessions (cortex-codex-*, cortex-claude-*) are separately
 // managed by the stall detector and lifecycle system.
 
-httpServer.listen(WS_PORT, '0.0.0.0', () => {
-  console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+async function bootstrapWsServer() {
+  try {
+    await rehydrateOrchestratorSessions();
+  } catch (error) {
+    console.warn(
+      `[orchestrator-rehydrate] WS startup rehydration failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
-  // ── Start Agent Supervisor ──
-  const NEXT_ORIGIN = `http://localhost:${process.env.PORT || '3001'}`;
-  const supervisorCallbacks: SupervisorCallbacks = {
-    async fetchFleetStatus() {
-      const res = await fetch(`${NEXT_ORIGIN}/api/runtime/inventory?fresh=1`, { signal: AbortSignal.timeout(8000) });
-      const data = await res.json() as { agents?: Array<Record<string, unknown>> };
-      return ((data.agents ?? []) as Array<Record<string, unknown>>)
-        .filter((a) => a.runtime === 'codex' || a.runtime === 'claude-code')
-        .map((a) => ({
-          sessionKey: a.sessionKey as string,
-          status: a.status as string,
-          name: a.name as string,
-          workspace: a.workspace as string,
-          currentTask: a.currentTask as string,
+  startPollingLoops();
+  startBrowserDiscoveryRealtimeLoop();
+  startAttachedBrowserRefreshLoop();
+  scheduleRealtimeRuntimeRefresh({ reason: 'startup', fresh: false });
+  scheduleRealtimeMobileInboxRefresh(500);
+
+  httpServer.listen(WS_PORT, '0.0.0.0', () => {
+    console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+
+    // ── Start Agent Supervisor ──
+    const NEXT_ORIGIN = `http://localhost:${process.env.PORT || '3001'}`;
+    const supervisorCallbacks: SupervisorCallbacks = {
+      async fetchFleetStatus() {
+        const res = await fetch(`${NEXT_ORIGIN}/api/runtime/inventory?fresh=1`, { signal: AbortSignal.timeout(8000) });
+        const data = await res.json() as { agents?: Array<Record<string, unknown>> };
+        return ((data.agents ?? []) as Array<Record<string, unknown>>)
+          .filter((a) => a.runtime === 'codex' || a.runtime === 'claude-code')
+          .map((a) => ({
+            sessionKey: a.sessionKey as string,
+            status: a.status as string,
+            name: a.name as string,
+            workspace: a.workspace as string,
+            currentTask: a.currentTask as string,
+          }));
+      },
+      async fetchTranscript(sessionKey, limit) {
+        const res = await fetch(`${NEXT_ORIGIN}/api/runtime/transcript?sessionKey=${encodeURIComponent(sessionKey)}&limit=${limit}`, { signal: AbortSignal.timeout(8000) });
+        const data = await res.json() as { transcript?: Array<Record<string, unknown>> };
+        return ((data.transcript ?? []) as Array<Record<string, unknown>>).map((e) => ({
+          id: (e.id as string) ?? '',
+          role: (e.role as string) ?? '',
+          text: (e.text as string) ?? '',
+          timestamp: e.timestamp as number | undefined,
+          timestampLabel: e.timestampLabel as string | undefined,
+          toolName: e.toolName as string | undefined,
         }));
-    },
-    async fetchTranscript(sessionKey, limit) {
-      const res = await fetch(`${NEXT_ORIGIN}/api/runtime/transcript?sessionKey=${encodeURIComponent(sessionKey)}&limit=${limit}`, { signal: AbortSignal.timeout(8000) });
-      const data = await res.json() as { transcript?: Array<Record<string, unknown>> };
-      return ((data.transcript ?? []) as Array<Record<string, unknown>>).map((e) => ({
-        id: (e.id as string) ?? '',
-        role: (e.role as string) ?? '',
-        text: (e.text as string) ?? '',
-        timestamp: e.timestamp as number | undefined,
-        timestampLabel: e.timestampLabel as string | undefined,
-        toolName: e.toolName as string | undefined,
-      }));
-    },
-    async steerAgent(surfaceId, message) {
-      await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'steer', surfaceId, message }),
-        signal: AbortSignal.timeout(8000),
-      });
-    },
-    async interruptAgent(surfaceId) {
-      await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'interrupt', surfaceId }),
-        signal: AbortSignal.timeout(8000),
-      });
-    },
-    async relaunchAgent(prompt, repoPath, taskName) {
-      const res = await fetch(`${NEXT_ORIGIN}/api/runtime/launch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName }),
-        signal: AbortSignal.timeout(15000),
-      });
-      const data = await res.json() as { ok?: boolean; surfaceId?: string };
-      return data.ok ? (data.surfaceId as string) : null;
-    },
-    broadcastAgentUpdate(update: AgentUpdateEvent) {
-      const msg = JSON.stringify({
-        channel: 'orchestrator',
-        event: 'agent-update',
-        data: update,
-      });
-      for (const [cid] of orchestratorSubscriptions) {
-        const c = clients.get(cid);
-        if (c) sendRaw(c, msg);
-      }
-    },
-    queueOrchestratorEscalation,
-    onAgentProgress(surfaceId, lastMessage) {
-      const watched = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
-      const update: AgentUpdateEvent = {
-        surfaceId,
-        name: watched?.name ?? surfaceId,
-        status: watched?.lastStatus ?? 'running',
-        detail: lastMessage,
-        repoPath: watched?.repoPath,
-      };
-      console.log(`[supervisor] Agent ${surfaceId} progress: ${lastMessage.slice(0, 80)}`);
-
-      const msg = JSON.stringify({
-        channel: 'orchestrator',
-        event: 'agent-update',
-        data: update,
-      });
-      for (const [cid] of orchestratorSubscriptions) {
-        const c = clients.get(cid);
-        if (c) sendRaw(c, msg);
-      }
-    },
-    onAgentCompletion(surfaceId, outcome) {
-      void (async () => {
-        try {
-          const { findLaneBySession, setLaneStatus } = await import('@/lib/lane/registry');
-          const lane = findLaneBySession(surfaceId);
-          if (!lane) {
-            return;
-          }
-
-          if (outcome === 'completed') {
-            const updated = setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
-            if (updated) {
-              const packetId = updated.packetId ?? lane.packetId;
-              const sessionKey = updated.sessionKey ?? surfaceId;
-              if (packetId) {
-                try {
-                  const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
-                  await capturePacketCompletionContext(packetId, sessionKey);
-                } catch (error) {
-                  console.error(`[context-relay] Failed to capture completion context for packet ${packetId}:`, error);
-                }
-              } else {
-                console.warn(`[context-relay] Skipped completion context capture for lane ${lane.id}; packetId missing`);
-              }
-              const { triggerAutoReview } = await import('@/lib/lane/auto-review');
-              triggerAutoReview(updated);
-              await runHeadlessSprintTick({
-                releasePacketIds: packetId ? [packetId] : undefined,
-              });
-            }
-            console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
-            return;
-          }
-
-          setLaneStatus(lane.id, 'awaiting_input', 'system', 'agent_failed');
-          console.log(`[supervisor] Agent ${surfaceId} failed, lane ${lane.id} -> awaiting_input`);
-        } catch (error) {
-          console.error('[supervisor] Completion callback failed:', error);
+      },
+      async steerAgent(surfaceId, message) {
+        await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'steer', surfaceId, message }),
+          signal: AbortSignal.timeout(8000),
+        });
+      },
+      async interruptAgent(surfaceId) {
+        await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'interrupt', surfaceId }),
+          signal: AbortSignal.timeout(8000),
+        });
+      },
+      async relaunchAgent(prompt, repoPath, taskName) {
+        const res = await fetch(`${NEXT_ORIGIN}/api/runtime/launch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const data = await res.json() as { ok?: boolean; surfaceId?: string };
+        return data.ok ? (data.surfaceId as string) : null;
+      },
+      broadcastAgentUpdate(update: AgentUpdateEvent) {
+        const msg = JSON.stringify({
+          channel: 'orchestrator',
+          event: 'agent-update',
+          data: update,
+        });
+        for (const [cid] of orchestratorSubscriptions) {
+          const c = clients.get(cid);
+          if (c) sendRaw(c, msg);
         }
-      })();
-    },
-  };
-  startSupervisorLoop(supervisorCallbacks);
-  stopHeadlessLoop = startHeadlessSprintLoop(10_000);
-});
+      },
+      queueOrchestratorEscalation,
+      onAgentProgress(surfaceId, lastMessage) {
+        const watched = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
+        const update: AgentUpdateEvent = {
+          surfaceId,
+          name: watched?.name ?? surfaceId,
+          status: watched?.lastStatus ?? 'running',
+          detail: lastMessage,
+          repoPath: watched?.repoPath,
+        };
+        console.log(`[supervisor] Agent ${surfaceId} progress: ${lastMessage.slice(0, 80)}`);
+
+        const msg = JSON.stringify({
+          channel: 'orchestrator',
+          event: 'agent-update',
+          data: update,
+        });
+        for (const [cid] of orchestratorSubscriptions) {
+          const c = clients.get(cid);
+          if (c) sendRaw(c, msg);
+        }
+      },
+      onAgentCompletion(surfaceId, outcome) {
+        void (async () => {
+          try {
+            const { findLaneBySession, setLaneStatus } = await import('@/lib/lane/registry');
+            const lane = findLaneBySession(surfaceId);
+            if (!lane) {
+              return;
+            }
+
+            if (outcome === 'completed') {
+              const updated = setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
+              if (updated) {
+                const packetId = updated.packetId ?? lane.packetId;
+                const sessionKey = updated.sessionKey ?? surfaceId;
+                if (packetId) {
+                  try {
+                    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+                    await capturePacketCompletionContext(packetId, sessionKey);
+                  } catch (error) {
+                    console.error(`[context-relay] Failed to capture completion context for packet ${packetId}:`, error);
+                  }
+                } else {
+                  console.warn(`[context-relay] Skipped completion context capture for lane ${lane.id}; packetId missing`);
+                }
+                const { triggerAutoReview } = await import('@/lib/lane/auto-review');
+                triggerAutoReview(updated);
+                await runHeadlessSprintTick({
+                  releasePacketIds: packetId ? [packetId] : undefined,
+                });
+              }
+              console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
+              return;
+            }
+
+            setLaneStatus(lane.id, 'awaiting_input', 'system', 'agent_failed');
+            console.log(`[supervisor] Agent ${surfaceId} failed, lane ${lane.id} -> awaiting_input`);
+          } catch (error) {
+            console.error('[supervisor] Completion callback failed:', error);
+          }
+        })();
+      },
+    };
+    startSupervisorLoop(supervisorCallbacks);
+    stopHeadlessLoop = startHeadlessSprintLoop(10_000);
+  });
+}
+
+void bootstrapWsServer();
 
 // ── Graceful shutdown ──
 
