@@ -15,6 +15,7 @@ import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import {
   approveAndMergePacket,
   createMission,
+  createMissionInline,
   dispatchMission,
   getMissionStatus,
   resetPacket,
@@ -333,14 +334,27 @@ const TOOLS: McpTool[] = [
   {
     name: 'create_mission',
     description:
-      'Create a sprint mission from GitHub issues, build packet dependencies, and persist the mission in the operator control plane.',
+      'Create a sprint mission from GitHub issues or inline issue objects. Use `issues` with GitHub issue refs (requires `gh` CLI), or `issues_inline` with pre-built objects (no GitHub dependency). Provide one or the other, not both.',
     inputSchema: {
       type: 'object',
       properties: {
         issues: {
           type: 'array',
           items: { type: 'string' },
-          description: 'GitHub issue references such as "334", "#334", or an issue URL.',
+          description: 'GitHub issue references such as "334", "#334", or an issue URL. Requires `gh` CLI access.',
+        },
+        issues_inline: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              number: { type: 'number', description: 'Issue number (can be synthetic).' },
+              title: { type: 'string', description: 'Issue title / task summary.' },
+              body: { type: 'string', description: 'Issue body / detailed description.' },
+            },
+            required: ['number', 'title'],
+          },
+          description: 'Inline issue objects — bypasses GitHub API. Use when rate-limited or for ad-hoc tasks.',
         },
         repoPath: {
           type: 'string',
@@ -356,7 +370,7 @@ const TOOLS: McpTool[] = [
           description: 'Optional sprint-wide constraints that should be included in packet scope.',
         },
       },
-      required: ['issues', 'repoPath'],
+      required: ['repoPath'],
     },
   },
   {
@@ -643,11 +657,42 @@ async function handleHistory(args: Record<string, unknown>): Promise<McpToolResu
 
 async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
+    const repoPath = requiredString(args, 'repoPath');
+    const runtime = parseMissionRuntime(args.runtime);
+    const constraints = optionalString(args, 'constraints');
+
+    // #453 — Support inline issues (no GitHub dependency)
+    const inlineIssues = Array.isArray(args.issues_inline) ? args.issues_inline : null;
+    const ghIssues = Array.isArray(args.issues) && args.issues.length > 0 ? args.issues : null;
+
+    if (!inlineIssues && !ghIssues) {
+      return textResult('Provide either `issues` (GitHub refs) or `issues_inline` (inline objects).', true);
+    }
+
+    if (inlineIssues) {
+      const parsed = inlineIssues.map((entry) => {
+        if (typeof entry !== 'object' || entry === null) throw new Error('Each inline issue must be an object.');
+        const e = entry as Record<string, unknown>;
+        const num = typeof e.number === 'number' ? e.number : Number(e.number);
+        if (!Number.isFinite(num) || num < 1) throw new Error('Each inline issue must have a positive number.');
+        const title = typeof e.title === 'string' ? e.title.trim() : '';
+        if (!title) throw new Error('Each inline issue must have a title.');
+        return { number: num, title, body: typeof e.body === 'string' ? e.body : '' };
+      });
+      const result = await createMissionInline({
+        issues_inline: parsed,
+        repoPath,
+        runtime,
+        constraints,
+      });
+      return jsonResult(result);
+    }
+
     const result = await createMission({
       issues: parseIssueList(args.issues),
-      repoPath: requiredString(args, 'repoPath'),
-      runtime: parseMissionRuntime(args.runtime),
-      constraints: optionalString(args, 'constraints'),
+      repoPath,
+      runtime,
+      constraints,
     });
     return jsonResult(result);
   } catch (error) {
