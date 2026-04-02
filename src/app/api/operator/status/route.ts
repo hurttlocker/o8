@@ -8,15 +8,10 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const sessionKeyFilter = request.nextUrl.searchParams.get('sessionKey') || undefined;
-    const port = process.env.PORT || '3001';
 
-    const [snapshot, pendingAll, timelineRes] = await Promise.all([
+    const [snapshot, pendingAll] = await Promise.all([
       getRuntimeInventorySnapshot({ fleetMode: 'smart', fresh: true }),
       listApprovals({ status: 'pending' }),
-      fetch(`http://localhost:${port}/api/panel/timeline?limit=5`).then(
-        (res) => (res.ok ? res.json() : { events: [] }),
-        () => ({ events: [] }),
-      ),
     ]);
 
     // ── Agents ──
@@ -54,11 +49,7 @@ export async function GET(request: NextRequest) {
     };
 
     // ── Timeline ──
-    const events: Array<Record<string, unknown>> = Array.isArray(timelineRes.events)
-      ? timelineRes.events
-      : Array.isArray(timelineRes)
-        ? timelineRes
-        : [];
+    const events: Array<Record<string, unknown>> = [];
 
     const recentActivity = events.slice(0, 5).map((e) => ({
       action: (e.action as string) || (e.type as string) || '',

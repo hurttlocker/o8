@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
 import { getCodexRolloutPath } from '@/lib/codex/sessions';
+import { getSqlite } from '@/lib/db';
 
 /**
  * Agent Supervisor — zero-cost rules engine that monitors launched Codex agents.
@@ -124,7 +125,7 @@ type TranscriptSourceCacheEntry = {
 
 // ── Constants ──
 
-const SUPERVISOR_HEARTBEAT_MS = 1_000;
+const SUPERVISOR_HEARTBEAT_MS = 5_000;
 const DEFAULT_ACTIVE_POLL_INTERVAL_MS = 2_000;
 const IDLE_POLL_INTERVAL_MS = 10_000;
 const COMPLETED_POLL_INTERVAL_MS = 30_000;
@@ -156,7 +157,6 @@ let registrationOrdinal = 0;
 
 function persistWatchedAgent(agent: WatchedAgent): void {
   try {
-    const { getSqlite } = require('@/lib/db') as { getSqlite: () => import('better-sqlite3').Database };
     const db = getSqlite();
     db.prepare(
       `INSERT OR REPLACE INTO watched_agents
@@ -172,7 +172,6 @@ function persistWatchedAgent(agent: WatchedAgent): void {
 
 function removePersistedAgent(surfaceId: string): void {
   try {
-    const { getSqlite } = require('@/lib/db') as { getSqlite: () => import('better-sqlite3').Database };
     getSqlite().prepare('DELETE FROM watched_agents WHERE surface_id = ?').run(surfaceId);
   } catch { /* DB may not be ready */ }
 }
@@ -192,7 +191,6 @@ interface PersistedAgentRow {
 
 export function rehydrateWatchedAgents(): number {
   try {
-    const { getSqlite } = require('@/lib/db') as { getSqlite: () => import('better-sqlite3').Database };
     const db = getSqlite();
     const rows = db.prepare('SELECT * FROM watched_agents WHERE completion_reported = 0').all() as PersistedAgentRow[];
     let count = 0;
