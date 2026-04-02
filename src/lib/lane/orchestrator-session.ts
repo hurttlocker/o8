@@ -45,6 +45,8 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'c
 const MCP_SERVER_PATH = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/cortex-mcp-server.ts');
 const MCP_CONFIG_DIR = join(homedir(), '.cortex-ide', 'mcp');
 const LOG_PREFIX = '[orchestrator-rehydrate]';
+/** #457 — Kill the claude process if it doesn't finish within this window */
+const PROCESS_TIMEOUT_MS = 90_000;
 
 let startupRehydrationPromise: Promise<void> | null = null;
 let startupRehydrationComplete = false;
@@ -362,8 +364,12 @@ export async function sendToOrchestrator(
   message: string,
   onEvent: (event: OrchestratorEvent) => void,
 ): Promise<void> {
+  // #457 — Auto-recover dead sessions by creating a fresh one
   if (session.status === 'dead') {
-    throw new Error('Orchestrator session is dead');
+    console.log(`[orchestrator-session] Auto-recovering dead session ${session.sessionName}`);
+    session.status = 'ready';
+    session.claudeSessionId = null;
+    session.proc = null;
   }
   if (session.status === 'busy') {
     throw new Error('Orchestrator session is busy');
@@ -402,6 +408,16 @@ export async function sendToOrchestrator(
     });
     session.proc = proc;
 
+    // #457 — Process timeout: kill the claude process if it hangs
+    const processTimeout = setTimeout(() => {
+      console.warn(`[orchestrator-session] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
+      proc.kill('SIGTERM');
+      // Force kill after 5s if SIGTERM doesn't work
+      setTimeout(() => {
+        if (!proc.killed) proc.kill('SIGKILL');
+      }, 5_000);
+    }, PROCESS_TIMEOUT_MS);
+
     let lineBuffer = '';
     let sessionId: string | null = session.claudeSessionId;
     let cost: number | null = null;
@@ -429,6 +445,7 @@ export async function sendToOrchestrator(
     });
 
     proc.on('error', (err) => {
+      clearTimeout(processTimeout);
       session.status = 'dead';
       session.proc = null;
       onEvent({ type: 'error', error: err.message });
@@ -436,6 +453,7 @@ export async function sendToOrchestrator(
     });
 
     proc.on('close', (code) => {
+      clearTimeout(processTimeout);
       session.proc = null;
 
       // Process any remaining buffer
