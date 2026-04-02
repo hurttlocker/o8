@@ -503,8 +503,8 @@ function MobileRemoteShellInner({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 'calc(env(safe-area-inset-bottom, 0px) + 140px)',
-    background: 'linear-gradient(0deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 45%, rgba(0,0,0,0.85) 58%, rgba(0,0,0,0.5) 74%, rgba(0,0,0,0.15) 90%, rgba(0,0,0,0) 100%)',
+    height: 'calc(env(safe-area-inset-bottom, 0px) + 80px)',
+    background: 'linear-gradient(0deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 60%, rgba(0,0,0,0.6) 80%, rgba(0,0,0,0) 100%)',
     pointerEvents: 'none',
     zIndex: 88,
   };
