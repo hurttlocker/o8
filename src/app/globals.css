@@ -48,7 +48,7 @@ html::-webkit-scrollbar {
 
 :root.dark-mode, .dark-mode {
   color-scheme: dark;
-  --bg: #000000;
+  --bg: #1A1816;
   --panel: rgba(28, 28, 30, 0.82);
   --panel-strong: #1c1c1e;
   --text: #f5f5f7;
@@ -81,12 +81,12 @@ html::-webkit-scrollbar {
 
 /* ═══ Dark Mode ═══ */
 /* Use both :root.dark-mode, .dark-mode and .dark-mode for iOS Safari compat */
-:root.dark-mode, .dark-mode, .dark-mode { background: #000000 !important; color: #f5f5f7 !important; }
+:root.dark-mode, .dark-mode, .dark-mode { background: #1A1816 !important; color: #FAF5F0 !important; }
 :root.dark-mode, .dark-mode body, body.dark-mode {
-  background: #000000 !important;
-  color: #f5f5f7 !important;
+  background: #1A1816 !important;
+  color: #FAF5F0 !important;
 }
-:root.dark-mode, .dark-mode .mobile-wrap, .dark-mode .mobile-wrap { background: #000000 !important; }
+:root.dark-mode, .dark-mode .mobile-wrap, .dark-mode .mobile-wrap { background: #1A1816 !important; }
 
 /* Kill decorative gradient in dark mode */
 :root.dark-mode, .dark-mode .mobile-wrap::before {
