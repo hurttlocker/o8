@@ -10,6 +10,7 @@ import {
   buildDomainLaneSummaries,
   readOrchestratorControlPlaneState,
   syncOrchestratorControlPlaneState,
+  withLockedState,
   writeOrchestratorControlPlaneState,
 } from '@/lib/orchestrator/control-plane';
 import { buildDependencyGraph, buildDagMetadata } from '@/lib/orchestrator/dag';
@@ -553,23 +554,29 @@ export async function dispatchMission(input: DispatchMissionInput) {
   const before = currentMissionState();
   normalizeMissionSelection(before, input.missionId);
 
-  const synced = await syncOrchestratorControlPlaneState(before);
-  const afterDispatch = await runDispatchTick(synced);
-  const finalState = writeOrchestratorControlPlaneState(afterDispatch);
-  const beforeByPacketId = new Map(before.packets.map((packet) => [packet.id, packet] as const));
-  const dispatched = finalState.packets.filter((packet) => {
-    const previous = beforeByPacketId.get(packet.id);
-    const hadLane = Boolean(previous?.lane?.laneId || previous?.lane?.sessionKey);
-    const hasLane = Boolean(packet.lane?.laneId || packet.lane?.sessionKey);
-    return !hadLane && hasLane;
-  }).length;
+  // Use locked state to prevent race with headless loop tick
+  const { result, state: finalState } = await withLockedState(async (current) => {
+    const afterDispatch = await runDispatchTick(current);
+    writeOrchestratorControlPlaneState(afterDispatch);
+
+    const beforeByPacketId = new Map(before.packets.map((packet) => [packet.id, packet] as const));
+    const dispatched = afterDispatch.packets.filter((packet) => {
+      const previous = beforeByPacketId.get(packet.id);
+      const hadLane = Boolean(previous?.lane?.laneId || previous?.lane?.sessionKey);
+      const hasLane = Boolean(packet.lane?.laneId || packet.lane?.sessionKey);
+      return !hadLane && hasLane;
+    }).length;
+
+    return dispatched;
+  });
+
   const packetIds = new Set(finalState.packets.map((packet) => packet.id));
   const dag = buildDagMetadata(finalState.packets);
 
-  log(`Dispatched mission ${finalState.missionId || 'current'} with ${dispatched} packet launches.`);
+  log(`Dispatched mission ${finalState.missionId || 'current'} with ${result} packet launches.`);
 
   return {
-    dispatched,
+    dispatched: result,
     waves: dag.totalWaves,
     activeAgents: missionAgentKeys(packetIds),
   };
