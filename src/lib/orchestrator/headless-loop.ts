@@ -1,6 +1,7 @@
 import {
   readOrchestratorControlPlaneState,
   reconcileOrchestratorControlPlaneState,
+  withLockedState,
   writeOrchestratorControlPlaneState,
 } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
@@ -104,25 +105,29 @@ function countActivePackets(state: OrchestratorMissionState) {
 }
 
 async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
-  let current = readOrchestratorControlPlaneState();
-  current = markReleasedPackets(current, drainReleasedPackets());
+  // #460 — Acquire the control-plane lock so concurrent API operations
+  // (reset_packet, etc.) don't race our read-modify-write cycle.
+  const { result } = await withLockedState(async (current) => {
+    const withReleases = markReleasedPackets(current, drainReleasedPackets());
+    const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
+    const dispatched = await runDispatchTick(reconciled);
+    const mission = writeOrchestratorControlPlaneState(dispatched);
+    const dag = buildDagMetadata(mission.packets);
+    const launched = countLaunchedPackets(reconciled, mission);
+    const active = countActivePackets(mission);
 
-  const reconciled = reconcileOrchestratorControlPlaneState(current);
-  const dispatched = await runDispatchTick(reconciled);
-  const mission = writeOrchestratorControlPlaneState(dispatched);
-  const dag = buildDagMetadata(mission.packets);
-  const launched = countLaunchedPackets(reconciled, mission);
-  const active = countActivePackets(mission);
+    console.log(`[headless] Tick: ${launched} launched, ${active} active, wave ${dag.currentWave}/${dag.totalWaves}`);
 
-  console.log(`[headless] Tick: ${launched} launched, ${active} active, wave ${dag.currentWave}/${dag.totalWaves}`);
+    return {
+      launched,
+      active,
+      currentWave: dag.currentWave,
+      totalWaves: dag.totalWaves,
+      mission,
+    } satisfies HeadlessSprintTickResult;
+  });
 
-  return {
-    launched,
-    active,
-    currentWave: dag.currentWave,
-    totalWaves: dag.totalWaves,
-    mission,
-  };
+  return result;
 }
 
 export async function runHeadlessSprintTick(options: { releasePacketIds?: string[] } = {}) {
