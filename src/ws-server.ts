@@ -45,6 +45,7 @@ import { execSync, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
+import { promisify } from 'node:util';
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
@@ -84,6 +85,8 @@ import type {
   RealtimeStreamKey,
   RealtimeSubscription,
 } from './lib/realtime/types';
+
+const execFileAsync = promisify(execFile);
 
 // Read repo registry directly (avoid importing registry.ts which uses 'server-only')
 function listRepoPathsSync(): string[] {
@@ -2553,9 +2556,77 @@ let reviewPollTimer: ReturnType<typeof setInterval> | null = null;
 const reviewTargetHashes = new Map<string, string>();
 const REVIEW_POLL_INTERVAL_MS = 10_000;
 
+type GitWorktreeRecord = {
+  path: string;
+  branch: string | null;
+};
+
 function shortHome(filePath: string) {
   const home = process.env.HOME ?? homedir();
   return filePath.startsWith(`${home}/`) ? filePath.replace(`${home}/`, '~/') : filePath;
+}
+
+function parseGitWorktreeList(raw: string): GitWorktreeRecord[] {
+  const worktrees: GitWorktreeRecord[] = [];
+  let current: GitWorktreeRecord | null = null;
+
+  for (const line of raw.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      current = { path: line.slice('worktree '.length), branch: null };
+      worktrees.push(current);
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith('branch refs/heads/')) {
+      current.branch = line.slice('branch refs/heads/'.length);
+    }
+  }
+
+  return worktrees;
+}
+
+async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<number> {
+  await execFileAsync('git', ['worktree', 'prune'], {
+    cwd: repoPath,
+    encoding: 'utf-8',
+    timeout: 10_000,
+  });
+
+  const [{ stdout: worktreeStdout }, { stdout: branchStdout }] = await Promise.all([
+    execFileAsync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: repoPath,
+      encoding: 'utf-8',
+      timeout: 10_000,
+    }),
+    execFileAsync('git', ['branch', '--list', 'worktree/codex/*', '--format=%(refname:short)'], {
+      cwd: repoPath,
+      encoding: 'utf-8',
+      timeout: 10_000,
+    }),
+  ]);
+
+  const activeBranches = new Set(
+    parseGitWorktreeList(worktreeStdout)
+      .filter((worktree) => worktree.branch && existsSync(worktree.path))
+      .map((worktree) => worktree.branch as string),
+  );
+
+  const orphanedBranches = branchStdout
+    .split('\n')
+    .map((branch) => branch.trim())
+    .filter(Boolean)
+    .filter((branch) => !activeBranches.has(branch));
+
+  for (const branch of orphanedBranches) {
+    await execFileAsync('git', ['branch', '-D', branch], {
+      cwd: repoPath,
+      encoding: 'utf-8',
+      timeout: 10_000,
+    });
+  }
+
+  console.log(`[cleanup] Pruned ${orphanedBranches.length} orphaned worktree branches`);
+  return orphanedBranches.length;
 }
 
 async function getReviewWatchTargets() {
@@ -2761,6 +2832,14 @@ async function bootstrapWsServer() {
   const db = getDb();
   if (db) {
     expireStaleApprovals();
+  }
+
+  try {
+    await pruneOrphanedCodexWorktreeBranches(REPO_ROOT);
+  } catch (error) {
+    console.warn(
+      `[cleanup] Failed to prune orphaned worktree branches: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   try {
