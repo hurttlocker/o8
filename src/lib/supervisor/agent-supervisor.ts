@@ -82,6 +82,8 @@ export interface SupervisorCallbacks {
   queueOrchestratorEscalation(repoPath: string, message: string): void;
   onAgentProgress?: (surfaceId: string, lastMessage: string) => void;
   onAgentCompletion?: (surfaceId: string, outcome: 'completed' | 'failed') => void;
+  /** Called when a failed agent is retried — update lane session binding */
+  onAgentRetry?: (oldSurfaceId: string, newSurfaceId: string) => void;
 }
 
 export interface SupervisorFleetStatusSummary {
@@ -622,8 +624,12 @@ async function handleStatusChange(
           `${watched.name} (retry ${watched.retryCount})`,
         );
         if (newSurfaceId) {
+          // Update lane session binding so the new agent is tracked
+          callbacks.onAgentRetry?.(watched.surfaceId, newSurfaceId);
+
           watchedAgents.delete(watched.surfaceId);
           transcriptSourceCache.delete(watched.surfaceId);
+          removePersistedAgent(watched.surfaceId);
 
           registerWatchedAgent(newSurfaceId, watched.repoPath, watched.name, watched.prompt);
           const newWatched = watchedAgents.get(newSurfaceId);
