@@ -323,7 +323,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           const wsPort = process.env.WS_PORT || '3002';
           await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.WS_TOKEN || 'cortex-ide'}` },
             body: JSON.stringify({
               surfaceId: result.surfaceId,
               repoPath: lane.repoPath,
@@ -450,7 +450,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           const wsPort = process.env.WS_PORT || '3002';
           await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.WS_TOKEN || 'cortex-ide'}` },
             body: JSON.stringify({ surfaceId: result.surfaceId, repoPath: lane.repoPath, name: lane.label || lane.branch, prompt }),
             signal: AbortSignal.timeout(3000),
           });
