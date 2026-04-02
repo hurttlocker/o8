@@ -2807,12 +2807,16 @@ async function bootstrapWsServer() {
         }));
       },
       async steerAgent(surfaceId, message) {
-        await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
+        const res = await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'steer', surfaceId, message }),
           signal: AbortSignal.timeout(8000),
         });
+        const data = await res.json().catch(() => null) as { ok?: boolean; error?: string; note?: string } | null;
+        if (!res.ok || data?.ok === false) {
+          throw new Error(data?.error ?? data?.note ?? `Steer failed (${res.status})`);
+        }
       },
       async interruptAgent(surfaceId) {
         await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
@@ -2865,68 +2869,101 @@ async function bootstrapWsServer() {
           if (c) sendRaw(c, msg);
         }
       },
-      onAgentCompletion(surfaceId, outcome) {
-        void (async () => {
-          try {
-            const { findLaneBySession, setLaneStatus } = await import('@/lib/lane/registry');
-            const lane = findLaneBySession(surfaceId);
-            if (!lane) {
-              return;
-            }
-
-            if (outcome === 'completed') {
-              // #454 — Auto-commit dirty worktree before transitioning to reviewing
-              const completionCwd = lane.worktreePath ?? lane.repoPath;
-              try {
-                const { execFile } = await import('node:child_process');
-                const { promisify } = await import('node:util');
-                const execAsync = promisify(execFile);
-                const { stdout: porcelain } = await execAsync('git', ['status', '--porcelain'], {
-                  cwd: completionCwd,
-                  maxBuffer: 10 * 1024 * 1024,
-                });
-                if (porcelain.trim().length > 0) {
-                  console.log(`[supervisor] Agent ${surfaceId} left dirty worktree, auto-committing in ${completionCwd}`);
-                  await execAsync('git', ['add', '-A'], { cwd: completionCwd, maxBuffer: 10 * 1024 * 1024 });
-                  await execAsync('git', ['commit', '-m', 'auto-commit: agent work before review'], {
-                    cwd: completionCwd,
-                    maxBuffer: 10 * 1024 * 1024,
-                  });
-                }
-              } catch (commitErr) {
-                console.warn(`[supervisor] Auto-commit check failed for ${completionCwd}:`, commitErr);
-              }
-
-              const updated = setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
-              if (updated) {
-                const packetId = updated.packetId ?? lane.packetId;
-                const sessionKey = updated.sessionKey ?? surfaceId;
-                if (packetId) {
-                  try {
-                    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
-                    await capturePacketCompletionContext(packetId, sessionKey);
-                  } catch (error) {
-                    console.error(`[context-relay] Failed to capture completion context for packet ${packetId}:`, error);
-                  }
-                } else {
-                  console.warn(`[context-relay] Skipped completion context capture for lane ${lane.id}; packetId missing`);
-                }
-                const { triggerAutoReview } = await import('@/lib/lane/auto-review');
-                triggerAutoReview(updated);
-                await runHeadlessSprintTick({
-                  releasePacketIds: packetId ? [packetId] : undefined,
-                });
-              }
-              console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
-              return;
-            }
-
-            setLaneStatus(lane.id, 'awaiting_input', 'system', 'agent_failed');
-            console.log(`[supervisor] Agent ${surfaceId} failed, lane ${lane.id} -> awaiting_input`);
-          } catch (error) {
-            console.error('[supervisor] Completion callback failed:', error);
+      async onAgentCompletion(surfaceId, outcome) {
+        try {
+          const { findLaneBySession, setLaneStatus } = await import('@/lib/lane/registry');
+          const lane = findLaneBySession(surfaceId);
+          if (!lane) {
+            return;
           }
-        })();
+
+          if (outcome === 'completed') {
+            const completionCwd = lane.worktreePath ?? lane.repoPath;
+            const {
+              autoCommitCompletionWorktree,
+              buildTypecheckFailureSteerMessage,
+              runCompletionTypecheck,
+            } = await import('@/lib/supervisor/completion-verification');
+            const typecheck = await runCompletionTypecheck(completionCwd);
+
+            if (!typecheck.ok) {
+              console.warn(`[supervisor] Agent ${surfaceId} failed post-completion typecheck in ${completionCwd}`);
+              try {
+                await supervisorCallbacks.steerAgent(
+                  surfaceId,
+                  buildTypecheckFailureSteerMessage(typecheck.output),
+                );
+                setLaneStatus(lane.id, 'running', 'system', 'post_completion_typecheck_failed');
+                console.log(`[supervisor] Agent ${surfaceId} resumed after post-completion typecheck failure`);
+                return {
+                  resume: true,
+                  detail: 'Post-completion typecheck failed — agent resumed with the compiler output.',
+                };
+              } catch (steerError) {
+                setLaneStatus(lane.id, 'awaiting_input', 'system', 'post_completion_typecheck_steer_failed');
+                queueOrchestratorEscalation(
+                  lane.repoPath,
+                  [
+                    `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion typecheck and could not be steered automatically.`,
+                    '',
+                    `Lane ${lane.id} needs operator attention before review.`,
+                    '',
+                    'Typecheck output:',
+                    '```',
+                    typecheck.output,
+                    '```',
+                    '',
+                    `Steer failure: ${steerError instanceof Error ? steerError.message : String(steerError)}`,
+                    '',
+                    'Decide: resume the agent manually with the compiler errors, or inspect the worktree and request changes.',
+                  ].join('\n'),
+                );
+                console.error('[supervisor] Completion typecheck steer failed:', steerError);
+                return {
+                  block: true,
+                  detail: 'Post-completion typecheck failed and the automatic steer also failed. Operator input is required.',
+                };
+              }
+            }
+
+            try {
+              const committed = await autoCommitCompletionWorktree(completionCwd);
+              if (committed) {
+                console.log(`[supervisor] Agent ${surfaceId} left dirty worktree, auto-committing in ${completionCwd}`);
+              }
+            } catch (commitErr) {
+              console.warn(`[supervisor] Auto-commit check failed for ${completionCwd}:`, commitErr);
+            }
+
+            const updated = setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
+            if (updated) {
+              const packetId = updated.packetId ?? lane.packetId;
+              const sessionKey = updated.sessionKey ?? surfaceId;
+              if (packetId) {
+                try {
+                  const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+                  await capturePacketCompletionContext(packetId, sessionKey);
+                } catch (error) {
+                  console.error(`[context-relay] Failed to capture completion context for packet ${packetId}:`, error);
+                }
+              } else {
+                console.warn(`[context-relay] Skipped completion context capture for lane ${lane.id}; packetId missing`);
+              }
+              const { triggerAutoReview } = await import('@/lib/lane/auto-review');
+              triggerAutoReview(updated);
+              await runHeadlessSprintTick({
+                releasePacketIds: packetId ? [packetId] : undefined,
+              });
+            }
+            console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
+            return;
+          }
+
+          setLaneStatus(lane.id, 'awaiting_input', 'system', 'agent_failed');
+          console.log(`[supervisor] Agent ${surfaceId} failed, lane ${lane.id} -> awaiting_input`);
+        } catch (error) {
+          console.error('[supervisor] Completion callback failed:', error);
+        }
       },
       onAgentRetry(oldSurfaceId, newSurfaceId) {
         // Update the lane's session binding so the new agent is tracked
