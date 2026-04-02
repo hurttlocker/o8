@@ -45,6 +45,8 @@ import { execSync, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
+import { expireStaleApprovals } from '@/lib/approvals/store';
+import { getDb } from '@/lib/db';
 import '@/lib/ws-runtime-env';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
@@ -2753,6 +2755,11 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 async function bootstrapWsServer() {
+  const db = getDb();
+  if (db) {
+    expireStaleApprovals();
+  }
+
   try {
     await rehydrateOrchestratorSessions();
   } catch (error) {

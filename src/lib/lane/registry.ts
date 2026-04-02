@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, isNotNull, ne, notInArray } from 'drizzle-orm';
+import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import type { LaneLifecycleEventPayload } from '@/lib/realtime/types';
@@ -455,6 +456,7 @@ export function reconcileLanesWithSessions(
   const db = getSqlite();
 
   db.transaction(() => {
+    expireStaleApprovals();
     const currentLanes = listLanes();
     const sessionByKey = new Map(activeSessions.map((session) => [session.sessionKey, session]));
     const laneBySession = new Map(
