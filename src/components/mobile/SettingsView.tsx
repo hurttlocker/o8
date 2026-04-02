@@ -1,66 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, memo } from 'react';
+import { memo, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { initSounds, isSoundEnabled, setSoundEnabled } from '@/lib/mobile/sounds';
 import { useTheme } from './ThemeContext';
 
-function AppearanceSection() {
-  const { theme, setTheme } = useTheme();
-  const options: Array<{ value: 'light' | 'dark' | 'system'; label: string }> = [
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
-    { value: 'system', label: 'System' },
-  ];
-
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <span style={{
-        display: 'block', fontSize: 12, fontWeight: 700,
-        color: '#8e8e93', textTransform: 'uppercase',
-        letterSpacing: '0.04em', padding: '0 16px', marginBottom: 6,
-      }}>
-        Appearance
-      </span>
-      <div style={{
-        borderRadius: 14,
-        background: 'rgba(0,122,255,0.03)',
-        border: '1px solid rgba(0,122,255,0.08)',
-        overflow: 'hidden', padding: '10px 16px',
-      }}>
-        {/* iOS-style segmented control */}
-        <div style={{
-          display: 'flex', gap: 0,
-          background: 'rgba(0,122,255,0.06)',
-          borderRadius: 9, padding: 2,
-        }}>
-          {options.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setTheme(opt.value)}
-              style={{
-                flex: 1,
-                padding: '7px 0',
-                borderRadius: 7,
-                border: 'none',
-                background: theme === opt.value ? '#fff' : 'transparent',
-                boxShadow: theme === opt.value ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
-                color: theme === opt.value ? '#007aff' : '#8e8e93',
-                fontSize: 13, fontWeight: 600,
-                fontFamily: '-apple-system, system-ui, sans-serif',
-                cursor: 'pointer',
-                transition: 'all 200ms ease',
-                WebkitTapHighlightColor: 'transparent',
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+type ThemeColors = ReturnType<typeof useTheme>['colors'];
 
 interface SettingsViewProps {
   onBack: () => void;
@@ -84,33 +28,110 @@ interface GitHubStatus {
   } | null;
 }
 
-function SettingsGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function sectionHeaderStyle(colors: ThemeColors, padding = '0 4px') {
+  return {
+    display: 'block',
+    fontSize: 12,
+    fontWeight: 600,
+    color: colors.textSecondary,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    padding,
+    marginBottom: 8,
+  };
+}
+
+function AppearanceSection() {
+  const { theme, setTheme, colors } = useTheme();
+  const options: Array<{ value: 'light' | 'dark' | 'system'; label: string }> = [
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
+    { value: 'system', label: 'System' },
+  ];
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <span style={sectionHeaderStyle(colors, '0 4px')}>Appearance</span>
+      <div
+        style={{
+          borderRadius: 14,
+          background: colors.cardBg,
+          border: `1px solid ${colors.cardBorder}`,
+          overflow: 'hidden',
+          padding: '10px 12px',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            gap: 4,
+            padding: 4,
+            borderRadius: 12,
+            background: 'rgba(255,255,255,0.04)',
+            border: `1px solid ${colors.border}`,
+          }}
+        >
+          {options.map((option) => {
+            const active = theme === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setTheme(option.value)}
+                style={{
+                  flex: 1,
+                  minHeight: 44,
+                  borderRadius: 12,
+                  border: active ? `1px solid ${colors.blueGlassBorder}` : '1px solid transparent',
+                  background: active ? colors.blueGlass : 'transparent',
+                  color: active ? colors.text : colors.textSecondary,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+        <p style={{ margin: '10px 4px 0', fontSize: 12, color: colors.textTertiary, lineHeight: 1.4 }}>
+          Mobile surfaces are currently dark-only. Appearance selection is retained for parity.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SettingsGroup({ label, children }: { label: string; children: ReactNode }) {
+  const { colors } = useTheme();
+
   return (
     <section style={{ marginBottom: 20 }}>
-      <span style={{
-        display: 'block',
-        fontSize: 12, fontWeight: 700,
-        color: '#8e8e93',
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-        padding: '0 4px',
-        marginBottom: 6,
-      }}>
-        {label}
-      </span>
-      <div style={{
-        borderRadius: 14,
-        background: 'rgba(0,122,255,0.02)',
-        border: '1px solid rgba(0,122,255,0.06)',
-        overflow: 'hidden',
-      }}>
+      {label ? <span style={sectionHeaderStyle(colors)}>{label}</span> : null}
+      <div
+        style={{
+          borderRadius: 14,
+          background: colors.cardBg,
+          border: `1px solid ${colors.cardBorder}`,
+          overflow: 'hidden',
+        }}
+      >
         {children}
       </div>
     </section>
   );
 }
 
-function SettingsRow({ label, value, detail, action, destructive, last }: {
+function SettingsRow({
+  label,
+  value,
+  detail,
+  action,
+  destructive,
+  last,
+}: {
   label: string;
   value?: string;
   detail?: string;
@@ -118,91 +139,110 @@ function SettingsRow({ label, value, detail, action, destructive, last }: {
   destructive?: boolean;
   last?: boolean;
 }) {
-  const Component = action ? 'button' : 'div';
+  const { colors } = useTheme();
+  const sharedStyle = {
+    width: '100%',
+    minHeight: 44,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: '13px 16px',
+    borderBottom: last ? 'none' : `1px solid ${colors.border}`,
+    background: 'transparent',
+    borderTop: 'none',
+    borderLeft: 'none',
+    borderRight: 'none',
+    cursor: action ? 'pointer' : 'default',
+    WebkitTapHighlightColor: 'transparent',
+    textAlign: 'left' as const,
+  };
+
+  if (action) {
+    return (
+      <button type="button" onClick={action} style={sharedStyle}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 500, color: destructive ? colors.red : colors.text }}>
+            {label}
+          </span>
+          {detail ? (
+            <p style={{ margin: '3px 0 0', fontSize: 12, color: colors.textSecondary, lineHeight: 1.4 }}>
+              {detail}
+            </p>
+          ) : null}
+        </div>
+        {value ? (
+          <span style={{ fontSize: 14, color: colors.textSecondary, flexShrink: 0 }}>{value}</span>
+        ) : null}
+        {!destructive ? (
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke={colors.textTertiary}
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0 }}
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        ) : null}
+      </button>
+    );
+  }
 
   return (
-    <Component
-      type={action ? 'button' : undefined}
-      onClick={action}
-      style={{
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '13px 16px',
-        borderBottom: last ? 'none' : '1px solid rgba(0,0,0,0.04)',
-        background: 'transparent',
-        border: last ? 'none' : undefined,
-        borderTop: 'none', borderLeft: 'none', borderRight: 'none',
-        cursor: action ? 'pointer' : 'default',
-        WebkitTapHighlightColor: 'transparent',
-        textAlign: 'left',
-      } as React.CSSProperties}
-    >
+    <div style={sharedStyle}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <span style={{
-          fontSize: 15, fontWeight: 500,
-          color: destructive ? '#ff3b30' : '#0a0a0a',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-        }}>
+        <span style={{ fontSize: 15, fontWeight: 500, color: destructive ? colors.red : colors.text }}>
           {label}
         </span>
-        {detail && (
-          <p style={{
-            margin: '2px 0 0', fontSize: 12,
-            color: '#8e8e93',
-          }}>
+        {detail ? (
+          <p style={{ margin: '3px 0 0', fontSize: 12, color: colors.textSecondary, lineHeight: 1.4 }}>
             {detail}
           </p>
-        )}
+        ) : null}
       </div>
-      {value && (
-        <span style={{
-          fontSize: 14, color: '#8e8e93',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-          marginLeft: 12, flexShrink: 0,
-        }}>
-          {value}
-        </span>
-      )}
-      {action && !destructive && (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-          stroke="#c7c7cc" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          style={{ marginLeft: 8, flexShrink: 0 }}>
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
-      )}
-    </Component>
+      {value ? <span style={{ fontSize: 14, color: colors.textSecondary, flexShrink: 0 }}>{value}</span> : null}
+    </div>
   );
 }
 
-function SettingsToggle({ label, detail, checked, onChange, last }: {
+function SettingsToggle({
+  label,
+  detail,
+  checked,
+  onChange,
+  last,
+}: {
   label: string;
   detail?: string;
   checked: boolean;
-  onChange: (val: boolean) => void;
+  onChange: (value: boolean) => void;
   last?: boolean;
 }) {
+  const { colors } = useTheme();
+
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '13px 16px',
-      borderBottom: last ? 'none' : '1px solid rgba(0,0,0,0.04)',
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        padding: '13px 16px',
+        borderBottom: last ? 'none' : `1px solid ${colors.border}`,
+      }}
+    >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <span style={{
-          fontSize: 15, fontWeight: 500, color: '#0a0a0a',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-        }}>
-          {label}
-        </span>
-        {detail && (
-          <p style={{ margin: '2px 0 0', fontSize: 12, color: '#8e8e93' }}>
+        <span style={{ fontSize: 15, fontWeight: 500, color: colors.text }}>{label}</span>
+        {detail ? (
+          <p style={{ margin: '3px 0 0', fontSize: 12, color: colors.textSecondary, lineHeight: 1.4 }}>
             {detail}
           </p>
-        )}
+        ) : null}
       </div>
       <button
         type="button"
@@ -210,25 +250,29 @@ function SettingsToggle({ label, detail, checked, onChange, last }: {
         role="switch"
         aria-checked={checked}
         style={{
-          width: 51, height: 31,
-          borderRadius: 16, border: 'none',
-          background: checked ? '#007aff' : 'rgba(0,0,0,0.08)',
+          width: 52,
+          minHeight: 32,
+          borderRadius: 999,
+          border: 'none',
+          background: checked ? colors.blueAccent : 'rgba(255,255,255,0.12)',
           position: 'relative',
           cursor: 'pointer',
-          transition: 'background 200ms ease',
-          flexShrink: 0, marginLeft: 12,
+          flexShrink: 0,
           WebkitTapHighlightColor: 'transparent',
         }}
       >
-        <span style={{
-          position: 'absolute',
-          top: 2, left: checked ? 22 : 2,
-          width: 27, height: 27,
-          borderRadius: '50%',
-          background: '#fff',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
-          transition: 'left 200ms cubic-bezier(0.32, 0.72, 0, 1)',
-        }} />
+        <span
+          style={{
+            position: 'absolute',
+            top: 2,
+            left: checked ? 22 : 2,
+            width: 28,
+            height: 28,
+            borderRadius: '50%',
+            background: colors.text,
+            boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+          }}
+        />
       </button>
     </div>
   );
@@ -236,16 +280,21 @@ function SettingsToggle({ label, detail, checked, onChange, last }: {
 
 function StatusDot({ connected }: { connected: boolean }) {
   return (
-    <span style={{
-      width: 8, height: 8, borderRadius: '50%',
-      background: connected ? '#34c759' : '#ff3b30',
-      boxShadow: connected ? '0 0 6px rgba(52,199,89,0.4)' : 'none',
-      flexShrink: 0,
-    }} />
+    <span
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: connected ? '#30d158' : '#ff453a',
+        boxShadow: connected ? '0 0 0 4px rgba(48,209,88,0.12)' : '0 0 0 4px rgba(255,69,58,0.12)',
+        flexShrink: 0,
+      }}
+    />
   );
 }
 
 export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewProps) {
+  const { colors } = useTheme();
   const [gateway, setGateway] = useState<GatewayStatus | null>(null);
   const [github, setGitHub] = useState<GitHubStatus | null>(null);
   const [notifications, setNotifications] = useState(true);
@@ -259,11 +308,10 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
   const [autoScroll, setAutoScroll] = useState(true);
   const [compactMode, setCompactMode] = useState(false);
 
-  // Fetch gateway status
   useEffect(() => {
     fetch('/api/panel/status')
-      .then(r => r.json())
-      .then(data => {
+      .then((response) => response.json())
+      .then((data) => {
         setGateway({
           connected: data.connected ?? true,
           url: data.gatewayUrl || 'localhost:18789',
@@ -271,12 +319,13 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
           agents: data.agentCount ?? 0,
         });
       })
-      .catch(() => setGateway({ connected: false, url: 'unknown', version: 'unknown', agents: 0 }));
+      .catch(() =>
+        setGateway({ connected: false, url: 'unknown', version: 'unknown', agents: 0 })
+      );
 
-    // GitHub status via gh
     fetch('/api/panel/github-status')
-      .then(r => r.json())
-      .then(data => setGitHub(data))
+      .then((response) => response.json())
+      .then((data) => setGitHub(data))
       .catch(() => setGitHub({ authenticated: false, username: '', repos: 0 }));
   }, []);
 
@@ -291,60 +340,67 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
   }, []);
 
   return (
-    <div style={{
-      padding: '0 14px 40px',
-      display: 'flex', flexDirection: 'column',
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        paddingTop: 8, marginBottom: 16,
-      }}>
-        <h2 style={{
-          margin: 0, fontSize: 28, fontWeight: 800,
-          fontFamily: '-apple-system, system-ui, sans-serif',
-          color: '#0a0a0a', letterSpacing: '-0.03em',
-        }}>
+    <div
+      style={{
+        padding: '0 14px 40px',
+        display: 'flex',
+        flexDirection: 'column',
+        background: colors.bg,
+        minHeight: '100%',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingTop: 8,
+          marginBottom: 16,
+          gap: 12,
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: colors.text, letterSpacing: '-0.03em' }}>
           Settings
         </h2>
-        <button type="button" onClick={onBack} style={{
-          padding: '6px 14px', borderRadius: 10,
-          background: 'rgba(0,122,255,0.08)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          border: '1px solid rgba(0,122,255,0.12)',
-          color: '#007aff', fontSize: 13, fontWeight: 600,
-          cursor: 'pointer',
-          WebkitTapHighlightColor: 'transparent',
-        }}>
+        <button
+          type="button"
+          onClick={onBack}
+          style={{
+            minHeight: 44,
+            padding: '0 16px',
+            borderRadius: 12,
+            border: 'none',
+            background: colors.blueAccent,
+            color: colors.text,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
           Done
         </button>
       </div>
 
-      {/* Connection */}
       <SettingsGroup label="Connection">
         <SettingsRow
           label="Gateway"
-          value={gateway ? (gateway.connected ? 'Connected' : 'Offline') : '…'}
+          value={gateway ? (gateway.connected ? 'Connected' : 'Offline') : '...'}
           detail={gateway ? `${gateway.url} · v${gateway.version}` : undefined}
         />
         <SettingsRow
           label="Agents"
-          value={gateway ? `${gateway.agents}` : '…'}
+          value={gateway ? `${gateway.agents}` : '...'}
           detail="Connected to gateway"
         />
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '10px 16px',
-        }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px' }}>
           <StatusDot connected={gateway?.connected ?? false} />
-          <span style={{ fontSize: 12, color: '#8e8e93', fontWeight: 500 }}>
+          <span style={{ fontSize: 12, color: colors.textSecondary, fontWeight: 500 }}>
             {gateway?.connected ? 'Desktop runtime bridge available' : 'Not connected'}
           </span>
         </div>
       </SettingsGroup>
 
-      {/* GitHub */}
       <SettingsGroup label="GitHub">
         <SettingsRow
           label="Account"
@@ -359,19 +415,20 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
         <SettingsRow
           label="Webhooks"
           value={github?.broker?.productionWebhookReady ? 'Ready' : 'Blocked'}
-          detail={github?.broker?.productionWebhookReady
-            ? 'Production webhook sync can be completed.'
-            : 'Waiting on production public URL and webhook secret.'}
+          detail={
+            github?.broker?.productionWebhookReady
+              ? 'Production webhook sync can be completed.'
+              : 'Waiting on production public URL and webhook secret.'
+          }
         />
         <SettingsRow
           label="Repositories"
-          value={github?.repos !== undefined ? `${github.repos}` : '…'}
+          value={github?.repos !== undefined ? `${github.repos}` : '...'}
           action={() => {}}
           last
         />
       </SettingsGroup>
 
-      {/* Notifications */}
       <SettingsGroup label="Notifications">
         <SettingsToggle
           label="Push Notifications"
@@ -388,7 +445,6 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
         />
       </SettingsGroup>
 
-      {/* Chat */}
       <SettingsGroup label="Chat">
         <SettingsToggle
           label="Auto-scroll"
@@ -405,55 +461,46 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
         />
       </SettingsGroup>
 
-      {/* Appearance */}
       <AppearanceSection />
 
-      {/* Runtimes */}
       <SettingsGroup label="Runtimes">
-        <SettingsRow
-          label="Codex"
-          detail="OpenAI coding agent"
-          action={() => {}}
-        />
-        <SettingsRow
-          label="Claude Code"
-          detail="Anthropic coding agent"
-          action={() => {}}
-          last
-        />
+        <SettingsRow label="Codex" detail="OpenAI coding agent" action={() => {}} />
+        <SettingsRow label="Claude Code" detail="Anthropic coding agent" action={() => {}} last />
       </SettingsGroup>
 
-      {/* Data */}
       <SettingsGroup label="Data">
         <SettingsRow
           label="Clear Cache"
           detail="Reset session storage and reload"
           action={handleClearCache}
         />
-        <SettingsRow
-          label="Export Logs"
-          detail="Download session transcripts"
-          action={() => {}}
-          last
-        />
+        <SettingsRow label="Export Logs" detail="Download session transcripts" action={() => {}} last />
       </SettingsGroup>
 
-      {/* About */}
       <SettingsGroup label="About">
         <SettingsRow label="Version" value="1.0.0" />
         <SettingsRow
           label="Documentation"
-          action={() => window.open(process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/cortex-ide', '_blank')}
+          action={() =>
+            window.open(
+              process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/cortex-ide',
+              '_blank'
+            )
+          }
         />
         <SettingsRow
           label="GitHub"
-          action={() => window.open(process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/cortex-ide', '_blank')}
+          action={() =>
+            window.open(
+              process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/cortex-ide',
+              '_blank'
+            )
+          }
           last
         />
       </SettingsGroup>
 
-      {/* Danger zone */}
-      <SettingsGroup label="">
+      <SettingsGroup label="Danger Zone">
         <SettingsRow
           label="Reset All Settings"
           destructive

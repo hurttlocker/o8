@@ -27,7 +27,7 @@ import {
   mediaHref,
 } from './utils';
 import { isSlashCommandText } from '@/lib/slash-commands';
-import { measureHeight, useStreamingHeight } from '@/lib/pretext';
+import { FONTS, LINE_HEIGHTS, measureHeight, useStreamingHeight } from '@/lib/pretext';
 
 interface MessageBubbleProps {
   entry: ChatViewProps['transcriptEntries'][number];
@@ -47,6 +47,8 @@ interface BodyElementProps {
   language?: string;
   style?: CSSProperties;
 }
+
+const MOBILE_CODE_FONT_FAMILY = '"SF Mono", Menlo, ui-monospace, monospace';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
@@ -412,9 +414,10 @@ const PremiumCodeBlock = memo(function PremiumCodeBlock({
     padding: 12,
     background: palette.codeBlockBg,
     color: palette.assistantText,
-    fontFamily: '"SF Mono", Menlo, monospace',
+    font: FONTS.monoBlock,
+    fontFamily: MOBILE_CODE_FONT_FAMILY,
     fontSize: 13,
-    lineHeight: 1.5,
+    lineHeight: LINE_HEIGHTS.monoBlock,
     whiteSpace: 'pre',
     overflowX: 'auto',
     borderTop: `1px solid ${palette.toolRowBorder}`,

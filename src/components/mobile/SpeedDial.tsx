@@ -58,13 +58,14 @@ export const SpeedDialButton = memo(function SpeedDialButton({
   const { colors } = useTheme();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const primaryText = '#F5F5F7';
-  const secondaryText = '#8E8E93';
-  const surfaceBorder = 'rgba(255, 255, 255, 0.08)';
+  const primaryText = colors.text;
+  const activeText = colors.blueAccent;
+  const surfaceBorder = colors.cardBorder;
+  const approvalBadgeBackground = colors.red;
   const closedBackground = 'rgba(0, 0, 0, 0.8)';
   const openBackground = 'rgba(0, 0, 0, 0.88)';
-  const pillBackground = 'rgba(18, 18, 20, 0.82)';
-  const pillActiveBackground = 'rgba(28, 28, 30, 0.94)';
+  const pillBackground = 'rgba(44, 44, 46, 0.9)';
+  const pillActiveBackground = 'rgba(10, 132, 255, 0.2)';
   const menuButtonStyle: CSSProperties = {
     width: 44,
     height: 44,
@@ -91,10 +92,9 @@ export const SpeedDialButton = memo(function SpeedDialButton({
   const backdropStyle: CSSProperties = {
     position: 'fixed',
     inset: 0,
-    background: 'rgba(0, 0, 0, 0.38)',
-    backdropFilter: 'blur(12px) saturate(1.02)',
-    WebkitBackdropFilter: 'blur(12px) saturate(1.02)',
-    animation: 'menuFrostIn 200ms ease',
+    background: 'rgba(0, 0, 0, 0.85)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
     zIndex: 9997,
   };
 
@@ -108,7 +108,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
-        aria-label="Navigation menu"
+        aria-label={approvalCount > 0 ? `Navigation menu, ${approvalCount} pending approvals` : 'Navigation menu'}
         style={menuButtonStyle}
       >
         <div style={{
@@ -139,13 +139,14 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         {!open && approvalCount > 0 && (
           <span style={{
             position: 'absolute', top: -4, right: -4,
-            width: 16, height: 16, borderRadius: '50%',
-            background: colors.blueAccent, color: '#fff',
-            fontSize: 9, fontWeight: 700,
+            width: 18, height: 18, borderRadius: 9,
+            background: approvalBadgeBackground, color: '#FFFFFF',
+            fontSize: 11, fontWeight: 700,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: `2px solid ${closedBackground}`,
+            lineHeight: 1,
+            pointerEvents: 'none',
           }}>
-            {approvalCount}
+            {approvalCount > 1 ? approvalCount : null}
           </span>
         )}
       </button>
@@ -203,11 +204,11 @@ export const SpeedDialButton = memo(function SpeedDialButton({
               >
                 {/* Label pill */}
                 <span style={{
-                  padding: '10px 15px',
-                  borderRadius: 999,
+                  padding: '12px 20px',
+                  borderRadius: 22,
                   background: isActive ? pillActiveBackground : pillBackground,
                   border: `1px solid ${surfaceBorder}`,
-                  color: isActive ? primaryText : secondaryText,
+                  color: isActive ? activeText : primaryText,
                   fontSize: 13,
                   fontWeight: isActive ? 700 : 600,
                   fontFamily: '-apple-system, system-ui, sans-serif',
@@ -221,17 +222,6 @@ export const SpeedDialButton = memo(function SpeedDialButton({
                   WebkitBackdropFilter: 'blur(20px)',
                 }}>
                   {item.label}
-                  {item.screen === 'approvals' && approvalCount > 0 && (
-                    <span style={{
-                      position: 'absolute', top: -5, right: -5,
-                      width: 16, height: 16, borderRadius: '50%',
-                      background: colors.blueAccent, color: '#fff',
-                      fontSize: 9, fontWeight: 700,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      {approvalCount}
-                    </span>
-                  )}
                 </span>
 
                 {/* Icon circle */}
@@ -240,7 +230,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
                   borderRadius: 999,
                   background: isActive ? pillActiveBackground : pillBackground,
                   border: `1px solid ${surfaceBorder}`,
-                  color: isActive ? primaryText : secondaryText,
+                  color: isActive ? activeText : primaryText,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -264,17 +254,6 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         </>,
         document.body,
       )}
-
-      <style>{`
-        @keyframes speedDialPop {
-          from { opacity: 0; transform: translateY(-6px) scale(0.92); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes menuFrostIn {
-          from { opacity: 0; backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px); }
-          to { opacity: 1; backdrop-filter: blur(12px) saturate(1.4); -webkit-backdrop-filter: blur(12px) saturate(1.4); }
-        }
-      `}</style>
     </div>
   );
 });

@@ -1,6 +1,9 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTheme } from './ThemeContext';
+
+type ThemeColors = ReturnType<typeof useTheme>['colors'];
 
 interface RepoEntry {
   name: string;
@@ -15,24 +18,36 @@ interface LaunchSheetProps {
 }
 
 const RUNTIMES = [
-  { id: 'codex', label: 'Codex', color: '#34c759' },
-  { id: 'claude-code', label: 'Claude Code', color: '#af52de' },
+  { id: 'codex', label: 'Codex', color: '#64d2ff' },
+  { id: 'claude-code', label: 'Claude Code', color: '#bf5af2' },
 ] as const;
 
 const RUNTIME_ICONS: Record<string, string> = {
-  'codex': 'M13 2L3 14h9l-1 8 10-12h-9l1-8z', // bolt
-  'claude-code': 'M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z M9 21h6', // brain
+  codex: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
+  'claude-code': 'M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z M9 21h6',
 };
+
+function sectionHeaderStyle(colors: ThemeColors) {
+  return {
+    display: 'block',
+    fontSize: 12,
+    fontWeight: 600,
+    color: colors.textSecondary,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    marginBottom: 8,
+  };
+}
 
 function shortRepoName(name: string): string {
   const map: Record<string, string> = {
     'cortex-ide': 'Cortex IDE',
-    'cortex': 'Cortex',
+    cortex: 'Cortex',
     'spear-production': 'Spear',
     'parasite-network': 'Parasite',
-    'mybeautifulwife': 'Eyes Web',
+    mybeautifulwife: 'Eyes Web',
   };
-  return map[name] || name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return map[name] || name.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 export const LaunchSheet = memo(function LaunchSheet({
@@ -40,6 +55,7 @@ export const LaunchSheet = memo(function LaunchSheet({
   onClose,
   onLaunched,
 }: LaunchSheetProps) {
+  const { colors } = useTheme();
   const [task, setTask] = useState('');
   const [repos, setRepos] = useState<RepoEntry[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<RepoEntry | null>(null);
@@ -51,12 +67,11 @@ export const LaunchSheet = memo(function LaunchSheet({
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Fetch repos on open
   useEffect(() => {
     if (!open) return;
     fetch('/api/panel/repos')
-      .then(r => r.json())
-      .then(data => {
+      .then((response) => response.json())
+      .then((data) => {
         const list = data.repos || data || [];
         setRepos(list);
         if (list.length > 0 && !selectedRepo) {
@@ -66,7 +81,6 @@ export const LaunchSheet = memo(function LaunchSheet({
       .catch(() => {});
   }, [open, selectedRepo]);
 
-  // Focus textarea on open
   useEffect(() => {
     if (open) {
       setTimeout(() => textareaRef.current?.focus(), 300);
@@ -82,6 +96,7 @@ export const LaunchSheet = memo(function LaunchSheet({
       .slice(0, 40);
     return slug ? `feat/${slug}` : '';
   }, [task]);
+
   const branchValue = newBranch || suggestedBranch;
 
   const handleLaunch = useCallback(async () => {
@@ -105,21 +120,20 @@ export const LaunchSheet = memo(function LaunchSheet({
         body.skipSetup = true;
       }
 
-      const res = await fetch('/api/runtime/launch', {
+      const response = await fetch('/api/runtime/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
 
-      const result = await res.json();
+      const result = await response.json();
 
-      if (!res.ok || !result.ok) {
+      if (!response.ok || !result.ok) {
         setError(result.error || 'Launch failed');
         setLaunching(false);
         return;
       }
 
-      // Success — reset and navigate to new agent
       setTask('');
       setBranchMode('main');
       setNewBranch('');
@@ -138,146 +152,103 @@ export const LaunchSheet = memo(function LaunchSheet({
 
   return (
     <>
-      {/* Backdrop */}
       <div
         onClick={onClose}
         style={{
-          position: 'fixed', inset: 0,
-          background: 'rgba(0,0,0,0.3)',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.78)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
           zIndex: 9998,
-          animation: 'launchFadeIn 200ms ease',
         }}
       />
 
-      {/* Sheet */}
-      <div style={{
-        position: 'fixed',
-        bottom: 0, left: 0, right: 0,
-        maxHeight: '88dvh',
-        borderRadius: '20px 20px 0 0',
-        background: 'rgba(255,255,255,0.92)',
-        backdropFilter: 'blur(40px) saturate(1.8)',
-        WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-        border: '1px solid rgba(0,122,255,0.08)',
-        boxShadow: '0 -8px 40px rgba(0,0,0,0.12)',
-        zIndex: 9999,
-        display: 'flex',
-        flexDirection: 'column',
-        animation: 'launchSlideUp 300ms cubic-bezier(0.32, 0.72, 0, 1)',
-        overflow: 'hidden',
-      }}>
-        {/* Drag handle */}
-        <div style={{
-          display: 'flex', justifyContent: 'center',
-          padding: '10px 0 4px',
-        }}>
-          <div style={{
-            width: 36, height: 4, borderRadius: 2,
-            background: 'rgba(0,0,0,0.12)',
-          }} />
+      <div
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          maxHeight: '88dvh',
+          borderRadius: '24px 24px 0 0',
+          background: colors.bg,
+          borderTop: `1px solid ${colors.cardBorder}`,
+          boxShadow: '0 -16px 40px rgba(0,0,0,0.45)',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}>
+          <div style={{ width: 36, height: 4, borderRadius: 999, background: colors.textTertiary }} />
         </div>
 
-        {/* Header */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '4px 20px 12px',
-        }}>
-          <h2 style={{
-            margin: 0, fontSize: 22, fontWeight: 800,
-            fontFamily: '-apple-system, system-ui, sans-serif',
-            color: '#0a0a0a', letterSpacing: '-0.03em',
-          }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 20px 12px', gap: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: colors.text, letterSpacing: '-0.03em' }}>
             Launch Agent
           </h2>
           <button
             type="button"
             onClick={onClose}
             style={{
-              width: 28, height: 28, borderRadius: '50%',
-              background: 'rgba(0,0,0,0.06)',
-              border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              background: colors.cardBg,
+              border: `1px solid ${colors.cardBorder}`,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               WebkitTapHighlightColor: 'transparent',
             }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-              stroke="#8e8e93" strokeWidth="3" strokeLinecap="round">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.textSecondary} strokeWidth="3" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         </div>
 
-        {/* Scrollable content */}
-        <div style={{
-          flex: 1, overflowY: 'auto',
-          padding: '0 20px 20px',
-          WebkitOverflowScrolling: 'touch',
-        }}>
-          {/* Task input */}
-          <label style={{
-            display: 'block',
-            fontSize: 12, fontWeight: 700,
-            color: '#8e8e93',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: 6,
-          }}>
-            Task
-          </label>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px', WebkitOverflowScrolling: 'touch' }}>
+          <label style={sectionHeaderStyle(colors)}>Task</label>
           <textarea
             ref={textareaRef}
             value={task}
-            onChange={(e) => setTask(e.target.value)}
+            onChange={(event) => setTask(event.target.value)}
             placeholder="What should the agent do?"
-            rows={3}
+            rows={4}
             style={{
               width: '100%',
+              minHeight: 116,
               padding: '12px 14px',
-              borderRadius: 12,
-              border: '1px solid rgba(0,122,255,0.12)',
-              background: 'rgba(0,122,255,0.03)',
-              color: '#0a0a0a',
-              fontSize: 15, fontWeight: 500,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              borderRadius: 14,
+              border: `1px solid ${colors.cardBorder}`,
+              background: colors.cardBg,
+              color: colors.text,
+              fontSize: 15,
+              fontWeight: 500,
               resize: 'none',
               outline: 'none',
               lineHeight: 1.5,
               boxSizing: 'border-box',
             }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(0,122,255,0.3)';
-              e.currentTarget.style.background = 'rgba(0,122,255,0.05)';
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(0,122,255,0.12)';
-              e.currentTarget.style.background = 'rgba(0,122,255,0.03)';
-            }}
           />
 
-          {/* Repo picker */}
-          <label style={{
-            display: 'block',
-            fontSize: 12, fontWeight: 700,
-            color: '#8e8e93',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginTop: 16, marginBottom: 6,
-          }}>
-            Repository
-          </label>
+          <label style={{ ...sectionHeaderStyle(colors), marginTop: 16 }}>Repository</label>
           <div style={{ position: 'relative' }}>
             <button
               type="button"
-              onClick={() => setRepoPickerOpen(v => !v)}
+              onClick={() => setRepoPickerOpen((value) => !value)}
               style={{
                 width: '100%',
-                padding: '12px 14px',
-                borderRadius: 12,
-                border: '1px solid rgba(0,122,255,0.12)',
-                background: 'rgba(0,122,255,0.03)',
+                minHeight: 44,
+                padding: '0 14px',
+                borderRadius: 14,
+                border: `1px solid ${colors.cardBorder}`,
+                background: colors.cardBg,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -285,48 +256,46 @@ export const LaunchSheet = memo(function LaunchSheet({
                 WebkitTapHighlightColor: 'transparent',
               }}
             >
-              <span style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-              }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="#007aff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.blueAccent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
-                <span style={{
-                  fontSize: 15, fontWeight: 600, color: '#0a0a0a',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                }}>
-                  {selectedRepo ? shortRepoName(selectedRepo.name) : 'Select repo…'}
+                <span style={{ fontSize: 15, fontWeight: 600, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedRepo ? shortRepoName(selectedRepo.name) : 'Select repo...'}
                 </span>
               </span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                stroke="#c7c7cc" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                style={{
-                  transition: 'transform 200ms ease',
-                  transform: repoPickerOpen ? 'rotate(180deg)' : 'none',
-                }}>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={colors.textTertiary}
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ transform: repoPickerOpen ? 'rotate(180deg)' : 'none' }}
+              >
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
 
-            {/* Repo dropdown */}
-            {repoPickerOpen && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0, right: 0,
-                marginTop: 4,
-                borderRadius: 12,
-                background: 'rgba(255,255,255,0.92)',
-                backdropFilter: 'blur(40px) saturate(1.8)',
-                WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-                border: '1px solid rgba(0,122,255,0.12)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-                padding: '4px 0',
-                zIndex: 10,
-                maxHeight: 200,
-                overflowY: 'auto',
-              }}>
+            {repoPickerOpen ? (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  marginTop: 4,
+                  borderRadius: 14,
+                  background: colors.cardBg,
+                  border: `1px solid ${colors.cardBorder}`,
+                  padding: '4px 0',
+                  zIndex: 10,
+                  maxHeight: 220,
+                  overflowY: 'auto',
+                }}
+              >
                 {repos.map((repo) => (
                   <button
                     key={repo.path}
@@ -337,9 +306,10 @@ export const LaunchSheet = memo(function LaunchSheet({
                     }}
                     style={{
                       width: '100%',
-                      padding: '10px 14px',
+                      minHeight: 44,
+                      padding: '0 14px',
                       border: 'none',
-                      background: selectedRepo?.path === repo.path ? 'rgba(0,122,255,0.08)' : 'transparent',
+                      background: selectedRepo?.path === repo.path ? colors.blueGlass : 'transparent',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
@@ -347,197 +317,164 @@ export const LaunchSheet = memo(function LaunchSheet({
                       WebkitTapHighlightColor: 'transparent',
                     }}
                   >
-                    <span style={{
-                      fontSize: 14, fontWeight: 600, color: '#0a0a0a',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
-                    }}>
-                      {shortRepoName(repo.name)}
-                    </span>
-                    {selectedRepo?.path === repo.path && (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                        stroke="#007aff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <span style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>{shortRepoName(repo.name)}</span>
+                    {selectedRepo?.path === repo.path ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.blueAccent} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
-                    )}
+                    ) : null}
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
 
-          {/* Runtime picker — iOS segmented control */}
-          <label style={{
-            display: 'block',
-            fontSize: 12, fontWeight: 700,
-            color: '#8e8e93',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginTop: 16, marginBottom: 6,
-          }}>
-            Runtime
-          </label>
-          <div style={{
-            display: 'flex',
-            padding: 3,
-            borderRadius: 10,
-            background: 'rgba(0,122,255,0.04)',
-            border: '1px solid rgba(0,122,255,0.08)',
-            gap: 2,
-          }}>
-            {RUNTIMES.map((rt) => {
-              const active = selectedRuntime === rt.id;
+          <label style={{ ...sectionHeaderStyle(colors), marginTop: 16 }}>Runtime</label>
+          <div
+            style={{
+              display: 'flex',
+              gap: 4,
+              padding: 4,
+              borderRadius: 14,
+              background: colors.cardBg,
+              border: `1px solid ${colors.cardBorder}`,
+            }}
+          >
+            {RUNTIMES.map((runtime) => {
+              const active = selectedRuntime === runtime.id;
               return (
                 <button
-                  key={rt.id}
+                  key={runtime.id}
                   type="button"
-                  onClick={() => setSelectedRuntime(rt.id)}
+                  onClick={() => setSelectedRuntime(runtime.id)}
                   style={{
                     flex: 1,
-                    padding: '9px 4px',
-                    borderRadius: 8,
-                    border: 'none',
-                    background: active ? '#fff' : 'transparent',
-                    boxShadow: active ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                    minHeight: 44,
+                    borderRadius: 12,
+                    border: active ? `1px solid ${colors.blueGlassBorder}` : '1px solid transparent',
+                    background: active ? colors.blueGlass : 'transparent',
                     cursor: 'pointer',
                     WebkitTapHighlightColor: 'transparent',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: 5,
-                    transition: 'all 200ms ease',
+                    gap: 6,
                   }}
                 >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                    stroke={active ? rt.color : '#8e8e93'}
-                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d={RUNTIME_ICONS[rt.id] || ''} />
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={active ? runtime.color : colors.textSecondary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d={RUNTIME_ICONS[runtime.id] || ''} />
                   </svg>
-                  <span style={{
-                    fontSize: 12, fontWeight: 600,
-                    color: active ? '#0a0a0a' : '#8e8e93',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
-                  }}>
-                    {rt.label}
+                  <span style={{ fontSize: 12, fontWeight: 600, color: active ? colors.text : colors.textSecondary }}>
+                    {runtime.label}
                   </span>
                 </button>
               );
             })}
           </div>
 
-          {/* Branch mode — iOS segmented control */}
-          <label style={{
-            display: 'block',
-            fontSize: 12, fontWeight: 700,
-            color: '#8e8e93',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginTop: 16, marginBottom: 6,
-          }}>
-            Branch
-          </label>
-          <div style={{
-            display: 'flex',
-            padding: 3,
-            borderRadius: 10,
-            background: 'rgba(0,122,255,0.04)',
-            border: '1px solid rgba(0,122,255,0.08)',
-            gap: 2,
-          }}>
+          <label style={{ ...sectionHeaderStyle(colors), marginTop: 16 }}>Branch</label>
+          <div
+            style={{
+              display: 'flex',
+              gap: 4,
+              padding: 4,
+              borderRadius: 14,
+              background: colors.cardBg,
+              border: `1px solid ${colors.cardBorder}`,
+            }}
+          >
             {[
               { id: 'main' as const, label: 'On main' },
               { id: 'new' as const, label: 'New branch' },
-            ].map((opt) => {
-              const active = branchMode === opt.id;
+            ].map((option) => {
+              const active = branchMode === option.id;
               return (
                 <button
-                  key={opt.id}
+                  key={option.id}
                   type="button"
-                  onClick={() => setBranchMode(opt.id)}
+                  onClick={() => setBranchMode(option.id)}
                   style={{
                     flex: 1,
-                    padding: '9px 4px',
-                    borderRadius: 8,
-                    border: 'none',
-                    background: active ? '#fff' : 'transparent',
-                    boxShadow: active ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                    minHeight: 44,
+                    borderRadius: 12,
+                    border: active ? `1px solid ${colors.blueGlassBorder}` : '1px solid transparent',
+                    background: active ? colors.blueGlass : 'transparent',
                     cursor: 'pointer',
                     WebkitTapHighlightColor: 'transparent',
-                    transition: 'all 200ms ease',
                   }}
                 >
-                  <span style={{
-                    fontSize: 13, fontWeight: 600,
-                    color: active ? '#0a0a0a' : '#8e8e93',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
-                  }}>
-                    {opt.label}
+                  <span style={{ fontSize: 13, fontWeight: 600, color: active ? colors.text : colors.textSecondary }}>
+                    {option.label}
                   </span>
                 </button>
               );
             })}
           </div>
 
-          {/* New branch name input */}
-          {branchMode === 'new' && (
+          {branchMode === 'new' ? (
             <input
               type="text"
               value={branchValue}
-              onChange={(e) => setNewBranch(e.target.value)}
+              onChange={(event) => setNewBranch(event.target.value)}
               placeholder="feat/my-feature"
               style={{
                 width: '100%',
+                minHeight: 44,
                 marginTop: 8,
-                padding: '10px 14px',
-                borderRadius: 10,
-                border: '1px solid rgba(0,122,255,0.12)',
-                background: 'rgba(0,122,255,0.03)',
-                color: '#0a0a0a',
-                fontSize: 13, fontWeight: 600,
+                padding: '0 14px',
+                borderRadius: 14,
+                border: `1px solid ${colors.cardBorder}`,
+                background: colors.cardBg,
+                color: colors.text,
+                fontSize: 13,
+                fontWeight: 600,
                 fontFamily: '"SF Mono", ui-monospace, monospace',
                 outline: 'none',
                 boxSizing: 'border-box',
               }}
             />
-          )}
+          ) : null}
 
-          {/* Error */}
-          {error && (
-            <div style={{
-              marginTop: 12,
-              padding: '10px 14px',
-              borderRadius: 10,
-              background: 'rgba(255,59,48,0.06)',
-              border: '1px solid rgba(255,59,48,0.15)',
-              color: '#ff3b30',
-              fontSize: 13, fontWeight: 600,
-            }}>
+          {error ? (
+            <div
+              style={{
+                marginTop: 12,
+                padding: '12px 14px',
+                borderRadius: 14,
+                background: colors.cardBg,
+                border: '1px solid rgba(255,69,58,0.24)',
+                color: '#ff453a',
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
               {error}
             </div>
-          )}
+          ) : null}
         </div>
 
-        {/* Launch button — fixed at bottom */}
-        <div style={{
-          padding: '12px 20px',
-          paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
-          borderTop: '1px solid rgba(0,0,0,0.04)',
-        }}>
+        <div
+          style={{
+            padding: '12px 20px',
+            paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
+            borderTop: `1px solid ${colors.cardBorder}`,
+          }}
+        >
           <button
             type="button"
             onClick={handleLaunch}
             disabled={!canLaunch}
             style={{
               width: '100%',
-              padding: '14px',
-              borderRadius: 14,
+              minHeight: 48,
+              borderRadius: 12,
               border: 'none',
-              background: canLaunch ? '#007aff' : 'rgba(0,122,255,0.15)',
-              color: canLaunch ? '#fff' : 'rgba(0,122,255,0.4)',
-              fontSize: 16, fontWeight: 700,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              background: canLaunch ? colors.blueAccent : 'rgba(10,132,255,0.24)',
+              color: canLaunch ? colors.text : 'rgba(245,245,247,0.55)',
+              fontSize: 16,
+              fontWeight: 700,
               cursor: canLaunch ? 'pointer' : 'default',
               WebkitTapHighlightColor: 'transparent',
-              transition: 'all 200ms ease',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -545,20 +482,10 @@ export const LaunchSheet = memo(function LaunchSheet({
             }}
           >
             {launching ? (
-              <>
-                <span style={{
-                  width: 16, height: 16,
-                  border: '2px solid rgba(255,255,255,0.3)',
-                  borderTopColor: '#fff',
-                  borderRadius: '50%',
-                  animation: 'launchSpin 600ms linear infinite',
-                }} />
-                Launching…
-              </>
+              'Launching...'
             ) : (
               <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 2L11 13" />
                   <path d="M22 2L15 22 11 13 2 9z" />
                 </svg>
@@ -568,20 +495,6 @@ export const LaunchSheet = memo(function LaunchSheet({
           </button>
         </div>
       </div>
-
-      <style>{`
-        @keyframes launchSlideUp {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
-        }
-        @keyframes launchFadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes launchSpin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </>
   );
 });

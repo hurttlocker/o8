@@ -3,7 +3,7 @@
 import { memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
 import type { MobileInboxItem, MobileInboxSnapshot } from '@/lib/mobile/types';
-import { usePretextTruncation } from '@/lib/pretext';
+import { FONTS, usePretextTruncation } from '@/lib/pretext';
 import { useTheme } from './ThemeContext';
 
 interface ActivityFeedProps {
@@ -32,6 +32,37 @@ interface ActivityPalette {
 }
 
 const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif';
+const INLINE_CODE_PATTERN = /(`[^`\n]+`)/g;
+
+function renderInlineCodeText(text: string): ReactNode {
+  const parts = text.split(INLINE_CODE_PATTERN);
+  if (parts.length === 1) {
+    return text;
+  }
+
+  return parts.map((part, index) => {
+    const isInlineCode = part.startsWith('`') && part.endsWith('`') && part.length > 1;
+    if (!isInlineCode) {
+      return <span key={`text-${index}`}>{part}</span>;
+    }
+
+    return (
+      <code
+        key={`code-${index}`}
+        style={{
+          font: FONTS.mono,
+          fontFamily: '"SF Mono", Menlo, ui-monospace, monospace',
+          fontSize: 12,
+          background: 'rgba(28,28,30,0.8)',
+          padding: '2px 6px',
+          borderRadius: 4,
+        }}
+      >
+        {part.slice(1, -1)}
+      </code>
+    );
+  });
+}
 
 function formatRelativeTime(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -333,7 +364,7 @@ function ApprovalCard({
           <span style={timestampStyle(palette)}>{item.timestampLabel || ''}</span>
         </div>
         <p style={{ ...bodyTextStyle(palette), marginTop: 10 }}>
-          {detailText}
+          {renderInlineCodeText(detailText)}
         </p>
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button
@@ -397,7 +428,7 @@ function AlertCard({
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={headerTextStyle(palette)}>{item.title}</p>
             <p style={{ ...bodyTextStyle(palette), marginTop: 4 }}>
-              {item.detail.slice(0, 120)}{item.detail.length > 120 ? '…' : ''}
+              {renderInlineCodeText(`${item.detail.slice(0, 120)}${item.detail.length > 120 ? '…' : ''}`)}
             </p>
           </div>
           <span style={timestampStyle(palette)}>{item.timestampLabel || ''}</span>
@@ -444,7 +475,7 @@ function ReviewCard({
                 whiteSpace: 'nowrap',
               }}
             >
-              {item.detail}
+              {renderInlineCodeText(item.detail)}
             </p>
           </div>
           <span style={timestampStyle(palette)}>{item.timestampLabel || ''}</span>
@@ -509,7 +540,7 @@ function AgentEventCard({
                   whiteSpace: 'nowrap',
                 }}
               >
-                {agent.currentTask}
+                {renderInlineCodeText(agent.currentTask)}
               </p>
             ) : null}
           </div>

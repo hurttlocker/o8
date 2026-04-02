@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback, memo, lazy, Suspense } from 'react';
+import { Suspense, lazy, memo, useCallback, useEffect, useState } from 'react';
+import { useTheme } from './ThemeContext';
 
 const DeployStatus = lazy(() => import('./DeployStatus'));
 
-/* ── Types ────────────────────────────────────────────────── */
+type ThemeColors = ReturnType<typeof useTheme>['colors'];
 
 interface Issue {
   number: number;
@@ -36,10 +37,21 @@ interface IssuesPageProps {
   onOpenPR?: (repo: string, prNumber: number) => void;
 }
 
-/* ── Helpers ──────────────────────────────────────────────── */
-
 const STORAGE_KEY = 'cortex-ide:registered-repos';
 const DEFAULT_REPOS = ['', 'hurttlocker/cortex'];
+
+function sectionHeaderStyle(colors: ThemeColors) {
+  return {
+    display: 'block',
+    fontSize: 12,
+    fontWeight: 600,
+    color: colors.textSecondary,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    marginBottom: 8,
+    padding: '0 4px',
+  };
+}
 
 function loadRegisteredRepos(): string[] {
   if (typeof window === 'undefined') return DEFAULT_REPOS;
@@ -54,7 +66,9 @@ function loadRegisteredRepos(): string[] {
 }
 
 function saveRegisteredRepos(repos: string[]) {
-  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(repos)); } catch {}
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(repos));
+  } catch {}
 }
 
 function timeAgo(iso: string): string {
@@ -79,89 +93,234 @@ function repoShort(repo: string): string {
 
 function checksRollup(checks: { status: string; conclusion: string }[]): { color: string; label: string } {
   if (!checks || checks.length === 0) return { color: '#8e8e93', label: 'No CI' };
-  const failed = checks.some(c => c.conclusion === 'FAILURE');
-  const pending = checks.some(c => c.status !== 'COMPLETED');
-  if (failed) return { color: '#ff3b30', label: 'CI Failed' };
+  const failed = checks.some((check) => check.conclusion === 'FAILURE');
+  const pending = checks.some((check) => check.status !== 'COMPLETED');
+  if (failed) return { color: '#ff453a', label: 'CI Failed' };
   if (pending) return { color: '#ff9f0a', label: 'CI Running' };
-  return { color: '#34c759', label: 'CI Passed' };
+  return { color: '#30d158', label: 'CI Passed' };
 }
 
-/* ── Issue Card ───────────────────────────────────────────── */
-
 const IssueCard = memo(function IssueCard({ issue, repo }: { issue: Issue; repo: string }) {
+  const { colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
+
   return (
-    <div role="button" tabIndex={0}
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => setExpanded(!expanded)}
-      onTouchEnd={(e) => { setExpanded(!expanded); e.preventDefault(); }}
+      onTouchEnd={(event) => {
+        setExpanded(!expanded);
+        event.preventDefault();
+      }}
       style={{
-        padding: '12px 14px', borderRadius: 14,
-        background: 'rgba(52,199,89,0.03)', border: '1px solid rgba(52,199,89,0.10)',
-        cursor: 'pointer', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+        padding: '14px',
+        borderRadius: 14,
+        background: colors.cardBg,
+        border: `1px solid ${colors.cardBorder}`,
+        cursor: 'pointer',
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-          stroke="#34c759" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0, marginTop: 2 }}>
-          <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#30d158"
+          strokeWidth="2"
+          strokeLinecap="round"
+          style={{ flexShrink: 0, marginTop: 2 }}
+        >
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#0a0a0a', lineHeight: 1.35, fontFamily: '-apple-system, system-ui, sans-serif' }}>{issue.title}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: '#8e8e93', fontFamily: '"SF Mono", ui-monospace, monospace' }}>#{issue.number}</span>
-            <span style={{ fontSize: 10, color: '#8e8e93', padding: '1px 6px', borderRadius: 6, background: 'rgba(0,122,255,0.06)', fontWeight: 600 }}>{repoShort(repo)}</span>
-            {issue.createdAt ? <span style={{ fontSize: 10, color: '#8e8e93' }}>{timeAgo(issue.createdAt)}</span> : null}
+          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, lineHeight: 1.4 }}>{issue.title}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: colors.textSecondary, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+              #{issue.number}
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                color: colors.blueAccent,
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: colors.blueGlass,
+                border: `1px solid ${colors.blueGlassBorder}`,
+                fontWeight: 600,
+              }}
+            >
+              {repoShort(repo)}
+            </span>
+            {issue.createdAt ? <span style={{ fontSize: 10, color: colors.textSecondary }}>{timeAgo(issue.createdAt)}</span> : null}
           </div>
         </div>
       </div>
       {issue.labels.length > 0 ? (
-        <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'wrap' }}>
-          {issue.labels.map(l => (
-            <span key={l.name} style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: `#${l.color}18`, color: `#${l.color}`, border: `1px solid #${l.color}30` }}>{l.name}</span>
+        <div style={{ display: 'flex', gap: 4, marginTop: 10, flexWrap: 'wrap' }}>
+          {issue.labels.map((label) => (
+            <span
+              key={label.name}
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: `#${label.color}18`,
+                color: `#${label.color}`,
+                border: `1px solid #${label.color}30`,
+              }}
+            >
+              {label.name}
+            </span>
           ))}
         </div>
       ) : null}
       {expanded && issue.body ? (
-        <p style={{ marginTop: 10, fontSize: 12, lineHeight: 1.5, color: '#3c3c43', whiteSpace: 'pre-wrap', display: '-webkit-box', WebkitLineClamp: 8, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{issue.body.slice(0, 600)}</p>
+        <p
+          style={{
+            marginTop: 10,
+            fontSize: 12,
+            lineHeight: 1.5,
+            color: colors.textSecondary,
+            whiteSpace: 'pre-wrap',
+            display: '-webkit-box',
+            WebkitLineClamp: 8,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {issue.body.slice(0, 600)}
+        </p>
       ) : null}
     </div>
   );
 });
 
-/* ── PR Card ──────────────────────────────────────────────── */
-
-const PRCard = memo(function PRCard({ pr, repo, onOpen }: { pr: PR; repo: string; onOpen: () => void }) {
+const PRCard = memo(function PRCard({
+  pr,
+  repo,
+  onOpen,
+}: {
+  pr: PR;
+  repo: string;
+  onOpen: () => void;
+}) {
+  const { colors } = useTheme();
   const ci = checksRollup(pr.statusCheckRollup);
+
   return (
-    <button type="button"
-      onClick={(e) => { e.stopPropagation(); onOpen(); }}
-      onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onOpen(); }}
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpen();
+      }}
+      onTouchEnd={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpen();
+      }}
       style={{
-        width: '100%', padding: '12px 14px', borderRadius: 14,
-        background: 'rgba(0,122,255,0.03)', border: '1px solid rgba(0,122,255,0.10)',
-        cursor: 'pointer', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation', textAlign: 'left', display: 'block',
+        width: '100%',
+        minHeight: 44,
+        padding: '14px',
+        borderRadius: 14,
+        background: colors.cardBg,
+        border: `1px solid ${colors.cardBorder}`,
+        cursor: 'pointer',
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation',
+        textAlign: 'left',
+        display: 'block',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#007aff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
-          <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7" /><line x1="6" y1="9" x2="6" y2="21" />
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={colors.blueAccent}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ flexShrink: 0, marginTop: 2 }}
+        >
+          <circle cx="18" cy="18" r="3" />
+          <circle cx="6" cy="6" r="3" />
+          <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+          <line x1="6" y1="9" x2="6" y2="21" />
         </svg>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#0a0a0a', lineHeight: 1.35, fontFamily: '-apple-system, system-ui, sans-serif' }}>{pr.title}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: '#8e8e93', fontFamily: '"SF Mono", ui-monospace, monospace' }}>#{pr.number}</span>
-            <span style={{ fontSize: 10, color: '#636366' }}>{pr.headRefName}</span>
+          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, lineHeight: 1.4 }}>{pr.title}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: colors.textSecondary, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+              #{pr.number}
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                color: colors.blueAccent,
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: colors.blueGlass,
+                border: `1px solid ${colors.blueGlassBorder}`,
+                fontWeight: 600,
+              }}
+            >
+              {repoShort(repo)}
+            </span>
+            <span style={{ fontSize: 10, color: colors.textSecondary }}>{pr.headRefName}</span>
           </div>
         </div>
-        <span style={{ fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 8, background: `${ci.color}12`, color: ci.color, whiteSpace: 'nowrap', flexShrink: 0 }}>{ci.label}</span>
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 700,
+            padding: '4px 8px',
+            borderRadius: 999,
+            background: `${ci.color}18`,
+            color: ci.color,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
+          {ci.label}
+        </span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, marginLeft: 22 }}>
-        <span style={{ fontSize: 11, color: '#8e8e93' }}>{pr.changedFiles} files</span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: '#34c759', fontFamily: '"SF Mono", monospace' }}>+{pr.additions}</span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: '#ff3b30', fontFamily: '"SF Mono", monospace' }}>-{pr.deletions}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, marginLeft: 22, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: colors.textSecondary }}>{pr.changedFiles} files</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#30d158', fontFamily: '"SF Mono", monospace' }}>
+          +{pr.additions}
+        </span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#ff453a', fontFamily: '"SF Mono", monospace' }}>
+          -{pr.deletions}
+        </span>
         {pr.reviewDecision ? (
-          <span style={{ fontSize: 9, fontWeight: 600, marginLeft: 'auto', color: pr.reviewDecision === 'APPROVED' ? '#34c759' : pr.reviewDecision === 'CHANGES_REQUESTED' ? '#ff3b30' : '#ff9f0a' }}>
-            {pr.reviewDecision === 'APPROVED' ? 'Approved' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'Changes req.' : 'Review needed'}
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 600,
+              marginLeft: 'auto',
+              color:
+                pr.reviewDecision === 'APPROVED'
+                  ? '#30d158'
+                  : pr.reviewDecision === 'CHANGES_REQUESTED'
+                    ? '#ff453a'
+                    : '#ff9f0a',
+            }}
+          >
+            {pr.reviewDecision === 'APPROVED'
+              ? 'Approved'
+              : pr.reviewDecision === 'CHANGES_REQUESTED'
+                ? 'Changes requested'
+                : 'Review needed'}
           </span>
         ) : null}
       </div>
@@ -169,11 +328,18 @@ const PRCard = memo(function PRCard({ pr, repo, onOpen }: { pr: PR; repo: string
   );
 });
 
-/* ── Repo Switcher ────────────────────────────────────────── */
-
-function RepoSwitcher({ repos, selected, onSelect, onAddRepo }: {
-  repos: string[]; selected: string; onSelect: (r: string) => void; onAddRepo: (r: string) => void;
+function RepoSwitcher({
+  repos,
+  selected,
+  onSelect,
+  onAddRepo,
+}: {
+  repos: string[];
+  selected: string;
+  onSelect: (repo: string) => void;
+  onAddRepo: (repo: string) => void;
 }) {
+  const { colors } = useTheme();
   const [showAdd, setShowAdd] = useState(false);
   const [input, setInput] = useState('');
 
@@ -188,79 +354,144 @@ function RepoSwitcher({ repos, selected, onSelect, onAddRepo }: {
 
   return (
     <div style={{ marginBottom: 12 }}>
-      {/* Repo pills */}
-      <div style={{
-        display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center',
-      }}>
-        <button type="button" onClick={() => onSelect('all')}
-          onTouchEnd={(e) => { onSelect('all'); e.preventDefault(); }}
+      <span style={sectionHeaderStyle(colors)}>Repositories</span>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          type="button"
+          onClick={() => onSelect('all')}
+          onTouchEnd={(event) => {
+            onSelect('all');
+            event.preventDefault();
+          }}
           style={{
-            padding: '6px 12px', borderRadius: 10, border: 'none',
-            background: selected === 'all' ? '#007aff' : 'rgba(0,122,255,0.06)',
-            color: selected === 'all' ? '#fff' : '#007aff',
-            fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-          }}>
+            minHeight: 44,
+            padding: '0 14px',
+            borderRadius: 12,
+            border: selected === 'all' ? `1px solid ${colors.blueGlassBorder}` : `1px solid ${colors.cardBorder}`,
+            background: selected === 'all' ? colors.blueGlass : colors.cardBg,
+            color: selected === 'all' ? colors.text : colors.textSecondary,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            WebkitTapHighlightColor: 'transparent',
+            touchAction: 'manipulation',
+          }}
+        >
           All
         </button>
-        {repos.map(r => (
-          <button key={r} type="button" onClick={() => onSelect(r)}
-            onTouchEnd={(e) => { onSelect(r); e.preventDefault(); }}
+        {repos.map((repo) => (
+          <button
+            key={repo}
+            type="button"
+            onClick={() => onSelect(repo)}
+            onTouchEnd={(event) => {
+              onSelect(repo);
+              event.preventDefault();
+            }}
             style={{
-              padding: '6px 12px', borderRadius: 10, border: 'none',
-              background: selected === r ? '#007aff' : 'rgba(0,122,255,0.06)',
-              color: selected === r ? '#fff' : '#007aff',
-              fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-              maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-            {repoShort(r)}
+              minHeight: 44,
+              maxWidth: 180,
+              padding: '0 14px',
+              borderRadius: 12,
+              border: selected === repo ? `1px solid ${colors.blueGlassBorder}` : `1px solid ${colors.cardBorder}`,
+              background: selected === repo ? colors.blueGlass : colors.cardBg,
+              color: selected === repo ? colors.text : colors.textSecondary,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+              touchAction: 'manipulation',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {repoShort(repo)}
           </button>
         ))}
-        {/* + Add repo button */}
-        <button type="button"
+        <button
+          type="button"
           onClick={() => setShowAdd(!showAdd)}
-          onTouchEnd={(e) => { setShowAdd(!showAdd); e.preventDefault(); }}
+          onTouchEnd={(event) => {
+            setShowAdd(!showAdd);
+            event.preventDefault();
+          }}
           style={{
-            width: 28, height: 28, borderRadius: 8,
-            background: 'rgba(0,122,255,0.06)', border: 'none',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-          }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#007aff" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            border: `1px solid ${colors.cardBorder}`,
+            background: colors.cardBg,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            WebkitTapHighlightColor: 'transparent',
+            touchAction: 'manipulation',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.blueAccent} strokeWidth="2.5" strokeLinecap="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
       </div>
 
-      {/* Add repo input */}
       {showAdd ? (
-        <div style={{
-          display: 'flex', gap: 6, marginTop: 8,
-          padding: 8, borderRadius: 12,
-          background: 'rgba(0,122,255,0.03)', border: '1px solid rgba(0,122,255,0.10)',
-        }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 6,
+            marginTop: 8,
+            padding: 8,
+            borderRadius: 14,
+            background: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+          }}
+        >
           <input
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') handleAdd();
+            }}
             placeholder="owner/repo"
             style={{
-              flex: 1, padding: '8px 10px', borderRadius: 8,
-              border: '1px solid rgba(0,0,0,0.08)', background: '#fff',
-              fontSize: 13, fontFamily: '"SF Mono", ui-monospace, monospace',
-              outline: 'none', WebkitAppearance: 'none',
+              flex: 1,
+              minHeight: 44,
+              padding: '0 12px',
+              borderRadius: 12,
+              border: `1px solid ${colors.cardBorder}`,
+              background: 'rgba(255,255,255,0.04)',
+              fontSize: 13,
+              color: colors.text,
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              outline: 'none',
+              WebkitAppearance: 'none',
             }}
           />
-          <button type="button" onClick={handleAdd}
-            onTouchEnd={(e) => { handleAdd(); e.preventDefault(); }}
+          <button
+            type="button"
+            onClick={handleAdd}
+            onTouchEnd={(event) => {
+              handleAdd();
+              event.preventDefault();
+            }}
             style={{
-              padding: '8px 14px', borderRadius: 8, border: 'none',
-              background: '#007aff', color: '#fff',
-              fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-            }}>
+              minHeight: 44,
+              padding: '0 16px',
+              borderRadius: 12,
+              border: 'none',
+              background: colors.blueAccent,
+              color: colors.text,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+              touchAction: 'manipulation',
+            }}
+          >
             Add
           </button>
         </div>
@@ -269,9 +500,13 @@ function RepoSwitcher({ repos, selected, onSelect, onAddRepo }: {
   );
 }
 
-/* ── Main Page ────────────────────────────────────────────── */
+function SectionHeader({ label }: { label: string }) {
+  const { colors } = useTheme();
+  return <span style={sectionHeaderStyle(colors)}>{label}</span>;
+}
 
 export default function IssuesPage({ onBack, onOpenPR }: IssuesPageProps) {
+  const { colors } = useTheme();
   const [repos, setRepos] = useState<string[]>(DEFAULT_REPOS);
   const [issues, setIssues] = useState<{ issue: Issue; repo: string }[]>([]);
   const [prs, setPRs] = useState<{ pr: PR; repo: string }[]>([]);
@@ -279,8 +514,15 @@ export default function IssuesPage({ onBack, onOpenPR }: IssuesPageProps) {
   const [activeTab, setActiveTab] = useState<'all' | 'issues' | 'prs'>('all');
   const [selectedRepo, setSelectedRepo] = useState('all');
 
-  // Load registered repos from sessionStorage on mount
-  useEffect(() => { setRepos(loadRegisteredRepos()); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setRepos(loadRegisteredRepos());
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const fetchAll = useCallback(async (repoList: string[]) => {
     setLoading(true);
@@ -289,14 +531,14 @@ export default function IssuesPage({ onBack, onOpenPR }: IssuesPageProps) {
     await Promise.all(
       repoList.map(async (repo) => {
         try {
-          const res = await fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`);
-          const data = await res.json();
-          for (const issue of data.issues ?? []) issueResults.push({ issue, repo });
+          const issueResponse = await fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`);
+          const issueData = await issueResponse.json();
+          for (const issue of issueData.issues ?? []) issueResults.push({ issue, repo });
         } catch {}
         try {
-          const res = await fetch(`/api/panel/prs?repo=${encodeURIComponent(repo)}`);
-          const data = await res.json();
-          for (const pr of data.prs ?? []) prResults.push({ pr, repo });
+          const prResponse = await fetch(`/api/panel/prs?repo=${encodeURIComponent(repo)}`);
+          const prData = await prResponse.json();
+          for (const pr of prData.prs ?? []) prResults.push({ pr, repo });
         } catch {}
       })
     );
@@ -307,72 +549,143 @@ export default function IssuesPage({ onBack, onOpenPR }: IssuesPageProps) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchAll(repos); }, [fetchAll, repos]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchAll(repos);
+    }, 0);
 
-  const addRepo = useCallback((repo: string) => {
-    const updated = [...repos, repo];
-    setRepos(updated);
-    saveRegisteredRepos(updated);
-  }, [repos]);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [fetchAll, repos]);
 
-  const filteredIssues = selectedRepo === 'all' ? issues : issues.filter(i => i.repo === selectedRepo);
-  const filteredPRs = selectedRepo === 'all' ? prs : prs.filter(p => p.repo === selectedRepo);
+  const addRepo = useCallback(
+    (repo: string) => {
+      const updated = [...repos, repo];
+      setRepos(updated);
+      saveRegisteredRepos(updated);
+    },
+    [repos]
+  );
 
-  const tabs: { key: typeof activeTab; label: string; count: number }[] = [
+  const filteredIssues = selectedRepo === 'all' ? issues : issues.filter((entry) => entry.repo === selectedRepo);
+  const filteredPRs = selectedRepo === 'all' ? prs : prs.filter((entry) => entry.repo === selectedRepo);
+
+  const tabs: { key: 'all' | 'prs' | 'issues'; label: string; count: number }[] = [
     { key: 'all', label: 'All', count: filteredIssues.length + filteredPRs.length },
     { key: 'prs', label: 'PRs', count: filteredPRs.length },
     { key: 'issues', label: 'Issues', count: filteredIssues.length },
   ];
 
   return (
-    <div style={{ padding: '0 12px 24px', width: '100%', boxSizing: 'border-box' }}>
-      {/* Header */}
-      <div style={{ marginBottom: 12 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', color: '#0a0a0a', fontFamily: '-apple-system, system-ui, sans-serif', margin: 0 }}>
-          Issues & PRs
-        </h1>
-        <p style={{ margin: '2px 0 0', fontSize: 13, color: '#8e8e93', fontWeight: 500 }}>
-          {loading ? 'Loading...' : `${filteredIssues.length} issues · ${filteredPRs.length} PRs`}
-        </p>
+    <div style={{ padding: '0 12px 24px', width: '100%', boxSizing: 'border-box', background: colors.bg, minHeight: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', color: colors.text, margin: 0 }}>
+            Issues & PRs
+          </h1>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: colors.textSecondary, fontWeight: 500 }}>
+            {loading ? 'Loading...' : `${filteredIssues.length} issues · ${filteredPRs.length} PRs`}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onBack}
+          style={{
+            minHeight: 44,
+            padding: '0 16px',
+            borderRadius: 12,
+            border: 'none',
+            background: colors.blueAccent,
+            color: colors.text,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          Done
+        </button>
       </div>
 
-      {/* Repo Switcher */}
       <RepoSwitcher repos={repos} selected={selectedRepo} onSelect={setSelectedRepo} onAddRepo={addRepo} />
 
-      {/* Tab bar */}
-      <div style={{
-        display: 'flex', padding: 3, borderRadius: 10,
-        background: 'rgba(0,122,255,0.04)', border: '1px solid rgba(0,122,255,0.08)',
-        gap: 1, marginBottom: 16,
-      }}>
-        {tabs.map(tab => (
-          <button key={tab.key} type="button"
-            onClick={() => setActiveTab(tab.key)}
-            onTouchEnd={(e) => { setActiveTab(tab.key); e.preventDefault(); }}
-            style={{
-              flex: 1, padding: '7px 4px', borderRadius: 8, border: 'none',
-              background: activeTab === tab.key ? '#fff' : 'transparent',
-              boxShadow: activeTab === tab.key ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
-              cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
-              transition: 'all 200ms ease',
-            }}
-          >
-            <span style={{ fontSize: 11, fontWeight: 600, color: activeTab === tab.key ? '#0a0a0a' : '#8e8e93' }}>{tab.label}</span>
-            <span style={{
-              minWidth: 14, height: 14, borderRadius: 7, padding: '0 3px',
-              background: activeTab === tab.key ? '#007aff' : 'rgba(0,0,0,0.06)',
-              color: activeTab === tab.key ? '#fff' : '#8e8e93',
-              fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>{tab.count}</span>
-          </button>
-        ))}
+      <div
+        style={{
+          display: 'flex',
+          gap: 4,
+          padding: 4,
+          borderRadius: 14,
+          background: colors.cardBg,
+          border: `1px solid ${colors.cardBorder}`,
+          marginBottom: 16,
+        }}
+      >
+        {tabs.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              onTouchEnd={(event) => {
+                setActiveTab(tab.key);
+                event.preventDefault();
+              }}
+              style={{
+                flex: 1,
+                minHeight: 44,
+                borderRadius: 12,
+                border: active ? `1px solid ${colors.blueGlassBorder}` : '1px solid transparent',
+                background: active ? colors.blueGlass : 'transparent',
+                cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 600, color: active ? colors.text : colors.textSecondary }}>
+                {tab.label}
+              </span>
+              <span
+                style={{
+                  minWidth: 18,
+                  height: 18,
+                  borderRadius: 999,
+                  padding: '0 5px',
+                  background: active ? colors.blueAccent : 'rgba(255,255,255,0.08)',
+                  color: active ? colors.text : colors.textSecondary,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {tab.count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Content */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#8e8e93', fontSize: 14 }}>Loading...</div>
+          <div
+            style={{
+              padding: '32px 20px',
+              textAlign: 'center',
+              color: colors.textSecondary,
+              fontSize: 14,
+              borderRadius: 14,
+              background: colors.cardBg,
+              border: `1px solid ${colors.cardBorder}`,
+            }}
+          >
+            Loading...
+          </div>
         ) : (
           <>
             {(activeTab === 'all' || activeTab === 'prs') && filteredPRs.length > 0 ? (
@@ -392,31 +705,61 @@ export default function IssuesPage({ onBack, onOpenPR }: IssuesPageProps) {
               </>
             ) : null}
             {activeTab === 'prs' && filteredPRs.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: '#8e8e93', fontSize: 14 }}>No open PRs</div>
+              <div
+                style={{
+                  padding: '32px 20px',
+                  textAlign: 'center',
+                  color: colors.textSecondary,
+                  fontSize: 14,
+                  borderRadius: 14,
+                  background: colors.cardBg,
+                  border: `1px solid ${colors.cardBorder}`,
+                }}
+              >
+                No open PRs
+              </div>
             ) : null}
             {activeTab === 'issues' && filteredIssues.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: '#8e8e93', fontSize: 14 }}>No open issues</div>
+              <div
+                style={{
+                  padding: '32px 20px',
+                  textAlign: 'center',
+                  color: colors.textSecondary,
+                  fontSize: 14,
+                  borderRadius: 14,
+                  background: colors.cardBg,
+                  border: `1px solid ${colors.cardBorder}`,
+                }}
+              >
+                No open issues
+              </div>
             ) : null}
           </>
         )}
       </div>
 
-      {/* Deployments */}
       <div style={{ marginTop: 24 }}>
         <SectionHeader label="Deployments" />
-        <Suspense fallback={<div style={{ padding: 20, textAlign: 'center', color: '#8e8e93', fontSize: 13 }}>Loading...</div>}>
+        <Suspense
+          fallback={
+            <div
+              style={{
+                padding: '20px',
+                textAlign: 'center',
+                color: colors.textSecondary,
+                fontSize: 13,
+                borderRadius: 14,
+                background: colors.cardBg,
+                border: `1px solid ${colors.cardBorder}`,
+              }}
+            >
+              Loading...
+            </div>
+          }
+        >
           <DeployStatus repos={repos} />
         </Suspense>
       </div>
     </div>
-  );
-}
-
-function SectionHeader({ label }: { label: string }) {
-  return (
-    <h2 style={{
-      fontSize: 15, fontWeight: 700, color: '#0a0a0a', margin: '12px 0 6px',
-      fontFamily: '-apple-system, system-ui, sans-serif',
-    }}>{label}</h2>
   );
 }
