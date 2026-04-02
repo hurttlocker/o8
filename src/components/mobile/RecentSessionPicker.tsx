@@ -11,6 +11,7 @@ interface RecentSessionPickerProps {
   onSessionSelect: (sessionId: string) => void;
   onNewChat: () => void;
   onLaunch: () => void;
+  bottomPadding?: CSSProperties['paddingBottom'];
 }
 
 interface SessionAgentPillProps {
@@ -741,6 +742,7 @@ export function RecentSessionPicker({
   compactLine,
   agentDisplayName,
   onSessionSelect,
+  bottomPadding,
 }: RecentSessionPickerProps) {
   return (
     <GroupedSessionList
@@ -749,6 +751,7 @@ export function RecentSessionPicker({
       renderSessionName={(session) => compactLine(session.name, agentDisplayName(session), 56)}
       emptyMessage="No sessions yet."
       topPadding={4}
+      bottomPadding={bottomPadding}
     />
   );
 }

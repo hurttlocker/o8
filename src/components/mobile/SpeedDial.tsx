@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useRef, memo, type CSSProperties } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, memo, type CSSProperties } from 'react';
 import { useTheme } from './ThemeContext';
 
 export type MobileScreen = 'chat' | 'fleet' | 'memory' | 'approvals' | 'costs' | 'settings' | 'issues';
@@ -51,6 +50,14 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
   },
 ];
 
+const menuFontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
+const menuBackground = 'rgba(38,36,34,0.95)';
+const menuText = '#FAF5F0';
+const menuTextSecondary = '#A09890';
+const menuActiveBackground = 'rgba(255,248,240,0.06)';
+const menuBorder = 'rgba(255,248,240,0.08)';
+const menuSeparator = 'rgba(255,248,240,0.04)';
+
 export const SpeedDialButton = memo(function SpeedDialButton({
   activeScreen,
   onNavigate,
@@ -59,15 +66,18 @@ export const SpeedDialButton = memo(function SpeedDialButton({
 }: SpeedDialProps) {
   const { colors } = useTheme();
   const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const primaryText = colors.text;
-  const activeText = colors.blueAccent;
   const surfaceBorder = colors.surfaceBorder;
   const approvalBadgeBackground = colors.red;
   const closedBackground = colors.surface;
   const openBackground = 'rgba(30, 28, 26, 0.88)';
-  const pillBackground = colors.elevatedSurface;
-  const pillActiveBackground = 'rgba(10, 132, 255, 0.2)';
+  const wrapperStyle: CSSProperties = {
+    position: 'relative',
+    flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    zIndex: open ? 201 : undefined,
+  };
   const menuButtonStyle: CSSProperties = {
     width: 44,
     height: 44,
@@ -90,27 +100,83 @@ export const SpeedDialButton = memo(function SpeedDialButton({
     WebkitTapHighlightColor: 'transparent',
     position: 'relative',
     padding: 0,
+    zIndex: 201,
   };
   const backdropStyle: CSSProperties = {
     position: 'fixed',
-    inset: 0,
-    background: 'rgba(10, 10, 10, 0.84)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    zIndex: 9997,
+    top: '-100dvh',
+    left: '-100dvw',
+    width: '300dvw',
+    height: '300dvh',
+    background: 'transparent',
+    zIndex: 199,
   };
-
-  // Close-on-outside-tap handled by frost backdrop onClick.
-  // No document-level touchstart listener — it was killing pill taps
-  // because the portaled pills are outside menuRef.
+  const menuStyle: CSSProperties = {
+    position: 'absolute',
+    top: 52,
+    left: 0,
+    width: 220,
+    background: menuBackground,
+    backdropFilter: 'blur(40px)',
+    WebkitBackdropFilter: 'blur(40px)',
+    borderRadius: 14,
+    border: `1px solid ${menuBorder}`,
+    boxShadow: '0 24px 48px rgba(0,0,0,0.4)',
+    overflow: 'hidden',
+    boxSizing: 'border-box',
+    zIndex: 200,
+  };
+  const menuItemStyle: CSSProperties = {
+    width: '100%',
+    minHeight: 44,
+    padding: '12px 16px',
+    border: 'none',
+    background: 'transparent',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    color: menuText,
+    cursor: 'pointer',
+    textAlign: 'left',
+    boxSizing: 'border-box',
+    WebkitTapHighlightColor: 'transparent',
+    touchAction: 'manipulation',
+  };
+  const separatorStyle: CSSProperties = {
+    marginLeft: 48,
+    borderTop: `1px solid ${menuSeparator}`,
+  };
+  const menuEntries: Array<{
+    key: string;
+    label: string;
+    iconPath: string;
+    isActive: boolean;
+    onSelect: () => void;
+  }> = [
+    ...(onNewChat ? [{
+      key: 'new-chat',
+      label: 'New Chat',
+      iconPath: 'M12 5v14 M5 12h14',
+      isActive: false,
+      onSelect: onNewChat,
+    }] : []),
+    ...MENU_ITEMS.map((item) => ({
+      key: item.screen,
+      label: item.label,
+      iconPath: item.iconPath,
+      isActive: item.screen === activeScreen,
+      onSelect: () => onNavigate(item.screen),
+    })),
+  ];
 
   return (
-    <div ref={menuRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-      {/* Soft floating menu button */}
+    <div style={wrapperStyle}>
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
         aria-label={approvalCount > 0 ? `Navigation menu, ${approvalCount} pending approvals` : 'Navigation menu'}
+        aria-expanded={open}
+        aria-haspopup="menu"
         style={menuButtonStyle}
       >
         <div style={{
@@ -138,7 +204,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           }} />
         </div>
 
-        {!open && approvalCount > 0 && (
+        {approvalCount > 0 && (
           <span style={{
             position: 'absolute', top: -4, right: -4,
             width: 18, height: 18, borderRadius: 9,
@@ -153,179 +219,69 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         )}
       </button>
 
-      {/* Portal: frosted overlay + floating pills at document.body level */}
-      {open && typeof document !== 'undefined' && createPortal(
+      {open ? (
         <>
-          {/* Frost backdrop — separate layer, closes menu on tap */}
           <div
             onClick={() => setOpen(false)}
             style={backdropStyle}
           />
 
-          {/* Floating pills — separate layer above frost */}
-          <div style={{
-            position: 'fixed',
-            top: 'calc(env(safe-area-inset-top, 0px) + 52px)',
-            left: 16,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-start',
-            gap: 10,
-            zIndex: 9999,
-          }}>
-          {onNewChat ? (
-            <button
-              type="button"
-              onTouchEnd={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onNewChat();
-                setOpen(false);
-              }}
-              onClick={() => {
-                onNewChat();
-                setOpen(false);
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '4px',
-                border: 'none',
-                background: 'transparent',
-                cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
-                pointerEvents: 'auto',
-                touchAction: 'manipulation',
-                position: 'relative',
-                minHeight: 44,
-              }}
-            >
-              <span style={{
-                padding: '12px 20px',
-                borderRadius: 22,
-                background: '#0A84FF',
-                border: '1px solid rgba(10,132,255,0.36)',
-                color: '#FFFFFF',
-                fontSize: 13,
-                fontWeight: 700,
-                fontFamily: '-apple-system, system-ui, sans-serif',
-                letterSpacing: '-0.01em',
-                boxShadow: '0 14px 30px rgba(10,132,255,0.24)',
-                position: 'relative',
-                pointerEvents: 'none',
-                backdropFilter: 'blur(20px)',
-                WebkitBackdropFilter: 'blur(20px)',
-              }}>
-                New Chat
-              </span>
-              <span style={{
-                width: 44,
-                height: 44,
-                borderRadius: 999,
-                background: '#0A84FF',
-                border: '1px solid rgba(10,132,255,0.36)',
-                color: '#FFFFFF',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 14px 30px rgba(10,132,255,0.24)',
-                pointerEvents: 'none',
-                backdropFilter: 'blur(20px)',
-                WebkitBackdropFilter: 'blur(20px)',
-              }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 5v14" />
-                  <path d="M5 12h14" />
-                </svg>
-              </span>
-            </button>
-          ) : null}
-          {MENU_ITEMS.map((item) => {
-            const isActive = item.screen === activeScreen;
-            return (
-              <button
-                key={item.screen}
-                type="button"
-                onTouchEnd={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onNavigate(item.screen);
-                  setOpen(false);
-                }}
-                onClick={() => {
-                  onNavigate(item.screen);
-                  setOpen(false);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '4px',
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  WebkitTapHighlightColor: 'transparent',
-                  pointerEvents: 'auto',
-                  touchAction: 'manipulation',
-                  position: 'relative',
-                  minHeight: 44,
-                }}
-              >
-                {/* Label pill */}
-                <span style={{
-                  padding: '12px 20px',
-                  borderRadius: 22,
-                  background: isActive ? pillActiveBackground : pillBackground,
-                  border: `1px solid ${surfaceBorder}`,
-                  color: isActive ? activeText : primaryText,
-                  fontSize: 13,
-                  fontWeight: isActive ? 700 : 600,
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  letterSpacing: '-0.01em',
-                  boxShadow: isActive
-                    ? '0 14px 30px rgba(0, 0, 0, 0.28)'
-                    : '0 10px 24px rgba(0, 0, 0, 0.18)',
-                  position: 'relative',
-                  pointerEvents: 'none',
-                  backdropFilter: 'blur(20px)',
-                  WebkitBackdropFilter: 'blur(20px)',
-                }}>
-                  {item.label}
-                </span>
-
-                {/* Icon circle */}
-                <span style={{
-                  width: 44, height: 44,
-                  borderRadius: 999,
-                  background: isActive ? pillActiveBackground : pillBackground,
-                  border: `1px solid ${surfaceBorder}`,
-                  color: isActive ? activeText : primaryText,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: isActive
-                    ? '0 14px 30px rgba(0, 0, 0, 0.28)'
-                    : '0 10px 24px rgba(0, 0, 0, 0.18)',
-                  pointerEvents: 'none',
-                  backdropFilter: 'blur(20px)',
-                  WebkitBackdropFilter: 'blur(20px)',
-                }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d={item.iconPath} />
-                  </svg>
-                </span>
-              </button>
-            );
-          })}
+          <div role="menu" aria-label="Navigation menu" style={menuStyle}>
+            {menuEntries.map((item, index) => (
+              <div key={item.key}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    item.onSelect();
+                    setOpen(false);
+                  }}
+                  style={{
+                    ...menuItemStyle,
+                    background: item.isActive ? menuActiveBackground : 'transparent',
+                  }}
+                >
+                  <span style={{
+                    width: 20,
+                    height: 20,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    color: item.isActive ? menuText : menuTextSecondary,
+                  }}>
+                    <svg
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d={item.iconPath} />
+                    </svg>
+                  </span>
+                  <span style={{
+                    flex: 1,
+                    minWidth: 0,
+                    color: menuText,
+                    fontSize: 15,
+                    fontWeight: 500,
+                    fontFamily: menuFontFamily,
+                    letterSpacing: '-0.01em',
+                  }}>
+                    {item.label}
+                  </span>
+                </button>
+                {index < menuEntries.length - 1 ? <div style={separatorStyle} /> : null}
+              </div>
+            ))}
           </div>
-        </>,
-        document.body,
-      )}
+        </>
+      ) : null}
     </div>
   );
 });
