@@ -6,11 +6,13 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `56be609` feat: objective exit criteria
 - `186bb77` fix: supervisor retry rebinds lane session + dispatch uses lock (#dogfood)
 - `471225d` feat: compact Apple-style dropdown menu, no full-screen overlay
 - `81d4c37` fix: viewport-fit cover as separate export — Next.js 16 requirement
 - `f009103` fix: update PWA manifest + meta tags toC1C1E
 - `01fa6c8` fix: match iOS system dark bgC1C1E — kill Safari toolbar line
+- `3c1505c` fix: clean archived lanes and stale worktrees
 - `e9f74f8` fix: add theme-colorA1816 + viewport-fit cover for iOS Safari
 - `86a6005` fix: THE LINE
 - `ca0e6a1` fix: add auth header to supervisor watch registration
