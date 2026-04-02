@@ -30,6 +30,7 @@ export interface WatchedAgent {
   lastTranscriptSignature: string | null;
   lastTranscriptMtimeMs: number | null;
   lastActivityAt: number;
+  lastEventAt: number;
   retryCount: number;
   steerCount: number;
   completionReported: boolean;
@@ -137,6 +138,7 @@ const MAX_RETRIES = 1;                           // Auto-retry once on failure
 const MAX_STEERS = 2;                            // Auto-steer twice before escalate
 const COMPLETION_CLEANUP_MS = 60_000;            // Remove from watch 60s after done
 const COMPLETION_CONFIRM_MS = 15_000;            // 15s grace before confirming completion
+const STALE_WATCH_THRESHOLD_MS = 60 * 60 * 1000; // Purge stale watched rows on startup after 1h
 const TRANSCRIPT_ACTIVITY_WINDOW = 120;
 const CLAUDE_PROJECTS_DIR = path.join(
   process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude'),
@@ -160,12 +162,12 @@ function persistWatchedAgent(agent: WatchedAgent): void {
     const db = getSqlite();
     db.prepare(
       `INSERT OR REPLACE INTO watched_agents
-       (surface_id, repo_path, name, prompt, registered_at, last_status, retry_count, steer_count, completion_reported, last_activity_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (surface_id, repo_path, name, prompt, registered_at, last_status, retry_count, steer_count, completion_reported, last_event_at, last_activity_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       agent.surfaceId, agent.repoPath, agent.name, agent.prompt,
       agent.registeredAt, agent.lastStatus, agent.retryCount, agent.steerCount,
-      agent.completionReported ? 1 : 0, agent.lastActivityAt,
+      agent.completionReported ? 1 : 0, agent.lastEventAt, agent.lastActivityAt,
     );
   } catch { /* DB may not be ready */ }
 }
@@ -186,7 +188,12 @@ interface PersistedAgentRow {
   retry_count: number;
   steer_count: number;
   completion_reported: number;
+  last_event_at: number;
   last_activity_at: number;
+}
+
+function recordWatchedAgentEvent(watched: WatchedAgent, at: number): void {
+  watched.lastEventAt = at;
 }
 
 export function rehydrateWatchedAgents(): number {
@@ -194,11 +201,14 @@ export function rehydrateWatchedAgents(): number {
     const db = getSqlite();
     const rows = db.prepare('SELECT * FROM watched_agents WHERE completion_reported = 0').all() as PersistedAgentRow[];
     let count = 0;
+    let purged = 0;
+    const rehydratedSurfaceIds: string[] = [];
     const now = Date.now();
 
     for (const row of rows) {
       if (watchedAgents.has(row.surface_id)) continue;
       const pollOrdinal = registrationOrdinal++;
+      const lastEventAt = row.last_event_at || row.last_activity_at || row.registered_at;
       watchedAgents.set(row.surface_id, {
         surfaceId: row.surface_id,
         repoPath: row.repo_path,
@@ -212,6 +222,7 @@ export function rehydrateWatchedAgents(): number {
         lastTranscriptSignature: null,
         lastTranscriptMtimeMs: null,
         lastActivityAt: row.last_activity_at,
+        lastEventAt,
         retryCount: row.retry_count,
         steerCount: row.steer_count,
         completionReported: Boolean(row.completion_reported),
@@ -225,12 +236,25 @@ export function rehydrateWatchedAgents(): number {
         nextPollAt: now,
         lastPolledAt: null,
       });
+      rehydratedSurfaceIds.push(row.surface_id);
       count++;
+    }
+
+    for (const surfaceId of rehydratedSurfaceIds) {
+      const agent = watchedAgents.get(surfaceId);
+      if (!agent) continue;
+      if (agent.completionReported) continue;
+      if (now - agent.lastEventAt <= STALE_WATCH_THRESHOLD_MS) continue;
+      removePersistedAgent(surfaceId);
+      watchedAgents.delete(surfaceId);
+      transcriptSourceCache.delete(surfaceId);
+      purged += 1;
     }
 
     if (count > 0) {
       console.log(`[supervisor] Rehydrated ${count} watched agent${count === 1 ? '' : 's'} from SQLite`);
     }
+    console.log(`[supervisor] Purged ${purged} stale watched agents on startup`);
     return count;
   } catch {
     return 0;
@@ -263,6 +287,7 @@ export function registerWatchedAgent(
     lastTranscriptSignature: null,
     lastTranscriptMtimeMs: null,
     lastActivityAt: now,
+    lastEventAt: now,
     retryCount: 0,
     steerCount: 0,
     completionReported: false,
@@ -465,12 +490,14 @@ async function pollWatchedAgent(
   if (currentStatus !== watched.lastStatus) {
     const prevStatus = watched.lastStatus;
     watched.lastStatus = currentStatus;
+    recordWatchedAgentEvent(watched, now);
     console.log(`[supervisor] "${watched.name}" ${prevStatus} → ${currentStatus}`);
 
     await handleStatusChange(watched, currentStatus, now);
     if (!watchedAgents.has(watched.surfaceId)) {
       return;
     }
+    persistWatchedAgent(watched);
   }
 
   if ((currentStatus === 'running' || currentStatus === 'waiting') && !watched.completionReported) {
@@ -591,11 +618,13 @@ function resumeWatchedAgentAfterCompletionCheck(watched: WatchedAgent, now: numb
   watched.lastStatus = 'running';
   watched.lastRuntimeStatus = 'running';
   watched.lastActivityAt = now;
+  recordWatchedAgentEvent(watched, now);
   watched.batchReported = false;
   watched.tentativeFinishedSince = now;
   watched.tentativeTranscriptLength = watched.lastTranscriptLength;
   watched.tentativeTranscriptEntryId = watched.lastTranscriptEntryId;
   watched.tentativeTranscriptSignature = watched.lastTranscriptSignature;
+  persistWatchedAgent(watched);
 }
 
 // ── Event Handlers ──
@@ -624,6 +653,8 @@ async function handleStatusChange(
     }
     if (completionDecision?.block) {
       watched.completionReported = true;
+      recordWatchedAgentEvent(watched, now);
+      persistWatchedAgent(watched);
       callbacks.broadcastAgentUpdate({
         surfaceId: watched.surfaceId,
         name: watched.name,
@@ -636,6 +667,8 @@ async function handleStatusChange(
     }
 
     watched.completionReported = true;
+    recordWatchedAgentEvent(watched, now);
+    persistWatchedAgent(watched);
     callbacks.broadcastAgentUpdate({
       surfaceId: watched.surfaceId,
       name: watched.name,
@@ -650,6 +683,8 @@ async function handleStatusChange(
   if (status === 'failed') {
     if (watched.retryCount < MAX_RETRIES) {
       watched.retryCount += 1;
+      recordWatchedAgentEvent(watched, now);
+      persistWatchedAgent(watched);
       console.log(`[supervisor] Auto-retrying "${watched.name}" (attempt ${watched.retryCount})`);
 
       callbacks.broadcastAgentUpdate({
@@ -678,6 +713,7 @@ async function handleStatusChange(
           if (newWatched) {
             newWatched.retryCount = watched.retryCount;
             newWatched.steerCount = watched.steerCount;
+            persistWatchedAgent(newWatched);
           }
         }
       } catch (err) {
@@ -685,6 +721,8 @@ async function handleStatusChange(
       }
     } else {
       watched.completionReported = true;
+      recordWatchedAgentEvent(watched, now);
+      persistWatchedAgent(watched);
       callbacks.broadcastAgentUpdate({
         surfaceId: watched.surfaceId,
         name: watched.name,
@@ -721,6 +759,8 @@ async function handleStatusChange(
 
   if (status === 'interrupted') {
     watched.completionReported = true;
+    recordWatchedAgentEvent(watched, now);
+    persistWatchedAgent(watched);
     callbacks.broadcastAgentUpdate({
       surfaceId: watched.surfaceId,
       name: watched.name,
@@ -753,6 +793,8 @@ async function checkStuck(
   if (watched.steerCount < MAX_STEERS) {
     watched.steerCount += 1;
     watched.lastActivityAt = now;
+    recordWatchedAgentEvent(watched, now);
+    persistWatchedAgent(watched);
     console.log(`[supervisor] Auto-steering stuck agent "${watched.name}" (steer ${watched.steerCount})`);
 
     callbacks.broadcastAgentUpdate({
@@ -775,6 +817,8 @@ async function checkStuck(
     watched.completionReported = true;
     // Prevent the 'failed' handler from auto-retrying after stuck escalation
     watched.retryCount = MAX_RETRIES;
+    recordWatchedAgentEvent(watched, now);
+    persistWatchedAgent(watched);
     console.log(`[supervisor] Agent "${watched.name}" stuck after ${watched.steerCount} steers — escalating`);
 
     callbacks.broadcastAgentUpdate({
@@ -1154,6 +1198,8 @@ function recordTranscriptActivity(
   watched.lastTranscriptLength = nextLength;
   watched.lastTranscriptEntryId = nextEntryId;
   watched.lastActivityAt = now;
+  recordWatchedAgentEvent(watched, now);
+  persistWatchedAgent(watched);
 
   const progressEntry = findLastProgressEntry(entries);
   const progressMessage = progressEntry ? normalizeProgressMessage(progressEntry.text) : '';
