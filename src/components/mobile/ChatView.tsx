@@ -33,7 +33,7 @@ interface MessageBubbleProps {
   entry: ChatViewProps['transcriptEntries'][number];
   isLatest: boolean;
   isNewMessage: boolean;
-  isExpanded: boolean;
+  expandedToolCardIds: Set<string>;
   selectedReviewFile: ChatViewProps['selectedReviewFile'];
   renderMessageBody: ChatViewProps['renderMessageBody'];
   setExpandedMedia: ChatViewProps['setExpandedMedia'];
@@ -59,38 +59,23 @@ function useChatPalette() {
     background: colors.bg,
     userBubble: 'rgba(255,248,240,0.12)',
     userText: '#FAF5F0',
-    assistantBubble: colors.elevatedSurface,
-    assistantText: colors.text,
-    secondaryText: colors.textSecondary,
-    tertiaryText: colors.textTertiary,
+    assistantBubble: 'rgba(30,28,26,0.82)',
+    assistantText: '#FAF5F0',
+    secondaryText: '#A09890',
+    tertiaryText: '#706860',
     toolRowBg: 'rgba(30,28,26,0.6)',
-    toolRowBorder: colors.surfaceBorder,
-    codeBlockBg: 'rgba(30,28,26,1)',
+    toolRowBorder: 'rgba(255,248,240,0.08)',
+    codeBlockBg: 'rgba(30,28,26,0.92)',
     codeInlineBg: 'rgba(255,248,240,0.10)',
-    mutedBorder: colors.border,
-    mutedSurface: colors.surface,
+    mutedBorder: 'rgba(255,248,240,0.08)',
+    mutedSurface: 'rgba(30,28,26,0.48)',
     elevatedShadow: '0 18px 38px rgba(0, 0, 0, 0.34)',
-    green: colors.green,
-    red: colors.red,
+    green: '#30D158',
+    red: '#FF453A',
   }), [colors]);
 }
 
 type ChatPalette = ReturnType<typeof useChatPalette>;
-
-function toolDetail(tool: MobileTranscriptToolCall) {
-  const args = tool.args ?? {};
-  const detail = [
-    typeof args.file_path === 'string' ? args.file_path : null,
-    typeof args.path === 'string' ? args.path : null,
-    typeof args.command === 'string' ? args.command : null,
-    typeof args.cmd === 'string' ? args.cmd : null,
-    typeof args.query === 'string' ? args.query : null,
-    typeof args.url === 'string' ? args.url : null,
-    typeof tool.preview === 'string' ? tool.preview : null,
-  ].find(Boolean);
-
-  return typeof detail === 'string' ? detail : tool.name;
-}
 
 function humanizeToolName(name: string) {
   return name
@@ -98,17 +83,146 @@ function humanizeToolName(name: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function toolStatusLabel(status?: MobileTranscriptToolCall['status']) {
-  if (status === 'done') return 'Done';
-  if (status === 'running') return 'Running';
-  if (status === 'calling') return 'Calling';
-  return 'Queued';
+function firstNonEmptyString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
 }
 
-function toolStatusColor(status: MobileTranscriptToolCall['status'] | undefined, palette: ChatPalette) {
-  if (status === 'done') return palette.green;
-  if (status === 'running' || status === 'calling') return palette.userBubble;
-  return palette.tertiaryText;
+function stringifyToolValue(value: unknown) {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value == null) return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function toolCardLabel(name: string) {
+  const normalized = name.toLowerCase();
+  if (normalized === 'grep') return 'Grep';
+  if (normalized === 'glob' || normalized === 'list_files' || normalized === 'ls') return 'Glob';
+  if (normalized === 'read' || normalized === 'read_file' || normalized === 'read_mcp_resource' || normalized === 'open') return 'Read';
+  if (normalized === 'edit' || normalized === 'edit_file' || normalized === 'apply_patch') return 'Edit';
+  if (normalized === 'write' || normalized === 'write_file') return 'Write';
+  if (
+    normalized === 'exec'
+    || normalized === 'exec_command'
+    || normalized === 'bash'
+    || normalized === 'shell_command'
+    || normalized === 'command_execution'
+    || normalized === 'run_user_shell_command'
+    || normalized === 'write_stdin'
+  ) {
+    return 'Bash';
+  }
+  if (normalized === 'view_image' || normalized === 'image') return 'Image';
+  if (normalized === 'browser') return 'Browser';
+  if (normalized === 'search_query' || normalized === 'search_web' || normalized === 'web_search' || normalized === 'cortex_search' || normalized === 'memory_search') {
+    return 'Search';
+  }
+  return humanizeToolName(name);
+}
+
+function toolSummary(tool: MobileTranscriptToolCall) {
+  const args = tool.args ?? {};
+  const name = tool.name.toLowerCase();
+
+  if (
+    name === 'exec'
+    || name === 'exec_command'
+    || name === 'bash'
+    || name === 'shell_command'
+    || name === 'command_execution'
+    || name === 'run_user_shell_command'
+  ) {
+    return firstNonEmptyString(args.command, args.cmd, args.interaction_input) || 'Terminal command';
+  }
+
+  if (name === 'write_stdin') {
+    return firstNonEmptyString(args.chars, args.text, args.session_id, args.sessionId) || 'Terminal input';
+  }
+
+  if (name === 'browser') {
+    const action = firstNonEmptyString(args.action, args.kind, args.operation);
+    const url = firstNonEmptyString(args.url, args.href, args.currentUrl);
+    return firstNonEmptyString(
+      action && url ? `${action} ${url}` : '',
+      action,
+      url,
+    ) || 'Browser action';
+  }
+
+  return firstNonEmptyString(
+    args.file_path,
+    args.path,
+    args.target_file,
+    args.pattern,
+    args.query,
+    args.url,
+    args.href,
+    args.command,
+    args.cmd,
+    tool.preview,
+  ) || humanizeToolName(tool.name);
+}
+
+function toolArgsText(tool: MobileTranscriptToolCall) {
+  const args = tool.args;
+  if (!args || Object.keys(args).length === 0) {
+    return '';
+  }
+
+  const primary = firstNonEmptyString(
+    args.command,
+    args.cmd,
+    args.file_path,
+    args.path,
+    args.pattern,
+    args.query,
+    args.url,
+    args.href,
+    typeof args.input === 'string' ? args.input : null,
+  );
+
+  const serialized = stringifyToolValue(args);
+  if (!serialized) {
+    return '';
+  }
+
+  if (
+    primary
+    && !serialized.startsWith('{')
+    && !serialized.startsWith('[')
+  ) {
+    return serialized;
+  }
+
+  return serialized;
+}
+
+function toolOutputText(tool: MobileTranscriptToolCall) {
+  return typeof tool.preview === 'string' ? tool.preview.trim() : '';
+}
+
+function isDiffText(text: string) {
+  return text
+    .split('\n')
+    .some((line) => ['+', '-', '@@', 'diff --git', 'index ', '---', '+++'].some((token) => line.startsWith(token)));
+}
+
+function isImageResultText(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/^!\[[^\]]*\]\(([^)]+)\)$/.test(trimmed)) return true;
+  if (/^data:image\//i.test(trimmed)) return true;
+  if (/^https?:\/\/\S+\.(png|jpe?g|gif|webp|svg)(?:\?\S*)?$/i.test(trimmed)) return true;
+  return trimmed.startsWith('/') && /\.(png|jpe?g|gif|webp|svg)$/i.test(trimmed);
 }
 
 function formatCodeLanguage(language?: string) {
@@ -283,6 +397,15 @@ function richTextStyleFor(
     case 'em':
       return {
         color: bodyColor,
+      };
+    case 'img':
+      return {
+        display: 'block',
+        width: '100%',
+        maxWidth: '100%',
+        height: 'auto',
+        borderRadius: 10,
+        margin: '8px 0',
       };
     case 'code':
       return {
@@ -465,6 +588,61 @@ const PremiumCodeBlock = memo(function PremiumCodeBlock({
   );
 });
 
+const DiffTextBlock = memo(function DiffTextBlock({
+  text,
+  palette,
+}: {
+  text: string;
+  palette: ChatPalette;
+}) {
+  const lines = text.split('\n');
+
+  return (
+    <div style={{ display: 'grid', gap: 2 }}>
+      {lines.map((line, index) => {
+        const tone = diffLineTone(line);
+        const rowBackground = tone === 'add'
+          ? 'rgba(48,209,88,0.08)'
+          : tone === 'remove'
+            ? 'rgba(255,69,58,0.08)'
+            : 'transparent';
+        const rowColor = tone === 'add'
+          ? palette.green
+          : tone === 'remove'
+            ? palette.red
+            : tone === 'meta' || tone === 'hunk'
+              ? palette.secondaryText
+              : palette.assistantText;
+
+        return (
+          <div
+            key={`${index}-${line}`}
+            style={{
+              padding: '2px 8px',
+              borderRadius: 8,
+              background: rowBackground,
+            }}
+          >
+            <code
+              style={{
+                display: 'block',
+                color: rowColor,
+                fontFamily: MOBILE_CODE_FONT_FAMILY,
+                fontSize: 12,
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {line || ' '}
+            </code>
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
 const ArtifactPreviewCard = memo(function ArtifactPreviewCard({
   action,
   path,
@@ -475,9 +653,9 @@ const ArtifactPreviewCard = memo(function ArtifactPreviewCard({
   preview: string;
 }) {
   const palette = useChatPalette();
-  const previewLines = preview.split('\n').filter(Boolean).slice(0, 10);
+  const previewLines = preview.split('\n').slice(0, 10);
 
-  if (!previewLines.length) {
+  if (!previewLines.some((line) => line.trim().length > 0)) {
     return null;
   }
 
@@ -501,10 +679,9 @@ const ArtifactPreviewCard = memo(function ArtifactPreviewCard({
         <span
           style={{
             color: palette.secondaryText,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: 0,
           }}
         >
           {action}
@@ -517,57 +694,17 @@ const ArtifactPreviewCard = memo(function ArtifactPreviewCard({
             whiteSpace: 'nowrap',
             padding: '6px 8px',
             borderRadius: 8,
-            background: palette.codeBlockBg,
-            color: palette.assistantText,
-            fontFamily: '"SF Mono", Menlo, monospace',
+            background: 'rgba(255,248,240,0.08)',
+            color: palette.secondaryText,
+            fontFamily: MOBILE_CODE_FONT_FAMILY,
             fontSize: 12,
           }}
         >
           {path}
         </code>
       </div>
-      <div style={{ display: 'grid' }}>
-        {previewLines.map((line, index) => {
-          const tone = diffLineTone(line);
-          const rowBackground = tone === 'add'
-            ? 'rgba(48,209,88,0.10)'
-            : tone === 'remove'
-              ? 'rgba(255,69,58,0.10)'
-              : tone === 'meta' || tone === 'hunk'
-                ? 'rgba(10,132,255,0.10)'
-                : 'transparent';
-          const rowColor = tone === 'add'
-            ? palette.green
-            : tone === 'remove'
-              ? palette.red
-              : tone === 'meta' || tone === 'hunk'
-                ? '#7CC3FF'
-                : palette.assistantText;
-
-          return (
-            <div
-              key={`${path}-${index}`}
-              style={{
-                padding: '4px 12px',
-                background: rowBackground,
-              }}
-            >
-              <code
-                style={{
-                  display: 'block',
-                  color: rowColor,
-                  fontFamily: '"SF Mono", Menlo, monospace',
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {line}
-              </code>
-            </div>
-          );
-        })}
+      <div style={{ padding: 8 }}>
+        <DiffTextBlock text={previewLines.join('\n')} palette={palette} />
       </div>
     </div>
   );
@@ -577,7 +714,7 @@ const MessageBubble = memo(function MessageBubble({
   entry,
   isLatest,
   isNewMessage,
-  isExpanded,
+  expandedToolCardIds,
   selectedReviewFile,
   renderMessageBody,
   setExpandedMedia,
@@ -704,18 +841,24 @@ const MessageBubble = memo(function MessageBubble({
       {entry.toolCalls?.length ? (
         <div style={{ display: 'grid', gap: 6 }}>
           {entry.toolCalls.map((tool, index) => {
-            const statusColor = toolStatusColor(tool.status, palette);
+            const toolCardId = `${entry.id}-${tool.name}-${index}`;
+            const isExpanded = expandedToolCardIds.has(toolCardId);
+            const argsText = toolArgsText(tool);
+            const outputText = toolOutputText(tool);
+            const hasOutputDiff = isDiffText(outputText);
+            const hasImageOutput = isImageResultText(outputText);
+            const fallbackDetail = !argsText && !outputText ? toolSummary(tool) : '';
             return (
               <button
-                key={`${entry.id}-${tool.name}-${index}`}
+                key={toolCardId}
                 type="button"
-                onClick={() => onToggleExpanded(entry.id)}
+                onClick={() => onToggleExpanded(toolCardId)}
                 aria-expanded={isExpanded}
                 style={{
                   display: 'grid',
                   gap: isExpanded ? 8 : 0,
                   width: '100%',
-                  padding: '10px 12px',
+                  padding: 10,
                   borderRadius: 10,
                   border: `1px solid ${palette.toolRowBorder}`,
                   background: palette.toolRowBg,
@@ -731,73 +874,140 @@ const MessageBubble = memo(function MessageBubble({
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     gap: 12,
+                    minWidth: 0,
                   }}
                 >
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 10,
+                      gap: 8,
                       minWidth: 0,
+                      flex: 1,
                     }}
                   >
                     <span
-                      aria-hidden="true"
                       style={{
-                        width: 9,
-                        height: 9,
-                        borderRadius: '50%',
-                        background: statusColor,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '5px 8px',
+                        borderRadius: 999,
+                        background: 'rgba(255,248,240,0.08)',
+                        color: palette.assistantText,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        lineHeight: 1,
                         flexShrink: 0,
-                        animation: tool.status === 'running' || tool.status === 'calling'
-                          ? 'chatview-thinking-pulse 1.4s ease-in-out infinite'
-                          : undefined,
                       }}
-                    />
+                    >
+                      {toolCardLabel(tool.name)}
+                    </span>
                     <span
                       style={{
                         minWidth: 0,
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        fontSize: 13,
-                        fontWeight: 600,
+                        color: palette.secondaryText,
+                        fontSize: 12,
+                        fontWeight: 500,
+                        lineHeight: 1.4,
                       }}
                     >
-                      {humanizeToolName(tool.name)}
+                      {toolSummary(tool)}
                     </span>
                   </div>
-                  <div
+                  <ChevronDown
+                    size={14}
+                    strokeWidth={2}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      color: palette.secondaryText,
+                      color: palette.tertiaryText,
                       flexShrink: 0,
+                      transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                      transition: 'transform 180ms ease',
                     }}
-                  >
-                    <span style={{ fontSize: 11 }}>{toolStatusLabel(tool.status)}</span>
-                    <ChevronDown
-                      size={14}
-                      strokeWidth={2}
-                      style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 180ms ease' }}
-                    />
-                  </div>
+                  />
                 </div>
                 {isExpanded ? (
-                  <code
-                    style={{
-                      display: 'block',
-                      color: palette.secondaryText,
-                      fontFamily: '"SF Mono", Menlo, monospace',
-                      fontSize: 12,
-                      lineHeight: 1.5,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    {toolDetail(tool)}
-                  </code>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {argsText ? (
+                      <code
+                        style={{
+                          display: 'block',
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          background: 'rgba(255,248,240,0.05)',
+                          color: palette.assistantText,
+                          fontFamily: MOBILE_CODE_FONT_FAMILY,
+                          fontSize: 12,
+                          lineHeight: 1.5,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {argsText}
+                      </code>
+                    ) : null}
+                    {outputText ? (
+                      hasImageOutput ? (
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            background: 'rgba(255,248,240,0.05)',
+                          }}
+                        >
+                          {renderStyledMessageBody(renderMessageBody, outputText, `${toolCardId}-output`, palette, 'assistant')}
+                        </div>
+                      ) : hasOutputDiff ? (
+                        <div
+                          style={{
+                            padding: 8,
+                            borderRadius: 8,
+                            background: 'rgba(255,248,240,0.05)',
+                          }}
+                        >
+                          <DiffTextBlock text={outputText} palette={palette} />
+                        </div>
+                      ) : (
+                        <code
+                          style={{
+                            display: 'block',
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            background: 'rgba(255,248,240,0.05)',
+                            color: palette.secondaryText,
+                            fontFamily: MOBILE_CODE_FONT_FAMILY,
+                            fontSize: 12,
+                            lineHeight: 1.5,
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {outputText}
+                        </code>
+                      )
+                    ) : null}
+                    {fallbackDetail ? (
+                      <code
+                        style={{
+                          display: 'block',
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          background: 'rgba(255,248,240,0.05)',
+                          color: palette.secondaryText,
+                          fontFamily: MOBILE_CODE_FONT_FAMILY,
+                          fontSize: 12,
+                          lineHeight: 1.5,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {fallbackDetail}
+                      </code>
+                    ) : null}
+                  </div>
                 ) : null}
               </button>
             );
@@ -972,14 +1182,14 @@ function MediaGrid({
               href={mediaHref(item.path)}
               target="_blank"
               rel="noreferrer"
-              style={{ color: '#7CC3FF', fontSize: 12, textDecoration: 'none' }}
+              style={{ color: palette.secondaryText, fontSize: 12, textDecoration: 'none' }}
             >
               Open
             </a>
             <a
               href={mediaHref(item.path, true)}
               download={item.name}
-              style={{ color: '#7CC3FF', fontSize: 12, textDecoration: 'none' }}
+              style={{ color: palette.secondaryText, fontSize: 12, textDecoration: 'none' }}
             >
               Save
             </a>
@@ -1044,9 +1254,17 @@ export function ChatView({
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [canLoadMore, setCanLoadMore] = useState(hasMoreHistory);
-  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const [expandedToolCardIds, setExpandedToolCardIds] = useState<Set<string>>(new Set());
   const toggleExpanded = useCallback((id: string) => {
-    setExpandedMessageId((prev) => (prev === id ? null : id));
+    setExpandedToolCardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   }, []);
   const latestVisibleEntryRef = useRef<{ sessionKey?: string; entryId: string | null }>({
     sessionKey: selectedSession?.sessionKey,
@@ -1154,7 +1372,7 @@ export function ChatView({
 
     if (sessionChanged || (idsChanged && !appendedOnly)) {
       virtualizer.measure();
-      setExpandedMessageId(null);
+      setExpandedToolCardIds(new Set());
       setHasNewMessages(false);
     }
 
@@ -1384,7 +1602,7 @@ export function ChatView({
                       entry={entry}
                       isLatest={isLatest}
                       isNewMessage={isNew}
-                      isExpanded={expandedMessageId === entry.id}
+                      expandedToolCardIds={expandedToolCardIds}
                       selectedReviewFile={selectedReviewFile}
                       renderMessageBody={renderMessageBody}
                       setExpandedMedia={setExpandedMedia}
@@ -1400,9 +1618,9 @@ export function ChatView({
           <div style={{ display: 'grid', gap: 16, paddingTop: 8 }}>
             {[
               { width: '75%', alignSelf: 'flex-start', background: 'linear-gradient(90deg, rgba(46,42,38,0.9) 25%, rgba(62,56,50,0.9) 50%, rgba(46,42,38,0.9) 75%)', height: 52 },
-              { width: '55%', alignSelf: 'flex-end', background: 'linear-gradient(90deg, rgba(10,132,255,0.7) 25%, rgba(42,152,255,0.85) 50%, rgba(10,132,255,0.7) 75%)', height: 52 },
+              { width: '55%', alignSelf: 'flex-end', background: 'linear-gradient(90deg, rgba(72,64,58,0.92) 25%, rgba(98,88,80,0.96) 50%, rgba(72,64,58,0.92) 75%)', height: 52 },
               { width: '85%', alignSelf: 'flex-start', background: 'linear-gradient(90deg, rgba(46,42,38,0.9) 25%, rgba(62,56,50,0.9) 50%, rgba(46,42,38,0.9) 75%)', height: 84 },
-              { width: '40%', alignSelf: 'flex-end', background: 'linear-gradient(90deg, rgba(10,132,255,0.7) 25%, rgba(42,152,255,0.85) 50%, rgba(10,132,255,0.7) 75%)', height: 40 },
+              { width: '40%', alignSelf: 'flex-end', background: 'linear-gradient(90deg, rgba(72,64,58,0.92) 25%, rgba(98,88,80,0.96) 50%, rgba(72,64,58,0.92) 75%)', height: 40 },
             ].map((bubble, index) => (
               <div
                 key={index}
