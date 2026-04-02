@@ -604,11 +604,8 @@ function MobileRemoteShellInner({
     position: 'relative',
     display: 'grid',
     gap: '0.42rem',
-    padding: 10,
-    borderRadius: 26,
-    border: `1px solid ${DARK_COLORS.surfaceBorder}`,
-    background: isComposerPrimed ? 'rgba(46,42,38,0.94)' : DARK_COLORS.surface,
-    backdropFilter: 'blur(18px)',
+    padding: 0,
+    background: 'transparent',
     WebkitBackdropFilter: 'blur(18px)',
     boxShadow: '0 18px 38px rgba(0,0,0,0.28)',
   };
