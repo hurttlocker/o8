@@ -227,6 +227,8 @@ interface UnifiedSyncPollingArgs {
   setReviewFileByPath: Dispatch<SetStateAction<Record<string, MobileReviewFileResponse['file']>>>;
   // Legacy loaders for owned review packet (stays separate — not in sync endpoint yet)
   loadOwnedReviewPacketRef: MutableRefObject<(sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>>;
+  pinnedSessionKeyRef: MutableRefObject<string | null>;
+  clearPinnedSession: (sessionKey?: string | null) => void;
 }
 
 export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
@@ -239,12 +241,14 @@ export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
     linkedOwnedKeyRef,
     diffOpenRef,
     selectedReviewFilePathRef,
-  setSnapshot,
-  setRefreshError,
-  setHistoryBySession,
-  setReviewFileByPath,
-  loadOwnedReviewPacketRef,
-} = args;
+    setSnapshot,
+    setRefreshError,
+    setHistoryBySession,
+    setReviewFileByPath,
+    loadOwnedReviewPacketRef,
+    pinnedSessionKeyRef,
+    clearPinnedSession,
+  } = args;
 
   const intervalMs = POLLING_INTERVALS[pollingTier];
 
@@ -282,6 +286,8 @@ export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
       setRefreshError,
       setHistoryBySession,
       setReviewFileByPath,
+      pinnedSessionKeyRef,
+      clearPinnedSession,
     });
 
     // Owned review packet stays on the legacy endpoint (not consolidated yet)

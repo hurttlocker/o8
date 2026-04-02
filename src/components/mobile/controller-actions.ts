@@ -222,9 +222,11 @@ interface FocusSessionArgs {
   sessionId: string;
   snapshot: MobileInboxSnapshot;
   compactLine: CompactLine;
-  setSelectedId: Dispatch<SetStateAction<string>>;
-  setSelectedSessionKeyHint: Dispatch<SetStateAction<string>>;
-  setSelectedSessionFallback: Dispatch<SetStateAction<MobileInboxSnapshot['sessions'][number] | null>>;
+  setSelection: Dispatch<SetStateAction<{
+    id: string;
+    sessionKey: string;
+    fallback: MobileInboxSnapshot['sessions'][number] | null;
+  }>>;
   setActiveView: (view: 'chat') => void;
   setControlsOpen: Dispatch<SetStateAction<boolean>>;
   setDiffOpen: Dispatch<SetStateAction<boolean>>;
@@ -239,9 +241,7 @@ export function focusSessionSurface({
   sessionId,
   snapshot,
   compactLine,
-  setSelectedId,
-  setSelectedSessionKeyHint,
-  setSelectedSessionFallback,
+  setSelection,
   setActiveView,
   setControlsOpen,
   setDiffOpen,
@@ -260,9 +260,11 @@ export function focusSessionSurface({
     resolvedSessionKey: nextSession.sessionKey,
   });
 
-  setSelectedId(nextSession.id);
-  setSelectedSessionKeyHint(nextSession.sessionKey);
-  setSelectedSessionFallback(nextSession);
+  setSelection({
+    id: nextSession.id,
+    sessionKey: nextSession.sessionKey,
+    fallback: nextSession,
+  });
   setActiveView('chat');
   setControlsOpen(false);
   setDiffOpen(false);

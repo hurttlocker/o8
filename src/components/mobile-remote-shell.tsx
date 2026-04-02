@@ -1,6 +1,7 @@
 'use client';
 import {
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -13,7 +14,6 @@ import type { MobileInboxSnapshot, MobileReviewFileResponse, MobileTranscriptEnt
 import {
   agentDisplayName,
   compactLine,
-  pickHomeSession,
   renderMessageBody,
 } from './mobile/utils';
 import dynamic from 'next/dynamic';
@@ -194,6 +194,29 @@ function MobileRemoteShellInner({
     sessionId: string | null;
     tab: 'chat' | 'terminal';
   }>({ sessionId: null, tab: 'chat' });
+  const pinnedSessionKeyRef = useRef<string | null>(null);
+  const pinnedSessionTimeoutRef = useRef<number | null>(null);
+
+  const clearPinnedSession = useCallback((sessionKey?: string | null) => {
+    if (sessionKey && pinnedSessionKeyRef.current !== sessionKey) {
+      return;
+    }
+    pinnedSessionKeyRef.current = null;
+    if (pinnedSessionTimeoutRef.current !== null) {
+      window.clearTimeout(pinnedSessionTimeoutRef.current);
+      pinnedSessionTimeoutRef.current = null;
+    }
+  }, []);
+
+  const pinOptimisticSession = useCallback((sessionKey: string) => {
+    clearPinnedSession();
+    pinnedSessionKeyRef.current = sessionKey;
+    pinnedSessionTimeoutRef.current = window.setTimeout(() => {
+      if (pinnedSessionKeyRef.current === sessionKey) {
+        clearPinnedSession(sessionKey);
+      }
+    }, 5000);
+  }, [clearPinnedSession]);
 
   // ── All state lives in useMobileState ──
   const state = useMobileState({ initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket });
@@ -206,7 +229,10 @@ function MobileRemoteShellInner({
   } = useMobileStreaming(state);
 
   // ── Data fetching + polling ──
-  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles } = useMobilePolling(state, wsConnected);
+  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles } = useMobilePolling(state, wsConnected, {
+    pinnedSessionKeyRef,
+    clearPinnedSession,
+  });
 
   // ── Action handlers ──
   const actions = useMobileActions(state, { wsConnected, refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, sendTerminalAttach, sendTerminalInput });
@@ -261,7 +287,7 @@ function MobileRemoteShellInner({
     composeFocused, composeHeight, waitingForResponse, hydrated,
     streamingText,
     // Setters
-    setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setSurfaceNote,
+    setSelection, setActiveView, setSurfaceNote,
     setDraftBySession, setPendingOwnedTurnBySession,
     setControlsOpen, setAlertsOpen, setSessionPickerOpen,
     setPendingApprovals, setResolvedApprovals,
@@ -269,7 +295,7 @@ function MobileRemoteShellInner({
     setDiffOpen, setSnapshot,
     // Refs
     composeRef, fileInputRef, transcriptBottomRef,
-    lastAssistantCountRef, seenMessageIdsRef,
+    seenMessageIdsRef,
     refreshError, surfaceNote,
     activeView,
     // Cortex memory
@@ -283,6 +309,10 @@ function MobileRemoteShellInner({
   const [prReviewNumber, setPrReviewNumber] = useState<number | null>(null);
   const [prReviewRepo, setPrReviewRepo] = useState('');
 
+  useEffect(() => () => {
+    clearPinnedSession();
+  }, [clearPinnedSession]);
+
   useEffect(() => {
     setPendingApprovals(snapshot.approvals ?? []);
     setResolvedApprovals((current) => {
@@ -293,10 +323,6 @@ function MobileRemoteShellInner({
       return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
   }, [setPendingApprovals, setResolvedApprovals, snapshot.approvals]);
-
-  useEffect(() => {
-    void refreshInbox(true, MOBILE_INITIAL_INBOX_LIMIT).catch(() => undefined);
-  }, [refreshInbox]);
 
   // ── Swipe right from left edge to go back to chat ──
   useSwipeBack(
@@ -321,29 +347,6 @@ function MobileRemoteShellInner({
     };
   }, [diffOpen]);
 
-  // Sync selected session with snapshot
-  useEffect(() => {
-    setSelectedId((currentId) => {
-      if (currentId && snapshot.sessions.some((session) => session.id === currentId)) return currentId;
-      if (state.selectedSessionKeyHint) {
-        const matchingSession = snapshot.sessions.find((session) => session.sessionKey === state.selectedSessionKeyHint);
-        if (matchingSession) return matchingSession.id;
-        return currentId;
-      }
-      return currentId || (pickHomeSession(snapshot)?.id ?? '');
-    });
-  }, [snapshot, setSelectedId, state.selectedSessionKeyHint]);
-
-  useEffect(() => {
-    if (activeView !== 'squad' || selectedSession) return;
-    const homeSession = pickHomeSession(snapshot);
-    if (!homeSession) return;
-    setSelectedId(homeSession.id);
-    setSelectedSessionKeyHint(homeSession.sessionKey);
-    setSelectedSessionFallback(homeSession);
-    setActiveView('chat');
-  }, [activeView, selectedSession, setActiveView, setSelectedId, setSelectedSessionFallback, setSelectedSessionKeyHint, snapshot]);
-
   const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
   const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
   const transcriptLoading = selectedSessionKey ? historyLoading[selectedSessionKey] ?? false : false;
@@ -354,14 +357,6 @@ function MobileRemoteShellInner({
   const transcriptActionState = selectedSessionKey ? actionStateBySession[selectedSessionKey] ?? 'idle' : 'idle';
   const transcriptActionNote = selectedSessionKey ? actionNoteBySession[selectedSessionKey] ?? null : null;
   const selectedReviewFile = selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined;
-
-  // Track assistant count for response detection
-  const assistantCount = transcriptEntries.filter((e) => e.role === 'assistant').length;
-  useEffect(() => {
-    if (waitingForResponse && assistantCount > lastAssistantCountRef.current) {
-      setWaitingForResponse(false);
-    }
-  }, [waitingForResponse, assistantCount, lastAssistantCountRef, setWaitingForResponse]);
 
   const latestTranscriptMarker = transcriptEntries[transcriptEntries.length - 1]?.id ?? 'empty';
   const scrollMarker = pendingOwnedTurn ? `${latestTranscriptMarker}:${pendingOwnedTurn.id}` : latestTranscriptMarker;
@@ -472,13 +467,16 @@ function MobileRemoteShellInner({
             .map((session) => (session.isCurrentSession ? { ...session, isCurrentSession: false } : session)),
         ],
       }));
+      pinOptimisticSession(payload.sessionKey);
       state.setHistoryBySession((current) => ({
         ...current,
         [payload.sessionKey!]: current[payload.sessionKey!] ?? [],
       }));
-      setSelectedId(optimisticSession.id);
-      setSelectedSessionKeyHint(payload.sessionKey);
-      setSelectedSessionFallback(optimisticSession);
+      setSelection({
+        id: optimisticSession.id,
+        sessionKey: payload.sessionKey,
+        fallback: optimisticSession,
+      });
       setActiveView('chat');
       setWaitingForResponse(false);
       setSurfaceNote('New mobile chat ready.');

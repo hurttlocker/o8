@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import {
   loadOwnedReviewPacketForSession,
   loadReviewFilePreview,
@@ -18,7 +18,12 @@ import type { MobileState } from './useMobileState';
  * Manages all data-fetching: history loading, review packets, review files,
  * unified sync polling, visibility-based refresh.
  */
-export function useMobilePolling(state: MobileState, wsConnected: boolean) {
+interface MobilePollingOptions {
+  pinnedSessionKeyRef: MutableRefObject<string | null>;
+  clearPinnedSession: (sessionKey?: string | null) => void;
+}
+
+export function useMobilePolling(state: MobileState, wsConnected: boolean, options: MobilePollingOptions) {
   const {
     snapshot, setSnapshot,
     selectedSessionKey, selectedSession,
@@ -35,23 +40,31 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
     lastAssistantCountRef,
     documentVisibleRef,
   } = state;
+  const { pinnedSessionKeyRef, clearPinnedSession } = options;
 
   const refreshInbox = useCallback(
-    (fresh = false, limit?: number) => refreshInboxSnapshot({ setSnapshot, setRefreshError, fresh, limit }),
-    [setRefreshError, setSnapshot],
+    (fresh = false, limit?: number) => refreshInboxSnapshot({
+      setSnapshot,
+      setRefreshError,
+      fresh,
+      limit,
+      pinnedSessionKeyRef,
+      clearPinnedSession,
+    }),
+    [clearPinnedSession, pinnedSessionKeyRef, setRefreshError, setSnapshot],
   );
 
   const loadHistory = useCallback(
     (sessionKey: string, force = false) => loadSessionHistory({
       sessionKey,
       force,
-      historyBySession,
+      historyBySession: historyBySessionRef.current,
       setHistoryLoading,
       setHistoryBySession,
       setHistoryGroupsBySession,
       setHistoryError,
     }),
-    [historyBySession, setHistoryBySession, setHistoryError, setHistoryGroupsBySession, setHistoryLoading],
+    [historyBySessionRef, setHistoryBySession, setHistoryError, setHistoryGroupsBySession, setHistoryLoading],
   );
 
   const loadOwnedReviewPacket = useCallback(
@@ -214,6 +227,8 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
       setHistoryGroupsBySession,
       setReviewFileByPath,
       loadOwnedReviewPacketRef,
+      pinnedSessionKeyRef,
+      clearPinnedSession,
     });
   }, [
     pollingTier,
@@ -222,9 +237,9 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
     documentVisibleRef, historyBySessionRef,
     // Refs are stable (same identity)
     pollingTierRef, selectedSessionKeyRef, linkedOwnedKeyRef,
-    diffOpenRef, selectedReviewFilePathRef, loadOwnedReviewPacketRef,
+    diffOpenRef, selectedReviewFilePathRef, loadOwnedReviewPacketRef, pinnedSessionKeyRef,
     // These are still in deps for the initial sync (effect only re-runs when pollingTier changes):
-    selectedSessionKey, linkedOwnedKey, diffOpen, selectedReviewFilePath,
+    selectedSessionKey, linkedOwnedKey, diffOpen, selectedReviewFilePath, clearPinnedSession,
   ]);
 
   // Pre-fetch adjacent session history during idle (#46 optimistic rendering)

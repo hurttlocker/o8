@@ -3,6 +3,7 @@
  */
 import type {
   Dispatch,
+  MutableRefObject,
   SetStateAction,
 } from 'react';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
@@ -37,6 +38,47 @@ interface SyncResponse {
 
 let cachedInboxEtag: string | undefined;
 
+interface PinnedSessionArgs {
+  pinnedSessionKeyRef?: MutableRefObject<string | null>;
+  clearPinnedSession?: (sessionKey?: string | null) => void;
+}
+
+function mergePinnedOptimisticSession({
+  prev,
+  incoming,
+  pinnedSessionKeyRef,
+  clearPinnedSession,
+}: {
+  prev: MobileInboxSnapshot;
+  incoming: MobileInboxSnapshot;
+} & PinnedSessionArgs) {
+  const pinnedSessionKey = pinnedSessionKeyRef?.current;
+  if (!pinnedSessionKey) {
+    return incoming;
+  }
+  if (incoming.sessions.some((session) => session.sessionKey === pinnedSessionKey)) {
+    clearPinnedSession?.(pinnedSessionKey);
+    return incoming;
+  }
+
+  const pinnedOptimisticSession = prev.sessions.find((session) => session.sessionKey === pinnedSessionKey);
+  if (!pinnedOptimisticSession) {
+    clearPinnedSession?.(pinnedSessionKey);
+    return incoming;
+  }
+
+  return {
+    ...incoming,
+    primarySessionKey: pinnedSessionKey,
+    sessions: [
+      pinnedOptimisticSession,
+      ...incoming.sessions
+        .filter((session) => session.sessionKey !== pinnedSessionKey)
+        .map((session) => (session.isCurrentSession ? { ...session, isCurrentSession: false } : session)),
+    ],
+  };
+}
+
 interface MobileSyncArgs {
   wantInbox: boolean;
   historySessionKey?: string;
@@ -61,7 +103,9 @@ export async function mobileSyncOnce({
   setRefreshError,
   setHistoryBySession,
   setReviewFileByPath,
-}: MobileSyncArgs): Promise<SyncResponse | null> {
+  pinnedSessionKeyRef,
+  clearPinnedSession,
+}: MobileSyncArgs & PinnedSessionArgs): Promise<SyncResponse | null> {
   const body: SyncRequest = {};
   if (wantInbox) body.inbox = { etag: cachedInboxEtag };
   if (historySessionKey) body.history = { sessionKey: historySessionKey, sinceId: historyLastId, limit: 50 };
@@ -82,8 +126,14 @@ export async function mobileSyncOnce({
     if (data.inboxEtag) cachedInboxEtag = data.inboxEtag;
     if (data.inbox) {
       setSnapshot((prev) => {
-        if (sameMobileInboxSnapshot(prev, data.inbox!)) return prev;
-        return data.inbox!;
+        const nextSnapshot = mergePinnedOptimisticSession({
+          prev,
+          incoming: data.inbox!,
+          pinnedSessionKeyRef,
+          clearPinnedSession,
+        });
+        if (sameMobileInboxSnapshot(prev, nextSnapshot)) return prev;
+        return nextSnapshot;
       });
       setRefreshError(null);
     }
@@ -185,7 +235,9 @@ export async function refreshInboxSnapshot({
   setRefreshError,
   fresh = false,
   limit,
-}: RefreshInboxArgs) {
+  pinnedSessionKeyRef,
+  clearPinnedSession,
+}: RefreshInboxArgs & PinnedSessionArgs) {
   const params = new URLSearchParams({ _t: String(Date.now()) });
   if (fresh) {
     params.set('fresh', '1');
@@ -209,10 +261,16 @@ export async function refreshInboxSnapshot({
       }
     : nextSnapshot;
   setSnapshot((prev) => {
-    if (sameMobileInboxSnapshot(prev, limitedSnapshot)) {
+    const mergedSnapshot = mergePinnedOptimisticSession({
+      prev,
+      incoming: limitedSnapshot,
+      pinnedSessionKeyRef,
+      clearPinnedSession,
+    });
+    if (sameMobileInboxSnapshot(prev, mergedSnapshot)) {
       return prev;
     }
-    return limitedSnapshot;
+    return mergedSnapshot;
   });
   setRefreshError(null);
   return limitedSnapshot;
