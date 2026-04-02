@@ -450,7 +450,10 @@ export function reconcileOrchestratorMissionState(
       return next;
     }
 
-    if (packet.lane && !laneMatch && !domainLane) {
+    // #455 — Only mark recovering if the lane binding has a real laneId.
+    // A blank laneId means resetPacket cleared the binding but the lane object
+    // hasn't been nulled yet (defensive against partial resets).
+    if (packet.lane && packet.lane.laneId && !laneMatch && !domainLane) {
       next.status = 'recovering';
       next.blockedReason = STALE_LANE_REASON;
       return {
