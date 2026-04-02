@@ -6,6 +6,9 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `3e1e603` fix: eliminate supervisor http starvation
+- `a6aed2a` perf: break route barrel imports
+- `ba66251` perf: switch dev to turbopack and lazy init db
 - `14a417c` feat: bound onAgentCompletion retry loop
 - `8b336f1` chore: restore tracked next env import
 - `7d82733` feat: add attempt learning persistence
