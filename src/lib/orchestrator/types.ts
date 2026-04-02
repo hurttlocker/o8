@@ -90,11 +90,21 @@ export interface OrchestratorMissionState {
   updatedAt: string;
 }
 
+export type PacketSelfReviewConfidence = 'high' | 'medium' | 'low';
+
+export interface PacketSelfReview {
+  passed: boolean;
+  confidence: PacketSelfReviewConfidence;
+  summary: string;
+  issuesFound?: string[];
+}
+
 export interface PacketContext {
   packetId: string;
   sessionKey: string;
   summary: string;
   changedFiles: string[];
+  selfReview?: PacketSelfReview;
   reviewFindings?: OrchestratorReviewFinding[];
   patterns?: string[];
   conflictZones?: string[];
