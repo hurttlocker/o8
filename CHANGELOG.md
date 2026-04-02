@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `f3388e8` fix: push fades further — top up, bottom down (-120px offset)
 - `256e772` fix: aggressive scroll fades
 - `0236a2a` fix: extend fades beyond screen edges with negative positioning
 - `f5c3998` fix: flush scroll fades to screen edges — full width, no inset
