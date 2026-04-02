@@ -524,6 +524,24 @@ export function reconcileLanesWithSessions(
           lifecycleTimestamp = now;
         }
 
+        // #8 — Safety net: if a lane has been 'running' for 30+ min with no
+        // event update, the agent is likely silently dead. Transition to paused.
+        if (
+          Object.keys(nextValues).length === 0
+          && lane.status === 'running'
+          && lane.lastEventAt
+        ) {
+          const staleMs = Date.now() - new Date(lane.lastEventAt).getTime();
+          if (staleMs > 30 * 60 * 1000) {
+            const now = nowIso();
+            console.log(`[session-lifecycle] Stale running lane detected: ${lane.id} — no activity for ${Math.round(staleMs / 60000)}m`);
+            nextValues.status = 'paused';
+            nextValues.lastEventAt = now;
+            nextValues.lastEventLabel = 'session_stale';
+            lifecycleTimestamp = now;
+          }
+        }
+
         if (Object.keys(nextValues).length > 0) {
           nextValues.updatedAt = nowIso();
           updateLaneRecord(lane.id, nextValues);

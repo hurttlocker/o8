@@ -633,6 +633,8 @@ async function checkStuck(
     }
   } else {
     watched.completionReported = true;
+    // Prevent the 'failed' handler from auto-retrying after stuck escalation
+    watched.retryCount = MAX_RETRIES;
     console.log(`[supervisor] Agent "${watched.name}" stuck after ${watched.steerCount} steers — escalating`);
 
     callbacks.broadcastAgentUpdate({
@@ -647,6 +649,11 @@ async function checkStuck(
     } catch {
       // Best effort.
     }
+
+    // #8 — Transition the lane so it doesn't stay 'running' forever.
+    // Without this, the lane was never updated — the escalation message went
+    // to the orchestrator chat but the dashboard still showed 'running'.
+    callbacks.onAgentCompletion?.(watched.surfaceId, 'failed');
 
     const duration = Math.round((now - watched.registeredAt) / 1000);
     callbacks.queueOrchestratorEscalation(
