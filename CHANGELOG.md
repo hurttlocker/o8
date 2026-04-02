@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `e9f74f8` fix: add theme-colorA1816 + viewport-fit cover for iOS Safari
 - `86a6005` fix: THE LINE
 - `ca0e6a1` fix: add auth header to supervisor watch registration
 - `8d40872` fix: supervisor registration must use HTTP — different process than Next.js
