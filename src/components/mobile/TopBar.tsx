@@ -5,18 +5,18 @@ import { useTheme } from './ThemeContext';
 
 const fontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
 
-// Top veil: solid black header background + thin dissolve edge
-// The header area is fully opaque. Only the bottom 24px fades to transparent.
+// Top veil: covers the iOS safe area (status bar / dynamic island) + header + thin dissolve.
+// Starts above the viewport to fill the safe area on iOS.
 const topVeilStyle: CSSProperties = {
   position: 'fixed',
-  top: 0,
+  top: 'calc(-1 * env(safe-area-inset-top, 0px))',
   left: 0,
   right: 0,
-  height: 'calc(env(safe-area-inset-top, 0px) + 80px)',
-  background: 'linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 70%, rgba(0,0,0,0.6) 85%, rgba(0,0,0,0) 100%)',
+  height: 'calc(env(safe-area-inset-top, 0px) + env(safe-area-inset-top, 0px) + 80px)',
+  background: 'linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 75%, rgba(0,0,0,0.5) 88%, rgba(0,0,0,0) 100%)',
   pointerEvents: 'none',
   zIndex: 90,
-};
+} as CSSProperties;
 
 function MoreIcon() {
   return (
