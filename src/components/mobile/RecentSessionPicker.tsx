@@ -9,6 +9,7 @@ interface RecentSessionPickerProps {
   compactLine: CompactLine;
   agentDisplayName: AgentDisplayName;
   onSessionSelect: (sessionId: string) => void;
+  onNewChat: () => void;
   onLaunch: () => void;
 }
 
@@ -151,6 +152,7 @@ export function RecentSessionPicker({
   compactLine,
   agentDisplayName,
   onSessionSelect,
+  onNewChat,
   onLaunch,
 }: RecentSessionPickerProps) {
   const { colors } = useTheme();
@@ -185,6 +187,24 @@ export function RecentSessionPicker({
     fontWeight: 700,
     letterSpacing: '-0.02em',
     boxShadow: '0 14px 28px rgba(10,132,255,0.28)',
+    cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+  };
+
+  const newChatButtonStyle: CSSProperties = {
+    width: '100%',
+    minHeight: 44,
+    padding: '14px 20px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    border: 'none',
+    background: '#0A84FF',
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 600,
+    boxShadow: '0 16px 32px rgba(10,132,255,0.28)',
     cursor: 'pointer',
     WebkitTapHighlightColor: 'transparent',
   };
@@ -227,6 +247,10 @@ export function RecentSessionPicker({
             Chat opens first when a session is active. Right now there is no active mobile thread, so choose a recent session or launch a fresh one.
           </p>
         </div>
+
+        <button type="button" onClick={onNewChat} style={newChatButtonStyle}>
+          New Chat
+        </button>
 
         {visibleSessions.length ? visibleSessions.map((session, index) => {
           const accent = statusColor(session, colors.blueAccent);
