@@ -317,15 +317,21 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         }
         setLaneStatus(command.laneId, 'running', actor, 'session_launched');
 
-        // Register with supervisor for completion detection + stuck monitoring
+        // Register with supervisor for completion detection + stuck monitoring.
+        // The supervisor runs in the ws-server process — use HTTP, not direct import.
         try {
-          const { registerWatchedAgent } = await import('@/lib/supervisor/agent-supervisor');
-          registerWatchedAgent(
-            result.surfaceId,
-            lane.repoPath,
-            lane.label || lane.branch,
-            command.prompt,
-          );
+          const wsPort = process.env.WS_PORT || '3002';
+          await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              surfaceId: result.surfaceId,
+              repoPath: lane.repoPath,
+              name: lane.label || lane.branch,
+              prompt: command.prompt,
+            }),
+            signal: AbortSignal.timeout(3000),
+          });
         } catch (regErr) {
           console.warn(`[lane] Failed to register agent with supervisor:`, regErr);
         }
@@ -439,10 +445,15 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         attachSession(command.laneId, result.surfaceId, actor);
         setLaneStatus(command.laneId, 'running', actor, 'resumed');
 
-        // Register with supervisor for completion detection
+        // Register with supervisor (ws-server process) via HTTP
         try {
-          const { registerWatchedAgent } = await import('@/lib/supervisor/agent-supervisor');
-          registerWatchedAgent(result.surfaceId, lane.repoPath, lane.label || lane.branch, prompt);
+          const wsPort = process.env.WS_PORT || '3002';
+          await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ surfaceId: result.surfaceId, repoPath: lane.repoPath, name: lane.label || lane.branch, prompt }),
+            signal: AbortSignal.timeout(3000),
+          });
         } catch { /* best effort */ }
 
         const updated = getLane(command.laneId);
