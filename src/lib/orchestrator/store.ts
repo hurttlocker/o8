@@ -50,6 +50,7 @@ function normalizeLaneBinding(value: unknown): OrchestratorLaneBinding | null {
     tileId: lane.tileId,
     tabId: lane.tabId,
     repoPath: typeof lane.repoPath === 'string' ? lane.repoPath : null,
+    worktreePath: typeof lane.worktreePath === 'string' ? lane.worktreePath : null,
     runtime: lane.runtime === 'claude-code' ? 'claude-code' : 'codex',
     sessionKey: typeof lane.sessionKey === 'string' ? lane.sessionKey : null,
     laneId: typeof lane.laneId === 'string' ? lane.laneId : null,

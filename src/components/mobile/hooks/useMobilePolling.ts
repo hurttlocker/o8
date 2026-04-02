@@ -37,7 +37,7 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
   } = state;
 
   const refreshInbox = useCallback(
-    (fresh = false) => refreshInboxSnapshot({ setSnapshot, setRefreshError, fresh }),
+    (fresh = false, limit?: number) => refreshInboxSnapshot({ setSnapshot, setRefreshError, fresh, limit }),
     [setRefreshError, setSnapshot],
   );
 

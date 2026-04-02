@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
 import { getApproval, listApprovals, resolveApproval } from '@/lib/approvals/store';
+import {
+  buildLlmRequestMessages,
+  cleanProxyContent,
+  defaultMobileLlmModel,
+  ensurePersistedMobileLlmChatSession,
+  providerForLlmModel,
+} from '@/lib/llm/mobile-chat-session';
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { launchCodexFromMobile, performRuntimeAction } from '@/lib/runtime/actions';
-import { readPersistedLlmChat, writePersistedLlmChat, type PersistedLlmChatHistory, type PersistedLlmChatMessage } from '@/lib/llm/chat-history-store';
+import { writePersistedLlmChat, type PersistedLlmChatHistory, type PersistedLlmChatMessage } from '@/lib/llm/chat-history-store';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 
@@ -24,52 +31,16 @@ function invalidateMutationCaches() {
   invalidateInboxCache();
 }
 
-function providerForLlmModel(model?: string): 'openai' | 'anthropic' | 'google' {
-  if (!model) return 'openai';
-  if (model.startsWith('claude-')) return 'anthropic';
-  if (model.startsWith('gemini-')) return 'google';
-  return 'openai';
-}
-
 function buildLlmImagesMarkdown(attachments: MobileActionRequest['attachments']) {
   const images = (attachments ?? []).filter((item) => item?.mimeType?.startsWith('image/') && item?.content);
   if (!images.length) return '';
   return images.map((item, index) => `![Image ${index + 1}](${item.content})`).join('\n');
 }
 
-function cleanProxyContent(text: string) {
-  return text
-    .replace(/^I'll use the \w+ tool[^\n]*\n*/gm, '')
-    .replace(/^I'll use the \w+ tool[^\n]*/gm, '')
-    .replace(/^Let me use[^\n]*tool[^\n]*\n*/gm, '')
-    .trim();
-}
-
-function buildLlmRequestMessages(history: PersistedLlmChatHistory, nextUserContent: string) {
-  const cleanMessages = (history.messages ?? [])
-    .filter((message) => {
-      if (message.isError || message.isPartial) return false;
-      if (!message.content?.trim()) return false;
-      if (message.content.startsWith('Error: ')) return false;
-      if (message.content.startsWith('Action cancelled:')) return false;
-      return true;
-    })
-    .map((message) => ({ role: message.role, content: message.content }));
-
-  const recentMessages = cleanMessages.length > 40
-    ? cleanMessages.slice(-40)
-    : cleanMessages;
-
-  return [
-    ...recentMessages,
-    { role: 'user', content: nextUserContent },
-  ];
-}
-
 async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest, clientMutationId: string) {
   const sessionKey = payload.sessionKey.trim();
   const tabId = sessionKey.replace(/^llm-chat:/, '');
-  const existing = readPersistedLlmChat(tabId)?.history ?? { messages: [] } satisfies PersistedLlmChatHistory;
+  const existing = ensurePersistedMobileLlmChatSession(tabId) ?? { messages: [] } satisfies PersistedLlmChatHistory;
   const message = payload.message?.trim();
   const imageMarkdown = buildLlmImagesMarkdown(payload.attachments);
   const userContent = [message, imageMarkdown].filter(Boolean).join('\n\n').trim();
@@ -81,7 +52,7 @@ async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest
     );
   }
 
-  const model = existing.model || 'gpt-5.4';
+  const model = existing.model || defaultMobileLlmModel();
   const provider = providerForLlmModel(model);
   const userMessage: PersistedLlmChatMessage = {
     id: `user-${Date.now()}`,

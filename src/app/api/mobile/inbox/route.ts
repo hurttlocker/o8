@@ -8,7 +8,10 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const startedAt = performance.now();
   const fresh = req.nextUrl.searchParams.get('fresh') === '1';
-  const snapshot = await getMobileInboxSnapshot({ fresh });
+  const rawLimit = req.nextUrl.searchParams.get('limit');
+  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : Number.NaN;
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : undefined;
+  const snapshot = await getMobileInboxSnapshot({ fresh, limit });
 
   return NextResponse.json(snapshot, {
     headers: {

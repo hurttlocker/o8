@@ -99,6 +99,7 @@ function mapRuntimeSessionToAgent(
     sessionKey: session.sessionKey,
     approvalStatus: 'none',
     lastEventAt: relativeAge(session.lastActivityAt),
+    lastActivityAt: session.lastActivityAt.getTime(),
     context: {
       usedPercent: contextUsed,
       trend: contextUsed >= 60 ? 'rising' : 'stable',
@@ -145,6 +146,7 @@ function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): Age
   const currentTask = session.liveSessionKey
     ? 'Reconnecting\u2026'
     : 'Idle';
+  const parsedLastActivity = new Date(session.savedAt ?? Date.now()).getTime();
 
   return {
     id: session.sessionKey,
@@ -160,6 +162,7 @@ function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): Age
     sessionKey: session.sessionKey,
     approvalStatus: 'none',
     lastEventAt: relativeAge(new Date(session.savedAt ?? Date.now())),
+    lastActivityAt: Number.isNaN(parsedLastActivity) ? Date.now() : parsedLastActivity,
     context: {
       usedPercent: 0,
       trend: 'stable',

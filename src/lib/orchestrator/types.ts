@@ -32,6 +32,7 @@ export interface OrchestratorLaneBinding {
   tileId: string;
   tabId: string;
   repoPath: string | null;
+  worktreePath?: string | null;
   runtime: OrchestratorRuntime;
   sessionKey?: string | null;
   laneId?: string | null;

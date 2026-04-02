@@ -1,8 +1,11 @@
 'use client';
 import {
+  Suspense,
   useEffect,
+  useMemo,
   useRef,
   useState,
+  lazy,
   type CSSProperties,
 } from 'react';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
@@ -28,7 +31,6 @@ import { type MobileScreen } from './mobile/SpeedDial';
 const shimmerFallback = { loading: () => <ShimmerCard /> };
 const ApprovalStack = dynamic(() => import('./mobile/ApprovalStack').then((m) => ({ default: m.ApprovalStack })), { ssr: false, ...shimmerFallback });
 const ControlsSheet = dynamic(() => import('./mobile/ControlsSheet').then((m) => ({ default: m.ControlsSheet })), { ssr: false, ...shimmerFallback });
-const CostsDashboard = dynamic(() => import('./mobile/CostsDashboard').then((m) => ({ default: m.CostsDashboard })), { ssr: false, ...shimmerFallback });
 const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ default: m.DiffOverlay })), { ssr: false, ...shimmerFallback });
 const MobileTerminal = dynamic(() => import('./mobile/MobileTerminal').then((m) => ({ default: m.MobileTerminal })), { ssr: false, ...shimmerFallback });
 const WorktreeActions = dynamic(() => import('./mobile/WorktreeActions').then((m) => ({ default: m.WorktreeActions })), { ssr: false, ...shimmerFallback });
@@ -40,9 +42,14 @@ import { ThemeProvider } from './mobile/ThemeContext';
 const LaunchSheet = dynamic(() => import('./mobile/LaunchSheet').then((m) => ({ default: m.LaunchSheet })), { ssr: false });
 const ActivityFeed = dynamic(() => import('./mobile/ActivityFeed').then((m) => ({ default: m.ActivityFeed })), { ssr: false, ...shimmerFallback });
 const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) => ({ default: m.PRReviewSheet })), { ssr: false });
-const SettingsView = dynamic(() => import('./mobile/SettingsView').then((m) => ({ default: m.SettingsView })), { ssr: false, ...shimmerFallback });
-const MemoryPage = dynamic(() => import('./mobile/MemoryPage'), { ssr: false, ...shimmerFallback });
-const IssuesPage = dynamic(() => import('./mobile/IssuesPage'), { ssr: false, ...shimmerFallback });
+const CostsDashboard = lazy(async () => ({ default: (await import('./mobile/CostsDashboard')).CostsDashboard }));
+const SettingsView = lazy(async () => ({ default: (await import('./mobile/SettingsView')).SettingsView }));
+const MemoryPage = lazy(() => import('./mobile/MemoryPage'));
+const IssuesPage = lazy(() => import('./mobile/IssuesPage'));
+
+const MOBILE_SESSION_LIST_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MOBILE_SESSION_LIST_LIMIT = 20;
+const MOBILE_INITIAL_INBOX_LIMIT = 15;
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 const RecallPanel = dynamic(() => import('./mobile/RecallPanel'), { ssr: false });
@@ -97,6 +104,7 @@ function buildOptimisticMobileChatSession(args: {
     sessionKey: args.sessionKey,
     approvalStatus: 'none',
     lastEventAt: 'just now',
+    lastActivityAt: Date.now(),
     context: {
       usedPercent: 0,
       trend: 'stable',
@@ -125,6 +133,50 @@ function buildOptimisticMobileChatSession(args: {
       },
     },
   };
+}
+
+function sessionListStatus(session: MobileInboxSnapshot['sessions'][number]) {
+  if (session.runtimeSurface?.lifecycle?.availability === 'running') {
+    return 'running';
+  }
+  return String(session.status ?? '').trim().toLowerCase();
+}
+
+function sessionLastActivityAt(session: MobileInboxSnapshot['sessions'][number]) {
+  if (typeof session.lastActivityAt === 'number' && Number.isFinite(session.lastActivityAt)) {
+    return session.lastActivityAt;
+  }
+  const lifecycleTime = session.runtimeSurface?.lifecycle?.lastRunFinishedAt
+    ?? session.runtimeSurface?.lifecycle?.lastRunStartedAt
+    ?? null;
+  if (lifecycleTime) {
+    const parsed = new Date(lifecycleTime).getTime();
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function buildVisibleMobileSessionList(sessions: MobileInboxSnapshot['sessions']) {
+  const cutoff = Date.now() - MOBILE_SESSION_LIST_WINDOW_MS;
+  const activeSessions: MobileInboxSnapshot['sessions'] = [];
+  const recentSessions: MobileInboxSnapshot['sessions'] = [];
+
+  for (const session of sessions) {
+    const status = sessionListStatus(session);
+    const isActive = status === 'running' || status === 'launching';
+    if (isActive) {
+      activeSessions.push(session);
+      continue;
+    }
+    const lastActivityAt = sessionLastActivityAt(session);
+    if (lastActivityAt != null && lastActivityAt >= cutoff) {
+      recentSessions.push(session);
+    }
+  }
+
+  return [...activeSessions, ...recentSessions].slice(0, MOBILE_SESSION_LIST_LIMIT);
 }
 
 function MobileRemoteShellInner({
@@ -173,7 +225,7 @@ function MobileRemoteShellInner({
 
     async function refreshSoon() {
       try {
-        await refreshInbox(true);
+        await refreshInbox(true, MOBILE_INITIAL_INBOX_LIMIT);
       } catch {
         // Shell-first bootstrap should stay honest and retry later.
       }
@@ -243,7 +295,7 @@ function MobileRemoteShellInner({
   }, [setPendingApprovals, setResolvedApprovals, snapshot.approvals]);
 
   useEffect(() => {
-    void refreshInbox(true).catch(() => undefined);
+    void refreshInbox(true, MOBILE_INITIAL_INBOX_LIMIT).catch(() => undefined);
   }, [refreshInbox]);
 
   // ── Swipe right from left edge to go back to chat ──
@@ -343,6 +395,10 @@ function MobileRemoteShellInner({
   }, [historyGroupsBySession, pendingOwnedTurnBySession, selectedSession?.runtimeSurface?.capabilities.interrupt, selectedSession?.runtimeSurface?.capabilities.sendInput, selectedSessionKey, transcriptActionState, setPendingOwnedTurnBySession]);
 
   // ── UI layout values ──
+  const sessionListSessions = useMemo(
+    () => buildVisibleMobileSessionList(snapshot.sessions),
+    [snapshot.sessions],
+  );
   const sessionSwitcher = snapshot.sessions.slice(0, 5);
   const isComposerPrimed = isChatSession && (composeFocused || transcriptAttachments.length > 0);
   const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
@@ -361,7 +417,7 @@ function MobileRemoteShellInner({
     ? detailTabState.tab
     : 'chat';
   const terminalActive = hasTerminalSession && detailTab === 'terminal';
-  const recentSessions = snapshot.sessions;
+  const recentSessions = sessionListSessions;
   const linkedWorktree = selectedReviewPacket?.worktree;
   const showWorktreeActions = Boolean(
     isOwnedCodexSession
@@ -606,39 +662,43 @@ function MobileRemoteShellInner({
         <div style={scrollViewStyle}>
           {activeView === 'fleet' ? (
             <FleetView
-              snapshot={snapshot}
-              onAgentSelect={(sessionKey) => {
-                actions.handleSessionFocus(sessionKey);
-              }}
+              sessions={sessionListSessions}
+              onAgentSelect={actions.handleSessionFocus}
               onBack={returnToHome}
               onLaunch={() => setLaunchOpen(true)}
             />
           ) : null}
           {activeView === 'settings' ? (
-            <SettingsView onBack={returnToHome} />
+            <Suspense fallback={null}>
+              <SettingsView onBack={returnToHome} />
+            </Suspense>
           ) : null}
           {activeView === 'memory' ? (
-            <MemoryPage
-              onBack={returnToHome}
-              onInjectText={(text: string) => {
-                if (!selectedSessionKey) return;
-                setDraftBySession((prev) => ({
-                  ...prev,
-                  [selectedSessionKey]: (prev[selectedSessionKey] ?? '') + (prev[selectedSessionKey] ? '\n' : '') + text,
-                }));
-                setActiveView('chat');
-              }}
-            />
+            <Suspense fallback={null}>
+              <MemoryPage
+                onBack={returnToHome}
+                onInjectText={(text: string) => {
+                  if (!selectedSessionKey) return;
+                  setDraftBySession((prev) => ({
+                    ...prev,
+                    [selectedSessionKey]: (prev[selectedSessionKey] ?? '') + (prev[selectedSessionKey] ? '\n' : '') + text,
+                  }));
+                  setActiveView('chat');
+                }}
+              />
+            </Suspense>
           ) : null}
           {activeView === 'issues' ? (
-            <IssuesPage
-              onBack={returnToHome}
-              onOpenPR={(repo, prNumber) => {
-                setPrReviewRepo(repo);
-                setPrReviewNumber(prNumber);
-                setPrReviewOpen(true);
-              }}
-            />
+            <Suspense fallback={null}>
+              <IssuesPage
+                onBack={returnToHome}
+                onOpenPR={(repo, prNumber) => {
+                  setPrReviewRepo(repo);
+                  setPrReviewNumber(prNumber);
+                  setPrReviewOpen(true);
+                }}
+              />
+            </Suspense>
           ) : null}
           {activeView === 'activity' ? (
             <ActivityFeed
@@ -665,14 +725,14 @@ function MobileRemoteShellInner({
             />
           ) : null}
           {activeView === 'costs' ? (
-            <CostsDashboard
-              snapshot={snapshot}
-              onBack={returnToHome}
-              onSessionSelect={(sessionId) => {
-                actions.handleSessionFocus(sessionId);
-              }}
-              compactLine={compactLine}
-            />
+            <Suspense fallback={null}>
+              <CostsDashboard
+                snapshot={snapshot}
+                onBack={returnToHome}
+                onSessionSelect={actions.handleSessionFocus}
+                compactLine={compactLine}
+              />
+            </Suspense>
           ) : null}
           {showRecentPicker ? (
             <RecentSessionPicker

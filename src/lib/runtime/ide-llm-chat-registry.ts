@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
+import { listPersistedLlmChats, readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { listCurrentIdeRepoPaths, readIdeTerminalStateFiles } from '@/lib/runtime/ide-terminal-state';
 
 export interface IdeLlmChatDescriptor {
@@ -72,6 +72,31 @@ export function listIdeLlmChatSessions(): IdeLlmChatDescriptor[] {
     } catch {
       continue;
     }
+  }
+
+  for (const tabId of listPersistedLlmChats()) {
+    const sessionKey = `llm-chat:${tabId}`;
+    if (descriptors.has(sessionKey)) continue;
+
+    const history = readPersistedLlmChat(tabId);
+    if (!history) continue;
+
+    const messages = history.history.messages ?? [];
+    const lastMessage = [...messages].reverse().find((entry) => entry.content?.trim())?.content?.trim();
+    descriptors.set(sessionKey, {
+      tabId,
+      sessionKey,
+      label: normalizeLabel(history.history.title, history.history.repoName, history.history.repoPath),
+      model: history.history.model,
+      repoName: history.history.repoName,
+      repoPath: history.history.repoPath,
+      scope: 'chat-history',
+      savedAt: history.history.savedAt,
+      modifiedAt: history.modifiedAt,
+      isCurrentSession: false,
+      messageCount: messages.length,
+      lastMessage,
+    });
   }
 
   return [...descriptors.values()]

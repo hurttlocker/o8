@@ -152,6 +152,19 @@ let inboxInflight: { generation: number; promise: Promise<MobileInboxSnapshot> }
 let inboxGeneration = 0;
 const INBOX_CACHE_TTL = 8000;
 
+function limitMobileInboxSessions(snapshot: MobileInboxSnapshot, limit?: number): MobileInboxSnapshot {
+  if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
+    return snapshot;
+  }
+  if (snapshot.sessions.length <= limit) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    sessions: snapshot.sessions.slice(0, limit),
+  };
+}
+
 export function invalidateInboxCache() {
   inboxGeneration += 1;
   inboxCache = null;
@@ -159,15 +172,16 @@ export function invalidateInboxCache() {
   invalidateMobileBootstrapBroker();
 }
 
-export async function getMobileInboxSnapshot(options: { fresh?: boolean } = {}): Promise<MobileInboxSnapshot> {
+export async function getMobileInboxSnapshot(options: { fresh?: boolean; limit?: number } = {}): Promise<MobileInboxSnapshot> {
   const fresh = options.fresh ?? false;
   const generation = inboxGeneration;
   if (!fresh && inboxCache && Date.now() - inboxCache.timestamp < INBOX_CACHE_TTL) {
-    return inboxCache.snapshot;
+    return limitMobileInboxSessions(inboxCache.snapshot, options.limit);
   }
 
   if (!fresh && inboxInflight && inboxInflight.generation === generation) {
-    return inboxInflight.promise;
+    const snapshot = await inboxInflight.promise;
+    return limitMobileInboxSessions(snapshot, options.limit);
   }
 
   const promise = (async () => {
@@ -184,13 +198,14 @@ export async function getMobileInboxSnapshot(options: { fresh?: boolean } = {}):
     }
   })();
   inboxInflight = { generation, promise };
-  return promise;
+  const snapshot = await promise;
+  return limitMobileInboxSessions(snapshot, options.limit);
 }
 
 async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Promise<MobileInboxSnapshot> {
   const fresh = options.fresh ?? false;
   const fleet = await getRuntimeInventorySnapshot({ fresh });
-  const orderedSessions = fleet.agents
+  const inventorySessions = fleet.agents
     .filter((agent) => agent.runtime === 'codex' || agent.runtime === 'claude-code')
     .map((agent, index) => ({ agent, index }))
     .sort((left, right) => {
@@ -201,7 +216,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
 
   const sessions: AgentSummary[] = [];
   const seenSessionIds = new Set<string>();
-  for (const agent of orderedSessions) {
+  for (const agent of inventorySessions) {
     if (!shouldExposeMobileSession(agent)) continue;
     const identity = mobileSessionIdentity(agent);
     if (seenSessionIds.has(identity)) continue;
@@ -211,7 +226,8 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
 
   const workspaceChats = listIdeLlmChatSessions();
   for (const chat of workspaceChats) {
-    const currentTask = chat.lastMessage ? summarizeTranscript(chat.lastMessage) : '';
+    const currentTask = chat.lastMessage ? summarizeTranscript(chat.lastMessage) : 'Start a conversation.';
+    const parsedLastActivity = new Date(chat.modifiedAt ?? chat.savedAt ?? Date.now()).getTime();
     const session: AgentSummary = {
       id: chat.sessionKey,
       name: chat.label,
@@ -226,6 +242,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
       sessionKey: chat.sessionKey,
       approvalStatus: 'none',
       lastEventAt: relativeMobileAge(chat.modifiedAt ?? chat.savedAt),
+      lastActivityAt: Number.isNaN(parsedLastActivity) ? Date.now() : parsedLastActivity,
       context: {
         usedPercent: 0,
         trend: 'stable',
@@ -276,10 +293,18 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     };
   }
 
-  const primarySession = sessions.find((session) => session.isCurrentSession)
-    ?? sessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey)
-    ?? sessions.find((session) => session.status === 'running')
-    ?? sessions[0];
+  const orderedSessions = sessions
+    .map((session, index) => ({ session, index }))
+    .sort((left, right) => {
+      const priorityDiff = mobileSessionPriority(right.session) - mobileSessionPriority(left.session);
+      return priorityDiff !== 0 ? priorityDiff : left.index - right.index;
+    })
+    .map(({ session }) => session);
+
+  const primarySession = orderedSessions.find((session) => session.isCurrentSession)
+    ?? orderedSessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey)
+    ?? orderedSessions.find((session) => session.status === 'running')
+    ?? orderedSessions[0];
 
   const [reviewSnapshot, primaryTranscript] = await Promise.all([
     getWorkspaceReviewSnapshot({ fresh }).catch(() => null),
@@ -323,7 +348,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     });
   }
 
-  for (const agent of sessions.filter((session) => session.sessionKey !== primarySession?.sessionKey)) {
+  for (const agent of orderedSessions.filter((session) => session.sessionKey !== primarySession?.sessionKey)) {
     if (!['running', 'reviewing', 'blocked', 'failed'].includes(agent.status) && agent.alerts === 0) {
       continue;
     }
@@ -393,7 +418,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
   const alerts = items.filter((item) => item.kind === 'alert' && item.severity !== 'info').length;
   const approvalCount = pendingApprovals.length;
   const reviewItems = items.filter((item) => item.kind === 'review').length;
-  const activeRuns = sessions.filter((agent) => ['running', 'reviewing', 'blocked', 'waiting', 'failed'].includes(agent.status)).length;
+  const activeRuns = orderedSessions.filter((agent) => ['running', 'reviewing', 'blocked', 'waiting', 'failed'].includes(agent.status)).length;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -403,7 +428,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     note: fleet.meta.mode === 'live'
       ? 'Mobile now reflects the local Codex and Claude Code runtime inventory, plus IDE chat and review state.'
       : fleet.meta.note,
-    sessions,
+    sessions: orderedSessions,
     approvals,
     items,
     summary: {
