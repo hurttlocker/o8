@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `186bb77` fix: supervisor retry rebinds lane session + dispatch uses lock (#dogfood)
 - `471225d` feat: compact Apple-style dropdown menu, no full-screen overlay
 - `81d4c37` fix: viewport-fit cover as separate export — Next.js 16 requirement
 - `f009103` fix: update PWA manifest + meta tags toC1C1E
