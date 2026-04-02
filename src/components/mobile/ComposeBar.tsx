@@ -81,7 +81,7 @@ function CloseIcon({ size = 14, strokeWidth = 2.2 }: { size?: number; strokeWidt
 }
 
 export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const {
     session,
     sessionKey,
@@ -118,24 +118,24 @@ export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
   const chatSendDisabled = !sessionKey || actionState !== 'idle' || (!draft.trim() && attachments.length === 0);
   const ownedSendDisabled = !sessionKey || actionState !== 'idle' || !draft.trim();
   const palette = {
-    containerBg: isDark ? 'rgba(0,0,0,0.9)' : colors.frostBg,
-    containerBorder: 'rgba(255,255,255,0.08)',
-    surfaceBg: isDark ? 'rgba(28,28,30,0.82)' : colors.panelBg,
-    surfaceBorder: 'rgba(255,255,255,0.08)',
-    inputBg: isDark ? 'rgba(44,44,46,0.9)' : colors.msgAssistantBg,
-    inputText: isDark ? '#F5F5F7' : colors.text,
-    placeholderText: isDark ? '#636366' : colors.textTertiary,
-    subtleText: isDark ? '#8E8E93' : colors.textSecondary,
-    secondaryText: isDark ? '#98989D' : colors.textSecondary,
-    primaryText: isDark ? '#F5F5F7' : colors.text,
-    sendBg: isDark ? '#0A84FF' : colors.blueAccent,
-    touchBg: isDark ? 'rgba(44,44,46,0.72)' : colors.blueSoft,
-    chipBg: isDark ? 'rgba(44,44,46,0.72)' : colors.blueSoft,
-    chipBorder: 'rgba(255,255,255,0.08)',
-    removeBg: isDark ? 'rgba(58,58,60,0.96)' : colors.frostStrong,
-    removeText: isDark ? '#8E8E93' : colors.textSecondary,
-    shadow: isDark ? '0 10px 28px rgba(0,0,0,0.28)' : colors.shadow,
-    sendShadow: isDark ? '0 10px 24px rgba(10,132,255,0.34)' : '0 10px 24px rgba(0,122,255,0.24)',
+    containerBg: colors.frostBg,
+    containerBorder: colors.surfaceBorder,
+    surfaceBg: colors.surface,
+    surfaceBorder: colors.surfaceBorder,
+    inputBg: colors.elevatedSurface,
+    inputText: colors.text,
+    placeholderText: colors.textTertiary,
+    subtleText: colors.textSecondary,
+    secondaryText: colors.textSecondary,
+    primaryText: colors.text,
+    sendBg: colors.blueAccent,
+    touchBg: 'rgba(46,42,38,0.72)',
+    chipBg: 'rgba(46,42,38,0.72)',
+    chipBorder: colors.surfaceBorder,
+    removeBg: 'rgba(62,56,50,0.96)',
+    removeText: colors.textSecondary,
+    shadow: '0 10px 28px rgba(0,0,0,0.28)',
+    sendShadow: '0 10px 24px rgba(10,132,255,0.34)',
   };
 
   const handlePrimaryAction = () => {
@@ -251,7 +251,7 @@ export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
     padding: 6,
     borderRadius: 16,
     border: `1px solid ${palette.surfaceBorder}`,
-    background: 'rgba(28,28,30,0.96)',
+    background: 'rgba(30,28,26,0.96)',
     boxShadow: '0 18px 34px rgba(0,0,0,0.26)',
   } as CSSProperties;
   const slashItemStyle = {
@@ -286,7 +286,7 @@ export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
     padding: '10px 12px',
     borderRadius: 18,
     border: `1px solid ${palette.surfaceBorder}`,
-    background: 'rgba(28,28,30,0.88)',
+    background: 'rgba(30,28,26,0.88)',
     boxShadow: palette.shadow,
   } as CSSProperties;
   const watchActionStyle = {
@@ -348,84 +348,104 @@ export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
 
   const renderComposerSurface = (placeholder: string) => (
     <>
-      <div style={inputShellStyle}>
-        {!draft ? <span style={placeholderStyle}>{placeholder}</span> : null}
-        <textarea
-          ref={composeRef}
-          rows={1}
-          value={draft}
-          onChange={(event) => {
-            handlers.onDraftChange(event.target.value);
-            const el = event.target;
-            el.style.height = '0';
-            const next = Math.min(el.scrollHeight, 160);
-            el.style.height = `${next}px`;
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Tab' && showSlashSuggestions) {
-              event.preventDefault();
-              const nextValue = autocompleteSlashCommand(draft);
-              if (nextValue) {
-                handlers.onDraftChange(`${nextValue} `);
-              }
-              return;
-            }
-            if (event.key === 'Enter' && !event.shiftKey && sessionKey && draft.trim() && !isStopState) {
-              event.preventDefault();
-              if (isChatSession) {
-                void handlers.onSend(sessionKey);
-              } else if (canResumeOwnedCodex) {
-                void handlers.onOwnedResume(sessionKey);
-              }
-            }
-          }}
-          onFocus={() => handlers.onFocusChange(true)}
-          onBlur={() => handlers.onFocusChange(false)}
-          aria-label={placeholder}
-          style={textareaStyle}
-        />
-      </div>
-      {renderSlashSuggestions()}
       <div style={{
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
-      }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            style={quickActionStyle}
-            onPointerDown={preserveMouseFocus}
-            aria-label="Attach file"
-            onClick={handlers.onAttach}
-          >
-            @file
-          </button>
-          <button
-            type="button"
-            style={quickActionStyle}
-            onPointerDown={preserveMouseFocus}
-            aria-label="Insert slash command"
-            onClick={handleCommandShortcut}
-          >
-            /cmds
-          </button>
+        alignItems: 'flex-end',
+        gap: 8,
+      }}>
+        <button
+          type="button"
+          onPointerDown={preserveMouseFocus}
+          aria-label="Attach"
+          onClick={handlers.onAttach}
+          style={{
+            width: 32,
+            height: 32,
+            minWidth: 32,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 999,
+            border: 'none',
+            background: 'rgba(255,248,240,0.08)',
+            color: '#A09890',
+            cursor: 'pointer',
+            padding: 0,
+            flexShrink: 0,
+            marginBottom: 2,
+            WebkitTapHighlightColor: 'transparent',
+          } as React.CSSProperties}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+        <div style={{
+          ...inputShellStyle,
+          flex: 1,
+          minHeight: 36,
+          maxHeight: 160,
+          padding: '6px 14px',
+          borderRadius: 20,
+        }}>
+          {!draft ? <span style={{ ...placeholderStyle, top: 6, left: 14 }}>{placeholder}</span> : null}
+          <textarea
+            ref={composeRef}
+            rows={1}
+            value={draft}
+            onChange={(event) => {
+              handlers.onDraftChange(event.target.value);
+              const el = event.target;
+              el.style.height = '0';
+              const next = Math.min(el.scrollHeight, 140);
+              el.style.height = `${next}px`;
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Tab' && showSlashSuggestions) {
+                event.preventDefault();
+                const nextValue = autocompleteSlashCommand(draft);
+                if (nextValue) {
+                  handlers.onDraftChange(`${nextValue} `);
+                }
+                return;
+              }
+              if (event.key === 'Enter' && !event.shiftKey && sessionKey && draft.trim() && !isStopState) {
+                event.preventDefault();
+                if (isChatSession) {
+                  void handlers.onSend(sessionKey);
+                } else if (canResumeOwnedCodex) {
+                  void handlers.onOwnedResume(sessionKey);
+                }
+              }
+            }}
+            onFocus={() => handlers.onFocusChange(true)}
+            onBlur={() => handlers.onFocusChange(false)}
+            aria-label={placeholder}
+            style={{
+              ...textareaStyle,
+              minHeight: 22,
+              fontSize: 16,
+              lineHeight: '22px',
+            }}
+          />
         </div>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-          <button
-            type="button"
-            style={primaryButtonStyle}
-            disabled={primaryDisabled}
-            onPointerDown={preserveMouseFocus}
-            onClick={handlePrimaryAction}
-            aria-label={isStopState ? 'Stop run' : `Send message to ${session ? agentDisplayName(session) : 'Assistant'}`}
-          >
-            {isStopState ? <SquareIcon size={16} /> : <ArrowUpIcon size={18} strokeWidth={2.3} />}
-          </button>
-        </div>
+        <button
+          type="button"
+          style={{
+            ...primaryButtonStyle,
+            width: 32,
+            height: 32,
+            minWidth: 32,
+            minHeight: 32,
+            marginBottom: 2,
+          }}
+          disabled={primaryDisabled}
+          onPointerDown={preserveMouseFocus}
+          onClick={handlePrimaryAction}
+          aria-label={isStopState ? 'Stop run' : 'Send'}
+        >
+          {isStopState ? <SquareIcon size={14} /> : <ArrowUpIcon size={16} strokeWidth={2.5} />}
+        </button>
       </div>
+      {renderSlashSuggestions()}
     </>
   );
 
