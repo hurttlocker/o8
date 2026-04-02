@@ -31,6 +31,7 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  turbopack: {},
   webpack: (config, { dev }) => {
     if (dev) {
       return config;
