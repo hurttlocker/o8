@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `998b96e` feat: add packet self-review confidence gate
 - `56be609` feat: objective exit criteria
 - `186bb77` fix: supervisor retry rebinds lane session + dispatch uses lock (#dogfood)
 - `471225d` feat: compact Apple-style dropdown menu, no full-screen overlay
