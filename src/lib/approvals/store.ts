@@ -1,8 +1,21 @@
-import { and, desc, eq, gte, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, type SQL } from 'drizzle-orm';
+import {
+  buildApprovalContextMatchPredicate,
+  extractApprovalContextIds,
+  isOrchestratorReviewApproval,
+  normalizeApprovalLookupValue,
+  scoreApprovalContextMatch,
+} from '@/lib/approvals/context';
+import {
+  allFindingsResolved,
+  buildOrchestratorReviewApprovalInput,
+  buildOrchestratorReviewEvent,
+  deriveOrchestratorReviewRisk,
+  normalizeOrchestratorReview,
+} from '@/lib/approvals/orchestrator-review';
 import { approvals as approvalsTable, getDb } from '@/lib/db';
 import type { EventSeverity } from '@/lib/fleet/types';
 import { findLaneByPacket } from '@/lib/lane/registry';
-import type { Lane } from '@/lib/lane/types';
 import type {
   ApprovalActor,
   ApprovalAuditEvent,
@@ -15,13 +28,6 @@ import type {
 
 type ApprovalRow = typeof approvalsTable.$inferSelect;
 type ApprovalInsert = typeof approvalsTable.$inferInsert;
-
-interface OrchestratorReviewRecordInput {
-  findings: OrchestratorReviewFinding[];
-  reviewer?: string;
-  approved: boolean;
-  diffSha?: string;
-}
 
 const APPROVAL_CONTEXT_LOOKUP_LIMIT = 100;
 const APPROVAL_CONTEXT_LOOKBACK_MS = 1000 * 60 * 60 * 24 * 90;
@@ -84,6 +90,8 @@ function mapApprovalRow(row: ApprovalRow | undefined): ApprovalRecord | null {
 }
 
 function toApprovalValues(approval: ApprovalRecord): ApprovalInsert {
+  const { packetId, laneId } = extractApprovalContextIds(approval.metadata);
+
   return {
     id: approval.id,
     source: approval.source,
@@ -100,6 +108,8 @@ function toApprovalValues(approval: ApprovalRecord): ApprovalInsert {
     diffJson: serializeJson(approval.diff),
     risk: approval.risk,
     metadataJson: serializeJson(approval.metadata),
+    packetId,
+    laneId,
     policyRuleId: approval.policyRuleId ?? null,
     status: approval.status,
     createdAt: approval.createdAt,
@@ -202,132 +212,6 @@ function auditEvent(
   };
 }
 
-function trimOptional(value?: string) {
-  const normalized = value?.trim();
-  return normalized || undefined;
-}
-
-function normalizeReviewFinding(finding: OrchestratorReviewFinding): OrchestratorReviewFinding {
-  const normalizedLine = typeof finding.line === 'number' && Number.isFinite(finding.line) && finding.line > 0
-    ? Math.floor(finding.line)
-    : undefined;
-  return {
-    file: finding.file.trim(),
-    line: normalizedLine,
-    severity: finding.severity,
-    description: finding.description.trim(),
-    resolution: finding.resolution,
-  };
-}
-
-function normalizeOrchestratorReview(review: {
-  findings: OrchestratorReviewFinding[];
-  reviewer?: string;
-  approved: boolean;
-  diffSha?: string;
-}): OrchestratorReviewRecordInput {
-  return {
-    findings: review.findings.map(normalizeReviewFinding),
-    reviewer: trimOptional(review.reviewer),
-    approved: review.approved,
-    diffSha: trimOptional(review.diffSha),
-  };
-}
-
-function allFindingsResolved(findings: OrchestratorReviewFinding[]) {
-  return findings.every((finding) => finding.resolution !== 'deferred');
-}
-
-function deriveOrchestratorReviewRisk(review: OrchestratorReviewRecordInput): ApprovalRisk {
-  if (!review.approved) {
-    return 'high';
-  }
-
-  if (review.findings.some((finding) => (
-    finding.resolution === 'deferred'
-    && (finding.severity === 'bug' || finding.severity === 'rule_violation')
-  ))) {
-    return 'high';
-  }
-
-  if (review.findings.length > 0) {
-    return 'medium';
-  }
-
-  return 'low';
-}
-
-function buildOrchestratorReviewNote(review: OrchestratorReviewRecordInput) {
-  const reviewer = review.reviewer ?? 'orchestrator';
-  const verdict = review.approved ? 'approved' : 'requested changes';
-  const findingCount = review.findings.length;
-  const findingsSummary = findingCount === 0
-    ? 'no findings'
-    : `${findingCount} finding${findingCount === 1 ? '' : 's'}`;
-  const diffSummary = review.diffSha ? ` Diff ${review.diffSha}.` : '';
-  return `${reviewer} ${verdict} with ${findingsSummary}.${diffSummary}`;
-}
-
-function buildOrchestratorReviewEvent(review: OrchestratorReviewRecordInput): ApprovalAuditEvent {
-  return {
-    type: 'orchestrator_review',
-    actor: 'orchestrator',
-    timestamp: Date.now(),
-    note: buildOrchestratorReviewNote(review),
-    findings: review.findings.length > 0 ? review.findings : undefined,
-    reviewer: review.reviewer,
-    approved: review.approved,
-    diffSha: review.diffSha,
-  };
-}
-
-function buildOrchestratorReviewApprovalInput(
-  packetId: string,
-  lane: Lane | null,
-  review: OrchestratorReviewRecordInput,
-): CreateApprovalInput {
-  return {
-    source: 'runtime',
-    runtime: lane?.runtime ?? 'codex',
-    agent: lane?.label ?? review.reviewer ?? 'Orchestrator',
-    sessionKey: lane?.sessionKey || (lane ? `lane:${lane.id}` : `packet:${packetId}`),
-    title: 'Orchestrator review',
-    description: lane
-      ? `Orchestrator review for lane "${lane.label}" (${lane.branch} → ${lane.baseBranch})`
-      : `Orchestrator review for packet ${packetId}`,
-    summary: lane
-      ? `Orchestrator review: ${lane.branch} → ${lane.baseBranch}`
-      : `Orchestrator review: ${packetId}`,
-    toolName: 'orchestrator_review',
-    risk: deriveOrchestratorReviewRisk(review),
-    metadata: {
-      Packet: packetId,
-      ...(lane ? {
-        Lane: lane.id,
-        Branch: lane.branch,
-        Base: lane.baseBranch,
-        Runtime: lane.runtime,
-      } : {}),
-      ...(review.reviewer ? { Reviewer: review.reviewer } : {}),
-      ...(review.diffSha ? { 'Diff SHA': review.diffSha } : {}),
-    },
-  };
-}
-
-function isOrchestratorReviewApproval(
-  approval: ApprovalRecord,
-  packetId: string,
-  laneId?: string | null,
-) {
-  if (approval.toolName !== 'orchestrator_review') {
-    return false;
-  }
-
-  const metadataPacketId = approval.metadata?.Packet;
-  const metadataLaneId = approval.metadata?.Lane;
-  return metadataPacketId === packetId || (laneId ? metadataLaneId === laneId : false);
-}
-
 export function approvalSeverity(risk: ApprovalRisk): EventSeverity {
   if (risk === 'high') return 'critical';
   if (risk === 'medium') return 'warning';
@@ -392,64 +276,6 @@ export function getApproval(id: string) {
   return mapApprovalRow(row);
 }
 
-function normalizeApprovalLookupValue(value?: string | null) {
-  return value?.trim() ?? '';
-}
-
-function combinePredicates(
-  predicates: SQL<unknown>[],
-  operator: 'and' | 'or',
-): SQL<unknown> | undefined {
-  if (predicates.length === 0) {
-    return undefined;
-  }
-  if (predicates.length === 1) {
-    return predicates[0];
-  }
-  return operator === 'and' ? and(...predicates)! : or(...predicates)!;
-}
-
-function escapeSqlLikePattern(value: string) {
-  return value
-    .replaceAll('\\', '\\\\')
-    .replaceAll('%', '\\%')
-    .replaceAll('_', '\\_');
-}
-
-function approvalMetadataEquals(field: 'Packet' | 'Lane', value: string): SQL<unknown> {
-  const path = field === 'Packet' ? '$.Packet' : '$.Lane';
-  return sql<boolean>`json_extract(${approvalsTable.metadataJson}, ${path}) = ${value}`;
-}
-
-function approvalSessionKeyContains(value: string): SQL<unknown> {
-  return sql<boolean>`${approvalsTable.sessionKey} LIKE ${`%${escapeSqlLikePattern(value)}%`} ESCAPE '\\'`;
-}
-
-function buildApprovalContextMatchPredicate(options: {
-  packetId?: string;
-  laneId?: string;
-  sessionKey?: string;
-}): SQL<unknown> | undefined {
-  const packetId = normalizeApprovalLookupValue(options.packetId);
-  const laneId = normalizeApprovalLookupValue(options.laneId);
-  const sessionKey = normalizeApprovalLookupValue(options.sessionKey);
-  const predicates: SQL<unknown>[] = [];
-
-  if (sessionKey) {
-    predicates.push(eq(approvalsTable.sessionKey, sessionKey));
-  }
-  if (packetId) {
-    predicates.push(approvalMetadataEquals('Packet', packetId));
-    predicates.push(approvalSessionKeyContains(packetId));
-  }
-  if (laneId) {
-    predicates.push(approvalMetadataEquals('Lane', laneId));
-    predicates.push(approvalSessionKeyContains(laneId));
-  }
-
-  return combinePredicates(predicates, 'or');
-}
-
 function mapApprovalRows(rows: ApprovalRow[]) {
   return rows
     .map((row) => mapApprovalRow(row)!)
@@ -500,29 +326,6 @@ function listApprovalCandidatesForContext(options: {
 
   return Array.from(rowsById.values())
     .sort((left, right) => right.createdAt - left.createdAt);
-}
-
-function scoreApprovalContextMatch(
-  approval: ApprovalRecord,
-  options: { packetId?: string; laneId?: string; sessionKey?: string },
-) {
-  const packetId = normalizeApprovalLookupValue(options.packetId);
-  const laneId = normalizeApprovalLookupValue(options.laneId);
-  const sessionKey = normalizeApprovalLookupValue(options.sessionKey);
-  const metadataPacketId = normalizeApprovalLookupValue(approval.metadata?.Packet);
-  const metadataLaneId = normalizeApprovalLookupValue(approval.metadata?.Lane);
-  const approvalSessionKey = normalizeApprovalLookupValue(approval.sessionKey);
-
-  if (packetId && metadataPacketId === packetId) {
-    return 3;
-  }
-  if (laneId && metadataLaneId === laneId) {
-    return 2;
-  }
-  if (sessionKey && approvalSessionKey === sessionKey) {
-    return 1;
-  }
-  return 0;
 }
 
 export function listApprovalsForContext(options: { packetId?: string; laneId?: string; sessionKey?: string }) {
@@ -576,7 +379,7 @@ export function createApproval(input: CreateApprovalInput) {
   }
 
   const approval = createApprovalRecord(input);
-  db.insert(approvalsTable).values(toApprovalValues(approval)).run();
+  insertApprovalRecord(approval);
   return approval;
 }
 
