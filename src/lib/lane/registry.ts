@@ -524,17 +524,20 @@ export function reconcileLanesWithSessions(
           lifecycleTimestamp = now;
         }
 
-        // #8 — Safety net: if a lane has been 'running' for 30+ min with no
-        // event update, the agent is likely silently dead. Transition to paused.
+        // #8 / #467 — Safety net: if a lane has been 'running' for 2+ hours with no
+        // event update AND the session is not in the active sessions list, the agent
+        // is likely silently dead. Only trigger when the session is actually gone —
+        // a healthy agent working for hours is fine as long as the session exists.
         if (
           Object.keys(nextValues).length === 0
           && lane.status === 'running'
           && lane.lastEventAt
+          && !session // session NOT in active sessions list
         ) {
           const staleMs = Date.now() - new Date(lane.lastEventAt).getTime();
-          if (staleMs > 30 * 60 * 1000) {
+          if (staleMs > 2 * 60 * 60 * 1000) {
             const now = nowIso();
-            console.log(`[session-lifecycle] Stale running lane detected: ${lane.id} — no activity for ${Math.round(staleMs / 60000)}m`);
+            console.log(`[session-lifecycle] Stale running lane detected: ${lane.id} — no session + no activity for ${Math.round(staleMs / 60000)}m`);
             nextValues.status = 'paused';
             nextValues.lastEventAt = now;
             nextValues.lastEventLabel = 'session_stale';
