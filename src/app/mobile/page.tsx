@@ -23,7 +23,9 @@ function MobileRouteFallback() {
 }
 
 async function MobileBootstrapView() {
-  const bootstrap = await getMobileBootstrap({ fresh: false, budgetMs: 0 });
+  // budgetMs: 200 — don't block server render on slow runtime discovery.
+  // Client hydrates the full session list via WebSocket after paint.
+  const bootstrap = await getMobileBootstrap({ fresh: false, budgetMs: 200 });
 
   return (
     <>
