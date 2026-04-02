@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `c298e44` fix: bottom fade z-index 88, FAB/dock z-index 92 — bottom fade now covers content
 - `28facdc` fix: top veil z-index 90, header z-index 95 — content no longer shows through
 - `7dd3f7d` fix: fades at screen edges — top:0, bottom:0, solid black from edge
 - `f3388e8` fix: push fades further — top up, bottom down (-120px offset)
