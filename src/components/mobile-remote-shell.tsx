@@ -501,10 +501,10 @@ function MobileRemoteShellInner({
   const bottomFadeStyle: CSSProperties = {
     position: 'fixed',
     bottom: 0,
-    left: '50%',
-    width: 'min(100dvw, 430px)',
+    left: 0,
+    right: 0,
+    width: '100%',
     height: 'calc(env(safe-area-inset-bottom, 0px) + 100px)',
-    transform: 'translateX(-50%)',
     background: 'linear-gradient(0deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.7) 40%, rgba(0,0,0,0.2) 70%, rgba(0,0,0,0) 100%)',
     pointerEvents: 'none',
     zIndex: 12,
