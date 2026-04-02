@@ -224,6 +224,7 @@ function isPacketContext(value: unknown): value is PacketContext {
     && typeof candidate.summary === 'string'
     && Array.isArray(candidate.changedFiles)
     && candidate.changedFiles.every((entry) => typeof entry === 'string')
+    && (candidate.attemptLearnings === undefined || isStringArray(candidate.attemptLearnings))
     && (candidate.selfReview === undefined || isPacketSelfReview(candidate.selfReview))
     && (candidate.reviewFindings === undefined || (Array.isArray(candidate.reviewFindings) && candidate.reviewFindings.every(isReviewFinding)))
     && (candidate.patterns === undefined || isStringArray(candidate.patterns))
