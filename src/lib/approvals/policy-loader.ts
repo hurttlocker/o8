@@ -78,7 +78,11 @@ export function loadUserPolicies(): PolicyRuleOverride[] {
 }
 
 export function mergePolicies(defaults: PolicyRule[], overrides: PolicyRuleOverride[]): PolicyRule[] {
-  const overridesById = new Map(overrides.map((rule) => [rule.id, rule]));
+  const overridesById = new Map(
+    overrides
+      .filter((rule) => !rule.workspacePath?.trim())
+      .map((rule) => [rule.id, rule]),
+  );
   return defaults.map((rule) => {
     const override = overridesById.get(rule.id);
     return override ? { ...rule, ...override } : rule;
