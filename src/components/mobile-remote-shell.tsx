@@ -500,14 +500,14 @@ function MobileRemoteShellInner({
   };
   const bottomFadeStyle: CSSProperties = {
     position: 'fixed',
-    bottom: 0,
+    bottom: 'calc(-1 * env(safe-area-inset-bottom, 0px))' as string,
     left: 0,
     right: 0,
-    height: 'calc(env(safe-area-inset-bottom, 0px) + 80px)',
-    background: 'linear-gradient(0deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 60%, rgba(0,0,0,0.6) 80%, rgba(0,0,0,0) 100%)',
+    height: 'calc(env(safe-area-inset-bottom, 0px) + env(safe-area-inset-bottom, 0px) + 80px)',
+    background: 'linear-gradient(0deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 60%, rgba(0,0,0,0.5) 82%, rgba(0,0,0,0) 100%)',
     pointerEvents: 'none',
     zIndex: 88,
-  };
+  } as CSSProperties;
   const fabWrapStyle: CSSProperties = {
     position: 'fixed',
     left: '50%',
