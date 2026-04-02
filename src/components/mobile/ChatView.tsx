@@ -57,8 +57,8 @@ function useChatPalette() {
 
   return useMemo(() => ({
     background: colors.bg,
-    userBubble: colors.blueAccent,
-    userText: '#FFFFFF',
+    userBubble: 'rgba(255,248,240,0.12)',
+    userText: '#FAF5F0',
     assistantBubble: colors.elevatedSurface,
     assistantText: colors.text,
     secondaryText: colors.textSecondary,
@@ -1612,7 +1612,7 @@ export function ChatView({
             left: 0,
             right: 0,
             height: 3,
-            background: 'linear-gradient(90deg, transparent, #0A84FF, transparent)',
+            background: 'linear-gradient(90deg, transparent, rgba(255,248,240,0.3), transparent)',
             animation: 'chatview-refresh-slide 1.5s ease-in-out infinite',
             zIndex: 10,
           }}
