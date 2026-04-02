@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `4f807ca` fix: detect silently dead agents — transition lane on stuck escalation
 - `df857c7` fix: dirty-worktree guard + reset_packet recovery race
 - `78574b5` fix: auto-expire stale approvals, fix chat/approval overlap, instant new chat nav
 - `959a209` fix: FAB button opens New Chat instead of Launch Agent sheet
