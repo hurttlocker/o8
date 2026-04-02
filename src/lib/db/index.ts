@@ -3,7 +3,7 @@
  *
  * Single connection per process (Next.js server).
  * Database file lives at DATA_DIR/cortex-ide.db (defaults to ~/.cortex-ide/).
- * Auto-creates tables on first connection via push schema.
+ * Ensures tables on first connection until a schema marker is written.
  *
  * For production multi-tenant: swap better-sqlite3 for @neondatabase/serverless
  * or postgres.js — Drizzle supports both with minimal changes.
@@ -11,7 +11,7 @@
 
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { extractApprovalContextIdsFromMetadataJson } from '@/lib/approvals/context';
@@ -23,6 +23,9 @@ import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
 
 const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.cortex-ide');
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
+// Bump when ensureTables() adds new schema or backfill work.
+const DB_SCHEMA_VERSION = 1;
+const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
 if (!existsSync(DATA_DIR)) {
@@ -43,6 +46,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
   if (_db) return _db;
   if (!Database || !drizzle) return null;
 
+  const dbFilePreviouslyExisted = existsSync(DB_PATH);
   _sqlite = new Database(DB_PATH);
 
   // SQLite performance pragmas
@@ -54,8 +58,10 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
 
   _db = drizzle!(_sqlite, { schema });
 
-  // Auto-create tables
-  ensureTables(_sqlite);
+  if (shouldEnsureTables(dbFilePreviouslyExisted)) {
+    ensureTables(_sqlite);
+    writeMigrationMarker();
+  }
 
   console.log(`[db] Connected to ${DB_PATH}`);
   return _db;
@@ -389,6 +395,21 @@ function ensureTables(sqlite: Database.Database): void {
   backfillApprovalEventsFromAuditJson(sqlite);
   ensureApprovalContextIndexes(sqlite);
   migrateLegacyLaneStoreIfNeeded(sqlite, { lanesTablePreviouslyMissing });
+}
+
+function shouldEnsureTables(dbFilePreviouslyExisted: boolean): boolean {
+  return !dbFilePreviouslyExisted || !existsSync(DB_MIGRATION_MARKER_PATH);
+}
+
+function writeMigrationMarker(): void {
+  try {
+    writeFileSync(
+      DB_MIGRATION_MARKER_PATH,
+      JSON.stringify({ schemaVersion: DB_SCHEMA_VERSION, migratedAt: new Date().toISOString() }),
+    );
+  } catch (error) {
+    console.warn(`[db] Failed to write migration marker at ${DB_MIGRATION_MARKER_PATH}`, error);
+  }
 }
 
 function tableColumnExists(sqlite: Database.Database, tableName: string, columnName: string): boolean {
