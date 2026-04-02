@@ -10,27 +10,25 @@ const fontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI'
 // 2. Gradient overlay for the color fade
 const topVeilBlurStyle: CSSProperties = {
   position: 'fixed',
-  top: 0,
-  left: 0,
-  right: 0,
-  width: '100%',
-  height: 'calc(env(safe-area-inset-top, 0px) + 140px)',
+  top: -50,
+  left: -20,
+  right: -20,
+  height: 'calc(env(safe-area-inset-top, 0px) + 190px)',
   backdropFilter: 'blur(24px)',
   WebkitBackdropFilter: 'blur(24px)',
-  WebkitMaskImage: 'linear-gradient(180deg, black 0%, black 35%, transparent 100%)',
-  maskImage: 'linear-gradient(180deg, black 0%, black 35%, transparent 100%)',
+  WebkitMaskImage: 'linear-gradient(180deg, black 0%, black 30%, transparent 100%)',
+  maskImage: 'linear-gradient(180deg, black 0%, black 30%, transparent 100%)',
   pointerEvents: 'none',
   zIndex: 10,
 } as CSSProperties;
 
 const topVeilGradientStyle: CSSProperties = {
   position: 'fixed',
-  top: 0,
-  left: 0,
-  right: 0,
-  width: '100%',
-  height: 'calc(env(safe-area-inset-top, 0px) + 140px)',
-  background: 'linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 20%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.18) 75%, rgba(0,0,0,0) 100%)',
+  top: -50,
+  left: -20,
+  right: -20,
+  height: 'calc(env(safe-area-inset-top, 0px) + 190px)',
+  background: 'linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 15%, rgba(0,0,0,0.88) 35%, rgba(0,0,0,0.5) 55%, rgba(0,0,0,0.15) 78%, rgba(0,0,0,0) 100%)',
   pointerEvents: 'none',
   zIndex: 10,
 };
