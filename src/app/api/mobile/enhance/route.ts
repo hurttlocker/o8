@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
  * optimized for AI coding agents.
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { sanitizeErrorMessage } from '@/lib/api/error-format';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = 'gemini-2.0-flash';
@@ -67,6 +68,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ enhanced, model: GEMINI_MODEL });
   } catch (err) {
     console.error('[enhance] Error:', err);
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+    return NextResponse.json({ error: sanitizeErrorMessage(err, 'Internal error') }, { status: 500 });
   }
 }

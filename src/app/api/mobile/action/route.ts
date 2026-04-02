@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buildErrorPayload, sanitizeErrorMessage } from '@/lib/api/error-format';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
 import { getApproval, listApprovals, resolveApproval } from '@/lib/approvals/store';
@@ -20,6 +21,7 @@ import { getRuntime } from '@/lib/runtimes/registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
 
 function previewMessage(message?: string) {
   if (!message) return '';
@@ -37,6 +39,13 @@ function buildLlmImagesMarkdown(attachments: MobileActionRequest['attachments'])
   return images.map((item, index) => `![Image ${index + 1}](${item.content})`).join('\n');
 }
 
+function actionErrorResponse(error: string, status: number, detail?: unknown) {
+  return NextResponse.json(buildErrorPayload(error, detail), {
+    status,
+    headers: NO_STORE_HEADERS,
+  });
+}
+
 async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest, clientMutationId: string) {
   const sessionKey = payload.sessionKey.trim();
   const tabId = sessionKey.replace(/^llm-chat:/, '');
@@ -46,10 +55,7 @@ async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest
   const userContent = [message, imageMarkdown].filter(Boolean).join('\n\n').trim();
 
   if (!userContent) {
-    return NextResponse.json(
-      { error: 'message or image attachment is required for llm-chat' },
-      { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-    );
+    return actionErrorResponse('message or image attachment is required for llm-chat', 400);
   }
 
   const model = existing.model || defaultMobileLlmModel();
@@ -88,6 +94,7 @@ async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     const note = typeof body?.error === 'string' ? body.error : `HTTP ${res.status}`;
+    // Bubble proxy failures to the top-level POST catch so the route returns one structured error shape.
     throw new Error(note);
   }
 
@@ -176,7 +183,7 @@ async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest
       approvalId: approvalRequired.id,
     }, {
       status: 200,
-      headers: { 'Cache-Control': 'no-store, max-age=0' },
+      headers: NO_STORE_HEADERS,
     });
   }
 
@@ -196,6 +203,7 @@ async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest
         },
       ],
     });
+    // Bubble model/tool failures to the top-level POST catch so mobile clients get a structured error body.
     throw new Error(errorText);
   }
 
@@ -237,7 +245,7 @@ async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest
 
   return NextResponse.json(response, {
     status: 200,
-    headers: { 'Cache-Control': 'no-store, max-age=0' },
+    headers: NO_STORE_HEADERS,
   });
 }
 
@@ -271,26 +279,33 @@ async function publishMobileMutation(
 }
 
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => null)) as MobileActionRequest | null;
-  const action = payload?.action;
-  const sessionKey = payload?.sessionKey?.trim();
-
-  if (!action || !sessionKey) {
-    return NextResponse.json({ error: 'action and sessionKey are required' }, { status: 400 });
-  }
-
-  const clientMutationId = payload?.clientMutationId?.trim() || `mutation-${Date.now()}`;
+  let action: MobileActionRequest['action'] | undefined;
+  let sessionKey: string | undefined;
+  let clientMutationId = `mutation-${Date.now()}`;
 
   try {
+    const payload = (await request.json().catch(() => null)) as MobileActionRequest | null;
+    if (!payload) {
+      return actionErrorResponse('Invalid JSON body', 400);
+    }
+
+    action = payload.action;
+    sessionKey = payload.sessionKey?.trim();
+    if (!action || !sessionKey) {
+      return actionErrorResponse('action and sessionKey are required', 400);
+    }
+
+    clientMutationId = payload.clientMutationId?.trim() || clientMutationId;
     const isOwnedCodex = sessionKey.startsWith('codex-owned:');
+
     console.info('[mobile/action] request', {
       action,
       sessionKey,
       clientMutationId,
-      cwd: payload?.cwd,
-      hasMessage: Boolean(payload?.message?.trim()),
-      attachmentCount: payload?.attachments?.length ?? 0,
-      messagePreview: previewMessage(payload?.message),
+      cwd: payload.cwd,
+      hasMessage: Boolean(payload.message?.trim()),
+      attachmentCount: payload.attachments?.length ?? 0,
+      messagePreview: previewMessage(payload.message),
     });
 
     if (sessionKey.startsWith('llm-chat:') && (action === 'steer' || action === 'send')) {
@@ -298,21 +313,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'send') {
-      return NextResponse.json(
-        { error: 'send is no longer supported on mobile runtime sessions. Use steer instead.' },
-        { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-      );
+      return actionErrorResponse('send is no longer supported on mobile runtime sessions. Use steer instead.', 400);
     }
 
     if (action === 'launch') {
-      const cwd = payload?.cwd?.trim();
-      const message = payload?.message?.trim();
+      const cwd = payload.cwd?.trim();
+      const message = payload.message?.trim();
       if (!cwd || !message) {
-        return NextResponse.json(
-          { error: 'cwd and message are required for launch' },
-          { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-        );
+        return actionErrorResponse('cwd and message are required for launch', 400);
       }
+
       const result = await launchCodexFromMobile(cwd, message);
       const response: MobileActionResponse = {
         ok: result.ok,
@@ -325,6 +335,7 @@ export async function POST(request: NextRequest) {
       if (result.ok) {
         invalidateMutationCaches();
       }
+
       console.info('[mobile/action] launch result', {
         requestedSessionKey: sessionKey,
         resolvedSessionKey: response.sessionKey,
@@ -332,6 +343,7 @@ export async function POST(request: NextRequest) {
         ok: result.ok,
         status: result.status,
       });
+
       await publishMobileMutation(clientMutationId, {
         action,
         sessionKey: response.sessionKey,
@@ -339,72 +351,61 @@ export async function POST(request: NextRequest) {
         status: result.ok ? 'queued' : 'failed',
         note: result.note,
       });
+
       return NextResponse.json(response, {
         status: 200,
-        headers: { 'Cache-Control': 'no-store, max-age=0' },
+        headers: NO_STORE_HEADERS,
       });
     }
 
     if (action === 'approve' || action === 'deny') {
-      const explicitApprovalId = payload?.approvalId?.trim();
+      const explicitApprovalId = payload.approvalId?.trim();
       const pendingForSession = explicitApprovalId
         ? []
         : listApprovals({ status: 'pending', sessionKey });
       const approvalId = explicitApprovalId || (pendingForSession.length === 1 ? pendingForSession[0]?.id : '');
       if (!approvalId) {
-        return NextResponse.json(
-          { ok: false, action, sessionKey, clientMutationId, status: 'unavailable', note: 'No pending approval found for this mobile session.' },
-          { status: 404, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-        );
+        return actionErrorResponse('No pending approval found for this mobile session.', 404);
       }
 
       const currentApproval = getApproval(approvalId);
       if (!currentApproval) {
-        return NextResponse.json(
-          { ok: false, action, sessionKey, clientMutationId, status: 'unavailable', note: 'Approval not found.' },
-          { status: 404, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-        );
+        return actionErrorResponse('Approval not found.', 404);
       }
       if (currentApproval.status !== 'pending') {
         return NextResponse.json(
           { ok: true, action, sessionKey, clientMutationId, status: 'completed', note: 'Approval was already resolved.' },
-          { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+          { status: 200, headers: NO_STORE_HEADERS },
         );
       }
 
       const approval = resolveApproval(approvalId, action === 'approve' ? 'approve' : 'reject', 'mobile');
       if (!approval) {
-        return NextResponse.json(
-          { ok: false, action, sessionKey, clientMutationId, status: 'unavailable', note: 'Approval not found.' },
-          { status: 404, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-        );
+        return actionErrorResponse('Approval not found.', 404);
       }
-      // Route approval resolution based on continuation type
+
       let decisionNote = action === 'approve' ? 'Approved.' : 'Denied.';
       const continuation = approval.continuation;
 
       if (continuation?.kind === 'llm-chat') {
-        // LLM chat continuation — resume or reject the chat turn
         const decision = action === 'approve'
           ? await resumeLlmApproval(request.url, approval, { actor: 'mobile' })
           : rejectLlmApproval(approval, 'mobile');
         decisionNote = decision.note;
       } else if (continuation?.kind === 'lane' && action === 'approve') {
-        // Lane continuation — re-dispatch the lane command
         try {
           const { dispatch } = await import('@/lib/lane/commands');
           const result = await dispatch({
             verb: continuation.verb,
             laneId: continuation.laneId,
             commitMessage: continuation.commitMessage,
-            actor: 'user', // approved by human, bypass policy re-check
+            actor: 'user',
           } as Parameters<typeof dispatch>[0]);
           decisionNote = result.note;
-        } catch (err) {
-          decisionNote = `Lane ${continuation.verb} failed: ${err instanceof Error ? err.message : 'unknown'}`;
+        } catch (error) {
+          decisionNote = `Lane ${continuation.verb} failed: ${sanitizeErrorMessage(error, 'unknown')}`;
         }
       } else if (continuation?.kind === 'runtime' && action === 'approve') {
-        // Runtime continuation — launch or resume the session
         try {
           if (continuation.action === 'launch' && continuation.prompt) {
             const rt = getRuntime(continuation.runtimeId);
@@ -422,8 +423,8 @@ export async function POST(request: NextRequest) {
               decisionNote = result.note;
             }
           }
-        } catch (err) {
-          decisionNote = `Runtime action failed: ${err instanceof Error ? err.message : 'unknown'}`;
+        } catch (error) {
+          decisionNote = `Runtime action failed: ${sanitizeErrorMessage(error, 'unknown')}`;
         }
       }
 
@@ -445,21 +446,20 @@ export async function POST(request: NextRequest) {
         note: decisionNote,
       }, {
         status: 200,
-        headers: { 'Cache-Control': 'no-store, max-age=0' },
+        headers: NO_STORE_HEADERS,
       });
     }
 
     if (action === 'resume') {
-      const message = (payload as unknown as Record<string, unknown>)?.message as string | undefined;
+      const message = (payload as unknown as Record<string, unknown>).message as string | undefined;
 
-      // Route 1: IDE-owned Codex — use existing performRuntimeAction path
       if (isOwnedCodex) {
         const result = await performRuntimeAction({
           action: 'send_input',
           surfaceId: sessionKey,
           clientMutationId,
           message,
-          runId: payload?.runId,
+          runId: payload.runId,
         });
 
         const response: MobileActionResponse = {
@@ -475,6 +475,7 @@ export async function POST(request: NextRequest) {
         if (result.ok) {
           invalidateMutationCaches();
         }
+
         console.info('[mobile/action] owned resume result', {
           sessionKey,
           clientMutationId,
@@ -482,6 +483,7 @@ export async function POST(request: NextRequest) {
           status: result.status,
           runId: result.runId ?? null,
         });
+
         await publishMobileMutation(clientMutationId, {
           action,
           sessionKey,
@@ -490,31 +492,34 @@ export async function POST(request: NextRequest) {
           note: result.note,
         });
 
+        if (result.status === 'unavailable') {
+          return actionErrorResponse(result.note, 501);
+        }
+
         return NextResponse.json(response, {
-          status: result.status === 'unavailable' ? 501 : 200,
-          headers: { 'Cache-Control': 'no-store, max-age=0' },
+          status: 200,
+          headers: NO_STORE_HEADERS,
         });
       }
 
-      // Route 2: Claude Code sessions — use claude-code runtime adapter
       if (sessionKey.startsWith('claude-code:')) {
         const ccRuntime = getRuntime('claude-code');
         if (!ccRuntime?.resume) {
-          return NextResponse.json(
-            { ok: false, action, sessionKey, status: 'unavailable', note: 'Claude Code runtime not available.' },
-            { status: 501, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-          );
+          return actionErrorResponse('Claude Code runtime not available.', 501);
         }
+
         const result = await ccRuntime.resume(sessionKey, message ?? '');
         if (result.ok) {
           invalidateMutationCaches();
         }
+
         console.info('[mobile/action] claude-code resume result', {
           sessionKey,
           clientMutationId,
           ok: result.ok,
           note: result.note,
         });
+
         await publishMobileMutation(clientMutationId, {
           action,
           sessionKey,
@@ -522,14 +527,17 @@ export async function POST(request: NextRequest) {
           status: result.ok ? 'queued' : 'failed',
           note: result.note,
         });
+
+        if (!result.ok) {
+          return actionErrorResponse(result.note, 500);
+        }
+
         return NextResponse.json(
-          { ok: result.ok, action, sessionKey, clientMutationId, status: result.ok ? 'sent' : 'error', note: result.note },
-          { status: result.ok ? 200 : 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+          { ok: true, action, sessionKey, clientMutationId, status: 'sent', note: result.note },
+          { status: 200, headers: NO_STORE_HEADERS },
         );
       }
 
-      // Route 3: Discovered Codex sessions — send directly to Codex CLI.
-      // These sessions are local terminals, not provider-backed runtime lanes.
       if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:')) {
         const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
         try {
@@ -537,8 +545,6 @@ export async function POST(request: NextRequest) {
           const os = await import('node:os');
           const path = await import('node:path');
           const codexBin = path.join(os.homedir(), '.npm-global', 'bin', 'codex');
-          
-          // Use codex exec resume <threadId> <message> — same as desktop /api/codex/send
           const args = ['exec', 'resume', threadId, message ?? '', '--json', '--dangerously-bypass-approvals-and-sandbox'];
           const stdout = execFileSync(codexBin, args, {
             cwd: process.env.HOME || os.homedir(),
@@ -548,7 +554,6 @@ export async function POST(request: NextRequest) {
             encoding: 'utf-8',
           });
 
-          // Parse last turn.completed for usage
           const lines = stdout.split('\n').filter(Boolean);
           let responseText = '';
           for (const line of lines) {
@@ -560,7 +565,9 @@ export async function POST(request: NextRequest) {
                   responseText += item.text;
                 }
               }
-            } catch { /* skip non-JSON */ }
+            } catch {
+              continue;
+            }
           }
 
           invalidateMutationCaches();
@@ -580,47 +587,31 @@ export async function POST(request: NextRequest) {
 
           return NextResponse.json(
             { ok: true, action, sessionKey, clientMutationId, status: 'completed', note: 'Sent to Codex.' },
-            { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+            { status: 200, headers: NO_STORE_HEADERS },
           );
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message.slice(0, 200) : 'Unknown error';
-          console.error('[mobile/action] discovered codex CLI resume failed:', errMsg);
+        } catch (error) {
+          const message = sanitizeErrorMessage(error, 'Codex CLI error').slice(0, 200);
+          console.error('[mobile/action] discovered codex CLI resume failed:', message);
           await publishMobileMutation(clientMutationId, {
             action,
             sessionKey,
             runtime: 'codex',
             status: 'failed',
-            note: `Codex CLI error: ${errMsg}`,
+            note: `Codex CLI error: ${message}`,
           });
-          return NextResponse.json(
-            { ok: false, action, sessionKey, clientMutationId, status: 'error', note: errMsg },
-            { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-          );
+          return actionErrorResponse(message, 500);
         }
       }
 
-      // Route 4: Unknown session type
-      return NextResponse.json(
-        { ok: false, action, sessionKey, status: 'unavailable', note: `Don't know how to resume session: ${sessionKey.split(':')[0]}` },
-        { status: 501, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-      );
+      return actionErrorResponse(`Don't know how to resume session: ${sessionKey.split(':')[0]}`, 501);
     }
 
     if (action === 'watch' || action === 'resolve') {
       if (!isOwnedCodex) {
-        const response: MobileActionResponse = {
-          ok: false,
-          action,
-          sessionKey,
-          status: 'unavailable',
-          note: `${action} is only wired truthfully for IDE-owned Codex review packets on mobile right now.`,
-        };
-        return NextResponse.json(response, {
-          status: 501,
-          headers: {
-            'Cache-Control': 'no-store, max-age=0',
-          },
-        });
+        return actionErrorResponse(
+          `${action} is only wired truthfully for IDE-owned Codex review packets on mobile right now.`,
+          501,
+        );
       }
 
       const result = await performRuntimeAction({
@@ -640,6 +631,7 @@ export async function POST(request: NextRequest) {
       if (result.ok) {
         invalidateMutationCaches();
       }
+
       await publishMobileMutation(clientMutationId, {
         action,
         sessionKey,
@@ -648,37 +640,30 @@ export async function POST(request: NextRequest) {
         note: result.note,
       });
 
+      if (result.status === 'unavailable') {
+        return actionErrorResponse(result.note, 501);
+      }
+
       return NextResponse.json(response, {
-        status: result.status === 'unavailable' ? 501 : 200,
-        headers: {
-          'Cache-Control': 'no-store, max-age=0',
-        },
+        status: 200,
+        headers: NO_STORE_HEADERS,
       });
     }
 
     if (action !== 'steer' && action !== 'stop') {
-      const response: MobileActionResponse = {
-        ok: false,
-        action,
-        sessionKey,
-        status: 'unavailable',
-        note: `${action} is part of the mobile control contract, but it is not wired truthfully on the current runtime lane yet.`,
-      };
-      return NextResponse.json(response, {
-        status: 501,
-        headers: {
-          'Cache-Control': 'no-store, max-age=0',
-        },
-      });
+      return actionErrorResponse(
+        `${action} is part of the mobile control contract, but it is not wired truthfully on the current runtime lane yet.`,
+        501,
+      );
     }
 
     const result = await performRuntimeAction({
       action,
       surfaceId: sessionKey,
       clientMutationId,
-      message: payload?.message,
-      attachments: payload?.attachments,
-      runId: payload?.runId,
+      message: payload.message,
+      attachments: payload.attachments,
+      runId: payload.runId,
     });
 
     const response: MobileActionResponse = {
@@ -694,6 +679,7 @@ export async function POST(request: NextRequest) {
     if (result.ok) {
       invalidateMutationCaches();
     }
+
     console.info('[mobile/action] runtime action result', {
       action,
       sessionKey,
@@ -702,6 +688,7 @@ export async function POST(request: NextRequest) {
       status: result.status,
       runId: result.runId ?? null,
     });
+
     await publishMobileMutation(clientMutationId, {
       action,
       sessionKey,
@@ -710,30 +697,36 @@ export async function POST(request: NextRequest) {
       note: result.note,
     });
 
+    if (result.status === 'unavailable') {
+      return actionErrorResponse(result.note, 501);
+    }
+
     return NextResponse.json(response, {
-      status: result.status === 'unavailable' ? 501 : 200,
-      headers: {
-        'Cache-Control': 'no-store, max-age=0',
-      },
+      status: 200,
+      headers: NO_STORE_HEADERS,
     });
   } catch (error) {
+    const message = sanitizeErrorMessage(error, 'Unable to perform mobile action');
     console.error('[mobile/action] request failed', {
       action,
       sessionKey,
       clientMutationId,
-      error: error instanceof Error ? error.message : String(error),
+      error: message,
     });
-    await publishMobileMutation(clientMutationId, {
-      action,
-      sessionKey,
-      status: 'failed',
-      note: error instanceof Error ? error.message : 'Unable to perform mobile action',
-    });
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : 'Unable to perform mobile action',
-      },
-      { status: 500 },
-    );
+
+    if (action && sessionKey) {
+      try {
+        await publishMobileMutation(clientMutationId, {
+          action,
+          sessionKey,
+          status: 'failed',
+          note: message,
+        });
+      } catch (publishError) {
+        console.error('[mobile/action] failed to publish mutation error', publishError);
+      }
+    }
+
+    return actionErrorResponse(message, 500);
   }
 }
