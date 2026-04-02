@@ -6,6 +6,9 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `880c7a3` fix: harden API route and MCP error handling
+- `29d5a8b` fix: purge stale supervisor watches and orphaned worktree branches
+- `5b67fc8` refactor: slim mobile surface to beta essentials
 - `70111ac` docs: remove stale agent runtime references from AI provider.md — two runtimes for v1
 - `50f7915` fix: add turbopack config to silence webpack-only warning
 - `3e1e603` fix: eliminate supervisor http starvation
