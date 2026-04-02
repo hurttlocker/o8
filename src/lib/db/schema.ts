@@ -271,6 +271,8 @@ export const approvals = sqliteTable('approvals', {
   diffJson: text('diff_json'),
   risk: text('risk', { enum: ['low', 'medium', 'high'] }).notNull(),
   metadataJson: text('metadata_json'),
+  packetId: text('packet_id'),
+  laneId: text('lane_id'),
   policyRuleId: text('policy_rule_id'),
   status: text('status', { enum: ['pending', 'approved', 'rejected'] }).notNull(),
   createdAt: integer('created_at').notNull(),
@@ -283,6 +285,8 @@ export const approvals = sqliteTable('approvals', {
 }, (table) => ({
   statusCreatedIdx: index('idx_approvals_status_created').on(table.status, table.createdAt),
   sessionKeyCreatedIdx: index('idx_approvals_session_key_created').on(table.sessionKey, table.createdAt),
+  packetIdIdx: index('idx_approvals_packet_id').on(table.packetId),
+  laneIdIdx: index('idx_approvals_lane_id').on(table.laneId),
   fingerprintStatusIdx: index('idx_approvals_fingerprint_status').on(table.fingerprint, table.status),
   resolvedAtIdx: index('idx_approvals_resolved_at').on(table.resolvedAt),
 }));
