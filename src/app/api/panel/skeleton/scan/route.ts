@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { buildErrorPayload } from '@/lib/api/error-format';
 import { scanRepo, getChunkStats } from '@/lib/skeleton';
 
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error('[skeleton] Scan error:', err);
     return NextResponse.json(
-      { error: 'Scan failed', detail: String(err) },
+      buildErrorPayload('Scan failed', err),
       { status: 500 },
     );
   }
