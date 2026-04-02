@@ -237,7 +237,7 @@ function richTextStyleFor(
       return {
         margin: 0,
         color: bodyColor,
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: 700,
         lineHeight: 1.3,
         letterSpacing: '-0.01em',
@@ -247,7 +247,7 @@ function richTextStyleFor(
       return {
         margin: 0,
         color: bodyColor,
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: 700,
         lineHeight: 1.4,
         letterSpacing: '0.01em',
@@ -256,7 +256,7 @@ function richTextStyleFor(
       return {
         margin: 0,
         color: bodyColor,
-        fontSize: 15,
+        fontSize: 14,
         lineHeight: 1.48,
         whiteSpace: 'pre-wrap',
       };
@@ -268,7 +268,7 @@ function richTextStyleFor(
         display: 'grid',
         gap: 6,
         color: bodyColor,
-        fontSize: 15,
+        fontSize: 14,
         lineHeight: 1.48,
       };
     case 'li':
@@ -614,13 +614,11 @@ const MessageBubble = memo(function MessageBubble({
         {hasText ? (
           <div
             style={{
-              width: 'fit-content',
-              maxWidth: '80%',
+              width: '100%',
               padding: '10px 14px',
               borderRadius: 14,
               background: palette.userBubble,
               color: palette.userText,
-              boxShadow: palette.elevatedShadow,
             }}
           >
             {isSlashCommand ? (
