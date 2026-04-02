@@ -416,14 +416,35 @@ export class WorktreeManager {
 
   /**
    * Prune all stale worktrees (no activity for maxAgeMs).
+   * Skips worktrees that have an active lane (running/reviewing/merging).
    */
   async prune(maxAgeMs = STALE_THRESHOLD_MS): Promise<string[]> {
     const worktrees = await this.list();
     const now = Date.now();
     const pruned: string[] = [];
 
+    // Guard: never prune worktrees with active lanes
+    let activeLanePaths: Set<string> | null = null;
+    try {
+      const { listActiveLanes } = await import('@/lib/lane/registry');
+      const activeLanes = listActiveLanes();
+      activeLanePaths = new Set(
+        activeLanes
+          .map((l) => l.worktreePath)
+          .filter((p): p is string => Boolean(p)),
+      );
+    } catch {
+      // Lane registry not available — skip guard
+    }
+
     for (const wt of worktrees) {
       if (now - wt.lastActivityAt > maxAgeMs && wt.status !== 'active') {
+        // Check if this worktree backs an active lane
+        const wtPath = path.join(this.worktreeBase, wt.id);
+        if (activeLanePaths?.has(wtPath)) {
+          console.log(`[worktree-prune] Skipping ${wt.id} — active lane bound to this worktree`);
+          continue;
+        }
         await this.cleanup(wt.id, { force: true, deleteBranch: true });
         pruned.push(wt.id);
       }

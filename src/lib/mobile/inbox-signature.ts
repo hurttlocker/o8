@@ -1,7 +1,7 @@
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 
 function sessionSignature(session: MobileInboxSnapshot['sessions'][number]) {
-  return `${session.sessionKey}:${session.status}:${session.currentTask}:${session.approvalStatus}:${session.name}:${session.lastEventAt}:${session.workspace}:${session.branch}:${Math.round(session.context?.usedPercent ?? 0)}:${session.alerts}`;
+  return `${session.sessionKey}:${session.status}:${session.currentTask}:${session.approvalStatus}:${session.name}:${session.lastEventAt}:${session.lastActivityAt ?? ''}:${session.workspace}:${session.branch}:${Math.round(session.context?.usedPercent ?? 0)}:${session.alerts}`;
 }
 
 function itemSignature(item: MobileInboxSnapshot['items'][number]) {

@@ -97,6 +97,7 @@ export interface AgentSummary {
   sessionKey: string;
   approvalStatus: ApprovalStatus;
   lastEventAt: string;
+  lastActivityAt?: number | null;
   context: ContextPressure;
   cost?: CostSnapshot;
   alerts: number;

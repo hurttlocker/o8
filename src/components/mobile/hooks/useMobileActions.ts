@@ -27,7 +27,7 @@ import { compactLine } from '../utils';
 
 interface ActionDeps {
   wsConnected: boolean;
-  refreshInbox: (fresh?: boolean) => Promise<MobileInboxSnapshot>;
+  refreshInbox: (fresh?: boolean, limit?: number) => Promise<MobileInboxSnapshot>;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
   loadOwnedReviewPacket: (sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>;
   loadReviewFile: (reviewPath: string, force?: boolean) => Promise<MobileReviewFileResponse['file'] | undefined>;

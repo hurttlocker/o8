@@ -299,6 +299,7 @@ async function buildPacketPrompt(packet: OrchestratorPacket, allPackets: Orchest
     ...dependencySections,
     ...fileSizeSections,
     'Files in this repository follow a 600-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
+    'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');
 }
@@ -308,6 +309,7 @@ function createLaneBinding(packet: OrchestratorPacket, laneId: string, sessionKe
     tileId: '',
     tabId: '',
     repoPath: packet.workspaceTargetPath,
+    worktreePath: null,
     runtime: packet.runtime,
     laneId,
     sessionKey: sessionKey ?? null,

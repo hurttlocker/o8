@@ -2,14 +2,37 @@
 
 import { memo, type CSSProperties } from 'react';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import { GroupedSessionList, MOBILE_SESSION_LIST_COLORS } from './RecentSessionPicker';
+import {
+  areSessionListRowsEqual,
+  GroupedSessionList,
+  MOBILE_SESSION_LIST_COLORS,
+  SessionRowButton,
+  type GroupedSessionListRowProps,
+} from './RecentSessionPicker';
 
 interface FleetViewProps {
-  snapshot: MobileInboxSnapshot;
+  sessions: MobileInboxSnapshot['sessions'];
   onAgentSelect: (sessionKey: string) => void;
   onBack: () => void;
   onLaunch: () => void;
 }
+
+function renderFleetSessionName(session: MobileInboxSnapshot['sessions'][number]) {
+  return session.name?.trim() || session.surfaceLabel?.trim() || 'Untitled session';
+}
+
+const FleetSessionRow = memo(function FleetSessionRow({
+  session,
+  onSessionSelect,
+  renderSessionName,
+}: GroupedSessionListRowProps) {
+  return (
+    <SessionRowButton
+      title={renderSessionName(session)}
+      onClick={() => onSessionSelect(session.id)}
+    />
+  );
+}, (prev, next) => areSessionListRowsEqual(prev.session, next.session));
 
 function PlusIcon() {
   return (
@@ -31,7 +54,7 @@ function PlusIcon() {
 }
 
 export const FleetView = memo(function FleetView({
-  snapshot,
+  sessions,
   onAgentSelect,
   onBack,
   onLaunch,
@@ -111,9 +134,10 @@ export const FleetView = memo(function FleetView({
       </div>
 
       <GroupedSessionList
-        sessions={snapshot.sessions}
+        sessions={sessions}
         onSessionSelect={onAgentSelect}
-        renderSessionName={(session) => session.name?.trim() || session.surfaceLabel?.trim() || 'Untitled session'}
+        renderSessionName={renderFleetSessionName}
+        RowComponent={FleetSessionRow}
         emptyMessage="No remote sessions yet."
         topPadding={2}
       />
