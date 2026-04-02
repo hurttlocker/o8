@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `0ac17b9` fix: stale-lane safety net was too aggressive — archived running agents
 - `bc19c54` feat: AI provider-style tool cards in mobile chat
 - `c76eafb` fix: remove last backdropFilter + boxShadow from compose shell
 - `6c65507` fix: remove compose shell overlay box — transparent, no border/bg/blur
