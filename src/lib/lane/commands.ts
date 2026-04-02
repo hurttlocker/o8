@@ -317,6 +317,19 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         }
         setLaneStatus(command.laneId, 'running', actor, 'session_launched');
 
+        // Register with supervisor for completion detection + stuck monitoring
+        try {
+          const { registerWatchedAgent } = await import('@/lib/supervisor/agent-supervisor');
+          registerWatchedAgent(
+            result.surfaceId,
+            lane.repoPath,
+            lane.label || lane.branch,
+            command.prompt,
+          );
+        } catch (regErr) {
+          console.warn(`[lane] Failed to register agent with supervisor:`, regErr);
+        }
+
         const updated = getLane(command.laneId);
         return { ok: true, laneId: command.laneId, note: result.note, lane: updated ?? undefined };
       } catch (err) {
@@ -425,6 +438,13 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
         attachSession(command.laneId, result.surfaceId, actor);
         setLaneStatus(command.laneId, 'running', actor, 'resumed');
+
+        // Register with supervisor for completion detection
+        try {
+          const { registerWatchedAgent } = await import('@/lib/supervisor/agent-supervisor');
+          registerWatchedAgent(result.surfaceId, lane.repoPath, lane.label || lane.branch, prompt);
+        } catch { /* best effort */ }
+
         const updated = getLane(command.laneId);
         return { ok: true, laneId: command.laneId, note: `Resumed in ${lane.worktreePath ?? lane.repoPath}.`, lane: updated ?? undefined };
       } catch (err) {
