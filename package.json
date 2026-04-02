@@ -6,7 +6,7 @@
   "main": "src/app/layout.tsx",
   "scripts": {
     "predev:cleanup": "lsof -ti :3001 -sTCP:LISTEN | xargs kill -9 2>/dev/null; lsof -ti :3002 -sTCP:LISTEN | xargs kill -9 2>/dev/null; true",
-    "dev": "next dev --webpack -p 3001",
+    "dev": "next dev -p 3001",
     "dev:ws": "tsx src/ws-server.ts",
     "dev:all": "npm run dev & npm run dev:ws &",
     "build": "sh -c 'env -u TURBOPACK NODE_ENV=production next build --webpack'",
