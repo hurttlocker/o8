@@ -61,7 +61,6 @@ import { useMobileActions } from './mobile/hooks/useMobileActions';
 import {
   mobileShellStyle,
   neomorphicButtonStyle,
-  neomorphicSurfaceStyle,
 } from './mobile/neomorph';
 
 export function MobileRemoteShell(props: MobileRemoteShellProps) {
@@ -296,7 +295,6 @@ function MobileRemoteShellInner({
 
   // ── UI layout values ──
   const sessionSwitcher = snapshot.sessions.slice(0, 5);
-  const headerProgress = Math.min(scrollY / 88, 1);
   const isComposerPrimed = isChatSession && (composeFocused || transcriptAttachments.length > 0);
   const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
   const ownedReviewDisposition = selectedReviewPacket?.reviewDisposition;
@@ -355,30 +353,96 @@ function MobileRemoteShellInner({
     return () => observer.disconnect();
   }, [setComposeHeight]);
 
-  const shellVars = {
-    '--remodex-header-progress': headerProgress.toFixed(3),
-    '--remodex-compose-active': isComposerPrimed ? '1' : '0',
-    '--remodex-viewport-top-offset': `${viewportTopOffset}px`,
-    '--remodex-compose-height': `${composeHeight}px`,
-  } as CSSProperties;
+  const pageStyle: CSSProperties = {
+    ...mobileShellStyle,
+    minHeight: '100vh',
+    padding: '0 0 34px',
+    backgroundColor: '#000000',
+    backgroundImage: [
+      'radial-gradient(circle at top, rgba(10, 132, 255, 0.12), transparent 42%)',
+      'linear-gradient(180deg, #000000 0%, #050507 56%, #0a0a0c 100%)',
+    ].join(', '),
+    color: '#F5F5F7',
+  };
+  const phoneShellStyle: CSSProperties = {
+    position: 'relative',
+    maxWidth: 720,
+    minHeight: '100vh',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    paddingTop: `calc(env(safe-area-inset-top, 0px) + ${viewportTopOffset}px + 74px)`,
+    paddingBottom: 18,
+  };
+  const scrollViewStyle: CSSProperties = {
+    display: 'grid',
+    gap: 0,
+    paddingTop: 0,
+    paddingRight: 18,
+    paddingBottom: `calc(${composeHeight}px + env(safe-area-inset-bottom, 0px) + 42px)`,
+    paddingLeft: 18,
+    background: 'transparent',
+  };
+  const noteStyle: CSSProperties = {
+    margin: '0 0 14px',
+    padding: '12px 15px',
+    borderRadius: 14,
+    border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(28,28,30,0.82)',
+    color: '#8E8E93',
+    fontSize: '0.88rem',
+    lineHeight: 1.45,
+    boxShadow: '0 12px 24px rgba(0,0,0,0.18)',
+  };
+  const scrollAnchorStyle: CSSProperties = {
+    height: 1,
+    scrollMarginBottom: `calc(${composeHeight}px + 108px)`,
+  };
+  const fabWrapStyle: CSSProperties = {
+    position: 'fixed',
+    left: '50%',
+    bottom: 'calc(env(safe-area-inset-bottom, 0px) + 18px)',
+    width: 'min(calc(100dvw - 28px), 390px)',
+    transform: 'translateX(-50%)',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    pointerEvents: 'none',
+    zIndex: 14,
+  };
+  const bottomDockStyle: CSSProperties = {
+    position: 'fixed',
+    left: '50%',
+    bottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)',
+    zIndex: 13,
+    width: 'min(calc(100dvw - 24px), 394px)',
+    display: 'grid',
+    gap: '0.34rem',
+    padding: '0',
+    opacity: isScrolling && !isComposerPrimed ? 0 : 1,
+    transform: isScrolling && !isComposerPrimed ? 'translate(-50%, 18px)' : 'translate(-50%, 0)',
+    transition: 'opacity 180ms ease, transform 180ms ease',
+    pointerEvents: isScrolling && !isComposerPrimed ? 'none' : 'auto',
+    background: 'transparent',
+  };
+  const composeShellStyle: CSSProperties = {
+    position: 'relative',
+    display: 'grid',
+    gap: '0.42rem',
+    padding: 10,
+    borderRadius: 26,
+    border: '1px solid rgba(255,255,255,0.08)',
+    background: isComposerPrimed ? 'rgba(44,44,46,0.94)' : 'rgba(28,28,30,0.82)',
+    backdropFilter: 'blur(18px)',
+    WebkitBackdropFilter: 'blur(18px)',
+    boxShadow: '0 18px 38px rgba(0,0,0,0.28)',
+  };
 
   // ── Render ──
   return (
     <ThemeProvider>
     <div
-      className="mobile-wrap remodex-mobile-page"
-      style={{ ...mobileShellStyle, ...shellVars }}
+      style={pageStyle}
     >
-      <div
-        className="remodex-phone-shell"
-        style={{
-          position: 'relative',
-          maxWidth: 720,
-          minHeight: '100vh',
-          marginLeft: 'auto',
-          marginRight: 'auto',
-        }}
-      >
+      <div style={phoneShellStyle}>
         <TopBar
           selectedSession={selectedSession}
           headerVisible={headerVisible}
@@ -415,7 +479,7 @@ function MobileRemoteShellInner({
         />
         <PullToRefresh onRefresh={async () => { await refreshInbox(true); await new Promise(r => setTimeout(r, 600)); }}>
         <PageTransition activeKey={activeView}>
-        <div className="remodex-scroll-view">
+        <div style={scrollViewStyle}>
           {activeView === 'fleet' ? (
             <FleetView
               snapshot={snapshot}
@@ -547,7 +611,7 @@ function MobileRemoteShellInner({
                 .filter(Boolean)
                 .slice(0, 2)
                 .map((note, index) => (
-                  <p key={`${note}-${index}`} className="remodex-reference-thread-note">{note}</p>
+                  <p key={`${note}-${index}`} style={noteStyle}>{note}</p>
                 ))}
               <SessionAgentPill
                 session={selectedSession!}
@@ -608,29 +672,20 @@ function MobileRemoteShellInner({
             </>
           )
           ) : null}
-          <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
+          <div ref={transcriptBottomRef} style={scrollAnchorStyle} aria-hidden="true" />
         </div>
         </PageTransition>
         </PullToRefresh>
         {showRecentPicker ? (
-          <div className="remodex-reference-fab-wrap">
+          <div style={fabWrapStyle}>
             <MobileFloatingActionButton label="Launch new remote session" onClick={() => setLaunchOpen(true)}>
               +
             </MobileFloatingActionButton>
           </div>
         ) : null}
-        <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'} data-scrolling={isScrolling && !isComposerPrimed ? 'true' : 'false'}>
+        <div ref={bottomDockRef} style={bottomDockStyle}>
           {!terminalActive && showThreadSurface ? (
-            <div
-              className="remodex-compose-shell"
-              style={neomorphicSurfaceStyle('slate', {
-                paddingTop: 10,
-                paddingRight: 10,
-                paddingBottom: 10,
-                paddingLeft: 10,
-                borderRadius: 26,
-              })}
-            >
+            <div style={composeShellStyle}>
               <ComposeBar
                 session={selectedSession}
                 sessionKey={selectedSessionKey}

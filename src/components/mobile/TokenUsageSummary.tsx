@@ -2,8 +2,10 @@
 
 import { memo } from 'react';
 import type { TokenUsageSummaryProps } from './types';
+import { useTheme } from './ThemeContext';
 
 export const TokenUsageSummary = memo(function TokenUsageSummary({ snapshot, onViewCosts }: TokenUsageSummaryProps) {
+  const { colors } = useTheme();
   const tracked = snapshot.sessions.filter((session) => session.tokenUsage);
   const total = tracked.reduce((sum, session) => sum + (session.tokenUsage?.totalTokens ?? 0), 0);
 
@@ -35,27 +37,93 @@ export const TokenUsageSummary = memo(function TokenUsageSummary({ snapshot, onV
     return null;
   }
 
+  const cardStyle = {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+    padding: '14px 16px',
+    borderRadius: 14,
+    border: `1px solid ${colors.border}`,
+    background: 'rgba(28,28,30,0.82)',
+    color: colors.text,
+    boxShadow: '0 16px 34px rgba(0,0,0,0.26)',
+    cursor: 'pointer',
+    textAlign: 'left',
+    WebkitTapHighlightColor: 'transparent',
+  } as const;
+  const leftStyle = {
+    minWidth: 0,
+    display: 'grid',
+    gap: 4,
+  } as const;
+  const kickerStyle = {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: 600,
+    letterSpacing: '0.02em',
+  } as const;
+  const valueStyle = {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: 700,
+    letterSpacing: '-0.03em',
+  } as const;
+  const unitStyle = {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: 600,
+    letterSpacing: '0.02em',
+  } as const;
+  const rightStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  } as const;
+  const ringStyle = {
+    position: 'relative',
+    width: 52,
+    height: 52,
+  } as const;
+  const ringSvgStyle = {
+    width: '100%',
+    height: '100%',
+    transform: 'rotate(-90deg)',
+  } as const;
+  const ringLabelStyle = {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: 700,
+  } as const;
+
   return (
     <button
       type="button"
-      className="remodex-costs-summary-card"
+      style={cardStyle}
       onClick={onViewCosts}
     >
-      <div className="remodex-costs-summary-left">
-        <span className="remodex-costs-summary-kicker">
+      <div style={leftStyle}>
+        <span style={kickerStyle}>
           Token Usage · {tracked.length} session{tracked.length === 1 ? '' : 's'}
         </span>
-        <strong className="remodex-costs-summary-value">
-          {total.toLocaleString()} <span className="remodex-costs-summary-unit">tokens</span>
+        <strong style={valueStyle}>
+          {total.toLocaleString()} <span style={unitStyle}>tokens</span>
         </strong>
       </div>
-      <div className="remodex-costs-summary-right">
-        <div className="remodex-costs-summary-ring">
-          <svg viewBox="0 0 36 36" className="remodex-costs-ring-svg">
+      <div style={rightStyle}>
+        <div style={ringStyle}>
+          <svg viewBox="0 0 36 36" style={ringSvgStyle}>
             <path
               d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
               fill="none"
-              stroke="#f5f5f7"
+              stroke="rgba(255,255,255,0.16)"
               strokeWidth="3"
             />
             <path
@@ -67,7 +135,7 @@ export const TokenUsageSummary = memo(function TokenUsageSummary({ snapshot, onV
               strokeLinecap="round"
             />
           </svg>
-          <span className="remodex-costs-ring-label">{pct}%</span>
+          <span style={ringLabelStyle}>{pct}%</span>
         </div>
       </div>
     </button>
