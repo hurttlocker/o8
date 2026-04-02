@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `8d40872` fix: supervisor registration must use HTTP — different process than Next.js
 - `ab49f0c` fix: register launched agents with supervisor for completion detection
 - `6397ca1` fix: remove ALL overlays and backdrops — completely clean slate
 - `ef0e5e2` fix: purge ALL mobile-wrap CSS + progressive header fade
