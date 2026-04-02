@@ -2,13 +2,8 @@
 
 import { memo, type CSSProperties } from 'react';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import {
-  areSessionListRowsEqual,
-  GroupedSessionList,
-  MOBILE_SESSION_LIST_COLORS,
-  SessionRowButton,
-  type GroupedSessionListRowProps,
-} from './RecentSessionPicker';
+import { GroupedSessionList } from './RecentSessionPicker';
+import { useTheme } from './ThemeContext';
 
 interface FleetViewProps {
   sessions: MobileInboxSnapshot['sessions'];
@@ -20,19 +15,6 @@ interface FleetViewProps {
 function renderFleetSessionName(session: MobileInboxSnapshot['sessions'][number]) {
   return session.name?.trim() || session.surfaceLabel?.trim() || 'Untitled session';
 }
-
-const FleetSessionRow = memo(function FleetSessionRow({
-  session,
-  onSessionSelect,
-  renderSessionName,
-}: GroupedSessionListRowProps) {
-  return (
-    <SessionRowButton
-      title={renderSessionName(session)}
-      onClick={() => onSessionSelect(session.id)}
-    />
-  );
-}, (prev, next) => areSessionListRowsEqual(prev.session, next.session));
 
 function PlusIcon() {
   return (
@@ -59,6 +41,8 @@ export const FleetView = memo(function FleetView({
   onBack,
   onLaunch,
 }: FleetViewProps) {
+  const { colors } = useTheme();
+
   const iconButtonStyle: CSSProperties = {
     width: 36,
     height: 36,
@@ -68,9 +52,9 @@ export const FleetView = memo(function FleetView({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 999,
-    border: '1px solid rgba(255,248,240,0.12)',
-    background: 'rgba(255,248,240,0.10)',
-    color: MOBILE_SESSION_LIST_COLORS.primary,
+    border: `1px solid ${colors.border}`,
+    background: colors.cardBg,
+    color: colors.text,
     cursor: 'pointer',
     WebkitTapHighlightColor: 'transparent',
   };
@@ -80,7 +64,7 @@ export const FleetView = memo(function FleetView({
       style={{
         width: '100%',
         minHeight: '100%',
-        background: MOBILE_SESSION_LIST_COLORS.background,
+        background: colors.bg,
       }}
     >
       <div
@@ -100,7 +84,7 @@ export const FleetView = memo(function FleetView({
             padding: 0,
             border: 'none',
             background: 'transparent',
-            color: '#0A84FF',
+            color: colors.blueAccent,
             fontSize: 16,
             fontWeight: 500,
             cursor: 'pointer',
@@ -114,13 +98,13 @@ export const FleetView = memo(function FleetView({
           style={{
             margin: 0,
             textAlign: 'center',
-            color: MOBILE_SESSION_LIST_COLORS.primary,
+            color: colors.text,
             fontSize: 17,
             fontWeight: 600,
             letterSpacing: '-0.02em',
           }}
         >
-          Agents
+          Sessions
         </h2>
 
         <button
@@ -137,8 +121,7 @@ export const FleetView = memo(function FleetView({
         sessions={sessions}
         onSessionSelect={onAgentSelect}
         renderSessionName={renderFleetSessionName}
-        RowComponent={FleetSessionRow}
-        emptyMessage="No remote sessions yet."
+        emptyMessage="No sessions yet."
         topPadding={2}
       />
     </section>
