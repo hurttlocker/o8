@@ -9,6 +9,7 @@ export type MobileScreen = 'chat' | 'fleet' | 'memory' | 'approvals' | 'costs' |
 interface SpeedDialProps {
   activeScreen: MobileScreen;
   onNavigate: (screen: MobileScreen) => void;
+  onNewChat?: () => void;
   approvalCount?: number;
 }
 
@@ -53,6 +54,7 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
 export const SpeedDialButton = memo(function SpeedDialButton({
   activeScreen,
   onNavigate,
+  onNewChat,
   approvalCount = 0,
 }: SpeedDialProps) {
   const { colors } = useTheme();
@@ -171,6 +173,76 @@ export const SpeedDialButton = memo(function SpeedDialButton({
             gap: 10,
             zIndex: 9999,
           }}>
+          {onNewChat ? (
+            <button
+              type="button"
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onNewChat();
+                setOpen(false);
+              }}
+              onClick={() => {
+                onNewChat();
+                setOpen(false);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '4px',
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+                pointerEvents: 'auto',
+                touchAction: 'manipulation',
+                position: 'relative',
+                minHeight: 44,
+              }}
+            >
+              <span style={{
+                padding: '12px 20px',
+                borderRadius: 22,
+                background: '#0A84FF',
+                border: '1px solid rgba(10,132,255,0.36)',
+                color: '#FFFFFF',
+                fontSize: 13,
+                fontWeight: 700,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                letterSpacing: '-0.01em',
+                boxShadow: '0 14px 30px rgba(10,132,255,0.24)',
+                position: 'relative',
+                pointerEvents: 'none',
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+              }}>
+                New Chat
+              </span>
+              <span style={{
+                width: 44,
+                height: 44,
+                borderRadius: 999,
+                background: '#0A84FF',
+                border: '1px solid rgba(10,132,255,0.36)',
+                color: '#FFFFFF',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 14px 30px rgba(10,132,255,0.24)',
+                pointerEvents: 'none',
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+              }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+              </span>
+            </button>
+          ) : null}
           {MENU_ITEMS.map((item) => {
             const isActive = item.screen === activeScreen;
             return (
