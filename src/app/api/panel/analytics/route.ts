@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
-import { getDb, usageLogs } from '@/lib/db';
+import { getDb } from '@/lib/db/index';
+import { usageLogs } from '@/lib/db/schema';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
