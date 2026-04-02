@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { promisify } from 'node:util';
+import { sanitizeErrorMessage } from '@/lib/api/error-format';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type {
   ApproveAndMergeInput as ApproveAndMergeRequest,
@@ -52,6 +53,7 @@ interface ApiErrorResponse {
 }
 
 type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
+type MissionToolError = { error: string };
 
 function log(message: string, details?: unknown) {
   if (details === undefined) {
@@ -196,24 +198,33 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   throw new Error(`Invalid response from ${path}.`);
 }
 
+function missionToolError(action: string, error: unknown, fallback: string): MissionToolError {
+  console.error(`${LOG_PREFIX} ${action} failed`, error);
+  return { error: sanitizeErrorMessage(error, fallback) };
+}
+
 export async function createMission(input: CreateMissionInput) {
-  const repoPath = ensureRepoPath(input.repoPath);
-  const loadedIssues = await Promise.all(input.issues.map((issueRef) => loadIssue(repoPath, issueRef)));
+  try {
+    const repoPath = ensureRepoPath(input.repoPath);
+    const loadedIssues = await Promise.all(input.issues.map((issueRef) => loadIssue(repoPath, issueRef)));
 
-  log(`Loaded ${loadedIssues.length} issue${loadedIssues.length === 1 ? '' : 's'} locally; delegating mission creation to Next.js API.`);
+    log(`Loaded ${loadedIssues.length} issue${loadedIssues.length === 1 ? '' : 's'} locally; delegating mission creation to Next.js API.`);
 
-  return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
-    '/api/orchestrator/create-mission',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        issues: loadedIssues,
-        repoPath,
-        runtime: input.runtime,
-        constraints: input.constraints,
-      } satisfies CreateMissionRequest),
-    },
-  );
+    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
+      '/api/orchestrator/create-mission',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          issues: loadedIssues,
+          repoPath,
+          runtime: input.runtime,
+          constraints: input.constraints,
+        } satisfies CreateMissionRequest),
+      },
+    );
+  } catch (error) {
+    return missionToolError('createMission', error, 'Failed to create mission.');
+  }
 }
 
 /**
@@ -221,96 +232,120 @@ export async function createMission(input: CreateMissionInput) {
  * Use when GitHub API is rate-limited or issues are ad-hoc/synthetic.
  */
 export async function createMissionInline(input: CreateMissionInlineInput) {
-  const repoPath = ensureRepoPath(input.repoPath);
+  try {
+    const repoPath = ensureRepoPath(input.repoPath);
 
-  const loadedIssues: LoadedIssue[] = input.issues_inline.map((issue) => ({
-    number: issue.number,
-    title: issue.title,
-    body: issue.body ?? '',
-    url: '',
-  }));
+    const loadedIssues: LoadedIssue[] = input.issues_inline.map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      body: issue.body ?? '',
+      url: '',
+    }));
 
-  log(`Creating mission from ${loadedIssues.length} inline issue${loadedIssues.length === 1 ? '' : 's'} (no GitHub fetch).`);
+    log(`Creating mission from ${loadedIssues.length} inline issue${loadedIssues.length === 1 ? '' : 's'} (no GitHub fetch).`);
 
-  return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
-    '/api/orchestrator/create-mission',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        issues: loadedIssues,
-        repoPath,
-        runtime: input.runtime,
-        constraints: input.constraints,
-      } satisfies CreateMissionRequest),
-    },
-  );
+    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
+      '/api/orchestrator/create-mission',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          issues: loadedIssues,
+          repoPath,
+          runtime: input.runtime,
+          constraints: input.constraints,
+        } satisfies CreateMissionRequest),
+      },
+    );
+  } catch (error) {
+    return missionToolError('createMissionInline', error, 'Failed to create mission.');
+  }
 }
 
 export async function dispatchMission(input: DispatchMissionInput) {
-  return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').dispatchMission>>>(
-    '/api/orchestrator/dispatch',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        missionId: input.missionId,
-      } satisfies DispatchMissionInput),
-    },
-  );
+  try {
+    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').dispatchMission>>>(
+      '/api/orchestrator/dispatch',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          missionId: input.missionId,
+        } satisfies DispatchMissionInput),
+      },
+    );
+  } catch (error) {
+    return missionToolError('dispatchMission', error, 'Failed to dispatch mission.');
+  }
 }
 
 export async function getMissionStatus(input: MissionStatusInput) {
-  const params = new URLSearchParams();
-  if (input.missionId?.trim()) {
-    params.set('missionId', input.missionId.trim());
-  }
-  if (input.includeCost) {
-    params.set('includeCost', 'true');
-  }
+  try {
+    const params = new URLSearchParams();
+    if (input.missionId?.trim()) {
+      params.set('missionId', input.missionId.trim());
+    }
+    if (input.includeCost) {
+      params.set('includeCost', 'true');
+    }
 
-  const suffix = params.toString() ? `?${params.toString()}` : '';
-  return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').getMissionStatus>>>(
-    `/api/orchestrator/status${suffix}`,
-  );
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').getMissionStatus>>>(
+      `/api/orchestrator/status${suffix}`,
+    );
+  } catch (error) {
+    return missionToolError('getMissionStatus', error, 'Failed to read mission status.');
+  }
 }
 
 export async function submitPacketReview(input: SubmitReviewInput) {
-  return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').submitPacketReview>>>(
-    '/api/orchestrator/review',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        packetId: input.packetId,
-        findings: input.findings,
-        approved: input.approved,
-      } satisfies SubmitReviewInput),
-    },
-  );
+  try {
+    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').submitPacketReview>>>(
+      '/api/orchestrator/review',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          packetId: input.packetId,
+          findings: input.findings,
+          approved: input.approved,
+        } satisfies SubmitReviewInput),
+      },
+    );
+  } catch (error) {
+    return missionToolError('submitPacketReview', error, 'Failed to submit review.');
+  }
 }
 
 export async function approveAndMergePacket(input: ApproveAndMergeRequest) {
-  return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').approveAndMergePacket>>>(
-    '/api/orchestrator/merge',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        packetId: input.packetId,
-        commitMessage: input.commitMessage,
-      } satisfies ApproveAndMergeRequest),
-    },
-  );
+  try {
+    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').approveAndMergePacket>>>(
+      '/api/orchestrator/merge',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          packetId: input.packetId,
+          commitMessage: input.commitMessage,
+        } satisfies ApproveAndMergeRequest),
+      },
+    );
+  } catch (error) {
+    return missionToolError('approveAndMergePacket', error, 'Failed to approve and merge packet.');
+  }
 }
 
 export async function resetPacket(input: ResetPacketInput) {
-  return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').resetPacket>>>(
-    '/api/orchestrator/reset-packet',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        packetId: input.packetId,
-        reason: input.reason,
-      } satisfies ResetPacketInput),
-    },
-  );
+  try {
+    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').resetPacket>>>(
+      '/api/orchestrator/reset-packet',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          packetId: input.packetId,
+          reason: input.reason,
+        } satisfies ResetPacketInput),
+      },
+    );
+  } catch (error) {
+    return missionToolError('resetPacket', error, 'Failed to reset packet.');
+  }
 }
 
 export type { OrchestratorReviewFinding };
