@@ -20,20 +20,76 @@ interface SessionAgentPillProps {
   onClick: () => void;
 }
 
-function statusLabel(session: SessionSummary) {
-  if (session.isCurrentSession) return 'Live';
-  if (session.runtimeSurface?.lifecycle?.availability === 'running') return 'Running';
-  return session.status.charAt(0).toUpperCase() + session.status.slice(1);
+type SessionGroupId = 'working' | 'idle' | 'archived';
+
+interface SessionGroup {
+  id: SessionGroupId;
+  label: string;
+  sessions: SessionSummary[];
 }
 
-function statusColor(session: SessionSummary, accent: string) {
-  if (session.isCurrentSession || session.runtimeSurface?.lifecycle?.availability === 'running' || session.status === 'running') {
-    return accent;
+interface GroupedSessionListProps {
+  sessions: SessionSummary[];
+  onSessionSelect: (sessionId: string) => void;
+  renderSessionName: (session: SessionSummary) => string;
+  emptyMessage?: string;
+  topPadding?: CSSProperties['paddingTop'];
+  bottomPadding?: CSSProperties['paddingBottom'];
+}
+
+export const MOBILE_SESSION_LIST_COLORS = {
+  background: '#000000',
+  primary: '#F5F5F7',
+  secondary: '#8E8E93',
+  separator: 'rgba(255,255,255,0.06)',
+} as const;
+
+const SESSION_GROUP_ORDER: Array<{ id: SessionGroupId; label: string }> = [
+  { id: 'working', label: 'Working' },
+  { id: 'idle', label: 'Idle' },
+  { id: 'archived', label: 'Archived' },
+];
+
+const WORKING_STATUSES = new Set(['running', 'launching']);
+const IDLE_STATUSES = new Set(['idle', 'waiting', 'reviewing', 'paused', 'blocked']);
+const ARCHIVED_STATUSES = new Set(['completed', 'archived', 'failed']);
+
+function normalizeSessionStatus(session: SessionSummary): string {
+  if (session.runtimeSurface?.lifecycle?.availability === 'running') {
+    return 'running';
   }
-  if (session.status === 'failed' || session.status === 'blocked') {
-    return '#FF453A';
+
+  return String(session.status ?? '').trim().toLowerCase();
+}
+
+function sessionGroupId(session: SessionSummary): SessionGroupId {
+  const status = normalizeSessionStatus(session);
+
+  if (WORKING_STATUSES.has(status)) return 'working';
+  if (ARCHIVED_STATUSES.has(status)) return 'archived';
+  if (IDLE_STATUSES.has(status)) return 'idle';
+
+  return 'idle';
+}
+
+export function groupSessionsByStatus(sessions: SessionSummary[]): SessionGroup[] {
+  const grouped = {
+    working: [] as SessionSummary[],
+    idle: [] as SessionSummary[],
+    archived: [] as SessionSummary[],
+  };
+
+  for (const session of sessions) {
+    grouped[sessionGroupId(session)].push(session);
   }
-  return '#8E8E93';
+
+  return SESSION_GROUP_ORDER
+    .map((group) => ({
+      id: group.id,
+      label: group.label,
+      sessions: grouped[group.id],
+    }))
+    .filter((group) => group.sessions.length > 0);
 }
 
 function ChevronDownIcon({ color }: { color: string }) {
@@ -54,22 +110,190 @@ function ChevronDownIcon({ color }: { color: string }) {
   );
 }
 
-function ArrowIcon({ color }: { color: string }) {
+function MonitorIcon({ color }: { color: string }) {
   return (
     <svg
       aria-hidden="true"
       viewBox="0 0 24 24"
-      width="16"
-      height="16"
+      width="13"
+      height="13"
+      fill="none"
+      stroke={color}
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <rect x="3.5" y="4.5" width="17" height="11" rx="1.5" />
+      <path d="M9 19.5h6" />
+      <path d="M12 15.5v4" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon({ color }: { color: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
       fill="none"
       stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
     >
-      <path d="M7 17 17 7" />
-      <path d="M9 7h8v8" />
+      <path d="m10 6 6 6-6 6" />
     </svg>
+  );
+}
+
+function SessionRow({
+  title,
+  onClick,
+}: {
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        width: '100%',
+        minHeight: 44,
+        padding: '14px 16px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        border: 'none',
+        background: 'transparent',
+        color: MOBILE_SESSION_LIST_COLORS.primary,
+        textAlign: 'left',
+        cursor: 'pointer',
+        WebkitTapHighlightColor: 'transparent',
+      }}
+    >
+      <span
+        style={{
+          minWidth: 0,
+          display: 'grid',
+          gap: 4,
+        }}
+      >
+        <span
+          style={{
+            color: MOBILE_SESSION_LIST_COLORS.primary,
+            fontSize: 17,
+            fontWeight: 600,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.2,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {title}
+        </span>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            minWidth: 0,
+            color: MOBILE_SESSION_LIST_COLORS.secondary,
+            fontSize: 14,
+            fontWeight: 500,
+            lineHeight: 1.2,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          <MonitorIcon color={MOBILE_SESSION_LIST_COLORS.secondary} />
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            Remote control
+          </span>
+        </span>
+      </span>
+
+      <ChevronRightIcon color={MOBILE_SESSION_LIST_COLORS.secondary} />
+    </button>
+  );
+}
+
+export function GroupedSessionList({
+  sessions,
+  onSessionSelect,
+  renderSessionName,
+  emptyMessage = 'No remote sessions yet.',
+  topPadding = 6,
+  bottomPadding = 0,
+}: GroupedSessionListProps) {
+  const groups = groupSessionsByStatus(sessions);
+
+  return (
+    <section
+      style={{
+        width: '100%',
+        minHeight: '100%',
+        paddingTop: topPadding,
+        paddingBottom: bottomPadding,
+        background: MOBILE_SESSION_LIST_COLORS.background,
+      }}
+    >
+      {groups.length > 0 ? groups.map((group, groupIndex) => (
+        <section key={group.id} style={{ display: 'flex', flexDirection: 'column' }}>
+          <div
+            style={{
+              padding: `${groupIndex === 0 ? 6 : 18}px 16px 8px`,
+              color: MOBILE_SESSION_LIST_COLORS.secondary,
+              fontSize: 13,
+              fontWeight: 500,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
+            }}
+          >
+            {group.label}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {group.sessions.map((session, sessionIndex) => (
+              <div key={session.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                {sessionIndex > 0 ? (
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      height: 1,
+                      marginLeft: 16,
+                      background: MOBILE_SESSION_LIST_COLORS.separator,
+                    }}
+                  />
+                ) : null}
+                <SessionRow
+                  title={renderSessionName(session)}
+                  onClick={() => onSessionSelect(session.id)}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      )) : (
+        <div
+          style={{
+            padding: '24px 16px',
+            color: MOBILE_SESSION_LIST_COLORS.secondary,
+            fontSize: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          {emptyMessage}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -152,240 +376,14 @@ export function RecentSessionPicker({
   compactLine,
   agentDisplayName,
   onSessionSelect,
-  onNewChat,
-  onLaunch,
 }: RecentSessionPickerProps) {
-  const { colors } = useTheme();
-  const visibleSessions = sessions.slice(0, 5);
-
-  const shellStyle: CSSProperties = {
-    paddingTop: 'calc(env(safe-area-inset-top, 0px) + 76px)',
-    paddingRight: 14,
-    paddingBottom: 24,
-    paddingLeft: 14,
-  };
-
-  const introCardStyle: CSSProperties = {
-    padding: '18px 18px 16px',
-    borderRadius: 14,
-    border: `1px solid ${colors.cardBorder}`,
-    background: colors.cardBg,
-    boxShadow: '0 14px 28px rgba(0,0,0,0.24)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-  };
-
-  const launchButtonStyle: CSSProperties = {
-    width: '100%',
-    minHeight: 52,
-    padding: '14px 16px',
-    borderRadius: 14,
-    border: '1px solid rgba(10,132,255,0.24)',
-    background: colors.blueAccent,
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: 700,
-    letterSpacing: '-0.02em',
-    boxShadow: '0 14px 28px rgba(10,132,255,0.28)',
-    cursor: 'pointer',
-    WebkitTapHighlightColor: 'transparent',
-  };
-
-  const newChatButtonStyle: CSSProperties = {
-    width: '100%',
-    minHeight: 44,
-    padding: '14px 20px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 14,
-    border: 'none',
-    background: '#0A84FF',
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 600,
-    boxShadow: '0 16px 32px rgba(10,132,255,0.28)',
-    cursor: 'pointer',
-    WebkitTapHighlightColor: 'transparent',
-  };
-
   return (
-    <section style={shellStyle}>
-      <div style={{ display: 'grid', gap: 12 }}>
-        <div style={introCardStyle}>
-          <p
-            style={{
-              margin: 0,
-              color: colors.textSecondary,
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-            }}
-          >
-            Recent sessions
-          </p>
-          <h2
-            style={{
-              margin: '8px 0 0',
-              color: colors.text,
-              fontSize: 24,
-              fontWeight: 800,
-              letterSpacing: '-0.04em',
-            }}
-          >
-            Pick a thread
-          </h2>
-          <p
-            style={{
-              margin: '8px 0 0',
-              color: colors.textSecondary,
-              fontSize: 14,
-              lineHeight: 1.5,
-            }}
-          >
-            Chat opens first when a session is active. Right now there is no active mobile thread, so choose a recent session or launch a fresh one.
-          </p>
-        </div>
-
-        <button type="button" onClick={onNewChat} style={newChatButtonStyle}>
-          New Chat
-        </button>
-
-        {visibleSessions.length ? visibleSessions.map((session, index) => {
-          const accent = statusColor(session, colors.blueAccent);
-          return (
-            <button
-              key={session.id}
-              type="button"
-              onClick={() => onSessionSelect(session.id)}
-              style={{
-                width: '100%',
-                padding: '16px 16px 15px',
-                display: 'grid',
-                gap: 12,
-                borderRadius: 14,
-                border: `1px solid ${index === 0 ? 'rgba(10,132,255,0.22)' : colors.cardBorder}`,
-                background: colors.cardBg,
-                color: colors.text,
-                boxShadow: index === 0
-                  ? '0 16px 32px rgba(10,132,255,0.12)'
-                  : '0 14px 28px rgba(0,0,0,0.24)',
-                backdropFilter: 'blur(20px)',
-                WebkitBackdropFilter: 'blur(20px)',
-                textAlign: 'left',
-                cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
-              }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    minWidth: 0,
-                    color: colors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    letterSpacing: '0.02em',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 999,
-                      background: accent,
-                      boxShadow: `0 0 0 4px ${accent}22`,
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {compactLine(session.name, agentDisplayName(session), 30)}
-                  </span>
-                </span>
-                <span
-                  style={{
-                    padding: '6px 10px',
-                    borderRadius: 999,
-                    border: `1px solid ${colors.cardBorder}`,
-                    background: 'rgba(255,255,255,0.04)',
-                    color: accent,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    flexShrink: 0,
-                  }}
-                >
-                  {statusLabel(session)}
-                </span>
-              </span>
-
-              <span
-                style={{
-                  color: colors.text,
-                  fontSize: 18,
-                  fontWeight: 700,
-                  letterSpacing: '-0.03em',
-                  lineHeight: 1.3,
-                }}
-              >
-                {compactLine(session.currentTask ?? session.name, session.name ?? session.sessionKey, 88)}
-              </span>
-
-              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <span
-                  style={{
-                    color: colors.textSecondary,
-                    fontSize: 13,
-                    fontWeight: 500,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {compactLine(session.workspace, session.branch || session.runtime, 40)}
-                </span>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    color: colors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    flexShrink: 0,
-                  }}
-                >
-                  <span>{compactLine(session.lastEventAt, 'now', 16)}</span>
-                  <ArrowIcon color={colors.textSecondary} />
-                </span>
-              </span>
-            </button>
-          );
-        }) : (
-          <div
-            style={{
-              padding: '18px 16px',
-              borderRadius: 14,
-              border: `1px solid ${colors.cardBorder}`,
-              background: colors.cardBg,
-              color: colors.textSecondary,
-              fontSize: 14,
-              lineHeight: 1.5,
-              boxShadow: '0 14px 28px rgba(0,0,0,0.24)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-            }}
-          >
-            No recent sessions are available yet.
-          </div>
-        )}
-
-        <button type="button" onClick={onLaunch} style={launchButtonStyle}>
-          Launch new remote session
-        </button>
-      </div>
-    </section>
+    <GroupedSessionList
+      sessions={sessions}
+      onSessionSelect={onSessionSelect}
+      renderSessionName={(session) => compactLine(session.name, agentDisplayName(session), 56)}
+      emptyMessage="No remote sessions yet."
+      topPadding={4}
+    />
   );
 }

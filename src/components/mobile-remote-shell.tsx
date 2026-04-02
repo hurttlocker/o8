@@ -16,9 +16,8 @@ import {
 import dynamic from 'next/dynamic';
 import { ChatView } from './mobile/ChatView';
 import { ComposeBar } from './mobile/ComposeBar';
-import { RecentSessionPicker, SessionAgentPill } from './mobile/RecentSessionPicker';
+import { MOBILE_SESSION_LIST_COLORS, RecentSessionPicker, SessionAgentPill } from './mobile/RecentSessionPicker';
 import { TopBar } from './mobile/TopBar';
-import { MobileFloatingActionButton } from './mobile/ReferencePrimitives';
 
 import { ShimmerCard } from './mobile/ShimmerCard';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
@@ -249,7 +248,7 @@ function MobileRemoteShellInner({
 
   // ── Swipe right from left edge to go back to chat ──
   useSwipeBack(
-    () => { if (activeView !== 'squad' && activeView !== 'chat') setActiveView(selectedSession ? 'chat' : 'squad'); },
+    () => { if (activeView !== 'squad' && activeView !== 'chat') setActiveView('squad'); },
     activeView !== 'squad' && activeView !== 'chat',
   );
 
@@ -355,13 +354,14 @@ function MobileRemoteShellInner({
   const isIndexView = activeView === 'squad';
   const isThreadView = activeView === 'chat';
   const showRecentPicker = isIndexView || (isThreadView && !selectedSession);
+  const isSessionListSurface = showRecentPicker || activeView === 'fleet';
   const showThreadSurface = isThreadView && Boolean(selectedSession);
-  const returnToHome = () => setActiveView(selectedSession ? 'chat' : 'squad');
+  const returnToHome = () => setActiveView('squad');
   const detailTab = detailTabState.sessionId === selectedSession?.id
     ? detailTabState.tab
     : 'chat';
   const terminalActive = hasTerminalSession && detailTab === 'terminal';
-  const recentSessions = snapshot.sessions.slice(0, 5);
+  const recentSessions = snapshot.sessions;
   const linkedWorktree = selectedReviewPacket?.worktree;
   const showWorktreeActions = Boolean(
     isOwnedCodexSession
@@ -453,10 +453,12 @@ function MobileRemoteShellInner({
     minHeight: '100vh',
     padding: '0 0 34px',
     backgroundColor: '#000000',
-    backgroundImage: [
-      'radial-gradient(circle at top, rgba(10, 132, 255, 0.12), transparent 42%)',
-      'linear-gradient(180deg, #000000 0%, #050507 56%, #0a0a0c 100%)',
-    ].join(', '),
+    backgroundImage: isSessionListSurface
+      ? 'none'
+      : [
+          'radial-gradient(circle at top, rgba(10, 132, 255, 0.12), transparent 42%)',
+          'linear-gradient(180deg, #000000 0%, #050507 56%, #0a0a0c 100%)',
+        ].join(', '),
     color: '#F5F5F7',
   };
   const phoneShellStyle: CSSProperties = {
@@ -472,9 +474,13 @@ function MobileRemoteShellInner({
     display: 'grid',
     gap: 0,
     paddingTop: 0,
-    paddingRight: 18,
-    paddingBottom: `calc(${composeHeight}px + env(safe-area-inset-bottom, 0px) + 42px)`,
-    paddingLeft: 18,
+    paddingRight: isSessionListSurface ? 0 : 18,
+    paddingBottom: showRecentPicker
+      ? 'calc(env(safe-area-inset-bottom, 0px) + 96px)'
+      : activeView === 'fleet'
+        ? 'calc(env(safe-area-inset-bottom, 0px) + 24px)'
+        : `calc(${composeHeight}px + env(safe-area-inset-bottom, 0px) + 42px)`,
+    paddingLeft: isSessionListSurface ? 0 : 18,
     background: 'transparent',
   };
   const noteStyle: CSSProperties = {
@@ -496,12 +502,31 @@ function MobileRemoteShellInner({
     position: 'fixed',
     left: '50%',
     bottom: 'calc(env(safe-area-inset-bottom, 0px) + 18px)',
-    width: 'min(calc(100dvw - 28px), 390px)',
+    width: 'min(calc(100dvw - 32px), 390px)',
     transform: 'translateX(-50%)',
     display: 'flex',
     justifyContent: 'flex-end',
     pointerEvents: 'none',
     zIndex: 14,
+  };
+  const fabButtonStyle: CSSProperties = {
+    width: 56,
+    height: 56,
+    minWidth: 56,
+    minHeight: 56,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.15)',
+    background: 'rgba(255,255,255,0.12)',
+    color: MOBILE_SESSION_LIST_COLORS.primary,
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    boxShadow: '0 18px 36px rgba(0,0,0,0.28)',
+    cursor: 'pointer',
+    pointerEvents: 'auto',
+    WebkitTapHighlightColor: 'transparent',
   };
   const bottomDockStyle: CSSProperties = {
     position: 'fixed',
@@ -775,9 +800,27 @@ function MobileRemoteShellInner({
         </PullToRefresh>
         {showRecentPicker ? (
           <div style={fabWrapStyle}>
-            <MobileFloatingActionButton label="Launch new remote session" onClick={() => setLaunchOpen(true)}>
-              +
-            </MobileFloatingActionButton>
+            <button
+              type="button"
+              aria-label="Launch new remote session"
+              onClick={() => setLaunchOpen(true)}
+              style={fabButtonStyle}
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
+            </button>
           </div>
         ) : null}
         <div ref={bottomDockRef} style={bottomDockStyle}>
