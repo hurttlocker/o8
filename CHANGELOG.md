@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `14a417c` feat: bound onAgentCompletion retry loop
 - `8b336f1` chore: restore tracked next env import
 - `7d82733` feat: add attempt learning persistence
 - `acb9bb3` feat: add low-risk auto-approve policy
