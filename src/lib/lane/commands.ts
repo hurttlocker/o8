@@ -30,6 +30,7 @@ import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES, FILE_SIZE_WAIVERS } from '@/lib/orchestrator/dispatch';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { parseGitDiff } from '@/lib/worktree/diff-parser';
 
 async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>) {
@@ -323,7 +324,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           const wsPort = process.env.WS_PORT || '3002';
           await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.WS_TOKEN || 'cortex-ide'}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },
             body: JSON.stringify({
               surfaceId: result.surfaceId,
               repoPath: lane.repoPath,
@@ -450,7 +451,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           const wsPort = process.env.WS_PORT || '3002';
           await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.WS_TOKEN || 'cortex-ide'}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },
             body: JSON.stringify({ surfaceId: result.surfaceId, repoPath: lane.repoPath, name: lane.label || lane.branch, prompt }),
             signal: AbortSignal.timeout(3000),
           });

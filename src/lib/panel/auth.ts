@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
-const PANEL_API_TOKEN = process.env.WS_TOKEN?.trim() || '';
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 function isLoopbackHost(hostname?: string | null) {
@@ -35,9 +35,10 @@ export function requirePanelAuth(req: NextRequest): NextResponse | null {
     return null;
   }
 
+  const panelApiToken = getOrCreateWsToken().trim();
   const auth = req.headers.get('authorization');
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : req.nextUrl.searchParams.get('token');
-  if (!PANEL_API_TOKEN || token !== PANEL_API_TOKEN) {
+  if (!panelApiToken || token !== panelApiToken) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

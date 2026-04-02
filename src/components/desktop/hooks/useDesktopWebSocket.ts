@@ -55,7 +55,7 @@ const PING_INTERVAL = 20_000;
 function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
   const { hostname, port, protocol } = window.location;
-  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? 'cortex-ide';
+  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
   const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
 

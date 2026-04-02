@@ -13,6 +13,7 @@
  */
 
 import { createInterface } from 'node:readline';
+import { getOrCreateWsToken } from '../ws-auth';
 
 // ── Types ──
 
@@ -46,6 +47,7 @@ interface McpToolResult {
 const API_BASE = process.env.CORTEX_API_BASE || 'http://localhost:3001';
 const REPO_PATH = process.env.CORTEX_REPO_PATH || '';
 const REPO_SLUG = process.env.CORTEX_REPO_SLUG || '';
+const WS_TOKEN = process.env.WS_TOKEN?.trim() || getOrCreateWsToken();
 
 // ── Tool Definitions ──
 
@@ -510,7 +512,7 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
         await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${process.env.WS_TOKEN || 'cortex-ide'}`,
+            'Authorization': `Bearer ${WS_TOKEN}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
