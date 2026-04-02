@@ -733,6 +733,7 @@ function MobileRemoteShellInner({
               onSessionSelect={actions.handleSessionFocus}
               onNewChat={handleCreateNewChat}
               onLaunch={() => setLaunchOpen(true)}
+              bottomPadding="calc(env(safe-area-inset-bottom, 0px) + 96px)"
             />
           ) : null}
           {hasTerminalSession && showThreadSurface ? (
