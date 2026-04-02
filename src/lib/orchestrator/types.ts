@@ -70,6 +70,8 @@ export interface OrchestratorPacket {
   queueState: OrchestratorQueueState;
   releaseState: OrchestratorReleaseState;
   status: OrchestratorPacketStatus;
+  attemptCount?: number;
+  maxAttempts?: number;
   blockedReason?: string | null;
   lastEventAt?: string | null;
   lastEventLabel?: string | null;
@@ -104,6 +106,7 @@ export interface PacketContext {
   sessionKey: string;
   summary: string;
   changedFiles: string[];
+  attemptLearnings?: string[];
   selfReview?: PacketSelfReview;
   reviewFindings?: OrchestratorReviewFinding[];
   patterns?: string[];
