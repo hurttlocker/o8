@@ -166,11 +166,8 @@ export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
   const surfaceStyle = {
     display: 'grid',
     gap: 12,
-    padding: 12,
-    borderRadius: 18,
-    border: `1px solid ${palette.surfaceBorder}`,
-    background: palette.surfaceBg,
-    boxShadow: palette.shadow,
+    padding: 0,
+    background: 'transparent',
   } as CSSProperties;
   const inputShellStyle = {
     position: 'relative',
