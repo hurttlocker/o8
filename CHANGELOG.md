@@ -6,6 +6,8 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `8b336f1` chore: restore tracked next env import
+- `7d82733` feat: add attempt learning persistence
 - `acb9bb3` feat: add low-risk auto-approve policy
 - `998b96e` feat: add packet self-review confidence gate
 - `56be609` feat: objective exit criteria
