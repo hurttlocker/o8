@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: 'o8',
   description: 'Mobile command surface for AI agent orchestration',
   other: {
-    'theme-color': '#1A1816',
+    'theme-color': '#1C1C1E',
     'apple-mobile-web-app-status-bar-style': 'black-translucent',
   },
   viewport: {
@@ -22,8 +22,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     ?? 'dev';
 
   return (
-    <html lang="en">
-      <body>
+    <html lang="en" style={{ background: '#1C1C1E' }}>
+      <body style={{ background: '#1C1C1E', margin: 0 }}>
         <script
           dangerouslySetInnerHTML={{
             __html: `
