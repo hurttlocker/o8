@@ -6,7 +6,9 @@ export const metadata: Metadata = {
   description: 'Mobile command surface for AI agent orchestration',
   other: {
     'theme-color': '#1C1C1E',
+    'apple-mobile-web-app-capable': 'yes',
     'apple-mobile-web-app-status-bar-style': 'black-translucent',
+    'mobile-web-app-capable': 'yes',
   },
   viewport: {
     width: 'device-width',
