@@ -606,8 +606,6 @@ function MobileRemoteShellInner({
     gap: '0.42rem',
     padding: 0,
     background: 'transparent',
-    WebkitBackdropFilter: 'blur(18px)',
-    boxShadow: '0 18px 38px rgba(0,0,0,0.28)',
   };
 
   // ── Render ──
