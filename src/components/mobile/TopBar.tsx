@@ -5,30 +5,15 @@ import { useTheme } from './ThemeContext';
 
 const fontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
 
-// Progressive scroll fade — two layers:
-// 1. Blur layer with mask-image so blur itself fades out progressively
-// 2. Gradient overlay for the color fade
-const topVeilBlurStyle: CSSProperties = {
+// Top veil: solid black header background + thin dissolve edge
+// The header area is fully opaque. Only the bottom 24px fades to transparent.
+const topVeilStyle: CSSProperties = {
   position: 'fixed',
   top: 0,
   left: 0,
   right: 0,
-  height: 'calc(env(safe-area-inset-top, 0px) + 160px)',
-  backdropFilter: 'blur(30px)',
-  WebkitBackdropFilter: 'blur(30px)',
-  WebkitMaskImage: 'linear-gradient(180deg, black 0%, black 55%, transparent 100%)',
-  maskImage: 'linear-gradient(180deg, black 0%, black 55%, transparent 100%)',
-  pointerEvents: 'none',
-  zIndex: 90,
-} as CSSProperties;
-
-const topVeilGradientStyle: CSSProperties = {
-  position: 'fixed',
-  top: 0,
-  left: 0,
-  right: 0,
-  height: 'calc(env(safe-area-inset-top, 0px) + 160px)',
-  background: 'linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 50%, rgba(0,0,0,0.85) 62%, rgba(0,0,0,0.5) 76%, rgba(0,0,0,0.15) 90%, rgba(0,0,0,0) 100%)',
+  height: 'calc(env(safe-area-inset-top, 0px) + 80px)',
+  background: 'linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 70%, rgba(0,0,0,0.6) 85%, rgba(0,0,0,0) 100%)',
   pointerEvents: 'none',
   zIndex: 90,
 };
@@ -183,8 +168,7 @@ export const TopBar = memo(function TopBar({
 
   return (
     <>
-      <div style={topVeilBlurStyle} aria-hidden="true" />
-      <div style={topVeilGradientStyle} aria-hidden="true" />
+      <div style={topVeilStyle} aria-hidden="true" />
       <header style={headerStyle}>
         <SpeedDialButton
           activeScreen={activeScreen}
