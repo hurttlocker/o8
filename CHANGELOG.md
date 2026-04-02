@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `959a209` fix: FAB button opens New Chat instead of Launch Agent sheet
 - `8b21c51` fix: mobile stability
 - `8775a3e` refactor: denormalize packetId/laneId into indexed approval columns + extract context & review modules
 - `2f0f366` refactor: denormalize packetId/laneId into indexed approval columns + extract context & review modules
