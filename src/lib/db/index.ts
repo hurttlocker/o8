@@ -14,6 +14,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { extractApprovalContextIdsFromMetadataJson } from '@/lib/approvals/context';
 import * as schema from './schema';
 import { migrateLegacyApprovalStoreIfNeeded } from '@/lib/approvals/storage-migration';
 import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
@@ -287,6 +288,8 @@ function ensureTables(sqlite: Database.Database): void {
       diff_json TEXT,
       risk TEXT NOT NULL,
       metadata_json TEXT,
+      packet_id TEXT,
+      lane_id TEXT,
       policy_rule_id TEXT,
       status TEXT NOT NULL,
       created_at INTEGER NOT NULL,
@@ -353,8 +356,75 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_lane_events_timestamp ON lane_events(timestamp);
   `);
 
+  ensureApprovalContextColumns(sqlite);
   migrateLegacyApprovalStoreIfNeeded(sqlite, { approvalsTablePreviouslyMissing });
+  backfillApprovalContextColumns(sqlite);
+  ensureApprovalContextIndexes(sqlite);
   migrateLegacyLaneStoreIfNeeded(sqlite, { lanesTablePreviouslyMissing });
+}
+
+function tableColumnExists(sqlite: Database.Database, tableName: string, columnName: string): boolean {
+  const columns = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === columnName);
+}
+
+function ensureApprovalContextColumns(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'approvals', 'packet_id')) {
+    sqlite.exec('ALTER TABLE approvals ADD COLUMN packet_id TEXT');
+  }
+  if (!tableColumnExists(sqlite, 'approvals', 'lane_id')) {
+    sqlite.exec('ALTER TABLE approvals ADD COLUMN lane_id TEXT');
+  }
+}
+
+function backfillApprovalContextColumns(sqlite: Database.Database): void {
+  const approvalsNeedingBackfill = sqlite.prepare(`
+    SELECT id, metadata_json, packet_id, lane_id
+    FROM approvals
+    WHERE packet_id IS NULL OR lane_id IS NULL
+  `).all() as Array<{
+    id: string;
+    metadata_json: string | null;
+    packet_id: string | null;
+    lane_id: string | null;
+  }>;
+
+  if (approvalsNeedingBackfill.length === 0) {
+    return;
+  }
+
+  const updateApprovalContext = sqlite.prepare(`
+    UPDATE approvals
+    SET packet_id = ?, lane_id = ?
+    WHERE id = ?
+  `);
+
+  let updatedCount = 0;
+  sqlite.transaction((rows: typeof approvalsNeedingBackfill) => {
+    for (const row of rows) {
+      const { packetId, laneId } = extractApprovalContextIdsFromMetadataJson(row.metadata_json);
+      const nextPacketId = row.packet_id ?? packetId;
+      const nextLaneId = row.lane_id ?? laneId;
+
+      if (nextPacketId === row.packet_id && nextLaneId === row.lane_id) {
+        continue;
+      }
+
+      updateApprovalContext.run(nextPacketId ?? null, nextLaneId ?? null, row.id);
+      updatedCount += 1;
+    }
+  })(approvalsNeedingBackfill);
+
+  if (updatedCount > 0) {
+    console.log(`[db] Backfilled approval context columns for ${updatedCount} approval rows`);
+  }
+}
+
+function ensureApprovalContextIndexes(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_approvals_packet_id ON approvals(packet_id);
+    CREATE INDEX IF NOT EXISTS idx_approvals_lane_id ON approvals(lane_id);
+  `);
 }
 
 // Re-export schema for convenience
