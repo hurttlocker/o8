@@ -326,19 +326,34 @@ export async function submitSteerTurn({
 
   try {
     if (isWorkspaceChat) {
-      await runAction({
-        action: 'steer',
-        sessionKey,
-        message,
-        attachments: attachments.map((item) => ({
-          type: 'image',
-          mimeType: item.mimeType,
-          fileName: item.fileName,
-          content: item.content,
-        })),
-      });
-      setSurfaceNote('Sent to workspace chat…');
-      scheduleHistoryRefreshBurst(sessionKey, loadHistory);
+      // llm-chat sessions route through the mobile chat send API, not WS steer
+      if (sessionKey.startsWith('llm-chat:')) {
+        const res = await fetch('/api/mobile/chat/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionKey, message }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          throw new Error(err.error || 'Chat send failed');
+        }
+        setSurfaceNote('Sent…');
+        scheduleHistoryRefreshBurst(sessionKey, loadHistory);
+      } else {
+        await runAction({
+          action: 'steer',
+          sessionKey,
+          message,
+          attachments: attachments.map((item) => ({
+            type: 'image',
+            mimeType: item.mimeType,
+            fileName: item.fileName,
+            content: item.content,
+          })),
+        });
+        setSurfaceNote('Sent to workspace chat…');
+        scheduleHistoryRefreshBurst(sessionKey, loadHistory);
+      }
     } else if (isDiscoveredCodex) {
       await runAction({ action: 'steer', sessionKey, message });
       setSurfaceNote('Sent to Codex…');
