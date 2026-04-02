@@ -19,7 +19,7 @@ const topVeilBlurStyle: CSSProperties = {
   WebkitMaskImage: 'linear-gradient(180deg, black 0%, black 55%, transparent 100%)',
   maskImage: 'linear-gradient(180deg, black 0%, black 55%, transparent 100%)',
   pointerEvents: 'none',
-  zIndex: 10,
+  zIndex: 90,
 } as CSSProperties;
 
 const topVeilGradientStyle: CSSProperties = {
@@ -30,7 +30,7 @@ const topVeilGradientStyle: CSSProperties = {
   height: 'calc(env(safe-area-inset-top, 0px) + 160px)',
   background: 'linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 50%, rgba(0,0,0,0.85) 62%, rgba(0,0,0,0.5) 76%, rgba(0,0,0,0.15) 90%, rgba(0,0,0,0) 100%)',
   pointerEvents: 'none',
-  zIndex: 10,
+  zIndex: 90,
 };
 
 function MoreIcon() {
@@ -131,7 +131,7 @@ export const TopBar = memo(function TopBar({
     gridTemplateColumns: '44px minmax(0, 1fr) 44px',
     alignItems: 'center',
     gap: 12,
-    zIndex: 12,
+    zIndex: 95,
     opacity: headerVisible ? 1 : 0,
     pointerEvents: headerVisible ? 'auto' : 'none',
     transition: 'opacity 220ms ease, transform 220ms ease',
