@@ -4,6 +4,12 @@ import { getCortexClient } from '@/lib/cortex/client';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
+import {
+  buildMissingPacketSelfReview,
+  isPacketSelfReview,
+  parsePacketSelfReview,
+  stripPacketSelfReview,
+} from '@/lib/orchestrator/self-review';
 import type { PacketContext } from '@/lib/orchestrator/types';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime } from '@/lib/runtimes/registry';
@@ -138,6 +144,22 @@ function latestTranscriptTimestamp(entries: RuntimeTranscriptEntry[]): string | 
   return null;
 }
 
+function findLatestSelfReview(entries: RuntimeTranscriptEntry[]): PacketContext['selfReview'] {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.role !== 'assistant' || !entry.text.trim()) {
+      continue;
+    }
+
+    const selfReview = parsePacketSelfReview(entry.text);
+    if (selfReview) {
+      return selfReview;
+    }
+  }
+
+  return buildMissingPacketSelfReview();
+}
+
 function buildChangedFileList(entries: RuntimeTranscriptEntry[], runtimeChangedFiles: Array<{ path: string }>): string[] {
   const seen = new Set<string>();
   const files: string[] = [];
@@ -202,6 +224,7 @@ function isPacketContext(value: unknown): value is PacketContext {
     && typeof candidate.summary === 'string'
     && Array.isArray(candidate.changedFiles)
     && candidate.changedFiles.every((entry) => typeof entry === 'string')
+    && (candidate.selfReview === undefined || isPacketSelfReview(candidate.selfReview))
     && (candidate.reviewFindings === undefined || (Array.isArray(candidate.reviewFindings) && candidate.reviewFindings.every(isReviewFinding)))
     && (candidate.patterns === undefined || isStringArray(candidate.patterns))
     && (candidate.conflictZones === undefined || isStringArray(candidate.conflictZones))
@@ -516,6 +539,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   const agent = agentResult.status === 'fulfilled' ? agentResult.value : null;
   const telemetry = telemetryResult.status === 'fulfilled' ? telemetryResult.value : undefined;
   const lastAssistantEntry = findLastAssistantEntry(transcript);
+  const selfReview = findLatestSelfReview(transcript);
   const matchingApprovals = listApprovalsForContext({
     packetId: normalizedPacketId,
     laneId: lane?.id ?? undefined,
@@ -530,11 +554,12 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     sessionKey: normalizedSessionKey,
     summary: buildPacketSummary({
       lifecycleSummary: normalizeSummaryText(agent?.runtimeSurface?.lifecycle?.summary ?? '', SUMMARY_LIMIT),
-      assistantSummary: normalizeSummaryText(lastAssistantEntry?.text ?? '', SUMMARY_LIMIT),
+      assistantSummary: normalizeSummaryText(stripPacketSelfReview(lastAssistantEntry?.text ?? ''), SUMMARY_LIMIT),
       note: findRecentNote(transcript, lastAssistantEntry?.id ?? null),
       changedFiles,
     }),
     changedFiles,
+    selfReview,
     completedAt: agent?.runtimeSurface?.lifecycle?.lastRunFinishedAt
       ?? latestTranscriptTimestamp(transcript)
       ?? new Date().toISOString(),
