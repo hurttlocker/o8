@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `78574b5` fix: auto-expire stale approvals, fix chat/approval overlap, instant new chat nav
 - `959a209` fix: FAB button opens New Chat instead of Launch Agent sheet
 - `8b21c51` fix: mobile stability
 - `8775a3e` refactor: denormalize packetId/laneId into indexed approval columns + extract context & review modules
