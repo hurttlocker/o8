@@ -86,12 +86,6 @@ html::-webkit-scrollbar {
   background: #1A1816 !important;
   color: #FAF5F0 !important;
 }
-:root.dark-mode, .dark-mode .mobile-wrap, .dark-mode .mobile-wrap { background: #1A1816 !important; }
-
-/* Kill decorative gradient in dark mode */
-:root.dark-mode, .dark-mode .mobile-wrap::before {
-  background: radial-gradient(circle at 50% 30%, rgba(10,132,255,0.08), transparent 50%) !important;
-}
 
 * {
   box-sizing: border-box;
@@ -175,8 +169,7 @@ button:hover {
   border-color: transparent;
 }
 
-.page-wrap,
-.mobile-wrap {
+.page-wrap {
   width: min(1480px, calc(100% - 40px));
   margin: 0 auto;
   padding: 24px 0 48px;
@@ -576,34 +569,6 @@ button:hover {
   gap: 0.45rem;
 }
 
-.mobile-wrap {
-  position: relative;
-  isolation: isolate;
-  width: 100%;
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
-.mobile-wrap::before {
-  content: '';
-  position: absolute;
-  inset: -24px 0 auto;
-  height: 220px;
-  border-radius: 36px;
-  background:
-    radial-gradient(circle at 10% 10%, rgba(255, 255, 255, 0.72), transparent 22%),
-    radial-gradient(circle at 85% 20%, rgba(59, 130, 246, 0.26), transparent 28%),
-    radial-gradient(circle at 50% 80%, rgba(99, 102, 241, 0.18), transparent 32%);
-  filter: blur(12px);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.mobile-wrap > * {
-  position: relative;
-  z-index: 1;
-}
-
 .mobile-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -613,58 +578,6 @@ button:hover {
 
 .mobile-stack {
   margin-top: 14px;
-}
-
-.mobile-wrap .surface-card:not(.mobile-header),
-.mobile-action-card,
-.mobile-memory-card,
-.mobile-wrap .inset-card,
-.mobile-wrap .transcript-entry {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.4));
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  box-shadow:
-    0 24px 60px rgba(15, 23, 42, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.42);
-  backdrop-filter: blur(24px) saturate(180%);
-}
-
-.mobile-wrap .surface-card.mobile-header {
-  position: relative;
-  overflow: hidden;
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(37, 99, 235, 0.76) 58%, rgba(99, 102, 241, 0.72));
-  border-color: rgba(255, 255, 255, 0.18);
-  box-shadow:
-    0 28px 80px rgba(37, 99, 235, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  color: white;
-}
-
-.mobile-wrap .surface-card.mobile-header::before {
-  content: '';
-  position: absolute;
-  inset: -20% auto auto 55%;
-  width: 220px;
-  height: 220px;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.3), transparent 68%);
-  filter: blur(10px);
-  pointer-events: none;
-}
-
-.mobile-wrap .surface-card.mobile-header h1,
-.mobile-wrap .surface-card.mobile-header p,
-.mobile-wrap .surface-card.mobile-header .eyebrow,
-.mobile-wrap .surface-card.mobile-header .inline-link {
-  position: relative;
-  color: rgba(255, 255, 255, 0.92);
-}
-
-.mobile-wrap .surface-card.mobile-header .eyebrow {
-  color: rgba(219, 234, 254, 0.84);
-}
-
-.mobile-wrap .surface-card.mobile-header .inline-link {
-  color: white;
 }
 
 .mobile-action-card,
@@ -1436,17 +1349,6 @@ button.workflow-file-item.workflow-file-item-active {
   }
 }
 
-.mobile-wrap button,
-.mobile-action-link {
-  border: 1px solid rgba(255, 255, 255, 0.52);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.46));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.44);
-}
-
-.mobile-wrap button {
-  min-height: 42px;
-}
-
 .mobile-action-link {
   display: grid;
   place-items: center;
@@ -1456,12 +1358,6 @@ button.workflow-file-item.workflow-file-item-active {
   font-weight: 600;
   font-size: 0.92rem;
   text-align: center;
-}
-
-.mobile-wrap .button-primary {
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.96), rgba(79, 70, 229, 0.92));
-  border-color: rgba(255, 255, 255, 0.18);
-  color: white;
 }
 
 .mobile-review-focus,
@@ -1630,8 +1526,7 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 @media (max-width: 820px) {
-  .page-wrap,
-  .mobile-wrap {
+  .page-wrap {
     width: min(100% - 24px, 100%);
     padding-top: 16px;
   }
