@@ -5,16 +5,32 @@ import { useTheme } from './ThemeContext';
 
 const fontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
 
-const topVeilStyle: CSSProperties = {
+// Progressive scroll fade — two layers:
+// 1. Blur layer with mask-image so blur itself fades out progressively
+// 2. Gradient overlay for the color fade
+const topVeilBlurStyle: CSSProperties = {
   position: 'fixed',
   top: 0,
   left: '50%',
   width: 'min(100dvw, 430px)',
-  height: 'calc(env(safe-area-inset-top, 0px) + 118px)',
+  height: 'calc(env(safe-area-inset-top, 0px) + 140px)',
   transform: 'translateX(-50%)',
-  background: 'linear-gradient(180deg, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.9) 30%, rgba(0, 0, 0, 0.68) 58%, rgba(0, 0, 0, 0.24) 82%, rgba(0, 0, 0, 0) 100%)',
-  backdropFilter: 'blur(20px)',
-  WebkitBackdropFilter: 'blur(20px)',
+  backdropFilter: 'blur(24px)',
+  WebkitBackdropFilter: 'blur(24px)',
+  WebkitMaskImage: 'linear-gradient(180deg, black 0%, black 35%, transparent 100%)',
+  maskImage: 'linear-gradient(180deg, black 0%, black 35%, transparent 100%)',
+  pointerEvents: 'none',
+  zIndex: 10,
+} as CSSProperties;
+
+const topVeilGradientStyle: CSSProperties = {
+  position: 'fixed',
+  top: 0,
+  left: '50%',
+  width: 'min(100dvw, 430px)',
+  height: 'calc(env(safe-area-inset-top, 0px) + 140px)',
+  transform: 'translateX(-50%)',
+  background: 'linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 20%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.18) 75%, rgba(0,0,0,0) 100%)',
   pointerEvents: 'none',
   zIndex: 10,
 };
@@ -169,7 +185,8 @@ export const TopBar = memo(function TopBar({
 
   return (
     <>
-      <div style={topVeilStyle} aria-hidden="true" />
+      <div style={topVeilBlurStyle} aria-hidden="true" />
+      <div style={topVeilGradientStyle} aria-hidden="true" />
       <header style={headerStyle}>
         <SpeedDialButton
           activeScreen={activeScreen}

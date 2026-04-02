@@ -498,6 +498,17 @@ function MobileRemoteShellInner({
     height: 1,
     scrollMarginBottom: `calc(${composeHeight}px + 108px)`,
   };
+  const bottomFadeStyle: CSSProperties = {
+    position: 'fixed',
+    bottom: 0,
+    left: '50%',
+    width: 'min(100dvw, 430px)',
+    height: 'calc(env(safe-area-inset-bottom, 0px) + 100px)',
+    transform: 'translateX(-50%)',
+    background: 'linear-gradient(0deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.7) 40%, rgba(0,0,0,0.2) 70%, rgba(0,0,0,0) 100%)',
+    pointerEvents: 'none',
+    zIndex: 12,
+  };
   const fabWrapStyle: CSSProperties = {
     position: 'fixed',
     left: '50%',
@@ -799,6 +810,8 @@ function MobileRemoteShellInner({
         </PageTransition>
         </PullToRefresh>
         {showRecentPicker ? (
+          <>
+          <div style={bottomFadeStyle} aria-hidden="true" />
           <div style={fabWrapStyle}>
             <button
               type="button"
@@ -822,6 +835,7 @@ function MobileRemoteShellInner({
               </svg>
             </button>
           </div>
+          </>
         ) : null}
         <div ref={bottomDockRef} style={bottomDockStyle}>
           {!terminalActive && showThreadSurface ? (
