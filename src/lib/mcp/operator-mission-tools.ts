@@ -25,6 +25,19 @@ interface CreateMissionInput {
   constraints: string;
 }
 
+interface InlineIssue {
+  number: number;
+  title: string;
+  body?: string;
+}
+
+interface CreateMissionInlineInput {
+  issues_inline: InlineIssue[];
+  repoPath: string;
+  runtime: OrchestratorRuntime;
+  constraints: string;
+}
+
 interface ApiSuccessResponse<T> {
   ok: true;
   result: T;
@@ -188,6 +201,36 @@ export async function createMission(input: CreateMissionInput) {
   const loadedIssues = await Promise.all(input.issues.map((issueRef) => loadIssue(repoPath, issueRef)));
 
   log(`Loaded ${loadedIssues.length} issue${loadedIssues.length === 1 ? '' : 's'} locally; delegating mission creation to Next.js API.`);
+
+  return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
+    '/api/orchestrator/create-mission',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        issues: loadedIssues,
+        repoPath,
+        runtime: input.runtime,
+        constraints: input.constraints,
+      } satisfies CreateMissionRequest),
+    },
+  );
+}
+
+/**
+ * #453 — Create a mission from inline issue objects, bypassing `gh issue view`.
+ * Use when GitHub API is rate-limited or issues are ad-hoc/synthetic.
+ */
+export async function createMissionInline(input: CreateMissionInlineInput) {
+  const repoPath = ensureRepoPath(input.repoPath);
+
+  const loadedIssues: LoadedIssue[] = input.issues_inline.map((issue) => ({
+    number: issue.number,
+    title: issue.title,
+    body: issue.body ?? '',
+    url: '',
+  }));
+
+  log(`Creating mission from ${loadedIssues.length} inline issue${loadedIssues.length === 1 ? '' : 's'} (no GitHub fetch).`);
 
   return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
     '/api/orchestrator/create-mission',
