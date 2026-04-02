@@ -13,7 +13,7 @@ import {
   deriveOrchestratorReviewRisk,
   normalizeOrchestratorReview,
 } from '@/lib/approvals/orchestrator-review';
-import { approvals as approvalsTable, getDb } from '@/lib/db';
+import { approvals as approvalsTable, approvalEvents as approvalEventsTable, getDb, getSqlite } from '@/lib/db';
 import type { EventSeverity } from '@/lib/fleet/types';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type {
@@ -31,6 +31,7 @@ type ApprovalInsert = typeof approvalsTable.$inferInsert;
 
 const APPROVAL_CONTEXT_LOOKUP_LIMIT = 100;
 const APPROVAL_CONTEXT_LOOKBACK_MS = 1000 * 60 * 60 * 24 * 90;
+const STALE_APPROVAL_TTL_MS = 1000 * 60 * 60;
 
 function getApprovalDb() {
   const db = getDb();
@@ -212,10 +213,57 @@ function auditEvent(
   };
 }
 
+function insertApprovalEvent(approvalId: string, event: ApprovalAuditEvent): void {
+  const { type: eventType, actor, note, timestamp, ...rest } = event;
+  getApprovalDb().insert(approvalEventsTable).values({
+    id: `evt-${approvalId}-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    approvalId,
+    eventType,
+    actor,
+    note: note ?? null,
+    detailsJson: JSON.stringify(rest),
+    timestamp,
+  }).run();
+}
+
+export function listApprovalEvents(approvalId: string): ApprovalAuditEvent[] {
+  return getApprovalDb()
+    .select()
+    .from(approvalEventsTable)
+    .where(eq(approvalEventsTable.approvalId, approvalId))
+    .orderBy(approvalEventsTable.timestamp)
+    .all()
+    .map((row) => ({
+      type: row.eventType as ApprovalAuditEvent['type'],
+      actor: row.actor as ApprovalActor,
+      timestamp: row.timestamp,
+      note: row.note ?? undefined,
+      ...parseJson<Record<string, unknown>>(row.detailsJson, {}),
+    })) as ApprovalAuditEvent[];
+}
+
 export function approvalSeverity(risk: ApprovalRisk): EventSeverity {
   if (risk === 'high') return 'critical';
   if (risk === 'medium') return 'warning';
   return 'info';
+}
+
+export function expireStaleApprovals() {
+  const cutoff = Date.now() - STALE_APPROVAL_TTL_MS;
+  const result = getSqlite()
+    .prepare(`
+      UPDATE approvals
+      SET status = 'rejected'
+      WHERE status = 'pending'
+        AND created_at < ?
+    `)
+    .run(cutoff);
+
+  if (result.changes > 0) {
+    console.log(`[approvals] Expired ${result.changes} stale pending approvals`);
+  }
+
+  return result.changes;
 }
 
 export function listApprovals(options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string } = {}) {
@@ -393,10 +441,16 @@ export function recordApprovalAudit(
   const existing = getApproval(id);
   if (!existing) return null;
 
+  const event = auditEvent(type, actor, note, details);
+
+  // Write to normalized events table (primary)
+  insertApprovalEvent(id, event);
+
+  // Also append to audit_json for backward compat reads
   const next: ApprovalRecord = {
     ...existing,
     updatedAt: Date.now(),
-    audit: [...existing.audit, auditEvent(type, actor, note, details)],
+    audit: [...existing.audit, event],
   };
   updateApprovalRecord(next);
   return next;

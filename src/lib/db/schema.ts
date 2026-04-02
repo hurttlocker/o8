@@ -321,6 +321,18 @@ export const lanes = sqliteTable('lanes', {
   statusIdx: index('idx_lanes_status').on(table.status),
 }));
 
+export const approvalEvents = sqliteTable('approval_events', {
+  id: text('id').primaryKey(),
+  approvalId: text('approval_id').notNull(),
+  eventType: text('event_type').notNull(),
+  actor: text('actor').notNull(),
+  note: text('note'),
+  detailsJson: text('details_json').notNull().default('{}'),
+  timestamp: integer('timestamp').notNull(),
+}, (table) => ({
+  approvalTimestampIdx: index('idx_approval_events_approval_timestamp').on(table.approvalId, table.timestamp),
+}));
+
 export const laneEvents = sqliteTable('lane_events', {
   id: text('id').primaryKey(),
   laneId: text('lane_id').notNull().references(() => lanes.id, { onDelete: 'cascade' }),

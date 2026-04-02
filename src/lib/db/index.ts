@@ -357,8 +357,10 @@ function ensureTables(sqlite: Database.Database): void {
   `);
 
   ensureApprovalContextColumns(sqlite);
+  ensureApprovalEventsTable(sqlite);
   migrateLegacyApprovalStoreIfNeeded(sqlite, { approvalsTablePreviouslyMissing });
   backfillApprovalContextColumns(sqlite);
+  backfillApprovalEventsFromAuditJson(sqlite);
   ensureApprovalContextIndexes(sqlite);
   migrateLegacyLaneStoreIfNeeded(sqlite, { lanesTablePreviouslyMissing });
 }
@@ -417,6 +419,67 @@ function backfillApprovalContextColumns(sqlite: Database.Database): void {
 
   if (updatedCount > 0) {
     console.log(`[db] Backfilled approval context columns for ${updatedCount} approval rows`);
+  }
+}
+
+function ensureApprovalEventsTable(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS approval_events (
+      id TEXT PRIMARY KEY,
+      approval_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT 'system',
+      note TEXT,
+      details_json TEXT NOT NULL DEFAULT '{}',
+      timestamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_approval_events_approval_timestamp
+      ON approval_events(approval_id, timestamp);
+  `);
+}
+
+function backfillApprovalEventsFromAuditJson(sqlite: Database.Database): void {
+  // Check if we've already backfilled by looking for any rows
+  const existing = sqlite.prepare('SELECT COUNT(*) as count FROM approval_events').get() as { count: number };
+  if (existing.count > 0) return;
+
+  const rows = sqlite.prepare(`
+    SELECT id, audit_json FROM approvals WHERE audit_json IS NOT NULL AND audit_json != '[]'
+  `).all() as Array<{ id: string; audit_json: string }>;
+
+  if (rows.length === 0) return;
+
+  const insert = sqlite.prepare(`
+    INSERT OR IGNORE INTO approval_events (id, approval_id, event_type, actor, note, details_json, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  let eventCount = 0;
+  sqlite.transaction((allRows: typeof rows) => {
+    for (const row of allRows) {
+      let events: Array<{ type?: string; actor?: string; note?: string; timestamp?: number; [key: string]: unknown }> = [];
+      try { events = JSON.parse(row.audit_json); } catch { continue; }
+      if (!Array.isArray(events)) continue;
+
+      for (const event of events) {
+        const eventId = `evt-${row.id}-${event.timestamp ?? Date.now()}-${eventCount}`;
+        const { type: _type, actor: _actor, note: _note, timestamp: _ts, ...rest } = event;
+        insert.run(
+          eventId,
+          row.id,
+          event.type ?? 'unknown',
+          event.actor ?? 'system',
+          event.note ?? null,
+          JSON.stringify(rest),
+          event.timestamp ?? Date.now(),
+        );
+        eventCount += 1;
+      }
+    }
+  })(rows);
+
+  if (eventCount > 0) {
+    console.log(`[db] Backfilled ${eventCount} approval events from audit_json blobs`);
   }
 }
 

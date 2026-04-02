@@ -29,7 +29,6 @@ import { type MobileScreen } from './mobile/SpeedDial';
 
 // Lazy-loaded panels — only loaded when opened (#45)
 const shimmerFallback = { loading: () => <ShimmerCard /> };
-const ApprovalStack = dynamic(() => import('./mobile/ApprovalStack').then((m) => ({ default: m.ApprovalStack })), { ssr: false, ...shimmerFallback });
 const ControlsSheet = dynamic(() => import('./mobile/ControlsSheet').then((m) => ({ default: m.ControlsSheet })), { ssr: false, ...shimmerFallback });
 const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ default: m.DiffOverlay })), { ssr: false, ...shimmerFallback });
 const MobileTerminal = dynamic(() => import('./mobile/MobileTerminal').then((m) => ({ default: m.MobileTerminal })), { ssr: false, ...shimmerFallback });
@@ -281,7 +280,7 @@ function MobileRemoteShellInner({
     draftAttachmentsBySession, pendingOwnedTurnBySession,
     enhancing, preEnhanceDraft,
     controlsOpen, alertsOpen, sessionPickerOpen,
-    pendingApprovals, resolvedApprovals,
+    pendingApprovals,
     surfaceRefreshing, expandedMedia, scrollY,
     isScrolling, headerVisible, viewportTopOffset,
     composeFocused, composeHeight, waitingForResponse, hydrated,
@@ -450,6 +449,8 @@ function MobileRemoteShellInner({
         throw new Error(payload?.error || 'Unable to create a new mobile chat.');
       }
 
+      setActiveView('chat');
+
       const optimisticSession = buildOptimisticMobileChatSession({
         sessionKey: payload.sessionKey,
         tabId: payload.tabId,
@@ -477,12 +478,11 @@ function MobileRemoteShellInner({
         sessionKey: payload.sessionKey,
         fallback: optimisticSession,
       });
-      setActiveView('chat');
       setWaitingForResponse(false);
       setSurfaceNote('New mobile chat ready.');
 
-      await loadHistory(payload.sessionKey, true).catch(() => undefined);
-      await refreshInbox(true).catch(() => undefined);
+      void loadHistory(payload.sessionKey, true).catch(() => undefined);
+      void refreshInbox(true).catch(() => undefined);
     } catch (error) {
       setSurfaceNote(error instanceof Error ? error.message : 'Unable to create a new mobile chat.');
     }
@@ -830,12 +830,6 @@ function MobileRemoteShellInner({
                     setHistoryBySession: state.setHistoryBySession,
                   });
                 } : undefined}
-              />
-              <ApprovalStack
-                pendingApprovals={pendingApprovals}
-                resolvedApprovals={resolvedApprovals}
-                onApprove={(a) => actions.handleApprovalDecision(a, 'approved')}
-                onReject={(a) => actions.handleApprovalDecision(a, 'rejected')}
               />
               {showWorktreeActions && mobileWorktree && worktreeRepoRoot ? (
                 <div style={{ padding: '0 14px', marginTop: 12 }}>
