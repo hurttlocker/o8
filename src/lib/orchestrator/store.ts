@@ -110,6 +110,18 @@ function normalizePacketReview(value: unknown): OrchestratorPacketReview | null 
   };
 }
 
+function normalizeAttemptCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : 0;
+}
+
+function normalizeMaxAttempts(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 3;
+}
+
 function normalizePacket(raw: unknown, index: number, existing: Array<Pick<OrchestratorPacket, 'referenceLabel'>>) {
   const packet = (raw && typeof raw === 'object' ? raw : {}) as Partial<OrchestratorPacket>;
   const referenceLabel = typeof packet.referenceLabel === 'string' && packet.referenceLabel.trim()
@@ -145,6 +157,8 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       : queueState === 'queued'
         ? 'queued'
         : 'draft',
+    attemptCount: normalizeAttemptCount(packet.attemptCount),
+    maxAttempts: normalizeMaxAttempts(packet.maxAttempts),
     blockedReason: typeof packet.blockedReason === 'string' ? packet.blockedReason : null,
     lastEventAt: typeof packet.lastEventAt === 'string' ? packet.lastEventAt : null,
     lastEventLabel: typeof packet.lastEventLabel === 'string' ? packet.lastEventLabel : null,
