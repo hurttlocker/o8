@@ -76,6 +76,7 @@ export const TopBar = memo(function TopBar({
   activeView,
   compactLine,
   activeScreen,
+  enabledViews,
   onNavigate,
   onNewChat,
   onOpenControls,
@@ -170,6 +171,7 @@ export const TopBar = memo(function TopBar({
         ) : (
           <SpeedDialButton
             activeScreen={activeScreen}
+            enabledViews={enabledViews}
             onNavigate={onNavigate}
             onNewChat={onNewChat}
             approvalCount={pendingApprovalsCount}
