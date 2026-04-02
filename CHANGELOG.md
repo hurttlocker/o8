@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `b181c37` fix: remove CSS mask-image, add solid header backdrop like AI provider
 - `fbcc573` fix: kill the compose surface border/bg/shadow — THAT was the bottom line
 - `c03a4bf` fix: remove bottom mask fade — only top fade, bottom stays solid
 - `0ac17b9` fix: stale-lane safety net was too aggressive — archived running agents
