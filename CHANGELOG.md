@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `70111ac` docs: remove stale agent runtime references from AI provider.md — two runtimes for v1
 - `50f7915` fix: add turbopack config to silence webpack-only warning
 - `3e1e603` fix: eliminate supervisor http starvation
 - `a6aed2a` perf: break route barrel imports
