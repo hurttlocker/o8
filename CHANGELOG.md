@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `f5c3998` fix: flush scroll fades to screen edges — full width, no inset
 - `d796428` fix: progressive scroll fade
 - `79698ce` feat: copy AI provider mobile session list — clean rows, status groups, FAB
 - `bf22b7d` feat: mobile new chat — launch LLM session from phone
