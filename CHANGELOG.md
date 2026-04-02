@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `7da466a` feat: mobile wave 4
 - `c726097` feat: purge 4,277 lines of remodex CSS + remaining className from mobile
 
 ## 2026-04-01
