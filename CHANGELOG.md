@@ -6,6 +6,11 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `73ba856` feat: in-process mutex on orchestrator-state.json
+- `4b610bb` feat: merge conflict escalation via approval card
+- `1681823` feat: persist supervisor watch state to SQLite
+- `dc3b635` feat: orchestrator session health monitor — 90s timeout + auto-recovery
+- `77a08e4` feat: persistent SQLite-backed review queue
 - `32fa1ce` feat: inline mission creation — no GitHub dependency
 - `4f807ca` fix: detect silently dead agents — transition lane on stuck escalation
 - `df857c7` fix: dirty-worktree guard + reset_packet recovery race
