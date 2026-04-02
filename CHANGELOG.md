@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `6481fce` perf: mobile page is now client-only — zero server-side bootstrap
 - `9499529` perf: cap mobile bootstrap to 200ms budget — don't block on runtime discovery
 - `294efd5` perf: mobile optimization
 - `f2d75c1` fix: scroll fade via CSS mask-image on scroll container, not fixed overlays
