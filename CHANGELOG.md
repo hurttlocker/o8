@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `19f77f8` fix: fades extend into iOS safe area — top starts above viewport, bottom below
 - `b99b023` fix: thin fades
 - `c298e44` fix: bottom fade z-index 88, FAB/dock z-index 92 — bottom fade now covers content
 - `28facdc` fix: top veil z-index 90, header z-index 95 — content no longer shows through
