@@ -160,15 +160,26 @@ export const TopBar = memo(function TopBar({
     <>
       {/* scroll fade handled by mask-image on scroll container */}
       <header style={headerStyle}>
-        <SpeedDialButton
-          activeScreen={activeScreen}
-          onNavigate={onNavigate}
-          onNewChat={onNewChat}
-          approvalCount={pendingApprovalsCount}
-        />
+        {isThreadView ? (
+          <HeaderIconButton
+            label="Back"
+            onClick={() => onNavigate('fleet')}
+            style={iconButtonStyle}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          </HeaderIconButton>
+        ) : (
+          <SpeedDialButton
+            activeScreen={activeScreen}
+            onNavigate={onNavigate}
+            onNewChat={onNewChat}
+            approvalCount={pendingApprovalsCount}
+          />
+        )}
 
         <div style={copyStyle}>
-          <h1 style={titleStyle}>{isThreadView ? threadTitle : screenTitle(activeView)}</h1>
+          <h1 style={titleStyle}>{isThreadView ? (selectedSession?.name ?? 'Chat') : screenTitle(activeView)}</h1>
+          {isThreadView ? <p style={{ margin: 0, color: colors.textSecondary, fontSize: 12, fontFamily }}>Remote control</p> : null}
         </div>
 
         {isThreadView ? (
