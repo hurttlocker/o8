@@ -765,10 +765,13 @@ export async function resetPacket(input: ResetPacketInput) {
     throw new Error(`Packet ${input.packetId} not found.`);
   }
 
-  // Archive the old lane if one exists
+  // Archive the old lane and clear its packet binding so the reconciler
+  // doesn't re-attach it to this packet
   if (packet.lane?.laneId) {
     try {
-      const { archiveLane } = await import('@/lib/lane/registry');
+      const { archiveLane, updateLane } = await import('@/lib/lane/registry');
+      // Clear packetId first so reconciler won't find this lane
+      updateLane(packet.lane.laneId, { packetId: '' });
       archiveLane(packet.lane.laneId, 'user');
       log(`Archived stale lane ${packet.lane.laneId} for packet ${packet.referenceLabel}`);
     } catch {

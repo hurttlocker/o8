@@ -51,7 +51,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
     selectedReviewPacket, reviewPacketBySession, reviewFileByPath,
     selectedReviewFilePath, draftBySession, actionStateBySession,
     draftAttachmentsBySession, enhancing, preEnhanceDraft,
-    setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setSurfaceNote,
+    setSelection, setActiveView, setSurfaceNote,
     setDraftBySession, setActionStateBySession, setActionNoteBySession,
     setDraftAttachmentsBySession, setPendingOwnedTurnBySession,
     setRealtimeMutationsById, setPendingMutationIdBySession,
@@ -258,10 +258,10 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
 
   const handleSessionFocus = useCallback((sessionId: string) => {
     focusSessionSurface({
-      sessionId, snapshot, compactLine, setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setControlsOpen, setDiffOpen,
+      sessionId, snapshot, compactLine, setSelection, setActiveView, setControlsOpen, setDiffOpen,
       setSurfaceNote, setSelectedReviewFilePath, loadHistory, loadOwnedReviewPacket, loadReviewFile,
     });
-  }, [snapshot, setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setControlsOpen, setDiffOpen, setSurfaceNote, setSelectedReviewFilePath, loadHistory, loadOwnedReviewPacket, loadReviewFile]);
+  }, [snapshot, setSelection, setActiveView, setControlsOpen, setDiffOpen, setSurfaceNote, setSelectedReviewFilePath, loadHistory, loadOwnedReviewPacket, loadReviewFile]);
 
   const handleStopActiveRun = useCallback(async () => {
     const canInterruptOwnedCodex = Boolean(isOwnedCodexSession && state.selectedSession?.runtimeSurface?.capabilities.interrupt);

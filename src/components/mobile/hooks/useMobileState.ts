@@ -21,15 +21,23 @@ export interface MobileStateInit {
   initialOwnedReviewPacket?: RuntimeReviewPacket | null;
 }
 
+export interface MobileSelectionState {
+  id: string;
+  sessionKey: string;
+  fallback: MobileInboxSnapshot['sessions'][number] | null;
+}
+
 export function useMobileState(init: MobileStateInit) {
   const { initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket } = init;
   const initialSession = pickHomeSession(initialSnapshot);
 
   // ── Core state ──
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot>(initialSnapshot);
-  const [selectedId, setSelectedId] = useState(() => initialSession?.id ?? '');
-  const [selectedSessionKeyHint, setSelectedSessionKeyHint] = useState(() => initialSession?.sessionKey ?? '');
-  const [selectedSessionFallback, setSelectedSessionFallback] = useState<MobileInboxSnapshot['sessions'][number] | null>(() => initialSession ?? null);
+  const [selection, setSelection] = useState<MobileSelectionState>(() => ({
+    id: initialSession?.id ?? '',
+    sessionKey: initialSession?.sessionKey ?? '',
+    fallback: initialSession ?? null,
+  }));
   const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory' | 'issues'>('squad');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
@@ -147,6 +155,9 @@ export function useMobileState(init: MobileStateInit) {
   }, []);
 
   // ── Derived ──
+  const selectedId = selection.id;
+  const selectedSessionKeyHint = selection.sessionKey;
+  const selectedSessionFallback = selection.fallback;
   const selectedSessionFromSnapshot = useMemo(
     () => snapshot.sessions.find((session) => session.sessionKey === selectedSessionKeyHint)
       ?? snapshot.sessions.find((session) => session.id === selectedId)
@@ -173,30 +184,35 @@ export function useMobileState(init: MobileStateInit) {
   const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
 
   useEffect(() => {
-    if (!selectedSessionFromSnapshot) return;
-
-    if (selectedId !== selectedSessionFromSnapshot.id) {
-      setSelectedId(selectedSessionFromSnapshot.id);
-    }
-    if (selectedSessionKeyHint !== selectedSessionFromSnapshot.sessionKey) {
-      console.info('[mobile] canonicalizing selected session', {
-        selectedId,
-        selectedSessionKeyHint,
-        nextId: selectedSessionFromSnapshot.id,
-        nextSessionKey: selectedSessionFromSnapshot.sessionKey,
+    if (selectedSessionFromSnapshot) {
+      recoveredSelectionRef.current = '';
+      setSelection((current) => {
+        if (
+          current.id === selectedSessionFromSnapshot.id
+          && current.sessionKey === selectedSessionFromSnapshot.sessionKey
+          && current.fallback?.id === selectedSessionFromSnapshot.id
+          && current.fallback?.sessionKey === selectedSessionFromSnapshot.sessionKey
+        ) {
+          return current;
+        }
+        if (current.sessionKey !== selectedSessionFromSnapshot.sessionKey || current.id !== selectedSessionFromSnapshot.id) {
+          console.info('[mobile] canonicalizing selected session', {
+            selectedId: current.id,
+            selectedSessionKeyHint: current.sessionKey,
+            nextId: selectedSessionFromSnapshot.id,
+            nextSessionKey: selectedSessionFromSnapshot.sessionKey,
+          });
+        }
+        return {
+          id: selectedSessionFromSnapshot.id,
+          sessionKey: selectedSessionFromSnapshot.sessionKey,
+          fallback: selectedSessionFromSnapshot,
+        };
       });
-      setSelectedSessionKeyHint(selectedSessionFromSnapshot.sessionKey);
+      return;
     }
-    if (
-      selectedSessionFallback?.id !== selectedSessionFromSnapshot.id
-      || selectedSessionFallback?.sessionKey !== selectedSessionFromSnapshot.sessionKey
-    ) {
-      setSelectedSessionFallback(selectedSessionFromSnapshot);
-    }
-  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint]);
 
-  useEffect(() => {
-    if (!selectedSessionFallback || selectedSessionFromSnapshot) return;
+    if (!selectedSessionFallback) return;
     if (snapshot.sessions.length === 0) {
       console.info('[mobile] selected session missing while live inventory is empty; keeping last known selection', {
         missingId: selectedSessionFallback.id,
@@ -218,9 +234,11 @@ export function useMobileState(init: MobileStateInit) {
         selectedSessionKeyHint,
         availableSessionKeys: snapshot.sessions.map((session) => session.sessionKey),
       });
-      setSelectedId('');
-      setSelectedSessionKeyHint('');
-      setSelectedSessionFallback(null);
+      setSelection((current) => (
+        current.id || current.sessionKey || current.fallback
+          ? { id: '', sessionKey: '', fallback: null }
+          : current
+      ));
       setActiveView('squad');
       setSurfaceNote('No active session is available. Pick a recent thread.');
       return;
@@ -234,18 +252,28 @@ export function useMobileState(init: MobileStateInit) {
       selectedSessionKeyHint,
       availableSessionKeys: snapshot.sessions.map((session) => session.sessionKey),
     });
-    setSelectedId(nextSession.id);
-    setSelectedSessionKeyHint(nextSession.sessionKey);
-    setSelectedSessionFallback(nextSession);
+    setSelection((current) => (
+      current.id === nextSession.id
+      && current.sessionKey === nextSession.sessionKey
+      && current.fallback?.id === nextSession.id
+      && current.fallback?.sessionKey === nextSession.sessionKey
+        ? current
+        : {
+            id: nextSession.id,
+            sessionKey: nextSession.sessionKey,
+            fallback: nextSession,
+          }
+    ));
     setSurfaceNote(`Recovered to ${nextSession.name}. Previous session is no longer live.`);
-  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, setActiveView, setSelectedId, setSelectedSessionFallback, setSelectedSessionKeyHint, setSurfaceNote, snapshot]);
+  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, setActiveView, setSelection, setSurfaceNote, snapshot]);
 
   return {
     // Core state + setters
     snapshot, setSnapshot,
-    selectedId, setSelectedId,
-    selectedSessionKeyHint, setSelectedSessionKeyHint,
-    selectedSessionFallback, setSelectedSessionFallback,
+    selection, setSelection,
+    selectedId,
+    selectedSessionKeyHint,
+    selectedSessionFallback,
     activeView, setActiveView,
     refreshError, setRefreshError,
     surfaceNote, setSurfaceNote,

@@ -161,19 +161,6 @@ export async function enhancePromptDraft({
   }
 }
 
-function scheduleHistoryRefreshBurst(
-  sessionKey: string,
-  loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>,
-) {
-  void loadHistory(sessionKey, true).catch(() => undefined);
-  if (typeof window === 'undefined') return;
-  for (const delay of [1200, 3000]) {
-    window.setTimeout(() => {
-      void loadHistory(sessionKey, true).catch(() => undefined);
-    }, delay);
-  }
-}
-
 // ── Steer (send message) ──
 
 interface SteerSubmitArgs {
@@ -338,7 +325,7 @@ export async function submitSteerTurn({
           throw new Error(err.error || 'Chat send failed');
         }
         setSurfaceNote('Sent…');
-        scheduleHistoryRefreshBurst(sessionKey, loadHistory);
+        void loadHistory(sessionKey, true).catch(() => undefined);
       } else {
         await runAction({
           action: 'steer',
@@ -352,16 +339,16 @@ export async function submitSteerTurn({
           })),
         });
         setSurfaceNote('Sent to workspace chat…');
-        scheduleHistoryRefreshBurst(sessionKey, loadHistory);
+        void loadHistory(sessionKey, true).catch(() => undefined);
       }
     } else if (isDiscoveredCodex) {
       await runAction({ action: 'steer', sessionKey, message });
       setSurfaceNote('Sent to Codex…');
-      scheduleHistoryRefreshBurst(sessionKey, loadHistory);
+      void loadHistory(sessionKey, true).catch(() => undefined);
     } else if (isOwnedCodex || isClaudeCode) {
       await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey, message });
       setSurfaceNote(isClaudeCode ? 'Sent to Claude Code…' : 'Sent to Codex…');
-      scheduleHistoryRefreshBurst(sessionKey, loadHistory);
+      void loadHistory(sessionKey, true).catch(() => undefined);
     } else {
       await runAction({
         action: 'steer',
