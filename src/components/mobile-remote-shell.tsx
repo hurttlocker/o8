@@ -864,8 +864,8 @@ function MobileRemoteShellInner({
           <div style={fabWrapStyle}>
             <button
               type="button"
-              aria-label="Launch new remote session"
-              onClick={() => setLaunchOpen(true)}
+              aria-label="New chat"
+              onClick={handleCreateNewChat}
               style={fabButtonStyle}
             >
               <svg
