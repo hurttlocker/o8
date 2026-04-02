@@ -89,6 +89,7 @@ export const TopBar = memo(function TopBar({
   compactLine,
   activeScreen,
   onNavigate,
+  onNewChat,
   onOpenControls,
 }: TopBarProps) {
   const { colors } = useTheme();
@@ -173,6 +174,7 @@ export const TopBar = memo(function TopBar({
         <SpeedDialButton
           activeScreen={activeScreen}
           onNavigate={onNavigate}
+          onNewChat={onNewChat}
           approvalCount={pendingApprovalsCount}
         />
 

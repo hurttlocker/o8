@@ -200,6 +200,7 @@ export interface TopBarProps {
   compactLine: CompactLine;
   activeScreen: import('./SpeedDial').MobileScreen;
   onNavigate: (screen: import('./SpeedDial').MobileScreen) => void;
+  onNewChat: () => void;
   onOpenControls: () => void;
 }
 

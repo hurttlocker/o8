@@ -78,6 +78,56 @@ interface MobileRemoteShellProps {
   initialOwnedReviewPacket?: RuntimeReviewPacket | null;
 }
 
+function buildOptimisticMobileChatSession(args: {
+  sessionKey: string;
+  tabId: string;
+  workspace?: string;
+  branch?: string;
+}): MobileInboxSnapshot['sessions'][number] {
+  return {
+    id: args.sessionKey,
+    name: 'Chat',
+    squadId: 'workspace-chat',
+    runtime: 'chat',
+    model: 'Workspace Chat',
+    primaryModel: 'Workspace Chat',
+    status: 'idle',
+    currentTask: 'Start a conversation.',
+    workspace: args.workspace || '~/clawd',
+    branch: args.branch || 'workspace',
+    sessionKey: args.sessionKey,
+    approvalStatus: 'none',
+    lastEventAt: 'just now',
+    context: {
+      usedPercent: 0,
+      trend: 'stable',
+    },
+    alerts: 0,
+    sessionId: args.tabId,
+    surfaceLabel: 'Chat',
+    isCurrentSession: true,
+    runtimeSurface: {
+      id: args.sessionKey,
+      runtime: 'chat',
+      kind: 'chat-session',
+      ownership: 'owned',
+      title: 'Chat',
+      cwd: args.workspace,
+      branch: args.branch || 'workspace',
+      sourceLabel: 'Mobile workspace chat',
+      capabilities: {
+        attach: false,
+        readTail: true,
+        sendInput: true,
+        interrupt: false,
+        resize: false,
+        diffContext: true,
+        reviewContext: true,
+      },
+    },
+  };
+}
+
 function MobileRemoteShellInner({
   initialSnapshot,
   initialTranscript,
@@ -339,6 +389,51 @@ function MobileRemoteShellInner({
     claudeManaged: false,
   } : null;
 
+  async function handleCreateNewChat() {
+    try {
+      const response = await fetch('/api/mobile/chat', {
+        method: 'POST',
+      });
+      const payload = await response.json().catch(() => null) as { sessionKey?: string; tabId?: string; error?: string } | null;
+      if (!response.ok || !payload?.sessionKey || !payload?.tabId) {
+        throw new Error(payload?.error || 'Unable to create a new mobile chat.');
+      }
+
+      const optimisticSession = buildOptimisticMobileChatSession({
+        sessionKey: payload.sessionKey,
+        tabId: payload.tabId,
+        workspace: selectedSession?.workspace || snapshot.sessions[0]?.workspace,
+        branch: selectedSession?.branch || snapshot.sessions[0]?.branch || 'workspace',
+      });
+
+      setSnapshot((current) => ({
+        ...current,
+        primarySessionKey: payload.sessionKey,
+        sessions: [
+          optimisticSession,
+          ...current.sessions
+            .filter((session) => session.sessionKey !== payload.sessionKey)
+            .map((session) => (session.isCurrentSession ? { ...session, isCurrentSession: false } : session)),
+        ],
+      }));
+      state.setHistoryBySession((current) => ({
+        ...current,
+        [payload.sessionKey!]: current[payload.sessionKey!] ?? [],
+      }));
+      setSelectedId(optimisticSession.id);
+      setSelectedSessionKeyHint(payload.sessionKey);
+      setSelectedSessionFallback(optimisticSession);
+      setActiveView('chat');
+      setWaitingForResponse(false);
+      setSurfaceNote('New mobile chat ready.');
+
+      await loadHistory(payload.sessionKey, true).catch(() => undefined);
+      await refreshInbox(true).catch(() => undefined);
+    } catch (error) {
+      setSurfaceNote(error instanceof Error ? error.message : 'Unable to create a new mobile chat.');
+    }
+  }
+
   // Track compose bar height via ResizeObserver for dynamic pill positioning
   const bottomDockRef = useRef<HTMLDivElement>(null);
 
@@ -475,6 +570,7 @@ function MobileRemoteShellInner({
                 break;
             }
           }}
+          onNewChat={handleCreateNewChat}
           onOpenControls={() => setControlsOpen(true)}
         />
         <PullToRefresh onRefresh={async () => { await refreshInbox(true); await new Promise(r => setTimeout(r, 600)); }}>
@@ -556,6 +652,7 @@ function MobileRemoteShellInner({
               compactLine={compactLine}
               agentDisplayName={agentDisplayName}
               onSessionSelect={actions.handleSessionFocus}
+              onNewChat={handleCreateNewChat}
               onLaunch={() => setLaunchOpen(true)}
             />
           ) : null}
