@@ -52,7 +52,7 @@ function HeaderIconButton({
 function screenTitle(activeView: TopBarProps['activeView']) {
   switch (activeView) {
     case 'squad':
-      return 'Code';
+      return '';
     case 'fleet':
       return 'Agents';
     case 'memory':
@@ -106,7 +106,7 @@ export const TopBar = memo(function TopBar({
     gridTemplateColumns: '44px minmax(0, 1fr) 44px',
     alignItems: 'center',
     gap: 12,
-    zIndex: 95,
+    zIndex: 110,
     opacity: headerVisible ? 1 : 0,
     pointerEvents: headerVisible ? 'auto' : 'none',
     transition: 'opacity 220ms ease, transform 220ms ease',
