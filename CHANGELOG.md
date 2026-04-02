@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `cd7f8ec` fix: warm grey bgA1816, full-width user bubbles, text -1pt
 - `4801b41` fix: kill blue accent, strip compose bar box, shrink bottom fade
 - `4228c8b` feat: organize mobile sessions by type — Chats, Sessions, Missions
 - `84f7942` feat: warm grey + light beige palette across all 30 mobile surfaces
