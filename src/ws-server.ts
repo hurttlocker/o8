@@ -47,6 +47,8 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
+import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { readRuntimeTranscript } from '@/lib/runtime/transcript';
 import '@/lib/ws-runtime-env';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
@@ -2779,13 +2781,11 @@ async function bootstrapWsServer() {
     console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
 
     // ── Start Agent Supervisor ──
-    const NEXT_ORIGIN = `http://localhost:${process.env.PORT || '3001'}`;
     const supervisorCallbacks: SupervisorCallbacks = {
       async fetchFleetStatus() {
-        const res = await fetch(`${NEXT_ORIGIN}/api/runtime/inventory?fresh=1`, { signal: AbortSignal.timeout(8000) });
-        const data = await res.json() as { agents?: Array<Record<string, unknown>> };
-        return ((data.agents ?? []) as Array<Record<string, unknown>>)
-          .filter((a) => a.runtime === 'codex' || a.runtime === 'claude-code')
+        const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+        return (snapshot.agents ?? [])
+          .filter((agent) => agent.runtime === 'codex' || agent.runtime === 'claude-code')
           .map((a) => ({
             sessionKey: a.sessionKey as string,
             status: a.status as string,
@@ -2795,15 +2795,14 @@ async function bootstrapWsServer() {
           }));
       },
       async fetchTranscript(sessionKey, limit) {
-        const res = await fetch(`${NEXT_ORIGIN}/api/runtime/transcript?sessionKey=${encodeURIComponent(sessionKey)}&limit=${limit}`, { signal: AbortSignal.timeout(8000) });
-        const data = await res.json() as { transcript?: Array<Record<string, unknown>> };
-        return ((data.transcript ?? []) as Array<Record<string, unknown>>).map((e) => ({
-          id: (e.id as string) ?? '',
-          role: (e.role as string) ?? '',
-          text: (e.text as string) ?? '',
-          timestamp: e.timestamp as number | undefined,
-          timestampLabel: e.timestampLabel as string | undefined,
-          toolName: e.toolName as string | undefined,
+        const entries = await readRuntimeTranscript(sessionKey, { limit });
+        return entries.map((entry) => ({
+          id: entry.id,
+          role: entry.role,
+          text: entry.text,
+          timestamp: entry.timestamp.getTime(),
+          timestampLabel: entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          toolName: entry.toolName,
         }));
       },
       async steerAgent(surfaceId, message) {
