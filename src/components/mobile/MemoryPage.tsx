@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, memo } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { RecallCard } from '@/lib/cortex/types';
+import { useTheme } from './ThemeContext';
+
+type ThemeColors = ReturnType<typeof useTheme>['colors'];
 
 interface MemoryStats {
   total_memories: number;
@@ -18,16 +21,42 @@ interface MemoryPageProps {
 
 function classColor(cls: string): string {
   switch (cls) {
-    case 'rule': return '#007aff';
-    case 'identity': return '#34c759';
-    case 'preference': return '#ff9f0a';
-    case 'decision': return '#af52de';
-    case 'fact': return '#5ac8fa';
-    default: return '#8e8e93';
+    case 'rule':
+      return '#0a84ff';
+    case 'identity':
+      return '#30d158';
+    case 'preference':
+      return '#ff9f0a';
+    case 'decision':
+      return '#bf5af2';
+    case 'fact':
+      return '#64d2ff';
+    default:
+      return '#8e8e93';
   }
 }
 
-const FactRow = memo(function FactRow({ fact, onInject }: { fact: RecallCard; onInject?: (text: string) => void }) {
+function sectionHeaderStyle(colors: ThemeColors) {
+  return {
+    display: 'block',
+    fontSize: 12,
+    fontWeight: 600,
+    color: colors.textSecondary,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    marginBottom: 8,
+    padding: '0 4px',
+  };
+}
+
+const FactRow = memo(function FactRow({
+  fact,
+  onInject,
+}: {
+  fact: RecallCard;
+  onInject?: (text: string) => void;
+}) {
+  const { colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const source = fact.evidence[0]?.sourceFile ?? fact.sourceTier;
   const factColor = classColor(fact.factType);
@@ -37,94 +66,118 @@ const FactRow = memo(function FactRow({ fact, onInject }: { fact: RecallCard; on
       role="button"
       tabIndex={0}
       onClick={() => setExpanded(!expanded)}
-      onTouchEnd={(e) => { setExpanded(!expanded); e.preventDefault(); }}
+      onTouchEnd={(event) => {
+        setExpanded(!expanded);
+        event.preventDefault();
+      }}
       style={{
-        padding: '10px 12px',
-        borderRadius: 12,
-        background: 'rgba(0,122,255,0.04)',
-        border: '1px solid rgba(0,122,255,0.08)',
+        padding: '12px 14px',
+        borderRadius: 14,
+        background: colors.cardBg,
+        border: `1px solid ${colors.cardBorder}`,
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         touchAction: 'manipulation',
-        transition: 'background 150ms ease',
       }}
     >
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <span style={{
-          width: 6, height: 6, borderRadius: '50%',
-          background: factColor,
-          flexShrink: 0,
-        }} />
-        <span style={{
-          fontSize: 10, fontWeight: 700,
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          color: factColor,
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-        }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: factColor,
+            flexShrink: 0,
+          }}
+        />
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            color: factColor,
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}
+        >
           {fact.factType}
         </span>
         {fact.promptEligible ? (
-          <span style={{
-            fontSize: 10,
-            color: '#2563eb',
-            background: 'rgba(37,99,235,0.08)',
-            borderRadius: 999,
-            padding: '2px 6px',
-          }}>
+          <span
+            style={{
+              fontSize: 10,
+              color: '#64d2ff',
+              background: 'rgba(100,210,255,0.12)',
+              border: '1px solid rgba(100,210,255,0.16)',
+              borderRadius: 999,
+              padding: '2px 6px',
+            }}
+          >
             prompt
           </span>
         ) : null}
-        <span style={{ fontSize: 10, color: '#8e8e93', marginLeft: 'auto' }}>
+        <span style={{ fontSize: 10, color: colors.textSecondary, marginLeft: 'auto' }}>
           {fact.evidenceCount} evidence
         </span>
-        <span style={{
-          fontSize: 9, color: '#8e8e93',
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-        }}>
+        <span
+          style={{
+            fontSize: 9,
+            color: colors.textSecondary,
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}
+        >
           {Math.round(fact.relevance * 100)}%
         </span>
       </div>
 
-      {/* Content */}
-      <p style={{
-        margin: 0, fontSize: 13, lineHeight: 1.4,
-        color: '#1c1c1e',
-        fontFamily: '-apple-system, system-ui, sans-serif',
-        display: '-webkit-box',
-        WebkitLineClamp: expanded ? 999 : 3,
-        WebkitBoxOrient: 'vertical',
-        overflow: 'hidden',
-      }}>
+      <p
+        style={{
+          margin: 0,
+          fontSize: 13,
+          lineHeight: 1.5,
+          color: colors.text,
+          display: '-webkit-box',
+          WebkitLineClamp: expanded ? 999 : 3,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        }}
+      >
         {fact.text}
       </p>
 
-      {/* Expanded: source + actions */}
       {expanded ? (
-        <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
-          <div style={{
-            fontSize: 10, color: '#636366',
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
+        <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+          <div
+            style={{
+              fontSize: 10,
+              color: colors.textTertiary,
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {source}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            <span style={{ fontSize: 10, color: '#5b6475' }}>{fact.sourceTier}</span>
-            <span style={{ fontSize: 10, color: '#5b6475' }}>{fact.memoryKind}</span>
-            <span style={{ fontSize: 10, color: '#5b6475' }}>{fact.retrievalVisibility}</span>
+            <span style={{ fontSize: 10, color: colors.textSecondary }}>{fact.sourceTier}</span>
+            <span style={{ fontSize: 10, color: colors.textSecondary }}>{fact.memoryKind}</span>
+            <span style={{ fontSize: 10, color: colors.textSecondary }}>{fact.retrievalVisibility}</span>
           </div>
           {fact.reasons.length > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {fact.reasons.map((reason) => (
-                <span key={reason} style={{
-                  fontSize: 10,
-                  color: '#5b6475',
-                  padding: '3px 7px',
-                  borderRadius: 999,
-                  background: 'rgba(15, 23, 42, 0.04)',
-                }}>
+                <span
+                  key={reason}
+                  style={{
+                    fontSize: 10,
+                    color: colors.textSecondary,
+                    padding: '4px 8px',
+                    borderRadius: 999,
+                    background: 'rgba(255,255,255,0.05)',
+                    border: `1px solid ${colors.border}`,
+                  }}
+                >
                   {reason.replace(/_/g, ' ')}
                 </span>
               ))}
@@ -133,15 +186,25 @@ const FactRow = memo(function FactRow({ fact, onInject }: { fact: RecallCard; on
           {onInject ? (
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); onInject(fact.text); }}
-              onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); onInject(fact.text); }}
+              onClick={(event) => {
+                event.stopPropagation();
+                onInject(fact.text);
+              }}
+              onTouchEnd={(event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                onInject(fact.text);
+              }}
               style={{
-                fontSize: 11, fontWeight: 600,
-                color: '#007aff',
-                background: 'rgba(0,122,255,0.08)',
-                border: '1px solid rgba(0,122,255,0.15)',
-                borderRadius: 8,
-                padding: '6px 10px',
+                minHeight: 44,
+                justifySelf: 'start',
+                padding: '0 14px',
+                borderRadius: 12,
+                border: `1px solid ${colors.blueGlassBorder}`,
+                background: colors.blueGlass,
+                color: colors.blueAccent,
+                fontSize: 12,
+                fontWeight: 600,
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
               }}
@@ -155,7 +218,78 @@ const FactRow = memo(function FactRow({ fact, onInject }: { fact: RecallCard; on
   );
 });
 
+function MetricCard({
+  label,
+  value,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  valueColor?: string;
+}) {
+  const { colors } = useTheme();
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        minWidth: 0,
+        padding: '12px 10px',
+        borderRadius: 14,
+        background: colors.cardBg,
+        border: `1px solid ${colors.cardBorder}`,
+        textAlign: 'center',
+      }}
+    >
+      <div style={{ fontSize: 16, fontWeight: 700, color: valueColor ?? colors.text }}>{value}</div>
+      <div
+        style={{
+          fontSize: 9,
+          color: colors.textSecondary,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          marginTop: 4,
+        }}
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function StatRow({ label, value, color }: { label: string; value: string; color?: string }) {
+  const { colors } = useTheme();
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 12,
+        padding: '13px 14px',
+        borderRadius: 14,
+        background: colors.cardBg,
+        border: `1px solid ${colors.cardBorder}`,
+      }}
+    >
+      <span style={{ fontSize: 14, color: colors.textSecondary }}>{label}</span>
+      <span
+        style={{
+          fontSize: 16,
+          fontWeight: 700,
+          color: color ?? colors.text,
+          fontFamily: '"SF Mono", ui-monospace, monospace',
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
+  const { colors } = useTheme();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<RecallCard[]>([]);
   const [stats, setStats] = useState<MemoryStats | null>(null);
@@ -163,11 +297,10 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
   const [activeTab, setActiveTab] = useState<'search' | 'recent' | 'health'>('recent');
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch stats on mount
   useEffect(() => {
     fetch('/api/mobile/cortex/stats')
-      .then(r => r.json())
-      .then(d => setStats(d.stats ?? d))
+      .then((response) => response.json())
+      .then((data) => setStats(data.stats ?? data))
       .catch(() => {});
   }, []);
 
@@ -178,12 +311,14 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: 'recent important decisions', limit: 10 }),
     })
-      .then(r => r.json())
-      .then(d => { setResults(d.cards ?? []); setLoading(false); })
+      .then((response) => response.json())
+      .then((data) => {
+        setResults(data.cards ?? []);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
 
-  // Fetch recent on mount
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadRecent();
@@ -191,53 +326,68 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
     return () => window.clearTimeout(timer);
   }, [loadRecent]);
 
-  const doSearch = useCallback((q: string) => {
-    if (!q.trim()) return;
+  const doSearch = useCallback((value: string) => {
+    if (!value.trim()) return;
     setLoading(true);
     fetch('/api/mobile/cortex/recall', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, limit: 15 }),
+      body: JSON.stringify({ query: value, limit: 15 }),
     })
-      .then(r => r.json())
-      .then(d => { setResults(d.cards ?? []); setLoading(false); })
+      .then((response) => response.json())
+      .then((data) => {
+        setResults(data.cards ?? []);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
 
-  const handleSearch = useCallback((value: string) => {
-    setQuery(value);
-    setActiveTab('search');
-    if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    searchTimeout.current = setTimeout(() => doSearch(value), 400);
-  }, [doSearch]);
+  const handleSearch = useCallback(
+    (value: string) => {
+      setQuery(value);
+      setActiveTab('search');
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+      searchTimeout.current = setTimeout(() => doSearch(value), 400);
+    },
+    [doSearch]
+  );
 
-  const tabs: { key: typeof activeTab; label: string }[] = [
+  const tabs: { key: 'recent' | 'search' | 'health'; label: string }[] = [
     { key: 'recent', label: 'Recent' },
     { key: 'search', label: 'Search' },
     { key: 'health', label: 'Health' },
   ];
 
   return (
-    <div style={{
-      padding: '0 12px 24px',
-      width: '100%',
-      boxSizing: 'border-box',
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 16,
-      }}>
+    <div
+      style={{
+        padding: '0 12px 24px',
+        width: '100%',
+        boxSizing: 'border-box',
+        background: colors.bg,
+        minHeight: '100%',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
             type="button"
             onClick={onBack}
             style={{
-              padding: '6px 14px',
-              borderRadius: 10,
-              background: 'rgba(0,122,255,0.08)',
-              border: '1px solid rgba(0,122,255,0.12)',
-              color: '#007aff',
+              minHeight: 44,
+              padding: '0 16px',
+              borderRadius: 12,
+              border: 'none',
+              background: colors.blueAccent,
+              color: colors.text,
               fontSize: 13,
               fontWeight: 600,
               cursor: 'pointer',
@@ -246,176 +396,147 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
           >
             Done
           </button>
-          <h1 style={{
-            fontSize: 28, fontWeight: 800,
-            letterSpacing: '-0.03em',
-            color: '#0a0a0a',
-            fontFamily: '-apple-system, system-ui, sans-serif',
-            margin: 0,
-          }}>
+          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', color: colors.text, margin: 0 }}>
             Memory
           </h1>
         </div>
-        {stats ? (
-          <div style={{
-            display: 'flex', gap: 12,
-          }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#007aff' }}>
-                {(stats.total_memories / 1000).toFixed(1)}k
-              </div>
-              <div style={{ fontSize: 9, color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                memories
-              </div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#34c759' }}>
-                {(stats.active_facts / 1000).toFixed(1)}k
-              </div>
-              <div style={{ fontSize: 9, color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                facts
-              </div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#8e8e93' }}>
-                {stats.db_size_mb?.toFixed(0) ?? '?'}MB
-              </div>
-              <div style={{ fontSize: 9, color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                size
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
 
-      {/* Search bar */}
-      <div style={{
-        position: 'relative',
-        marginBottom: 12,
-      }}>
+      {stats ? (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <MetricCard label="Memories" value={`${(stats.total_memories / 1000).toFixed(1)}k`} valueColor={colors.blueAccent} />
+          <MetricCard label="Active Facts" value={`${(stats.active_facts / 1000).toFixed(1)}k`} valueColor="#30d158" />
+          <MetricCard label="DB Size" value={`${stats.db_size_mb?.toFixed(0) ?? '?'}MB`} valueColor={colors.textSecondary} />
+        </div>
+      ) : null}
+
+      <span style={sectionHeaderStyle(colors)}>Recall</span>
+      <div style={{ position: 'relative', marginBottom: 12 }}>
         <input
           type="text"
           value={query}
-          onChange={(e) => handleSearch(e.target.value)}
+          onChange={(event) => handleSearch(event.target.value)}
           placeholder="Search memories..."
           style={{
             width: '100%',
-            padding: '10px 14px',
-            borderRadius: 12,
-            border: '1px solid rgba(0,122,255,0.12)',
-            background: 'rgba(0,122,255,0.04)',
+            minHeight: 48,
+            padding: '0 14px',
+            borderRadius: 14,
+            border: `1px solid ${colors.cardBorder}`,
+            background: colors.cardBg,
             fontSize: 14,
-            color: '#1c1c1e',
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            color: colors.text,
             outline: 'none',
             boxSizing: 'border-box',
             WebkitAppearance: 'none',
           }}
         />
         {loading ? (
-          <div style={{
-            position: 'absolute', right: 12, top: '50%',
-            transform: 'translateY(-50%)',
-            width: 16, height: 16,
-            border: '2px solid rgba(0,122,255,0.2)',
-            borderTop: '2px solid #007aff',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-          }} />
+          <div
+            style={{
+              position: 'absolute',
+              right: 12,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              fontSize: 11,
+              fontWeight: 600,
+              color: colors.textSecondary,
+            }}
+          >
+            Loading
+          </div>
         ) : null}
       </div>
 
-      {/* Tab bar — iOS segmented control */}
-      <div style={{
-        display: 'flex',
-        background: 'rgba(0,122,255,0.06)',
-        borderRadius: 10,
-        padding: 2,
-        marginBottom: 16,
-      }}>
-        {tabs.map(tab => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setActiveTab(tab.key)}
-            onTouchEnd={(e) => { setActiveTab(tab.key); e.preventDefault(); }}
-            style={{
-              flex: 1,
-              padding: '7px 0',
-              borderRadius: 8,
-              border: 'none',
-              background: activeTab === tab.key ? 'rgba(255,255,255,0.9)' : 'transparent',
-              color: activeTab === tab.key ? '#007aff' : '#8e8e93',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
-              WebkitTapHighlightColor: 'transparent',
-              boxShadow: activeTab === tab.key ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
-              transition: 'all 200ms ease',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div
+        style={{
+          display: 'flex',
+          gap: 4,
+          padding: 4,
+          borderRadius: 14,
+          background: colors.cardBg,
+          border: `1px solid ${colors.cardBorder}`,
+          marginBottom: 16,
+        }}
+      >
+        {tabs.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              onTouchEnd={(event) => {
+                setActiveTab(tab.key);
+                event.preventDefault();
+              }}
+              style={{
+                flex: 1,
+                minHeight: 44,
+                borderRadius: 12,
+                border: active ? `1px solid ${colors.blueGlassBorder}` : '1px solid transparent',
+                background: active ? colors.blueGlass : 'transparent',
+                color: active ? colors.text : colors.textSecondary,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Results list */}
       {activeTab !== 'health' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {results.length === 0 && !loading ? (
-            <div style={{
-              padding: 32, textAlign: 'center',
-              color: '#8e8e93', fontSize: 14,
-            }}>
+            <div
+              style={{
+                padding: '32px 20px',
+                textAlign: 'center',
+                color: colors.textSecondary,
+                fontSize: 14,
+                borderRadius: 14,
+                background: colors.cardBg,
+                border: `1px solid ${colors.cardBorder}`,
+              }}
+            >
               {activeTab === 'search' && query ? 'No results found' : 'Loading recent memories...'}
             </div>
           ) : null}
-          {results.map((fact, i) => (
-            <FactRow key={`${fact.factId}-${i}`} fact={fact} onInject={onInjectText} />
+          {results.map((fact, index) => (
+            <FactRow key={`${fact.factId}-${index}`} fact={fact} onInject={onInjectText} />
           ))}
         </div>
       ) : (
-        /* Health tab */
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <span style={sectionHeaderStyle(colors)}>Health</span>
           {stats ? (
             <>
               <StatRow label="Total Memories" value={stats.total_memories.toLocaleString()} />
               <StatRow label="Total Facts" value={stats.total_facts.toLocaleString()} />
-              <StatRow label="Active Facts" value={stats.active_facts.toLocaleString()} color="#34c759" />
-              <StatRow label="Retired Facts" value={stats.retired_facts.toLocaleString()} color="#ff3b30" />
+              <StatRow label="Active Facts" value={stats.active_facts.toLocaleString()} color="#30d158" />
+              <StatRow label="Retired Facts" value={stats.retired_facts.toLocaleString()} color="#ff453a" />
               <StatRow label="Database Size" value={`${stats.db_size_mb?.toFixed(1) ?? '?'} MB`} />
             </>
           ) : (
-            <div style={{ padding: 32, textAlign: 'center', color: '#8e8e93' }}>
+            <div
+              style={{
+                padding: '32px 20px',
+                textAlign: 'center',
+                color: colors.textSecondary,
+                borderRadius: 14,
+                background: colors.cardBg,
+                border: `1px solid ${colors.cardBorder}`,
+              }}
+            >
               Loading stats...
             </div>
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-function StatRow({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div style={{
-      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      padding: '12px 14px',
-      borderRadius: 12,
-      background: 'rgba(0,122,255,0.04)',
-      border: '1px solid rgba(0,122,255,0.08)',
-    }}>
-      <span style={{ fontSize: 14, color: '#3c3c43', fontFamily: '-apple-system, system-ui, sans-serif' }}>
-        {label}
-      </span>
-      <span style={{
-        fontSize: 16, fontWeight: 700,
-        color: color ?? '#0a0a0a',
-        fontFamily: '"SF Mono", ui-monospace, monospace',
-      }}>
-        {value}
-      </span>
     </div>
   );
 }

@@ -45,9 +45,11 @@ export const FONTS = {
   /** Tiny text — badges, meta */
   tiny: '11px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
   /** Monospace — code blocks, diffs, terminal output */
-  mono: '12px "SF Mono", ui-monospace, monospace',
+  mono: '12px "SF Mono", Menlo, ui-monospace, monospace',
+  /** Monospace block — expanded mobile code blocks */
+  monoBlock: '13px "SF Mono", Menlo, ui-monospace, monospace',
   /** Monospace small — inline code, file paths */
-  monoSmall: '11px "SF Mono", ui-monospace, monospace',
+  monoSmall: '11px "SF Mono", Menlo, ui-monospace, monospace',
   /** Heading — card titles, section headers */
   heading: '16px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
 } as const;
@@ -61,6 +63,7 @@ export const LINE_HEIGHTS: Record<FontKey, number> = {
   small: 1.45,      // common in AgentPanel, RepoRegistry
   tiny: 1.4,
   mono: 1.5,        // code blocks, diffs
+  monoBlock: 1.5,
   monoSmall: 1.45,
   heading: 1.3,
 };
