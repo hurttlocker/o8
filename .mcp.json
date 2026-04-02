@@ -9,7 +9,7 @@
     },
     "tauri-mcp": {
       "command": "node",
-      "args": ["/Users/marquisehurtt/.cargo/git/checkouts/tauri-plugin-mcp-2fd5dc058bb53a96/ac709a7/mcp-server-ts/build/index.js"],
+      "args": ["/Users/marquisehurtt/tauri-plugin-mcp/mcp-server-ts/build/index.js"],
       "env": {
         "TAURI_MCP_IPC_PATH": "/tmp/tauri-mcp-o8.sock"
       }

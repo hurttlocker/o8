@@ -118,7 +118,6 @@ export function MobileChromeButton({
   children,
   label,
   tone = 'light',
-  className: _className,
   style,
   type = 'button',
   ...props
@@ -275,7 +274,6 @@ export function MobileListRow({
 export function MobileFloatingActionButton({
   children,
   label,
-  className: _className,
   style,
   type = 'button',
   ...props

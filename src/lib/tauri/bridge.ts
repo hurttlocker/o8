@@ -19,6 +19,22 @@ export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
+// ── MCP Plugin Init ──
+// Register the Tauri MCP event handlers so query_page, execute_js, etc. work.
+// Must run once on page load inside the Tauri webview.
+let _mcpInitialized = false;
+export async function initMcpPlugin(): Promise<void> {
+  if (_mcpInitialized || !isTauri()) return;
+  _mcpInitialized = true;
+  try {
+    const { setupPluginListeners } = await import('tauri-plugin-mcp');
+    await setupPluginListeners();
+    console.log('[tauri-bridge] MCP plugin listeners registered');
+  } catch (err) {
+    console.error('[tauri-bridge] MCP plugin init failed:', err);
+  }
+}
+
 // ── Types ──
 
 export interface DesktopInfo {
