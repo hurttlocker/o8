@@ -11,11 +11,17 @@
 
 import { randomUUID } from 'node:crypto';
 import { execSync } from 'node:child_process';
+import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
+import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import type { Lane } from './types';
 
 const MAX_REVIEW_ATTEMPTS = 5;
 const DRAIN_INTERVAL_MS = 10_000;
-const MAX_DIFF_LINES = 200;
+const REVIEW_DIFF_LINES = {
+  'fast-track': 120,
+  standard: 200,
+  'deep-dive': 320,
+} as const;
 
 /** Lanes currently being reviewed — prevents concurrent review of the same lane */
 const reviewingLanes = new Set<string>();
@@ -150,6 +156,8 @@ export function startReviewQueueDrain(): () => void {
 
 let drainInFlight = false;
 
+type ReviewDepth = keyof typeof REVIEW_DIFF_LINES;
+
 async function drainReviewQueue(): Promise<void> {
   if (drainInFlight) return;
   drainInFlight = true;
@@ -182,8 +190,48 @@ async function drainReviewQueue(): Promise<void> {
 
 // ── Review Execution ──
 
-function getDiffSummary(lane: Lane): string {
+function deriveReviewDepth(selfReview?: PacketSelfReview): ReviewDepth {
+  if (!selfReview?.passed || selfReview.confidence === 'low') {
+    return 'deep-dive';
+  }
+
+  if (selfReview.confidence === 'high' && (!selfReview.issuesFound || selfReview.issuesFound.length === 0)) {
+    return 'fast-track';
+  }
+
+  return 'standard';
+}
+
+function formatSelfReview(selfReview: PacketSelfReview | undefined, depth: ReviewDepth): string {
+  if (!selfReview) {
+    return [
+      '## Agent self-review',
+      '',
+      'Structured self-review: missing',
+      'Review depth: deep-dive',
+      'Reason: no machine-readable self-review verdict was captured in the completion context.',
+    ].join('\n');
+  }
+
+  const issues = selfReview.issuesFound && selfReview.issuesFound.length > 0
+    ? selfReview.issuesFound.map((issue) => `- ${issue}`).join('\n')
+    : '- none recorded';
+
+  return [
+    '## Agent self-review',
+    '',
+    `Passed: ${selfReview.passed ? 'yes' : 'no'}`,
+    `Confidence: ${selfReview.confidence}`,
+    `Review depth: ${depth}`,
+    `Summary: ${selfReview.summary}`,
+    'Issues found and fixed during self-review:',
+    issues,
+  ].join('\n');
+}
+
+function getDiffSummary(lane: Lane, depth: ReviewDepth): string {
   const cwd = lane.worktreePath || lane.repoPath;
+  const maxDiffLines = REVIEW_DIFF_LINES[depth];
   try {
     let stat = '';
     try {
@@ -197,11 +245,11 @@ function getDiffSummary(lane: Lane): string {
     let diff = '';
     try {
       const rawDiff = execSync(`git diff ${lane.baseBranch}...HEAD --no-color -U2`, { cwd, timeout: 10_000, encoding: 'utf-8' });
-      diff = rawDiff.split('\n').slice(0, MAX_DIFF_LINES).join('\n').trim();
+      diff = rawDiff.split('\n').slice(0, maxDiffLines).join('\n').trim();
     } catch {
       try {
         const rawDiff = execSync('git diff HEAD~1 --no-color -U2', { cwd, timeout: 10_000, encoding: 'utf-8' });
-        diff = rawDiff.split('\n').slice(0, MAX_DIFF_LINES).join('\n').trim();
+        diff = rawDiff.split('\n').slice(0, maxDiffLines).join('\n').trim();
       } catch { /* no commits yet */ }
     }
 
@@ -212,13 +260,28 @@ function getDiffSummary(lane: Lane): string {
   }
 }
 
-function buildReviewPrompt(lane: Lane, diffSummary: string): string {
+function buildReviewPrompt(
+  lane: Lane,
+  diffSummary: string,
+  selfReview: PacketSelfReview | undefined,
+  depth: ReviewDepth,
+): string {
+  const depthGuidance = depth === 'fast-track'
+    ? 'This lane reports a high-confidence self-review. Fast-track by validating the self-review claims, then scan for obvious regressions before deciding.'
+    : depth === 'deep-dive'
+      ? 'This lane has low-confidence or missing self-review context. Perform a deep-dive review and challenge assumptions, edge cases, and missing validation.'
+      : 'This lane reports medium-confidence self-review. Do a normal review with independent verification of the claimed changes.';
+
   return [
     `An agent has completed work on lane "${lane.label}" (branch: ${lane.branch}).`,
+    ``,
+    depthGuidance,
     ``,
     `Review the changes and provide your verdict. Your review summary will be shown`,
     `to the operator on their approval card — they don't read code, so your summary`,
     `IS their understanding of what happened.`,
+    ``,
+    formatSelfReview(selfReview, depth),
     ``,
     diffSummary,
     ``,
@@ -246,8 +309,21 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     return;
   }
 
-  const diffSummary = getDiffSummary(lane);
-  const reviewPrompt = buildReviewPrompt(lane, diffSummary);
+  let completionContext = null;
+  if (lane.packetId && lane.sessionKey) {
+    try {
+      completionContext = await capturePacketCompletionContext(lane.packetId, lane.sessionKey);
+    } catch (error) {
+      console.warn(`[auto-review] Failed to refresh completion context for lane ${lane.id}:`, error);
+      completionContext = await readPacketCompletionContext(lane.packetId);
+    }
+  } else if (lane.packetId) {
+    completionContext = await readPacketCompletionContext(lane.packetId);
+  }
+
+  const depth = deriveReviewDepth(completionContext?.selfReview);
+  const diffSummary = getDiffSummary(lane, depth);
+  const reviewPrompt = buildReviewPrompt(lane, diffSummary, completionContext?.selfReview, depth);
 
   const { ensureOrchestratorSession, sendToOrchestrator } = await import('./orchestrator-session');
   const session = ensureOrchestratorSession(lane.repoPath);

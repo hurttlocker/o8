@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
+import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { getAllCached, type FileSkeleton } from '@/lib/skeleton';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
@@ -280,7 +281,11 @@ async function buildDependencyContextSections(
     });
 }
 
-async function buildPacketPrompt(packet: OrchestratorPacket, allPackets: OrchestratorPacket[]) {
+async function buildPacketPrompt(
+  packet: OrchestratorPacket,
+  allPackets: OrchestratorPacket[],
+  baseBranch = 'main',
+) {
   const dependencySections = await buildDependencyContextSections(packet, allPackets);
   const fileSizeSections = checkFileSizeThresholds(packet);
   if (dependencySections.length > 0) {
@@ -299,6 +304,7 @@ async function buildPacketPrompt(packet: OrchestratorPacket, allPackets: Orchest
     ...dependencySections,
     ...fileSizeSections,
     'Files in this repository follow a 600-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
+    ...buildPacketSelfReviewInstructions(baseBranch),
     'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');
@@ -423,7 +429,7 @@ async function dispatchPacket(
   const launchResult = await dispatchLaneCommand({
     verb: 'launch_session',
     laneId: laneResult.laneId,
-    prompt: await buildPacketPrompt(packet, allPackets),
+    prompt: await buildPacketPrompt(packet, allPackets, laneResult.lane?.baseBranch ?? 'main'),
     actor: 'orchestrator',
   });
 
