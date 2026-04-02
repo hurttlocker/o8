@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `01fa6c8` fix: match iOS system dark bgC1C1E — kill Safari toolbar line
 - `e9f74f8` fix: add theme-colorA1816 + viewport-fit cover for iOS Safari
 - `86a6005` fix: THE LINE
 - `ca0e6a1` fix: add auth header to supervisor watch registration
