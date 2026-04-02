@@ -88,9 +88,9 @@ export const TopBar = memo(function TopBar({
   }
 
   const isThreadView = activeView === 'chat';
-  const primaryText = '#F5F5F7';
-  const chromeBackground = 'rgba(0, 0, 0, 0.8)';
-  const chromeBorder = 'rgba(255, 255, 255, 0.08)';
+  const primaryText = colors.text;
+  const chromeBackground = colors.surface;
+  const chromeBorder = colors.surfaceBorder;
   const threadTitle = compactLine(
     selectedSession?.currentTask ?? selectedSession?.name,
     selectedSession?.name ?? 'Code',
@@ -126,7 +126,7 @@ export const TopBar = memo(function TopBar({
     color: primaryText,
     backdropFilter: 'blur(20px)',
     WebkitBackdropFilter: 'blur(20px)',
-    boxShadow: '0 12px 28px rgba(0, 0, 0, 0.32)',
+    boxShadow: '0 12px 28px rgba(0, 0, 0, 0.28)',
     cursor: 'pointer',
     padding: 0,
     outlineColor: colors.blueAccent,

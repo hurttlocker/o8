@@ -69,7 +69,7 @@ function checksStatusColor(status: string): string {
     case 'pending':
       return '#ff9f0a';
     default:
-      return '#8e8e93';
+      return '#A09890';
   }
 }
 
@@ -108,7 +108,7 @@ function reviewColor(decision: string): string {
     case 'REVIEW_REQUIRED':
       return '#ff9f0a';
     default:
-      return '#8e8e93';
+      return '#A09890';
   }
 }
 
@@ -118,9 +118,9 @@ function fileIcon(path: string): string {
   if (['js', 'jsx'].includes(ext)) return '#ffd60a';
   if (['css', 'scss'].includes(ext)) return '#bf5af2';
   if (['json', 'yaml', 'yml'].includes(ext)) return '#30d158';
-  if (['md', 'mdx'].includes(ext)) return '#8e8e93';
+  if (['md', 'mdx'].includes(ext)) return '#A09890';
   if (['go'].includes(ext)) return '#0a84ff';
-  return '#636366';
+  return '#706860';
 }
 
 const CheckRow = memo(function CheckRow({ check }: { check: PRCheck }) {

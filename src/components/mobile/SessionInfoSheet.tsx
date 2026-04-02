@@ -377,7 +377,7 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
               minHeight: 44,
             }}
           >
-            <X size={16} strokeWidth={2.5} style={{ color: '#8e8e93' }} />
+            <X size={16} strokeWidth={2.5} style={{ color: '#A09890' }} />
           </button>
         </div>
 
@@ -418,7 +418,7 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
               alignItems: 'center',
               gap: 16,
               marginTop: 10,
-              color: '#8e8e93',
+              color: '#A09890',
               fontSize: 12,
             }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -431,7 +431,7 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
                 <span style={{
                   fontSize: 11,
                   fontWeight: 500,
-                  color: status === 'running' ? '#34c759' : '#8e8e93',
+                  color: status === 'running' ? '#34c759' : '#A09890',
                   background: status === 'running' ? 'rgba(52, 199, 89, 0.1)' : 'rgba(120, 120, 128, 0.08)',
                   padding: '2px 8px',
                   borderRadius: 6,
@@ -518,7 +518,7 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
                 <div style={{
                   fontSize: 13,
                   fontWeight: 600,
-                  color: '#8e8e93',
+                  color: '#A09890',
                   marginBottom: 6,
                   letterSpacing: '-0.01em',
                 }}>

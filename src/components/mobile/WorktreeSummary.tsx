@@ -62,7 +62,7 @@ export const WorktreeSummary = memo(function WorktreeSummary({
         padding: '10px 14px',
         borderRadius: '14px',
         backgroundColor: '#1c1c1e',
-        border: '1px solid rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,248,240,0.06)',
       }}
     >
       {/* Header row */}
@@ -76,11 +76,11 @@ export const WorktreeSummary = memo(function WorktreeSummary({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <circle cx="5" cy="4" r="1.5" stroke="#8e8e93" strokeWidth="1.5" fill="none" />
-            <circle cx="5" cy="12" r="1.5" stroke="#8e8e93" strokeWidth="1.5" fill="none" />
+            <circle cx="5" cy="4" r="1.5" stroke="#A09890" strokeWidth="1.5" fill="none" />
+            <circle cx="5" cy="12" r="1.5" stroke="#A09890" strokeWidth="1.5" fill="none" />
             <circle cx="11" cy="6" r="1.5" stroke="#34c759" strokeWidth="1.5" fill="none" />
-            <line x1="5" y1="5.5" x2="5" y2="10.5" stroke="#8e8e93" strokeWidth="1.5" />
-            <path d="M5 7.5 C5 7.5 7 6 11 6" stroke="#8e8e93" strokeWidth="1.5" fill="none" />
+            <line x1="5" y1="5.5" x2="5" y2="10.5" stroke="#A09890" strokeWidth="1.5" />
+            <path d="M5 7.5 C5 7.5 7 6 11 6" stroke="#A09890" strokeWidth="1.5" fill="none" />
           </svg>
           <span
             style={{
@@ -95,7 +95,7 @@ export const WorktreeSummary = memo(function WorktreeSummary({
           <span
             style={{
               fontSize: '11px',
-              color: '#8e8e93',
+              color: '#A09890',
               fontWeight: 500,
             }}
           >
@@ -137,7 +137,7 @@ export const WorktreeSummary = memo(function WorktreeSummary({
         }}
       >
         {active.map((wt) => {
-          const color = AGENT_COLORS[wt.agentType] ?? '#8e8e93';
+          const color = AGENT_COLORS[wt.agentType] ?? '#A09890';
           const label = wt.id.slice(0, 16);
 
           return (
@@ -151,7 +151,7 @@ export const WorktreeSummary = memo(function WorktreeSummary({
                 gap: '4px',
                 padding: '3px 8px',
                 borderRadius: '8px',
-                backgroundColor: 'rgba(255,255,255,0.06)',
+                backgroundColor: 'rgba(255,248,240,0.06)',
                 border: 'none',
                 cursor: 'pointer',
                 fontSize: '10px',
@@ -171,7 +171,7 @@ export const WorktreeSummary = memo(function WorktreeSummary({
               />
               {label}
               {wt.dirtyFiles.length > 0 ? (
-                <span style={{ color: '#8e8e93' }}>
+                <span style={{ color: '#A09890' }}>
                   {wt.dirtyFiles.length}f
                 </span>
               ) : null}
@@ -189,9 +189,9 @@ export const WorktreeSummary = memo(function WorktreeSummary({
           style={{
             padding: '4px 10px',
             borderRadius: '8px',
-            backgroundColor: pruneConfirm ? '#ff3b30' : 'rgba(255,255,255,0.08)',
+            backgroundColor: pruneConfirm ? '#ff3b30' : 'rgba(255,248,240,0.07)',
             border: 'none',
-            color: pruneConfirm ? '#fff' : '#8e8e93',
+            color: pruneConfirm ? '#fff' : '#A09890',
             fontSize: '11px',
             fontWeight: pruneConfirm ? 600 : 500,
             cursor: 'pointer',

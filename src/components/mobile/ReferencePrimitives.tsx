@@ -38,13 +38,13 @@ function useReferencePalette(): ReferencePalette {
 
   if (isDark) {
     return {
-      primary: '#F5F5F7',
-      secondary: '#8E8E93',
-      tertiary: '#636366',
-      surfaceBg: 'rgba(28,28,30,0.82)',
-      surfaceBorder: 'rgba(255,255,255,0.08)',
-      raisedBg: 'rgba(44,44,46,0.92)',
-      raisedBorder: 'rgba(255,255,255,0.12)',
+      primary: colors.text,
+      secondary: colors.textSecondary,
+      tertiary: colors.textTertiary,
+      surfaceBg: colors.surface,
+      surfaceBorder: colors.surfaceBorder,
+      raisedBg: colors.elevatedSurface,
+      raisedBorder: 'rgba(255,248,240,0.12)',
       selectedBg: 'rgba(10,132,255,0.14)',
       selectedBorder: 'rgba(10,132,255,0.28)',
       accent: colors.blueAccent,
@@ -58,8 +58,8 @@ function useReferencePalette(): ReferencePalette {
       removeBg: 'rgba(255,69,58,0.14)',
       removeText: colors.red,
       metaBg: 'rgba(99,99,102,0.22)',
-      metaText: '#8E8E93',
-      contextText: '#D1D1D6',
+      metaText: colors.textSecondary,
+      contextText: colors.text,
     };
   }
 

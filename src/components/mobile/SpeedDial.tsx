@@ -62,11 +62,11 @@ export const SpeedDialButton = memo(function SpeedDialButton({
   const menuRef = useRef<HTMLDivElement>(null);
   const primaryText = colors.text;
   const activeText = colors.blueAccent;
-  const surfaceBorder = colors.cardBorder;
+  const surfaceBorder = colors.surfaceBorder;
   const approvalBadgeBackground = colors.red;
-  const closedBackground = 'rgba(0, 0, 0, 0.8)';
-  const openBackground = 'rgba(0, 0, 0, 0.88)';
-  const pillBackground = 'rgba(44, 44, 46, 0.9)';
+  const closedBackground = colors.surface;
+  const openBackground = 'rgba(30, 28, 26, 0.88)';
+  const pillBackground = colors.elevatedSurface;
   const pillActiveBackground = 'rgba(10, 132, 255, 0.2)';
   const menuButtonStyle: CSSProperties = {
     width: 44,
@@ -84,8 +84,8 @@ export const SpeedDialButton = memo(function SpeedDialButton({
     justifyContent: 'center',
     cursor: 'pointer',
     boxShadow: open
-      ? '0 14px 30px rgba(0, 0, 0, 0.34)'
-      : '0 10px 24px rgba(0, 0, 0, 0.24)',
+      ? '0 14px 30px rgba(0, 0, 0, 0.30)'
+      : '0 10px 24px rgba(0, 0, 0, 0.22)',
     transition: 'background 220ms ease, box-shadow 220ms ease, transform 180ms ease',
     WebkitTapHighlightColor: 'transparent',
     position: 'relative',
@@ -94,7 +94,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
   const backdropStyle: CSSProperties = {
     position: 'fixed',
     inset: 0,
-    background: 'rgba(0, 0, 0, 0.85)',
+    background: 'rgba(10, 10, 10, 0.84)',
     backdropFilter: 'blur(20px)',
     WebkitBackdropFilter: 'blur(20px)',
     zIndex: 9997,

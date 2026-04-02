@@ -37,7 +37,7 @@ const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ defa
 import { PullToRefresh } from './mobile/PullToRefresh';
 import { PageTransition } from './mobile/PageTransition';
 import { useSwipeBack } from './mobile/useSwipeBack';
-import { ThemeProvider } from './mobile/ThemeContext';
+import { DARK_COLORS, ThemeProvider } from './mobile/ThemeContext';
 const LaunchSheet = dynamic(() => import('./mobile/LaunchSheet').then((m) => ({ default: m.LaunchSheet })), { ssr: false });
 const ActivityFeed = dynamic(() => import('./mobile/ActivityFeed').then((m) => ({ default: m.ActivityFeed })), { ssr: false, ...shimmerFallback });
 const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) => ({ default: m.PRReviewSheet })), { ssr: false });
@@ -506,14 +506,14 @@ function MobileRemoteShellInner({
     ...mobileShellStyle,
     minHeight: '100vh',
     padding: '0 0 34px',
-    backgroundColor: '#000000',
+    backgroundColor: DARK_COLORS.bg,
     backgroundImage: isSessionListSurface
       ? 'none'
       : [
           'radial-gradient(circle at top, rgba(10, 132, 255, 0.12), transparent 42%)',
-          'linear-gradient(180deg, #000000 0%, #050507 56%, #0a0a0c 100%)',
+          'linear-gradient(180deg, #0A0A0A 0%, #0F0D0C 56%, #151210 100%)',
         ].join(', '),
-    color: '#F5F5F7',
+    color: DARK_COLORS.text,
   };
   const phoneShellStyle: CSSProperties = {
     position: 'relative',
@@ -543,9 +543,9 @@ function MobileRemoteShellInner({
     margin: '0 0 14px',
     padding: '12px 15px',
     borderRadius: 14,
-    border: '1px solid rgba(255,255,255,0.08)',
-    background: 'rgba(28,28,30,0.82)',
-    color: '#8E8E93',
+    border: `1px solid ${DARK_COLORS.surfaceBorder}`,
+    background: DARK_COLORS.surface,
+    color: DARK_COLORS.textSecondary,
     fontSize: '0.88rem',
     lineHeight: 1.45,
     boxShadow: '0 12px 24px rgba(0,0,0,0.18)',
@@ -575,8 +575,8 @@ function MobileRemoteShellInner({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 999,
-    border: '1px solid rgba(255,255,255,0.15)',
-    background: 'rgba(255,255,255,0.12)',
+    border: `1px solid ${DARK_COLORS.surfaceBorder}`,
+    background: 'rgba(46,42,38,0.18)',
     color: MOBILE_SESSION_LIST_COLORS.primary,
     backdropFilter: 'blur(20px)',
     WebkitBackdropFilter: 'blur(20px)',
@@ -606,8 +606,8 @@ function MobileRemoteShellInner({
     gap: '0.42rem',
     padding: 10,
     borderRadius: 26,
-    border: '1px solid rgba(255,255,255,0.08)',
-    background: isComposerPrimed ? 'rgba(44,44,46,0.94)' : 'rgba(28,28,30,0.82)',
+    border: `1px solid ${DARK_COLORS.surfaceBorder}`,
+    background: isComposerPrimed ? 'rgba(46,42,38,0.94)' : DARK_COLORS.surface,
     backdropFilter: 'blur(18px)',
     WebkitBackdropFilter: 'blur(18px)',
     boxShadow: '0 18px 38px rgba(0,0,0,0.28)',

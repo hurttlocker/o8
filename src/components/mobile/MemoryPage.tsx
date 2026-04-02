@@ -32,7 +32,7 @@ function classColor(cls: string): string {
     case 'fact':
       return '#64d2ff';
     default:
-      return '#8e8e93';
+      return '#A09890';
   }
 }
 

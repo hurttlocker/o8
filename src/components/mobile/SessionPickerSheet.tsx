@@ -143,7 +143,7 @@ function statusDotColor(session: SessionSummary): string {
     return '#FF9F0A';
   }
 
-  return '#636366';
+  return '#706860';
 }
 
 function SectionHeader({
@@ -159,11 +159,13 @@ function SectionHeader({
   open?: boolean;
   onToggle?: () => void;
 }) {
+  const { colors } = useTheme();
+
   const content = (
     <>
       <span
         style={{
-          color: '#F5F5F7',
+          color: colors.text,
           fontFamily: SYSTEM_FONT,
           fontSize: 13,
           fontWeight: 700,
@@ -178,8 +180,8 @@ function SectionHeader({
           height: 22,
           padding: '0 7px',
           borderRadius: 999,
-          background: 'rgba(255,255,255,0.08)',
-          color: '#8E8E93',
+          background: colors.surfaceBorder,
+          color: colors.textSecondary,
           fontFamily: SYSTEM_FONT,
           fontSize: 12,
           fontWeight: 700,
@@ -201,7 +203,7 @@ function SectionHeader({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#8E8E93',
+            color: colors.textSecondary,
             transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
             transition: 'transform 220ms ease',
           }}
@@ -261,6 +263,8 @@ function SessionCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { colors } = useTheme();
+
   return (
     <button
       type="button"
@@ -275,8 +279,8 @@ function SessionCard({
         gap: 12,
         padding: 14,
         borderRadius: 14,
-        border: '1px solid rgba(255,255,255,0.06)',
-        background: selected ? 'rgba(44,44,46,0.76)' : 'rgba(44,44,46,0.6)',
+        border: `1px solid ${colors.surfaceBorder}`,
+        background: selected ? 'rgba(46,42,38,0.76)' : 'rgba(46,42,38,0.6)',
         textAlign: 'left',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
@@ -299,7 +303,7 @@ function SessionCard({
             <span
               style={{
                 minWidth: 0,
-                color: '#F5F5F7',
+                color: colors.text,
                 fontFamily: SYSTEM_FONT,
                 fontSize: 16,
                 fontWeight: 700,
@@ -317,8 +321,8 @@ function SessionCard({
                 height: 24,
                 padding: '0 9px',
                 borderRadius: 999,
-                background: 'rgba(255,255,255,0.08)',
-                color: '#F5F5F7',
+                background: colors.surfaceBorder,
+                color: colors.text,
                 fontFamily: SYSTEM_FONT,
                 fontSize: 11,
                 fontWeight: 800,
@@ -334,7 +338,7 @@ function SessionCard({
           <p
             style={{
               margin: '4px 0 0',
-              color: '#8E8E93',
+              color: colors.textSecondary,
               fontFamily: SYSTEM_FONT,
               fontSize: 13,
               fontWeight: 500,
@@ -402,9 +406,9 @@ export const SessionPickerSheet = memo(function SessionPickerSheet({
     margin: 0,
     padding: '18px 14px',
     borderRadius: 14,
-    border: '1px solid rgba(255,255,255,0.06)',
-    background: 'rgba(44,44,46,0.45)',
-    color: '#8E8E93',
+    border: `1px solid ${colors.surfaceBorder}`,
+    background: 'rgba(46,42,38,0.45)',
+    color: colors.textSecondary,
     fontFamily: SYSTEM_FONT,
     fontSize: 14,
     lineHeight: '20px',
@@ -440,7 +444,7 @@ export const SessionPickerSheet = memo(function SessionPickerSheet({
           transform: open ? 'translate(-50%, 0)' : 'translate(-50%, 100%)',
           transition: 'transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
           borderRadius: '20px 20px 0 0',
-          background: 'rgba(28,28,30,0.95)',
+          background: 'rgba(30,28,26,0.95)',
           backdropFilter: 'blur(40px)',
           WebkitBackdropFilter: 'blur(40px)',
           border: `1px solid ${colors.border}`,
@@ -462,7 +466,7 @@ export const SessionPickerSheet = memo(function SessionPickerSheet({
               width: 36,
               height: 4,
               borderRadius: 2,
-              background: 'rgba(255,255,255,0.3)',
+              background: 'rgba(255,248,240,0.24)',
             }}
           />
         </div>
@@ -480,7 +484,7 @@ export const SessionPickerSheet = memo(function SessionPickerSheet({
             <h2
               style={{
                 margin: 0,
-                color: '#F5F5F7',
+                color: colors.text,
                 fontFamily: SYSTEM_FONT,
                 fontSize: 20,
                 fontWeight: 800,
@@ -492,7 +496,7 @@ export const SessionPickerSheet = memo(function SessionPickerSheet({
             <p
               style={{
                 margin: '4px 0 0',
-                color: '#8E8E93',
+                color: colors.textSecondary,
                 fontFamily: SYSTEM_FONT,
                 fontSize: 13,
                 fontWeight: 500,
@@ -511,8 +515,8 @@ export const SessionPickerSheet = memo(function SessionPickerSheet({
               padding: '0 14px',
               border: 'none',
               borderRadius: 999,
-              background: 'rgba(255,255,255,0.08)',
-              color: '#F5F5F7',
+              background: colors.surfaceBorder,
+              color: colors.text,
               fontFamily: SYSTEM_FONT,
               fontSize: 14,
               fontWeight: 700,

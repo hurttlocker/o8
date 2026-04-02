@@ -7,6 +7,7 @@
  */
 
 import { memo } from 'react';
+import { useTheme } from './ThemeContext';
 
 interface CrossAgentPillProps {
   runningCount: number;
@@ -19,6 +20,8 @@ export const CrossAgentPill = memo(function CrossAgentPill({
   totalCount,
   onTap,
 }: CrossAgentPillProps) {
+  const { colors } = useTheme();
+
   if (totalCount === 0) return null;
 
   return (
@@ -42,14 +45,14 @@ export const CrossAgentPill = memo(function CrossAgentPill({
       {/* Tiny dot — pulse is opacity-only (no layout) */}
       <span style={{
         width: 4, height: 4, borderRadius: '50%',
-        background: runningCount > 0 ? '#34c759' : '#8e8e93',
+        background: runningCount > 0 ? colors.green : colors.textSecondary,
         willChange: runningCount > 0 ? 'opacity' : undefined,
         animation: runningCount > 0 ? 'crossPulse 2s ease-in-out infinite' : 'none',
       }} />
 
       <span style={{
         fontSize: 9, fontWeight: 500,
-        color: '#8e8e93',
+        color: colors.textSecondary,
         fontFamily: '-apple-system, system-ui, sans-serif',
         letterSpacing: '0.02em',
       }}>
