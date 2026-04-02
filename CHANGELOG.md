@@ -6,6 +6,9 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `8b21c51` fix: mobile stability
+- `8775a3e` refactor: denormalize packetId/laneId into indexed approval columns + extract context & review modules
+- `2f0f366` refactor: denormalize packetId/laneId into indexed approval columns + extract context & review modules
 - `39a1348` fix: mobile chat
 - `aa1929f` fix: provide empty snapshot for client-only mobile shell
 - `6481fce` perf: mobile page is now client-only — zero server-side bootstrap
