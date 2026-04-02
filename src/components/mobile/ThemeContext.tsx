@@ -49,7 +49,7 @@ interface ColorPalette {
 }
 
 export const DARK_COLORS: ColorPalette = {
-  bg: '#1A1816',
+  bg: '#1C1C1E',
   surface: 'rgba(30,28,26,0.82)',
   surfaceBorder: 'rgba(255,248,240,0.07)',
   accent: '#0A84FF',
