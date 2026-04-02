@@ -32,9 +32,9 @@ function stateColor(state: string): string {
     case 'queued':
       return '#ff9f0a';
     case 'inactive':
-      return '#8e8e93';
+      return '#A09890';
     default:
-      return '#8e8e93';
+      return '#A09890';
   }
 }
 

@@ -6,11 +6,17 @@ type Theme = 'light' | 'dark' | 'system';
 
 interface ColorPalette {
   bg: string;
+  surface: string;
+  surfaceBorder: string;
+  accent: string;
+  success: string;
+  danger: string;
   text: string;
   textSecondary: string;
   textTertiary: string;
   cardBg: string;
   cardBorder: string;
+  elevatedSurface: string;
   blueAccent: string;
   blueGlass: string;
   blueGlassBorder: string;
@@ -42,42 +48,48 @@ interface ColorPalette {
   activityStatusIdle: string;
 }
 
-const DARK_COLORS: ColorPalette = {
-  bg: '#000000',
-  text: '#F5F5F7',
-  textSecondary: '#8E8E93',
-  textTertiary: '#636366',
-  cardBg: 'rgba(28,28,30,0.82)',
-  cardBorder: 'rgba(255,255,255,0.08)',
+export const DARK_COLORS: ColorPalette = {
+  bg: '#0A0A0A',
+  surface: 'rgba(30,28,26,0.82)',
+  surfaceBorder: 'rgba(255,248,240,0.07)',
+  accent: '#0A84FF',
+  success: '#30D158',
+  danger: '#FF453A',
+  text: '#FAF5F0',
+  textSecondary: '#A09890',
+  textTertiary: '#706860',
+  cardBg: 'rgba(32,28,24,0.75)',
+  cardBorder: 'rgba(255,248,240,0.07)',
+  elevatedSurface: 'rgba(46,42,38,0.9)',
   blueAccent: '#0A84FF',
   blueGlass: 'rgba(10,132,255,0.12)',
   blueGlassBorder: 'rgba(10,132,255,0.2)',
   blueSoft: 'rgba(10,132,255,0.08)',
-  composeBg: 'rgba(28,28,30,0.82)',
-  composeBorder: 'rgba(255,255,255,0.08)',
-  frostBg: 'rgba(28,28,30,0.92)',
-  frostStrong: '#000000',
-  panelBg: 'rgba(28,28,30,0.82)',
+  composeBg: 'rgba(30,28,26,0.82)',
+  composeBorder: 'rgba(255,248,240,0.07)',
+  frostBg: 'rgba(30,28,26,0.92)',
+  frostStrong: '#0A0A0A',
+  panelBg: 'rgba(30,28,26,0.82)',
   msgUserBg: 'rgba(10,132,255,0.15)',
-  msgAssistantBg: 'rgba(28,28,30,0.82)',
-  border: 'rgba(255,255,255,0.08)',
+  msgAssistantBg: 'rgba(30,28,26,0.82)',
+  border: 'rgba(255,248,240,0.07)',
   shadow: '0 2px 8px rgba(0,0,0,0.2)',
-  green: '#30d158',
+  green: '#30D158',
   amber: '#ffd60a',
-  red: '#ff453a',
+  red: '#FF453A',
   notifBg: 'rgba(10,132,255,0.1)',
   notifBorder: 'rgba(10,132,255,0.18)',
   dismissBg: 'rgba(10,132,255,0.12)',
   pillTextInactive: 'rgba(100,160,255,0.7)',
-  activityTimelineLine: 'rgba(255,255,255,0.06)',
-  activityCardBg: 'rgba(28,28,30,0.82)',
-  activityCardBorder: 'rgba(255,255,255,0.06)',
+  activityTimelineLine: 'rgba(255,248,240,0.06)',
+  activityCardBg: 'rgba(30,28,26,0.82)',
+  activityCardBorder: 'rgba(255,248,240,0.06)',
   activityStatusCoding: '#0A84FF',
   activityStatusThinking: '#64D2FF',
   activityStatusTesting: '#FF9F0A',
   activityStatusError: '#FF453A',
   activityStatusSuccess: '#30D158',
-  activityStatusIdle: '#636366',
+  activityStatusIdle: '#706860',
 };
 
 interface ThemeContextValue {

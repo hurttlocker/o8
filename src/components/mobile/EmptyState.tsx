@@ -6,6 +6,7 @@
  */
 
 import { memo } from 'react';
+import { useTheme } from './ThemeContext';
 
 interface EmptyStateProps {
   iconPath: string;
@@ -19,6 +20,8 @@ interface EmptyStateProps {
 export const EmptyState = memo(function EmptyState({
   iconPath, title, subtitle, actionLabel, onAction, iconColor = 'rgba(0,122,255,0.15)',
 }: EmptyStateProps) {
+  const { colors } = useTheme();
+
   return (
     <div style={{
       padding: '48px 24px',
@@ -33,7 +36,7 @@ export const EmptyState = memo(function EmptyState({
       </svg>
       <div>
         <p style={{
-          fontSize: 15, fontWeight: 600, color: '#3c3c43',
+          fontSize: 15, fontWeight: 600, color: colors.text,
           fontFamily: '-apple-system, system-ui, sans-serif',
           margin: 0,
         }}>
@@ -41,7 +44,7 @@ export const EmptyState = memo(function EmptyState({
         </p>
         {subtitle ? (
           <p style={{
-            fontSize: 12, color: '#8e8e93', margin: '4px 0 0',
+            fontSize: 12, color: colors.textSecondary, margin: '4px 0 0',
             fontFamily: '-apple-system, system-ui, sans-serif',
           }}>
             {subtitle}
@@ -54,7 +57,7 @@ export const EmptyState = memo(function EmptyState({
           onTouchEnd={(e) => { e.preventDefault(); onAction(); }}
           style={{
             padding: '8px 20px', borderRadius: 10,
-            background: '#007aff', color: '#fff',
+            background: colors.blueAccent, color: '#fff',
             fontSize: 13, fontWeight: 600, border: 'none',
             cursor: 'pointer',
             WebkitTapHighlightColor: 'transparent',

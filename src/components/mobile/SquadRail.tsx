@@ -46,7 +46,7 @@ export const SquadRail = memo(function SquadRail({
   onSessionFocus,
   compactLine,
 }: SquadRailProps) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
 
   const orderedSessions = useMemo(
     () => [...snapshot.sessions].sort((left, right) => (
@@ -58,9 +58,9 @@ export const SquadRail = memo(function SquadRail({
   const inProgress = orderedSessions.filter((session) => isInProgress(session, selectedSession));
   const archived = orderedSessions.filter((session) => !isInProgress(session, selectedSession));
 
-  const surfaceBg = isDark ? 'rgba(28,28,30,0.82)' : colors.panelBg;
-  const surfaceBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-  const secondaryText = isDark ? '#8E8E93' : colors.textSecondary;
+  const surfaceBg = colors.surface;
+  const surfaceBorder = colors.surfaceBorder;
+  const secondaryText = colors.textSecondary;
 
   const sectionStyle: CSSProperties = {
     display: 'grid',
@@ -89,7 +89,7 @@ export const SquadRail = memo(function SquadRail({
     fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif',
     fontSize: '0.92rem',
     lineHeight: 1.5,
-    boxShadow: isDark ? '0 14px 28px rgba(0,0,0,0.24)' : colors.shadow,
+    boxShadow: '0 14px 28px rgba(0,0,0,0.24)',
     backdropFilter: 'blur(18px)',
     WebkitBackdropFilter: 'blur(18px)',
   };

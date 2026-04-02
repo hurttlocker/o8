@@ -46,7 +46,7 @@ export const TokenUsageSummary = memo(function TokenUsageSummary({ snapshot, onV
     padding: '14px 16px',
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(28,28,30,0.82)',
+    background: colors.surface,
     color: colors.text,
     boxShadow: '0 16px 34px rgba(0,0,0,0.26)',
     cursor: 'pointer',
