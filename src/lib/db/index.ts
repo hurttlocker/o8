@@ -354,6 +354,32 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_lanes_status ON lanes(status);
     CREATE INDEX IF NOT EXISTS idx_lane_events_lane_timestamp ON lane_events(lane_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_lane_events_timestamp ON lane_events(timestamp);
+
+    CREATE TABLE IF NOT EXISTS review_queue (
+      id TEXT PRIMARY KEY,
+      lane_id TEXT NOT NULL,
+      repo_path TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue(status);
+    CREATE INDEX IF NOT EXISTS idx_review_queue_lane_id ON review_queue(lane_id);
+
+    CREATE TABLE IF NOT EXISTS watched_agents (
+      surface_id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL DEFAULT '',
+      registered_at INTEGER NOT NULL,
+      last_status TEXT NOT NULL DEFAULT 'running',
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      steer_count INTEGER NOT NULL DEFAULT 0,
+      completion_reported INTEGER NOT NULL DEFAULT 0,
+      last_activity_at INTEGER NOT NULL
+    );
   `);
 
   ensureApprovalContextColumns(sqlite);

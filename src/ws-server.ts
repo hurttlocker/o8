@@ -695,6 +695,7 @@ const sessionHistoryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
+let stopReviewDrain: (() => void) | null = null;
 
 const lastRealtimeFingerprint = {
   runtime: '',
@@ -2930,6 +2931,13 @@ async function bootstrapWsServer() {
     };
     startSupervisorLoop(supervisorCallbacks);
     stopHeadlessLoop = startHeadlessSprintLoop(10_000);
+
+    // #456 — Start the durable review queue drain
+    import('@/lib/lane/auto-review').then(({ startReviewQueueDrain }) => {
+      stopReviewDrain = startReviewQueueDrain();
+    }).catch((err) => {
+      console.error('[ws-server] Failed to start review queue drain:', err);
+    });
   });
 }
 
@@ -2944,6 +2952,8 @@ function shutdown(signal: string) {
   stopSupervisorLoop();
   stopHeadlessLoop?.();
   stopHeadlessLoop = null;
+  stopReviewDrain?.();
+  stopReviewDrain = null;
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
   if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);
