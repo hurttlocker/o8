@@ -2874,6 +2874,28 @@ async function bootstrapWsServer() {
             }
 
             if (outcome === 'completed') {
+              // #454 — Auto-commit dirty worktree before transitioning to reviewing
+              const completionCwd = lane.worktreePath ?? lane.repoPath;
+              try {
+                const { execFile } = await import('node:child_process');
+                const { promisify } = await import('node:util');
+                const execAsync = promisify(execFile);
+                const { stdout: porcelain } = await execAsync('git', ['status', '--porcelain'], {
+                  cwd: completionCwd,
+                  maxBuffer: 10 * 1024 * 1024,
+                });
+                if (porcelain.trim().length > 0) {
+                  console.log(`[supervisor] Agent ${surfaceId} left dirty worktree, auto-committing in ${completionCwd}`);
+                  await execAsync('git', ['add', '-A'], { cwd: completionCwd, maxBuffer: 10 * 1024 * 1024 });
+                  await execAsync('git', ['commit', '-m', 'auto-commit: agent work before review'], {
+                    cwd: completionCwd,
+                    maxBuffer: 10 * 1024 * 1024,
+                  });
+                }
+              } catch (commitErr) {
+                console.warn(`[supervisor] Auto-commit check failed for ${completionCwd}:`, commitErr);
+              }
+
               const updated = setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
               if (updated) {
                 const packetId = updated.packetId ?? lane.packetId;

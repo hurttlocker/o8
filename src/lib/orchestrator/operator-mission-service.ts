@@ -780,21 +780,14 @@ export async function resetPacket(input: ResetPacketInput) {
   }
 
   // Reset packet to dispatchable state
+  // #455 — lane MUST be null, not a blank object. A truthy lane with empty laneId
+  // causes the reconciler to see "has lane but no domain match" → 'recovering',
+  // which races the next dispatch tick and traps the packet in a recovery loop.
   packet.status = 'draft';
   packet.queueState = 'queued';
   packet.releaseState = 'pending';
   packet.blockedReason = null;
-  packet.lane = {
-    tileId: '',
-    tabId: '',
-    repoPath: null,
-    runtime: packet.runtime,
-    laneId: '',
-    sessionKey: null,
-    lastHeartbeatAt: null,
-    lastEventAt: null,
-    lastEventLabel: null,
-  };
+  packet.lane = null;
   packet.review = null;
   packet.lastEventAt = null;
   packet.lastEventLabel = null;

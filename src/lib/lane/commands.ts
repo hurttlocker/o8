@@ -438,6 +438,29 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
 
+      // #454 — Guard: auto-commit dirty worktrees before allowing review transition
+      const reviewCwd = lane.worktreePath ?? lane.repoPath;
+      try {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const execFileAsync = promisify(execFile);
+        const { stdout: porcelain } = await execFileAsync('git', ['status', '--porcelain'], {
+          cwd: reviewCwd,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        if (porcelain.trim().length > 0) {
+          console.log(`[lane] request_review: dirty worktree detected in ${reviewCwd}, auto-committing`);
+          await execFileAsync('git', ['add', '-A'], { cwd: reviewCwd, maxBuffer: 10 * 1024 * 1024 });
+          await execFileAsync('git', ['commit', '-m', 'auto-commit: agent work before review'], {
+            cwd: reviewCwd,
+            maxBuffer: 10 * 1024 * 1024,
+          });
+        }
+      } catch (err) {
+        console.warn(`[lane] request_review: git status/commit check failed for ${reviewCwd}:`, err);
+        // Non-fatal — proceed with the review transition even if the commit check fails
+      }
+
       const updated = setLaneStatus(command.laneId, 'reviewing', actor, 'review_requested');
       return { ok: true, laneId: command.laneId, note: 'Review requested.', lane: updated ?? undefined };
     }
