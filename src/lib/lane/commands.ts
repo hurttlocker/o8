@@ -651,18 +651,40 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         try {
           await execFileAsync('git', ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${actualBranch})`, actualBranch], { cwd: lane.repoPath });
         } catch (mergeErr) {
-          // Real conflict — rollback
+          // #459 — Real conflict: rollback and escalate via approval card
+          // Extract conflict file list before aborting
+          let conflictFiles: string[] = [];
+          try {
+            const { stdout: unmerged } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=U'], { cwd: lane.repoPath });
+            conflictFiles = unmerged.trim().split('\n').filter(Boolean);
+          } catch { /* best effort */ }
+
           try { await execFileAsync('git', ['merge', '--abort'], { cwd: lane.repoPath }); } catch { /* already clean */ }
           await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
-          setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_conflicts');
-          const message = mergeErr instanceof Error ? mergeErr.message : 'Merge failed.';
-          return {
-            ok: false,
-            laneId: command.laneId,
-            note: rebaseFailed
-              ? `Rebase failed, merge also failed: ${message}`
-              : `Merge failed after rebase: ${message}`,
-          };
+
+          const conflictMessage = mergeErr instanceof Error ? mergeErr.message : 'Merge failed.';
+          const conflictDetail = rebaseFailed
+            ? `Rebase failed, merge also failed: ${conflictMessage}`
+            : `Merge failed after rebase: ${conflictMessage}`;
+          const conflictFileList = conflictFiles.length > 0
+            ? `\n\nConflicting files:\n${conflictFiles.map((f) => `- ${f}`).join('\n')}`
+            : '';
+
+          // Create an approval card so the operator sees the conflict instead of silent stall
+          return createLaneActionApproval(lane, actor, {
+            verb: 'merge',
+            commitMessage: command.commitMessage,
+            reviewSummary: command.reviewSummary,
+            title: `Merge conflict: ${lane.label}`,
+            description: `${conflictDetail}${conflictFileList}\n\nResolve the conflicts manually, or re-dispatch the packet with conflict context.`,
+            summary: `Merge conflict on ${lane.branch} → ${lane.baseBranch}. ${conflictFiles.length} file${conflictFiles.length === 1 ? '' : 's'} conflicting.`,
+            risk: 'high' as ApprovalRisk,
+            policyRuleId: 'merge_conflict_escalation',
+            metadata: {
+              ConflictFiles: conflictFiles.join(', ') || 'unknown',
+            },
+            note: `Merge conflict escalated to operator. ${conflictFiles.length} conflicting file${conflictFiles.length === 1 ? '' : 's'}.`,
+          });
         }
 
         await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
