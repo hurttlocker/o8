@@ -5,18 +5,8 @@ import { useTheme } from './ThemeContext';
 
 const fontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
 
-// Top veil: covers the iOS safe area (status bar / dynamic island) + header + thin dissolve.
-// Starts above the viewport to fill the safe area on iOS.
-const topVeilStyle: CSSProperties = {
-  position: 'fixed',
-  top: 'calc(-1 * env(safe-area-inset-top, 0px))',
-  left: 0,
-  right: 0,
-  height: 'calc(env(safe-area-inset-top, 0px) + env(safe-area-inset-top, 0px) + 80px)',
-  background: 'linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 75%, rgba(0,0,0,0.5) 88%, rgba(0,0,0,0) 100%)',
-  pointerEvents: 'none',
-  zIndex: 90,
-} as CSSProperties;
+// No overlay veil — scroll fade is handled by mask-image on the scroll container.
+// See mobile-remote-shell.tsx scrollContainerStyle.
 
 function MoreIcon() {
   return (
@@ -168,7 +158,7 @@ export const TopBar = memo(function TopBar({
 
   return (
     <>
-      <div style={topVeilStyle} aria-hidden="true" />
+      {/* scroll fade handled by mask-image on scroll container */}
       <header style={headerStyle}>
         <SpeedDialButton
           activeScreen={activeScreen}
