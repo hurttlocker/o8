@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Is This
 
-**o8** (formerly Cortex IDE) is a Next.js 16 + Tauri v2 desktop app — **the governance layer for autonomous engineering teams**. Approvals, audit, organizational memory, and mobile operator control across any AI provider. Claude is the orchestrator/brain; Codex is the workhorse executing tasks in worktrees. It runs three agent runtimes (OpenClaw, Codex, Claude Code) through a universal CLI-based adapter interface, with separate desktop and mobile surfaces.
+**o8** (formerly Cortex IDE) is a Next.js 16 + Tauri v2 desktop app — **the governance layer for autonomous engineering teams**. Approvals, audit, organizational memory, and mobile operator control across any AI provider. Claude is the orchestrator/brain; Codex is the workhorse executing tasks in worktrees. It runs two agent runtimes (Codex, Claude Code) through a universal CLI-based adapter interface, with separate desktop and mobile surfaces.
 
 See `docs/o8-product-brief.md` for the full product vision, monetization, and Karpathy alignment.
 
@@ -67,7 +67,7 @@ Runs on push/PR to `main`: TypeCheck → Lint → Build (Node 22, `npm ci`). Bui
 
 Universal `AgentRuntime` interface (`types.ts`) with capability-gated discovery. UI never talks to a specific runtime directly — always routes through the registry (`registry.ts`).
 
-Three adapters: `openclaw.ts`, `codex.ts`, `claude-code.ts`. All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
+Two adapters: `codex.ts`, `claude-code.ts`. Both share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
 
 `discoverAllSessions()` runs all adapters in parallel via `Promise.allSettled`. `routeAction()` dispatches resume/interrupt to the correct runtime.
 
@@ -81,7 +81,7 @@ Channel semantics matter:
 
 Backpressure: 64KB buffer limit, max 32 queued messages, 50ms flush interval.
 
-Architecture: `Mobile ←WS:3002→ ws-server ←WS:18789→ OpenClaw Gateway` + HTTP to Next.js API
+Architecture: `Mobile ←WS:3002→ ws-server` + HTTP to Next.js API. Supervisor polls runtime inventory via direct function imports (not HTTP).
 
 ### Desktop vs Mobile
 
@@ -123,14 +123,13 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 - `/api/worktrees/*` — Git worktree management (merge, conflicts)
 - `/api/review/*` — Code review workflow (commit, push)
 - `/api/setup/*` — First-run setup wizard (config detection)
-- `/api/claude-code/*`, `/api/codex/*`, `/api/openclaw/*` — Per-runtime endpoints
+- `/api/claude-code/*`, `/api/codex/*` — Per-runtime endpoints
 
 ### Library Domains (`src/lib/`)
 
 37+ feature domains. Key ones:
-- `runtimes` — Adapter registry (OpenClaw, Codex, Claude Code)
+- `runtimes` — Adapter registry (Codex, Claude Code)
 - `runtime` — IDE session registries: `ide-session-registry.ts`, `ide-llm-chat-registry.ts`, `ide-terminal-state.ts`, `ide-surface-state.ts`, `actions.ts`, `inventory.ts`
-- `openclaw` — Gateway client (`wsRpc()` WebSocket RPC)
 - `llm` — LLM subsystem: `tools.ts` (tool definitions), `memory.ts` (memory management), `chat-history-store.ts` (persistent storage), `context.ts`
 - `approvals` — Approval workflows for LLM actions (`store.ts`, `types.ts`, `llm.ts`)
 - `workspace` — Workspace lifecycle management and persistence
@@ -140,14 +139,13 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 - `db` — Drizzle schema + SQLite
 - `theme` — CSS variable system
 - `panel` — Panel auth (loopback host checking + token verification)
-- `mobile` — Mobile-specific: inbox filter, sounds, types, OpenClaw bridge
+- `mobile` — Mobile-specific: inbox filter, sounds, types
 - `terminal` — PTY/tmux tab state
-- `connectors` — External service connectors (OpenClaw beta)
+- `connectors` — External service connectors
 
 ## Critical Rules
 
 ### NEVER
-- **Never use the OpenClaw CLI for status/session queries** — `openclaw status --json` and `openclaw gateway call status --json` hang indefinitely on some configurations. Use WebSocket RPC via `wsRpc()` in `src/lib/openclaw/gateway-client.ts` instead. The gateway WebSocket (`ws://127.0.0.1:{port}`) with challenge-response auth returns sessions in <500ms. CLI is kept ONLY as a last-resort fallback with a 10s timeout.
 - **Never spread `...statusResult` AFTER session data in `runStatusSnapshot()`** — the `status` RPC response has its own `sessions` key that will clobber real session data from `sessions.list`. Always spread it BEFORE so our keys win.
 - **Never use CSS classes** — inline styles only (`style={{ }}` props). iOS Safari reliability issue. This is permanent.
 - **Never use emoji** — Phosphor icons (raw SVG) across all surfaces
@@ -160,13 +158,11 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 - **Never use `ai` SDK** — direct fetch to `/api/v2/proxy/llm` route
 
 ### ALWAYS
-- **Gateway communication goes through WebSocket RPC** — `wsRpc()` in `gateway-client.ts` is the primary path. It opens a short-lived WS, does challenge-response auth (client ID must be `'gateway-client'`), sends the RPC, returns the result. This replaced the CLI fallback that was hanging indefinitely.
-- **`getGatewayStatus()` must call `runStatusSnapshot()` directly** on cold start — never rely on the background refresh loop for initial data. The background loop is only for cache refreshes.
 - **`npx tsc --noEmit` before every commit**
 - **Respect the 600-line file ceiling** — if your changes would push a file past 600 lines, decompose first. Extract helpers, hooks, or modules before adding new logic. Layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) are explicitly waived.
 - **Apple HIG**: 44px touch targets, 14px card radii, spring curves
 - **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props
-- **Build for all three runtimes** — OpenClaw, Codex, Claude Code. Never commit to one provider.
+- **Build for both runtimes** — Codex and Claude Code. The adapter interface allows adding new runtimes later.
 - **Don't build what models will commoditize** — Cost dashboards, context optimization, prompt tools, orchestration quality, and briefing features are table-stakes, never differentiators. Our moats are governance, organizational memory, and the operator approval surface.
 - **Console logging prefix**: `[feature-name]` (e.g., `[memory-recall]`, `[compaction]`)
 - **Commit prefix**: `feat:`, `fix:`, `refactor:`, `perf:`, `chore:`
