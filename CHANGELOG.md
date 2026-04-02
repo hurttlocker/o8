@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `86a6005` fix: THE LINE
 - `ca0e6a1` fix: add auth header to supervisor watch registration
 - `8d40872` fix: supervisor registration must use HTTP — different process than Next.js
 - `ab49f0c` fix: register launched agents with supervisor for completion detection
