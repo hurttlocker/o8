@@ -469,7 +469,9 @@ function MobileRemoteShellInner({
     marginRight: 'auto',
     paddingTop: `calc(env(safe-area-inset-top, 0px) + ${viewportTopOffset}px + 74px)`,
     paddingBottom: 18,
-  };
+    WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 3rem, black calc(100% - 3rem), transparent)',
+    maskImage: 'linear-gradient(to bottom, transparent, black 3rem, black calc(100% - 3rem), transparent)',
+  } as CSSProperties;
   const scrollViewStyle: CSSProperties = {
     display: 'grid',
     gap: 0,
@@ -498,16 +500,7 @@ function MobileRemoteShellInner({
     height: 1,
     scrollMarginBottom: `calc(${composeHeight}px + 108px)`,
   };
-  const bottomFadeStyle: CSSProperties = {
-    position: 'fixed',
-    bottom: 'calc(-1 * env(safe-area-inset-bottom, 0px))' as string,
-    left: 0,
-    right: 0,
-    height: 'calc(env(safe-area-inset-bottom, 0px) + env(safe-area-inset-bottom, 0px) + 80px)',
-    background: 'linear-gradient(0deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 60%, rgba(0,0,0,0.5) 82%, rgba(0,0,0,0) 100%)',
-    pointerEvents: 'none',
-    zIndex: 88,
-  } as CSSProperties;
+  // Bottom fade removed — scroll fade handled by mask-image on scroll container
   const fabWrapStyle: CSSProperties = {
     position: 'fixed',
     left: '50%',
@@ -810,7 +803,6 @@ function MobileRemoteShellInner({
         </PullToRefresh>
         {showRecentPicker ? (
           <>
-          <div style={bottomFadeStyle} aria-hidden="true" />
           <div style={fabWrapStyle}>
             <button
               type="button"
