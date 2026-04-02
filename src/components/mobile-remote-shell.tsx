@@ -500,7 +500,7 @@ function MobileRemoteShellInner({
   };
   const bottomFadeStyle: CSSProperties = {
     position: 'fixed',
-    bottom: -60,
+    bottom: -120,
     left: -30,
     right: -30,
     height: 'calc(env(safe-area-inset-bottom, 0px) + 180px)',
