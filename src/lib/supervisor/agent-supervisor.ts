@@ -141,6 +141,93 @@ let heartbeatInFlight = false;
 const pollIntervalMs = DEFAULT_ACTIVE_POLL_INTERVAL_MS;
 let registrationOrdinal = 0;
 
+// ── #458: SQLite persistence for watched agents ──
+
+function persistWatchedAgent(agent: WatchedAgent): void {
+  try {
+    const { getSqlite } = require('@/lib/db') as { getSqlite: () => import('better-sqlite3').Database };
+    const db = getSqlite();
+    db.prepare(
+      `INSERT OR REPLACE INTO watched_agents
+       (surface_id, repo_path, name, prompt, registered_at, last_status, retry_count, steer_count, completion_reported, last_activity_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      agent.surfaceId, agent.repoPath, agent.name, agent.prompt,
+      agent.registeredAt, agent.lastStatus, agent.retryCount, agent.steerCount,
+      agent.completionReported ? 1 : 0, agent.lastActivityAt,
+    );
+  } catch { /* DB may not be ready */ }
+}
+
+function removePersistedAgent(surfaceId: string): void {
+  try {
+    const { getSqlite } = require('@/lib/db') as { getSqlite: () => import('better-sqlite3').Database };
+    getSqlite().prepare('DELETE FROM watched_agents WHERE surface_id = ?').run(surfaceId);
+  } catch { /* DB may not be ready */ }
+}
+
+interface PersistedAgentRow {
+  surface_id: string;
+  repo_path: string;
+  name: string;
+  prompt: string;
+  registered_at: number;
+  last_status: string;
+  retry_count: number;
+  steer_count: number;
+  completion_reported: number;
+  last_activity_at: number;
+}
+
+export function rehydrateWatchedAgents(): number {
+  try {
+    const { getSqlite } = require('@/lib/db') as { getSqlite: () => import('better-sqlite3').Database };
+    const db = getSqlite();
+    const rows = db.prepare('SELECT * FROM watched_agents WHERE completion_reported = 0').all() as PersistedAgentRow[];
+    let count = 0;
+    const now = Date.now();
+
+    for (const row of rows) {
+      if (watchedAgents.has(row.surface_id)) continue;
+      const pollOrdinal = registrationOrdinal++;
+      watchedAgents.set(row.surface_id, {
+        surfaceId: row.surface_id,
+        repoPath: row.repo_path,
+        name: row.name,
+        prompt: row.prompt,
+        registeredAt: row.registered_at,
+        lastStatus: row.last_status,
+        lastRuntimeStatus: null,
+        lastTranscriptLength: 0,
+        lastTranscriptEntryId: null,
+        lastTranscriptSignature: null,
+        lastTranscriptMtimeMs: null,
+        lastActivityAt: row.last_activity_at,
+        retryCount: row.retry_count,
+        steerCount: row.steer_count,
+        completionReported: Boolean(row.completion_reported),
+        lastProgressEntryId: null,
+        batchReported: false,
+        tentativeFinishedSince: null,
+        tentativeTranscriptLength: 0,
+        tentativeTranscriptEntryId: null,
+        tentativeTranscriptSignature: null,
+        pollOrdinal,
+        nextPollAt: now,
+        lastPolledAt: null,
+      });
+      count++;
+    }
+
+    if (count > 0) {
+      console.log(`[supervisor] Rehydrated ${count} watched agent${count === 1 ? '' : 's'} from SQLite`);
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
 // ── Public API ──
 
 export function registerWatchedAgent(
@@ -182,6 +269,7 @@ export function registerWatchedAgent(
   });
 
   console.log(`[supervisor] Watching agent "${name}" (${surfaceId})`);
+  persistWatchedAgent(watchedAgents.get(surfaceId)!);
 
   callbacks?.broadcastAgentUpdate({
     surfaceId,
@@ -197,6 +285,7 @@ export function unregisterWatchedAgent(surfaceId: string): void {
   if (agent) {
     console.log(`[supervisor] Unwatching agent "${agent.name}" (${surfaceId})`);
     watchedAgents.delete(surfaceId);
+    removePersistedAgent(surfaceId);
   }
   transcriptSourceCache.delete(surfaceId);
 }
@@ -213,6 +302,9 @@ export function getSupervisorFleetStatusSummary(repoPath?: string): SupervisorFl
 export function startSupervisorLoop(cbs: SupervisorCallbacks): void {
   callbacks = cbs;
   if (pollTimer || heartbeatInFlight) return;
+
+  // #458 — Rehydrate watched agents from SQLite on startup
+  rehydrateWatchedAgents();
 
   queueNextHeartbeat(0);
   console.log(
