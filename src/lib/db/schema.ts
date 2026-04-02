@@ -333,6 +333,41 @@ export const approvalEvents = sqliteTable('approval_events', {
   approvalTimestampIdx: index('idx_approval_events_approval_timestamp').on(table.approvalId, table.timestamp),
 }));
 
+// ══════════════════════════════════════════════════════════════════
+//  Review Queue — durable auto-review queue (survives restarts)
+// ══════════════════════════════════════════════════════════════════
+
+export const reviewQueue = sqliteTable('review_queue', {
+  id: text('id').primaryKey(),
+  laneId: text('lane_id').notNull(),
+  repoPath: text('repo_path').notNull(),
+  status: text('status', { enum: ['pending', 'in_progress', 'completed', 'failed'] }).notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  statusIdx: index('idx_review_queue_status').on(table.status),
+  laneIdIdx: index('idx_review_queue_lane_id').on(table.laneId),
+}));
+
+// ══════════════════════════════════════════════════════════════════
+//  Watched Agents — durable supervisor state (survives restarts)
+// ══════════════════════════════════════════════════════════════════
+
+export const watchedAgents = sqliteTable('watched_agents', {
+  surfaceId: text('surface_id').primaryKey(),
+  repoPath: text('repo_path').notNull(),
+  name: text('name').notNull(),
+  prompt: text('prompt').notNull().default(''),
+  registeredAt: integer('registered_at').notNull(),
+  lastStatus: text('last_status').notNull().default('running'),
+  retryCount: integer('retry_count').notNull().default(0),
+  steerCount: integer('steer_count').notNull().default(0),
+  completionReported: integer('completion_reported', { mode: 'boolean' }).notNull().default(false),
+  lastActivityAt: integer('last_activity_at').notNull(),
+});
+
 export const laneEvents = sqliteTable('lane_events', {
   id: text('id').primaryKey(),
   laneId: text('lane_id').notNull().references(() => lanes.id, { onDelete: 'cascade' }),
