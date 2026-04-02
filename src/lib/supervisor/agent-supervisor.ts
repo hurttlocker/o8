@@ -72,6 +72,12 @@ export interface AgentUpdateEvent {
   repoPath?: string;
 }
 
+export interface AgentCompletionDecision {
+  block?: boolean;
+  resume?: boolean;
+  detail?: string;
+}
+
 export interface SupervisorCallbacks {
   fetchFleetStatus(): Promise<AgentStatusEntry[]>;
   fetchTranscript(sessionKey: string, limit: number): Promise<TranscriptEntry[]>;
@@ -81,7 +87,10 @@ export interface SupervisorCallbacks {
   broadcastAgentUpdate(update: AgentUpdateEvent): void;
   queueOrchestratorEscalation(repoPath: string, message: string): void;
   onAgentProgress?: (surfaceId: string, lastMessage: string) => void;
-  onAgentCompletion?: (surfaceId: string, outcome: 'completed' | 'failed') => void;
+  onAgentCompletion?: (
+    surfaceId: string,
+    outcome: 'completed' | 'failed',
+  ) => Promise<AgentCompletionDecision | void> | AgentCompletionDecision | void;
   /** Called when a failed agent is retried — update lane session binding */
   onAgentRetry?: (oldSurfaceId: string, newSurfaceId: string) => void;
 }
@@ -473,7 +482,7 @@ async function pollWatchedAgent(
     }
   }
 
-  scheduleNextAgentPoll(watched, currentStatus, runtimeAgent?.status ?? null, now);
+  scheduleNextAgentPoll(watched, watched.lastStatus, watched.lastRuntimeStatus, now);
 }
 
 // ── Status Resolution ──
@@ -580,6 +589,17 @@ function resetTentativeCompletion(watched: WatchedAgent): void {
   watched.tentativeTranscriptSignature = null;
 }
 
+function resumeWatchedAgentAfterCompletionCheck(watched: WatchedAgent, now: number): void {
+  watched.lastStatus = 'running';
+  watched.lastRuntimeStatus = 'running';
+  watched.lastActivityAt = now;
+  watched.batchReported = false;
+  watched.tentativeFinishedSince = now;
+  watched.tentativeTranscriptLength = watched.lastTranscriptLength;
+  watched.tentativeTranscriptEntryId = watched.lastTranscriptEntryId;
+  watched.tentativeTranscriptSignature = watched.lastTranscriptSignature;
+}
+
 // ── Event Handlers ──
 
 async function handleStatusChange(
@@ -592,6 +612,31 @@ async function handleStatusChange(
   const duration = Math.round((now - watched.registeredAt) / 1000);
 
   if (status === 'finished' && !watched.completionReported) {
+    const completionDecision = await callbacks.onAgentCompletion?.(watched.surfaceId, 'completed');
+    if (completionDecision?.resume) {
+      resumeWatchedAgentAfterCompletionCheck(watched, now);
+      callbacks.broadcastAgentUpdate({
+        surfaceId: watched.surfaceId,
+        name: watched.name,
+        status: 'running',
+        duration,
+        detail: completionDecision.detail ?? `Agent "${watched.name}" resumed after post-completion verification failed`,
+      });
+      return;
+    }
+    if (completionDecision?.block) {
+      watched.completionReported = true;
+      callbacks.broadcastAgentUpdate({
+        surfaceId: watched.surfaceId,
+        name: watched.name,
+        status: 'failed',
+        duration,
+        detail: completionDecision.detail ?? `Agent "${watched.name}" failed post-completion verification and needs operator input`,
+      });
+      setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
+      return;
+    }
+
     watched.completionReported = true;
     callbacks.broadcastAgentUpdate({
       surfaceId: watched.surfaceId,
@@ -600,7 +645,6 @@ async function handleStatusChange(
       duration,
       detail: `Agent "${watched.name}" completed (${formatDuration(duration)})`,
     });
-    callbacks.onAgentCompletion?.(watched.surfaceId, 'completed');
 
     setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
   }
