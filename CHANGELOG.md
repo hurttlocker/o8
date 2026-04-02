@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `84f7942` feat: warm grey + light beige palette across all 30 mobile surfaces
 - `5631e6c` feat: slim compose bar
 - `73ba856` feat: in-process mutex on orchestrator-state.json
 - `4b610bb` feat: merge conflict escalation via approval card
