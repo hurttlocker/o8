@@ -63,7 +63,7 @@ function HeaderIconButton({
 function screenTitle(activeView: TopBarProps['activeView']) {
   switch (activeView) {
     case 'squad':
-      return 'Recent';
+      return 'Code';
     case 'fleet':
       return 'Agents';
     case 'memory':
