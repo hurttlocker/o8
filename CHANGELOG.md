@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `ab49f0c` fix: register launched agents with supervisor for completion detection
 - `6397ca1` fix: remove ALL overlays and backdrops — completely clean slate
 - `ef0e5e2` fix: purge ALL mobile-wrap CSS + progressive header fade
 - `b181c37` fix: remove CSS mask-image, add solid header backdrop like AI provider
