@@ -71,7 +71,7 @@ export function DiffOverlay({
     overflow: 'hidden',
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(28,28,30,0.82)',
+    background: colors.surface,
     boxShadow: '0 24px 52px rgba(0,0,0,0.36)',
   };
   const headStyle: CSSProperties = {
@@ -79,14 +79,14 @@ export function DiffOverlay({
     gap: 10,
     padding: '12px 16px 10px',
     borderBottom: `1px solid ${colors.border}`,
-    background: 'rgba(28,28,30,0.92)',
+    background: colors.frostBg,
   };
   const handleStyle: CSSProperties = {
     width: 40,
     height: 5,
     margin: '0 auto',
     borderRadius: 999,
-    background: 'rgba(255,255,255,0.14)',
+    background: 'rgba(255,248,240,0.14)',
   };
   const titleRowStyle: CSSProperties = {
     display: 'flex',
@@ -115,7 +115,7 @@ export function DiffOverlay({
     padding: 0,
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(44,44,46,0.9)',
+    background: colors.elevatedSurface,
     color: colors.text,
     cursor: 'pointer',
   };
@@ -144,7 +144,7 @@ export function DiffOverlay({
     padding: '0 10px',
     borderRadius: 999,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(44,44,46,0.9)',
+    background: colors.elevatedSurface,
     color: colors.textSecondary,
     fontSize: 12,
     fontWeight: 600,
@@ -159,7 +159,7 @@ export function DiffOverlay({
     padding: '0 10px',
     borderRadius: 999,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(44,44,46,0.9)',
+    background: colors.elevatedSurface,
     color: colors.text,
     fontSize: 12,
     fontWeight: 600,
@@ -180,7 +180,7 @@ export function DiffOverlay({
     padding: '0 12px',
     borderRadius: 999,
     border: `1px solid ${active ? 'rgba(10,132,255,0.24)' : colors.border}`,
-    background: active ? 'rgba(10,132,255,0.16)' : 'rgba(44,44,46,0.9)',
+    background: active ? 'rgba(10,132,255,0.16)' : colors.elevatedSurface,
     color: active ? colors.blueAccent : colors.textSecondary,
     fontSize: 12,
     fontWeight: 600,
@@ -214,7 +214,7 @@ export function DiffOverlay({
     padding: '14px 16px',
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(44,44,46,0.9)',
+    background: colors.elevatedSurface,
   };
   const metaCopyStyle: CSSProperties = {
     minWidth: 0,
@@ -245,7 +245,7 @@ export function DiffOverlay({
     padding: '12px 14px',
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(44,44,46,0.9)',
+    background: colors.elevatedSurface,
   };
   const commitSummaryStyle: CSSProperties = {
     color: colors.text,
@@ -311,7 +311,7 @@ export function DiffOverlay({
     padding: '18px 16px',
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(44,44,46,0.9)',
+    background: colors.elevatedSurface,
     color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 1.5,

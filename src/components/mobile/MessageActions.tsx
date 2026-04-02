@@ -9,6 +9,7 @@
 
 import { memo, useCallback, useEffect, useState } from 'react';
 import { ttsEngine, type PlaybackState } from '@/lib/tts/engine';
+import { useTheme } from './ThemeContext';
 
 interface MessageActionsProps {
   messageId: string;
@@ -23,6 +24,7 @@ export const MessageActions = memo(function MessageActions({
   visible,
   onRetry,
 }: MessageActionsProps) {
+  const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
   const [ttsState, setTtsState] = useState<PlaybackState>('idle');
   const [isThisMessage, setIsThisMessage] = useState(false);
@@ -85,7 +87,7 @@ export const MessageActions = memo(function MessageActions({
     borderRadius: 7,
     border: 'none',
     background: 'transparent',
-    color: '#8e8e93',
+    color: colors.textSecondary,
     cursor: 'pointer',
     padding: 0,
     WebkitTapHighlightColor: 'transparent',
@@ -111,7 +113,7 @@ export const MessageActions = memo(function MessageActions({
         onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handlePlay(); }}
         style={{
           ...btnStyle,
-          color: playActive ? '#007aff' : '#8e8e93',
+          color: playActive ? colors.blueAccent : colors.textSecondary,
           touchAction: 'manipulation',
         }}>
         {playIcon}
@@ -131,7 +133,7 @@ export const MessageActions = memo(function MessageActions({
         onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); void handleCopy(); }}
         style={{
           ...btnStyle,
-          color: copied ? '#30d158' : '#8e8e93',
+          color: copied ? colors.green : colors.textSecondary,
           touchAction: 'manipulation',
         }}>
         {copyIcon}

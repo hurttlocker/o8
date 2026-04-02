@@ -59,16 +59,16 @@ function useChatPalette() {
     background: colors.bg,
     userBubble: colors.blueAccent,
     userText: '#FFFFFF',
-    assistantBubble: 'rgba(44,44,46,0.9)',
+    assistantBubble: colors.elevatedSurface,
     assistantText: colors.text,
     secondaryText: colors.textSecondary,
     tertiaryText: colors.textTertiary,
-    toolRowBg: 'rgba(28,28,30,0.6)',
-    toolRowBorder: 'rgba(255,255,255,0.08)',
-    codeBlockBg: 'rgba(28,28,30,1.0)',
-    codeInlineBg: 'rgba(255,255,255,0.10)',
+    toolRowBg: 'rgba(30,28,26,0.6)',
+    toolRowBorder: colors.surfaceBorder,
+    codeBlockBg: 'rgba(30,28,26,1)',
+    codeInlineBg: 'rgba(255,248,240,0.10)',
     mutedBorder: colors.border,
-    mutedSurface: 'rgba(28,28,30,0.82)',
+    mutedSurface: colors.surface,
     elevatedShadow: '0 18px 38px rgba(0, 0, 0, 0.34)',
     green: colors.green,
     red: colors.red,
@@ -317,11 +317,11 @@ function richTextStyleFor(
         padding: '10px 12px',
         color: bodyColor,
         fontSize: 13,
-        borderBottom: `1px solid rgba(255,255,255,0.06)`,
+        borderBottom: `1px solid ${palette.toolRowBorder}`,
       };
     case 'tr':
       return {
-        background: existingStyle.backgroundColor ? 'rgba(255,255,255,0.02)' : undefined,
+        background: existingStyle.backgroundColor ? 'rgba(255,248,240,0.02)' : undefined,
       };
     default:
       return {};
@@ -667,7 +667,7 @@ const MessageBubble = memo(function MessageBubble({
           gap: 8,
           padding: '8px 12px',
           borderRadius: 999,
-          background: 'rgba(28,28,30,0.72)',
+          background: 'rgba(30,28,26,0.72)',
           color: palette.secondaryText,
           fontSize: 12,
           fontWeight: 600,
@@ -1401,9 +1401,9 @@ export function ChatView({
         ) : transcriptLoading ? (
           <div style={{ display: 'grid', gap: 16, paddingTop: 8 }}>
             {[
-              { width: '75%', alignSelf: 'flex-start', background: 'linear-gradient(90deg, rgba(44,44,46,0.9) 25%, rgba(58,58,60,0.9) 50%, rgba(44,44,46,0.9) 75%)', height: 52 },
+              { width: '75%', alignSelf: 'flex-start', background: 'linear-gradient(90deg, rgba(46,42,38,0.9) 25%, rgba(62,56,50,0.9) 50%, rgba(46,42,38,0.9) 75%)', height: 52 },
               { width: '55%', alignSelf: 'flex-end', background: 'linear-gradient(90deg, rgba(10,132,255,0.7) 25%, rgba(42,152,255,0.85) 50%, rgba(10,132,255,0.7) 75%)', height: 52 },
-              { width: '85%', alignSelf: 'flex-start', background: 'linear-gradient(90deg, rgba(44,44,46,0.9) 25%, rgba(58,58,60,0.9) 50%, rgba(44,44,46,0.9) 75%)', height: 84 },
+              { width: '85%', alignSelf: 'flex-start', background: 'linear-gradient(90deg, rgba(46,42,38,0.9) 25%, rgba(62,56,50,0.9) 50%, rgba(46,42,38,0.9) 75%)', height: 84 },
               { width: '40%', alignSelf: 'flex-end', background: 'linear-gradient(90deg, rgba(10,132,255,0.7) 25%, rgba(42,152,255,0.85) 50%, rgba(10,132,255,0.7) 75%)', height: 40 },
             ].map((bubble, index) => (
               <div
@@ -1498,7 +1498,7 @@ export function ChatView({
                 marginTop: 8,
                 padding: '14px 16px',
                 borderRadius: 14,
-                background: 'rgba(28,28,30,0.86)',
+                background: 'rgba(30,28,26,0.86)',
                 border: '1px solid rgba(255,149,0,0.18)',
                 display: 'flex',
                 flexDirection: 'column',
@@ -1554,7 +1554,7 @@ export function ChatView({
                 style={{
                   padding: '10px 14px',
                   borderRadius: 14,
-                  background: 'rgba(28,28,30,0.82)',
+                  background: 'rgba(30,28,26,0.82)',
                   color: palette.secondaryText,
                   fontSize: 13,
                   fontWeight: 600,
@@ -1591,7 +1591,7 @@ export function ChatView({
             height: 36,
             borderRadius: 999,
             border: `1px solid ${palette.toolRowBorder}`,
-            background: 'rgba(28,28,30,0.92)',
+            background: 'rgba(30,28,26,0.92)',
             color: palette.assistantText,
             fontSize: 14,
             fontWeight: 600,

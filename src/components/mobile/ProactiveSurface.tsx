@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useRef, memo, useCallback } from 'react';
 import type { AgentSummary } from '@/lib/fleet/types';
+import { useTheme } from './ThemeContext';
 
 export interface ProactiveItem {
   id: string;
@@ -34,6 +35,7 @@ interface ProactiveSurfaceProps {
 const ProactiveCard = memo(function ProactiveCard({
   item, onDismiss,
 }: { item: ProactiveItem; onDismiss: () => void }) {
+  const { colors } = useTheme();
   const [exiting, setExiting] = useState(false);
 
   const handleDismiss = useCallback(() => {
@@ -66,14 +68,14 @@ const ProactiveCard = memo(function ProactiveCard({
       {/* Content */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
-          fontSize: 13, fontWeight: 600, color: '#0a0a0a',
+          fontSize: 13, fontWeight: 600, color: colors.text,
           fontFamily: '-apple-system, system-ui, sans-serif',
           lineHeight: 1.3,
         }}>
           {item.title}
         </div>
         {item.subtitle ? (
-          <div style={{ fontSize: 11, color: '#8e8e93', marginTop: 1, lineHeight: 1.3 }}>
+          <div style={{ fontSize: 11, color: colors.textSecondary, marginTop: 1, lineHeight: 1.3 }}>
             {item.subtitle}
           </div>
         ) : null}
@@ -103,14 +105,14 @@ const ProactiveCard = memo(function ProactiveCard({
         onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleDismiss(); }}
         style={{
           width: 20, height: 20, borderRadius: '50%',
-          background: 'rgba(0,0,0,0.03)', border: 'none',
+          background: colors.surfaceBorder, border: 'none',
           cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0, padding: 0,
           WebkitTapHighlightColor: 'transparent',
           touchAction: 'manipulation',
         }}>
         <svg width="8" height="8" viewBox="0 0 24 24" fill="none"
-          stroke="#c7c7cc" strokeWidth="3" strokeLinecap="round">
+          stroke={colors.textTertiary} strokeWidth="3" strokeLinecap="round">
           <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>

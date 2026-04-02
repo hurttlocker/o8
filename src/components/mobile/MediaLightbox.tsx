@@ -29,7 +29,7 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
     padding: 16,
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(28,28,30,0.82)',
+    background: colors.surface,
     boxShadow: '0 20px 44px rgba(0,0,0,0.34)',
   } as const;
   const headerStyle = {
@@ -48,7 +48,7 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
     padding: 0,
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(44,44,46,0.9)',
+    background: colors.elevatedSurface,
     color: colors.text,
     cursor: 'pointer',
     WebkitTapHighlightColor: 'transparent',
@@ -60,7 +60,7 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
     minHeight: 200,
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(44,44,46,0.9)',
+    background: colors.elevatedSurface,
     overflow: 'hidden',
   } as const;
   const fileStyle = {
@@ -85,7 +85,7 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
     padding: '0 14px',
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(44,44,46,0.9)',
+    background: colors.elevatedSurface,
     color: colors.text,
     fontSize: 14,
     fontWeight: 600,

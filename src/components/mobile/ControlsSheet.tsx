@@ -64,7 +64,7 @@ export function ControlsSheet({
     overflowY: 'auto',
     borderRadius: 14,
     border: `1px solid ${colors.border}`,
-    background: 'rgba(28,28,30,0.82)',
+    background: colors.surface,
     boxShadow: '0 24px 48px rgba(0,0,0,0.34)',
   };
   const headStyle: CSSProperties = {
@@ -74,7 +74,7 @@ export function ControlsSheet({
     gap: 10,
     padding: '12px 16px 10px',
     borderBottom: `1px solid ${colors.border}`,
-    background: 'rgba(28,28,30,0.92)',
+    background: colors.frostBg,
     zIndex: 1,
   };
   const handleStyle: CSSProperties = {
@@ -128,7 +128,7 @@ export function ControlsSheet({
     padding: '0 16px',
     borderRadius: 14,
     border: `1px solid ${danger ? 'rgba(255,69,58,0.18)' : colors.border}`,
-    background: danger ? 'rgba(255,69,58,0.10)' : 'rgba(44,44,46,0.9)',
+    background: danger ? 'rgba(255,69,58,0.10)' : colors.elevatedSurface,
     color: danger ? colors.red : colors.text,
     textDecoration: 'none',
     textAlign: 'left',
@@ -191,7 +191,7 @@ export function ControlsSheet({
     padding: '12px 14px',
     borderRadius: 14,
     border: `1px solid ${active ? 'rgba(10,132,255,0.24)' : colors.border}`,
-    background: active ? 'rgba(10,132,255,0.16)' : 'rgba(44,44,46,0.9)',
+    background: active ? 'rgba(10,132,255,0.16)' : colors.elevatedSurface,
     color: colors.text,
     textAlign: 'left',
     cursor: 'pointer',

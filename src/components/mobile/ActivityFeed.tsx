@@ -53,7 +53,7 @@ function renderInlineCodeText(text: string): ReactNode {
           font: FONTS.mono,
           fontFamily: '"SF Mono", Menlo, ui-monospace, monospace',
           fontSize: 12,
-          background: 'rgba(28,28,30,0.8)',
+          background: 'rgba(30,28,26,0.8)',
           padding: '2px 6px',
           borderRadius: 4,
         }}

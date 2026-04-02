@@ -9,6 +9,7 @@
 
 import { memo } from 'react';
 import type { WorktreeInfo } from '@/lib/worktree/types';
+import { useTheme } from './ThemeContext';
 
 interface WorktreeBadgeProps {
   worktree: WorktreeInfo;
@@ -16,16 +17,17 @@ interface WorktreeBadgeProps {
 }
 
 export const WorktreeBadge = memo(function WorktreeBadge({ worktree, hasConflict }: WorktreeBadgeProps) {
+  const { colors } = useTheme();
   const branchShort = worktree.branch
     .replace(/^worktree\/[^/]+\//, '')
     .slice(0, 24);
 
   const fileCount = worktree.dirtyFiles.length;
   const statusColor = worktree.status === 'active'
-    ? '#34c759'
+    ? colors.green
     : worktree.status === 'stale'
-      ? '#8e8e93'
-      : '#007aff';
+      ? colors.textSecondary
+      : colors.blueAccent;
 
   return (
     <div
@@ -37,16 +39,16 @@ export const WorktreeBadge = memo(function WorktreeBadge({ worktree, hasConflict
         fontSize: '10px',
         letterSpacing: '-0.01em',
         lineHeight: 1,
-        color: '#8e8e93',
+        color: colors.textSecondary,
       }}
     >
       {/* Git branch icon (inline SVG for zero deps) */}
       <svg width="10" height="10" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-        <circle cx="5" cy="4" r="1.5" stroke="#8e8e93" strokeWidth="1.5" fill="none" />
-        <circle cx="5" cy="12" r="1.5" stroke="#8e8e93" strokeWidth="1.5" fill="none" />
+        <circle cx="5" cy="4" r="1.5" stroke={colors.textSecondary} strokeWidth="1.5" fill="none" />
+        <circle cx="5" cy="12" r="1.5" stroke={colors.textSecondary} strokeWidth="1.5" fill="none" />
         <circle cx="11" cy="6" r="1.5" stroke={statusColor} strokeWidth="1.5" fill="none" />
-        <line x1="5" y1="5.5" x2="5" y2="10.5" stroke="#8e8e93" strokeWidth="1.5" />
-        <path d="M5 7.5 C5 7.5 7 6 11 6" stroke="#8e8e93" strokeWidth="1.5" fill="none" />
+        <line x1="5" y1="5.5" x2="5" y2="10.5" stroke={colors.textSecondary} strokeWidth="1.5" />
+        <path d="M5 7.5 C5 7.5 7 6 11 6" stroke={colors.textSecondary} strokeWidth="1.5" fill="none" />
       </svg>
 
       <span style={{ color: '#b0b0b0', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

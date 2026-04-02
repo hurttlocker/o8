@@ -117,7 +117,7 @@ export const ConflictSheet = memo(function ConflictSheet({
           <p
             style={{
               fontSize: '13px',
-              color: '#8e8e93',
+              color: '#A09890',
               margin: '4px 0 0',
             }}
           >
@@ -133,7 +133,7 @@ export const ConflictSheet = memo(function ConflictSheet({
               style={{
                 fontSize: '13px',
                 fontWeight: 600,
-                color: '#8e8e93',
+                color: '#A09890',
                 textTransform: 'uppercase',
                 letterSpacing: '0.04em',
                 margin: '0 0 8px',
@@ -180,7 +180,7 @@ export const ConflictSheet = memo(function ConflictSheet({
               style={{
                 fontSize: '13px',
                 fontWeight: 600,
-                color: '#8e8e93',
+                color: '#A09890',
                 textTransform: 'uppercase',
                 letterSpacing: '0.04em',
                 margin: '0 0 8px',
@@ -207,7 +207,7 @@ export const ConflictSheet = memo(function ConflictSheet({
             width: '100%',
             padding: '14px',
             borderRadius: '12px',
-            backgroundColor: 'rgba(255,255,255,0.08)',
+            backgroundColor: 'rgba(255,248,240,0.07)',
             border: 'none',
             color: '#e5e5ea',
             fontSize: '15px',
@@ -274,23 +274,23 @@ const FileConflictRow = memo(function FileConflictRow({
       </div>
 
       {dirPath ? (
-        <div style={{ fontSize: '11px', color: '#636366', marginBottom: '4px', marginLeft: '12px' }}>
+        <div style={{ fontSize: '11px', color: '#706860', marginBottom: '4px', marginLeft: '12px' }}>
           {dirPath}
         </div>
       ) : null}
 
       {/* Worktree names */}
-      <div style={{ fontSize: '11px', color: '#8e8e93', marginLeft: '12px' }}>
+      <div style={{ fontSize: '11px', color: '#A09890', marginLeft: '12px' }}>
         {conflict.worktreeA} ↔ {conflict.worktreeB}
       </div>
 
       {/* Line ranges (if available from deep analysis) */}
       {conflict.rangesA && conflict.rangesB ? (
         <div style={{ marginTop: '6px', marginLeft: '12px', fontSize: '11px' }}>
-          <div style={{ color: '#8e8e93' }}>
+          <div style={{ color: '#A09890' }}>
             {conflict.worktreeA}: lines {formatRanges(conflict.rangesA)}
           </div>
-          <div style={{ color: '#8e8e93' }}>
+          <div style={{ color: '#A09890' }}>
             {conflict.worktreeB}: lines {formatRanges(conflict.rangesB)}
           </div>
           {conflict.overlappingRanges && conflict.overlappingRanges.length > 0 ? (
@@ -315,7 +315,7 @@ const MergeOrderRow = memo(function MergeOrderRow({
   recommendation: MergeOrderRecommendation;
   onMergeFirst: () => void;
 }) {
-  const color = AGENT_COLORS[recommendation.agentType] ?? '#8e8e93';
+  const color = AGENT_COLORS[recommendation.agentType] ?? '#A09890';
 
   return (
     <div
@@ -363,11 +363,11 @@ const MergeOrderRow = memo(function MergeOrderRow({
           <span style={{ fontSize: '13px', fontWeight: 600, color: '#e5e5ea' }}>
             {recommendation.worktreeId}
           </span>
-          <span style={{ fontSize: '11px', color: '#8e8e93' }}>
+          <span style={{ fontSize: '11px', color: '#A09890' }}>
             {recommendation.fileCount}f · {recommendation.totalChanges}Δ
           </span>
         </div>
-        <div style={{ fontSize: '11px', color: '#8e8e93', marginTop: '2px' }}>
+        <div style={{ fontSize: '11px', color: '#A09890', marginTop: '2px' }}>
           {recommendation.reason}
         </div>
       </div>

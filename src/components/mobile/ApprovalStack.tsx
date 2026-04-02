@@ -61,6 +61,8 @@ function formatTimeAgo(timestamp: number, now: number) {
 }
 
 function CountBadge({ count }: { count: number }) {
+  const { colors } = useTheme();
+
   return (
     <span
       style={{
@@ -71,8 +73,8 @@ function CountBadge({ count }: { count: number }) {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(255,255,255,0.08)',
-        color: '#F5F5F7',
+        background: colors.surfaceBorder,
+        color: colors.text,
         fontSize: 12,
         fontWeight: 600,
         lineHeight: 1,
@@ -206,7 +208,7 @@ function ApprovalCard({
             display: 'grid',
             gap: 8,
             paddingTop: 12,
-            borderTop: '1px solid rgba(255,255,255,0.06)',
+            borderTop: `1px solid ${cardBorder}`,
           }}
         >
           {Object.entries(approval.metadata).map(([key, value]) => (
@@ -302,7 +304,7 @@ export function ApprovalStack({
   onApprove,
   onReject,
 }: ApprovalStackProps) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [now, setNow] = useState(() => Date.now());
   const [resolvedExpanded, setResolvedExpanded] = useState(false);
   const [resolvedArchive, setResolvedArchive] = useState<Record<string, ResolvedApprovalEntry>>({});
@@ -379,16 +381,16 @@ export function ApprovalStack({
     return null;
   }
 
-  const backgroundColor = isDark ? colors.bg : '#000000';
-  const cardBackground = isDark ? colors.cardBg : 'rgba(28,28,30,0.82)';
-  const cardBorder = isDark ? colors.cardBorder : 'rgba(255,255,255,0.08)';
-  const titleColor = isDark ? colors.text : '#F5F5F7';
-  const secondaryTextColor = isDark ? '#8E8E93' : colors.textSecondary;
-  const descriptionColor = isDark ? 'rgba(245,245,247,0.78)' : colors.text;
-  const metadataLabelColor = isDark ? 'rgba(142,142,147,0.95)' : colors.textSecondary;
-  const metadataValueColor = isDark ? 'rgba(245,245,247,0.9)' : titleColor;
+  const backgroundColor = colors.bg;
+  const cardBackground = colors.cardBg;
+  const cardBorder = colors.cardBorder;
+  const titleColor = colors.text;
+  const secondaryTextColor = colors.textSecondary;
+  const descriptionColor = colors.text;
+  const metadataLabelColor = colors.textSecondary;
+  const metadataValueColor = colors.text;
   const headerLabelStyle: CSSProperties = {
-    color: '#8E8E93',
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: 600,
     textTransform: 'uppercase',

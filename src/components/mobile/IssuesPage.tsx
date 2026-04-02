@@ -92,7 +92,7 @@ function repoShort(repo: string): string {
 }
 
 function checksRollup(checks: { status: string; conclusion: string }[]): { color: string; label: string } {
-  if (!checks || checks.length === 0) return { color: '#8e8e93', label: 'No CI' };
+  if (!checks || checks.length === 0) return { color: '#A09890', label: 'No CI' };
   const failed = checks.some((check) => check.conclusion === 'FAILURE');
   const pending = checks.some((check) => check.status !== 'COMPLETED');
   if (failed) return { color: '#ff453a', label: 'CI Failed' };
@@ -655,7 +655,7 @@ export default function IssuesPage({ onBack, onOpenPR }: IssuesPageProps) {
                   height: 18,
                   borderRadius: 999,
                   padding: '0 5px',
-                  background: active ? colors.blueAccent : 'rgba(255,255,255,0.08)',
+                  background: active ? colors.blueAccent : colors.surfaceBorder,
                   color: active ? colors.text : colors.textSecondary,
                   fontSize: 10,
                   fontWeight: 700,

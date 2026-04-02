@@ -45,10 +45,10 @@ export interface GroupedSessionListRowProps {
 }
 
 export const MOBILE_SESSION_LIST_COLORS = {
-  background: '#000000',
-  primary: '#F5F5F7',
-  secondary: '#8E8E93',
-  separator: 'rgba(255,255,255,0.06)',
+  background: '#0A0A0A',
+  primary: '#FAF5F0',
+  secondary: '#A09890',
+  separator: 'rgba(255,248,240,0.06)',
 } as const;
 
 const SESSION_GROUP_ORDER: Array<{ id: SessionGroupId; label: string }> = [
