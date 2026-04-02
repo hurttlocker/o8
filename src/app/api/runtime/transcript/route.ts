@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRuntime } from '@/lib/runtimes';
+import '@/lib/runtimes'; // Ensure runtimes are registered
+import { getRuntime } from '@/lib/runtimes/registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
