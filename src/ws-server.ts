@@ -2871,7 +2871,7 @@ async function bootstrapWsServer() {
       },
       async onAgentCompletion(surfaceId, outcome) {
         try {
-          const { findLaneBySession, setLaneStatus } = await import('@/lib/lane/registry');
+          const { findLaneBySession, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
           const lane = findLaneBySession(surfaceId);
           if (!lane) {
             return;
@@ -2881,47 +2881,185 @@ async function bootstrapWsServer() {
             const completionCwd = lane.worktreePath ?? lane.repoPath;
             const {
               autoCommitCompletionWorktree,
-              buildTypecheckFailureSteerMessage,
               runCompletionTypecheck,
             } = await import('@/lib/supervisor/completion-verification');
             const typecheck = await runCompletionTypecheck(completionCwd);
 
             if (!typecheck.ok) {
               console.warn(`[supervisor] Agent ${surfaceId} failed post-completion typecheck in ${completionCwd}`);
-              try {
-                await supervisorCallbacks.steerAgent(
-                  surfaceId,
-                  buildTypecheckFailureSteerMessage(typecheck.output),
-                );
-                setLaneStatus(lane.id, 'running', 'system', 'post_completion_typecheck_failed');
-                console.log(`[supervisor] Agent ${surfaceId} resumed after post-completion typecheck failure`);
-                return {
-                  resume: true,
-                  detail: 'Post-completion typecheck failed — agent resumed with the compiler output.',
-                };
-              } catch (steerError) {
-                setLaneStatus(lane.id, 'awaiting_input', 'system', 'post_completion_typecheck_steer_failed');
+              const packetId = lane.packetId?.trim();
+              if (!packetId) {
+                setLaneStatus(lane.id, 'awaiting_input', 'system', 'post_completion_typecheck_packet_missing');
                 queueOrchestratorEscalation(
                   lane.repoPath,
                   [
-                    `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion typecheck and could not be steered automatically.`,
+                    `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion typecheck, but lane ${lane.id} is no longer bound to a packet.`,
                     '',
-                    `Lane ${lane.id} needs operator attention before review.`,
+                    'Cannot enter the bounded retry flow without a packet binding.',
                     '',
                     'Typecheck output:',
                     '```',
                     typecheck.output,
                     '```',
                     '',
-                    `Steer failure: ${steerError instanceof Error ? steerError.message : String(steerError)}`,
-                    '',
-                    'Decide: resume the agent manually with the compiler errors, or inspect the worktree and request changes.',
+                    'Decide: inspect the lane/worktree manually and either re-queue the packet or request changes.',
                   ].join('\n'),
                 );
-                console.error('[supervisor] Completion typecheck steer failed:', steerError);
                 return {
                   block: true,
-                  detail: 'Post-completion typecheck failed and the automatic steer also failed. Operator input is required.',
+                  detail: 'Post-completion typecheck failed, but the lane is not bound to a packet. Operator input is required.',
+                };
+              }
+
+              try {
+                const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+                const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+                const {
+                  buildAttemptLearningFromFailure,
+                  persistAttemptLearnings,
+                  readAttemptLearnings,
+                } = await import('@/lib/orchestrator/attempt-log');
+
+                const { result: packetSnapshot } = await withLockedState((state) => {
+                  const packet = state.packets.find((candidate) => candidate.id === packetId);
+                  if (!packet) {
+                    return null;
+                  }
+
+                  return {
+                    attemptCount: packet.attemptCount ?? 0,
+                    maxAttempts: packet.maxAttempts ?? 3,
+                    referenceLabel: packet.referenceLabel,
+                    title: packet.title,
+                  };
+                });
+
+                if (!packetSnapshot) {
+                  setLaneStatus(lane.id, 'awaiting_input', 'system', 'post_completion_typecheck_packet_not_found');
+                  queueOrchestratorEscalation(
+                    lane.repoPath,
+                    [
+                      `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion typecheck, but packet ${packetId} was not found in mission state.`,
+                      '',
+                      'Cannot enter the bounded retry flow because the packet metadata is missing.',
+                      '',
+                      'Typecheck output:',
+                      '```',
+                      typecheck.output,
+                      '```',
+                      '',
+                      'Decide: inspect the mission state, re-bind/reset the packet if needed, and then relaunch or request changes.',
+                    ].join('\n'),
+                  );
+                  return {
+                    block: true,
+                    detail: 'Post-completion typecheck failed, but the packet could not be found in mission state. Operator input is required.',
+                  };
+                }
+
+                const currentAttempt = packetSnapshot.attemptCount;
+                const maxAttempts = Math.max(1, packetSnapshot.maxAttempts);
+                const attemptNumber = currentAttempt + 1;
+
+                if (currentAttempt < maxAttempts - 1) {
+                  const completionContext = await capturePacketCompletionContext(packetId, surfaceId);
+                  await persistAttemptLearnings(
+                    completionCwd,
+                    packetId,
+                    attemptNumber,
+                    buildAttemptLearningFromFailure(typecheck.output, completionContext.selfReview),
+                  );
+                  await autoCommitCompletionWorktree(completionCwd);
+                  updateLane(
+                    lane.id,
+                    {
+                      packetId: '',
+                      lastEventAt: new Date().toISOString(),
+                      lastEventLabel: 'ralph_retry_requeued',
+                    },
+                    'system',
+                  );
+                  await withLockedState((state) => {
+                    const packet = state.packets.find((candidate) => candidate.id === packetId);
+                    if (!packet) {
+                      throw new Error(`Packet ${packetId} disappeared before bounded retry requeue.`);
+                    }
+
+                    const now = new Date().toISOString();
+                    packet.attemptCount = attemptNumber;
+                    packet.queueState = 'queued';
+                    packet.status = 'queued';
+                    packet.blockedReason = null;
+                    packet.lastEventAt = now;
+                    packet.lastEventLabel = 'ralph_retry_requeued';
+                    packet.lane = null;
+                  });
+                  console.warn(`[ralph-loop] Attempt ${attemptNumber}/${maxAttempts} failed for packet ${packetId}, re-queuing with learnings`);
+                  void runHeadlessSprintTick().catch((error) => {
+                    console.error(`[ralph-loop] Failed to trigger headless retry dispatch for packet ${packetId}:`, error);
+                  });
+                  return;
+                }
+
+                const currentLearning = buildAttemptLearningFromFailure(typecheck.output);
+                const priorLearnings = await readAttemptLearnings(completionCwd);
+                const learningSummary = [
+                  ...priorLearnings.map((learning) => `- Attempt ${learning.attempt}: ${learning.summary}`),
+                  `- Attempt ${attemptNumber}: ${currentLearning.summary}`,
+                ].join('\n') || '- No attempt learnings recorded.';
+
+                setLaneStatus(lane.id, 'awaiting_input', 'system', 'ralph_retry_exhausted');
+                queueOrchestratorEscalation(
+                  lane.repoPath,
+                  [
+                    `[SUPERVISOR] Packet ${packetSnapshot.referenceLabel} (${packetId}) exhausted bounded retries after failing post-completion typecheck.`,
+                    '',
+                    `Lane: ${lane.id}`,
+                    `Agent: ${surfaceId}`,
+                    `Packet: ${packetSnapshot.title}`,
+                    `Attempts: ${attemptNumber}/${maxAttempts}`,
+                    '',
+                    'Learnings summary:',
+                    learningSummary,
+                    '',
+                    'Typecheck output:',
+                    '```',
+                    typecheck.output,
+                    '```',
+                    '',
+                    'Decide: inspect the worktree, apply the fix manually or reset/re-queue the packet with a new approach.',
+                  ].join('\n'),
+                );
+                console.warn(`[ralph-loop] Max attempts (${maxAttempts}) exhausted for packet ${packetId}, escalating to operator`);
+                return {
+                  block: true,
+                  detail: `Post-completion typecheck failed after ${attemptNumber}/${maxAttempts} attempts. Operator input is required.`,
+                };
+              } catch (retryError) {
+                updateLane(lane.id, { packetId }, 'system');
+                setLaneStatus(lane.id, 'awaiting_input', 'system', 'ralph_retry_failed');
+                queueOrchestratorEscalation(
+                  lane.repoPath,
+                  [
+                    `[SUPERVISOR] Packet ${packetId} failed post-completion typecheck, and the bounded retry handoff failed.`,
+                    '',
+                    `Lane: ${lane.id}`,
+                    `Agent: ${surfaceId}`,
+                    '',
+                    `Retry handoff failure: ${retryError instanceof Error ? retryError.message : String(retryError)}`,
+                    '',
+                    'Typecheck output:',
+                    '```',
+                    typecheck.output,
+                    '```',
+                    '',
+                    'Decide: inspect the worktree and either repair/re-queue the packet manually or request changes.',
+                  ].join('\n'),
+                );
+                console.error('[ralph-loop] Failed to process bounded retry handoff:', retryError);
+                return {
+                  block: true,
+                  detail: 'Post-completion typecheck failed and the bounded retry handoff also failed. Operator input is required.',
                 };
               }
             }
