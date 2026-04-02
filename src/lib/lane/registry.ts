@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, isNotNull, ne, notInArray } from 'drizzle-orm';
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
-import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import type { LaneLifecycleEventPayload } from '@/lib/realtime/types';
+import { publishLaneLifecycleEvent } from './lifecycle';
 import type {
   Lane,
   LaneEvent,
@@ -12,6 +11,7 @@ import type {
   LaneRuntime,
   LaneStatus,
 } from './types';
+import { cleanupLaneWorktree } from './worktree-cleanup';
 
 type LaneRow = typeof lanes.$inferSelect;
 type LaneEventRow = typeof laneEvents.$inferSelect;
@@ -34,57 +34,6 @@ function getLaneDb() {
     throw new Error('[lane-registry] SQLite database is unavailable');
   }
   return db;
-}
-
-function generateLaneLifecycleMutationId(laneId: string) {
-  return `lane-lifecycle-${laneId}-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
-}
-
-function buildLaneLifecyclePayload(
-  lane: Pick<Lane, 'id' | 'packetId' | 'status' | 'sessionKey' | 'branch' | 'repoPath'>,
-  previousStatus: LaneStatus | null,
-  timestamp: string,
-): LaneLifecycleEventPayload {
-  return {
-    laneId: lane.id,
-    packetId: lane.packetId,
-    status: lane.status,
-    previousStatus,
-    sessionKey: lane.sessionKey,
-    branch: lane.branch,
-    repoPath: lane.repoPath,
-    timestamp,
-  };
-}
-
-function publishLaneLifecycleEvent(
-  lane: Pick<Lane, 'id' | 'packetId' | 'status' | 'sessionKey' | 'branch' | 'repoPath' | 'runtime' | 'label'>,
-  previousStatus: LaneStatus | null,
-  timestamp: string,
-) {
-  const payload = buildLaneLifecyclePayload(lane, previousStatus, timestamp);
-  console.log(`[lane-lifecycle] ${payload.laneId} ${previousStatus ?? 'new'} -> ${payload.status}`);
-  void publishRealtimeMutation({
-    mutation: {
-      mutationId: generateLaneLifecycleMutationId(payload.laneId),
-      source: 'server',
-      action: 'lane-lifecycle',
-      status: 'completed',
-      runtime: lane.runtime,
-      surfaceId: payload.sessionKey ?? undefined,
-      sessionKey: payload.sessionKey ?? undefined,
-      laneId: payload.laneId,
-      packetId: payload.packetId ?? undefined,
-      repoPath: payload.repoPath,
-      branch: payload.branch,
-      laneStatus: payload.status,
-      previousStatus: payload.previousStatus,
-      timestamp: payload.timestamp,
-      note: `${lane.label}: ${previousStatus ?? 'new'} -> ${payload.status}`,
-      createdAt: payload.timestamp,
-      settledAt: payload.timestamp,
-    },
-  });
 }
 
 function mapLaneRow(row: LaneRow | undefined): Lane | null {
@@ -601,22 +550,34 @@ export function reconcileLanesWithSessions(
 }
 
 export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lane | null {
-  return setLaneStatus(laneId, 'archived', actor, 'archived');
+  const lane = getLane(laneId);
+  if (!lane) {
+    return null;
+  }
+
+  const updated = updateLane(laneId, {
+    status: 'archived',
+    sessionKey: null,
+    worktreePath: null,
+    writerToken: null,
+    lastEventAt: nowIso(),
+    lastEventLabel: 'archived',
+  }, actor);
+
+  if (lane.worktreePath) {
+    void cleanupLaneWorktree(lane).catch((error) => {
+      console.error(`[lane-worktree] Cleanup failed for ${lane.id}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
+  return updated;
 }
 
 export function archiveCompletedLanes(): number {
   const completedLanes = listLanes().filter((lane) => lane.status === 'completed');
   for (const lane of completedLanes) {
-    const now = nowIso();
-    updateLaneRecord(lane.id, {
-      status: 'archived',
-      updatedAt: now,
-    });
+    archiveLane(lane.id, 'system');
     appendEvent(lane.id, 'auto_archive', 'system', {});
-    const updatedLane = getLane(lane.id);
-    if (updatedLane) {
-      publishLaneLifecycleEvent(updatedLane, lane.status, now);
-    }
   }
   return completedLanes.length;
 }
