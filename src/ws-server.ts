@@ -2928,6 +2928,21 @@ async function bootstrapWsServer() {
           }
         })();
       },
+      onAgentRetry(oldSurfaceId, newSurfaceId) {
+        // Update the lane's session binding so the new agent is tracked
+        void (async () => {
+          try {
+            const { findLaneBySession, attachSession } = await import('@/lib/lane/registry');
+            const lane = findLaneBySession(oldSurfaceId);
+            if (lane) {
+              attachSession(lane.id, newSurfaceId, 'system');
+              console.log(`[supervisor] Rebound lane ${lane.id} from ${oldSurfaceId.slice(-12)} to ${newSurfaceId.slice(-12)}`);
+            }
+          } catch (error) {
+            console.error('[supervisor] Failed to rebind lane on retry:', error);
+          }
+        })();
+      },
     };
     startSupervisorLoop(supervisorCallbacks);
     stopHeadlessLoop = startHeadlessSprintLoop(10_000);
