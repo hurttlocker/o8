@@ -5,8 +5,18 @@ import { useTheme } from './ThemeContext';
 
 const fontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
 
-// No overlay veil — scroll fade is handled by mask-image on the scroll container.
-// See mobile-remote-shell.tsx scrollContainerStyle.
+// Header backdrop: solid warm background from top of screen through header area.
+// Content scrolls behind this and disappears — like Anthropic's app.
+const headerBackdropStyle: CSSProperties = {
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  right: 0,
+  height: 'calc(env(safe-area-inset-top, 0px) + 64px)',
+  background: '#1A1816',
+  zIndex: 105,
+  pointerEvents: 'none',
+};
 
 function MoreIcon() {
   return (
@@ -158,7 +168,7 @@ export const TopBar = memo(function TopBar({
 
   return (
     <>
-      {/* scroll fade handled by mask-image on scroll container */}
+      <div style={headerBackdropStyle} aria-hidden="true" />
       <header style={headerStyle}>
         {isThreadView ? (
           <HeaderIconButton
