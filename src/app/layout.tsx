@@ -4,6 +4,15 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'o8',
   description: 'Mobile command surface for AI agent orchestration',
+  other: {
+    'theme-color': '#1A1816',
+    'apple-mobile-web-app-status-bar-style': 'black-translucent',
+  },
+  viewport: {
+    width: 'device-width',
+    initialScale: 1,
+    viewportFit: 'cover',
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
