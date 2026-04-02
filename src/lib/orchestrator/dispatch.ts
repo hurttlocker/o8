@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { dirname } from 'node:path';
 import { promisify } from 'node:util';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
+import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
@@ -111,6 +112,40 @@ function buildReviewLessonSections(
   }
 
   return sections;
+}
+
+function extractAttemptLearningErrors(typecheckOutput?: string): string[] {
+  if (!typecheckOutput?.trim()) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  return typecheckOutput
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => truncateText(line.trim(), 220, { normalizeWhitespace: true }))
+    .filter((line) => line.length > 0 && /error\b/i.test(line))
+    .filter((line) => {
+      if (seen.has(line)) {
+        return false;
+      }
+      seen.add(line);
+      return true;
+    })
+    .slice(0, 3);
+}
+
+function buildAttemptLearningSections(learnings: AttemptLearning[]): string[] {
+  return [...learnings]
+    .sort((left, right) => left.attempt - right.attempt)
+    .flatMap((learning) => {
+      const keyErrors = extractAttemptLearningErrors(learning.typecheckOutput);
+      return [
+        `Attempt ${learning.attempt}: ${truncateText(learning.summary, 500, { normalizeWhitespace: true })}`,
+        keyErrors.length > 0 ? `Key errors: ${truncateText(keyErrors.join(' | '), 1_000)}` : null,
+        learning.filesChanged.length > 0 ? `Files implicated: ${formatInlinePromptList(learning.filesChanged, 4)}` : null,
+      ].filter((value): value is string => Boolean(value));
+    });
 }
 
 function buildPacketScopeText(packet: OrchestratorPacket): string {
@@ -285,11 +320,18 @@ async function buildPacketPrompt(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
   baseBranch = 'main',
+  worktreePath?: string | null,
 ) {
   const dependencySections = await buildDependencyContextSections(packet, allPackets);
+  const priorAttemptLearningSections = packet.attemptCount && packet.attemptCount > 0 && worktreePath?.trim()
+    ? buildAttemptLearningSections(await readAttemptLearnings(worktreePath))
+    : [];
   const fileSizeSections = checkFileSizeThresholds(packet);
   if (dependencySections.length > 0) {
     console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
+  }
+  if (priorAttemptLearningSections.length > 0) {
+    console.log(`[dispatch] Injected prior attempt learnings for packet ${packet.id}`);
   }
   if (fileSizeSections.length > 0) {
     console.log(`[dispatch] Injected file size governance guidance for packet ${packet.id}`);
@@ -302,6 +344,8 @@ async function buildPacketPrompt(
     packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
     dependencySections.length > 0 ? 'Dependency handoff context:' : null,
     ...dependencySections,
+    priorAttemptLearningSections.length > 0 ? 'Prior attempt learnings:' : null,
+    ...priorAttemptLearningSections,
     ...fileSizeSections,
     'Files in this repository follow a 600-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     ...buildPacketSelfReviewInstructions(baseBranch),
@@ -429,7 +473,12 @@ async function dispatchPacket(
   const launchResult = await dispatchLaneCommand({
     verb: 'launch_session',
     laneId: laneResult.laneId,
-    prompt: await buildPacketPrompt(packet, allPackets, laneResult.lane?.baseBranch ?? 'main'),
+    prompt: await buildPacketPrompt(
+      packet,
+      allPackets,
+      laneResult.lane?.baseBranch ?? 'main',
+      laneResult.lane?.worktreePath ?? null,
+    ),
     actor: 'orchestrator',
   });
 
