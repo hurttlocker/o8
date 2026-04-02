@@ -523,8 +523,8 @@ function MobileRemoteShellInner({
     marginRight: 'auto',
     paddingTop: `calc(env(safe-area-inset-top, 0px) + ${viewportTopOffset}px + 74px)`,
     paddingBottom: 18,
-    WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 5rem, black 100%)',
-    maskImage: 'linear-gradient(to bottom, transparent, black 5rem, black 100%)',
+    WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 5rem, black calc(100% - 4rem), transparent)',
+    maskImage: 'linear-gradient(to bottom, transparent, black 5rem, black calc(100% - 4rem), transparent)',
   } as CSSProperties;
   const scrollViewStyle: CSSProperties = {
     display: 'grid',
