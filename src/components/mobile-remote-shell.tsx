@@ -506,7 +506,7 @@ function MobileRemoteShellInner({
     height: 'calc(env(safe-area-inset-bottom, 0px) + 140px)',
     background: 'linear-gradient(0deg, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 45%, rgba(0,0,0,0.85) 58%, rgba(0,0,0,0.5) 74%, rgba(0,0,0,0.15) 90%, rgba(0,0,0,0) 100%)',
     pointerEvents: 'none',
-    zIndex: 12,
+    zIndex: 88,
   };
   const fabWrapStyle: CSSProperties = {
     position: 'fixed',
@@ -517,7 +517,7 @@ function MobileRemoteShellInner({
     display: 'flex',
     justifyContent: 'flex-end',
     pointerEvents: 'none',
-    zIndex: 14,
+    zIndex: 92,
   };
   const fabButtonStyle: CSSProperties = {
     width: 56,
@@ -542,7 +542,7 @@ function MobileRemoteShellInner({
     position: 'fixed',
     left: '50%',
     bottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)',
-    zIndex: 13,
+    zIndex: 92,
     width: 'min(calc(100dvw - 24px), 394px)',
     display: 'grid',
     gap: '0.34rem',
