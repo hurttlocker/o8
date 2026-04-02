@@ -5,20 +5,7 @@ import { useTheme } from './ThemeContext';
 
 const fontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
 
-// Header backdrop: solid warm background from top of screen through header area.
-// Content scrolls behind this and disappears — like Anthropic's app.
-// Progressive fade behind header — text dissolves as it scrolls up.
-// Gradient from solid bg at top → transparent at bottom. NOT opaque.
-const headerBackdropStyle: CSSProperties = {
-  position: 'fixed',
-  top: 0,
-  left: 0,
-  right: 0,
-  height: 'calc(env(safe-area-inset-top, 0px) + 90px)',
-  background: 'linear-gradient(180deg, rgba(26,24,22,1) 0%, rgba(26,24,22,0.95) 40%, rgba(26,24,22,0.7) 65%, rgba(26,24,22,0.3) 85%, rgba(26,24,22,0) 100%)',
-  zIndex: 105,
-  pointerEvents: 'none',
-};
+// No backdrop, no fade, no overlay. Clean.
 
 function MoreIcon() {
   return (
@@ -170,7 +157,7 @@ export const TopBar = memo(function TopBar({
 
   return (
     <>
-      <div style={headerBackdropStyle} aria-hidden="true" />
+      {/* no backdrop overlay */}
       <header style={headerStyle}>
         {isThreadView ? (
           <HeaderIconButton
