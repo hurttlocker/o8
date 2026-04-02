@@ -1,5 +1,6 @@
+import { archiveCompletedLanes, listLanes } from '@/lib/lane/registry';
+import { pruneRepoWorktrees } from '@/lib/lane/worktree-cleanup';
 import {
-  readOrchestratorControlPlaneState,
   reconcileOrchestratorControlPlaneState,
   withLockedState,
   writeOrchestratorControlPlaneState,
@@ -11,6 +12,7 @@ import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 
 const DEFAULT_INTERVAL_MS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
+const PRUNE_INTERVAL_MS = 10 * 60_000;
 
 interface HeadlessSprintTickResult {
   launched: number;
@@ -24,6 +26,9 @@ let loopTimer: ReturnType<typeof setInterval> | null = null;
 let tickPromise: Promise<HeadlessSprintTickResult> | null = null;
 let rerunRequested = false;
 const queuedReleasePacketIds = new Set<string>();
+let lastPruneAt = 0;
+let prunePromise: Promise<void> | null = null;
+let lastCompletedMissionId = '';
 
 function queueReleasedPackets(packetIds?: string[]) {
   for (const packetId of packetIds ?? []) {
@@ -104,6 +109,48 @@ function countActivePackets(state: OrchestratorMissionState) {
   return state.packets.filter((packet) => packet.status === 'launching' || packet.status === 'running').length;
 }
 
+function collectPrunableRepoPaths(state: OrchestratorMissionState) {
+  return [...new Set([
+    state.repoPath?.trim() || '',
+    ...listLanes().map((lane) => lane.repoPath.trim()),
+  ].filter(Boolean))];
+}
+
+function isMissionComplete(state: OrchestratorMissionState) {
+  return state.packets.length > 0
+    && state.packets.every((packet) => packet.archivedAt || packet.releaseState === 'released');
+}
+
+async function pruneWorktreesIfDue(state: OrchestratorMissionState) {
+  if (prunePromise || Date.now() - lastPruneAt < PRUNE_INTERVAL_MS) {
+    return;
+  }
+
+  const repoPaths = collectPrunableRepoPaths(state);
+  if (repoPaths.length === 0) {
+    lastPruneAt = Date.now();
+    return;
+  }
+
+  prunePromise = (async () => {
+    for (const repoPath of repoPaths) {
+      try {
+        const pruned = await pruneRepoWorktrees(repoPath);
+        if (pruned.length > 0) {
+          console.log(`[headless] Pruned ${pruned.length} stale worktree${pruned.length === 1 ? '' : 's'} for ${repoPath}`);
+        }
+      } catch (error) {
+        console.error(`[headless] Worktree prune failed for ${repoPath}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  })().finally(() => {
+    lastPruneAt = Date.now();
+    prunePromise = null;
+  });
+
+  await prunePromise;
+}
+
 async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
   // #460 — Acquire the control-plane lock so concurrent API operations
   // (reset_packet, etc.) don't race our read-modify-write cycle.
@@ -126,6 +173,22 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
       mission,
     } satisfies HeadlessSprintTickResult;
   });
+
+  const archivedCompleted = archiveCompletedLanes();
+  if (archivedCompleted > 0) {
+    console.log(`[headless] Archived ${archivedCompleted} completed lane${archivedCompleted === 1 ? '' : 's'}`);
+  }
+  const missionId = result.mission.missionId || 'current';
+  if (isMissionComplete(result.mission)) {
+    if (lastCompletedMissionId !== missionId) {
+      lastCompletedMissionId = missionId;
+      lastPruneAt = 0;
+      console.log(`[headless] Mission ${missionId} reached terminal state`);
+    }
+  } else if (lastCompletedMissionId === missionId) {
+    lastCompletedMissionId = '';
+  }
+  await pruneWorktreesIfDue(result.mission);
 
   return result;
 }
