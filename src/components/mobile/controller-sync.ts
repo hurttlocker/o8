@@ -177,14 +177,23 @@ interface RefreshInboxArgs {
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;
   fresh?: boolean;
+  limit?: number;
 }
 
 export async function refreshInboxSnapshot({
   setSnapshot,
   setRefreshError,
   fresh = false,
+  limit,
 }: RefreshInboxArgs) {
-  const response = await fetch(`/api/mobile/inbox?${fresh ? 'fresh=1&' : ''}_t=${Date.now()}`, {
+  const params = new URLSearchParams({ _t: String(Date.now()) });
+  if (fresh) {
+    params.set('fresh', '1');
+  }
+  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) {
+    params.set('limit', String(limit));
+  }
+  const response = await fetch(`/api/mobile/inbox?${params.toString()}`, {
     cache: 'no-store',
     headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
   });
@@ -193,14 +202,20 @@ export async function refreshInboxSnapshot({
   }
 
   const nextSnapshot = await readJson<MobileInboxSnapshot>(response);
+  const limitedSnapshot = typeof limit === 'number' && Number.isFinite(limit) && limit > 0 && nextSnapshot.sessions.length > limit
+    ? {
+        ...nextSnapshot,
+        sessions: nextSnapshot.sessions.slice(0, limit),
+      }
+    : nextSnapshot;
   setSnapshot((prev) => {
-    if (sameMobileInboxSnapshot(prev, nextSnapshot)) {
+    if (sameMobileInboxSnapshot(prev, limitedSnapshot)) {
       return prev;
     }
-    return nextSnapshot;
+    return limitedSnapshot;
   });
   setRefreshError(null);
-  return nextSnapshot;
+  return limitedSnapshot;
 }
 
 interface LoadHistoryArgs {

@@ -100,6 +100,7 @@ export function useWebSocket({
   const [orchestratorNote, setOrchestratorNote] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(INITIAL_BACKOFF);
+  const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const disposedRef = useRef(false);
@@ -266,6 +267,7 @@ export function useWebSocket({
             setConnectionState('connected');
             setRefreshErrorRef.current(null);
             backoffRef.current = INITIAL_BACKOFF;
+            reconnectAttemptRef.current = 0;
           }
           break;
 
@@ -440,6 +442,8 @@ export function useWebSocket({
       ws.onopen = () => {
         if (disposedRef.current) { ws.close(); return; }
         wsRef.current = ws;
+        backoffRef.current = INITIAL_BACKOFF;
+        reconnectAttemptRef.current = 0;
         // Subscribe to current session
         if (sessionKeyRef.current) {
           ws.send(JSON.stringify({ type: 'subscribe', sessionKey: sessionKeyRef.current }));
@@ -488,12 +492,18 @@ export function useWebSocket({
           subscribedRepoPathRef.current = null;
           streamingTextRefRef.current.current = '';
           setStreamingTextRef.current('');
-          // Exponential backoff reconnect
+          const nextDelay = backoffRef.current;
+          const nextAttempt = reconnectAttemptRef.current + 1;
+          reconnectAttemptRef.current = nextAttempt;
+          console.info(`[ws-mobile] reconnect attempt ${nextAttempt} in ${nextDelay}ms`);
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+          }
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
             connect();
-          }, backoffRef.current);
-          backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF);
+          }, nextDelay);
+          backoffRef.current = Math.min(nextDelay * 2, MAX_BACKOFF);
         }
       };
 

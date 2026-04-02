@@ -17,6 +17,7 @@ import {
   createMission,
   dispatchMission,
   getMissionStatus,
+  resetPacket,
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -51,15 +52,69 @@ interface McpToolResult {
 // ── Config ──
 
 const API_BASE = process.env.O8_API_BASE || 'http://localhost:3001';
+const MAX_RETRIES = 3;
+const RETRY_DELAYS_MS = [500, 1500, 4000];
+const FETCH_TIMEOUT_MS = 15_000;
+
+// ── API Health ──
+
+let _apiHealthy = true;
+let _lastHealthCheck = 0;
+const HEALTH_CHECK_INTERVAL_MS = 10_000;
+
+async function checkApiHealth(): Promise<boolean> {
+  const now = Date.now();
+  if (now - _lastHealthCheck < HEALTH_CHECK_INTERVAL_MS) return _apiHealthy;
+  _lastHealthCheck = now;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${API_BASE}/api/panel/repos`, { signal: controller.signal });
+    clearTimeout(timer);
+    _apiHealthy = res.ok;
+  } catch {
+    _apiHealthy = false;
+  }
+  return _apiHealthy;
+}
 
 // ── Helpers ──
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function apiFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  });
-  return res.json();
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
+      console.error(`[o8-operator] API retry ${attempt}/${MAX_RETRIES} for ${path} in ${delay}ms`);
+      await sleep(delay);
+    }
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      const res = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', ...init?.headers },
+      });
+      clearTimeout(timer);
+      _apiHealthy = true;
+      return res.json();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      _apiHealthy = false;
+      if (lastError.name === 'AbortError') {
+        lastError = new Error(`Request to ${path} timed out after ${FETCH_TIMEOUT_MS}ms`);
+      }
+    }
+  }
+
+  throw new Error(`o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. Is the dev server running on ${API_BASE}?`);
 }
 
 function textResult(text: string, isError = false): McpToolResult {
@@ -389,6 +444,25 @@ const TOOLS: McpTool[] = [
       required: ['packetId'],
     },
   },
+  {
+    name: 'reset_packet',
+    description:
+      'Reset a stuck or failed packet back to queued/draft state so it can be re-dispatched. Archives the old lane.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'The packet ID to reset.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Optional reason for the reset (e.g., "worktree lost", "agent failed").',
+        },
+      },
+      required: ['packetId'],
+    },
+  },
 ];
 
 // ── Tool Handlers ──
@@ -639,6 +713,19 @@ async function handleApproveAndMerge(args: Record<string, unknown>): Promise<Mcp
   }
 }
 
+async function handleResetPacket(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const result = await resetPacket({
+      packetId: requiredString(args, 'packetId'),
+      reason: optionalString(args, 'reason') || undefined,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} reset_packet failed: ${errorText(error)}`);
+    return textResult(`Failed to reset packet: ${errorText(error)}`, true);
+  }
+}
+
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
   o8_send: handleSend,
   o8_status: handleStatus,
@@ -650,6 +737,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   get_mission_status: handleGetMissionStatus,
   submit_review: handleSubmitReview,
   approve_and_merge: handleApproveAndMerge,
+  reset_packet: handleResetPacket,
 };
 
 // ── JSON-RPC Server ──
@@ -665,7 +753,9 @@ async function handleMessage(msg: JsonRpcRequest): Promise<void> {
   if (id === undefined || id === null) return;
 
   switch (method) {
-    case 'initialize':
+    case 'initialize': {
+      // Fire-and-forget health check so first tool call has warm status
+      checkApiHealth().catch(() => {});
       send({
         jsonrpc: '2.0',
         id,
@@ -676,6 +766,7 @@ async function handleMessage(msg: JsonRpcRequest): Promise<void> {
         },
       });
       break;
+    }
 
     case 'tools/list':
       send({
@@ -710,6 +801,16 @@ async function handleMessage(msg: JsonRpcRequest): Promise<void> {
       });
   }
 }
+
+// ── Process Resilience ──
+// Prevent unhandled rejections from killing the MCP server process.
+// The server must survive dev server restarts, transient API failures, etc.
+process.on('uncaughtException', (err) => {
+  console.error(`[o8-operator] Uncaught exception (survived): ${err.message}`);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error(`[o8-operator] Unhandled rejection (survived): ${reason}`);
+});
 
 // ── Main Loop ──
 

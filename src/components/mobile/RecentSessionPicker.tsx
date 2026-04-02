@@ -1,6 +1,6 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { memo, type CSSProperties, type ReactNode } from 'react';
 import type { AgentDisplayName, CompactLine, SessionSummary } from './types';
 import { useTheme } from './ThemeContext';
 
@@ -32,9 +32,16 @@ interface GroupedSessionListProps {
   sessions: SessionSummary[];
   onSessionSelect: (sessionId: string) => void;
   renderSessionName: (session: SessionSummary) => string;
+  RowComponent?: (props: GroupedSessionListRowProps) => ReactNode;
   emptyMessage?: string;
   topPadding?: CSSProperties['paddingTop'];
   bottomPadding?: CSSProperties['paddingBottom'];
+}
+
+export interface GroupedSessionListRowProps {
+  session: SessionSummary;
+  onSessionSelect: (sessionId: string) => void;
+  renderSessionName: (session: SessionSummary) => string;
 }
 
 export const MOBILE_SESSION_LIST_COLORS = {
@@ -150,7 +157,14 @@ function ChevronRightIcon({ color }: { color: string }) {
   );
 }
 
-function SessionRow({
+export function areSessionListRowsEqual(prev: SessionSummary, next: SessionSummary) {
+  return prev.sessionKey === next.sessionKey
+    && prev.status === next.status
+    && prev.name === next.name
+    && (prev.lastActivityAt ?? null) === (next.lastActivityAt ?? null);
+}
+
+export function SessionRowButton({
   title,
   onClick,
 }: {
@@ -225,10 +239,24 @@ function SessionRow({
   );
 }
 
+const DefaultSessionRow = memo(function DefaultSessionRow({
+  session,
+  onSessionSelect,
+  renderSessionName,
+}: GroupedSessionListRowProps) {
+  return (
+    <SessionRowButton
+      title={renderSessionName(session)}
+      onClick={() => onSessionSelect(session.id)}
+    />
+  );
+}, (prev, next) => areSessionListRowsEqual(prev.session, next.session));
+
 export function GroupedSessionList({
   sessions,
   onSessionSelect,
   renderSessionName,
+  RowComponent = DefaultSessionRow,
   emptyMessage = 'No remote sessions yet.',
   topPadding = 6,
   bottomPadding = 0,
@@ -262,7 +290,7 @@ export function GroupedSessionList({
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {group.sessions.map((session, sessionIndex) => (
-              <div key={session.id} style={{ display: 'flex', flexDirection: 'column' }}>
+              <div key={session.sessionKey} style={{ display: 'flex', flexDirection: 'column' }}>
                 {sessionIndex > 0 ? (
                   <div
                     aria-hidden="true"
@@ -273,9 +301,10 @@ export function GroupedSessionList({
                     }}
                   />
                 ) : null}
-                <SessionRow
-                  title={renderSessionName(session)}
-                  onClick={() => onSessionSelect(session.id)}
+                <RowComponent
+                  session={session}
+                  onSessionSelect={onSessionSelect}
+                  renderSessionName={renderSessionName}
                 />
               </div>
             ))}
@@ -297,7 +326,7 @@ export function GroupedSessionList({
   );
 }
 
-export function SessionAgentPill({
+export const SessionAgentPill = memo(function SessionAgentPill({
   session,
   compactLine,
   agentDisplayName,
@@ -369,7 +398,7 @@ export function SessionAgentPill({
       </span>
     </button>
   );
-}
+}, (prev, next) => areSessionListRowsEqual(prev.session, next.session));
 
 export function RecentSessionPicker({
   sessions,

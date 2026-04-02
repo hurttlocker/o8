@@ -8,6 +8,7 @@ import type {
   DispatchMissionInput,
   LoadedIssue,
   MissionStatusInput,
+  ResetPacketInput,
   SubmitReviewInput,
 } from '@/lib/orchestrator/operator-mission-service';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -121,19 +122,49 @@ function extractApiErrorMessage(path: string, status: number, payload: unknown) 
   return `Request to ${path} failed with HTTP ${status}.`;
 }
 
+const MAX_RETRIES = 3;
+const RETRY_DELAYS_MS = [500, 1500, 4000];
+const FETCH_TIMEOUT_MS = 15_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}${path}`, {
-      ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...init?.headers,
-      },
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Unable to reach Next.js API at ${API_BASE}: ${message}`);
+  let response: Response | undefined;
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
+      log(`API retry ${attempt}/${MAX_RETRIES} for ${path} in ${delay}ms`);
+      await sleep(delay);
+    }
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      response = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...init?.headers,
+        },
+      });
+      clearTimeout(timer);
+      break;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (lastError.name === 'AbortError') {
+        lastError = new Error(`Request to ${path} timed out after ${FETCH_TIMEOUT_MS}ms`);
+      }
+      response = undefined;
+    }
+  }
+
+  if (!response) {
+    throw new Error(`o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. Is the dev server running on ${API_BASE}?`);
   }
 
   const payload = await response.json().catch(() => null) as ApiResponse<T> | Record<string, unknown> | null;
@@ -222,6 +253,19 @@ export async function approveAndMergePacket(input: ApproveAndMergeRequest) {
         packetId: input.packetId,
         commitMessage: input.commitMessage,
       } satisfies ApproveAndMergeRequest),
+    },
+  );
+}
+
+export async function resetPacket(input: ResetPacketInput) {
+  return apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').resetPacket>>>(
+    '/api/orchestrator/reset-packet',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        packetId: input.packetId,
+        reason: input.reason,
+      } satisfies ResetPacketInput),
     },
   );
 }

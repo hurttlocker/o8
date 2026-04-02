@@ -63,6 +63,11 @@ export interface ApproveAndMergeInput {
   commitMessage?: string;
 }
 
+export interface ResetPacketInput {
+  packetId: string;
+  reason?: string;
+}
+
 function log(message: string, details?: unknown) {
   if (details === undefined) {
     console.log(`${LOG_PREFIX} ${message}`);
@@ -750,5 +755,56 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
     note: mergedPrerequisites.length > 0
       ? `Merged ${mergedPrerequisites.join(', ')} before ${packet.referenceLabel} based on recommended same-wave merge order. ${requestedResult.note}`
       : requestedResult.note,
+  };
+}
+
+export async function resetPacket(input: ResetPacketInput) {
+  const state = currentMissionState();
+  const packet = state.packets.find((candidate) => candidate.id === input.packetId);
+  if (!packet) {
+    throw new Error(`Packet ${input.packetId} not found.`);
+  }
+
+  // Archive the old lane if one exists
+  if (packet.lane?.laneId) {
+    try {
+      const { archiveLane } = await import('@/lib/lane/registry');
+      archiveLane(packet.lane.laneId, 'user');
+      log(`Archived stale lane ${packet.lane.laneId} for packet ${packet.referenceLabel}`);
+    } catch {
+      log(`Could not archive lane ${packet.lane.laneId} — may already be gone`);
+    }
+  }
+
+  // Reset packet to dispatchable state
+  packet.status = 'draft';
+  packet.queueState = 'queued';
+  packet.releaseState = 'pending';
+  packet.blockedReason = null;
+  packet.lane = {
+    tileId: '',
+    tabId: '',
+    repoPath: null,
+    runtime: packet.runtime,
+    laneId: '',
+    sessionKey: null,
+    lastHeartbeatAt: null,
+    lastEventAt: null,
+    lastEventLabel: null,
+  };
+  packet.review = null;
+  packet.lastEventAt = null;
+  packet.lastEventLabel = null;
+
+  // Persist
+  const { updateOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  updateOrchestratorMissionState(state);
+  log(`Reset packet ${packet.referenceLabel} (${input.packetId}). Reason: ${input.reason ?? 'operator reset'}`);
+
+  return {
+    reset: true,
+    packetId: input.packetId,
+    referenceLabel: packet.referenceLabel,
+    note: `Packet ${packet.referenceLabel} reset to queued/draft. Old lane archived. Ready for re-dispatch.`,
   };
 }
