@@ -58,6 +58,8 @@ interface CompiledPolicyRule extends PolicyRule {
   matches: (ctx: PolicyContext) => boolean;
 }
 
+type PolicyRuleWithWorkspace = Pick<PolicyRuleOverride, 'workspacePath'>;
+
 // ── Shell tool detection ──
 
 const SHELL_TOOL_NAMES = new Set([
@@ -283,15 +285,25 @@ const DEFAULT_RULES: CompiledPolicyRule[] = [
       return classifyCommand(cmd).safety === 'needs_approval';
     },
   },
+
+  {
+    id: 'auto_approve_low_risk',
+    name: 'Auto-approve low-risk action',
+    description: 'Allow low-risk actions when no higher-priority policy matched.',
+    risk: 'low',
+    enabled: true,
+    requiresApproval: false,
+    matches: () => true,
+  },
 ];
 
 const DEFAULT_RULES_BY_ID = new Map(DEFAULT_RULES.map((rule) => [rule.id, rule]));
 
 let mergedRuleSummaries = clonePolicyRules(serializeRules(DEFAULT_RULES));
 let activeRules = [...DEFAULT_RULES];
+let scopedOverridesById = new Map<string, PolicyRuleOverride[]>();
 let policyRulesLoaded = false;
 let policyWatcherAttached = false;
-let policyWatcherCleanup: (() => void) | null = null;
 
 function serializeRules(rules: CompiledPolicyRule[]): PolicyRule[] {
   return rules.map((rule) => ({
@@ -328,7 +340,7 @@ function extractWorkspacePath(ctx: PolicyContext): string {
   return normalizeWorkspacePath(ctx.workspacePath ?? argWorkspacePath);
 }
 
-function matchesWorkspacePath(rule: PolicyRule, ctx: PolicyContext): boolean {
+function matchesWorkspacePath(rule: PolicyRuleWithWorkspace, ctx: PolicyContext): boolean {
   const requiredPath = normalizeWorkspacePath(rule.workspacePath);
   if (!requiredPath) {
     return true;
@@ -342,9 +354,27 @@ function matchesWorkspacePath(rule: PolicyRule, ctx: PolicyContext): boolean {
   return candidatePath === requiredPath || candidatePath.startsWith(`${requiredPath}/`);
 }
 
+function getMatchingScopedOverride(ruleId: string, ctx: PolicyContext): PolicyRuleOverride | undefined {
+  const scopedOverrides = scopedOverridesById.get(ruleId);
+  if (!scopedOverrides) {
+    return undefined;
+  }
+
+  for (let index = scopedOverrides.length - 1; index >= 0; index -= 1) {
+    const override = scopedOverrides[index];
+    if (matchesWorkspacePath(override, ctx)) {
+      return override;
+    }
+  }
+
+  return undefined;
+}
+
 function rebuildPolicyState(overrides: PolicyRuleOverride[]) {
+  const globalOverrides = overrides.filter((rule) => !normalizeWorkspacePath(rule.workspacePath));
+  const scopedOverrides = overrides.filter((rule) => normalizeWorkspacePath(rule.workspacePath));
   const defaultSummaries = serializeRules(DEFAULT_RULES);
-  mergedRuleSummaries = mergePolicies(defaultSummaries, overrides);
+  mergedRuleSummaries = mergePolicies(defaultSummaries, globalOverrides);
   activeRules = mergedRuleSummaries.flatMap((rule) => {
     const defaultRule = DEFAULT_RULES_BY_ID.get(rule.id);
     if (!defaultRule) {
@@ -354,6 +384,16 @@ function rebuildPolicyState(overrides: PolicyRuleOverride[]) {
     const mergedRule = { ...defaultRule, ...rule };
     return mergedRule.enabled === false ? [] : [mergedRule];
   });
+  scopedOverridesById = scopedOverrides.reduce((map, override) => {
+    if (!DEFAULT_RULES_BY_ID.has(override.id)) {
+      return map;
+    }
+
+    const scopedRules = map.get(override.id) ?? [];
+    scopedRules.push({ ...override, workspacePath: normalizeWorkspacePath(override.workspacePath) });
+    map.set(override.id, scopedRules);
+    return map;
+  }, new Map<string, PolicyRuleOverride[]>());
   policyRulesLoaded = true;
 }
 
@@ -362,7 +402,7 @@ function ensurePolicyWatcher() {
     return;
   }
 
-  policyWatcherCleanup = watchPolicies((rules) => {
+  watchPolicies((rules) => {
     rebuildPolicyState(rules);
   });
   policyWatcherAttached = true;
@@ -389,12 +429,18 @@ export function refreshPolicyRules(): PolicyRule[] {
 
 /**
  * Evaluate an action against all policy rules.
- * Returns the first matching rule's evaluation, or auto-approve if no rules match.
+ * Returns the first matching rule's evaluation.
  */
 export function evaluatePolicy(ctx: PolicyContext): PolicyEvaluation {
   ensurePolicyState();
 
-  for (const rule of activeRules) {
+  for (const activeRule of activeRules) {
+    const scopedOverride = getMatchingScopedOverride(activeRule.id, ctx);
+    if (scopedOverride?.enabled === false) {
+      continue;
+    }
+
+    const rule = scopedOverride ? { ...activeRule, ...scopedOverride } : activeRule;
     if (!matchesWorkspacePath(rule, ctx)) {
       continue;
     }
@@ -411,10 +457,10 @@ export function evaluatePolicy(ctx: PolicyContext): PolicyEvaluation {
   }
 
   return {
-    requiresApproval: false,
+    requiresApproval: true,
     risk: 'low',
-    reason: 'No policy rule triggered',
-    ruleId: 'default-allow',
+    reason: 'Low-risk auto-approval is disabled for this workspace',
+    ruleId: 'auto_approve_low_risk',
   };
 }
 
