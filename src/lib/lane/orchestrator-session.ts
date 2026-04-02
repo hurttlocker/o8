@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 // ── Types ──
 
@@ -209,7 +210,7 @@ function ensureMcpConfig(repoPath: string): string {
           CORTEX_REPO_PATH: repoPath,
           CORTEX_REPO_SLUG: repoSlug,
           WS_PORT: String(process.env.WS_PORT || '3002'),
-          WS_TOKEN: process.env.WS_TOKEN || 'cortex-ide',
+          WS_TOKEN: getOrCreateWsToken(),
         },
       },
     },
