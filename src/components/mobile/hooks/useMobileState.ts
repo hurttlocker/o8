@@ -30,9 +30,7 @@ export function useMobileState(init: MobileStateInit) {
   const [selectedId, setSelectedId] = useState(() => initialSession?.id ?? '');
   const [selectedSessionKeyHint, setSelectedSessionKeyHint] = useState(() => initialSession?.sessionKey ?? '');
   const [selectedSessionFallback, setSelectedSessionFallback] = useState<MobileInboxSnapshot['sessions'][number] | null>(() => initialSession ?? null);
-  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory' | 'issues'>(() => (
-    initialSession ? 'chat' : 'squad'
-  ));
+  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory' | 'issues'>('squad');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
 
