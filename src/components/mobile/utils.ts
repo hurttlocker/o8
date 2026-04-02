@@ -507,7 +507,6 @@ export function renderMessageBody(text: string, keyPrefix: string) {
         'p',
         {
           key: `${keyPrefix}-p-${blocks.length}`,
-          className: 'remodex-rich-paragraph',
         },
         renderInlineMarkdown(paragraph, `${keyPrefix}-p-${blocks.length}`),
       ));
@@ -533,7 +532,6 @@ export function renderMessageBody(text: string, keyPrefix: string) {
       listType,
       {
         key: listKey,
-        className: 'remodex-rich-list',
       },
       items,
     ));
@@ -650,11 +648,11 @@ export function renderMessageBody(text: string, keyPrefix: string) {
     if (headingMatch) {
       flushParagraph();
       flushList();
+      const headingLevel = Math.min(headingMatch[1].length, 3);
       blocks.push(createElement(
-        'p',
+        `h${headingLevel}`,
         {
           key: `${keyPrefix}-h-${blocks.length}`,
-          className: `remodex-rich-heading remodex-rich-heading-${Math.min(headingMatch[1].length, 3)}`,
         },
         renderInlineMarkdown(headingMatch[2], `${keyPrefix}-h-${blocks.length}`),
       ));
@@ -729,7 +727,7 @@ export function renderMessageBody(text: string, keyPrefix: string) {
   flushParagraph();
   flushList();
 
-  return createElement('div', { className: 'remodex-rich-text' }, blocks);
+  return createElement('div', null, blocks);
 }
 
 export async function readJson<T>(response: Response) {

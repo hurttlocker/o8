@@ -26,5 +26,5 @@ tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
-tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", branch = "main" }
+tauri-plugin-mcp = { path = "/Users/marquisehurtt/tauri-plugin-mcp" }
 window-vibrancy = "0.6"

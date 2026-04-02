@@ -43,7 +43,6 @@ interface MessageBubbleProps {
 
 interface BodyElementProps {
   children?: ReactNode;
-  className?: string;
   code?: string;
   language?: string;
   style?: CSSProperties;
@@ -206,56 +205,12 @@ function mergeElementStyle(style: unknown): CSSProperties {
 
 function richTextStyleFor(
   tag: string,
-  className: string | undefined,
   existingStyle: CSSProperties,
   palette: ChatPalette,
   tone: 'user' | 'assistant',
 ): CSSProperties {
   const bodyColor = tone === 'user' ? palette.userText : palette.assistantText;
   const inlineCodeBg = tone === 'user' ? 'rgba(255,255,255,0.16)' : palette.codeInlineBg;
-
-  if (className?.includes('remodex-rich-text')) {
-    return {
-      display: 'grid',
-      gap: 10,
-      minWidth: 0,
-      color: bodyColor,
-    };
-  }
-
-  if (className?.includes('remodex-rich-heading')) {
-    const isMinorHeading = /remodex-rich-heading-[23]/.test(className);
-    return {
-      margin: 0,
-      color: bodyColor,
-      fontSize: isMinorHeading ? 14 : 16,
-      fontWeight: 700,
-      lineHeight: isMinorHeading ? 1.4 : 1.3,
-      letterSpacing: isMinorHeading ? '0.01em' : '-0.01em',
-    };
-  }
-
-  if (className?.includes('remodex-rich-paragraph')) {
-    return {
-      margin: 0,
-      color: bodyColor,
-      fontSize: 15,
-      lineHeight: 1.48,
-      whiteSpace: 'pre-wrap',
-    };
-  }
-
-  if (className?.includes('remodex-rich-list')) {
-    return {
-      margin: 0,
-      paddingLeft: 18,
-      display: 'grid',
-      gap: 6,
-      color: bodyColor,
-      fontSize: 15,
-      lineHeight: 1.48,
-    };
-  }
 
   if (tag === 'div' && existingStyle.overflowX === 'auto') {
     return {
@@ -269,6 +224,32 @@ function richTextStyleFor(
   }
 
   switch (tag) {
+    case 'div':
+      return {
+        display: existingStyle.display ?? 'grid',
+        gap: existingStyle.gap ?? 10,
+        minWidth: existingStyle.minWidth ?? 0,
+        color: bodyColor,
+      };
+    case 'h1':
+      return {
+        margin: 0,
+        color: bodyColor,
+        fontSize: 16,
+        fontWeight: 700,
+        lineHeight: 1.3,
+        letterSpacing: '-0.01em',
+      };
+    case 'h2':
+    case 'h3':
+      return {
+        margin: 0,
+        color: bodyColor,
+        fontSize: 14,
+        fontWeight: 700,
+        lineHeight: 1.4,
+        letterSpacing: '0.01em',
+      };
     case 'p':
       return {
         margin: 0,
@@ -370,13 +351,12 @@ function restyleMessageBodyNode(
   if (typeof node.type === 'string') {
     const existingStyle = mergeElementStyle(node.props.style);
     const style = {
+      ...richTextStyleFor(node.type, existingStyle, palette, tone),
       ...existingStyle,
-      ...richTextStyleFor(node.type, node.props.className, existingStyle, palette, tone),
     };
 
     return cloneElement(node, {
       ...node.props,
-      className: undefined,
       style,
     }, children);
   }

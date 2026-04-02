@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { isTauri } from '@/lib/tauri/bridge';
+import { isTauri, initMcpPlugin } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
@@ -173,7 +173,7 @@ export default function DashboardPage() {
 
 function DashboardInner() {
   const [inTauri, setInTauri] = useState(false);
-  useEffect(() => { setInTauri(isTauri()); }, []);
+  useEffect(() => { setInTauri(isTauri()); initMcpPlugin(); }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
 
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
@@ -2055,7 +2055,7 @@ function DashboardInner() {
   }
 
   return (
-    <div data-vibrancy-passthrough="" style={{
+    <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
       height: '100vh',
       display: 'flex',
       flexDirection: 'column',
@@ -2231,7 +2231,7 @@ function DashboardInner() {
       )}
 
       {/* ── Main Layout (horizontal) ── */}
-      <div style={{
+      <div data-mcp-scope="main-layout" style={{
         flex: 1,
         display: 'flex',
         overflow: 'hidden',
@@ -2316,6 +2316,7 @@ function DashboardInner() {
         <motion.div
           animate={{ width: leftWidth }}
           transition={showAgentPanelFtux ? FTUX_SPRING_TRANSITION : { duration: 0.001 }}
+          data-mcp-scope="agent-panel"
           style={{
             width: leftWidth,
             flexShrink: 0,
@@ -2390,7 +2391,7 @@ function DashboardInner() {
       </div>}
 
       {/* ── Center: Workspace Surface ── */}
-      <div style={{
+      <div data-mcp-scope="workspace" style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
@@ -2520,6 +2521,7 @@ function DashboardInner() {
             </div>
 
             <div
+              data-mcp-scope="chat-panel"
               style={{
                 width: rightWidth,
                 flexShrink: 0,
