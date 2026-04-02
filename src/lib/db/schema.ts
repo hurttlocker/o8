@@ -365,6 +365,7 @@ export const watchedAgents = sqliteTable('watched_agents', {
   retryCount: integer('retry_count').notNull().default(0),
   steerCount: integer('steer_count').notNull().default(0),
   completionReported: integer('completion_reported', { mode: 'boolean' }).notNull().default(false),
+  lastEventAt: integer('last_event_at').notNull().default(0),
   lastActivityAt: integer('last_activity_at').notNull(),
 });
 

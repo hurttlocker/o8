@@ -24,7 +24,7 @@ import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
 const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.cortex-ide');
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 1;
+const DB_SCHEMA_VERSION = 2;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -384,13 +384,16 @@ function ensureTables(sqlite: Database.Database): void {
       retry_count INTEGER NOT NULL DEFAULT 0,
       steer_count INTEGER NOT NULL DEFAULT 0,
       completion_reported INTEGER NOT NULL DEFAULT 0,
+      last_event_at INTEGER NOT NULL DEFAULT 0,
       last_activity_at INTEGER NOT NULL
     );
   `);
 
   ensureApprovalContextColumns(sqlite);
+  ensureWatchedAgentColumns(sqlite);
   ensureApprovalEventsTable(sqlite);
   migrateLegacyApprovalStoreIfNeeded(sqlite, { approvalsTablePreviouslyMissing });
+  backfillWatchedAgentColumns(sqlite);
   backfillApprovalContextColumns(sqlite);
   backfillApprovalEventsFromAuditJson(sqlite);
   ensureApprovalContextIndexes(sqlite);
@@ -423,6 +426,28 @@ function ensureApprovalContextColumns(sqlite: Database.Database): void {
   }
   if (!tableColumnExists(sqlite, 'approvals', 'lane_id')) {
     sqlite.exec('ALTER TABLE approvals ADD COLUMN lane_id TEXT');
+  }
+}
+
+function ensureWatchedAgentColumns(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'watched_agents', 'last_event_at')) {
+    sqlite.exec('ALTER TABLE watched_agents ADD COLUMN last_event_at INTEGER NOT NULL DEFAULT 0');
+  }
+}
+
+function backfillWatchedAgentColumns(sqlite: Database.Database): void {
+  const result = sqlite.prepare(`
+    UPDATE watched_agents
+    SET last_event_at = CASE
+      WHEN last_event_at IS NOT NULL AND last_event_at > 0 THEN last_event_at
+      WHEN last_activity_at IS NOT NULL AND last_activity_at > 0 THEN last_activity_at
+      ELSE registered_at
+    END
+    WHERE last_event_at IS NULL OR last_event_at <= 0
+  `).run() as { changes?: number };
+
+  if ((result.changes ?? 0) > 0) {
+    console.log(`[db] Backfilled last_event_at for ${result.changes} watched agent row${result.changes === 1 ? '' : 's'}`);
   }
 }
 
