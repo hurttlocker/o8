@@ -199,8 +199,9 @@ export interface TopBarProps {
   activeView: 'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory' | 'issues';
   compactLine: CompactLine;
   activeScreen: import('./SpeedDial').MobileScreen;
+  enabledViews: ReadonlySet<string>;
   onNavigate: (screen: import('./SpeedDial').MobileScreen) => void;
-  onNewChat: () => void;
+  onNewChat?: () => void;
   onOpenControls: () => void;
 }
 

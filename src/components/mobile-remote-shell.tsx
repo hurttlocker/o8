@@ -46,6 +46,7 @@ const SettingsView = lazy(async () => ({ default: (await import('./mobile/Settin
 const MemoryPage = lazy(() => import('./mobile/MemoryPage'));
 const IssuesPage = lazy(() => import('./mobile/IssuesPage'));
 
+const BETA_ENABLED_VIEWS = new Set(['fleet', 'activity', 'settings']);
 const MOBILE_SESSION_LIST_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MOBILE_SESSION_LIST_LIMIT = 20;
 const MOBILE_INITIAL_INBOX_LIMIT = 15;
@@ -401,11 +402,12 @@ function MobileRemoteShellInner({
   const canResumeOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.sendInput && !ownedQueuedTurn);
   const canInterruptOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.interrupt);
   const hasTerminalSession = Boolean(selectedSession?.tmuxSession);
+  const showBetaPlaceholder = !BETA_ENABLED_VIEWS.has(activeView);
   const isIndexView = activeView === 'squad';
   const isThreadView = activeView === 'chat';
-  const showRecentPicker = isIndexView || (isThreadView && !selectedSession);
-  const isSessionListSurface = showRecentPicker || activeView === 'fleet';
-  const showThreadSurface = isThreadView && Boolean(selectedSession);
+  const showRecentPicker = !showBetaPlaceholder && (isIndexView || (isThreadView && !selectedSession));
+  const isSessionListSurface = showBetaPlaceholder || showRecentPicker || activeView === 'fleet';
+  const showThreadSurface = !showBetaPlaceholder && isThreadView && Boolean(selectedSession);
   const returnToHome = () => setActiveView('squad');
   const detailTab = detailTabState.sessionId === selectedSession?.id
     ? detailTabState.tab
@@ -548,6 +550,11 @@ function MobileRemoteShellInner({
     lineHeight: 1.45,
     boxShadow: '0 12px 24px rgba(0,0,0,0.18)',
   };
+  const betaPlaceholderStyle: CSSProperties = {
+    ...noteStyle,
+    marginTop: 18,
+    textAlign: 'center',
+  };
   const scrollAnchorStyle: CSSProperties = {
     height: 1,
     scrollMarginBottom: `calc(${composeHeight}px + 108px)`,
@@ -619,6 +626,7 @@ function MobileRemoteShellInner({
           pendingApprovalsCount={pendingApprovals.length}
           activeView={activeView}
           compactLine={compactLine}
+          enabledViews={BETA_ENABLED_VIEWS}
           activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'memory' ? 'memory' : activeView === 'issues' ? 'issues' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
@@ -645,13 +653,18 @@ function MobileRemoteShellInner({
                 break;
             }
           }}
-          onNewChat={handleCreateNewChat}
+          onNewChat={showBetaPlaceholder ? undefined : handleCreateNewChat}
           onOpenControls={() => setControlsOpen(true)}
         />
         <PullToRefresh onRefresh={async () => { await refreshInbox(true); await new Promise(r => setTimeout(r, 600)); }}>
         <PageTransition activeKey={activeView}>
         <div style={scrollViewStyle}>
-          {activeView === 'fleet' ? (
+          {showBetaPlaceholder ? (
+            <p style={betaPlaceholderStyle}>
+              Beta mobile currently supports Fleet, Activity, and Settings only.
+            </p>
+          ) : null}
+          {!showBetaPlaceholder && activeView === 'fleet' ? (
             <FleetView
               sessions={sessionListSessions}
               onAgentSelect={actions.handleSessionFocus}
@@ -659,12 +672,12 @@ function MobileRemoteShellInner({
               onLaunch={() => setLaunchOpen(true)}
             />
           ) : null}
-          {activeView === 'settings' ? (
+          {!showBetaPlaceholder && activeView === 'settings' ? (
             <Suspense fallback={null}>
               <SettingsView onBack={returnToHome} />
             </Suspense>
           ) : null}
-          {activeView === 'memory' ? (
+          {!showBetaPlaceholder && activeView === 'memory' ? (
             <Suspense fallback={null}>
               <MemoryPage
                 onBack={returnToHome}
@@ -679,7 +692,7 @@ function MobileRemoteShellInner({
               />
             </Suspense>
           ) : null}
-          {activeView === 'issues' ? (
+          {!showBetaPlaceholder && activeView === 'issues' ? (
             <Suspense fallback={null}>
               <IssuesPage
                 onBack={returnToHome}
@@ -691,7 +704,7 @@ function MobileRemoteShellInner({
               />
             </Suspense>
           ) : null}
-          {activeView === 'activity' ? (
+          {!showBetaPlaceholder && activeView === 'activity' ? (
             <ActivityFeed
               snapshot={snapshot}
               onBack={returnToHome}
@@ -715,7 +728,7 @@ function MobileRemoteShellInner({
               }}
             />
           ) : null}
-          {activeView === 'costs' ? (
+          {!showBetaPlaceholder && activeView === 'costs' ? (
             <Suspense fallback={null}>
               <CostsDashboard
                 snapshot={snapshot}
@@ -725,7 +738,7 @@ function MobileRemoteShellInner({
               />
             </Suspense>
           ) : null}
-          {showRecentPicker ? (
+          {!showBetaPlaceholder && showRecentPicker ? (
             <RecentSessionPicker
               sessions={recentSessions}
               compactLine={compactLine}
@@ -736,7 +749,7 @@ function MobileRemoteShellInner({
               bottomPadding="calc(env(safe-area-inset-bottom, 0px) + 96px)"
             />
           ) : null}
-          {hasTerminalSession && showThreadSurface ? (
+          {!showBetaPlaceholder && hasTerminalSession && showThreadSurface ? (
             <div
               style={{
                 display: 'flex',
@@ -779,7 +792,7 @@ function MobileRemoteShellInner({
               </button>
             </div>
           ) : null}
-          {showThreadSurface ? (
+          {!showBetaPlaceholder && showThreadSurface ? (
           terminalActive ? (
             <MobileTerminal tmuxSession={selectedSession!.tmuxSession!} />
           ) : (
@@ -847,7 +860,7 @@ function MobileRemoteShellInner({
         </div>
         </PageTransition>
         </PullToRefresh>
-        {showRecentPicker ? (
+        {!showBetaPlaceholder && showRecentPicker ? (
           <>
           <div style={fabWrapStyle}>
             <button
