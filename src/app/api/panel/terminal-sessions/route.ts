@@ -1,14 +1,15 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 const WS_PORT = Number(process.env.WS_PORT ?? 3002);
-const WS_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 
 /** GET — list alive dashboard terminal sessions owned by the WS bridge */
 export async function GET() {
   try {
+    const wsToken = getOrCreateWsToken();
     const response = await fetch(`http://127.0.0.1:${WS_PORT}/terminal-sessions`, {
-      headers: { Authorization: `Bearer ${WS_TOKEN}` },
+      headers: { Authorization: `Bearer ${wsToken}` },
       cache: 'no-store',
     });
     if (!response.ok) {

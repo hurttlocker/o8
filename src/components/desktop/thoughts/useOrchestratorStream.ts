@@ -15,10 +15,20 @@ interface OrchestratorStreamResult {
 
 let agentUpdateSeq = 0;
 
-const WS_TOKEN = 'cortex-ide';
-const WS_URL = typeof window !== 'undefined'
-  ? `ws://${window.location.hostname}:3002/ws?token=${WS_TOKEN}`
-  : `ws://localhost:3002/ws?token=${WS_TOKEN}`;
+function getWsUrl(): string {
+  if (typeof window === 'undefined') return '';
+  const { hostname, port, protocol } = window.location;
+  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
+  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+  const wsProto = protocol === 'https:' ? 'wss' : 'ws';
+
+  if (isLocal) {
+    return `ws://${hostname}:3002/ws?token=${encodeURIComponent(token)}`;
+  }
+
+  const wsPort = port ? `:${port}` : '';
+  return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
+}
 
 /**
  * Hook that connects to the orchestrator WebSocket channel for real-time
@@ -69,8 +79,10 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
   const connect = useCallback(() => {
     if (!repoPathRef.current) return;
     if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
+    const wsUrl = getWsUrl();
+    if (!wsUrl) return;
 
-    const ws = new WebSocket(WS_URL);
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -259,7 +271,7 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
     ws.onerror = () => {
       // onclose will fire after this
     };
-  }, [flushCurrentAssistant]); // eslint-disable-line react-hooks/exhaustive-deps — status read via closure is intentional, not a dep
+  }, [flushCurrentAssistant]);
 
   // Connect on mount / repoPath change
   useEffect(() => {
