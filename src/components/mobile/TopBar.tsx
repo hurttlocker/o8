@@ -10,7 +10,7 @@ const fontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI'
 // 2. Gradient overlay for the color fade
 const topVeilBlurStyle: CSSProperties = {
   position: 'fixed',
-  top: -60,
+  top: -120,
   left: -30,
   right: -30,
   height: 'calc(env(safe-area-inset-top, 0px) + 200px)',
@@ -24,7 +24,7 @@ const topVeilBlurStyle: CSSProperties = {
 
 const topVeilGradientStyle: CSSProperties = {
   position: 'fixed',
-  top: -60,
+  top: -120,
   left: -30,
   right: -30,
   height: 'calc(env(safe-area-inset-top, 0px) + 200px)',
