@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `6c65507` fix: remove compose shell overlay box — transparent, no border/bg/blur
 - `09d20bf` fix: chat header
 - `cd7f8ec` fix: warm grey bgA1816, full-width user bubbles, text -1pt
 - `4801b41` fix: kill blue accent, strip compose bar box, shrink bottom fade
