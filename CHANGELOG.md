@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `ef0e5e2` fix: purge ALL mobile-wrap CSS + progressive header fade
 - `b181c37` fix: remove CSS mask-image, add solid header backdrop like AI provider
 - `fbcc573` fix: kill the compose surface border/bg/shadow — THAT was the bottom line
 - `c03a4bf` fix: remove bottom mask fade — only top fade, bottom stays solid
