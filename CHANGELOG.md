@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `3a8d78f` fix: mobile shows only governance approvals — filter out interactive LLM chat noise
 - `7f326ba` fix: hydration mismatch — defer timestamp render to client
 - `bb3cf28` fix: dark background in mobile layout to prevent white flash on reload
 - `6981714` refactor: replace mobile shell with purpose-built approval-only surface
