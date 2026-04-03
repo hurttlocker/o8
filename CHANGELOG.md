@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `be3b739` fix: iOS PWA bottom gap
 - `07b6d09` fix: proper iOS PWA viewport — no position:fixed, no 100dvh, no hacks
 - `bfe679a` fix: default mobile theme to dark — kills white input box
 - `c78d26e` fix: kill iOS PWA bottom gap — remove 100dvh, force html/body bg
