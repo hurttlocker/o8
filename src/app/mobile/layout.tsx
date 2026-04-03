@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { MobileAuroraBg } from './mobile-aurora-bg';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,6 +45,7 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
         '::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:3px}',
         '::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}',
       ].join('') }} />
+      <MobileAuroraBg />
       {children}
     </div>
   );

@@ -335,13 +335,14 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
 // When an overloaded Google model returns 503/429 or times out, retry with a stable fallback.
 
 const GOOGLE_FALLBACKS: Record<string, string> = {
-  'gemini-3.1-pro-preview': 'gemini-2.5-pro',
-  'gemini-3-pro-preview': 'gemini-2.5-pro',
-  'gemini-3-flash-preview': 'gemini-2.5-flash',
-  'gemini-3.1-flash-lite-preview': 'gemini-2.5-flash-lite',
+  // Fallbacks disabled — testing 3.1 / 3 directly
+  // 'gemini-3.1-pro-preview': 'gemini-2.5-pro',
+  // 'gemini-3-pro-preview': 'gemini-2.5-pro',
+  // 'gemini-3-flash-preview': 'gemini-2.5-flash',
+  // 'gemini-3.1-flash-lite-preview': 'gemini-2.5-flash-lite',
 };
 
-const UPSTREAM_TIMEOUT_MS = 15_000;
+const UPSTREAM_TIMEOUT_MS = 30_000;
 
 // ── Resolve API key ──
 
