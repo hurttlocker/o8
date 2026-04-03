@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { MobileMarkdown } from './mobile-markdown';
 
 // ── Types ──
 
@@ -98,6 +99,35 @@ function IconSend() {
     <svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor">
       <path d="M231.87,114,25.66,14.16a8,8,0,0,0-11,9.48L40.46,120H136a8,8,0,0,1,0,16H40.46L14.63,232.36A8,8,0,0,0,22,240a8.14,8.14,0,0,0,3.68-.89L231.87,142A8,8,0,0,0,231.87,114Z" />
     </svg>
+  );
+}
+
+function StreamingDot() {
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setExpanded((value) => !value);
+    }, 720);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <span
+      aria-label="Assistant is responding"
+      style={{
+        width: 9,
+        height: 9,
+        borderRadius: '50%',
+        backgroundColor: '#60a5fa',
+        boxShadow: expanded ? '0 0 0 7px rgba(96,165,250,0.08)' : '0 0 0 2px rgba(96,165,250,0.04)',
+        display: 'inline-block',
+        opacity: expanded ? 1 : 0.48,
+        transform: expanded ? 'scale(1)' : 'scale(0.72)',
+        transformOrigin: 'center',
+        transition: 'opacity 0.6s ease, transform 0.6s ease, box-shadow 0.6s ease',
+      }}
+    />
   );
 }
 
@@ -385,27 +415,40 @@ function ChatView() {
           <div
             key={i}
             style={{
-              marginBottom: 12,
+              marginBottom: msg.role === 'user' ? 14 : 20,
               display: 'flex',
               justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
             }}
           >
-            <div
-              style={{
-                maxWidth: '85%',
-                padding: '10px 14px',
-                borderRadius: 14,
-                fontSize: 14,
-                lineHeight: 1.5,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                ...(msg.role === 'user'
-                  ? { backgroundColor: '#2563eb', color: '#fff', borderBottomRightRadius: 4 }
-                  : { backgroundColor: 'rgba(255,255,255,0.08)', color: '#e5e7eb', borderBottomLeftRadius: 4 }),
-              }}
-            >
-              {msg.content || (streaming && i === messages.length - 1 ? '...' : '')}
-            </div>
+            {msg.role === 'user' ? (
+              <div
+                style={{
+                  maxWidth: '82%',
+                  padding: '10px 14px',
+                  borderRadius: 16,
+                  borderBottomRightRadius: 6,
+                  backgroundColor: '#2563eb',
+                  color: '#fff',
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  boxShadow: '0 10px 24px rgba(37,99,235,0.2)',
+                }}
+              >
+                {msg.content}
+              </div>
+            ) : (
+              <div
+                style={{
+                  width: '100%',
+                  paddingTop: 2,
+                  paddingRight: 18,
+                }}
+              >
+                {msg.content ? <MobileMarkdown content={msg.content} /> : (streaming && i === messages.length - 1 ? <StreamingDot /> : null)}
+              </div>
+            )}
           </div>
         ))}
       </div>
