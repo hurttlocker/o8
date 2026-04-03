@@ -93,7 +93,7 @@ const grainStyle: React.CSSProperties = {
   animation: 'grain 8s steps(6) infinite',
 };
 
-export function MobileAuroraBg() {
+export function MobileAuroraBg({ themeId: _themeId }: { themeId?: string } = {}) {
   return (
     <div style={containerStyle}>
       <style dangerouslySetInnerHTML={{ __html: keyframes }} />

@@ -1,4 +1,5 @@
-import { getOrCreateWsToken } from '@/lib/ws-auth';
+import packageJson from '../../../package.json';
+import { ThemeProvider } from '@/lib/theme/context';
 import { MobileApprovalsClient } from './mobile-approvals-client';
 
 export const dynamic = 'force-dynamic';
@@ -35,11 +36,16 @@ async function fetchPendingApprovals(): Promise<PrefetchedApproval[]> {
 
 export default async function MobilePage() {
   const approvals = await fetchPendingApprovals();
-  const wsToken = getOrCreateWsToken();
+  const buildRevision = process.env.VERCEL_GIT_COMMIT_SHA
+    ?? process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA
+    ?? process.env.GIT_COMMIT_SHA
+    ?? '';
+  const appVersion = buildRevision
+    ? `${packageJson.version} (${buildRevision.slice(0, 7)})`
+    : packageJson.version;
   return (
-    <>
-      <meta name="ws-token" content={wsToken} />
-      <MobileApprovalsClient initialApprovals={approvals} />
-    </>
+    <ThemeProvider>
+      <MobileApprovalsClient initialApprovals={approvals} appVersion={appVersion} />
+    </ThemeProvider>
   );
 }
