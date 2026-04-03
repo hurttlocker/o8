@@ -7,8 +7,11 @@ export const dynamic = 'force-dynamic';
 
 export function generateMetadata(): Metadata {
   return {
+    viewport: 'width=device-width, initial-scale=1, viewport-fit=cover',
     other: {
       'ws-token': getOrCreateWsToken(),
+      'apple-mobile-web-app-capable': 'yes',
+      'apple-mobile-web-app-status-bar-style': 'black-translucent',
     },
   };
 }
