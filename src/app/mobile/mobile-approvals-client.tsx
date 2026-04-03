@@ -904,6 +904,7 @@ function ChatView({
   const [streaming, setStreaming] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const activeTabRef = useRef<string | null>(currentTabId);
   const streamAbortRef = useRef<AbortController | null>(null);
 
@@ -1117,7 +1118,15 @@ function ChatView({
       />
 
       {/* Messages */}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 16, paddingTop: 8 }}>
+      <div
+        ref={scrollRef}
+        onScroll={() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          setShowScrollDown(el.scrollHeight - el.scrollTop - el.clientHeight > 150);
+        }}
+        style={{ flex: 1, overflowY: 'auto', paddingBottom: 16, paddingTop: 8 }}
+      >
         {(historyLoading || !currentTabId) && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 100, color: '#6b7280' }}>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Loading conversation</div>
@@ -1175,19 +1184,37 @@ function ChatView({
         ))}
       </div>
 
-      {/* Input — Apple Messages style */}
+      {/* Scroll to bottom */}
+      {showScrollDown && (
+        <button
+          onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
+          style={{
+            ...glassButtonStyle(36, 'neutral', true),
+            position: 'absolute',
+            bottom: 80,
+            right: 20,
+            zIndex: 5,
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
+            <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z" />
+          </svg>
+        </button>
+      )}
+
+      {/* Input — glassmorphism */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'flex-end',
-          gap: 8,
-          paddingTop: 8,
+          alignItems: 'center',
+          gap: 10,
+          paddingTop: 10,
           paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 4px)',
           paddingLeft: 16,
-          paddingRight: 12,
+          paddingRight: 14,
           marginLeft: -16,
           marginRight: -16,
-          backgroundColor: 'rgba(28,28,30,0.82)',
+          backgroundColor: 'rgba(20,20,22,0.75)',
           backdropFilter: 'blur(24px) saturate(180%)',
           WebkitBackdropFilter: 'blur(24px) saturate(180%)',
         } as React.CSSProperties}
@@ -1195,11 +1222,11 @@ function ChatView({
         <div
           style={{
             flex: 1,
-            minHeight: 36,
-            maxHeight: 120,
-            borderRadius: 18,
-            border: '1px solid rgba(255,255,255,0.12)',
-            backgroundColor: 'rgba(255,255,255,0.06)',
+            minHeight: 38,
+            borderRadius: 19,
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: 'linear-gradient(135deg, rgba(148,163,184,0.08) 0%, rgba(17,24,39,0.6) 50%, rgba(148,163,184,0.05) 100%)',
+            boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.2), 0 0 8px rgba(148,163,184,0.04)',
             display: 'flex',
             alignItems: 'center',
             paddingLeft: 16,
@@ -1214,14 +1241,14 @@ function ChatView({
             disabled={streaming || historyLoading || !currentTabId}
             style={{
               flex: 1,
-              height: 36,
+              height: 38,
               border: 'none',
               backgroundColor: 'transparent',
               color: '#f3f4f6',
               fontSize: 16,
               outline: 'none',
               fontFamily: 'system-ui, -apple-system, sans-serif',
-              lineHeight: '36px',
+              lineHeight: '38px',
             }}
           />
         </div>
@@ -1229,9 +1256,7 @@ function ChatView({
           onClick={() => { if (streaming) { /* stop */ } else { playSendClick(); void sendMessage(); } }}
           disabled={!streaming && (!input.trim() || historyLoading || !currentTabId)}
           style={{
-            ...glassButtonStyle(34, streaming ? 'neutral' : 'orange', streaming || !!(input.trim() && !historyLoading && currentTabId)),
-            marginBottom: 1,
-            border: 'none',
+            ...glassButtonStyle(34, streaming ? 'rose' : 'orange', streaming || !!(input.trim() && !historyLoading && currentTabId)),
           }}
           aria-label={streaming ? 'Stop' : 'Send'}
         >
