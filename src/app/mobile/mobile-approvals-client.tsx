@@ -1103,19 +1103,7 @@ function ChatView({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}>
-      {/* iOS-style top fade — content fades out as it scrolls behind the header */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 20,
-          background: 'linear-gradient(to bottom, rgba(17,17,17,0.7) 0%, transparent 100%)',
-          zIndex: 10,
-          pointerEvents: 'none',
-        }}
-      />
+      {/* no separate fade — header handles it */}
 
       {/* Messages */}
       <div
@@ -1210,10 +1198,8 @@ function ChatView({
           gap: 10,
           paddingTop: 10,
           paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 4px)',
-          paddingLeft: 16,
-          paddingRight: 14,
-          marginLeft: -16,
-          marginRight: -16,
+          paddingLeft: 4,
+          paddingRight: 4,
           backgroundColor: 'rgba(20,20,22,0.75)',
           backdropFilter: 'blur(24px) saturate(180%)',
           WebkitBackdropFilter: 'blur(24px) saturate(180%)',
@@ -1375,8 +1361,8 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
         onClose={() => setSidebarOpen(false)}
       />
 
-      {/* Header */}
-      <div style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)', paddingBottom: 12, display: 'flex', alignItems: 'center', gap: 12 } as React.CSSProperties}>
+      {/* Header — with soft bottom fade, no hard line */}
+      <div style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)', paddingBottom: 20, marginBottom: -8, display: 'flex', alignItems: 'center', gap: 12, position: 'relative', zIndex: 5, maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)' } as React.CSSProperties}>
         {inConversation ? (
           <button
             onClick={() => setCurrentTabId(null)}
