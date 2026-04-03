@@ -94,7 +94,7 @@ export function SettingsView({
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
             <span style={{ fontSize: 13, color: palette.subduedText }}>Model</span>
-            <span style={{ fontSize: 13, color: palette.rootText }}>{selectedModel.label}</span>
+            <span style={{ fontSize: 13, color: palette.rootText }}>{selectedModel.id}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
             <span style={{ fontSize: 13, color: palette.subduedText }}>Bridge</span>
@@ -240,6 +240,9 @@ export function SettingsView({
                   <div style={{ fontSize: 15, fontWeight: 700 }}>{model.label}</div>
                   <div style={{ fontSize: 12, color: palette.subduedText, marginTop: 3 }}>
                     {model.description}
+                  </div>
+                  <div style={{ fontSize: 11, color: palette.subduedText, marginTop: 3 }}>
+                    {model.id}
                   </div>
                 </div>
                 <div
