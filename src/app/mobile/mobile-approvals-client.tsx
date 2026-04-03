@@ -1079,8 +1079,8 @@ function ChatView({
           top: 0,
           left: 0,
           right: 0,
-          height: 48,
-          background: 'linear-gradient(to bottom, #111111 0%, rgba(17,17,17,0.6) 40%, rgba(17,17,17,0.2) 70%, transparent 100%)',
+          height: 40,
+          background: 'linear-gradient(to bottom, #111111 0%, rgba(17,17,17,0.45) 50%, rgba(17,17,17,0.1) 80%, transparent 100%)',
           zIndex: 10,
           pointerEvents: 'none',
         }}
