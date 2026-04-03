@@ -33,6 +33,7 @@ interface ChatHistoryRecord {
   lastMessage: string;
   updatedAt: string;
   model?: string;
+  starred?: boolean;
 }
 
 // ── Constants ──
@@ -347,27 +348,15 @@ function Sidebar({
             );
           })}
 
-          <div
-            style={{
-              marginTop: 20,
-              marginBottom: 10,
-              paddingLeft: 14,
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: '#6b7280',
-            }}
-          >
-            Recents
-          </div>
-
           {recentLoading ? (
-            <div style={{ paddingLeft: 14, paddingRight: 14, fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
+            <div style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 20, fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
               Loading conversations...
             </div>
-          ) : recentConversations.length > 0 ? (
-            recentConversations.map((conversation) => {
+          ) : (() => {
+            const starred = recentConversations.filter((c) => c.starred);
+            const unstarred = recentConversations.filter((c) => !c.starred);
+
+            const renderConvButton = (conversation: ChatHistoryRecord) => {
               const activeConversation = currentTabId === conversation.tabId;
               const title = truncateText(conversation.title, SIDEBAR_TITLE_MAX_LENGTH);
               return (
@@ -404,12 +393,42 @@ function Sidebar({
                   </div>
                 </button>
               );
-            })
-          ) : (
-            <div style={{ paddingLeft: 14, paddingRight: 14, fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
-              No saved chats yet.
-            </div>
-          )}
+            };
+
+            const sectionHeader = (label: string) => (
+              <div style={{ marginTop: 20, marginBottom: 10, paddingLeft: 14, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6b7280' }}>
+                {label}
+              </div>
+            );
+
+            if (starred.length === 0 && unstarred.length === 0) {
+              return (
+                <>
+                  {sectionHeader('Recents')}
+                  <div style={{ paddingLeft: 14, paddingRight: 14, fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
+                    No saved chats yet.
+                  </div>
+                </>
+              );
+            }
+
+            return (
+              <>
+                {starred.length > 0 && (
+                  <>
+                    {sectionHeader('Starred')}
+                    {starred.map(renderConvButton)}
+                  </>
+                )}
+                {sectionHeader('Recents')}
+                {unstarred.length > 0 ? unstarred.map(renderConvButton) : (
+                  <div style={{ paddingLeft: 14, paddingRight: 14, fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
+                    No recent chats.
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
     </>
@@ -680,58 +699,39 @@ function ChatListView({
                 <button onClick={() => void handleRenameSubmit()} style={{ height: 40, paddingLeft: 14, paddingRight: 14, borderRadius: 10, border: 'none', backgroundColor: '#2563eb', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'system-ui' }}>Save</button>
               </div>
             ) : (
-              <div
+              <button
+                onClick={() => { if (!contextMenu) onSelect(conv.tabId); }}
+                onTouchStart={(e) => handleLongPressStart(conv.tabId, conv.title, e)}
+                onTouchEnd={handleLongPressEnd}
+                onTouchMove={handleLongPressEnd}
+                onContextMenu={(e) => { e.preventDefault(); setContextMenu({ tabId: conv.tabId, title: conv.title, x: e.clientX, y: e.clientY }); }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   width: '100%',
                   padding: '14px 0',
-                  borderBottom: '1px solid rgba(255,255,255,0.06)',
-                }}
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  borderBlockEnd: '1px solid rgba(255,255,255,0.06)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                } as React.CSSProperties}
               >
-                <button
-                  onClick={() => onSelect(conv.tabId)}
-                  style={{
-                    flex: 1,
-                    overflow: 'hidden',
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontFamily: 'system-ui, -apple-system, sans-serif',
-                    padding: 0,
-                  }}
-                >
+                <div style={{ flex: 1, overflow: 'hidden' }}>
                   <div style={{ fontSize: 15, fontWeight: 500, color: '#f3f4f6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {conv.title || 'Untitled'}
                   </div>
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
                     {chatTimeAgo(conv.updatedAt)}
                   </div>
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setContextMenu({ tabId: conv.tabId, title: conv.title, x: e.clientX, y: e.clientY }); }}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 8,
-                    border: 'none',
-                    backgroundColor: 'transparent',
-                    color: '#6b7280',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    marginLeft: 4,
-                  }}
-                  aria-label="More options"
-                >
-                  <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
-                    <path d="M128,96a32,32,0,1,0,32,32A32,32,0,0,0,128,96Zm0,48a16,16,0,1,1,16-16A16,16,0,0,1,128,144Zm0-64a32,32,0,1,0-32-32A32,32,0,0,0,128,80Zm0-48a16,16,0,1,1-16,16A16,16,0,0,1,128,32Zm0,144a32,32,0,1,0,32,32A32,32,0,0,0,128,176Zm0,48a16,16,0,1,1,16-16A16,16,0,0,1,128,224Z" />
-                  </svg>
-                </button>
-              </div>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 256 256" fill="#6b7280" style={{ flexShrink: 0, marginLeft: 8 }}>
+                  <path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z" />
+                </svg>
+              </button>
             )}
           </div>
         ))
