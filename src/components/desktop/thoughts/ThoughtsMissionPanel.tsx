@@ -879,45 +879,27 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 10,
+                gap: 8,
                 width: '100%',
-                padding: '11px 14px',
+                padding: '7px 12px',
                 border: 'none',
                 background: 'transparent',
                 cursor: 'pointer',
                 textAlign: 'left',
-                minHeight: 44,
+                minHeight: 40,
               }}
             >
-              <span style={{ fontSize: 10, fontWeight: 800, color: runtimeMeta.color, padding: '2px 6px', borderRadius: 5, background: runtimeMeta.background, flexShrink: 0, letterSpacing: '0.02em' }}>
-                {packet.referenceLabel}
+              {/* Status dot — matches session rows */}
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusMeta.color, boxShadow: `0 0 6px ${statusMeta.border}`, flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 600, lineHeight: 1.35, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
+                  {packet.title}
+                </span>
+                <span style={{ display: 'block', marginTop: 1, fontSize: 9, lineHeight: 1.3, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {packet.runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
+                </span>
               </span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
-                {packet.title}
-              </span>
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                paddingTop: 4,
-                paddingRight: 8,
-                paddingBottom: 4,
-                paddingLeft: 8,
-                borderRadius: 999,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: packetCostBadgeTone.border,
-                background: packetCostBadgeTone.background,
-                color: packetCostBadgeTone.color,
-                fontSize: 10,
-                fontWeight: 800,
-                letterSpacing: '-0.01em',
-                flexShrink: 0,
-                minHeight: 24,
-              }}>
-                {packetCostLabel}
-              </span>
-              <span style={{ fontSize: 9, fontWeight: 800, color: statusMeta.color, padding: '3px 7px', borderRadius: 999, background: statusMeta.background, border: `1px solid ${statusMeta.border}`, textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>
+              <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 600, color: statusMeta.color, letterSpacing: '-0.01em' }}>
                 {statusMeta.label}
               </span>
               <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" style={{ flexShrink: 0, transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 150ms ease' }}>
