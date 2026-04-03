@@ -65,7 +65,7 @@ function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
   const { hostname, port, protocol } = window.location;
   // Auth token — prevents random network clients from connecting
-  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? 'cortex-ide';
+  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
 
   // When accessed via Tailscale / remote, use same-origin (proxied through
   // Next.js rewrites on /ws). For local dev on localhost, fall back to the
