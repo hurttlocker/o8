@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `cdccccd` fix: tap-to-reveal message actions, hide Play button until tapped
 - `ce15a62` fix: replace phosphor-icons/react/dist/defs imports with inline SVG paths
 - `d3f045f` feat: mobile settings view + decompose monolithic client into focused modules
 - `e89b6a6` feat: mobile redesign
