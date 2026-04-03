@@ -1198,7 +1198,7 @@ function ChatView({
 
 export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: ApprovalItem[] }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeView, setActiveView] = useState<MobileView>('approvals');
+  const [activeView, setActiveView] = useState<MobileView>('chat');
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals);
   const [resolving, setResolving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
