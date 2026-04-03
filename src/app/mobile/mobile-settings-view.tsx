@@ -2,9 +2,10 @@
 
 import {
   AVAILABLE_MODELS,
+  MOBILE_BODY_TRACKING,
+  MOBILE_CARD_RADIUS,
+  MOBILE_HEADING_TRACKING,
   IconGear,
-  IconMoon,
-  IconSun,
   formatAboutVersion,
   mobileFontFamily,
   renderConnectionLabel,
@@ -22,8 +23,6 @@ import {
 } from './mobile-shell-primitives';
 
 interface SettingsViewProps {
-  themeId: string;
-  onThemeChange: (themeId: 'light' | 'dark') => void;
   selectedModel: ModelOption;
   onModelChange: (modelId: string) => void;
   connectionStatus: 'connected' | 'disconnected';
@@ -31,73 +30,7 @@ interface SettingsViewProps {
   palette: MobilePalette;
 }
 
-function ToggleCard({
-  label,
-  detail,
-  active,
-  icon,
-  onClick,
-  palette,
-}: {
-  label: string;
-  detail: string;
-  active: boolean;
-  icon: React.ReactNode;
-  onClick: () => void;
-  palette: MobilePalette;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        minHeight: 120,
-        borderRadius: 20,
-        border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
-        background: active
-          ? `linear-gradient(135deg, ${palette.accentSoft} 0%, ${palette.panelBackground} 100%)`
-          : palette.cardBackground,
-        color: palette.rootText,
-        padding: 16,
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        cursor: 'pointer',
-        fontFamily: mobileFontFamily(),
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-      }}
-    >
-      <div
-        style={{
-          width: 42,
-          height: 42,
-          borderRadius: 16,
-          border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
-          background: active ? palette.panelBackground : palette.panelElevated,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {icon}
-      </div>
-      <div style={{ textAlign: 'left' }}>
-        <div style={{ fontSize: 16, fontWeight: 800, color: palette.rootText }}>
-          {label}
-        </div>
-        <div style={{ fontSize: 12, lineHeight: 1.6, color: palette.subduedText, marginTop: 5 }}>
-          {detail}
-        </div>
-      </div>
-    </button>
-  );
-}
-
 export function SettingsView({
-  themeId,
-  onThemeChange,
   selectedModel,
   onModelChange,
   connectionStatus,
@@ -119,39 +52,45 @@ export function SettingsView({
         <MobileGlassPanel palette={palette} style={{ padding: 20, marginBottom: 14 }}>
           <MobileSectionHeading
             eyebrow="Settings"
-            title="Control center"
-            subtitle="Tune the shell appearance, the default model, and the live bridge state for mobile."
+            title="o8 mobile"
+            subtitle="Brand-locked controls for the default model, transport status, and runtime identity."
             palette={palette}
           />
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 18 }}>
-            <MobileMetricChip label="Theme" value={themeId === 'dark' ? 'Dark' : 'Light'} palette={palette} tone="accent" />
+            <MobileMetricChip label="Palette" value="o8 Dark" palette={palette} tone="accent" />
             <MobileMetricChip label="Model" value={selectedModel.label} palette={palette} />
-            <MobileMetricChip label="Bridge" value={renderConnectionLabel(connectionStatus)} palette={palette} tone={connectionStatus === 'connected' ? 'success' : 'danger'} />
+            <MobileMetricChip
+              label="Bridge"
+              value={renderConnectionLabel(connectionStatus)}
+              palette={palette}
+              tone={connectionStatus === 'connected' ? 'success' : 'danger'}
+            />
           </div>
         </MobileGlassPanel>
 
         <MobileGlassPanel palette={palette} style={{ padding: 18, marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 14 }}>
-            Theme
+            Brand system
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <ToggleCard
-              label="Light"
-              detail="Warm paper glass with crisp blue focus."
-              active={themeId !== 'dark'}
-              icon={<IconSun fill="#1a1a2e" />}
-              onClick={() => onThemeChange('light')}
-              palette={palette}
-            />
-            <ToggleCard
-              label="Dark"
-              detail="Default graphite shell with bright white type."
-              active={themeId === 'dark'}
-              icon={<IconMoon fill="#ffffff" />}
-              onClick={() => onThemeChange('dark')}
-              palette={palette}
-            />
+          <div
+            style={{
+              borderRadius: MOBILE_CARD_RADIUS,
+              border: `1px solid ${palette.accentBorder}`,
+              background: 'rgba(37, 99, 235, 0.12)',
+              padding: 16,
+            }}
+          >
+            <div style={{ fontSize: 17, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING }}>
+              Fixed o8 Dark shell
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.65, color: palette.subduedText, letterSpacing: MOBILE_BODY_TRACKING, marginTop: 8 }}>
+              The mobile shell stays locked to the brand palette with a graphite base, explicit blue focus, red destructive state, 14px radii, 44px touch targets, and system typography.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
+              <MobileMetricChip label="Background" value="#111111" palette={palette} />
+              <MobileMetricChip label="Accent" value="#2563eb" palette={palette} tone="accent" />
+            </div>
           </div>
         </MobileGlassPanel>
 
@@ -170,19 +109,21 @@ export function SettingsView({
                   onClick={() => onModelChange(model.id)}
                   style={{
                     width: '100%',
-                    borderRadius: 18,
+                    minHeight: 72,
+                    borderRadius: MOBILE_CARD_RADIUS,
                     border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
-                    background: active
-                      ? `linear-gradient(135deg, ${palette.accentSoft} 0%, ${palette.panelBackground} 100%)`
-                      : palette.cardBackground,
+                    background: active ? palette.accentSoft : palette.panelBackground,
                     padding: 16,
                     color: palette.rootText,
                     textAlign: 'left',
                     cursor: 'pointer',
                     fontFamily: mobileFontFamily(),
+                    letterSpacing: MOBILE_BODY_TRACKING,
                     display: 'flex',
                     gap: 12,
                     alignItems: 'flex-start',
+                    backdropFilter: 'blur(20px)',
+                    WebkitBackdropFilter: 'blur(20px)',
                   }}
                 >
                   <div
@@ -197,27 +138,15 @@ export function SettingsView({
                     }}
                   />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: palette.rootText }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING }}>
                       {model.label}
                     </div>
-                    <div style={{ fontSize: 12, color: palette.subduedText, marginTop: 4, lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 12, color: palette.subduedText, marginTop: 4, lineHeight: 1.6, letterSpacing: MOBILE_BODY_TRACKING }}>
                       {model.description}
                     </div>
-                    <div style={{ fontSize: 11, color: palette.subduedText, marginTop: 6 }}>
+                    <div style={{ fontSize: 11, color: palette.subduedText, marginTop: 6, letterSpacing: MOBILE_BODY_TRACKING }}>
                       {model.id}
                     </div>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      letterSpacing: '0.08em',
-                      textTransform: 'uppercase',
-                      color: palette.subduedText,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {model.provider}
                   </div>
                 </button>
               );
@@ -231,7 +160,7 @@ export function SettingsView({
           </div>
           <div
             style={{
-              borderRadius: 18,
+              borderRadius: MOBILE_CARD_RADIUS,
               border: `1px solid ${connectionStatus === 'connected' ? palette.successBorder : palette.dangerBorder}`,
               background: connectionStatus === 'connected' ? palette.successSoft : palette.dangerSoft,
               padding: '14px 16px',
@@ -242,10 +171,10 @@ export function SettingsView({
             }}
           >
             <div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: palette.rootText }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING }}>
                 WebSocket Bridge
               </div>
-              <div style={{ fontSize: 12, lineHeight: 1.6, color: palette.subduedText, marginTop: 4 }}>
+              <div style={{ fontSize: 12, lineHeight: 1.6, color: palette.subduedText, marginTop: 4, letterSpacing: MOBILE_BODY_TRACKING }}>
                 {connectionStatus === 'connected'
                   ? 'Live transport is available for the mobile shell.'
                   : 'The mobile shell cannot reach the local bridge right now.'}
@@ -272,9 +201,9 @@ export function SettingsView({
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
             <div
               style={{
-                width: 40,
-                height: 40,
-                borderRadius: 16,
+                width: 44,
+                height: 44,
+                borderRadius: MOBILE_CARD_RADIUS,
                 border: `1px solid ${palette.cardBorder}`,
                 background: palette.panelBackground,
                 display: 'flex',
@@ -286,16 +215,16 @@ export function SettingsView({
               <IconGear fill={palette.iconFill} />
             </div>
             <div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: palette.rootText }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING }}>
                 About o8 mobile
               </div>
-              <div style={{ fontSize: 12, color: palette.subduedText, marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: palette.subduedText, marginTop: 4, letterSpacing: MOBILE_BODY_TRACKING }}>
                 Version {formatAboutVersion(appVersion)}
               </div>
             </div>
           </div>
-          <div style={{ fontSize: 13, lineHeight: 1.7, color: palette.subduedText }}>
-            Mobile command surface for approvals, conversation history, and assistant-driven work.
+          <div style={{ fontSize: 13, lineHeight: 1.7, color: palette.subduedText, letterSpacing: MOBILE_BODY_TRACKING }}>
+            Native-feeling command surface for approvals, chat history, and assistant-driven work on the go.
           </div>
         </MobileGlassPanel>
       </div>

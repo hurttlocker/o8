@@ -2,7 +2,16 @@
 
 import { ThreadListPrimitive, ThreadPrimitive } from '@assistant-ui/react';
 import type { CSSProperties, ReactNode } from 'react';
-import { mobileCardStyle, mobileFontFamily, type MobilePalette } from './mobile-approvals-shared';
+import {
+  MOBILE_BODY_TRACKING,
+  MOBILE_CARD_RADIUS,
+  MOBILE_GLASS_BLUR,
+  MOBILE_HEADING_TRACKING,
+  MOBILE_TOUCH_TARGET,
+  mobileCardStyle,
+  mobileFontFamily,
+  type MobilePalette,
+} from './mobile-approvals-shared';
 
 export function mobileSafeBottom(extra = 20) {
   return `calc(env(safe-area-inset-bottom, 0px) + ${extra}px)`;
@@ -22,6 +31,7 @@ export function MobileSurfaceRoot({
         flexDirection: 'column',
         flex: 1,
         minHeight: 0,
+        letterSpacing: MOBILE_BODY_TRACKING,
         ...style,
       }}
     >
@@ -45,8 +55,8 @@ export function MobileGlassPanel({
         ...mobileCardStyle(palette, {
           background: palette.panelElevated,
         }),
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
+        backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+        WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
         ...style,
       }}
     >
@@ -116,7 +126,7 @@ export function MobileSectionHeading({
           style={{
             fontSize: 24,
             fontWeight: 800,
-            letterSpacing: '-0.04em',
+            letterSpacing: MOBILE_HEADING_TRACKING,
             color: palette.rootText,
             lineHeight: 1.05,
           }}
@@ -129,6 +139,7 @@ export function MobileSectionHeading({
               fontSize: 13,
               color: palette.subduedText,
               lineHeight: 1.6,
+              letterSpacing: MOBILE_BODY_TRACKING,
               marginTop: 8,
             }}
           >
@@ -170,7 +181,7 @@ export function MobileMetricChip({
   return (
     <div
       style={{
-        borderRadius: 18,
+        borderRadius: MOBILE_CARD_RADIUS,
         border: `1px solid ${border}`,
         background,
         padding: '12px 14px',
@@ -193,6 +204,7 @@ export function MobileMetricChip({
           fontSize: 15,
           fontWeight: 700,
           color: palette.rootText,
+          letterSpacing: MOBILE_BODY_TRACKING,
         }}
       >
         {value}
@@ -217,11 +229,11 @@ export function MobilePillButton({
   style?: CSSProperties;
 }) {
   const background = tone === 'accent'
-    ? `linear-gradient(135deg, ${palette.accentSoft} 0%, ${palette.panelBackground} 100%)`
+    ? 'rgba(37, 99, 235, 0.18)'
     : tone === 'success'
-      ? `linear-gradient(135deg, ${palette.successSoft} 0%, ${palette.panelBackground} 100%)`
+      ? 'rgba(34, 197, 94, 0.16)'
       : tone === 'danger'
-        ? `linear-gradient(135deg, ${palette.dangerSoft} 0%, ${palette.panelBackground} 100%)`
+        ? 'rgba(239, 68, 68, 0.16)'
         : palette.panelElevated;
   const border = tone === 'accent'
     ? palette.accentBorder
@@ -237,18 +249,21 @@ export function MobilePillButton({
       disabled={disabled}
       onClick={onClick}
       style={{
-        minHeight: 40,
-        borderRadius: 999,
+        minHeight: MOBILE_TOUCH_TARGET,
+        borderRadius: MOBILE_CARD_RADIUS,
         border: `1px solid ${border}`,
         background,
         color: palette.rootText,
         padding: '0 14px',
         fontSize: 13,
         fontWeight: 700,
+        letterSpacing: MOBILE_BODY_TRACKING,
         fontFamily: mobileFontFamily(),
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.55 : 1,
         transition: 'opacity 0.18s ease, transform 0.18s ease',
+        backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+        WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
         ...style,
       }}
     >

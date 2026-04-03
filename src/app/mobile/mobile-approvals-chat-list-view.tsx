@@ -6,6 +6,9 @@ import {
   IconPencil,
   IconStar,
   IconTrash,
+  MOBILE_BODY_TRACKING,
+  MOBILE_CARD_RADIUS,
+  MOBILE_HEADING_TRACKING,
   mobileFontFamily,
   truncateText,
   type ChatHistoryRecord,
@@ -112,6 +115,7 @@ function ChatContextMenu({
                 color: item.color ?? palette.rootText,
                 fontSize: 15,
                 fontWeight: 500,
+                letterSpacing: MOBILE_BODY_TRACKING,
                 textAlign: 'left',
                 cursor: 'pointer',
                 fontFamily: mobileFontFamily(),
@@ -232,7 +236,7 @@ export function ChatListView({
           <MobileSectionHeading
             eyebrow="Chats"
             title="Recent conversations"
-            subtitle="Open a saved thread, long-press for management actions, or start a fresh mobile chat."
+            subtitle="Open a saved thread, long-press for management actions, or start a fresh o8 mobile chat."
             palette={palette}
             action={(
               <div style={{ display: 'grid', gap: 8 }}>
@@ -266,10 +270,10 @@ export function ChatListView({
             }}
           >
             <IconChat fill={palette.iconFill} style={{ opacity: 0.3 }} />
-            <div style={{ fontSize: 20, fontWeight: 800, color: palette.rootText, marginTop: 16, marginBottom: 6 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING, marginTop: 16, marginBottom: 6 }}>
               No conversations yet
             </div>
-            <div style={{ fontSize: 13, lineHeight: 1.7, color: palette.subduedText, maxWidth: 280, marginBottom: 18 }}>
+            <div style={{ fontSize: 13, lineHeight: 1.7, letterSpacing: MOBILE_BODY_TRACKING, color: palette.subduedText, maxWidth: 280, marginBottom: 18 }}>
               Start a new chat and it will appear here once the first exchange is saved.
             </div>
             <MobilePillButton onClick={onNewChat} palette={palette} tone="accent">
@@ -302,11 +306,12 @@ export function ChatListView({
                         }}
                         style={{
                           height: 44,
-                          borderRadius: 14,
+                          borderRadius: MOBILE_CARD_RADIUS,
                           border: `1px solid ${palette.inputBorder}`,
                           backgroundColor: palette.inputBackground,
                           color: palette.rootText,
                           fontSize: 14,
+                          letterSpacing: MOBILE_BODY_TRACKING,
                           paddingLeft: 12,
                           paddingRight: 12,
                           outline: 'none',
@@ -392,7 +397,7 @@ export function ChatListView({
                               justifyContent: 'center',
                             }}
                           >
-                            <IconStar fill={palette.iconFill} size={14} />
+                            <IconStar fill={palette.accent} size={14} />
                           </span>
                         ) : null}
                         {conversation.model ? (
@@ -421,6 +426,7 @@ export function ChatListView({
                       style={{
                         fontSize: 13,
                         lineHeight: 1.65,
+                        letterSpacing: MOBILE_BODY_TRACKING,
                         color: palette.mutedText,
                         overflow: 'hidden',
                         display: '-webkit-box',
