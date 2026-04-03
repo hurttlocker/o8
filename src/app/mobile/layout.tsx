@@ -33,7 +33,7 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: '#111111',
+        backgroundColor: 'var(--t-canvas-bg, #111111)',
         overflow: 'hidden',
       }}
     >
@@ -42,8 +42,8 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
         '[data-nextjs-dialog-overlay]{display:none!important}',
         '::-webkit-scrollbar{width:3px}',
         '::-webkit-scrollbar-track{background:transparent}',
-        '::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:3px}',
-        '::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}',
+        '::-webkit-scrollbar-thumb{background:var(--t-divider-strong, rgba(255,255,255,0.12));border-radius:3px}',
+        '::-webkit-scrollbar-thumb:hover{background:var(--t-border, rgba(255,255,255,0.2))}',
       ].join('') }} />
       <MobileAuroraBg />
       {children}
