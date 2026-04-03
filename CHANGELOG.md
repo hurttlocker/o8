@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `75aa5d2` feat: collapsible code blocks with diff coloring and file path labels
 - `c8c8c78` fix: clean input bar (no labels), send sound chirp, centered headers
 - `c98e658` fix: show separate Stop button next to Play when TTS is active
 - `d9e6881` fix: taller + more progressive iOS scroll fade (64px, 4-stop gradient)
