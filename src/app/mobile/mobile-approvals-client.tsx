@@ -485,16 +485,126 @@ function ApprovalsView({ approvals, onResolve, resolving, onRefresh }: {
   );
 }
 
+// ── Chat List View (Anthropic-style) ──
+
+function ChatListView({
+  conversations,
+  loading,
+  onSelect,
+  onNewChat,
+  onRefresh,
+}: {
+  conversations: ChatHistoryRecord[];
+  loading: boolean;
+  onSelect: (tabId: string) => void;
+  onNewChat: () => void;
+  onRefresh: () => void;
+}) {
+  function chatTimeAgo(dateStr: string): string {
+    const ms = Date.now() - new Date(dateStr).getTime();
+    const minutes = Math.floor(ms / 60_000);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 3_600_000);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 5) return `${weeks}w ago`;
+    const months = Math.floor(days / 30);
+    return `${months}mo ago`;
+  }
+
+  if (loading) {
+    return (
+      <div style={{ paddingTop: 60, textAlign: 'center', color: '#6b7280', fontSize: 14 }}>
+        Loading conversations...
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: 'relative', minHeight: 'calc(100dvh - 80px)' }}>
+      {conversations.length === 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 100, color: '#6b7280' }}>
+          <IconChat />
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4, marginTop: 16 }}>No conversations yet</div>
+          <div style={{ fontSize: 13 }}>Tap + to start a new chat</div>
+        </div>
+      ) : (
+        conversations.map((conv) => (
+          <button
+            key={conv.tabId}
+            onClick={() => onSelect(conv.tabId)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              width: '100%',
+              padding: '14px 0',
+              borderBottom: '1px solid rgba(255,255,255,0.06)',
+              backgroundColor: 'transparent',
+              border: 'none',
+              borderBlockEnd: '1px solid rgba(255,255,255,0.06)',
+              cursor: 'pointer',
+              textAlign: 'left',
+              fontFamily: 'system-ui, -apple-system, sans-serif',
+            }}
+          >
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: '#f3f4f6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {conv.title || 'Untitled'}
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                {chatTimeAgo(conv.updatedAt)}
+              </div>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 256 256" fill="#6b7280" style={{ flexShrink: 0, marginLeft: 8 }}>
+              <path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z" />
+            </svg>
+          </button>
+        ))
+      )}
+
+      {/* New chat FAB */}
+      <button
+        onClick={onNewChat}
+        style={{
+          position: 'fixed',
+          bottom: 'max(env(safe-area-inset-bottom, 0px), 24px)',
+          right: 24,
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          border: 'none',
+          backgroundColor: '#c27436',
+          color: '#fff',
+          fontSize: 28,
+          fontWeight: 300,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+        } as React.CSSProperties}
+        aria-label="New chat"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
 // ── Chat View ──
 
 function ChatView({
   currentTabId,
   onTabIdChange,
   onConversationSaved,
+  onBack,
 }: {
   currentTabId: string | null;
   onTabIdChange: (tabId: string) => void;
   onConversationSaved: () => void;
+  onBack?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -904,7 +1014,15 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
   }, []);
 
   const governanceCount = approvals.filter((a) => a.status === 'pending' && isGovernanceApproval(a)).length;
-  const viewTitle = activeView === 'approvals' ? 'Approvals' : 'Chat';
+  const inConversation = activeView === 'chat' && currentTabId !== null;
+  const viewTitle = activeView === 'approvals' ? 'Approvals' : inConversation ? (recentConversations.find((c) => c.tabId === currentTabId)?.title ?? 'Chat') : 'Chats';
+
+  // Load conversations when switching to chat list
+  useEffect(() => {
+    if (activeView === 'chat' && !currentTabId) {
+      void loadRecentConversations();
+    }
+  }, [activeView, currentTabId, loadRecentConversations]);
 
   return (
     <div style={{ minHeight: '100dvh', backgroundColor: '#111111', color: '#f3f4f6', fontFamily: 'system-ui, -apple-system, sans-serif', WebkitFontSmoothing: 'antialiased', padding: '0 16px' } as React.CSSProperties}>
@@ -922,17 +1040,29 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
 
       {/* Header */}
       <div style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)', paddingBottom: 12, display: 'flex', alignItems: 'center', gap: 12 } as React.CSSProperties}>
-        <button
-          onClick={() => setSidebarOpen(true)}
-          style={{ width: 44, height: 44, borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'transparent', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}
-          aria-label="Menu"
-        >
-          <IconHamburger />
-          {governanceCount > 0 && activeView !== 'approvals' && (
-            <span style={{ position: 'absolute', top: 6, right: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' }} />
-          )}
-        </button>
-        <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', flex: 1 }}>{viewTitle}</div>
+        {inConversation ? (
+          <button
+            onClick={() => setCurrentTabId(null)}
+            style={{ width: 44, height: 44, borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'transparent', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            aria-label="Back to chats"
+          >
+            <svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor">
+              <path d="M168.49,199.51a12,12,0,0,1-17,17l-80-80a12,12,0,0,1,0-17l80-80a12,12,0,0,1,17,17L97,128Z" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            style={{ width: 44, height: 44, borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'transparent', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}
+            aria-label="Menu"
+          >
+            <IconHamburger />
+            {governanceCount > 0 && activeView !== 'approvals' && (
+              <span style={{ position: 'absolute', top: 6, right: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' }} />
+            )}
+          </button>
+        )}
+        <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{viewTitle}</div>
       </div>
 
       {/* Error banner */}
@@ -946,13 +1076,26 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
       {activeView === 'approvals' && (
         <ApprovalsView approvals={approvals} onResolve={handleResolve} resolving={resolving} onRefresh={() => void refresh()} />
       )}
-      {activeView === 'chat' && (
+      {activeView === 'chat' && !currentTabId && (
+        <ChatListView
+          conversations={recentConversations}
+          loading={recentLoading}
+          onSelect={(tabId) => setCurrentTabId(tabId)}
+          onNewChat={() => {
+            const newId = `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            setCurrentTabId(newId);
+          }}
+          onRefresh={() => void loadRecentConversations()}
+        />
+      )}
+      {activeView === 'chat' && currentTabId && (
         <ChatView
           currentTabId={currentTabId}
           onTabIdChange={setCurrentTabId}
           onConversationSaved={() => {
             void loadRecentConversations();
           }}
+          onBack={() => setCurrentTabId(null)}
         />
       )}
     </div>
