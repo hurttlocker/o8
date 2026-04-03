@@ -37,6 +37,8 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
         overflow: 'hidden',
       }}
     >
+      {/* Default mobile to dark theme before React hydrates */}
+      <script dangerouslySetInnerHTML={{ __html: 'try{if(!localStorage.getItem("cortex-theme"))localStorage.setItem("cortex-theme","dark")}catch(e){}' }} />
       <style dangerouslySetInnerHTML={{ __html: [
         'html,body{background:#111111!important;margin:0;padding:0}',
         'nextjs-portal{display:none!important}',
