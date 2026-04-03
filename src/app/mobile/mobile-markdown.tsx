@@ -280,8 +280,35 @@ function highlightCode(code: string) {
   return highlightedLines;
 }
 
+function isDiffBlock(code: string): boolean {
+  const lines = code.split('\n');
+  let diffLines = 0;
+  for (const line of lines) {
+    if (line.startsWith('+') || line.startsWith('-') || line.startsWith('@@') || line.startsWith('diff ')) {
+      diffLines += 1;
+    }
+  }
+  return diffLines > lines.length * 0.25;
+}
+
+function extractFileLabel(language: string, code: string): string | null {
+  // Check language tag for file path
+  const langParts = language.split(/\s+/);
+  for (const part of langParts) {
+    if (part.includes('/') && part.includes('.')) return part;
+  }
+  // Check first line of diff for file path
+  const firstLine = code.split('\n')[0] ?? '';
+  const diffFileMatch = firstLine.match(/^(?:diff --git a\/|---|\+\+\+)\s*(.+?)(?:\s|$)/);
+  if (diffFileMatch?.[1]) return diffFileMatch[1].replace(/^[ab]\//, '');
+  return null;
+}
+
 function CodeBlock({ code, language }: { code: string; language: string }) {
   const [copied, setCopied] = useState(false);
+  const isDiff = isDiffBlock(code) || language === 'diff';
+  const fileLabel = extractFileLabel(language, code);
+  const [collapsed, setCollapsed] = useState(isDiff && code.split('\n').length > 8);
   const highlightedLines = highlightCode(code);
 
   return (
@@ -311,7 +338,16 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
           textTransform: 'lowercase',
         }}
       >
-        <span>{language}</span>
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, border: 'none', backgroundColor: 'transparent', color: '#8b96a5', cursor: 'pointer', padding: 0, fontFamily: '"SF Mono", Menlo, monospace', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em' }}
+        >
+          <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor" style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
+            <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z" />
+          </svg>
+          <span>{fileLabel ?? language}</span>
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -339,6 +375,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
           <span>{copied ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
+      {!collapsed && (
       <pre
         style={{
           color: '#dbe4f0',
@@ -352,13 +389,21 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
         }}
       >
         {highlightedLines.map((line, lineIndex) => {
+          const rawLine = code.split('\n')[lineIndex] ?? '';
+          const isAddition = isDiff && rawLine.startsWith('+') && !rawLine.startsWith('+++');
+          const isDeletion = isDiff && rawLine.startsWith('-') && !rawLine.startsWith('---');
+          const isHunk = isDiff && rawLine.startsWith('@@');
+          const diffBg = isAddition ? 'rgba(34,197,94,0.1)' : isDeletion ? 'rgba(239,68,68,0.1)' : isHunk ? 'rgba(96,165,250,0.06)' : undefined;
+          const diffColor = isAddition ? '#86efac' : isDeletion ? '#fca5a5' : isHunk ? '#93c5fd' : undefined;
+
           return (
             <Fragment key={`${language}-${lineIndex}`}>
+              <span style={diffBg ? { backgroundColor: diffBg, display: 'inline-block', width: '100%', marginLeft: -16, marginRight: -16, paddingLeft: 16, paddingRight: 16 } : undefined}>
               {line.tokens.map((token, tokenIndex) => (
                 <span
                   key={`${language}-${lineIndex}-${tokenIndex}`}
                   style={{
-                    color: token.type === 'keyword'
+                    color: diffColor ?? (token.type === 'keyword'
                       ? '#c792ea'
                       : token.type === 'string'
                         ? '#a5d6ff'
@@ -368,17 +413,19 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
                             ? '#8b96a5'
                             : token.type === 'function'
                               ? '#82aaff'
-                              : '#dbe4f0',
+                              : '#dbe4f0'),
                   }}
                 >
                   {token.value}
                 </span>
               ))}
+              </span>
               {lineIndex < highlightedLines.length - 1 ? '\n' : null}
             </Fragment>
           );
         })}
       </pre>
+      )}
     </div>
   );
 }
