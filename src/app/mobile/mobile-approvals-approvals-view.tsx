@@ -2,28 +2,38 @@
 
 import {
   IconCheck,
-  MobilePalette,
   RISK_COLORS,
   type ApprovalItem,
-  isGovernanceApproval,
-  mobileCardStyle,
-  mobileFontFamily,
+  type MobilePalette,
   timeAgo,
 } from './mobile-approvals-shared';
+import {
+  MobileGlassPanel,
+  MobileMetricChip,
+  MobilePillButton,
+  MobileSectionHeading,
+  MobileSurfaceRoot,
+  MobileThreadListRoot,
+  mobileSafeBottom,
+} from './mobile-shell-primitives';
 
 function RiskBadge({ risk }: { risk: string }) {
   return (
     <span
       style={{
-        display: 'inline-block',
-        padding: '3px 8px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 26,
+        paddingLeft: 10,
+        paddingRight: 10,
         borderRadius: 999,
+        backgroundColor: RISK_COLORS[risk] ?? RISK_COLORS.low,
+        color: '#ffffff',
         fontSize: 11,
         fontWeight: 700,
-        letterSpacing: '0.04em',
+        letterSpacing: '0.08em',
         textTransform: 'uppercase',
-        color: '#ffffff',
-        backgroundColor: RISK_COLORS[risk] ?? RISK_COLORS.low,
       }}
     >
       {risk}
@@ -39,81 +49,96 @@ function ApprovalCard({
 }: {
   approval: ApprovalItem;
   onResolve: (id: string, action: 'approve' | 'reject') => void;
-  resolving: string | null;
+  resolving: { id: string; action: 'approve' | 'reject' } | null;
   palette: MobilePalette;
 }) {
-  const isResolving = resolving === approval.id;
-  const agent = approval.metadata?.agent ?? approval.sessionKey?.split(':').pop() ?? 'agent';
+  const isApproving = resolving?.id === approval.id && resolving.action === 'approve';
+  const isRejecting = resolving?.id === approval.id && resolving.action === 'reject';
+  const isBusy = resolving?.id === approval.id;
+  const agent = approval.metadata?.agent ?? approval.sessionKey?.split(':').pop() ?? 'operator';
 
   return (
-    <div
-      style={{
-        ...mobileCardStyle(palette, {
-          padding: 18,
-          marginBottom: 12,
-          background: palette.panelElevated,
-        }),
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-        <RiskBadge risk={approval.risk} />
-        <span style={{ fontSize: 12, color: palette.subduedText }}>{timeAgo(approval.createdAt)}</span>
+    <MobileGlassPanel palette={palette} style={{ padding: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <RiskBadge risk={approval.risk} />
+          {approval.toolName ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                minHeight: 26,
+                paddingLeft: 10,
+                paddingRight: 10,
+                borderRadius: 999,
+                background: palette.cardBackground,
+                border: `1px solid ${palette.cardBorder}`,
+                fontSize: 11,
+                fontWeight: 700,
+                color: palette.subduedText,
+                fontFamily: 'SF Mono, Menlo, monospace',
+              }}
+            >
+              {approval.toolName}
+            </span>
+          ) : null}
+        </div>
+        <span style={{ fontSize: 12, color: palette.subduedText, flexShrink: 0 }}>
+          {timeAgo(approval.createdAt)}
+        </span>
       </div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: palette.rootText, marginBottom: 5, lineHeight: 1.35 }}>
+
+      <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.2, letterSpacing: '-0.03em', color: palette.rootText, marginBottom: 8 }}>
         {approval.title}
       </div>
-      {approval.toolName ? (
-        <div style={{ fontSize: 12, color: palette.subduedText, marginBottom: 4, fontFamily: 'SF Mono, Menlo, monospace' }}>
-          {approval.toolName}
-        </div>
-      ) : null}
-      <div style={{ fontSize: 13, color: palette.mutedText, marginBottom: 4 }}>{agent}</div>
-      {approval.summary ? (
-        <div style={{ fontSize: 13, color: palette.subduedText, marginBottom: 14, lineHeight: 1.55 }}>
-          {approval.summary.length > 200 ? `${approval.summary.slice(0, 200)}...` : approval.summary}
-        </div>
-      ) : null}
-      <div style={{ display: 'flex', gap: 10 }}>
-        <button
-          onClick={() => onResolve(approval.id, 'approve')}
-          disabled={isResolving}
-          style={{
-            flex: 1,
-            height: 46,
-            borderRadius: 999,
-            border: `1px solid ${palette.successBorder}`,
-            background: isResolving ? palette.cardBackground : `linear-gradient(135deg, ${palette.successSoft} 0%, ${palette.panelBackground} 100%)`,
-            color: palette.rootText,
-            fontSize: 15,
-            fontWeight: 700,
-            cursor: isResolving ? 'default' : 'pointer',
-            opacity: isResolving ? 0.55 : 1,
-            fontFamily: mobileFontFamily(),
-          }}
-        >
-          {isResolving ? 'Approving...' : 'Approve'}
-        </button>
-        <button
-          onClick={() => onResolve(approval.id, 'reject')}
-          disabled={isResolving}
-          style={{
-            flex: 1,
-            height: 46,
-            borderRadius: 999,
-            border: `1px solid ${palette.dangerBorder}`,
-            background: isResolving ? palette.cardBackground : `linear-gradient(135deg, ${palette.dangerSoft} 0%, ${palette.panelBackground} 100%)`,
-            color: palette.rootText,
-            fontSize: 15,
-            fontWeight: 700,
-            cursor: isResolving ? 'default' : 'pointer',
-            opacity: isResolving ? 0.55 : 1,
-            fontFamily: mobileFontFamily(),
-          }}
-        >
-          Reject
-        </button>
+
+      <div style={{ fontSize: 14, lineHeight: 1.65, color: palette.mutedText, marginBottom: 14 }}>
+        {approval.description || approval.summary || 'Approval required.'}
       </div>
-    </div>
+
+      {approval.summary && approval.summary !== approval.description ? (
+        <div
+          style={{
+            borderRadius: 18,
+            border: `1px solid ${palette.cardBorder}`,
+            background: palette.cardBackground,
+            padding: '12px 14px',
+            fontSize: 13,
+            lineHeight: 1.6,
+            color: palette.subduedText,
+            marginBottom: 14,
+          }}
+        >
+          {approval.summary}
+        </div>
+      ) : null}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+        <MobileMetricChip label="Agent" value={agent} palette={palette} />
+        <MobileMetricChip label="Session" value={approval.sessionKey || 'n/a'} palette={palette} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <MobilePillButton
+          onClick={() => onResolve(approval.id, 'approve')}
+          palette={palette}
+          tone="success"
+          disabled={isBusy}
+          style={{ minHeight: 48, fontSize: 14, fontWeight: 800 }}
+        >
+          {isApproving ? 'Approving...' : 'Approve'}
+        </MobilePillButton>
+        <MobilePillButton
+          onClick={() => onResolve(approval.id, 'reject')}
+          palette={palette}
+          tone="danger"
+          disabled={isBusy}
+          style={{ minHeight: 48, fontSize: 14, fontWeight: 800 }}
+        >
+          {isRejecting ? 'Rejecting...' : 'Reject'}
+        </MobilePillButton>
+      </div>
+    </MobileGlassPanel>
   );
 }
 
@@ -125,39 +150,66 @@ export function ApprovalsView({
 }: {
   approvals: ApprovalItem[];
   onResolve: (id: string, action: 'approve' | 'reject') => void;
-  resolving: string | null;
+  resolving: { id: string; action: 'approve' | 'reject' } | null;
   palette: MobilePalette;
 }) {
-  const pending = approvals.filter((approval) => approval.status === 'pending' && isGovernanceApproval(approval));
+  const pending = approvals.filter((approval) => approval.status === 'pending');
 
   return (
-    <>
-      <div style={{ marginBottom: 14, paddingLeft: 2 }}>
-        <div style={{ fontSize: 13, color: palette.subduedText }}>
-          {pending.length} pending approval{pending.length !== 1 ? 's' : ''}
-        </div>
-      </div>
-      {pending.length > 0 ? (
-        pending.map((approval) => (
-          <ApprovalCard
-            key={approval.id}
-            approval={approval}
-            onResolve={onResolve}
-            resolving={resolving}
+    <MobileSurfaceRoot>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          paddingBottom: mobileSafeBottom(24),
+        }}
+      >
+        <MobileGlassPanel palette={palette} style={{ padding: 20, marginBottom: 14 }}>
+          <MobileSectionHeading
+            eyebrow="Approvals Queue"
+            title={pending.length > 0 ? `${pending.length} pending` : 'Queue clear'}
+            subtitle={pending.length > 0
+              ? 'Review the request, then approve or reject it from the same surface.'
+              : 'New approval requests will appear here as they arrive.'}
             palette={palette}
           />
-        ))
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 96, color: palette.subduedText }}>
-          <IconCheck fill={palette.iconFill} style={{ opacity: 0.32 }} />
-          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 4, marginTop: 16, color: palette.rootText }}>
-            All clear
-          </div>
-          <div style={{ fontSize: 13 }}>
-            No pending approvals
-          </div>
-        </div>
-      )}
-    </>
+        </MobileGlassPanel>
+
+        {pending.length > 0 ? (
+          <MobileThreadListRoot>
+            {pending.map((approval) => (
+              <ApprovalCard
+                key={approval.id}
+                approval={approval}
+                onResolve={onResolve}
+                resolving={resolving}
+                palette={palette}
+              />
+            ))}
+          </MobileThreadListRoot>
+        ) : (
+          <MobileGlassPanel
+            palette={palette}
+            style={{
+              padding: '44px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+            }}
+          >
+            <IconCheck fill={palette.iconFill} style={{ opacity: 0.34 }} />
+            <div style={{ fontSize: 20, fontWeight: 800, color: palette.rootText, marginTop: 16, marginBottom: 6 }}>
+              All clear
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.7, color: palette.subduedText, maxWidth: 260 }}>
+              There are no pending approvals right now. This page will refresh as new requests land.
+            </div>
+          </MobileGlassPanel>
+        )}
+      </div>
+    </MobileSurfaceRoot>
   );
 }
