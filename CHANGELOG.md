@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `c232719` feat: starred + recents sections in sidebar, revert dots back to long-press
 - `116a7c8` fix: replace long-press with visible dots button for chat context menu
 - `ca8ad50` feat: long-press context menu on chat list — star, rename, delete
 - `d63d217` feat: AI provider-style chat list view
