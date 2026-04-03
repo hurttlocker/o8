@@ -19,7 +19,6 @@ import {
   getMobilePalette,
   getModelOption,
   glassButtonStyle,
-  isGovernanceApproval,
   mobileFontFamily,
   normalizeHistoryList,
   readStoredMobileModel,
@@ -56,7 +55,7 @@ export function MobileApprovalsClient({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState<MobileView>('chat');
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals);
-  const [resolving, setResolving] = useState<string | null>(null);
+  const [resolving, setResolving] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentTabId, setCurrentTabId] = useState<string | null>(null);
   const [recentConversations, setRecentConversations] = useState<ChatHistoryRecord[]>([]);
@@ -83,6 +82,7 @@ export function MobileApprovalsClient({
   }, []);
 
   useEffect(() => {
+    void refresh();
     const timer = setInterval(refresh, POLL_INTERVAL);
     return () => clearInterval(timer);
   }, [refresh]);
@@ -100,11 +100,6 @@ export function MobileApprovalsClient({
       setRecentLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    if (!sidebarOpen) return;
-    void loadRecentConversations();
-  }, [loadRecentConversations, sidebarOpen]);
 
   useEffect(() => {
     if (activeView === 'chat' && !currentTabId) {
@@ -158,7 +153,7 @@ export function MobileApprovalsClient({
   }, []);
 
   const handleResolve = useCallback(async (id: string, action: 'approve' | 'reject') => {
-    setResolving(id);
+    setResolving({ id, action });
     try {
       const response = await fetch('/api/panel/approvals', {
         method: 'POST',
@@ -168,6 +163,7 @@ export function MobileApprovalsClient({
 
       if (response.ok) {
         setApprovals((previous) => previous.filter((approval) => approval.id !== id));
+        setError(null);
       } else {
         const data = await response.json().catch(() => ({})) as { error?: string };
         setError(data.error ?? 'Failed to resolve approval');
@@ -178,9 +174,11 @@ export function MobileApprovalsClient({
     setResolving(null);
   }, []);
 
-  const handleSelectConversation = useCallback((tabId: string) => {
-    setCurrentTabId(tabId);
-    setActiveView('chat');
+  const handleNavigate = useCallback((view: MobileView) => {
+    setActiveView(view);
+    if (view === 'chat') {
+      setCurrentTabId(null);
+    }
   }, []);
 
   const handleThemeChange = useCallback((nextTheme: 'light' | 'dark') => {
@@ -197,8 +195,8 @@ export function MobileApprovalsClient({
     }
   }, []);
 
-  const governanceCount = useMemo(
-    () => approvals.filter((approval) => approval.status === 'pending' && isGovernanceApproval(approval)).length,
+  const pendingCount = useMemo(
+    () => approvals.filter((approval) => approval.status === 'pending').length,
     [approvals],
   );
   const inConversation = activeView === 'chat' && currentTabId !== null;
@@ -230,12 +228,11 @@ export function MobileApprovalsClient({
         <Sidebar
           open={sidebarOpen}
           activeView={activeView}
-          approvalCount={governanceCount}
-          currentTabId={currentTabId}
-          recentConversations={recentConversations}
-          recentLoading={recentLoading}
-          onNavigate={setActiveView}
-          onSelectConversation={handleSelectConversation}
+          approvalCount={pendingCount}
+          themeId={themeId}
+          selectedModelLabel={selectedModel.label}
+          connectionStatus={connectionStatus}
+          onNavigate={handleNavigate}
           onClose={() => setSidebarOpen(false)}
           palette={palette}
         />
@@ -266,7 +263,7 @@ export function MobileApprovalsClient({
               aria-label="Menu"
             >
               <IconHamburger fill={palette.iconFill} />
-              {governanceCount > 0 && activeView !== 'approvals' ? (
+              {pendingCount > 0 && activeView !== 'approvals' ? (
                 <span
                   style={{
                     position: 'absolute',

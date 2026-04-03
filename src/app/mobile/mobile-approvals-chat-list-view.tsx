@@ -1,19 +1,24 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
-  IconCaretRight,
   IconChat,
   IconPencil,
   IconStar,
   IconTrash,
-  MobilePalette,
-  glassButtonStyle,
   mobileFontFamily,
-  mobileCardStyle,
+  truncateText,
   type ChatHistoryRecord,
+  type MobilePalette,
 } from './mobile-approvals-shared';
+import {
+  MobileGlassPanel,
+  MobilePillButton,
+  MobileSectionHeading,
+  MobileSurfaceRoot,
+  MobileThreadListRoot,
+  mobileSafeBottom,
+} from './mobile-shell-primitives';
 
 interface ContextMenuState {
   tabId: string;
@@ -25,11 +30,11 @@ interface ContextMenuState {
 
 function chatTimeAgo(dateStr: string): string {
   const timestamp = new Date(dateStr).getTime();
-  if (Number.isNaN(timestamp)) return '';
+  if (Number.isNaN(timestamp)) return 'Unknown';
 
   const ms = Date.now() - timestamp;
   const minutes = Math.floor(ms / 60_000);
-  if (minutes < 1) return 'just now';
+  if (minutes < 1) return 'Just now';
   if (minutes < 60) return `${minutes}m ago`;
 
   const hours = Math.floor(minutes / 60);
@@ -81,44 +86,42 @@ function ChatContextMenu({
       <div
         style={{
           position: 'fixed',
-          left: Math.min(menu.x, typeof window !== 'undefined' ? window.innerWidth - 204 : 204),
-          top: Math.min(menu.y, typeof window !== 'undefined' ? window.innerHeight - 210 : 420),
+          left: Math.min(menu.x, typeof window !== 'undefined' ? window.innerWidth - 208 : 208),
+          top: Math.min(menu.y, typeof window !== 'undefined' ? window.innerHeight - 220 : 420),
           zIndex: 1001,
-          ...mobileCardStyle(palette, {
-            background: palette.menuBackground,
-            borderRadius: 18,
-            minWidth: 184,
-            padding: '6px 0',
-          }),
+          width: 192,
         }}
       >
-        {items.map((item) => (
-          <button
-            key={item.action}
-            onClick={() => {
-              onAction(item.action, menu.tabId);
-              onClose();
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              width: '100%',
-              padding: '12px 16px',
-              border: 'none',
-              backgroundColor: 'transparent',
-              color: item.color ?? palette.rootText,
-              fontSize: 15,
-              fontWeight: 500,
-              fontFamily: mobileFontFamily(),
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <span style={{ opacity: item.color ? 1 : 0.85 }}>{item.icon}</span>
-            {item.label}
-          </button>
-        ))}
+        <MobileGlassPanel palette={palette} style={{ padding: '6px 0', background: palette.menuBackground }}>
+          {items.map((item) => (
+            <button
+              key={item.action}
+              type="button"
+              onClick={() => {
+                onAction(item.action, menu.tabId);
+                onClose();
+              }}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 16px',
+                border: 'none',
+                backgroundColor: 'transparent',
+                color: item.color ?? palette.rootText,
+                fontSize: 15,
+                fontWeight: 500,
+                textAlign: 'left',
+                cursor: 'pointer',
+                fontFamily: mobileFontFamily(),
+              }}
+            >
+              <span style={{ opacity: item.color ? 1 : 0.88 }}>{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+        </MobileGlassPanel>
       </div>
     </>
   );
@@ -152,6 +155,7 @@ export function ChatListView({
   ) => {
     const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX;
     const clientY = 'touches' in event ? event.touches[0].clientY : event.clientY;
+
     longPressTimer.current = setTimeout(() => {
       setContextMenu({ tabId, title, starred, x: clientX, y: clientY });
     }, 500);
@@ -203,16 +207,8 @@ export function ChatListView({
     onRefresh();
   }, [onRefresh, renameValue, renaming]);
 
-  if (loading) {
-    return (
-      <div style={{ paddingTop: 64, textAlign: 'center', color: palette.subduedText, fontSize: 14 }}>
-        Loading conversations...
-      </div>
-    );
-  }
-
   return (
-    <div style={{ position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto' }}>
+    <MobileSurfaceRoot>
       {contextMenu ? (
         <ChatContextMenu
           menu={contextMenu}
@@ -224,134 +220,223 @@ export function ChatListView({
         />
       ) : null}
 
-      {conversations.length === 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 100, color: palette.subduedText }}>
-          <IconChat fill={palette.iconFill} style={{ opacity: 0.28 }} />
-          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 4, marginTop: 16, color: palette.rootText }}>
-            No conversations yet
-          </div>
-          <div style={{ fontSize: 13 }}>Use the add button to start a new chat.</div>
-        </div>
-      ) : (
-        conversations.map((conversation) => (
-          <div key={conversation.tabId}>
-            {renaming === conversation.tabId ? (
-              <div style={{ display: 'flex', gap: 8, padding: '10px 0', borderBottom: `1px solid ${palette.cardBorder}` }}>
-                <input
-                  autoFocus
-                  value={renameValue}
-                  onChange={(event) => setRenameValue(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      void handleRenameSubmit();
-                    }
-                    if (event.key === 'Escape') {
-                      setRenaming(null);
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    height: 42,
-                    borderRadius: 14,
-                    border: `1px solid ${palette.inputBorder}`,
-                    backgroundColor: palette.inputBackground,
-                    color: palette.rootText,
-                    fontSize: 14,
-                    paddingLeft: 12,
-                    paddingRight: 12,
-                    outline: 'none',
-                    fontFamily: mobileFontFamily(),
-                  }}
-                />
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          paddingBottom: mobileSafeBottom(24),
+        }}
+      >
+        <MobileGlassPanel palette={palette} style={{ padding: 20, marginBottom: 14 }}>
+          <MobileSectionHeading
+            eyebrow="Chats"
+            title="Recent conversations"
+            subtitle="Open a saved thread, long-press for management actions, or start a fresh mobile chat."
+            palette={palette}
+            action={(
+              <div style={{ display: 'grid', gap: 8 }}>
+                <MobilePillButton onClick={onRefresh} palette={palette}>
+                  Refresh
+                </MobilePillButton>
+                <MobilePillButton onClick={onNewChat} palette={palette} tone="accent">
+                  New chat
+                </MobilePillButton>
+              </div>
+            )}
+          />
+        </MobileGlassPanel>
+
+        {loading ? (
+          <MobileGlassPanel palette={palette} style={{ padding: '28px 20px', textAlign: 'center' }}>
+            <div style={{ fontSize: 14, color: palette.subduedText }}>
+              Loading conversations...
+            </div>
+          </MobileGlassPanel>
+        ) : conversations.length === 0 ? (
+          <MobileGlassPanel
+            palette={palette}
+            style={{
+              padding: '44px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+            }}
+          >
+            <IconChat fill={palette.iconFill} style={{ opacity: 0.3 }} />
+            <div style={{ fontSize: 20, fontWeight: 800, color: palette.rootText, marginTop: 16, marginBottom: 6 }}>
+              No conversations yet
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.7, color: palette.subduedText, maxWidth: 280, marginBottom: 18 }}>
+              Start a new chat and it will appear here once the first exchange is saved.
+            </div>
+            <MobilePillButton onClick={onNewChat} palette={palette} tone="accent">
+              Start new chat
+            </MobilePillButton>
+          </MobileGlassPanel>
+        ) : (
+          <MobileThreadListRoot>
+            {conversations.map((conversation) => {
+              const preview = truncateText(conversation.lastMessage || 'No preview yet.', 140);
+
+              if (renaming === conversation.tabId) {
+                return (
+                  <MobileGlassPanel key={conversation.tabId} palette={palette} style={{ padding: 16 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: palette.rootText, marginBottom: 10 }}>
+                      Rename conversation
+                    </div>
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            void handleRenameSubmit();
+                          }
+                          if (event.key === 'Escape') {
+                            setRenaming(null);
+                          }
+                        }}
+                        style={{
+                          height: 44,
+                          borderRadius: 14,
+                          border: `1px solid ${palette.inputBorder}`,
+                          backgroundColor: palette.inputBackground,
+                          color: palette.rootText,
+                          fontSize: 14,
+                          paddingLeft: 12,
+                          paddingRight: 12,
+                          outline: 'none',
+                          fontFamily: mobileFontFamily(),
+                        }}
+                      />
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <MobilePillButton onClick={() => setRenaming(null)} palette={palette} style={{ flex: 1 }}>
+                          Cancel
+                        </MobilePillButton>
+                        <MobilePillButton
+                          onClick={() => {
+                            void handleRenameSubmit();
+                          }}
+                          palette={palette}
+                          tone="accent"
+                          style={{ flex: 1 }}
+                        >
+                          Save
+                        </MobilePillButton>
+                      </div>
+                    </div>
+                  </MobileGlassPanel>
+                );
+              }
+
+              return (
                 <button
+                  key={conversation.tabId}
+                  type="button"
                   onClick={() => {
-                    void handleRenameSubmit();
+                    if (!contextMenu) onSelect(conversation.tabId);
+                  }}
+                  onMouseDown={(event) => handleLongPressStart(conversation.tabId, conversation.title, conversation.starred ?? false, event)}
+                  onMouseUp={handleLongPressEnd}
+                  onMouseLeave={handleLongPressEnd}
+                  onTouchStart={(event) => handleLongPressStart(conversation.tabId, conversation.title, conversation.starred ?? false, event)}
+                  onTouchEnd={handleLongPressEnd}
+                  onTouchMove={handleLongPressEnd}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({
+                      tabId: conversation.tabId,
+                      title: conversation.title,
+                      starred: conversation.starred,
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
                   }}
                   style={{
-                    height: 42,
-                    paddingLeft: 14,
-                    paddingRight: 14,
-                    borderRadius: 14,
-                    border: `1px solid ${palette.accentBorder}`,
-                    backgroundColor: palette.accent,
-                    color: palette.inverseIconFill,
-                    fontSize: 13,
-                    fontWeight: 700,
+                    width: '100%',
+                    padding: 0,
+                    border: 'none',
+                    background: 'transparent',
+                    textAlign: 'left',
                     cursor: 'pointer',
                     fontFamily: mobileFontFamily(),
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none',
                   }}
                 >
-                  Save
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => {
-                  if (!contextMenu) onSelect(conversation.tabId);
-                }}
-                onMouseDown={(event) => handleLongPressStart(conversation.tabId, conversation.title, conversation.starred ?? false, event)}
-                onMouseUp={handleLongPressEnd}
-                onMouseLeave={handleLongPressEnd}
-                onTouchStart={(event) => handleLongPressStart(conversation.tabId, conversation.title, conversation.starred ?? false, event)}
-                onTouchEnd={handleLongPressEnd}
-                onTouchMove={handleLongPressEnd}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setContextMenu({
-                    tabId: conversation.tabId,
-                    title: conversation.title,
-                    starred: conversation.starred,
-                    x: event.clientX,
-                    y: event.clientY,
-                  });
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  width: '100%',
-                  padding: '14px 0',
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  borderBottom: `1px solid ${palette.cardBorder}`,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontFamily: mobileFontFamily(),
-                  userSelect: 'none',
-                  WebkitUserSelect: 'none',
-                } as CSSProperties}
-              >
-                <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: palette.rootText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {conversation.title || 'Untitled'}
-                  </div>
-                  <div style={{ fontSize: 12, color: palette.subduedText, marginTop: 3 }}>
-                    {chatTimeAgo(conversation.updatedAt)}
-                  </div>
-                </div>
-                <IconCaretRight fill={palette.iconFill} style={{ flexShrink: 0, marginLeft: 8, opacity: 0.4 }} />
-              </button>
-            )}
-          </div>
-        ))
-      )}
+                  <MobileGlassPanel palette={palette} style={{ padding: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: palette.rootText, lineHeight: 1.3 }}>
+                          {conversation.title || 'Untitled conversation'}
+                        </div>
+                        <div style={{ fontSize: 12, color: palette.subduedText, marginTop: 4 }}>
+                          {chatTimeAgo(conversation.updatedAt)}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        {conversation.starred ? (
+                          <span
+                            style={{
+                              width: 30,
+                              height: 30,
+                              borderRadius: 999,
+                              border: `1px solid ${palette.warningSoft}`,
+                              background: palette.warningSoft,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <IconStar fill={palette.iconFill} size={14} />
+                          </span>
+                        ) : null}
+                        {conversation.model ? (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              minHeight: 28,
+                              paddingLeft: 10,
+                              paddingRight: 10,
+                              borderRadius: 999,
+                              border: `1px solid ${palette.cardBorder}`,
+                              background: palette.cardBackground,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: palette.subduedText,
+                            }}
+                          >
+                            {truncateText(conversation.model, 24)}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
 
-      <button
-        onClick={onNewChat}
-        style={{
-          position: 'fixed',
-          bottom: 'max(env(safe-area-inset-bottom, 0px), 24px)',
-          right: 24,
-          ...glassButtonStyle(56, 'accent', true, palette),
-          borderRadius: 20,
-          fontSize: 28,
-          fontWeight: 300,
-          color: palette.rootText,
-          fontFamily: mobileFontFamily(),
-        } as CSSProperties}
-        aria-label="New chat"
-      >
-        +
-      </button>
-    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        lineHeight: 1.65,
+                        color: palette.mutedText,
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      } as CSSProperties}
+                    >
+                      {preview}
+                    </div>
+                  </MobileGlassPanel>
+                </button>
+              );
+            })}
+          </MobileThreadListRoot>
+        )}
+      </div>
+    </MobileSurfaceRoot>
   );
 }
