@@ -49,6 +49,44 @@ const MAX_RECENT_CONVERSATIONS = 10;
 const CHAT_TITLE_MAX_LENGTH = 50;
 const SIDEBAR_TITLE_MAX_LENGTH = 40;
 
+// ── Glass Button Styles ──
+
+function glassButtonStyle(
+  size: number,
+  tint: 'neutral' | 'teal' | 'rose' | 'orange',
+  active: boolean,
+): React.CSSProperties {
+  const gradients: Record<string, string> = {
+    neutral: 'linear-gradient(135deg, rgba(148,163,184,0.35) 0%, rgba(30,30,46,0.9) 50%, rgba(148,163,184,0.2) 100%)',
+    teal: 'linear-gradient(135deg, rgba(45,212,191,0.25) 0%, rgba(17,24,39,0.9) 50%, rgba(45,212,191,0.15) 100%)',
+    rose: 'linear-gradient(135deg, rgba(244,114,182,0.3) 0%, rgba(17,24,39,0.9) 50%, rgba(244,114,182,0.2) 100%)',
+    orange: 'linear-gradient(135deg, rgba(194,116,54,0.4) 0%, rgba(17,24,39,0.9) 50%, rgba(194,116,54,0.25) 100%)',
+  };
+  const glows: Record<string, string> = {
+    neutral: '0 0 20px rgba(148,163,184,0.15), inset 0 1px 1px rgba(255,255,255,0.08)',
+    teal: '0 0 20px rgba(45,212,191,0.15), inset 0 1px 1px rgba(255,255,255,0.08)',
+    rose: '0 0 20px rgba(244,114,182,0.15), inset 0 1px 1px rgba(255,255,255,0.08)',
+    orange: '0 0 20px rgba(194,116,54,0.2), inset 0 1px 1px rgba(255,255,255,0.08)',
+  };
+
+  return {
+    width: size,
+    height: size,
+    borderRadius: size / 2,
+    border: '1px solid rgba(255,255,255,0.1)',
+    background: active ? gradients[tint] : 'rgba(255,255,255,0.04)',
+    boxShadow: active ? glows[tint] : 'none',
+    color: '#fff',
+    cursor: active ? 'pointer' : 'default',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    transition: 'all 0.25s ease',
+    opacity: active ? 1 : 0.35,
+  };
+}
+
 // ── Helpers ──
 
 function isGovernanceApproval(a: ApprovalItem): boolean {
@@ -547,11 +585,11 @@ function ApprovalCard({ approval, onResolve, resolving }: { approval: ApprovalIt
       {approval.toolName && <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4, fontFamily: 'SF Mono, Menlo, monospace' }}>{approval.toolName}</div>}
       <div style={{ fontSize: 13, color: '#d1d5db', marginBottom: 4 }}>{agent}</div>
       {approval.summary && <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 12, lineHeight: 1.4 }}>{approval.summary.length > 200 ? `${approval.summary.slice(0, 200)}...` : approval.summary}</div>}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={() => onResolve(approval.id, 'approve')} disabled={isResolving} style={{ flex: 1, height: 44, borderRadius: 12, border: 'none', backgroundColor: '#22c55e', color: '#fff', fontSize: 15, fontWeight: 600, cursor: isResolving ? 'default' : 'pointer', opacity: isResolving ? 0.5 : 1, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button onClick={() => onResolve(approval.id, 'approve')} disabled={isResolving} style={{ flex: 1, height: 44, borderRadius: 22, border: '1px solid rgba(45,212,191,0.2)', background: isResolving ? 'rgba(255,255,255,0.04)' : 'linear-gradient(135deg, rgba(45,212,191,0.2) 0%, rgba(17,24,39,0.85) 50%, rgba(45,212,191,0.12) 100%)', boxShadow: isResolving ? 'none' : '0 0 16px rgba(45,212,191,0.1), inset 0 1px 1px rgba(255,255,255,0.06)', color: '#fff', fontSize: 15, fontWeight: 600, cursor: isResolving ? 'default' : 'pointer', opacity: isResolving ? 0.5 : 1, fontFamily: 'system-ui, -apple-system, sans-serif', transition: 'all 0.25s ease' }}>
           {isResolving ? 'Approving...' : 'Approve'}
         </button>
-        <button onClick={() => onResolve(approval.id, 'reject')} disabled={isResolving} style={{ flex: 1, height: 44, borderRadius: 12, border: '1px solid rgba(255,255,255,0.15)', backgroundColor: 'transparent', color: '#f87171', fontSize: 15, fontWeight: 600, cursor: isResolving ? 'default' : 'pointer', opacity: isResolving ? 0.5 : 1, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        <button onClick={() => onResolve(approval.id, 'reject')} disabled={isResolving} style={{ flex: 1, height: 44, borderRadius: 22, border: '1px solid rgba(244,114,182,0.15)', background: isResolving ? 'rgba(255,255,255,0.04)' : 'linear-gradient(135deg, rgba(244,114,182,0.15) 0%, rgba(17,24,39,0.85) 50%, rgba(244,114,182,0.1) 100%)', boxShadow: isResolving ? 'none' : '0 0 16px rgba(244,114,182,0.08), inset 0 1px 1px rgba(255,255,255,0.06)', color: '#fff', fontSize: 15, fontWeight: 600, cursor: isResolving ? 'default' : 'pointer', opacity: isResolving ? 0.5 : 1, fontFamily: 'system-ui, -apple-system, sans-serif', transition: 'all 0.25s ease' }}>
           Reject
         </button>
       </div>
@@ -834,19 +872,9 @@ function ChatListView({
           position: 'fixed',
           bottom: 'max(env(safe-area-inset-bottom, 0px), 24px)',
           right: 24,
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          border: 'none',
-          backgroundColor: '#c27436',
-          color: '#fff',
+          ...glassButtonStyle(56, 'teal', true),
           fontSize: 28,
           fontWeight: 300,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
         } as React.CSSProperties}
         aria-label="New chat"
       >
@@ -1199,28 +1227,9 @@ function ChatView({
           onClick={() => { if (streaming) { /* stop */ } else { playSendClick(); void sendMessage(); } }}
           disabled={!streaming && (!input.trim() || historyLoading || !currentTabId)}
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 16,
+            ...glassButtonStyle(34, streaming ? 'neutral' : 'orange', streaming || !!(input.trim() && !historyLoading && currentTabId)),
+            marginBottom: 1,
             border: 'none',
-            backgroundColor: streaming
-              ? 'rgba(255,255,255,0.12)'
-              : input.trim() && !historyLoading && currentTabId
-                ? '#c27436'
-                : 'transparent',
-            color: streaming
-              ? '#9ca3af'
-              : input.trim() && !historyLoading && currentTabId
-                ? '#fff'
-                : '#4b5563',
-            cursor: (streaming || (input.trim() && !historyLoading && currentTabId)) ? 'pointer' : 'default',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-            marginBottom: 2,
-            transition: 'all 0.15s ease',
-            opacity: (!streaming && !input.trim()) ? 0.4 : 1,
           }}
           aria-label={streaming ? 'Stop' : 'Send'}
         >
