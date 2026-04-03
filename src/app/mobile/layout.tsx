@@ -29,19 +29,22 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
     <div
       style={{
         position: 'fixed',
-        inset: 0,
-        height: '100dvh',
-        backgroundColor: 'var(--t-canvas-bg, #111111)',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: '#111111',
         overflow: 'hidden',
       }}
     >
       <style dangerouslySetInnerHTML={{ __html: [
+        'html,body{background:#111111!important;margin:0;padding:0}',
         'nextjs-portal{display:none!important}',
         '[data-nextjs-dialog-overlay]{display:none!important}',
         '::-webkit-scrollbar{width:3px}',
         '::-webkit-scrollbar-track{background:transparent}',
-        '::-webkit-scrollbar-thumb{background:var(--t-divider-strong, rgba(255,255,255,0.12));border-radius:3px}',
-        '::-webkit-scrollbar-thumb:hover{background:var(--t-border, rgba(255,255,255,0.2))}',
+        '::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:3px}',
+        '::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}',
       ].join('') }} />
       <MobileAuroraBg />
       {children}
