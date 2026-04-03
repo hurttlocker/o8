@@ -6,6 +6,9 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `8b4199f` feat: rebuild mobile approvals and sidebar surfaces
+- `fcd91ca` feat: replace custom mobile chat with @assistant-ui/react Thread
+- `9cce975` feat: build mobile assistant-ui thread chat
 - `965719b` fix: strip safe-area padding from html — simplest possible layout
 - `be3b739` fix: iOS PWA bottom gap
 - `07b6d09` fix: proper iOS PWA viewport — no position:fixed, no 100dvh, no hacks
