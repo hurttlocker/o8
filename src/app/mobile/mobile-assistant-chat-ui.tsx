@@ -294,19 +294,15 @@ export function ComposerBar({
         paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)',
         paddingLeft: 4,
         paddingRight: 4,
-        background: palette.composerBackground,
-        backdropFilter: 'blur(24px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(180%)',
       }}
     >
       <div
         style={{
           flex: 1,
-          minHeight: 40,
-          borderRadius: 20,
+          minHeight: 36,
+          borderRadius: 18,
           border: `1px solid ${palette.inputBorder}`,
           background: palette.inputBackground,
-          boxShadow: palette.shadow,
           display: 'flex',
           alignItems: 'center',
           paddingLeft: 16,
@@ -456,7 +452,7 @@ export function ChatMessageRow({
             />
           ))}
           {textContent ? (
-            <MobileMarkdown content={textContent} />
+            <MobileMarkdown content={textContent} textColor={palette.rootText} light={palette.rootBackground !== '#111111'} />
           ) : isAssistantStreaming ? (
             <StreamingDot palette={palette} />
           ) : null}

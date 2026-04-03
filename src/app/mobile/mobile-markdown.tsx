@@ -19,14 +19,22 @@ const KEYWORDS = new Set([
   'throw', 'true', 'try', 'type', 'typeof', 'var', 'void', 'while', 'with', 'yield',
 ]);
 
-const INLINE_CODE_STYLE: CSSProperties = {
-  backgroundColor: 'rgba(255,255,255,0.1)',
-  borderRadius: 7,
-  color: '#f3f4f6',
-  fontFamily: '"SF Mono", Menlo, monospace',
-  fontSize: '0.92em',
-  padding: '0.18em 0.42em',
-};
+function inlineCodeStyle(textColor: string): CSSProperties {
+  return {
+    backgroundColor: 'rgba(128,128,128,0.12)',
+    borderRadius: 7,
+    color: textColor,
+    fontFamily: '"SF Mono", Menlo, monospace',
+    fontSize: '0.92em',
+    padding: '0.18em 0.42em',
+  };
+}
+
+// Strip emoji characters from LLM responses — we use Phosphor icons, not emoji
+const EMOJI_REGEX = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1FA00}-\u{1FA9F}\u{200D}]/gu;
+function stripEmoji(text: string): string {
+  return text.replace(EMOJI_REGEX, '').replace(/^\s+/, '');
+}
 
 function tokenizeCodeLine(line: string, inBlockComment: boolean) {
   const tokens: HighlightToken[] = [];
@@ -116,7 +124,7 @@ function tokenizeCodeLine(line: string, inBlockComment: boolean) {
   return { tokens, inBlockComment: nextInBlockComment };
 }
 
-function renderInline(text: string, keyPrefix = 'inline'): ReactNode[] {
+function renderInline(text: string, keyPrefix = 'inline', textColor = '#e5e7eb'): ReactNode[] {
   const nodes: ReactNode[] = [];
   const pattern = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([\s\S]+?)\*\*|\*([^*\n]+)\*/g;
   let lastIndex = 0;
@@ -124,7 +132,7 @@ function renderInline(text: string, keyPrefix = 'inline'): ReactNode[] {
 
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
+      nodes.push(stripEmoji(text.slice(lastIndex, match.index)));
     }
 
     const key = `${keyPrefix}-${match.index}`;
@@ -152,25 +160,25 @@ function renderInline(text: string, keyPrefix = 'inline'): ReactNode[] {
           rel="noreferrer"
           style={{ color: '#60a5fa', textDecoration: 'none' }}
         >
-          {renderInline(match[3], `${key}-link`)}
+          {renderInline(match[3], `${key}-link`, textColor)}
         </a>,
       );
     } else if (match[5] !== undefined) {
       nodes.push(
-        <code key={key} style={INLINE_CODE_STYLE}>
+        <code key={key} style={inlineCodeStyle(textColor)}>
           {match[5]}
         </code>,
       );
     } else if (match[6] !== undefined) {
       nodes.push(
-        <strong key={key} style={{ color: '#f3f4f6', fontWeight: 600 }}>
-          {renderInline(match[6], `${key}-bold`)}
+        <strong key={key} style={{ color: textColor, fontWeight: 600 }}>
+          {renderInline(match[6], `${key}-bold`, textColor)}
         </strong>,
       );
     } else if (match[7] !== undefined) {
       nodes.push(
-        <em key={key} style={{ color: '#cbd5e1', fontStyle: 'italic' }}>
-          {renderInline(match[7], `${key}-italic`)}
+        <em key={key} style={{ color: textColor, fontStyle: 'italic', opacity: 0.82 }}>
+          {renderInline(match[7], `${key}-italic`, textColor)}
         </em>,
       );
     }
@@ -179,7 +187,7 @@ function renderInline(text: string, keyPrefix = 'inline'): ReactNode[] {
   }
 
   if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
+    nodes.push(stripEmoji(text.slice(lastIndex)));
   }
 
   return nodes;
@@ -304,30 +312,77 @@ function extractFileLabel(language: string, code: string): string | null {
   return null;
 }
 
-function CodeBlock({ code, language }: { code: string; language: string }) {
+function codeTheme(light: boolean) {
+  return light ? {
+    bg: '#f8f9fc',
+    border: 'rgba(0,0,0,0.08)',
+    headerColor: '#6b7280',
+    headerBorder: 'rgba(0,0,0,0.06)',
+    text: '#24292f',
+    shadow: '0 2px 8px rgba(0,0,0,0.06)',
+    keyword: '#8250df',
+    string: '#0a3069',
+    number: '#0550ae',
+    comment: '#6e7781',
+    fn: '#8250df',
+    diffAdd: 'rgba(34,197,94,0.12)',
+    diffDel: 'rgba(239,68,68,0.1)',
+    diffHunk: 'rgba(96,165,250,0.08)',
+    diffAddColor: '#116329',
+    diffDelColor: '#cf222e',
+    diffHunkColor: '#0550ae',
+    copiedBg: 'rgba(37,99,235,0.1)',
+    copiedColor: '#2563eb',
+    btnColor: '#6b7280',
+  } : {
+    bg: '#1e1e2e',
+    border: 'rgba(148,163,184,0.16)',
+    headerColor: '#8b96a5',
+    headerBorder: 'rgba(148,163,184,0.12)',
+    text: '#dbe4f0',
+    shadow: '0 10px 30px rgba(0,0,0,0.24)',
+    keyword: '#c792ea',
+    string: '#a5d6ff',
+    number: '#7cc6fe',
+    comment: '#8b96a5',
+    fn: '#82aaff',
+    diffAdd: 'rgba(34,197,94,0.1)',
+    diffDel: 'rgba(239,68,68,0.1)',
+    diffHunk: 'rgba(96,165,250,0.06)',
+    diffAddColor: '#86efac',
+    diffDelColor: '#fca5a5',
+    diffHunkColor: '#93c5fd',
+    copiedBg: 'rgba(96,165,250,0.14)',
+    copiedColor: '#bfdbfe',
+    btnColor: '#94a3b8',
+  };
+}
+
+function CodeBlock({ code, language, light }: { code: string; language: string; light: boolean }) {
   const [copied, setCopied] = useState(false);
   const isDiff = isDiffBlock(code) || language === 'diff';
   const fileLabel = extractFileLabel(language, code);
   const [collapsed, setCollapsed] = useState(isDiff && code.split('\n').length > 8);
   const highlightedLines = highlightCode(code);
+  const t = codeTheme(light);
 
   return (
     <div
       style={{
         marginTop: 12,
         marginBottom: 14,
-        borderRadius: 18,
+        borderRadius: 14,
         overflow: 'hidden',
-        border: '1px solid rgba(148,163,184,0.16)',
-        backgroundColor: '#1e1e2e',
-        boxShadow: '0 10px 30px rgba(0,0,0,0.24)',
+        border: `1px solid ${t.border}`,
+        backgroundColor: t.bg,
+        boxShadow: t.shadow,
       }}
     >
       <div
         style={{
           alignItems: 'center',
-          borderBottom: '1px solid rgba(148,163,184,0.12)',
-          color: '#8b96a5',
+          borderBottom: `1px solid ${t.headerBorder}`,
+          color: t.headerColor,
           display: 'flex',
           fontFamily: '"SF Mono", Menlo, monospace',
           fontSize: 11,
@@ -341,9 +396,9 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, border: 'none', backgroundColor: 'transparent', color: '#8b96a5', cursor: 'pointer', padding: 0, fontFamily: '"SF Mono", Menlo, monospace', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, border: 'none', backgroundColor: 'transparent', color: t.headerColor, cursor: 'pointer', padding: 0, fontFamily: '"SF Mono", Menlo, monospace', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em' }}
         >
-          <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor" style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
+          <svg width="12" height="12" viewBox="0 0 256 256" fill={t.headerColor} style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
             <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z" />
           </svg>
           <span>{fileLabel ?? language}</span>
@@ -358,10 +413,10 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
           }}
           style={{
             alignItems: 'center',
-            backgroundColor: copied ? 'rgba(96,165,250,0.14)' : 'transparent',
+            backgroundColor: copied ? t.copiedBg : 'transparent',
             border: 'none',
             borderRadius: 999,
-            color: copied ? '#bfdbfe' : '#94a3b8',
+            color: copied ? t.copiedColor : t.btnColor,
             cursor: 'pointer',
             display: 'inline-flex',
             gap: 6,
@@ -369,7 +424,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
           }}
           aria-label={copied ? 'Copied code block' : 'Copy code block'}
         >
-          <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 256 256" fill={copied ? t.copiedColor : t.btnColor} aria-hidden="true">
             <path d="M196,64V192a12,12,0,0,1-12,12H88a12,12,0,0,1-12-12V64A12,12,0,0,1,88,52h96A12,12,0,0,1,196,64Zm-12,0H88V192h96ZM52,176a6,6,0,0,1-12,0V88A20,20,0,0,1,60,68h88a6,6,0,0,1,0,12H60a8,8,0,0,0-8,8Z" />
           </svg>
           <span>{copied ? 'Copied' : 'Copy'}</span>
@@ -378,7 +433,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
       {!collapsed && (
       <pre
         style={{
-          color: '#dbe4f0',
+          color: t.text,
           fontFamily: '"SF Mono", Menlo, monospace',
           fontSize: 13,
           lineHeight: 1.65,
@@ -393,8 +448,8 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
           const isAddition = isDiff && rawLine.startsWith('+') && !rawLine.startsWith('+++');
           const isDeletion = isDiff && rawLine.startsWith('-') && !rawLine.startsWith('---');
           const isHunk = isDiff && rawLine.startsWith('@@');
-          const diffBg = isAddition ? 'rgba(34,197,94,0.1)' : isDeletion ? 'rgba(239,68,68,0.1)' : isHunk ? 'rgba(96,165,250,0.06)' : undefined;
-          const diffColor = isAddition ? '#86efac' : isDeletion ? '#fca5a5' : isHunk ? '#93c5fd' : undefined;
+          const diffBg = isAddition ? t.diffAdd : isDeletion ? t.diffDel : isHunk ? t.diffHunk : undefined;
+          const diffColor = isAddition ? t.diffAddColor : isDeletion ? t.diffDelColor : isHunk ? t.diffHunkColor : undefined;
 
           return (
             <Fragment key={`${language}-${lineIndex}`}>
@@ -404,16 +459,16 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
                   key={`${language}-${lineIndex}-${tokenIndex}`}
                   style={{
                     color: diffColor ?? (token.type === 'keyword'
-                      ? '#c792ea'
+                      ? t.keyword
                       : token.type === 'string'
-                        ? '#a5d6ff'
+                        ? t.string
                         : token.type === 'number'
-                          ? '#7cc6fe'
+                          ? t.number
                           : token.type === 'comment'
-                            ? '#8b96a5'
+                            ? t.comment
                             : token.type === 'function'
-                              ? '#82aaff'
-                              : '#dbe4f0'),
+                              ? t.fn
+                              : t.text),
                   }}
                 >
                   {token.value}
@@ -430,14 +485,16 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
   );
 }
 
-export function MobileMarkdown({ content }: { content: string }) {
+export function MobileMarkdown({ content, textColor, light }: { content: string; textColor?: string; light?: boolean }) {
   const blocks = parseBlocks(content);
+  const baseColor = textColor ?? '#e5e7eb';
+  const isLight = light ?? false;
 
   return (
-    <div style={{ color: '#e5e7eb', fontSize: 15, lineHeight: 1.6, wordBreak: 'break-word' }}>
+    <div style={{ color: baseColor, fontSize: 15, lineHeight: 1.6, wordBreak: 'break-word' }}>
       {blocks.map((block, index) => {
         if (block.type === 'code') {
-          return <CodeBlock key={`code-${index}`} code={block.code} language={block.language} />;
+          return <CodeBlock key={`code-${index}`} code={block.code} language={block.language} light={isLight} />;
         }
 
         if (block.type === 'heading') {
@@ -446,7 +503,7 @@ export function MobileMarkdown({ content }: { content: string }) {
             <div
               key={`heading-${index}`}
               style={{
-                color: '#f8fafc',
+                color: baseColor,
                 fontSize: sizes[block.level],
                 fontWeight: 700,
                 letterSpacing: '-0.03em',
@@ -455,7 +512,7 @@ export function MobileMarkdown({ content }: { content: string }) {
                 marginBottom: 10,
               }}
             >
-              {renderInline(block.text, `heading-${index}`)}
+              {renderInline(stripEmoji(block.text), `heading-${index}`, baseColor)}
             </div>
           );
         }
@@ -475,7 +532,7 @@ export function MobileMarkdown({ content }: { content: string }) {
             >
               {quoteParagraphs.map((paragraph, paragraphIndex) => (
                 <div key={`quote-${index}-${paragraphIndex}`} style={{ marginBottom: paragraphIndex === quoteParagraphs.length - 1 ? 0 : 10 }}>
-                  {renderInline(paragraph.replace(/\n/g, ' '), `quote-${index}-${paragraphIndex}`)}
+                  {renderInline(paragraph.replace(/\n/g, ' '), `quote-${index}-${paragraphIndex}`, baseColor)}
                 </div>
               ))}
             </div>
@@ -488,7 +545,7 @@ export function MobileMarkdown({ content }: { content: string }) {
             <ListTag
               key={`list-${index}`}
               style={{
-                color: '#dbe4f0',
+                color: baseColor,
                 marginTop: 8,
                 marginBottom: 14,
                 paddingLeft: 22,
@@ -496,7 +553,7 @@ export function MobileMarkdown({ content }: { content: string }) {
             >
               {block.items.map((item, itemIndex) => (
                 <li key={`list-${index}-${itemIndex}`} style={{ marginBottom: 8, paddingLeft: 4 }}>
-                  {renderInline(item, `list-${index}-${itemIndex}`)}
+                  {renderInline(stripEmoji(item), `list-${index}-${itemIndex}`, baseColor)}
                 </li>
               ))}
             </ListTag>
@@ -505,7 +562,7 @@ export function MobileMarkdown({ content }: { content: string }) {
 
         return (
           <p key={`paragraph-${index}`} style={{ marginTop: 0, marginBottom: 14 }}>
-            {renderInline(block.text, `paragraph-${index}`)}
+            {renderInline(stripEmoji(block.text), `paragraph-${index}`, baseColor)}
           </p>
         );
       })}
