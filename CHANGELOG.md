@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `d9e6881` fix: taller + more progressive iOS scroll fade (64px, 4-stop gradient)
 - `376aa08` fix: mobile defaults to chat list + install edge-tts for TTS playback
 - `89ba9aa` fix: remove new-chat button from chat screen + iOS-style top scroll fade
 - `ec45fa7` feat: TTS play button on assistant messages + AI provider-style input bar
