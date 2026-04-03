@@ -145,6 +145,8 @@ export function ChatView({
   const [streaming, setStreaming] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [activeActions, setActiveActions] = useState<number | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<string | null>(currentTabId);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -373,47 +375,87 @@ export function ChatView({
           </div>
         ) : null}
 
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            style={{
-              marginBottom: message.role === 'user' ? 14 : 20,
-              display: 'flex',
-              justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
-            }}
-          >
-            {message.role === 'user' ? (
-              <div
-                style={{
-                  maxWidth: '82%',
-                  padding: '10px 14px',
-                  borderRadius: 18,
-                  borderBottomRightRadius: 8,
-                  background: palette.userBubble,
-                  color: palette.rootText,
-                  border: `1px solid ${palette.cardBorder}`,
-                  fontSize: 14,
-                  lineHeight: 1.55,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {message.content}
-              </div>
-            ) : (
-              <div style={{ width: '100%', paddingTop: 2, paddingRight: 18 }}>
-                {message.content ? (
-                  <>
+        {messages.map((message, index) => {
+          const showActions = activeActions === index && !streaming;
+          const isCopied = copiedIndex === index;
+
+          return (
+            <div
+              key={index}
+              onClick={() => setActiveActions(activeActions === index ? null : index)}
+              style={{
+                marginBottom: message.role === 'user' ? 14 : 20,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
+              }}
+            >
+              {message.role === 'user' ? (
+                <div
+                  style={{
+                    maxWidth: '82%',
+                    padding: '10px 14px',
+                    borderRadius: 18,
+                    borderBottomRightRadius: 8,
+                    background: palette.userBubble,
+                    color: palette.rootText,
+                    border: `1px solid ${palette.cardBorder}`,
+                    fontSize: 14,
+                    lineHeight: 1.55,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {message.content}
+                </div>
+              ) : (
+                <div style={{ width: '100%', paddingTop: 2, paddingRight: 18 }}>
+                  {message.content ? (
                     <MobileMarkdown content={message.content} />
-                    {!streaming ? (
-                      <TtsButton messageId={`msg-${index}`} text={message.content} palette={palette} />
-                    ) : null}
-                  </>
-                ) : (streaming && index === messages.length - 1 ? <StreamingDot palette={palette} /> : null)}
-              </div>
-            )}
-          </div>
-        ))}
+                  ) : (streaming && index === messages.length - 1 ? <StreamingDot palette={palette} /> : null)}
+                </div>
+              )}
+              {/* Tap-to-reveal actions */}
+              {showActions && message.content && (
+                <div style={{
+                  display: 'flex',
+                  gap: 6,
+                  marginTop: 6,
+                  alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start',
+                }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void navigator.clipboard.writeText(message.content).then(() => {
+                        setCopiedIndex(index);
+                        window.setTimeout(() => setCopiedIndex(null), 1800);
+                      }).catch(() => undefined);
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '5px 12px',
+                      borderRadius: 14,
+                      border: `1px solid ${palette.cardBorder}`,
+                      background: isCopied ? palette.successSoft : palette.cardBackground,
+                      color: isCopied ? palette.success : palette.mutedText,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      fontFamily: mobileFontFamily(),
+                    }}
+                  >
+                    {isCopied ? 'Copied' : 'Copy'}
+                  </button>
+                  {message.role === 'assistant' && (
+                    <TtsButton messageId={`msg-${index}`} text={message.content} palette={palette} />
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {showScrollDown ? (
