@@ -241,8 +241,7 @@ export function MobileApprovalsClient({
         <div
           style={{
             paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)',
-            paddingBottom: 20,
-            marginBottom: -8,
+            paddingBottom: 12,
             display: 'flex',
             alignItems: 'center',
             gap: 12,
