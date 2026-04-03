@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `d1697be` fix: soft mask-image fade on header, input fits within screen padding
 - `17f58ba` feat: full glass input field + glass send button + scroll-to-bottom arrow
 - `0e1ba78` fix: softest fade (20px, barely visible) + glass on all buttons
 - `be8458a` fix: minimal top fade
