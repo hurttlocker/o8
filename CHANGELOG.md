@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `965719b` fix: strip safe-area padding from html — simplest possible layout
 - `be3b739` fix: iOS PWA bottom gap
 - `07b6d09` fix: proper iOS PWA viewport — no position:fixed, no 100dvh, no hacks
 - `bfe679a` fix: default mobile theme to dark — kills white input box
