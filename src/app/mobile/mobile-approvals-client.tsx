@@ -1043,33 +1043,23 @@ function ChatView({
   }, [onTabIdChange]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 80px)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
-        <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.4 }}>
-          {historyLoading || !currentTabId ? 'Loading conversation...' : 'Chats are saved automatically.'}
-        </div>
-        <button
-          onClick={handleNewChat}
-          disabled={streaming}
-          style={{
-            height: 36,
-            padding: '0 14px',
-            borderRadius: 12,
-            border: '1px solid rgba(255,255,255,0.1)',
-            backgroundColor: 'rgba(255,255,255,0.04)',
-            color: streaming ? '#6b7280' : '#d1d5db',
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: streaming ? 'default' : 'pointer',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-          }}
-        >
-          New chat
-        </button>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 80px)', position: 'relative' }}>
+      {/* iOS-style top fade — content fades out as it scrolls behind the header */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 32,
+          background: 'linear-gradient(to bottom, #111111 0%, #111111 30%, transparent 100%)',
+          zIndex: 10,
+          pointerEvents: 'none',
+        }}
+      />
 
       {/* Messages */}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 16 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 16, paddingTop: 8 }}>
         {(historyLoading || !currentTabId) && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 100, color: '#6b7280' }}>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Loading conversation</div>
