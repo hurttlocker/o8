@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `d9352aa` fix: brighter glass borders + refresh in header + icon rendering
 - `33c2473` fix: visible scroll-down button + solid send button with glow
 - `cbb99d0` fix: clean up-arrow send icon (Phosphor ArrowUp)
 - `d1697be` fix: soft mask-image fade on header, input fits within screen padding
