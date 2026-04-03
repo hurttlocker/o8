@@ -20,6 +20,7 @@
     "research:post-merge": "tsx scripts/research/run-cortex-autoresearch.ts --trigger post-merge --max-loops 1",
     "measure:render": "bash scripts/measure-render-speed.sh",
     "desktop:dev": "npm run predev:cleanup && concurrently -k -s first \"npm run dev\" \"npm run dev:ws\"",
+    "tunnel": "npx cloudflared tunnel --url http://localhost:3001",
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
     "postinstall": "node scripts/postinstall.mjs",
