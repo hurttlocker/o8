@@ -140,8 +140,9 @@ function normalizeHistoryList(data: unknown): ChatHistoryRecord[] {
       ? item.updatedAt
       : ('modifiedAt' in item && typeof item.modifiedAt === 'string' ? item.modifiedAt : '');
     const model = 'model' in item && typeof item.model === 'string' ? item.model : undefined;
+    const starred = 'starred' in item && item.starred === true;
 
-    acc.push({ tabId, title, lastMessage, updatedAt, model });
+    acc.push({ tabId, title, lastMessage, updatedAt, model, starred });
     return acc;
   }, [])
     .slice(0, MAX_RECENT_CONVERSATIONS);
@@ -588,6 +589,7 @@ function ApprovalsView({ approvals, onResolve, resolving, onRefresh }: {
 interface ContextMenuState {
   tabId: string;
   title: string;
+  starred?: boolean;
   x: number;
   y: number;
 }
@@ -603,7 +605,7 @@ function ChatContextMenu({
 }) {
   const menuItems: Array<{ action: 'star' | 'rename' | 'delete'; label: string; color?: string; icon: React.ReactNode }> = [
     {
-      action: 'star', label: 'Star',
+      action: 'star', label: menu.starred ? 'Unstar' : 'Star',
       icon: <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M239.18,97.26A16.38,16.38,0,0,0,224.92,86l-59-4.76L143.14,26.15a16.36,16.36,0,0,0-30.27,0L90.11,81.23,31.08,86a16.46,16.46,0,0,0-9.37,28.86l45,38.83L53,211.75a16.38,16.38,0,0,0,24.5,17.82L128,198.49l50.53,31.08A16.4,16.4,0,0,0,203,211.75l-13.76-58.07,45-38.83A16.43,16.43,0,0,0,239.18,97.26Zm-15.34,5.47-48.7,42a8,8,0,0,0-2.56,7.91l14.88,62.8a.37.37,0,0,1-.17.48c-.18.14-.23.11-.38,0l-54.72-33.65a8,8,0,0,0-8.38,0L69.09,215.94c-.15.09-.2.12-.38,0a.37.37,0,0,1-.17-.48l14.88-62.8a8,8,0,0,0-2.56-7.91l-48.7-42c-.12-.1-.23-.19-.13-.5s.18-.27.33-.29l63.92-5.16A8,8,0,0,0,103,91.86l24.62-59.6c.08-.17.11-.25.35-.25s.27.08.35.25l24.62,59.6a8,8,0,0,0,6.67,4.88l63.92,5.16c.15,0,.24,0,.33.29S224,102.63,223.84,102.73Z" /></svg>,
     },
     {
@@ -695,11 +697,11 @@ function ChatListView({
     return `${months}mo ago`;
   }
 
-  const handleLongPressStart = useCallback((tabId: string, title: string, e: React.TouchEvent | React.MouseEvent) => {
+  const handleLongPressStart = useCallback((tabId: string, title: string, starred: boolean, e: React.TouchEvent | React.MouseEvent) => {
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     longPressTimer.current = setTimeout(() => {
-      setContextMenu({ tabId, title, x: clientX, y: clientY });
+      setContextMenu({ tabId, title, starred, x: clientX, y: clientY });
     }, 500);
   }, []);
 
@@ -715,10 +717,11 @@ function ChatListView({
       await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`, { method: 'DELETE' });
       onRefresh();
     } else if (action === 'star') {
+      const existing = conversations.find((c) => c.tabId === tabId);
       await fetch('/api/v2/chat-history', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tabId, starred: true }),
+        body: JSON.stringify({ tabId, starred: !existing?.starred }),
       });
       onRefresh();
     } else if (action === 'rename') {
@@ -780,10 +783,10 @@ function ChatListView({
             ) : (
               <button
                 onClick={() => { if (!contextMenu) onSelect(conv.tabId); }}
-                onTouchStart={(e) => handleLongPressStart(conv.tabId, conv.title, e)}
+                onTouchStart={(e) => handleLongPressStart(conv.tabId, conv.title, conv.starred ?? false, e)}
                 onTouchEnd={handleLongPressEnd}
                 onTouchMove={handleLongPressEnd}
-                onContextMenu={(e) => { e.preventDefault(); setContextMenu({ tabId: conv.tabId, title: conv.title, x: e.clientX, y: e.clientY }); }}
+                onContextMenu={(e) => { e.preventDefault(); setContextMenu({ tabId: conv.tabId, title: conv.title, starred: conv.starred, x: e.clientX, y: e.clientY }); }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
