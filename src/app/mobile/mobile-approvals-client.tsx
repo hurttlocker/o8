@@ -43,7 +43,7 @@ interface ChatHistoryRecord {
 const RISK_COLORS: Record<string, string> = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' };
 const POLL_INTERVAL = 5_000;
 const SIDEBAR_WIDTH = 280;
-const MOBILE_CHAT_MODEL = 'gemini-2.5-flash';
+const MOBILE_CHAT_MODEL = 'gemini-3.1-pro-preview';
 const MOBILE_CHAT_STORAGE_KEY = 'o8-mobile-chat-tab';
 const MAX_RECENT_CONVERSATIONS = 10;
 const CHAT_TITLE_MAX_LENGTH = 50;
@@ -1145,64 +1145,95 @@ function ChatView({
         ))}
       </div>
 
-      {/* Input — glass, sits just above home indicator */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 10, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 2px)', paddingLeft: 20, paddingRight: 20, backgroundColor: 'rgba(28,28,30,0.75)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', marginLeft: -16, marginRight: -16, borderTop: '1px solid rgba(255,255,255,0.06)' } as React.CSSProperties}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); playSendClick(); void sendMessage(); } }}
-          placeholder="Message..."
-          disabled={streaming || historyLoading || !currentTabId}
+      {/* Input — Apple Messages style */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: 8,
+          paddingTop: 8,
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 4px)',
+          paddingLeft: 16,
+          paddingRight: 12,
+          marginLeft: -16,
+          marginRight: -16,
+          backgroundColor: 'rgba(28,28,30,0.82)',
+          backdropFilter: 'blur(24px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+        } as React.CSSProperties}
+      >
+        <div
           style={{
             flex: 1,
-            height: 40,
-            borderRadius: 20,
-            border: '1px solid rgba(255,255,255,0.1)',
-            backgroundColor: 'rgba(255,255,255,0.07)',
-            color: '#f3f4f6',
-            fontSize: 15,
-            paddingLeft: 18,
-            paddingRight: 18,
-            outline: 'none',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
+            minHeight: 36,
+            maxHeight: 120,
+            borderRadius: 18,
+            border: '1px solid rgba(255,255,255,0.12)',
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            display: 'flex',
+            alignItems: 'center',
+            paddingLeft: 16,
+            paddingRight: 12,
           }}
-        />
-        {streaming ? (
-          <button
-            onClick={() => { /* stop streaming */ }}
-            style={{ width: 40, height: 40, borderRadius: 20, border: 'none', backgroundColor: 'rgba(255,255,255,0.1)', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-            aria-label="Stop"
-          >
-            <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
+        >
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); playSendClick(); void sendMessage(); } }}
+            placeholder="Message..."
+            disabled={streaming || historyLoading || !currentTabId}
+            style={{
+              flex: 1,
+              height: 36,
+              border: 'none',
+              backgroundColor: 'transparent',
+              color: '#f3f4f6',
+              fontSize: 16,
+              outline: 'none',
+              fontFamily: 'system-ui, -apple-system, sans-serif',
+              lineHeight: '36px',
+            }}
+          />
+        </div>
+        <button
+          onClick={() => { if (streaming) { /* stop */ } else { playSendClick(); void sendMessage(); } }}
+          disabled={!streaming && (!input.trim() || historyLoading || !currentTabId)}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            border: 'none',
+            backgroundColor: streaming
+              ? 'rgba(255,255,255,0.12)'
+              : input.trim() && !historyLoading && currentTabId
+                ? '#c27436'
+                : 'transparent',
+            color: streaming
+              ? '#9ca3af'
+              : input.trim() && !historyLoading && currentTabId
+                ? '#fff'
+                : '#4b5563',
+            cursor: (streaming || (input.trim() && !historyLoading && currentTabId)) ? 'pointer' : 'default',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            marginBottom: 2,
+            transition: 'all 0.15s ease',
+            opacity: (!streaming && !input.trim()) ? 0.4 : 1,
+          }}
+          aria-label={streaming ? 'Stop' : 'Send'}
+        >
+          {streaming ? (
+            <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
               <path d="M200,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Z" />
             </svg>
-          </button>
-        ) : (
-          <button
-            onClick={() => { playSendClick(); void sendMessage(); }}
-            disabled={!input.trim() || historyLoading || !currentTabId}
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              border: 'none',
-              backgroundColor: input.trim() && !historyLoading && currentTabId ? '#c27436' : 'rgba(255,255,255,0.06)',
-              color: input.trim() && !historyLoading && currentTabId ? '#fff' : '#4b5563',
-              cursor: input.trim() && !historyLoading && currentTabId ? 'pointer' : 'default',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              transition: 'all 0.2s ease',
-              transform: input.trim() ? 'scale(1)' : 'scale(0.92)',
-            }}
-            aria-label="Send"
-          >
-            <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
-              <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm45.66,109.66-32,32a8,8,0,0,1-11.32-11.32L148.69,136H88a8,8,0,0,1,0-16h60.69l-18.35-18.34a8,8,0,0,1,11.32-11.32l32,32A8,8,0,0,1,173.66,133.66Z" />
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
+              <path d="M152.49,120.49l-40,40a12,12,0,0,1-17-17L121,118H40a12,12,0,0,1,0-24h81L95.49,68.49a12,12,0,1,1,17-17l40,40a12,12,0,0,1,0,17Z" transform="rotate(-90 128 128)" />
             </svg>
-          </button>
-        )}
+          )}
+        </button>
       </div>
     </div>
   );
