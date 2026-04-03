@@ -300,18 +300,18 @@ function TtsButton({ messageId, text }: { messageId: string; text: string }) {
 
   const isPlaying = playback === 'playing' || playback === 'loading';
 
-  const btnBase = {
-    display: 'inline-flex' as const,
-    alignItems: 'center' as const,
+  const glassPill: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
     gap: 6,
-    padding: '6px 12px',
-    borderRadius: 8,
-    border: 'none' as const,
+    padding: '6px 14px',
+    borderRadius: 16,
+    border: '1px solid rgba(255,255,255,0.08)',
     fontSize: 12,
     fontWeight: 500,
-    cursor: 'pointer' as const,
+    cursor: 'pointer',
     fontFamily: 'system-ui, -apple-system, sans-serif',
-    transition: 'all 0.2s ease',
+    transition: 'all 0.25s ease',
   };
 
   return (
@@ -320,13 +320,14 @@ function TtsButton({ messageId, text }: { messageId: string; text: string }) {
         onClick={() => { if (!isPlaying) void ttsEngine.play(text, messageId); }}
         disabled={isPlaying}
         style={{
-          ...btnBase,
-          backgroundColor: isPlaying ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
-          color: isPlaying ? '#4b5563' : '#9ca3af',
-          opacity: isPlaying ? 0.5 : 1,
+          ...glassPill,
+          background: isPlaying ? 'rgba(255,255,255,0.03)' : 'linear-gradient(135deg, rgba(148,163,184,0.15) 0%, rgba(17,24,39,0.8) 50%, rgba(148,163,184,0.08) 100%)',
+          boxShadow: isPlaying ? 'none' : '0 0 12px rgba(148,163,184,0.06), inset 0 1px 1px rgba(255,255,255,0.05)',
+          color: isPlaying ? '#4b5563' : '#d1d5db',
+          opacity: isPlaying ? 0.4 : 1,
         }}
       >
-        <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+        <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor">
           <path d="M240,128a15.74,15.74,0,0,1-7.6,13.51L88.32,229.65a16,16,0,0,1-16.2.3A15.86,15.86,0,0,1,64,216.13V39.87a15.86,15.86,0,0,1,8.12-13.82,16,16,0,0,1,16.2.3L232.4,114.49A15.74,15.74,0,0,1,240,128Z" />
         </svg>
         {playback === 'loading' ? 'Loading...' : 'Play'}
@@ -335,12 +336,13 @@ function TtsButton({ messageId, text }: { messageId: string; text: string }) {
         <button
           onClick={() => ttsEngine.stop()}
           style={{
-            ...btnBase,
-            backgroundColor: 'rgba(239,68,68,0.12)',
-            color: '#f87171',
+            ...glassPill,
+            background: 'linear-gradient(135deg, rgba(244,114,182,0.15) 0%, rgba(17,24,39,0.8) 50%, rgba(244,114,182,0.1) 100%)',
+            boxShadow: '0 0 12px rgba(244,114,182,0.08), inset 0 1px 1px rgba(255,255,255,0.05)',
+            color: '#f9a8d4',
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+          <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor">
             <path d="M200,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Z" />
           </svg>
           Stop
@@ -613,7 +615,7 @@ function ApprovalsView({ approvals, onResolve, resolving, onRefresh }: {
         <div style={{ fontSize: 13, color: '#6b7280' }}>
           {pending.length} pending approval{pending.length !== 1 ? 's' : ''}
         </div>
-        <button onClick={onRefresh} style={{ width: 36, height: 36, borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'transparent', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-label="Refresh">
+        <button onClick={onRefresh} style={{ ...glassButtonStyle(36, 'neutral', true), borderRadius: 10 }} aria-label="Refresh">
           <IconRefresh />
         </button>
       </div>
@@ -1107,8 +1109,8 @@ function ChatView({
           top: 0,
           left: 0,
           right: 0,
-          height: 24,
-          background: 'linear-gradient(to bottom, rgba(17,17,17,0.95) 0%, rgba(17,17,17,0.3) 60%, transparent 100%)',
+          height: 20,
+          background: 'linear-gradient(to bottom, rgba(17,17,17,0.7) 0%, transparent 100%)',
           zIndex: 10,
           pointerEvents: 'none',
         }}
@@ -1353,22 +1355,22 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
         {inConversation ? (
           <button
             onClick={() => setCurrentTabId(null)}
-            style={{ width: 44, height: 44, borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'transparent', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ ...glassButtonStyle(40, 'neutral', true), borderRadius: 12 }}
             aria-label="Back to chats"
           >
-            <svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor">
+            <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
               <path d="M168.49,199.51a12,12,0,0,1-17,17l-80-80a12,12,0,0,1,0-17l80-80a12,12,0,0,1,17,17L97,128Z" />
             </svg>
           </button>
         ) : (
           <button
             onClick={() => setSidebarOpen(true)}
-            style={{ width: 44, height: 44, borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'transparent', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}
+            style={{ ...glassButtonStyle(40, 'neutral', true), borderRadius: 12, position: 'relative' }}
             aria-label="Menu"
           >
             <IconHamburger />
             {governanceCount > 0 && activeView !== 'approvals' && (
-              <span style={{ position: 'absolute', top: 6, right: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' }} />
+              <span style={{ position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' }} />
             )}
           </button>
         )}
