@@ -5,25 +5,28 @@ import {
   IconChat,
   IconGear,
   IconShield,
-  MobilePalette,
-  type ChatHistoryRecord,
+  type MobilePalette,
   type MobileView,
-  SIDEBAR_TITLE_MAX_LENGTH,
-  SIDEBAR_WIDTH,
-  mobileCardStyle,
   mobileFontFamily,
-  truncateText,
+  renderConnectionLabel,
 } from './mobile-approvals-shared';
+import {
+  MobileGlassPanel,
+  MobileMetricChip,
+  MobileSectionHeading,
+  MobileStatusDot,
+  MobileThreadListRoot,
+  mobileSafeBottom,
+} from './mobile-shell-primitives';
 
 interface SidebarProps {
   open: boolean;
   activeView: MobileView;
   approvalCount: number;
-  currentTabId: string | null;
-  recentConversations: ChatHistoryRecord[];
-  recentLoading: boolean;
+  themeId: string;
+  selectedModelLabel: string;
+  connectionStatus: 'connected' | 'disconnected';
   onNavigate: (view: MobileView) => void;
-  onSelectConversation: (tabId: string) => void;
   onClose: () => void;
   palette: MobilePalette;
 }
@@ -31,6 +34,7 @@ interface SidebarProps {
 interface SidebarNavItem {
   id: MobileView;
   label: string;
+  description: string;
   badge?: number;
   icon: ReactNode;
 }
@@ -39,59 +43,55 @@ export function Sidebar({
   open,
   activeView,
   approvalCount,
-  currentTabId,
-  recentConversations,
-  recentLoading,
+  themeId,
+  selectedModelLabel,
+  connectionStatus,
   onNavigate,
-  onSelectConversation,
   onClose,
   palette,
 }: SidebarProps) {
   const navItems: SidebarNavItem[] = [
     {
+      id: 'chat',
+      label: 'Chats',
+      description: 'Recent conversations and live assistant threads.',
+      icon: <IconChat fill={palette.iconFill} />,
+    },
+    {
       id: 'approvals',
       label: 'Approvals',
+      description: 'Pending actions that require operator confirmation.',
       badge: approvalCount > 0 ? approvalCount : undefined,
       icon: <IconShield fill={palette.iconFill} />,
     },
     {
-      id: 'chat',
-      label: 'Chat',
-      icon: <IconChat fill={palette.iconFill} />,
+      id: 'settings',
+      label: 'Settings',
+      description: 'Theme, model, and transport controls.',
+      icon: <IconGear fill={palette.iconFill} />,
     },
   ];
 
-  const settingsButtonActive = activeView === 'settings';
-  const sectionTitleStyle: CSSProperties = {
-    marginTop: 20,
-    marginBottom: 10,
-    paddingLeft: 14,
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: '0.1em',
-    textTransform: 'uppercase',
-    color: palette.subduedText,
-    fontFamily: mobileFontFamily(),
-  };
+  const connectionColor = connectionStatus === 'connected' ? palette.success : palette.danger;
 
-  const rowButtonStyle = (active: boolean): CSSProperties => ({
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
+  const navButtonStyle = (active: boolean): CSSProperties => ({
     width: '100%',
-    minHeight: 48,
-    padding: '12px 14px',
-    borderRadius: 16,
-    border: `1px solid ${active ? palette.accentBorder : 'transparent'}`,
-    background: active ? palette.panelElevated : 'transparent',
-    color: active ? palette.rootText : palette.mutedText,
-    fontSize: 15,
-    fontWeight: active ? 700 : 500,
-    fontFamily: mobileFontFamily(),
-    cursor: 'pointer',
+    borderRadius: 20,
+    border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
+    background: active
+      ? `linear-gradient(135deg, ${palette.accentSoft} 0%, ${palette.panelBackground} 100%)`
+      : palette.cardBackground,
+    padding: 16,
+    color: palette.rootText,
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 14,
     textAlign: 'left',
-    marginBottom: 6,
-    transition: 'background 0.18s ease, border-color 0.18s ease, color 0.18s ease',
+    cursor: 'pointer',
+    fontFamily: mobileFontFamily(),
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    transition: 'background 0.22s ease, border-color 0.22s ease, transform 0.22s ease',
   });
 
   return (
@@ -108,156 +108,191 @@ export function Sidebar({
           transition: 'opacity 0.24s ease',
         }}
       />
+
       <div
         style={{
           position: 'fixed',
           top: 0,
           left: 0,
           bottom: 0,
-          width: SIDEBAR_WIDTH,
-          background: palette.sidebarBackground,
-          backdropFilter: 'blur(30px) saturate(160%)',
-          WebkitBackdropFilter: 'blur(30px) saturate(160%)',
-          borderRight: `1px solid ${palette.cardBorder}`,
-          boxShadow: palette.shadow,
-          zIndex: 999,
-          transform: open ? 'translateX(0)' : `translateX(-${SIDEBAR_WIDTH}px)`,
-          transition: 'transform 0.28s cubic-bezier(0.32, 0.72, 0, 1)',
+          width: 296,
           paddingTop: 'max(env(safe-area-inset-top, 0px), 18px)',
-          paddingLeft: 18,
-          paddingRight: 18,
+          paddingLeft: 16,
+          paddingRight: 16,
+          paddingBottom: mobileSafeBottom(18),
           display: 'flex',
           flexDirection: 'column',
+          gap: 14,
+          background: palette.sidebarBackground,
+          borderRight: `1px solid ${palette.cardBorder}`,
+          boxShadow: palette.shadow,
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          zIndex: 999,
+          transform: open ? 'translateX(0)' : 'translateX(-304px)',
+          transition: 'transform 0.26s cubic-bezier(0.32, 0.72, 0, 1)',
           color: palette.rootText,
           fontFamily: mobileFontFamily(),
-        } as CSSProperties}
+        }}
       >
-        <div
-          style={{
-            ...mobileCardStyle(palette, {
-              padding: '16px 18px',
-              marginBottom: 18,
-              background: palette.panelElevated,
-            }),
-          }}
-        >
-          <div style={{ fontSize: 13, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 6 }}>
-            Mobile Control
-          </div>
-          <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.04em', color: palette.rootText }}>
-            o8
-          </div>
-        </div>
+        <MobileGlassPanel palette={palette} style={{ padding: 18 }}>
+          <MobileSectionHeading
+            eyebrow="Mobile Command"
+            title="o8"
+            subtitle="Glass navigation for chats, approvals, and device controls."
+            palette={palette}
+            action={(
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  minWidth: 56,
+                  height: 36,
+                  borderRadius: 999,
+                  border: `1px solid ${palette.cardBorder}`,
+                  background: palette.cardBackground,
+                  color: palette.rootText,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  fontFamily: mobileFontFamily(),
+                }}
+              >
+                Close
+              </button>
+            )}
+          />
+        </MobileGlassPanel>
 
-        <div style={{ display: 'grid', gap: 2 }}>
+        <MobileThreadListRoot style={{ gap: 10 }}>
           {navItems.map((item) => {
             const active = activeView === item.id;
+
             return (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => {
                   onNavigate(item.id);
                   onClose();
                 }}
-                style={rowButtonStyle(active)}
+                style={navButtonStyle(active)}
               >
-                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: active ? 1 : 0.82 }}>
+                <div
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 16,
+                    border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
+                    background: active ? palette.panelBackground : palette.panelElevated,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
                   {item.icon}
-                </span>
-                <span style={{ flex: 1 }}>{item.label}</span>
-                {item.badge ? (
-                  <span
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
                     style={{
-                      minWidth: 22,
-                      height: 22,
-                      borderRadius: 999,
-                      backgroundColor: palette.danger,
-                      color: palette.inverseIconFill,
-                      fontSize: 11,
-                      fontWeight: 700,
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: '0 7px',
+                      gap: 8,
+                      marginBottom: 6,
                     }}
                   >
-                    {item.badge}
-                  </span>
-                ) : null}
+                    <span style={{ fontSize: 16, fontWeight: 700, color: palette.rootText }}>
+                      {item.label}
+                    </span>
+                    {item.badge ? (
+                      <span
+                        style={{
+                          minWidth: 24,
+                          height: 24,
+                          borderRadius: 999,
+                          paddingLeft: 8,
+                          paddingRight: 8,
+                          backgroundColor: palette.danger,
+                          color: palette.inverseIconFill,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {item.badge}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div style={{ fontSize: 13, lineHeight: 1.55, color: palette.subduedText }}>
+                    {item.description}
+                  </div>
+                </div>
               </button>
             );
           })}
-        </div>
+        </MobileThreadListRoot>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 8, paddingBottom: 16 }}>
-          {sectionTitleStyle && <div style={sectionTitleStyle}>Recent Chats</div>}
-          {recentLoading ? (
-            <div style={{ paddingLeft: 14, paddingRight: 14, fontSize: 13, color: palette.subduedText, lineHeight: 1.6 }}>
-              Loading conversations...
-            </div>
-          ) : recentConversations.length === 0 ? (
-            <div style={{ paddingLeft: 14, paddingRight: 14, fontSize: 13, color: palette.subduedText, lineHeight: 1.6 }}>
-              No saved chats yet.
-            </div>
-          ) : (
-            recentConversations.map((conversation) => {
-              const active = currentTabId === conversation.tabId;
-              const title = truncateText(conversation.title, SIDEBAR_TITLE_MAX_LENGTH);
-              return (
-                <button
-                  key={conversation.tabId}
-                  onClick={() => {
-                    onSelectConversation(conversation.tabId);
-                    onClose();
-                  }}
-                  style={{
-                    width: '100%',
-                    border: `1px solid ${active ? palette.accentBorder : 'transparent'}`,
-                    background: active ? palette.panelElevated : 'transparent',
-                    color: active ? palette.rootText : palette.mutedText,
-                    borderRadius: 16,
-                    textAlign: 'left',
-                    padding: '11px 14px',
-                    cursor: 'pointer',
-                    marginBottom: 6,
-                    transition: 'background 0.18s ease, border-color 0.18s ease, color 0.18s ease',
-                    fontFamily: mobileFontFamily(),
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: active ? 700 : 500,
-                      lineHeight: 1.4,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {title}
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
+        <MobileGlassPanel palette={palette} style={{ padding: 18, marginTop: 'auto' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 10,
+              marginBottom: 14,
+            }}
+          >
+            <MobileMetricChip
+              label="Theme"
+              value={themeId === 'dark' ? 'Dark' : 'Light'}
+              palette={palette}
+              tone="accent"
+            />
+            <MobileMetricChip
+              label="Model"
+              value={selectedModelLabel}
+              palette={palette}
+            />
+          </div>
 
-        <button
-          onClick={() => {
-            onNavigate('settings');
-            onClose();
-          }}
-          style={{
-            ...rowButtonStyle(settingsButtonActive),
-            marginTop: 8,
-            marginBottom: 'max(env(safe-area-inset-bottom, 0px), 18px)',
-          }}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: settingsButtonActive ? 1 : 0.82 }}>
-            <IconGear fill={palette.iconFill} />
-          </span>
-          <span style={{ flex: 1 }}>Settings</span>
-        </button>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              borderRadius: 18,
+              border: `1px solid ${connectionStatus === 'connected' ? palette.successBorder : palette.dangerBorder}`,
+              background: connectionStatus === 'connected' ? palette.successSoft : palette.dangerSoft,
+              padding: '12px 14px',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 12, color: palette.subduedText, marginBottom: 4 }}>
+                Transport
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: palette.rootText }}>
+                WebSocket Bridge
+              </div>
+            </div>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 13,
+                fontWeight: 700,
+                color: palette.rootText,
+              }}
+            >
+              <MobileStatusDot color={connectionColor} />
+              {renderConnectionLabel(connectionStatus)}
+            </span>
+          </div>
+        </MobileGlassPanel>
       </div>
     </>
   );
