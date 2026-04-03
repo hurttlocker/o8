@@ -6,7 +6,7 @@ import type { CSSProperties } from 'react';
 /* Extracted from @phosphor-icons/react/dist/defs/*.es.js to avoid Turbopack  */
 /* resolution failures on those .es.js barrel files.                           */
 
-const ICON_PATHS = {
+export const ICON_PATHS = {
   ArrowLeft: 'M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z',
   ArrowClockwise: 'M240,56v48a8,8,0,0,1-8,8H184a8,8,0,0,1,0-16H211.4L184.81,71.64l-.25-.24a80,80,0,1,0-1.67,114.78,8,8,0,0,1,11,11.63A95.44,95.44,0,0,1,128,224h-1.32A96,96,0,1,1,195.75,60L224,85.8V56a8,8,0,1,1,16,0Z',
   ArrowClockwiseThin: 'M236,56v48a4,4,0,0,1-4,4H184a4,4,0,0,1,0-8h37.7L187.53,68.69l-.13-.12a84,84,0,1,0-1.75,120.51,4,4,0,0,1,5.5,5.82A91.43,91.43,0,0,1,128,220h-1.26A92,92,0,1,1,193,62.84l35,32.05V56a4,4,0,1,1,8,0Z',
@@ -25,6 +25,7 @@ const ICON_PATHS = {
   StopCircle: 'M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216ZM160,88H96a8,8,0,0,0-8,8v64a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V96A8,8,0,0,0,160,88Zm-8,64H104V104h48Z',
   SunDim: 'M120,40V32a8,8,0,0,1,16,0v8a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-8-8A8,8,0,0,0,50.34,61.66Zm0,116.68-8,8a8,8,0,0,0,11.32,11.32l8-8a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l8-8a8,8,0,0,0-11.32-11.32l-8,8A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l8,8a8,8,0,0,0,11.32-11.32ZM40,120H32a8,8,0,0,0,0,16h8a8,8,0,0,0,0-16Zm88,88a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-8A8,8,0,0,0,128,208Zm96-88h-8a8,8,0,0,0,0,16h8a8,8,0,0,0,0-16Z',
   Trash: 'M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z',
+  Copy: 'M196,64V192a12,12,0,0,1-12,12H88a12,12,0,0,1-12-12V64A12,12,0,0,1,88,52h96A12,12,0,0,1,196,64Zm-12,0H88V192h96ZM52,176a6,6,0,0,1-12,0V88A20,20,0,0,1,60,68h88a6,6,0,0,1,0,12H60a8,8,0,0,0-8,8Z',
 } as const;
 
 export type MobileView = 'approvals' | 'chat' | 'settings';
@@ -99,7 +100,13 @@ export interface MobilePalette {
   shadow: string;
 }
 
-export type IconFill = '#ffffff' | '#1a1a2e';
+export type IconFill = string;
+
+export const MOBILE_CARD_RADIUS = 14;
+export const MOBILE_TOUCH_TARGET = 44;
+export const MOBILE_BODY_TRACKING = '-0.01em';
+export const MOBILE_HEADING_TRACKING = '-0.02em';
+export const MOBILE_GLASS_BLUR = 20;
 
 export const RISK_COLORS: Record<string, string> = {
   high: '#ef4444',
@@ -129,8 +136,8 @@ export const SIDEBAR_TITLE_MAX_LENGTH = 40;
 
 function renderIcon(pathData: string, size: number, fill: IconFill, style?: CSSProperties) {
   return (
-    <svg width={size} height={size} viewBox="0 0 256 256" fill={fill} style={style}>
-      <path d={pathData} />
+    <svg width={size} height={size} viewBox="0 0 256 256" style={style} aria-hidden="true">
+      <path d={pathData} fill={fill} />
     </svg>
   );
 }
@@ -209,6 +216,10 @@ export function IconPencil({ fill, size = 18, style }: MobileIconProps) {
   return renderIcon(ICON_PATHS.PencilSimple, size, fill, style);
 }
 
+export function IconCopy({ fill, size = 18, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.Copy, size, fill, style);
+}
+
 export function getModelOption(modelId: string): ModelOption | null {
   return AVAILABLE_MODELS.find((model) => model.id === modelId) ?? null;
 }
@@ -223,73 +234,39 @@ export function readStoredMobileModel() {
   }
 }
 
-export function getMobilePalette(themeId: string): MobilePalette {
-  if (themeId === 'dark') {
-    return {
-      isDark: true,
-      rootBackground: '#111111',
-      rootText: '#f8fafc',
-      mutedText: 'rgba(226, 232, 240, 0.78)',
-      subduedText: 'rgba(148, 163, 184, 0.82)',
-      sidebarBackground: 'rgba(15, 15, 18, 0.82)',
-      overlayBackground: 'rgba(0, 0, 0, 0.52)',
-      panelBackground: 'rgba(20, 20, 24, 0.58)',
-      panelElevated: 'linear-gradient(180deg, rgba(42, 42, 48, 0.74) 0%, rgba(14, 14, 18, 0.9) 100%)',
-      cardBackground: 'rgba(255, 255, 255, 0.06)',
-      cardBorder: 'rgba(255, 255, 255, 0.1)',
-      menuBackground: 'rgba(23, 23, 28, 0.94)',
-      accent: '#8fb4ff',
-      accentSoft: 'rgba(143, 180, 255, 0.14)',
-      accentBorder: 'rgba(143, 180, 255, 0.22)',
-      success: '#34d399',
-      successSoft: 'rgba(52, 211, 153, 0.16)',
-      successBorder: 'rgba(52, 211, 153, 0.24)',
-      danger: '#fb7185',
-      dangerSoft: 'rgba(251, 113, 133, 0.16)',
-      dangerBorder: 'rgba(251, 113, 133, 0.24)',
-      warning: '#f59e0b',
-      warningSoft: 'rgba(245, 158, 11, 0.16)',
-      inputBackground: 'rgba(14, 14, 18, 0.62)',
-      inputBorder: 'rgba(255, 255, 255, 0.12)',
-      composerBackground: 'rgba(10, 10, 12, 0.72)',
-      userBubble: 'rgba(42, 42, 48, 0.86)',
-      iconFill: '#ffffff',
-      inverseIconFill: '#1a1a2e',
-      shadow: '0 26px 60px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
-    };
-  }
-
+export function getMobilePalette(_themeId: string): MobilePalette {
+  void _themeId;
   return {
-    isDark: false,
-    rootBackground: '#f5f0eb',
-    rootText: '#1a1a2e',
-    mutedText: 'rgba(26, 26, 46, 0.78)',
-    subduedText: 'rgba(71, 85, 105, 0.82)',
-    sidebarBackground: 'rgba(255, 249, 243, 0.86)',
-    overlayBackground: 'rgba(20, 31, 57, 0.14)',
-    panelBackground: 'rgba(255, 255, 255, 0.58)',
-    panelElevated: 'linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(245, 240, 235, 0.68) 100%)',
-    cardBackground: 'rgba(255, 255, 255, 0.56)',
-    cardBorder: 'rgba(37, 99, 235, 0.12)',
-    menuBackground: 'rgba(255, 249, 243, 0.96)',
+    isDark: true,
+    rootBackground: '#111111',
+    rootText: '#f8fafc',
+    mutedText: 'rgba(226, 232, 240, 0.84)',
+    subduedText: 'rgba(191, 206, 226, 0.7)',
+    sidebarBackground: 'rgba(17, 17, 17, 0.78)',
+    overlayBackground: 'rgba(5, 8, 13, 0.62)',
+    panelBackground: 'rgba(16, 21, 31, 0.6)',
+    panelElevated: 'rgba(20, 26, 39, 0.72)',
+    cardBackground: 'rgba(255, 255, 255, 0.05)',
+    cardBorder: 'rgba(148, 163, 184, 0.18)',
+    menuBackground: 'rgba(18, 24, 35, 0.88)',
     accent: '#2563eb',
-    accentSoft: 'rgba(37, 99, 235, 0.12)',
-    accentBorder: 'rgba(37, 99, 235, 0.18)',
-    success: '#16a34a',
-    successSoft: 'rgba(22, 163, 74, 0.12)',
-    successBorder: 'rgba(22, 163, 74, 0.16)',
-    danger: '#dc2626',
-    dangerSoft: 'rgba(220, 38, 38, 0.1)',
-    dangerBorder: 'rgba(220, 38, 38, 0.16)',
-    warning: '#f97316',
-    warningSoft: 'rgba(249, 115, 22, 0.12)',
-    inputBackground: 'rgba(255, 255, 255, 0.78)',
-    inputBorder: 'rgba(37, 99, 235, 0.12)',
-    composerBackground: 'rgba(250, 245, 239, 0.82)',
-    userBubble: 'rgba(37, 99, 235, 0.12)',
-    iconFill: '#1a1a2e',
-    inverseIconFill: '#ffffff',
-    shadow: '0 28px 72px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
+    accentSoft: 'rgba(37, 99, 235, 0.16)',
+    accentBorder: 'rgba(96, 165, 250, 0.28)',
+    success: '#22c55e',
+    successSoft: 'rgba(34, 197, 94, 0.14)',
+    successBorder: 'rgba(74, 222, 128, 0.24)',
+    danger: '#ef4444',
+    dangerSoft: 'rgba(239, 68, 68, 0.14)',
+    dangerBorder: 'rgba(248, 113, 113, 0.24)',
+    warning: '#f59e0b',
+    warningSoft: 'rgba(245, 158, 11, 0.14)',
+    inputBackground: 'rgba(12, 16, 24, 0.76)',
+    inputBorder: 'rgba(125, 163, 255, 0.2)',
+    composerBackground: 'rgba(12, 16, 24, 0.68)',
+    userBubble: 'rgba(37, 99, 235, 0.22)',
+    iconFill: '#f8fafc',
+    inverseIconFill: '#111111',
+    shadow: '0 24px 60px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
   };
 }
 
@@ -299,30 +276,22 @@ export function glassButtonStyle(
   active: boolean,
   palette: MobilePalette,
 ): CSSProperties {
-  const darkGradients: Record<string, string> = {
-    neutral: 'linear-gradient(135deg, rgba(148, 163, 184, 0.32) 0%, rgba(17, 24, 39, 0.92) 56%, rgba(148, 163, 184, 0.18) 100%)',
-    teal: 'linear-gradient(135deg, rgba(45, 212, 191, 0.24) 0%, rgba(17, 24, 39, 0.9) 54%, rgba(45, 212, 191, 0.12) 100%)',
-    rose: 'linear-gradient(135deg, rgba(244, 114, 182, 0.26) 0%, rgba(17, 24, 39, 0.9) 54%, rgba(244, 114, 182, 0.12) 100%)',
-    orange: 'linear-gradient(135deg, rgba(245, 158, 11, 0.28) 0%, rgba(17, 24, 39, 0.9) 54%, rgba(245, 158, 11, 0.12) 100%)',
-    accent: 'linear-gradient(135deg, rgba(143, 180, 255, 0.28) 0%, rgba(17, 24, 39, 0.92) 56%, rgba(143, 180, 255, 0.14) 100%)',
+  const activeBackgrounds: Record<string, string> = {
+    neutral: 'rgba(255, 255, 255, 0.08)',
+    teal: 'rgba(34, 197, 94, 0.18)',
+    rose: 'rgba(239, 68, 68, 0.18)',
+    orange: 'rgba(245, 158, 11, 0.18)',
+    accent: 'rgba(37, 99, 235, 0.2)',
   };
-  const lightGradients: Record<string, string> = {
-    neutral: 'linear-gradient(135deg, rgba(255, 255, 255, 0.82) 0%, rgba(245, 240, 235, 0.7) 100%)',
-    teal: 'linear-gradient(135deg, rgba(96, 165, 250, 0.18) 0%, rgba(255, 255, 255, 0.84) 58%, rgba(37, 99, 235, 0.1) 100%)',
-    rose: 'linear-gradient(135deg, rgba(251, 113, 133, 0.14) 0%, rgba(255, 255, 255, 0.84) 58%, rgba(251, 113, 133, 0.08) 100%)',
-    orange: 'linear-gradient(135deg, rgba(249, 115, 22, 0.16) 0%, rgba(255, 255, 255, 0.84) 58%, rgba(249, 115, 22, 0.08) 100%)',
-    accent: 'linear-gradient(135deg, rgba(37, 99, 235, 0.18) 0%, rgba(255, 255, 255, 0.88) 58%, rgba(37, 99, 235, 0.1) 100%)',
-  };
-
-  const borderColor = palette.isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(37, 99, 235, 0.14)';
-  const background = palette.isDark ? darkGradients[tint] : lightGradients[tint];
 
   return {
     width: size,
     height: size,
-    borderRadius: size / 2,
-    border: `1px solid ${borderColor}`,
-    background: active ? background : palette.cardBackground,
+    minWidth: MOBILE_TOUCH_TARGET,
+    minHeight: MOBILE_TOUCH_TARGET,
+    borderRadius: MOBILE_CARD_RADIUS,
+    border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
+    background: active ? activeBackgrounds[tint] : palette.panelBackground,
     boxShadow: active ? palette.shadow : 'none',
     cursor: active ? 'pointer' : 'default',
     display: 'flex',
@@ -331,6 +300,8 @@ export function glassButtonStyle(
     flexShrink: 0,
     opacity: active ? 1 : 0.45,
     transition: 'all 0.22s ease',
+    backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+    WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
   };
 }
 
@@ -449,7 +420,9 @@ export function mobileCardStyle(palette: MobilePalette, extra?: CSSProperties): 
     background: palette.panelElevated,
     border: `1px solid ${palette.cardBorder}`,
     boxShadow: palette.shadow,
-    borderRadius: 22,
+    borderRadius: MOBILE_CARD_RADIUS,
+    backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+    WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
     ...extra,
   };
 }
@@ -465,7 +438,7 @@ export function sectionLabelStyle(palette: MobilePalette): CSSProperties {
 }
 
 export function mobileFontFamily() {
-  return 'ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  return 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 }
 
 export function renderConnectionLabel(status: 'connected' | 'disconnected') {

@@ -7,9 +7,15 @@ import { getMessageTextContent, getMessageThinkingBlocks } from './mobile-assist
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
 import { playSendClick } from '@/lib/mobile/sounds';
 import {
+  MOBILE_BODY_TRACKING,
+  MOBILE_CARD_RADIUS,
+  MOBILE_GLASS_BLUR,
+  MOBILE_HEADING_TRACKING,
+  MOBILE_TOUCH_TARGET,
   IconCaretDown,
   IconCaretRight,
   IconChat,
+  IconCopy,
   IconSend,
   IconSpeaker,
   IconStop,
@@ -19,7 +25,7 @@ import {
   type ModelOption,
 } from './mobile-approvals-shared';
 
-function StreamingDot({ palette }: { palette: MobilePalette }) {
+function StreamingDot() {
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -35,9 +41,16 @@ function StreamingDot({ palette }: { palette: MobilePalette }) {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 6,
-        color: palette.subduedText,
+        gap: 8,
+        minHeight: 36,
+        padding: '0 12px',
+        borderRadius: 999,
+        border: '1px solid rgba(147, 197, 253, 0.26)',
+        background: 'rgba(147, 197, 253, 0.14)',
+        color: '#dbeafe',
         fontSize: 13,
+        fontStyle: 'italic',
+        letterSpacing: MOBILE_BODY_TRACKING,
       }}
     >
       <span
@@ -45,7 +58,7 @@ function StreamingDot({ palette }: { palette: MobilePalette }) {
           width: expanded ? 22 : 8,
           height: 8,
           borderRadius: 999,
-          backgroundColor: palette.accent,
+          backgroundColor: '#bfdbfe',
           transition: 'width 0.28s ease',
         }}
       />
@@ -78,34 +91,39 @@ function ThinkingBlock({
           display: 'inline-flex',
           alignItems: 'center',
           gap: 8,
-          padding: '6px 10px',
-          borderRadius: 14,
-          border: `1px solid ${palette.cardBorder}`,
-          background: palette.cardBackground,
-          color: palette.subduedText,
+          minHeight: MOBILE_TOUCH_TARGET,
+          padding: '0 14px',
+          borderRadius: MOBILE_CARD_RADIUS,
+          border: '1px solid rgba(147, 197, 253, 0.26)',
+          background: 'rgba(147, 197, 253, 0.12)',
+          color: '#dbeafe',
           cursor: 'pointer',
           fontFamily: mobileFontFamily(),
           fontSize: 12,
           fontWeight: 700,
+          letterSpacing: MOBILE_BODY_TRACKING,
+          backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+          WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
         }}
       >
-        {isCollapsed ? <IconCaretRight fill={palette.iconFill} size={14} /> : <IconCaretDown fill={palette.iconFill} size={14} />}
+        {isCollapsed ? <IconCaretRight fill="#dbeafe" size={14} /> : <IconCaretDown fill="#dbeafe" size={14} />}
         <span style={{ fontStyle: 'italic' }}>Thinking</span>
         {isStreaming ? (
-          <span style={{ color: palette.accent, fontWeight: 600 }}>Live</span>
+          <span style={{ color: '#bfdbfe', fontWeight: 600, fontStyle: 'italic' }}>Live</span>
         ) : null}
       </button>
       {!isCollapsed ? (
         <div
           style={{
             marginTop: 8,
-            borderRadius: 16,
-            border: `1px solid ${palette.cardBorder}`,
-            background: palette.cardBackground,
+            borderRadius: MOBILE_CARD_RADIUS,
+            border: '1px solid rgba(147, 197, 253, 0.2)',
+            background: 'rgba(20, 26, 39, 0.62)',
             color: palette.mutedText,
             padding: '10px 12px',
             fontSize: 13,
             lineHeight: 1.65,
+            letterSpacing: MOBILE_BODY_TRACKING,
             fontStyle: 'italic',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
@@ -138,18 +156,21 @@ function TtsButton({
   }, [messageId]);
 
   const glassPill: CSSProperties = {
-    height: 28,
-    borderRadius: 999,
+    minHeight: MOBILE_TOUCH_TARGET,
+    borderRadius: MOBILE_CARD_RADIUS,
     border: `1px solid ${palette.cardBorder}`,
     paddingLeft: 10,
     paddingRight: 10,
     fontSize: 12,
     fontWeight: 700,
+    letterSpacing: MOBILE_BODY_TRACKING,
     fontFamily: mobileFontFamily(),
     display: 'inline-flex',
     alignItems: 'center',
     gap: 6,
     cursor: 'pointer',
+    backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+    WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
   };
 
   return (
@@ -165,7 +186,7 @@ function TtsButton({
         disabled={isPlaying}
         style={{
           ...glassPill,
-          background: isPlaying ? palette.cardBackground : palette.panelElevated,
+          background: isPlaying ? palette.cardBackground : palette.panelBackground,
           color: isPlaying ? palette.subduedText : palette.rootText,
           opacity: isPlaying ? 0.4 : 1,
         }}
@@ -182,7 +203,7 @@ function TtsButton({
           }}
           style={{
             ...glassPill,
-            background: `linear-gradient(135deg, ${palette.dangerSoft} 0%, ${palette.panelBackground} 100%)`,
+            background: palette.dangerSoft,
             color: palette.rootText,
           }}
         >
@@ -201,12 +222,6 @@ export function ModelBadge({
   palette: MobilePalette;
   selectedModel: ModelOption;
 }) {
-  const providerLabel = selectedModel.provider === 'google'
-    ? 'Google'
-    : selectedModel.provider === 'openai'
-      ? 'OpenAI'
-      : 'Anthropic';
-
   return (
     <div style={{ padding: '8px 4px 12px' }}>
       <div
@@ -215,7 +230,7 @@ export function ModelBadge({
           alignItems: 'center',
           gap: 8,
           padding: '9px 12px',
-          borderRadius: 16,
+          borderRadius: MOBILE_CARD_RADIUS,
           background: palette.panelElevated,
         })}
       >
@@ -227,11 +242,11 @@ export function ModelBadge({
             backgroundColor: palette.accent,
           }}
         />
-        <span style={{ fontSize: 12, fontWeight: 700, color: palette.rootText }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: palette.rootText, letterSpacing: MOBILE_BODY_TRACKING }}>
           {selectedModel.label}
         </span>
-        <span style={{ fontSize: 12, color: palette.subduedText }}>
-          {providerLabel}
+        <span style={{ fontSize: 12, color: palette.subduedText, letterSpacing: MOBILE_BODY_TRACKING }}>
+          o8 tuned
         </span>
       </div>
     </div>
@@ -258,11 +273,14 @@ export function EmptyState({
       }}
     >
       <IconChat fill={palette.iconFill} style={{ opacity: 0.28 }} />
-      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 16, color: palette.rootText }}>
-        Chat with {selectedModel.label}
+      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 16, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING }}>
+        Start an o8 chat
       </div>
-      <div style={{ fontSize: 13, textAlign: 'center', padding: '0 32px', lineHeight: 1.6 }}>
-        Ask questions, brainstorm, or get help with your projects.
+      <div style={{ fontSize: 13, textAlign: 'center', padding: '0 32px', lineHeight: 1.6, letterSpacing: MOBILE_BODY_TRACKING }}>
+        Ask questions, brainstorm, or get help with your projects from the branded mobile shell.
+      </div>
+      <div style={{ fontSize: 12, textAlign: 'center', padding: '0 32px', lineHeight: 1.6, letterSpacing: MOBILE_BODY_TRACKING, color: palette.subduedText, marginTop: 8 }}>
+        Active model: {selectedModel.label}
       </div>
     </div>
   );
@@ -295,15 +313,15 @@ export function ComposerBar({
         paddingLeft: 4,
         paddingRight: 4,
         background: palette.composerBackground,
-        backdropFilter: 'blur(24px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+        backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+        WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
       }}
     >
       <div
         style={{
           flex: 1,
-          minHeight: 40,
-          borderRadius: 20,
+          minHeight: MOBILE_TOUCH_TARGET,
+          borderRadius: MOBILE_CARD_RADIUS,
           border: `1px solid ${palette.inputBorder}`,
           background: palette.inputBackground,
           boxShadow: palette.shadow,
@@ -327,6 +345,7 @@ export function ComposerBar({
             backgroundColor: 'transparent',
             color: palette.rootText,
             fontSize: 16,
+            letterSpacing: MOBILE_BODY_TRACKING,
             outline: 'none',
             fontFamily: mobileFontFamily(),
             lineHeight: 1.45,
@@ -338,10 +357,10 @@ export function ComposerBar({
       {isRunning ? (
         <ComposerPrimitive.Cancel
           style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            border: 'none',
+            width: MOBILE_TOUCH_TARGET,
+            height: MOBILE_TOUCH_TARGET,
+            borderRadius: MOBILE_CARD_RADIUS,
+            border: `1px solid ${palette.dangerBorder}`,
             backgroundColor: palette.dangerSoft,
             color: palette.rootText,
             cursor: 'pointer',
@@ -349,6 +368,8 @@ export function ComposerBar({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
+            backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+            WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
           }}
         >
           <IconStop fill={palette.iconFill} size={16} />
@@ -358,11 +379,11 @@ export function ComposerBar({
           type="submit"
           disabled={isComposerEmpty || isLoading}
           style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            border: 'none',
-            backgroundColor: !isComposerEmpty && !isLoading ? palette.accent : palette.cardBackground,
+            width: MOBILE_TOUCH_TARGET,
+            height: MOBILE_TOUCH_TARGET,
+            borderRadius: MOBILE_CARD_RADIUS,
+            border: `1px solid ${!isComposerEmpty && !isLoading ? palette.accentBorder : palette.cardBorder}`,
+            backgroundColor: !isComposerEmpty && !isLoading ? palette.accent : palette.panelBackground,
             color: palette.rootText,
             cursor: !isComposerEmpty && !isLoading ? 'pointer' : 'default',
             opacity: !isComposerEmpty && !isLoading ? 1 : 0.58,
@@ -370,9 +391,11 @@ export function ComposerBar({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
+            backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+            WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
           }}
         >
-          <IconSend fill={palette.iconFill} />
+          <IconSend fill={!isComposerEmpty && !isLoading ? '#ffffff' : palette.iconFill} />
         </button>
       )}
     </ComposerPrimitive.Root>
@@ -432,13 +455,13 @@ export function ChatMessageRow({
           style={{
             maxWidth: '82%',
             padding: '10px 14px',
-            borderRadius: 18,
-            borderBottomRightRadius: 8,
+            borderRadius: MOBILE_CARD_RADIUS,
             background: palette.userBubble,
             color: palette.rootText,
             border: `1px solid ${palette.cardBorder}`,
             fontSize: 14,
             lineHeight: 1.55,
+            letterSpacing: MOBILE_BODY_TRACKING,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
           }}
@@ -456,9 +479,16 @@ export function ChatMessageRow({
             />
           ))}
           {textContent ? (
-            <MobileMarkdown content={textContent} />
+            <div
+              style={mobileCardStyle(palette, {
+                padding: '14px 16px',
+                background: palette.panelBackground,
+              })}
+            >
+              <MobileMarkdown content={textContent} />
+            </div>
           ) : isAssistantStreaming ? (
-            <StreamingDot palette={palette} />
+            <StreamingDot />
           ) : null}
         </div>
       )}
@@ -483,17 +513,22 @@ export function ChatMessageRow({
               display: 'inline-flex',
               alignItems: 'center',
               gap: 5,
-              padding: '5px 12px',
-              borderRadius: 14,
+              minHeight: MOBILE_TOUCH_TARGET,
+              padding: '0 14px',
+              borderRadius: MOBILE_CARD_RADIUS,
               border: `1px solid ${palette.cardBorder}`,
               background: isCopied ? palette.successSoft : palette.cardBackground,
               color: isCopied ? palette.success : palette.mutedText,
               fontSize: 12,
               fontWeight: 500,
+              letterSpacing: MOBILE_BODY_TRACKING,
               cursor: 'pointer',
               fontFamily: mobileFontFamily(),
+              backdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
+              WebkitBackdropFilter: `blur(${MOBILE_GLASS_BLUR}px)`,
             }}
           >
+            <IconCopy fill={isCopied ? palette.success : palette.mutedText} size={14} />
             {isCopied ? 'Copied' : 'Copy'}
           </button>
           {message.role === 'assistant' ? (

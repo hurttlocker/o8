@@ -10,6 +10,8 @@ import { ChatListView } from './mobile-approvals-chat-list-view';
 import { Sidebar } from './mobile-approvals-sidebar';
 import {
   DEFAULT_MOBILE_CHAT_MODEL,
+  MOBILE_BODY_TRACKING,
+  MOBILE_CARD_RADIUS,
   IconArrowLeft,
   IconHamburger,
   IconRefresh,
@@ -67,6 +69,12 @@ export function MobileApprovalsClient({
     () => getModelOption(selectedModelId) ?? getModelOption(DEFAULT_MOBILE_CHAT_MODEL)!,
     [selectedModelId],
   );
+
+  useEffect(() => {
+    if (themeId !== 'dark') {
+      setTheme('dark');
+    }
+  }, [setTheme, themeId]);
 
   const refresh = useCallback(async () => {
     try {
@@ -181,10 +189,6 @@ export function MobileApprovalsClient({
     }
   }, []);
 
-  const handleThemeChange = useCallback((nextTheme: 'light' | 'dark') => {
-    setTheme(nextTheme);
-  }, [setTheme]);
-
   const handleModelChange = useCallback((modelId: string) => {
     if (!getModelOption(modelId)) return;
     setSelectedModelId(modelId);
@@ -219,17 +223,17 @@ export function MobileApprovalsClient({
         backgroundColor: palette.rootBackground,
         color: palette.rootText,
         fontFamily: mobileFontFamily(),
+        letterSpacing: MOBILE_BODY_TRACKING,
         WebkitFontSmoothing: 'antialiased',
       } as CSSProperties}
     >
-      <MobileAuroraBg themeId={themeId} />
+      <MobileAuroraBg />
 
       <div style={{ position: 'relative', zIndex: 1, height: '100%', padding: '0 16px', display: 'flex', flexDirection: 'column' }}>
         <Sidebar
           open={sidebarOpen}
           activeView={activeView}
           approvalCount={pendingCount}
-          themeId={themeId}
           selectedModelLabel={selectedModel.label}
           connectionStatus={connectionStatus}
           onNavigate={handleNavigate}
@@ -251,7 +255,7 @@ export function MobileApprovalsClient({
           {inConversation ? (
             <button
               onClick={() => setCurrentTabId(null)}
-              style={{ ...glassButtonStyle(40, 'neutral', true, palette), borderRadius: 14 }}
+              style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
               aria-label="Back to chats"
             >
               <IconArrowLeft fill={palette.iconFill} />
@@ -259,7 +263,7 @@ export function MobileApprovalsClient({
           ) : (
             <button
               onClick={() => setSidebarOpen(true)}
-              style={{ ...glassButtonStyle(40, 'neutral', true, palette), borderRadius: 14, position: 'relative' }}
+              style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS, position: 'relative' }}
               aria-label="Menu"
             >
               <IconHamburger fill={palette.iconFill} />
@@ -282,7 +286,7 @@ export function MobileApprovalsClient({
           <div
             style={{
               fontSize: 18,
-              fontWeight: 700,
+              fontWeight: 800,
               letterSpacing: '-0.02em',
               flex: 1,
               overflow: 'hidden',
@@ -300,13 +304,13 @@ export function MobileApprovalsClient({
               onClick={() => {
                 void refresh();
               }}
-              style={{ ...glassButtonStyle(40, 'neutral', true, palette), borderRadius: 14 }}
+              style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
               aria-label="Refresh"
             >
               <IconRefresh fill={palette.iconFill} />
             </button>
           ) : (
-            <div style={{ width: 40, flexShrink: 0 }} />
+            <div style={{ width: 44, flexShrink: 0 }} />
           )}
         </div>
 
@@ -315,7 +319,7 @@ export function MobileApprovalsClient({
             style={{
               backgroundColor: palette.dangerSoft,
               border: `1px solid ${palette.dangerBorder}`,
-              borderRadius: 14,
+              borderRadius: MOBILE_CARD_RADIUS,
               padding: '10px 12px',
               marginBottom: 12,
               fontSize: 13,
@@ -360,8 +364,6 @@ export function MobileApprovalsClient({
 
           {activeView === 'settings' ? (
             <SettingsView
-              themeId={themeId}
-              onThemeChange={handleThemeChange}
               selectedModel={selectedModel}
               onModelChange={handleModelChange}
               connectionStatus={connectionStatus}

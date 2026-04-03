@@ -2,6 +2,10 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import {
+  MOBILE_BODY_TRACKING,
+  MOBILE_CARD_RADIUS,
+  MOBILE_HEADING_TRACKING,
+  MOBILE_TOUCH_TARGET,
   IconChat,
   IconGear,
   IconShield,
@@ -13,7 +17,6 @@ import {
 import {
   MobileGlassPanel,
   MobileMetricChip,
-  MobileSectionHeading,
   MobileStatusDot,
   MobileThreadListRoot,
   mobileSafeBottom,
@@ -23,7 +26,6 @@ interface SidebarProps {
   open: boolean;
   activeView: MobileView;
   approvalCount: number;
-  themeId: string;
   selectedModelLabel: string;
   connectionStatus: 'connected' | 'disconnected';
   onNavigate: (view: MobileView) => void;
@@ -43,7 +45,6 @@ export function Sidebar({
   open,
   activeView,
   approvalCount,
-  themeId,
   selectedModelLabel,
   connectionStatus,
   onNavigate,
@@ -54,20 +55,20 @@ export function Sidebar({
     {
       id: 'chat',
       label: 'Chats',
-      description: 'Recent conversations and live assistant threads.',
+      description: 'Recent threads, live replies, and saved mobile sessions.',
       icon: <IconChat fill={palette.iconFill} />,
     },
     {
       id: 'approvals',
       label: 'Approvals',
-      description: 'Pending actions that require operator confirmation.',
+      description: 'Operator actions that need a fast, explicit decision.',
       badge: approvalCount > 0 ? approvalCount : undefined,
       icon: <IconShield fill={palette.iconFill} />,
     },
     {
       id: 'settings',
       label: 'Settings',
-      description: 'Theme, model, and transport controls.',
+      description: 'Model, transport, and shell status controls.',
       icon: <IconGear fill={palette.iconFill} />,
     },
   ];
@@ -76,11 +77,10 @@ export function Sidebar({
 
   const navButtonStyle = (active: boolean): CSSProperties => ({
     width: '100%',
-    borderRadius: 20,
+    minHeight: MOBILE_TOUCH_TARGET * 2,
+    borderRadius: MOBILE_CARD_RADIUS,
     border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
-    background: active
-      ? `linear-gradient(135deg, ${palette.accentSoft} 0%, ${palette.panelBackground} 100%)`
-      : palette.cardBackground,
+    background: active ? palette.accentSoft : palette.panelBackground,
     padding: 16,
     color: palette.rootText,
     display: 'flex',
@@ -89,6 +89,7 @@ export function Sidebar({
     textAlign: 'left',
     cursor: 'pointer',
     fontFamily: mobileFontFamily(),
+    letterSpacing: MOBILE_BODY_TRACKING,
     backdropFilter: 'blur(20px)',
     WebkitBackdropFilter: 'blur(20px)',
     transition: 'background 0.22s ease, border-color 0.22s ease, transform 0.22s ease',
@@ -136,32 +137,93 @@ export function Sidebar({
         }}
       >
         <MobileGlassPanel palette={palette} style={{ padding: 18 }}>
-          <MobileSectionHeading
-            eyebrow="Mobile Command"
-            title="o8"
-            subtitle="Glass navigation for chats, approvals, and device controls."
-            palette={palette}
-            action={(
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
+              <div
+                style={{
+                  width: MOBILE_TOUCH_TARGET,
+                  height: MOBILE_TOUCH_TARGET,
+                  borderRadius: MOBILE_CARD_RADIUS,
+                  border: `1px solid ${palette.accentBorder}`,
+                  background: 'rgba(37, 99, 235, 0.22)',
+                  color: palette.rootText,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 17,
+                  fontWeight: 800,
+                  letterSpacing: MOBILE_HEADING_TRACKING,
+                  flexShrink: 0,
+                }}
+              >
+                o8
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: '0.12em',
+                    textTransform: 'uppercase',
+                    color: palette.subduedText,
+                    marginBottom: 6,
+                  }}
+                >
+                  o8 mobile
+                </div>
+                <div
+                  style={{
+                    fontSize: 23,
+                    fontWeight: 800,
+                    lineHeight: 1.05,
+                    letterSpacing: MOBILE_HEADING_TRACKING,
+                    color: palette.rootText,
+                  }}
+                >
+                  Command Deck
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    letterSpacing: MOBILE_BODY_TRACKING,
+                    color: palette.subduedText,
+                    marginTop: 8,
+                  }}
+                >
+                  Branded navigation for chats, approvals, and runtime controls.
+                </div>
+              </div>
+            </div>
+            <div style={{ flexShrink: 0 }}>
               <button
                 type="button"
                 onClick={onClose}
                 style={{
-                  minWidth: 56,
-                  height: 36,
-                  borderRadius: 999,
+                  width: MOBILE_TOUCH_TARGET,
+                  height: MOBILE_TOUCH_TARGET,
+                  borderRadius: MOBILE_CARD_RADIUS,
                   border: `1px solid ${palette.cardBorder}`,
-                  background: palette.cardBackground,
+                  background: palette.panelBackground,
                   color: palette.rootText,
                   cursor: 'pointer',
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: 700,
+                  letterSpacing: MOBILE_BODY_TRACKING,
                   fontFamily: mobileFontFamily(),
                 }}
               >
-                Close
+                Done
               </button>
-            )}
-          />
+            </div>
+          </div>
         </MobileGlassPanel>
 
         <MobileThreadListRoot style={{ gap: 10 }}>
@@ -180,11 +242,11 @@ export function Sidebar({
               >
                 <div
                   style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 16,
+                    width: MOBILE_TOUCH_TARGET,
+                    height: MOBILE_TOUCH_TARGET,
+                    borderRadius: MOBILE_CARD_RADIUS,
                     border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
-                    background: active ? palette.panelBackground : palette.panelElevated,
+                    background: active ? 'rgba(37, 99, 235, 0.2)' : palette.cardBackground,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -215,7 +277,7 @@ export function Sidebar({
                           paddingLeft: 8,
                           paddingRight: 8,
                           backgroundColor: palette.danger,
-                          color: palette.inverseIconFill,
+                          color: '#ffffff',
                           fontSize: 11,
                           fontWeight: 700,
                           display: 'inline-flex',
@@ -246,8 +308,8 @@ export function Sidebar({
             }}
           >
             <MobileMetricChip
-              label="Theme"
-              value={themeId === 'dark' ? 'Dark' : 'Light'}
+              label="Palette"
+              value="o8 Dark"
               palette={palette}
               tone="accent"
             />
@@ -264,7 +326,7 @@ export function Sidebar({
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: 12,
-              borderRadius: 18,
+              borderRadius: MOBILE_CARD_RADIUS,
               border: `1px solid ${connectionStatus === 'connected' ? palette.successBorder : palette.dangerBorder}`,
               background: connectionStatus === 'connected' ? palette.successSoft : palette.dangerSoft,
               padding: '12px 14px',
