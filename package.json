@@ -27,6 +27,7 @@
     "tauri:prebuild": "npm run build && node scripts/tauri-export.mjs"
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.12.22",
     "@chenglou/pretext": "^0.0.3",
     "@json-render/core": "^0.14.0",
     "@json-render/react": "^0.14.0",
