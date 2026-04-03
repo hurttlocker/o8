@@ -36,8 +36,14 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
         overflow: 'hidden',
       }}
     >
-      {/* Hide Next.js dev indicator on mobile */}
-      <style dangerouslySetInnerHTML={{ __html: 'nextjs-portal{display:none!important}[data-nextjs-dialog-overlay]{display:none!important}' }} />
+      <style dangerouslySetInnerHTML={{ __html: [
+        'nextjs-portal{display:none!important}',
+        '[data-nextjs-dialog-overlay]{display:none!important}',
+        '::-webkit-scrollbar{width:3px}',
+        '::-webkit-scrollbar-track{background:transparent}',
+        '::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:3px}',
+        '::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}',
+      ].join('') }} />
       {children}
     </div>
   );
