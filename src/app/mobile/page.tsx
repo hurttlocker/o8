@@ -9,11 +9,13 @@ interface PrefetchedApproval {
   description?: string;
   summary?: string;
   risk: 'low' | 'medium' | 'high';
+  source?: 'llm-chat' | 'runtime' | 'test';
   toolName?: string;
   sessionKey?: string;
   status: string;
   createdAt: number;
   metadata?: Record<string, string>;
+  continuation?: { kind: 'llm-chat' | 'runtime' | 'lane' };
 }
 
 async function fetchPendingApprovals(): Promise<PrefetchedApproval[]> {

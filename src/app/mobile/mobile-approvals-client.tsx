@@ -8,11 +8,34 @@ interface ApprovalItem {
   description?: string;
   summary?: string;
   risk: 'low' | 'medium' | 'high';
+  source?: 'llm-chat' | 'runtime' | 'test';
   toolName?: string;
   sessionKey?: string;
   status: string;
   createdAt: number;
   metadata?: Record<string, string>;
+  continuation?: { kind: 'llm-chat' | 'runtime' | 'lane' };
+}
+
+/**
+ * Filter to only show governance-layer approvals on mobile:
+ * - Lane operations (merge, PR) — always show
+ * - High-risk anything — always show
+ * - Runtime agent approvals — show (agent-initiated, not interactive)
+ * - LLM chat tool calls (low/medium risk) — hide (interactive session noise)
+ * - Test approvals — hide
+ */
+function isGovernanceApproval(a: ApprovalItem): boolean {
+  // Lane merges and PRs — always governance
+  if (a.continuation?.kind === 'lane') return true;
+  // High risk — always surface regardless of source
+  if (a.risk === 'high') return true;
+  // Interactive LLM chat tool calls — noise, hide them
+  if (a.source === 'llm-chat' || a.continuation?.kind === 'llm-chat') return false;
+  // Test approvals — hide
+  if (a.source === 'test') return false;
+  // Everything else (runtime agent actions, medium-risk) — show
+  return true;
 }
 
 const RISK_COLORS: Record<string, string> = {
@@ -189,7 +212,7 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
     setResolving(null);
   }, []);
 
-  const pending = approvals.filter((a) => a.status === 'pending');
+  const pending = approvals.filter((a) => a.status === 'pending' && isGovernanceApproval(a));
 
   return (
     <div
