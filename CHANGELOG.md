@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `d63d217` feat: AI provider-style chat list view
 - `500dc19` feat: AI provider-style message rendering + mobile markdown for code blocks
 - `8763c40` feat: wire mobile chat to real chat history store + conversation list in sidebar
 - `7a1aef0` feat: AI provider-style sliding sidebar + AI provider chat on mobile
