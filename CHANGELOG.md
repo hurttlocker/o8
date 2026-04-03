@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `0e1ba78` fix: softest fade (20px, barely visible) + glass on all buttons
 - `be8458a` fix: minimal top fade
 - `a4e0d28` feat: glassmorphic buttons
 - `9734f5d` fix: gentler top scroll fade
