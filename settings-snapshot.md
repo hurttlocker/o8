@@ -1,0 +1,67 @@
+- generic [ref=e1]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - generic [ref=e9]: Mobile Command
+          - generic [ref=e10]: o8
+          - generic [ref=e11]: Glass navigation for chats, approvals, and device controls.
+        - button "Close" [ref=e13] [cursor=pointer]
+      - generic [ref=e14]:
+        - button "Chats Recent conversations and live assistant threads." [ref=e15] [cursor=pointer]:
+          - img [ref=e17]
+          - generic [ref=e19]
+        - button "Approvals 1 Pending actions that require operator confirmation." [ref=e205] [cursor=pointer]:
+          - img [ref=e25]
+          - generic [ref=e27]
+        - button "Settings Theme, model, and transport controls." [active] [ref=e31] [cursor=pointer]:
+          - img [ref=e33]
+          - generic [ref=e35]
+      - generic [ref=e39]:
+        - generic [ref=e40]:
+          - generic [ref=e41]
+          - generic [ref=e44]
+        - generic [ref=e47]:
+          - generic [ref=e48]
+          - generic [ref=e51]: Connected
+    - generic [ref=e53]:
+      - button "Menu" [ref=e54] [cursor=pointer]:
+        - img [ref=e55]
+      - generic [ref=e57]: Settings
+    - generic [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e98]:
+          - generic [ref=e99]: Settings
+          - generic [ref=e100]: Control center
+          - generic [ref=e101]: Tune the shell appearance, the default model, and the live bridge state for mobile.
+        - generic [ref=e102]:
+          - generic [ref=e103]
+          - generic [ref=e106]
+          - generic [ref=e109]
+      - generic [ref=e112]:
+        - generic [ref=e113]: Theme
+        - generic [ref=e114]:
+          - button "Light Warm paper glass with crisp blue focus." [ref=e115] [cursor=pointer]
+          - button "Dark Default graphite shell with bright white type." [ref=e122] [cursor=pointer]
+      - generic [ref=e129]:
+        - generic [ref=e130]: Model
+        - generic [ref=e131]:
+          - button "Gemini 3.1 Pro Latest flagship gemini-3.1-pro-preview google" [ref=e132] [cursor=pointer]
+          - button "Gemini 3 Pro Previous gen flagship gemini-3-pro-preview google" [ref=e139] [cursor=pointer]
+          - button "Gemini 3 Flash Fast and capable gemini-3-flash-preview google" [ref=e146] [cursor=pointer]
+          - button "Gemini 2.5 Pro Stable general-purpose model gemini-2.5-pro google" [ref=e153] [cursor=pointer]
+          - button "Gemini 2.5 Flash Faster and lighter gemini-2.5-flash google" [ref=e160] [cursor=pointer]
+          - button "Gemini 2.5 Flash Lite Lowest cost Google option gemini-2.5-flash-lite google" [ref=e167] [cursor=pointer]
+          - button "Claude Sonnet 4.5 Fast and high quality claude-sonnet-4-5 anthropic" [ref=e174] [cursor=pointer]
+          - button "GPT-5.4 Latest OpenAI model gpt-5.4 openai" [ref=e181] [cursor=pointer]
+      - generic [ref=e188]:
+        - generic [ref=e189]: Connection
+        - generic [ref=e190]:
+          - generic [ref=e191]
+          - generic [ref=e194]: Connected
+      - generic [ref=e196]:
+        - generic [ref=e197]:
+          - img [ref=e199]
+          - generic [ref=e201]
+        - generic [ref=e204]: Mobile command surface for approvals, conversation history, and assistant-driven work.
+  - alert [ref=e73]
