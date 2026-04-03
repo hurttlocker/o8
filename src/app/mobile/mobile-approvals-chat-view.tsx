@@ -490,7 +490,7 @@ export function ChatView({
           alignItems: 'center',
           gap: 10,
           paddingTop: 10,
-          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 4px)',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
           paddingLeft: 4,
           paddingRight: 4,
           background: palette.composerBackground,
