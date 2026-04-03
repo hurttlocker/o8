@@ -47,6 +47,7 @@ export interface ApprovalItem {
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  thinking?: string;
 }
 
 export interface ChatHistoryRecord {
@@ -117,7 +118,7 @@ export const AVAILABLE_MODELS: ModelOption[] = [
   { id: 'gpt-5.4', label: 'GPT-5.4', provider: 'openai', description: 'Latest OpenAI model' },
 ];
 
-export const DEFAULT_MOBILE_CHAT_MODEL = 'gemini-3.1-pro-preview';
+export const DEFAULT_MOBILE_CHAT_MODEL = 'gemini-2.5-pro';
 export const MOBILE_CHAT_STORAGE_KEY = 'o8-mobile-chat-tab';
 export const MOBILE_CHAT_MODEL_STORAGE_KEY = 'o8-mobile-chat-model';
 export const POLL_INTERVAL = 5_000;
@@ -396,7 +397,14 @@ export function normalizeChatMessages(messages: unknown): ChatMessage[] {
     const role = 'role' in message ? message.role : undefined;
     if (role !== 'user' && role !== 'assistant') return acc;
     const content = extractMessageContent('content' in message ? message.content : '');
-    acc.push({ role, content });
+    const thinking = 'thinking' in message && typeof message.thinking === 'string'
+      ? message.thinking
+      : undefined;
+    acc.push({
+      role,
+      content,
+      ...(thinking?.trim() ? { thinking } : {}),
+    });
     return acc;
   }, []);
 }

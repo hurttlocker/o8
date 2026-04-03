@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { MobileAuroraBg } from './mobile-aurora-bg';
+import { AssistantChatView } from './mobile-assistant-chat-view';
 import { ApprovalsView } from './mobile-approvals-approvals-view';
 import { ChatListView } from './mobile-approvals-chat-list-view';
-import { ChatView } from './mobile-approvals-chat-view';
 import { Sidebar } from './mobile-approvals-sidebar';
 import {
   DEFAULT_MOBILE_CHAT_MODEL,
@@ -214,7 +214,9 @@ export function MobileApprovalsClient({
     <div
       style={{
         position: 'relative',
-        height: '100%',
+        height: '100dvh',
+        minHeight: '100dvh',
+        maxHeight: '100dvh',
         overflow: 'hidden',
         backgroundColor: palette.rootBackground,
         color: palette.rootText,
@@ -348,7 +350,7 @@ export function MobileApprovalsClient({
           ) : null}
 
           {activeView === 'chat' && currentTabId ? (
-            <ChatView
+            <AssistantChatView
               currentTabId={currentTabId}
               onTabIdChange={setCurrentTabId}
               onConversationSaved={() => {
