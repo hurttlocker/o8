@@ -2,6 +2,15 @@
 /* eslint-disable @next/next/no-img-element -- lightweight markdown renderer needs raw img support */
 
 import { Fragment, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  MOBILE_BODY_TRACKING,
+  MOBILE_CARD_RADIUS,
+  MOBILE_HEADING_TRACKING,
+  MOBILE_TOUCH_TARGET,
+  IconCaretDown,
+  IconCopy,
+  mobileFontFamily,
+} from './mobile-approvals-shared';
 
 type MarkdownBlock =
   | { type: 'code'; code: string; language: string }
@@ -137,7 +146,7 @@ function renderInline(text: string, keyPrefix = 'inline'): ReactNode[] {
           style={{
             display: 'block',
             maxWidth: '100%',
-            borderRadius: 10,
+            borderRadius: MOBILE_CARD_RADIUS,
             marginTop: 10,
             marginBottom: 6,
           }}
@@ -316,10 +325,10 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
       style={{
         marginTop: 12,
         marginBottom: 14,
-        borderRadius: 18,
+        borderRadius: MOBILE_CARD_RADIUS,
         overflow: 'hidden',
         border: '1px solid rgba(148,163,184,0.16)',
-        backgroundColor: '#1e1e2e',
+        backgroundColor: 'rgba(10, 14, 22, 0.78)',
         boxShadow: '0 10px 30px rgba(0,0,0,0.24)',
       }}
     >
@@ -341,11 +350,9 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, border: 'none', backgroundColor: 'transparent', color: '#8b96a5', cursor: 'pointer', padding: 0, fontFamily: '"SF Mono", Menlo, monospace', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: MOBILE_TOUCH_TARGET, border: 'none', backgroundColor: 'transparent', color: '#8b96a5', cursor: 'pointer', padding: 0, fontFamily: mobileFontFamily(), fontSize: 11, fontWeight: 600, letterSpacing: MOBILE_BODY_TRACKING }}
         >
-          <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor" style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
-            <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z" />
-          </svg>
+          <IconCaretDown fill="#8b96a5" size={12} style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
           <span>{fileLabel ?? language}</span>
         </button>
         <button
@@ -360,18 +367,19 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
             alignItems: 'center',
             backgroundColor: copied ? 'rgba(96,165,250,0.14)' : 'transparent',
             border: 'none',
-            borderRadius: 999,
+            borderRadius: MOBILE_CARD_RADIUS,
             color: copied ? '#bfdbfe' : '#94a3b8',
             cursor: 'pointer',
             display: 'inline-flex',
             gap: 6,
-            padding: '4px 8px',
+            minHeight: MOBILE_TOUCH_TARGET,
+            padding: '0 10px',
+            fontFamily: mobileFontFamily(),
+            letterSpacing: MOBILE_BODY_TRACKING,
           }}
           aria-label={copied ? 'Copied code block' : 'Copy code block'}
         >
-          <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
-            <path d="M196,64V192a12,12,0,0,1-12,12H88a12,12,0,0,1-12-12V64A12,12,0,0,1,88,52h96A12,12,0,0,1,196,64Zm-12,0H88V192h96ZM52,176a6,6,0,0,1-12,0V88A20,20,0,0,1,60,68h88a6,6,0,0,1,0,12H60a8,8,0,0,0-8,8Z" />
-          </svg>
+          <IconCopy fill={copied ? '#bfdbfe' : '#94a3b8'} size={14} />
           <span>{copied ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
@@ -434,7 +442,7 @@ export function MobileMarkdown({ content }: { content: string }) {
   const blocks = parseBlocks(content);
 
   return (
-    <div style={{ color: '#e5e7eb', fontSize: 15, lineHeight: 1.6, wordBreak: 'break-word' }}>
+    <div style={{ color: '#e5e7eb', fontSize: 15, lineHeight: 1.6, letterSpacing: MOBILE_BODY_TRACKING, wordBreak: 'break-word' }}>
       {blocks.map((block, index) => {
         if (block.type === 'code') {
           return <CodeBlock key={`code-${index}`} code={block.code} language={block.language} />;
@@ -449,7 +457,7 @@ export function MobileMarkdown({ content }: { content: string }) {
                 color: '#f8fafc',
                 fontSize: sizes[block.level],
                 fontWeight: 700,
-                letterSpacing: '-0.03em',
+                letterSpacing: MOBILE_HEADING_TRACKING,
                 lineHeight: 1.2,
                 marginTop: index === 0 ? 0 : 18,
                 marginBottom: 10,
