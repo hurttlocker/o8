@@ -10,7 +10,7 @@ type MarkdownBlock =
   | { type: 'blockquote'; text: string }
   | { type: 'list'; ordered: boolean; items: string[] };
 
-type HighlightToken = { type: 'plain' | 'keyword' | 'string' | 'number' | 'comment' | 'function'; value: string };
+export type HighlightToken = { type: 'plain' | 'keyword' | 'string' | 'number' | 'comment' | 'function'; value: string };
 
 const KEYWORDS = new Set([
   'as', 'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'default', 'delete',
@@ -275,7 +275,7 @@ function parseBlocks(content: string): MarkdownBlock[] {
   return blocks;
 }
 
-function highlightCode(code: string) {
+export function highlightCode(code: string) {
   const highlightedLines: Array<{ tokens: HighlightToken[] }> = [];
   let inBlockComment = false;
 
@@ -312,7 +312,7 @@ function extractFileLabel(language: string, code: string): string | null {
   return null;
 }
 
-function codeTheme(light: boolean) {
+export function codeTheme(light: boolean) {
   return light ? {
     bg: '#f8f9fc',
     border: 'rgba(0,0,0,0.08)',
