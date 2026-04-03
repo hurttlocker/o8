@@ -6,6 +6,8 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `500dc19` feat: AI provider-style message rendering + mobile markdown for code blocks
+- `8763c40` feat: wire mobile chat to real chat history store + conversation list in sidebar
 - `7a1aef0` feat: AI provider-style sliding sidebar + AI provider chat on mobile
 - `3a8d78f` fix: mobile shows only governance approvals — filter out interactive LLM chat noise
 - `7f326ba` fix: hydration mismatch — defer timestamp render to client
