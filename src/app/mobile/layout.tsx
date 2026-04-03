@@ -28,8 +28,8 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: [
-        'html{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#111111}',
-        'body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#111111;-webkit-font-smoothing:antialiased}',
+        'html,body,#__next{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#111111;-webkit-font-smoothing:antialiased}',
+        'html{padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0);box-sizing:border-box}',
         'nextjs-portal{display:none!important}',
         '[data-nextjs-dialog-overlay]{display:none!important}',
         '::-webkit-scrollbar{width:3px}',
@@ -41,7 +41,6 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
         style={{
           width: '100%',
           height: '100%',
-          backgroundColor: '#111111',
           overflow: 'hidden',
           position: 'relative',
         }}
