@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `bb3cf28` fix: dark background in mobile layout to prevent white flash on reload
 - `6981714` refactor: replace mobile shell with purpose-built approval-only surface
 - `3c40bb8` feat: add npm run tunnel for remote mobile access via Cloudflare
 - `e14d089` fix: avoid ws token creation race
