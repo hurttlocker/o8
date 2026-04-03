@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { readFileSync, statSync } from 'fs';
 import path from 'path';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 /**
  * POST /api/panel/terminal-image
@@ -12,6 +13,7 @@ import path from 'path';
  */
 export async function POST(request: Request) {
   try {
+    const wsToken = getOrCreateWsToken();
     const { filePath, sessionName } = await request.json();
 
     if (!filePath) {
@@ -44,7 +46,7 @@ export async function POST(request: Request) {
         // Notify WS server by writing a signal file that triggers image rendering
         // The actual rendering happens through the WS terminal-image handler
         const WebSocket = (await import('ws')).default;
-        const ws = new WebSocket('ws://localhost:3002');
+        const ws = new WebSocket(`ws://localhost:3002/ws?token=${encodeURIComponent(wsToken)}`);
         await new Promise<void>((resolve, reject) => {
           ws.on('open', () => {
             ws.send(JSON.stringify({

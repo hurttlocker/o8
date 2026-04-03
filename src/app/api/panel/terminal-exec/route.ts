@@ -1,8 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 const WS_PORT = Number(process.env.WS_PORT ?? 3002);
-const WS_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 
 /**
  * POST /api/panel/terminal-exec
@@ -10,6 +10,7 @@ const WS_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
  */
 export async function POST(request: Request) {
   try {
+    const wsToken = getOrCreateWsToken();
     const { sessionName, command } = await request.json();
 
     if (!sessionName || !command) {
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${WS_TOKEN}`,
+        Authorization: `Bearer ${wsToken}`,
       },
       body: JSON.stringify({ sessionName, command }),
       cache: 'no-store',

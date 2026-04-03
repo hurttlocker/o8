@@ -3,17 +3,17 @@ import type {
   RealtimeMutationPublishRequest,
   RealtimeRefreshRequest,
 } from '@/lib/realtime/types';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 const REALTIME_INTERNAL_ORIGIN = process.env.CORTEX_REALTIME_INTERNAL_ORIGIN ?? 'http://127.0.0.1:3002';
 const REALTIME_INTERNAL_TIMEOUT_MS = 2_500;
-const WS_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 
 async function postInternalRealtimeRequest(payload: RealtimeInternalRequest) {
   try {
     await fetch(`${REALTIME_INTERNAL_ORIGIN}/internal/realtime`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${WS_TOKEN}`,
+        'Authorization': `Bearer ${getOrCreateWsToken()}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),

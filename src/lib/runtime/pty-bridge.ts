@@ -1,5 +1,6 @@
+import { getOrCreateWsToken } from '@/lib/ws-auth';
+
 const WS_PORT = Number(process.env.WS_PORT ?? 3002);
-const WS_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 
 interface SpawnBridgeTerminalRequest {
   sessionName: string;
@@ -26,7 +27,7 @@ export async function spawnBridgeTerminalSession(payload: SpawnBridgeTerminalReq
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${WS_TOKEN}`,
+      Authorization: `Bearer ${getOrCreateWsToken()}`,
     },
     body: JSON.stringify(payload),
     cache: 'no-store',
@@ -42,7 +43,7 @@ export async function isBridgeSessionAlive(sessionName: string): Promise<boolean
   try {
     const response = await fetch(bridgeUrl(`/terminal-alive?session=${encodeURIComponent(sessionName)}`), {
       method: 'GET',
-      headers: { Authorization: `Bearer ${WS_TOKEN}` },
+      headers: { Authorization: `Bearer ${getOrCreateWsToken()}` },
       cache: 'no-store',
       signal: AbortSignal.timeout(3000),
     });
@@ -59,7 +60,7 @@ export async function signalBridgeTerminalSession(sessionName: string, signal: '
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${WS_TOKEN}`,
+      Authorization: `Bearer ${getOrCreateWsToken()}`,
     },
     body: JSON.stringify({ sessionName, signal }),
     cache: 'no-store',
