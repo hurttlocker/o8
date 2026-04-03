@@ -50,6 +50,7 @@ import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { readRuntimeTranscript } from '@/lib/runtime/transcript';
+import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
 import '@/lib/ws-runtime-env';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
@@ -2455,7 +2456,8 @@ const httpServer = createServer((req, res) => {
   res.end();
 });
 
-const WS_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
+const WS_TOKEN = getOrCreateWsToken();
+console.log(`[ws-auth] WS token loaded (source: ${process.env.WS_TOKEN ? 'env' : WS_TOKEN_PATH})`);
 
 const wss = new WebSocketServer({
   server: httpServer,
