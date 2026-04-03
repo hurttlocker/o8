@@ -759,7 +759,7 @@ function ChatListView({
   }
 
   return (
-    <div style={{ position: 'relative', minHeight: 'calc(100dvh - 80px)' }}>
+    <div style={{ position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto' }}>
       {contextMenu && (
         <ChatContextMenu
           menu={contextMenu}
@@ -1071,7 +1071,7 @@ function ChatView({
   }, [onTabIdChange]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 80px)', position: 'relative' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}>
       {/* iOS-style top fade — content fades out as it scrolls behind the header */}
       <div
         style={{
@@ -1295,7 +1295,7 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
   }, [activeView, currentTabId, loadRecentConversations]);
 
   return (
-    <div style={{ height: '100dvh', maxHeight: '100dvh', overflow: 'hidden', backgroundColor: '#111111', color: '#f3f4f6', fontFamily: 'system-ui, -apple-system, sans-serif', WebkitFontSmoothing: 'antialiased', padding: '0 16px', display: 'flex', flexDirection: 'column' } as React.CSSProperties}>
+    <div style={{ height: '100%', overflow: 'hidden', backgroundColor: '#111111', color: '#f3f4f6', fontFamily: 'system-ui, -apple-system, sans-serif', WebkitFontSmoothing: 'antialiased', padding: '0 16px', display: 'flex', flexDirection: 'column' } as React.CSSProperties}>
       <Sidebar
         open={sidebarOpen}
         activeView={activeView}
@@ -1344,7 +1344,8 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
         </div>
       )}
 
-      {/* Views */}
+      {/* Views — flex child fills remaining space */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {activeView === 'approvals' && (
         <ApprovalsView approvals={approvals} onResolve={handleResolve} resolving={resolving} onRefresh={() => void refresh()} />
       )}
@@ -1370,6 +1371,7 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
           onBack={() => setCurrentTabId(null)}
         />
       )}
+      </div>
     </div>
   );
 }
