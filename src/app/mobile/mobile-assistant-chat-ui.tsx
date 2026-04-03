@@ -1,9 +1,10 @@
 'use client';
 
-import { ComposerPrimitive, MessagePrimitive, useAuiState, type MessageState } from '@assistant-ui/react';
+import { ComposerPrimitive, MessagePrimitive, useAuiState, type MessageState, type ThreadAssistantMessagePart } from '@assistant-ui/react';
 import { useEffect, useState, type CSSProperties } from 'react';
 import { MobileMarkdown } from './mobile-markdown';
 import { getMessageTextContent, getMessageThinkingBlocks } from './mobile-assistant-chat-runtime';
+import { renderToolPart } from './mobile-tool-cards';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
 import { playSendClick } from '@/lib/mobile/sounds';
 import {
@@ -116,6 +117,63 @@ function ThinkingBlock({
       ) : null}
     </div>
   );
+}
+
+type AssistantRenderableSegment =
+  | { type: 'thinking'; text: string }
+  | { type: 'text'; text: string }
+  | { type: 'tool'; part: Extract<ThreadAssistantMessagePart, { type: 'tool-call' }> };
+
+function getAssistantRenderableSegments(content: readonly ThreadAssistantMessagePart[]) {
+  const segments: AssistantRenderableSegment[] = [];
+  let textBuffer = '';
+  let thinkingBuffer = '';
+
+  const flushText = () => {
+    if (!textBuffer.trim()) {
+      textBuffer = '';
+      return;
+    }
+    segments.push({ type: 'text', text: textBuffer });
+    textBuffer = '';
+  };
+
+  const flushThinking = () => {
+    if (!thinkingBuffer.trim()) {
+      thinkingBuffer = '';
+      return;
+    }
+    segments.push({ type: 'thinking', text: thinkingBuffer });
+    thinkingBuffer = '';
+  };
+
+  for (const part of content) {
+    if (part.type === 'reasoning' && typeof part.text === 'string') {
+      flushText();
+      thinkingBuffer += part.text;
+      continue;
+    }
+
+    if (part.type === 'text' && typeof part.text === 'string') {
+      flushThinking();
+      textBuffer += part.text;
+      continue;
+    }
+
+    if (part.type === 'tool-call') {
+      flushThinking();
+      flushText();
+      segments.push({ type: 'tool', part });
+      continue;
+    }
+
+    flushThinking();
+    flushText();
+  }
+
+  flushThinking();
+  flushText();
+  return segments;
 }
 
 function TtsButton({
@@ -393,7 +451,11 @@ export function ChatMessageRow({
   onCopy: (messageId: string, content: string) => void;
 }) {
   const textContent = getMessageTextContent(message.content);
+  const assistantSegments = message.role === 'assistant'
+    ? getAssistantRenderableSegments(message.content as readonly ThreadAssistantMessagePart[])
+    : [];
   const thinkingBlocks = message.role === 'assistant' ? getMessageThinkingBlocks(message.content) : [];
+  const hasToolParts = assistantSegments.some((segment) => segment.type === 'tool');
   const isAssistantStreaming = message.role === 'assistant' && message.status.type === 'running';
   const hideCancelledPlaceholder = message.role === 'assistant'
     && message.status.type === 'incomplete'
@@ -401,7 +463,7 @@ export function ChatMessageRow({
     && !textContent.trim()
     && thinkingBlocks.length === 0;
 
-  if (hideCancelledPlaceholder) {
+  if (hideCancelledPlaceholder && !hasToolParts) {
     return null;
   }
 
@@ -443,16 +505,44 @@ export function ChatMessageRow({
         </div>
       ) : (
         <div style={{ width: '100%', paddingTop: 2, paddingRight: 18 }}>
-          {thinkingBlocks.map((block, index) => (
-            <ThinkingBlock
-              key={`${message.id}-thinking-${index}`}
-              text={block}
-              palette={palette}
-              isStreaming={isAssistantStreaming}
-            />
-          ))}
-          {textContent ? (
-            <MobileMarkdown content={textContent} textColor={palette.rootText} light={palette.rootBackground !== '#111111'} />
+          {assistantSegments.length > 0 ? (
+            assistantSegments.map((segment, index) => {
+              if (segment.type === 'thinking') {
+                return (
+                  <ThinkingBlock
+                    key={`${message.id}-thinking-${index}`}
+                    text={segment.text}
+                    palette={palette}
+                    isStreaming={isAssistantStreaming}
+                  />
+                );
+              }
+
+              if (segment.type === 'tool') {
+                return (
+                  <div key={`${message.id}-tool-${segment.part.toolCallId || index}`} style={{ marginBottom: 12 }}>
+                    {renderToolPart(segment.part.toolName, {
+                      toolCallId: segment.part.toolCallId,
+                      args: segment.part.args as Record<string, unknown> | undefined,
+                      argsText: segment.part.argsText,
+                      result: segment.part.result,
+                      isError: segment.part.isError,
+                      pending: segment.part.result === undefined && message.status?.type !== 'incomplete',
+                      light: !palette.isDark,
+                      palette,
+                    })}
+                  </div>
+                );
+              }
+
+              return (
+                <div key={`${message.id}-text-${index}`}>
+                  <MobileMarkdown content={segment.text} textColor={palette.rootText} light={!palette.isDark} />
+                </div>
+              );
+            })
+          ) : textContent ? (
+            <MobileMarkdown content={textContent} textColor={palette.rootText} light={!palette.isDark} />
           ) : isAssistantStreaming ? (
             <StreamingDot palette={palette} />
           ) : null}

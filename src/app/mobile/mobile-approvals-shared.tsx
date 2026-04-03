@@ -6,7 +6,7 @@ import type { CSSProperties } from 'react';
 /* Extracted from @phosphor-icons/react/dist/defs/*.es.js to avoid Turbopack  */
 /* resolution failures on those .es.js barrel files.                           */
 
-const ICON_PATHS = {
+export const ICON_PATHS = {
   ArrowLeft: 'M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z',
   ArrowClockwise: 'M240,56v48a8,8,0,0,1-8,8H184a8,8,0,0,1,0-16H211.4L184.81,71.64l-.25-.24a80,80,0,1,0-1.67,114.78,8,8,0,0,1,11,11.63A95.44,95.44,0,0,1,128,224h-1.32A96,96,0,1,1,195.75,60L224,85.8V56a8,8,0,1,1,16,0Z',
   ArrowClockwiseThin: 'M236,56v48a4,4,0,0,1-4,4H184a4,4,0,0,1,0-8h37.7L187.53,68.69l-.13-.12a84,84,0,1,0-1.75,120.51,4,4,0,0,1,5.5,5.82A91.43,91.43,0,0,1,128,220h-1.26A92,92,0,1,1,193,62.84l35,32.05V56a4,4,0,1,1,8,0Z',
@@ -44,10 +44,20 @@ export interface ApprovalItem {
   continuation?: { kind: 'llm-chat' | 'runtime' | 'lane' };
 }
 
+export interface ChatToolPart {
+  toolCallId?: string;
+  toolName: string;
+  args?: Record<string, unknown>;
+  argsText?: string;
+  result?: unknown;
+  isError?: boolean;
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   thinking?: string;
+  toolParts?: ChatToolPart[];
 }
 
 export interface ChatHistoryRecord {
@@ -400,10 +410,51 @@ export function normalizeChatMessages(messages: unknown): ChatMessage[] {
     const thinking = 'thinking' in message && typeof message.thinking === 'string'
       ? message.thinking
       : undefined;
+    const rawToolParts = 'toolParts' in message
+      ? message.toolParts
+      : ('toolCalls' in message ? message.toolCalls : undefined);
+    const toolParts = Array.isArray(rawToolParts)
+      ? rawToolParts.reduce<ChatToolPart[]>((parts, part) => {
+          if (!part || typeof part !== 'object') return parts;
+          const toolName = 'toolName' in part && typeof part.toolName === 'string'
+            ? part.toolName
+            : ('name' in part && typeof part.name === 'string' ? part.name : '');
+          if (!toolName) return parts;
+          const args = 'args' in part && part.args && typeof part.args === 'object' && !Array.isArray(part.args)
+            ? part.args as Record<string, unknown>
+            : undefined;
+          const argsText = 'argsText' in part && typeof part.argsText === 'string'
+            ? part.argsText
+            : undefined;
+          const result = 'result' in part
+            ? part.result
+            : ('preview' in part && typeof part.preview === 'string'
+                ? {
+                    preview: part.preview,
+                    status: 'status' in part && typeof part.status === 'string' ? part.status : undefined,
+                  }
+                : undefined);
+          const isError = 'isError' in part
+            ? part.isError === true
+            : ('status' in part && (part.status === 'blocked' || part.status === 'error'));
+
+          parts.push({
+            toolName,
+            ...('toolCallId' in part && typeof part.toolCallId === 'string' ? { toolCallId: part.toolCallId } : {}),
+            ...(args ? { args } : {}),
+            ...(argsText?.trim() ? { argsText } : {}),
+            ...(result !== undefined ? { result } : {}),
+            ...(isError ? { isError: true } : {}),
+          });
+          return parts;
+        }, [])
+      : undefined;
+
     acc.push({
       role,
       content,
       ...(thinking?.trim() ? { thinking } : {}),
+      ...(toolParts && toolParts.length > 0 ? { toolParts } : {}),
     });
     return acc;
   }, []);
