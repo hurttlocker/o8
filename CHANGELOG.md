@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `f6dd7b0` fix: position:fixed viewport lock, hide Next.js dev badge, proper flex layout
 - `5a21a75` fix: lock viewport height (no scroll), neutral user bubbles, strict approval filter
 - `60cd0e7` fix: starred field persists + star/unstar toggle + rename refreshes list
 - `529d216` fix: tighter input bar with proper iOS safe area + viewport-fit cover
