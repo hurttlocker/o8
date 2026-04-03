@@ -6,6 +6,10 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `3c40bb8` feat: add npm run tunnel for remote mobile access via Cloudflare
+- `e14d089` fix: avoid ws token creation race
+- `21b2f5c` fix: real ws auth token
+- `3b1c52c` perf: prefetch mobile inbox on server
 - `880c7a3` fix: harden API route and MCP error handling
 - `29d5a8b` fix: purge stale supervisor watches and orphaned worktree branches
 - `5b67fc8` refactor: slim mobile surface to beta essentials
