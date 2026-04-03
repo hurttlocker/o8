@@ -7,6 +7,7 @@ Development activity for Rainwater IDE.
 ## 2026-04-03
 
 - `fae1a68` fix: restyle planned work packet cards to match session rows
+- `50e562a` fix: align mobile chat input with iOS safe area
 - `cdccccd` fix: tap-to-reveal message actions, hide Play button until tapped
 - `ce15a62` fix: replace phosphor-icons/react/dist/defs imports with inline SVG paths
 - `d3f045f` feat: mobile settings view + decompose monolithic client into focused modules
