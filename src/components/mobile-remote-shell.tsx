@@ -246,7 +246,7 @@ function MobileRemoteShellInner({
   }, [state.snapshot, updateAgents]);
 
   useEffect(() => {
-    if (state.snapshot.mode === 'live' && state.snapshot.sessions.length > 0) return;
+    if (state.snapshot.mode !== 'stale') return;
     let active = true;
 
     async function refreshSoon() {
