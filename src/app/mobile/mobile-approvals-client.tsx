@@ -252,37 +252,53 @@ function TtsButton({ messageId, text }: { messageId: string; text: string }) {
 
   const isPlaying = playback === 'playing' || playback === 'loading';
 
+  const btnBase = {
+    display: 'inline-flex' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: 'none' as const,
+    fontSize: 12,
+    fontWeight: 500,
+    cursor: 'pointer' as const,
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    transition: 'all 0.2s ease',
+  };
+
   return (
-    <button
-      onClick={handleTap}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        marginTop: 8,
-        padding: '6px 12px',
-        borderRadius: 8,
-        border: 'none',
-        backgroundColor: isPlaying ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.06)',
-        color: isPlaying ? '#60a5fa' : '#9ca3af',
-        fontSize: 12,
-        fontWeight: 500,
-        cursor: 'pointer',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        transition: 'all 0.2s ease',
-      }}
-    >
-      {isPlaying ? (
-        <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
-          <path d="M216,48V208a16,16,0,0,1-16,16H160a16,16,0,0,1-16-16V48a16,16,0,0,1,16-16h40A16,16,0,0,1,216,48ZM96,32H56A16,16,0,0,0,40,48V208a16,16,0,0,0,16,16H96a16,16,0,0,0,16-16V48A16,16,0,0,0,96,32Z" />
-        </svg>
-      ) : (
+    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+      <button
+        onClick={() => { if (!isPlaying) void ttsEngine.play(text, messageId); }}
+        disabled={isPlaying}
+        style={{
+          ...btnBase,
+          backgroundColor: isPlaying ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
+          color: isPlaying ? '#4b5563' : '#9ca3af',
+          opacity: isPlaying ? 0.5 : 1,
+        }}
+      >
         <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
           <path d="M240,128a15.74,15.74,0,0,1-7.6,13.51L88.32,229.65a16,16,0,0,1-16.2.3A15.86,15.86,0,0,1,64,216.13V39.87a15.86,15.86,0,0,1,8.12-13.82,16,16,0,0,1,16.2.3L232.4,114.49A15.74,15.74,0,0,1,240,128Z" />
         </svg>
+        {playback === 'loading' ? 'Loading...' : 'Play'}
+      </button>
+      {isPlaying && (
+        <button
+          onClick={() => ttsEngine.stop()}
+          style={{
+            ...btnBase,
+            backgroundColor: 'rgba(239,68,68,0.12)',
+            color: '#f87171',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+            <path d="M200,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Z" />
+          </svg>
+          Stop
+        </button>
       )}
-      {playback === 'loading' ? 'Loading...' : isPlaying ? 'Stop' : 'Play'}
-    </button>
+    </div>
   );
 }
 
