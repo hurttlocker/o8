@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `9734f5d` fix: gentler top scroll fade
 - `1c09c65` fix: AI provider 3.1 Pro, 3px scrollbar, Apple Messages input bar
 - `3689907` fix: glass input bar, softer top fade, input positioned lower
 - `f6dd7b0` fix: position:fixed viewport lock, hide Next.js dev badge, proper flex layout
