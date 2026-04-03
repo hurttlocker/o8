@@ -52,11 +52,19 @@ const SIDEBAR_TITLE_MAX_LENGTH = 40;
 // ── Helpers ──
 
 function isGovernanceApproval(a: ApprovalItem): boolean {
+  // Lane merges and PRs — always governance
   if (a.continuation?.kind === 'lane') return true;
+  // High risk — always surface
   if (a.risk === 'high') return true;
-  if (a.source === 'llm-chat' || a.continuation?.kind === 'llm-chat') return false;
+  // Everything from interactive sessions (LLM chat, runtime tool calls, Claude Code) — hide
+  // Only lane-continuation approvals and high-risk should reach mobile
   if (a.source === 'test') return false;
-  return true;
+  if (a.continuation?.kind === 'llm-chat') return false;
+  if (a.continuation?.kind === 'runtime') return false;
+  if (a.source === 'llm-chat') return false;
+  if (a.source === 'runtime') return false;
+  // Unknown source with no continuation — hide (likely interactive)
+  return false;
 }
 
 function timeAgo(timestamp: number): string {
@@ -1111,13 +1119,12 @@ function ChatView({
                   padding: '10px 14px',
                   borderRadius: 16,
                   borderBottomRightRadius: 6,
-                  backgroundColor: '#2563eb',
-                  color: '#fff',
+                  backgroundColor: '#2a2a2e',
+                  color: '#e5e7eb',
                   fontSize: 14,
                   lineHeight: 1.5,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
-                  boxShadow: '0 10px 24px rgba(37,99,235,0.2)',
                 }}
               >
                 {msg.content}
@@ -1288,7 +1295,7 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
   }, [activeView, currentTabId, loadRecentConversations]);
 
   return (
-    <div style={{ minHeight: '100dvh', backgroundColor: '#111111', color: '#f3f4f6', fontFamily: 'system-ui, -apple-system, sans-serif', WebkitFontSmoothing: 'antialiased', padding: '0 16px' } as React.CSSProperties}>
+    <div style={{ height: '100dvh', maxHeight: '100dvh', overflow: 'hidden', backgroundColor: '#111111', color: '#f3f4f6', fontFamily: 'system-ui, -apple-system, sans-serif', WebkitFontSmoothing: 'antialiased', padding: '0 16px', display: 'flex', flexDirection: 'column' } as React.CSSProperties}>
       <Sidebar
         open={sidebarOpen}
         activeView={activeView}
