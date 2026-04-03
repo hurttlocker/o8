@@ -1177,14 +1177,26 @@ function ChatView({
         <button
           onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
           style={{
-            ...glassButtonStyle(36, 'neutral', true),
             position: 'absolute',
             bottom: 80,
             right: 20,
             zIndex: 5,
-          }}
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            border: '1px solid rgba(255,255,255,0.15)',
+            backgroundColor: 'rgba(30,30,34,0.9)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            color: '#e5e7eb',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+          } as React.CSSProperties}
         >
-          <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
+          <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
             <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z" />
           </svg>
         </button>
@@ -1242,7 +1254,25 @@ function ChatView({
           onClick={() => { if (streaming) { /* stop */ } else { playSendClick(); void sendMessage(); } }}
           disabled={!streaming && (!input.trim() || historyLoading || !currentTabId)}
           style={{
-            ...glassButtonStyle(34, streaming ? 'rose' : 'orange', streaming || !!(input.trim() && !historyLoading && currentTabId)),
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            border: 'none',
+            backgroundColor: streaming
+              ? 'rgba(244,114,182,0.25)'
+              : (input.trim() && !historyLoading && currentTabId)
+                ? '#c27436'
+                : 'rgba(255,255,255,0.06)',
+            color: (streaming || (input.trim() && !historyLoading && currentTabId)) ? '#fff' : '#4b5563',
+            cursor: (streaming || (input.trim() && !historyLoading && currentTabId)) ? 'pointer' : 'default',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            transition: 'all 0.2s ease',
+            boxShadow: (input.trim() && !streaming && !historyLoading && currentTabId)
+              ? '0 0 16px rgba(194,116,54,0.3)'
+              : 'none',
           }}
           aria-label={streaming ? 'Stop' : 'Send'}
         >
