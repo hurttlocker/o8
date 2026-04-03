@@ -1,37 +1,43 @@
-import { MobilePageClient } from './mobile-page-client';
-import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-
-const EMPTY_SNAPSHOT: MobileInboxSnapshot = {
-  generatedAt: new Date().toISOString(),
-  mode: 'stale',
-  sourceLabel: 'client-shell',
-  note: 'Connecting...',
-  sessions: [],
-  approvals: [],
-  items: [],
-  summary: { alerts: 0, approvals: 0, reviewItems: 0, activeRuns: 0 },
-};
+import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { MobileApprovalsClient } from './mobile-approvals-client';
 
 export const dynamic = 'force-dynamic';
 
-async function prefetchInbox(): Promise<MobileInboxSnapshot> {
+interface PrefetchedApproval {
+  id: string;
+  title: string;
+  description?: string;
+  summary?: string;
+  risk: 'low' | 'medium' | 'high';
+  toolName?: string;
+  sessionKey?: string;
+  status: string;
+  createdAt: number;
+  metadata?: Record<string, string>;
+}
+
+async function fetchPendingApprovals(): Promise<PrefetchedApproval[]> {
   try {
     const port = process.env.PORT || '3001';
-    const res = await fetch(`http://127.0.0.1:${port}/api/mobile/inbox`, {
+    const res = await fetch(`http://127.0.0.1:${port}/api/panel/approvals?status=pending`, {
       cache: 'no-store',
       signal: AbortSignal.timeout(3000),
     });
-    if (res.ok) {
-      return await res.json() as MobileInboxSnapshot;
-    }
+    if (!res.ok) return [];
+    const data = await res.json() as { approvals?: PrefetchedApproval[] };
+    return data.approvals ?? [];
   } catch {
-    // Prefetch failure falls back to an empty snapshot and the client refresh path.
+    return [];
   }
-
-  return EMPTY_SNAPSHOT;
 }
 
 export default async function MobilePage() {
-  const snapshot = await prefetchInbox();
-  return <MobilePageClient initialSnapshot={snapshot} />;
+  const approvals = await fetchPendingApprovals();
+  const wsToken = getOrCreateWsToken();
+  return (
+    <>
+      <meta name="ws-token" content={wsToken} />
+      <MobileApprovalsClient initialApprovals={approvals} />
+    </>
+  );
 }
