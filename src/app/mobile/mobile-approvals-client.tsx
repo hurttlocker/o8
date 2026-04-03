@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MobileMarkdown } from './mobile-markdown';
+import { ttsEngine, type PlaybackState } from '@/lib/tts/engine';
 
 // ── Types ──
 
@@ -221,6 +222,67 @@ function StreamingDot() {
         transition: 'opacity 0.6s ease, transform 0.6s ease, box-shadow 0.6s ease',
       }}
     />
+  );
+}
+
+// ── TTS Play Button ──
+
+function TtsButton({ messageId, text }: { messageId: string; text: string }) {
+  const [playback, setPlayback] = useState<PlaybackState>('idle');
+  const [isActive, setIsActive] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = ttsEngine.subscribe((state) => {
+      const active = state.activeMessageId === messageId;
+      setIsActive(active);
+      setPlayback(active ? state.state : 'idle');
+    });
+    return unsubscribe;
+  }, [messageId]);
+
+  const handleTap = useCallback(() => {
+    if (isActive && (playback === 'playing' || playback === 'loading')) {
+      ttsEngine.stop();
+    } else if (isActive && playback === 'paused') {
+      ttsEngine.resume();
+    } else {
+      void ttsEngine.play(text, messageId);
+    }
+  }, [isActive, playback, text, messageId]);
+
+  const isPlaying = playback === 'playing' || playback === 'loading';
+
+  return (
+    <button
+      onClick={handleTap}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        marginTop: 8,
+        padding: '6px 12px',
+        borderRadius: 8,
+        border: 'none',
+        backgroundColor: isPlaying ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.06)',
+        color: isPlaying ? '#60a5fa' : '#9ca3af',
+        fontSize: 12,
+        fontWeight: 500,
+        cursor: 'pointer',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        transition: 'all 0.2s ease',
+      }}
+    >
+      {isPlaying ? (
+        <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+          <path d="M216,48V208a16,16,0,0,1-16,16H160a16,16,0,0,1-16-16V48a16,16,0,0,1,16-16h40A16,16,0,0,1,216,48ZM96,32H56A16,16,0,0,0,40,48V208a16,16,0,0,0,16,16H96a16,16,0,0,0,16-16V48A16,16,0,0,0,96,32Z" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+          <path d="M240,128a15.74,15.74,0,0,1-7.6,13.51L88.32,229.65a16,16,0,0,1-16.2.3A15.86,15.86,0,0,1,64,216.13V39.87a15.86,15.86,0,0,1,8.12-13.82,16,16,0,0,1,16.2.3L232.4,114.49A15.74,15.74,0,0,1,240,128Z" />
+        </svg>
+      )}
+      {playback === 'loading' ? 'Loading...' : isPlaying ? 'Stop' : 'Play'}
+    </button>
   );
 }
 
@@ -1051,62 +1113,92 @@ function ChatView({
                 {msg.content}
               </div>
             ) : (
-              <div
-                style={{
-                  width: '100%',
-                  paddingTop: 2,
-                  paddingRight: 18,
-                }}
-              >
-                {msg.content ? <MobileMarkdown content={msg.content} /> : (streaming && i === messages.length - 1 ? <StreamingDot /> : null)}
+              <div style={{ width: '100%', paddingTop: 2, paddingRight: 18 }}>
+                {msg.content ? (
+                  <>
+                    <MobileMarkdown content={msg.content} />
+                    {!streaming && (
+                      <TtsButton messageId={`msg-${i}`} text={msg.content} />
+                    )}
+                  </>
+                ) : (streaming && i === messages.length - 1 ? <StreamingDot /> : null)}
               </div>
             )}
           </div>
         ))}
       </div>
 
-      {/* Input */}
-      <div style={{ display: 'flex', gap: 8, paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' } as React.CSSProperties}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
-          placeholder={historyLoading ? 'Loading chat...' : 'Message Gemini...'}
-          disabled={streaming || historyLoading || !currentTabId}
-          style={{
-            flex: 1,
-            height: 44,
-            borderRadius: 12,
-            border: '1px solid rgba(255,255,255,0.12)',
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            color: '#f3f4f6',
-            fontSize: 15,
-            paddingLeft: 14,
-            paddingRight: 14,
-            outline: 'none',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-          }}
-        />
-        <button
-          onClick={() => void sendMessage()}
-          disabled={streaming || historyLoading || !currentTabId || !input.trim()}
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 12,
-            border: 'none',
-            backgroundColor: input.trim() && !streaming && !historyLoading && currentTabId ? '#2563eb' : 'rgba(255,255,255,0.06)',
-            color: input.trim() && !streaming && !historyLoading && currentTabId ? '#fff' : '#6b7280',
-            cursor: input.trim() && !streaming && !historyLoading && currentTabId ? 'pointer' : 'default',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'background-color 0.15s ease',
-          }}
-          aria-label="Send"
-        >
-          <IconSend />
-        </button>
+      {/* Input — Anthropic-style */}
+      <div style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)', borderTop: '1px solid rgba(255,255,255,0.08)' } as React.CSSProperties}>
+        <div style={{ padding: '10px 0 6px' }}>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
+            placeholder={historyLoading ? 'Loading chat...' : 'Add feedback...'}
+            disabled={streaming || historyLoading || !currentTabId}
+            style={{
+              width: '100%',
+              height: 44,
+              borderRadius: 12,
+              border: '1px solid rgba(255,255,255,0.1)',
+              backgroundColor: 'rgba(255,255,255,0.04)',
+              color: '#f3f4f6',
+              fontSize: 15,
+              paddingLeft: 14,
+              paddingRight: 14,
+              outline: 'none',
+              fontFamily: 'system-ui, -apple-system, sans-serif',
+            }}
+          />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {/* Model indicator */}
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px' }}>
+              <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor">
+                <path d="M69.12,94.15,28.5,128l40.62,33.85a8,8,0,1,1-10.24,12.29l-48-40a8,8,0,0,1,0-12.29l48-40a8,8,0,0,1,10.24,12.29Zm176,27.7-48-40a8,8,0,1,0-10.24,12.29L227.5,128l-40.62,33.85a8,8,0,1,0,10.24,12.29l48-40a8,8,0,0,0,0-12.29ZM162.73,32.48a8,8,0,0,0-10.25,4.79l-64,176a8,8,0,0,0,4.79,10.26A8.14,8.14,0,0,0,96,224a8,8,0,0,0,7.52-5.27l64-176A8,8,0,0,0,162.73,32.48Z" />
+              </svg>
+              Gemini
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {streaming ? (
+              <button
+                onClick={() => { /* stop streaming - future */ }}
+                style={{ width: 36, height: 36, borderRadius: 10, border: 'none', backgroundColor: 'rgba(255,255,255,0.08)', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                aria-label="Stop"
+              >
+                <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
+                  <path d="M200,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,160H56V56H200Z" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                onClick={() => void sendMessage()}
+                disabled={!input.trim() || historyLoading || !currentTabId}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  border: 'none',
+                  backgroundColor: input.trim() && !historyLoading && currentTabId ? '#c27436' : 'rgba(255,255,255,0.06)',
+                  color: input.trim() && !historyLoading && currentTabId ? '#fff' : '#6b7280',
+                  cursor: input.trim() && !historyLoading && currentTabId ? 'pointer' : 'default',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background-color 0.2s ease',
+                }}
+                aria-label="Send"
+              >
+                <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
+                  <path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm-12.69,104-40,40a12,12,0,0,1-17-17L163,134H72a12,12,0,0,1,0-24h91l-24.69-25a12,12,0,0,1,17-17l40,40A12,12,0,0,1,195.31,136Z" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
