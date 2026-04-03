@@ -1079,8 +1079,8 @@ function ChatView({
           top: 0,
           left: 0,
           right: 0,
-          height: 64,
-          background: 'linear-gradient(to bottom, #111111 0%, rgba(17,17,17,0.85) 30%, rgba(17,17,17,0.4) 60%, transparent 100%)',
+          height: 48,
+          background: 'linear-gradient(to bottom, #111111 0%, rgba(17,17,17,0.6) 40%, rgba(17,17,17,0.2) 70%, transparent 100%)',
           zIndex: 10,
           pointerEvents: 'none',
         }}
@@ -1145,8 +1145,8 @@ function ChatView({
         ))}
       </div>
 
-      {/* Input — clean, minimal, iOS safe area aware */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6px)', paddingLeft: 4, paddingRight: 4 } as React.CSSProperties}>
+      {/* Input — glass, sits just above home indicator */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 10, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 2px)', paddingLeft: 20, paddingRight: 20, backgroundColor: 'rgba(28,28,30,0.75)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', marginLeft: -16, marginRight: -16, borderTop: '1px solid rgba(255,255,255,0.06)' } as React.CSSProperties}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -1157,8 +1157,8 @@ function ChatView({
             flex: 1,
             height: 40,
             borderRadius: 20,
-            border: '1px solid rgba(255,255,255,0.08)',
-            backgroundColor: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            backgroundColor: 'rgba(255,255,255,0.07)',
             color: '#f3f4f6',
             fontSize: 15,
             paddingLeft: 18,
