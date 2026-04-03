@@ -1135,8 +1135,8 @@ function ChatView({
         ))}
       </div>
 
-      {/* Input — clean, minimal */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 10px)', borderTop: '1px solid rgba(255,255,255,0.06)' } as React.CSSProperties}>
+      {/* Input — clean, minimal, iOS safe area aware */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6px)', paddingLeft: 4, paddingRight: 4 } as React.CSSProperties}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -1145,8 +1145,8 @@ function ChatView({
           disabled={streaming || historyLoading || !currentTabId}
           style={{
             flex: 1,
-            height: 44,
-            borderRadius: 22,
+            height: 40,
+            borderRadius: 20,
             border: '1px solid rgba(255,255,255,0.08)',
             backgroundColor: 'rgba(255,255,255,0.04)',
             color: '#f3f4f6',
@@ -1172,9 +1172,9 @@ function ChatView({
             onClick={() => { playSendClick(); void sendMessage(); }}
             disabled={!input.trim() || historyLoading || !currentTabId}
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: 20,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
               border: 'none',
               backgroundColor: input.trim() && !historyLoading && currentTabId ? '#c27436' : 'rgba(255,255,255,0.06)',
               color: input.trim() && !historyLoading && currentTabId ? '#fff' : '#4b5563',
