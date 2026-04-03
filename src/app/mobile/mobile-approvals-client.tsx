@@ -26,11 +26,24 @@ interface ChatMessage {
   content: string;
 }
 
+interface ChatHistoryRecord {
+  tabId: string;
+  title: string;
+  lastMessage: string;
+  updatedAt: string;
+  model?: string;
+}
+
 // ── Constants ──
 
 const RISK_COLORS: Record<string, string> = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' };
 const POLL_INTERVAL = 5_000;
 const SIDEBAR_WIDTH = 280;
+const MOBILE_CHAT_MODEL = 'gemini-2.5-flash';
+const MOBILE_CHAT_STORAGE_KEY = 'o8-mobile-chat-tab';
+const MAX_RECENT_CONVERSATIONS = 10;
+const CHAT_TITLE_MAX_LENGTH = 50;
+const SIDEBAR_TITLE_MAX_LENGTH = 40;
 
 // ── Helpers ──
 
@@ -49,6 +62,85 @@ function timeAgo(timestamp: number): string {
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ago`;
+}
+
+function truncateText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
+function generateChatTabId(): string {
+  if (typeof window !== 'undefined' && typeof window.crypto?.randomUUID === 'function') {
+    return `mobile-chat-${window.crypto.randomUUID()}`;
+  }
+  return `mobile-chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function extractMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+          return part.text;
+        }
+        return '';
+      })
+      .join('\n')
+      .trim();
+  }
+  if (content && typeof content === 'object' && 'text' in content && typeof content.text === 'string') {
+    return content.text;
+  }
+  return '';
+}
+
+function normalizeChatMessages(messages: unknown): ChatMessage[] {
+  if (!Array.isArray(messages)) return [];
+
+  return messages.reduce<ChatMessage[]>((acc, message) => {
+    if (!message || typeof message !== 'object') return acc;
+    const role = 'role' in message ? message.role : undefined;
+    if (role !== 'user' && role !== 'assistant') return acc;
+    const content = extractMessageContent('content' in message ? message.content : '');
+    acc.push({ role, content });
+    return acc;
+  }, []);
+}
+
+function getConversationTitle(messages: ChatMessage[]): string {
+  const firstUserMessage = messages.find((message) => message.role === 'user');
+  return truncateText(firstUserMessage?.content ?? 'Untitled conversation', CHAT_TITLE_MAX_LENGTH);
+}
+
+function normalizeHistoryList(data: unknown): ChatHistoryRecord[] {
+  if (!data || typeof data !== 'object') return [];
+
+  const items = 'items' in data && Array.isArray(data.items)
+    ? data.items
+    : ('conversations' in data && Array.isArray(data.conversations) ? data.conversations : []);
+
+  return items.reduce<ChatHistoryRecord[]>((acc, item) => {
+    if (!item || typeof item !== 'object') return acc;
+    const tabId = 'tabId' in item && typeof item.tabId === 'string' ? item.tabId : '';
+    if (!tabId) return acc;
+    const title = 'title' in item && typeof item.title === 'string' && item.title.trim()
+      ? item.title
+      : 'Untitled conversation';
+    const lastMessage = 'lastMessage' in item && typeof item.lastMessage === 'string'
+      ? item.lastMessage
+      : ('preview' in item && typeof item.preview === 'string' ? item.preview : '');
+    const updatedAt = 'updatedAt' in item && typeof item.updatedAt === 'string'
+      ? item.updatedAt
+      : ('modifiedAt' in item && typeof item.modifiedAt === 'string' ? item.modifiedAt : '');
+    const model = 'model' in item && typeof item.model === 'string' ? item.model : undefined;
+
+    acc.push({ tabId, title, lastMessage, updatedAt, model });
+    return acc;
+  }, [])
+    .slice(0, MAX_RECENT_CONVERSATIONS);
 }
 
 // ── Icons (Phosphor thin, raw SVG paths) ──
@@ -107,13 +199,21 @@ function Sidebar({
   open,
   activeView,
   approvalCount,
+  currentTabId,
+  recentConversations,
+  recentLoading,
   onNavigate,
+  onSelectConversation,
   onClose,
 }: {
   open: boolean;
   activeView: MobileView;
   approvalCount: number;
+  currentTabId: string | null;
+  recentConversations: ChatHistoryRecord[];
+  recentLoading: boolean;
   onNavigate: (view: MobileView) => void;
+  onSelectConversation: (tabId: string) => void;
   onClose: () => void;
 }) {
   const items: Array<{ id: MobileView; label: string; icon: React.ReactNode; badge?: number }> = [
@@ -160,58 +260,127 @@ function Sidebar({
           o8
         </div>
 
-        {/* Nav items */}
-        {items.map((item) => {
-          const active = activeView === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => { onNavigate(item.id); onClose(); }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                width: '100%',
-                height: 48,
-                paddingLeft: 14,
-                paddingRight: 14,
-                borderRadius: 12,
-                border: 'none',
-                backgroundColor: active ? 'rgba(255,255,255,0.1)' : 'transparent',
-                color: active ? '#f3f4f6' : '#9ca3af',
-                fontSize: 16,
-                fontWeight: active ? 600 : 400,
-                fontFamily: 'system-ui, -apple-system, sans-serif',
-                cursor: 'pointer',
-                textAlign: 'left',
-                marginBottom: 4,
-                transition: 'background-color 0.15s ease',
-              }}
-            >
-              {item.icon}
-              <span style={{ flex: 1 }}>{item.label}</span>
-              {item.badge && (
-                <span
+        <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)' }}>
+          {/* Nav items */}
+          {items.map((item) => {
+            const active = activeView === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  onNavigate(item.id);
+                  onClose();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  width: '100%',
+                  height: 48,
+                  paddingLeft: 14,
+                  paddingRight: 14,
+                  borderRadius: 12,
+                  border: 'none',
+                  backgroundColor: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                  color: active ? '#f3f4f6' : '#9ca3af',
+                  fontSize: 16,
+                  fontWeight: active ? 600 : 400,
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  marginBottom: 4,
+                  transition: 'background-color 0.15s ease',
+                }}
+              >
+                {item.icon}
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {item.badge && (
+                  <span
+                    style={{
+                      minWidth: 20,
+                      height: 20,
+                      borderRadius: 10,
+                      backgroundColor: '#ef4444',
+                      color: '#fff',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 6px',
+                    }}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+
+          <div
+            style={{
+              marginTop: 20,
+              marginBottom: 10,
+              paddingLeft: 14,
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: '#6b7280',
+            }}
+          >
+            Recents
+          </div>
+
+          {recentLoading ? (
+            <div style={{ paddingLeft: 14, paddingRight: 14, fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
+              Loading conversations...
+            </div>
+          ) : recentConversations.length > 0 ? (
+            recentConversations.map((conversation) => {
+              const activeConversation = currentTabId === conversation.tabId;
+              const title = truncateText(conversation.title, SIDEBAR_TITLE_MAX_LENGTH);
+              return (
+                <button
+                  key={conversation.tabId}
+                  onClick={() => {
+                    onSelectConversation(conversation.tabId);
+                    onClose();
+                  }}
                   style={{
-                    minWidth: 20,
-                    height: 20,
-                    borderRadius: 10,
-                    backgroundColor: '#ef4444',
-                    color: '#fff',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '0 6px',
+                    width: '100%',
+                    border: 'none',
+                    backgroundColor: activeConversation ? 'rgba(37,99,235,0.14)' : 'transparent',
+                    color: activeConversation ? '#f3f4f6' : '#d1d5db',
+                    borderRadius: 14,
+                    textAlign: 'left',
+                    padding: '10px 14px',
+                    cursor: 'pointer',
+                    marginBottom: 6,
+                    transition: 'background-color 0.18s ease, color 0.18s ease',
                   }}
                 >
-                  {item.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: activeConversation ? 600 : 500,
+                      lineHeight: 1.4,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {title}
+                  </div>
+                </button>
+              );
+            })
+          ) : (
+            <div style={{ paddingLeft: 14, paddingRight: 14, fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
+              No saved chats yet.
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
@@ -288,45 +457,143 @@ function ApprovalsView({ approvals, onResolve, resolving, onRefresh }: {
 
 // ── Chat View ──
 
-function ChatView() {
+function ChatView({
+  currentTabId,
+  onTabIdChange,
+  onConversationSaved,
+}: {
+  currentTabId: string | null;
+  onTabIdChange: (tabId: string) => void;
+  onConversationSaved: () => void;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const activeTabRef = useRef<string | null>(currentTabId);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    activeTabRef.current = currentTabId;
+  }, [currentTabId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (currentTabId) {
+      window.localStorage.setItem(MOBILE_CHAT_STORAGE_KEY, currentTabId);
+      return;
+    }
+
+    const storedTabId = window.localStorage.getItem(MOBILE_CHAT_STORAGE_KEY);
+    const nextTabId = storedTabId || generateChatTabId();
+    window.localStorage.setItem(MOBILE_CHAT_STORAGE_KEY, nextTabId);
+    onTabIdChange(nextTabId);
+  }, [currentTabId, onTabIdChange]);
+
+  useEffect(() => {
+    if (!currentTabId) return;
+
+    activeTabRef.current = currentTabId;
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    setStreaming(false);
+    setInput('');
+    setMessages([]);
+    setHistoryLoading(true);
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(currentTabId)}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load chat history');
+
+        const data = await res.json() as { messages?: unknown };
+        if (!cancelled) {
+          setMessages(normalizeChatMessages(data.messages));
+        }
+      } catch {
+        if (!cancelled) {
+          setMessages([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setHistoryLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTabId]);
+
+  useEffect(() => () => {
+    streamAbortRef.current?.abort();
+  }, []);
+
+  const saveConversation = useCallback(async (tabId: string, nextMessages: ChatMessage[]) => {
+    if (!tabId || nextMessages.length === 0) return;
+
+    try {
+      await fetch('/api/v2/chat-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
+        body: JSON.stringify({
+          tabId,
+          messages: nextMessages,
+          model: MOBILE_CHAT_MODEL,
+          title: getConversationTitle(nextMessages),
+        }),
+      });
+      onConversationSaved();
+    } catch {
+      // non-critical persistence failure
+    }
+  }, [onConversationSaved]);
+
   const sendMessage = useCallback(async () => {
     const text = input.trim();
-    if (!text || streaming) return;
+    const tabId = currentTabId;
+    if (!text || streaming || historyLoading || !tabId) return;
+
     setInput('');
 
     const userMsg: ChatMessage = { role: 'user', content: text };
     const assistantMsg: ChatMessage = { role: 'assistant', content: '' };
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    const requestMessages = [...messages, userMsg];
+    let finalMessages = [...requestMessages, assistantMsg];
+    setMessages(finalMessages);
     setStreaming(true);
+
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
 
     try {
       const res = await fetch('/api/v2/proxy/llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
-          model: 'gemini-2.5-flash',
+          model: MOBILE_CHAT_MODEL,
           provider: 'google',
-          messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
+          messages: requestMessages.map((message) => ({ role: message.role, content: message.content })),
           stream: true,
         }),
       });
 
       if (!res.ok || !res.body) {
-        setMessages((prev) => {
-          const next = [...prev];
-          next[next.length - 1] = { role: 'assistant', content: 'Failed to get a response. Check your API keys.' };
-          return next;
-        });
-        setStreaming(false);
+        finalMessages = [...requestMessages, { role: 'assistant', content: 'Failed to get a response. Check your API keys.' }];
+        if (activeTabRef.current === tabId) {
+          setMessages(finalMessages);
+        }
+        await saveConversation(tabId, finalMessages);
         return;
       }
 
@@ -351,30 +618,92 @@ function ChatView() {
             const parsed = JSON.parse(payload) as { type?: string; text?: string };
             if (parsed.type === 'content' && parsed.text) {
               fullText += parsed.text;
-              setMessages((prev) => {
-                const next = [...prev];
-                next[next.length - 1] = { role: 'assistant', content: fullText };
-                return next;
-              });
+              finalMessages = [...requestMessages, { role: 'assistant', content: fullText }];
+              if (activeTabRef.current === tabId) {
+                setMessages(finalMessages);
+              }
             }
           } catch { /* skip malformed SSE lines */ }
         }
       }
-    } catch {
-      setMessages((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = { role: 'assistant', content: 'Connection error. Is the server running?' };
-        return next;
-      });
+      if (!fullText.trim()) {
+        finalMessages = [...requestMessages, { role: 'assistant', content: 'No response received.' }];
+        if (activeTabRef.current === tabId) {
+          setMessages(finalMessages);
+        }
+      }
+      await saveConversation(tabId, finalMessages);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      finalMessages = [...requestMessages, { role: 'assistant', content: 'Connection error. Is the server running?' }];
+      if (activeTabRef.current === tabId) {
+        setMessages(finalMessages);
+      }
+      await saveConversation(tabId, finalMessages);
+    } finally {
+      if (streamAbortRef.current === controller) {
+        streamAbortRef.current = null;
+      }
+      if (activeTabRef.current === tabId) {
+        setStreaming(false);
+      }
     }
+  }, [currentTabId, historyLoading, input, messages, saveConversation, streaming]);
+
+  const handleNewChat = useCallback(() => {
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
     setStreaming(false);
-  }, [input, messages, streaming]);
+    setHistoryLoading(false);
+    setInput('');
+    setMessages([]);
+
+    const nextTabId = generateChatTabId();
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(MOBILE_CHAT_STORAGE_KEY, nextTabId);
+    }
+    onTabIdChange(nextTabId);
+  }, [onTabIdChange]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 80px)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
+        <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.4 }}>
+          {historyLoading || !currentTabId ? 'Loading conversation...' : 'Chats are saved automatically.'}
+        </div>
+        <button
+          onClick={handleNewChat}
+          disabled={streaming}
+          style={{
+            height: 36,
+            padding: '0 14px',
+            borderRadius: 12,
+            border: '1px solid rgba(255,255,255,0.1)',
+            backgroundColor: 'rgba(255,255,255,0.04)',
+            color: streaming ? '#6b7280' : '#d1d5db',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: streaming ? 'default' : 'pointer',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+          }}
+        >
+          New chat
+        </button>
+      </div>
+
       {/* Messages */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 16 }}>
-        {messages.length === 0 && (
+        {(historyLoading || !currentTabId) && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 100, color: '#6b7280' }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Loading conversation</div>
+            <div style={{ fontSize: 13, textAlign: 'center', padding: '0 32px', lineHeight: 1.5 }}>
+              Pulling saved messages from your chat history.
+            </div>
+          </div>
+        )}
+        {!historyLoading && currentTabId && messages.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 100, color: '#6b7280' }}>
             <IconChat />
             <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4, marginTop: 16 }}>Chat with Gemini</div>
@@ -416,8 +745,8 @@ function ChatView() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
-          placeholder="Message Gemini..."
-          disabled={streaming}
+          placeholder={historyLoading ? 'Loading chat...' : 'Message Gemini...'}
+          disabled={streaming || historyLoading || !currentTabId}
           style={{
             flex: 1,
             height: 44,
@@ -434,15 +763,15 @@ function ChatView() {
         />
         <button
           onClick={() => void sendMessage()}
-          disabled={streaming || !input.trim()}
+          disabled={streaming || historyLoading || !currentTabId || !input.trim()}
           style={{
             width: 44,
             height: 44,
             borderRadius: 12,
             border: 'none',
-            backgroundColor: input.trim() && !streaming ? '#2563eb' : 'rgba(255,255,255,0.06)',
-            color: input.trim() && !streaming ? '#fff' : '#6b7280',
-            cursor: input.trim() && !streaming ? 'pointer' : 'default',
+            backgroundColor: input.trim() && !streaming && !historyLoading && currentTabId ? '#2563eb' : 'rgba(255,255,255,0.06)',
+            color: input.trim() && !streaming && !historyLoading && currentTabId ? '#fff' : '#6b7280',
+            cursor: input.trim() && !streaming && !historyLoading && currentTabId ? 'pointer' : 'default',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -465,6 +794,9 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals);
   const [resolving, setResolving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [currentTabId, setCurrentTabId] = useState<string | null>(null);
+  const [recentConversations, setRecentConversations] = useState<ChatHistoryRecord[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -483,6 +815,25 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
     const timer = setInterval(refresh, POLL_INTERVAL);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  const loadRecentConversations = useCallback(async () => {
+    setRecentLoading(true);
+    try {
+      const res = await fetch('/api/v2/chat-history/list', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Failed to load conversations');
+      const data = await res.json();
+      setRecentConversations(normalizeHistoryList(data));
+    } catch {
+      setRecentConversations([]);
+    } finally {
+      setRecentLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    void loadRecentConversations();
+  }, [loadRecentConversations, sidebarOpen]);
 
   const handleResolve = useCallback(async (id: string, action: 'approve' | 'reject') => {
     setResolving(id);
@@ -504,12 +855,27 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
     setResolving(null);
   }, []);
 
+  const handleSelectConversation = useCallback((tabId: string) => {
+    setCurrentTabId(tabId);
+    setActiveView('chat');
+  }, []);
+
   const governanceCount = approvals.filter((a) => a.status === 'pending' && isGovernanceApproval(a)).length;
   const viewTitle = activeView === 'approvals' ? 'Approvals' : 'Chat';
 
   return (
     <div style={{ minHeight: '100dvh', backgroundColor: '#111111', color: '#f3f4f6', fontFamily: 'system-ui, -apple-system, sans-serif', WebkitFontSmoothing: 'antialiased', padding: '0 16px' } as React.CSSProperties}>
-      <Sidebar open={sidebarOpen} activeView={activeView} approvalCount={governanceCount} onNavigate={setActiveView} onClose={() => setSidebarOpen(false)} />
+      <Sidebar
+        open={sidebarOpen}
+        activeView={activeView}
+        approvalCount={governanceCount}
+        currentTabId={currentTabId}
+        recentConversations={recentConversations}
+        recentLoading={recentLoading}
+        onNavigate={setActiveView}
+        onSelectConversation={handleSelectConversation}
+        onClose={() => setSidebarOpen(false)}
+      />
 
       {/* Header */}
       <div style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)', paddingBottom: 12, display: 'flex', alignItems: 'center', gap: 12 } as React.CSSProperties}>
@@ -537,7 +903,15 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
       {activeView === 'approvals' && (
         <ApprovalsView approvals={approvals} onResolve={handleResolve} resolving={resolving} onRefresh={() => void refresh()} />
       )}
-      {activeView === 'chat' && <ChatView />}
+      {activeView === 'chat' && (
+        <ChatView
+          currentTabId={currentTabId}
+          onTabIdChange={setCurrentTabId}
+          onConversationSaved={() => {
+            void loadRecentConversations();
+          }}
+        />
+      )}
     </div>
   );
 }
