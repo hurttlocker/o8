@@ -14,5 +14,9 @@ export function generateMetadata(): Metadata {
 }
 
 export default function MobileLayout({ children }: { children: ReactNode }) {
-  return children;
+  return (
+    <div style={{ minHeight: '100dvh', backgroundColor: '#111111' }}>
+      {children}
+    </div>
+  );
 }
