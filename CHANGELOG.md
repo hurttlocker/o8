@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-02
 
+- `5a21a75` fix: lock viewport height (no scroll), neutral user bubbles, strict approval filter
 - `60cd0e7` fix: starred field persists + star/unstar toggle + rename refreshes list
 - `529d216` fix: tighter input bar with proper iOS safe area + viewport-fit cover
 - `75aa5d2` feat: collapsible code blocks with diff coloring and file path labels
