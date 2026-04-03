@@ -485,6 +485,84 @@ function ApprovalsView({ approvals, onResolve, resolving, onRefresh }: {
   );
 }
 
+// ── Context Menu (long-press popup) ──
+
+interface ContextMenuState {
+  tabId: string;
+  title: string;
+  x: number;
+  y: number;
+}
+
+function ChatContextMenu({
+  menu,
+  onClose,
+  onAction,
+}: {
+  menu: ContextMenuState;
+  onClose: () => void;
+  onAction: (action: 'star' | 'rename' | 'delete', tabId: string) => void;
+}) {
+  const menuItems: Array<{ action: 'star' | 'rename' | 'delete'; label: string; color?: string; icon: React.ReactNode }> = [
+    {
+      action: 'star', label: 'Star',
+      icon: <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M239.18,97.26A16.38,16.38,0,0,0,224.92,86l-59-4.76L143.14,26.15a16.36,16.36,0,0,0-30.27,0L90.11,81.23,31.08,86a16.46,16.46,0,0,0-9.37,28.86l45,38.83L53,211.75a16.38,16.38,0,0,0,24.5,17.82L128,198.49l50.53,31.08A16.4,16.4,0,0,0,203,211.75l-13.76-58.07,45-38.83A16.43,16.43,0,0,0,239.18,97.26Zm-15.34,5.47-48.7,42a8,8,0,0,0-2.56,7.91l14.88,62.8a.37.37,0,0,1-.17.48c-.18.14-.23.11-.38,0l-54.72-33.65a8,8,0,0,0-8.38,0L69.09,215.94c-.15.09-.2.12-.38,0a.37.37,0,0,1-.17-.48l14.88-62.8a8,8,0,0,0-2.56-7.91l-48.7-42c-.12-.1-.23-.19-.13-.5s.18-.27.33-.29l63.92-5.16A8,8,0,0,0,103,91.86l24.62-59.6c.08-.17.11-.25.35-.25s.27.08.35.25l24.62,59.6a8,8,0,0,0,6.67,4.88l63.92,5.16c.15,0,.24,0,.33.29S224,102.63,223.84,102.73Z" /></svg>,
+    },
+    {
+      action: 'rename', label: 'Rename',
+      icon: <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z" /></svg>,
+    },
+    {
+      action: 'delete', label: 'Delete', color: '#ef4444',
+      icon: <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" /></svg>,
+    },
+  ];
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+      <div
+        style={{
+          position: 'fixed',
+          left: Math.min(menu.x, typeof window !== 'undefined' ? window.innerWidth - 200 : 200),
+          top: Math.min(menu.y, typeof window !== 'undefined' ? window.innerHeight - 200 : 400),
+          zIndex: 1001,
+          backgroundColor: '#2a2a2a',
+          borderRadius: 14,
+          padding: '6px 0',
+          minWidth: 180,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08)',
+        }}
+      >
+        {menuItems.map((item) => (
+          <button
+            key={item.action}
+            onClick={() => { onAction(item.action, menu.tabId); onClose(); }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              width: '100%',
+              padding: '12px 16px',
+              border: 'none',
+              backgroundColor: 'transparent',
+              color: item.color ?? '#e5e7eb',
+              fontSize: 15,
+              fontWeight: 500,
+              fontFamily: 'system-ui, -apple-system, sans-serif',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <span style={{ color: item.color ?? '#9ca3af' }}>{item.icon}</span>
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // ── Chat List View (Anthropic-style) ──
 
 function ChatListView({
@@ -500,6 +578,11 @@ function ChatListView({
   onNewChat: () => void;
   onRefresh: () => void;
 }) {
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   function chatTimeAgo(dateStr: string): string {
     const ms = Date.now() - new Date(dateStr).getTime();
     const minutes = Math.floor(ms / 60_000);
@@ -514,6 +597,50 @@ function ChatListView({
     return `${months}mo ago`;
   }
 
+  const handleLongPressStart = useCallback((tabId: string, title: string, e: React.TouchEvent | React.MouseEvent) => {
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    longPressTimer.current = setTimeout(() => {
+      setContextMenu({ tabId, title, x: clientX, y: clientY });
+    }, 500);
+  }, []);
+
+  const handleLongPressEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleContextAction = useCallback(async (action: 'star' | 'rename' | 'delete', tabId: string) => {
+    if (action === 'delete') {
+      await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`, { method: 'DELETE' });
+      onRefresh();
+    } else if (action === 'star') {
+      await fetch('/api/v2/chat-history', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabId, starred: true }),
+      });
+      onRefresh();
+    } else if (action === 'rename') {
+      const conv = conversations.find((c) => c.tabId === tabId);
+      setRenaming(tabId);
+      setRenameValue(conv?.title ?? '');
+    }
+  }, [conversations, onRefresh]);
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renaming || !renameValue.trim()) { setRenaming(null); return; }
+    await fetch('/api/v2/chat-history', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tabId: renaming, title: renameValue.trim() }),
+    });
+    setRenaming(null);
+    onRefresh();
+  }, [renaming, renameValue, onRefresh]);
+
   if (loading) {
     return (
       <div style={{ paddingTop: 60, textAlign: 'center', color: '#6b7280', fontSize: 14 }}>
@@ -524,6 +651,14 @@ function ChatListView({
 
   return (
     <div style={{ position: 'relative', minHeight: 'calc(100dvh - 80px)' }}>
+      {contextMenu && (
+        <ChatContextMenu
+          menu={contextMenu}
+          onClose={() => setContextMenu(null)}
+          onAction={(action, tabId) => void handleContextAction(action, tabId)}
+        />
+      )}
+
       {conversations.length === 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 100, color: '#6b7280' }}>
           <IconChat />
@@ -532,35 +667,54 @@ function ChatListView({
         </div>
       ) : (
         conversations.map((conv) => (
-          <button
-            key={conv.tabId}
-            onClick={() => onSelect(conv.tabId)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              width: '100%',
-              padding: '14px 0',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
-              backgroundColor: 'transparent',
-              border: 'none',
-              borderBlockEnd: '1px solid rgba(255,255,255,0.06)',
-              cursor: 'pointer',
-              textAlign: 'left',
-              fontFamily: 'system-ui, -apple-system, sans-serif',
-            }}
-          >
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <div style={{ fontSize: 15, fontWeight: 500, color: '#f3f4f6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {conv.title || 'Untitled'}
+          <div key={conv.tabId}>
+            {renaming === conv.tabId ? (
+              <div style={{ display: 'flex', gap: 8, padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleRenameSubmit(); if (e.key === 'Escape') setRenaming(null); }}
+                  style={{ flex: 1, height: 40, borderRadius: 10, border: '1px solid rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.06)', color: '#f3f4f6', fontSize: 14, paddingLeft: 12, paddingRight: 12, outline: 'none', fontFamily: 'system-ui' }}
+                />
+                <button onClick={() => void handleRenameSubmit()} style={{ height: 40, paddingLeft: 14, paddingRight: 14, borderRadius: 10, border: 'none', backgroundColor: '#2563eb', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'system-ui' }}>Save</button>
               </div>
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                {chatTimeAgo(conv.updatedAt)}
-              </div>
-            </div>
-            <svg width="16" height="16" viewBox="0 0 256 256" fill="#6b7280" style={{ flexShrink: 0, marginLeft: 8 }}>
-              <path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z" />
-            </svg>
-          </button>
+            ) : (
+              <button
+                onClick={() => { if (!contextMenu) onSelect(conv.tabId); }}
+                onTouchStart={(e) => handleLongPressStart(conv.tabId, conv.title, e)}
+                onTouchEnd={handleLongPressEnd}
+                onTouchMove={handleLongPressEnd}
+                onContextMenu={(e) => { e.preventDefault(); setContextMenu({ tabId: conv.tabId, title: conv.title, x: e.clientX, y: e.clientY }); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  width: '100%',
+                  padding: '14px 0',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  borderBlockEnd: '1px solid rgba(255,255,255,0.06)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                } as React.CSSProperties}
+              >
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <div style={{ fontSize: 15, fontWeight: 500, color: '#f3f4f6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {conv.title || 'Untitled'}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                    {chatTimeAgo(conv.updatedAt)}
+                  </div>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 256 256" fill="#6b7280" style={{ flexShrink: 0, marginLeft: 8 }}>
+                  <path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z" />
+                </svg>
+              </button>
+            )}
+          </div>
         ))
       )}
 
