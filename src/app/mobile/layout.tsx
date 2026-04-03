@@ -27,11 +27,13 @@ export function generateMetadata(): Metadata {
 export default function MobileLayout({ children }: { children: ReactNode }) {
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: 'html,body,#__next{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#111111}nextjs-portal,[data-nextjs-dialog-overlay]{display:none!important}' }} />
+      <style dangerouslySetInnerHTML={{ __html: 'html,body,#__next{margin:0;padding:0;width:100%;height:100%;min-height:100dvh;overflow:hidden;background:#111111;overscroll-behavior:none}nextjs-portal,[data-nextjs-dialog-overlay]{display:none!important}' }} />
       <div
         style={{
           width: '100%',
-          height: '100%',
+          height: '100dvh',
+          minHeight: '100dvh',
+          maxHeight: '100dvh',
           overflow: 'hidden',
           position: 'relative',
         }}
