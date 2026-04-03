@@ -73,10 +73,10 @@ function glassButtonStyle(
     width: size,
     height: size,
     borderRadius: size / 2,
-    border: '1px solid rgba(255,255,255,0.1)',
+    border: '1px solid rgba(255,255,255,0.15)',
     background: active ? gradients[tint] : 'rgba(255,255,255,0.04)',
     boxShadow: active ? glows[tint] : 'none',
-    color: '#fff',
+    color: '#e5e7eb',
     cursor: active ? 'pointer' : 'default',
     display: 'flex',
     alignItems: 'center',
@@ -611,13 +611,10 @@ function ApprovalsView({ approvals, onResolve, resolving, onRefresh }: {
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 13, color: '#6b7280' }}>
           {pending.length} pending approval{pending.length !== 1 ? 's' : ''}
         </div>
-        <button onClick={onRefresh} style={{ ...glassButtonStyle(36, 'neutral', true), borderRadius: 10 }} aria-label="Refresh">
-          <IconRefresh />
-        </button>
       </div>
       {pending.length > 0 ? (
         pending.map((a) => <ApprovalCard key={a.id} approval={a} onResolve={onResolve} resolving={resolving} />)
@@ -1416,8 +1413,20 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
           </button>
         )}
         <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center' }}>{viewTitle}</div>
-        {/* Spacer to balance the header button for centering */}
-        <div style={{ width: 44, flexShrink: 0 }} />
+        {/* Right header action — refresh on approvals, spacer otherwise */}
+        {activeView === 'approvals' ? (
+          <button
+            onClick={() => void refresh()}
+            style={{ ...glassButtonStyle(40, 'neutral', true), borderRadius: 12 }}
+            aria-label="Refresh"
+          >
+            <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
+              <path d="M228,48V96a4,4,0,0,1-4,4H176a4,4,0,0,1,0-8h39.37L184.2,60.84a92,92,0,0,0-152.37,18,4,4,0,1,1-7.31-3.24A100,100,0,0,1,189.94,55.94L220,86.06V48a4,4,0,0,1,8,0ZM231.48,180.36a100,100,0,0,1-165.42,19.7L36,170.06V208a4,4,0,0,1-8,0V160a4,4,0,0,1,4-4H80a4,4,0,0,1,0,8H40.63l31.17,31.16A92,92,0,0,0,224.17,177.2a4,4,0,1,1,7.31,3.16Z" />
+            </svg>
+          </button>
+        ) : (
+          <div style={{ width: 40, flexShrink: 0 }} />
+        )}
       </div>
 
       {/* Error banner */}
