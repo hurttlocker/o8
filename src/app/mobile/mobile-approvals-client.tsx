@@ -146,7 +146,7 @@ function ApprovalCard({
 export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: ApprovalItem[] }) {
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals);
   const [resolving, setResolving] = useState<string | null>(null);
-  const [lastRefresh, setLastRefresh] = useState<number>(Date.now());
+  const [lastRefresh, setLastRefresh] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -305,7 +305,7 @@ export function MobileApprovalsClient({ initialApprovals }: { initialApprovals: 
           backgroundColor: '#111111',
         } as React.CSSProperties}
       >
-        Last checked {new Date(lastRefresh).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        {lastRefresh ? `Last checked ${new Date(lastRefresh).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Connecting...'}
       </div>
     </div>
   );
