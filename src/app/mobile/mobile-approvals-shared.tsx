@@ -1,23 +1,31 @@
 'use client';
 
-import type { CSSProperties, ReactElement } from 'react';
-import ArrowLeftPaths from '@phosphor-icons/react/dist/defs/ArrowLeft.es.js';
-import ArrowClockwisePaths from '@phosphor-icons/react/dist/defs/ArrowClockwise.es.js';
-import CaretDownPaths from '@phosphor-icons/react/dist/defs/CaretDown.es.js';
-import CaretRightPaths from '@phosphor-icons/react/dist/defs/CaretRight.es.js';
-import ChatCircleDotsPaths from '@phosphor-icons/react/dist/defs/ChatCircleDots.es.js';
-import CheckCirclePaths from '@phosphor-icons/react/dist/defs/CheckCircle.es.js';
-import GearPaths from '@phosphor-icons/react/dist/defs/Gear.es.js';
-import ListPaths from '@phosphor-icons/react/dist/defs/List.es.js';
-import MoonStarsPaths from '@phosphor-icons/react/dist/defs/MoonStars.es.js';
-import PaperPlaneTiltPaths from '@phosphor-icons/react/dist/defs/PaperPlaneTilt.es.js';
-import PencilSimplePaths from '@phosphor-icons/react/dist/defs/PencilSimple.es.js';
-import ShieldPaths from '@phosphor-icons/react/dist/defs/Shield.es.js';
-import SpeakerHighPaths from '@phosphor-icons/react/dist/defs/SpeakerHigh.es.js';
-import StarPaths from '@phosphor-icons/react/dist/defs/Star.es.js';
-import StopCirclePaths from '@phosphor-icons/react/dist/defs/StopCircle.es.js';
-import SunDimPaths from '@phosphor-icons/react/dist/defs/SunDim.es.js';
-import TrashPaths from '@phosphor-icons/react/dist/defs/Trash.es.js';
+import type { CSSProperties } from 'react';
+
+/* ── Inline Phosphor SVG path data (regular weight, 256x256 viewBox) ─────── */
+/* Extracted from @phosphor-icons/react/dist/defs/*.es.js to avoid Turbopack  */
+/* resolution failures on those .es.js barrel files.                           */
+
+const ICON_PATHS = {
+  ArrowLeft: 'M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z',
+  ArrowClockwise: 'M240,56v48a8,8,0,0,1-8,8H184a8,8,0,0,1,0-16H211.4L184.81,71.64l-.25-.24a80,80,0,1,0-1.67,114.78,8,8,0,0,1,11,11.63A95.44,95.44,0,0,1,128,224h-1.32A96,96,0,1,1,195.75,60L224,85.8V56a8,8,0,1,1,16,0Z',
+  ArrowClockwiseThin: 'M236,56v48a4,4,0,0,1-4,4H184a4,4,0,0,1,0-8h37.7L187.53,68.69l-.13-.12a84,84,0,1,0-1.75,120.51,4,4,0,0,1,5.5,5.82A91.43,91.43,0,0,1,128,220h-1.26A92,92,0,1,1,193,62.84l35,32.05V56a4,4,0,1,1,8,0Z',
+  CaretDown: 'M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z',
+  CaretRight: 'M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z',
+  ChatCircleDots: 'M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM84,116a12,12,0,1,0,12,12A12,12,0,0,0,84,116Zm88,0a12,12,0,1,0,12,12A12,12,0,0,0,172,116Zm60,12A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Zm-16,0A88,88,0,1,0,51.81,172.06a8,8,0,0,1,.66,6.54L40,216,77.4,203.53a7.85,7.85,0,0,1,2.53-.42,8,8,0,0,1,4,1.08A88,88,0,0,0,216,128Z',
+  CheckCircle: 'M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z',
+  Gear: 'M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Zm-16.1-6.5a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.48l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.48a73.93,73.93,0,0,1-8.68,0,8,8,0,0,0-5.48,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.48,73.93,73.93,0,0,1,0-8.68,8,8,0,0,0-1.74-5.48L40.2,100.45a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.48,1.74,73.93,73.93,0,0,1,8.68,0,8,8,0,0,0,5.48-1.74L155.55,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z',
+  List: 'M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z',
+  MoonStars: 'M240,96a8,8,0,0,1-8,8H216v16a8,8,0,0,1-16,0V104H184a8,8,0,0,1,0-16h16V72a8,8,0,0,1,16,0V88h16A8,8,0,0,1,240,96ZM144,56h8v8a8,8,0,0,0,16,0V56h8a8,8,0,0,0,0-16h-8V32a8,8,0,0,0-16,0v8h-8a8,8,0,0,0,0,16Zm72.77,97a8,8,0,0,1,1.43,8A96,96,0,1,1,95.07,37.8a8,8,0,0,1,10.6,9.06A88.07,88.07,0,0,0,209.14,150.33,8,8,0,0,1,216.77,153Zm-19.39,14.88c-1.79.09-3.59.14-5.38.14A104.11,104.11,0,0,1,88,64c0-1.79,0-3.59.14-5.38A80,80,0,1,0,197.38,167.86Z',
+  PaperPlaneTilt: 'M227.32,28.68a16,16,0,0,0-15.66-4.08l-.15,0L19.57,82.84a16,16,0,0,0-2.49,29.8L102,154l41.3,84.87A15.86,15.86,0,0,0,157.74,248q.69,0,1.38-.06a15.88,15.88,0,0,0,14-11.51l58.2-191.94c0-.05,0-.1,0-.15A16,16,0,0,0,227.32,28.68ZM157.83,231.85l-.05.14,0-.07-40.06-82.3,48-48a8,8,0,0,0-11.31-11.31l-48,48L24.08,98.25l-.07,0,.14,0L216,40Z',
+  PencilSimple: 'M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z',
+  Shield: 'M208,40H48A16,16,0,0,0,32,56v56c0,52.72,25.52,84.67,46.93,102.19,23.06,18.86,46,25.27,47,25.53a8,8,0,0,0,4.2,0c1-.26,23.91-6.67,47-25.53C198.48,196.67,224,164.72,224,112V56A16,16,0,0,0,208,40Zm0,72c0,37.07-13.66,67.16-40.6,89.42A129.3,129.3,0,0,1,128,223.62a128.25,128.25,0,0,1-38.92-21.81C61.82,179.51,48,149.3,48,112l0-56,160,0Z',
+  SpeakerHigh: 'M155.51,24.81a8,8,0,0,0-8.42.88L77.25,80H32A16,16,0,0,0,16,96v64a16,16,0,0,0,16,16H77.25l69.84,54.31A8,8,0,0,0,160,224V32A8,8,0,0,0,155.51,24.81ZM32,96H72v64H32ZM144,207.64,88,164.09V91.91l56-43.55Zm54-106.08a40,40,0,0,1,0,52.88,8,8,0,0,1-12-10.58,24,24,0,0,0,0-31.72,8,8,0,0,1,12-10.58ZM248,128a79.9,79.9,0,0,1-20.37,53.34,8,8,0,0,1-11.92-10.67,64,64,0,0,0,0-85.33,8,8,0,1,1,11.92-10.67A79.83,79.83,0,0,1,248,128Z',
+  Star: 'M239.18,97.26A16.38,16.38,0,0,0,224.92,86l-59-4.76L143.14,26.15a16.36,16.36,0,0,0-30.27,0L90.11,81.23,31.08,86a16.46,16.46,0,0,0-9.37,28.86l45,38.83L53,211.75a16.38,16.38,0,0,0,24.5,17.82L128,198.49l50.53,31.08A16.4,16.4,0,0,0,203,211.75l-13.76-58.07,45-38.83A16.43,16.43,0,0,0,239.18,97.26Zm-15.34,5.47-48.7,42a8,8,0,0,0-2.56,7.91l14.88,62.8a.37.37,0,0,1-.17.48c-.18.14-.23.11-.38,0l-54.72-33.65a8,8,0,0,0-8.38,0L69.09,215.94c-.15.09-.19.12-.38,0a.37.37,0,0,1-.17-.48l14.88-62.8a8,8,0,0,0-2.56-7.91l-48.7-42c-.12-.1-.23-.19-.13-.5s.18-.27.33-.29l63.92-5.16A8,8,0,0,0,103,91.86l24.62-59.61c.08-.17.11-.25.35-.25s.27.08.35.25L153,91.86a8,8,0,0,0,6.75,4.92l63.92,5.16c.15,0,.24,0,.33.29S224,102.63,223.84,102.73Z',
+  StopCircle: 'M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216ZM160,88H96a8,8,0,0,0-8,8v64a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V96A8,8,0,0,0,160,88Zm-8,64H104V104h48Z',
+  SunDim: 'M120,40V32a8,8,0,0,1,16,0v8a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-8-8A8,8,0,0,0,50.34,61.66Zm0,116.68-8,8a8,8,0,0,0,11.32,11.32l8-8a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l8-8a8,8,0,0,0-11.32-11.32l-8,8A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l8,8a8,8,0,0,0,11.32-11.32ZM40,120H32a8,8,0,0,0,0,16h8a8,8,0,0,0,0-16Zm88,88a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-8A8,8,0,0,0,128,208Zm96-88h-8a8,8,0,0,0,0,16h8a8,8,0,0,0,0-16Z',
+  Trash: 'M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z',
+} as const;
 
 export type MobileView = 'approvals' | 'chat' | 'settings';
 
@@ -90,8 +98,6 @@ export interface MobilePalette {
   shadow: string;
 }
 
-type IconWeight = 'thin' | 'regular';
-type IconDefs = ReadonlyMap<string, ReactElement>;
 export type IconFill = '#ffffff' | '#1a1a2e';
 
 export const RISK_COLORS: Record<string, string> = {
@@ -120,17 +126,10 @@ export const MAX_RECENT_CONVERSATIONS = 10;
 export const CHAT_TITLE_MAX_LENGTH = 50;
 export const SIDEBAR_TITLE_MAX_LENGTH = 40;
 
-function renderPhosphorIcon(
-  defs: IconDefs,
-  size: number,
-  fill: IconFill,
-  style?: CSSProperties,
-  weight: IconWeight = 'regular',
-) {
-  const fragment = defs.get(weight) ?? defs.get('regular') ?? null;
+function renderIcon(pathData: string, size: number, fill: IconFill, style?: CSSProperties) {
   return (
     <svg width={size} height={size} viewBox="0 0 256 256" fill={fill} style={style}>
-      {fragment}
+      <path d={pathData} />
     </svg>
   );
 }
@@ -139,75 +138,74 @@ interface MobileIconProps {
   fill: IconFill;
   size?: number;
   style?: CSSProperties;
-  weight?: IconWeight;
 }
 
-export function IconArrowLeft({ fill, size = 18, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(ArrowLeftPaths as IconDefs, size, fill, style, weight);
+export function IconArrowLeft({ fill, size = 18, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.ArrowLeft, size, fill, style);
 }
 
-export function IconCaretDown({ fill, size = 18, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(CaretDownPaths as IconDefs, size, fill, style, weight);
+export function IconCaretDown({ fill, size = 18, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.CaretDown, size, fill, style);
 }
 
-export function IconCaretRight({ fill, size = 16, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(CaretRightPaths as IconDefs, size, fill, style, weight);
+export function IconCaretRight({ fill, size = 16, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.CaretRight, size, fill, style);
 }
 
-export function IconChat({ fill, size = 20, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(ChatCircleDotsPaths as IconDefs, size, fill, style, weight);
+export function IconChat({ fill, size = 20, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.ChatCircleDots, size, fill, style);
 }
 
-export function IconCheck({ fill, size = 48, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(CheckCirclePaths as IconDefs, size, fill, style, weight);
+export function IconCheck({ fill, size = 48, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.CheckCircle, size, fill, style);
 }
 
-export function IconGear({ fill, size = 20, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(GearPaths as IconDefs, size, fill, style, weight);
+export function IconGear({ fill, size = 20, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.Gear, size, fill, style);
 }
 
-export function IconHamburger({ fill, size = 22, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(ListPaths as IconDefs, size, fill, style, weight);
+export function IconHamburger({ fill, size = 22, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.List, size, fill, style);
 }
 
-export function IconMoon({ fill, size = 18, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(MoonStarsPaths as IconDefs, size, fill, style, weight);
+export function IconMoon({ fill, size = 18, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.MoonStars, size, fill, style);
 }
 
 export function IconRefresh({ fill, size = 18, style }: MobileIconProps) {
-  return renderPhosphorIcon(ArrowClockwisePaths as IconDefs, size, fill, style, 'thin');
+  return renderIcon(ICON_PATHS.ArrowClockwiseThin, size, fill, style);
 }
 
-export function IconSend({ fill, size = 16, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(PaperPlaneTiltPaths as IconDefs, size, fill, style, weight);
+export function IconSend({ fill, size = 16, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.PaperPlaneTilt, size, fill, style);
 }
 
-export function IconShield({ fill, size = 20, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(ShieldPaths as IconDefs, size, fill, style, weight);
+export function IconShield({ fill, size = 20, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.Shield, size, fill, style);
 }
 
-export function IconSpeaker({ fill, size = 12, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(SpeakerHighPaths as IconDefs, size, fill, style, weight);
+export function IconSpeaker({ fill, size = 12, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.SpeakerHigh, size, fill, style);
 }
 
-export function IconStar({ fill, size = 18, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(StarPaths as IconDefs, size, fill, style, weight);
+export function IconStar({ fill, size = 18, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.Star, size, fill, style);
 }
 
-export function IconStop({ fill, size = 12, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(StopCirclePaths as IconDefs, size, fill, style, weight);
+export function IconStop({ fill, size = 12, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.StopCircle, size, fill, style);
 }
 
-export function IconSun({ fill, size = 18, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(SunDimPaths as IconDefs, size, fill, style, weight);
+export function IconSun({ fill, size = 18, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.SunDim, size, fill, style);
 }
 
-export function IconTrash({ fill, size = 18, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(TrashPaths as IconDefs, size, fill, style, weight);
+export function IconTrash({ fill, size = 18, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.Trash, size, fill, style);
 }
 
-export function IconPencil({ fill, size = 18, style, weight = 'regular' }: MobileIconProps) {
-  return renderPhosphorIcon(PencilSimplePaths as IconDefs, size, fill, style, weight);
+export function IconPencil({ fill, size = 18, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.PencilSimple, size, fill, style);
 }
 
 export function getModelOption(modelId: string): ModelOption | null {
