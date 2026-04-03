@@ -6,6 +6,8 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `e28fcf3` feat: theme-aware markdown renderer + light mode code blocks
+- `dea5185` feat: rebuild mobile approvals and sidebar surfaces
 - `8b4199f` feat: rebuild mobile approvals and sidebar surfaces
 - `fcd91ca` feat: replace custom mobile chat with @assistant-ui/react Thread
 - `9cce975` feat: build mobile assistant-ui thread chat
