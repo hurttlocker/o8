@@ -4,6 +4,18 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-04-03
+
+- `d3f045f` feat: mobile settings view + decompose monolithic client into focused modules
+- `e89b6a6` feat: mobile redesign
+- `289f3a0` feat: mobile settings view + decompose monolithic client into focused modules
+- `0576fce` feat: mobile settings view + decompose monolithic client into focused modules
+- `af1a715` feat: mobile settings view + decompose monolithic client into focused modules
+- `3b7046b` feat: mobile settings view + decompose monolithic client into focused modules
+- `b44386f` feat: mobile settings view + decompose monolithic client into focused modules
+- `19e3411` fix: surface mobile model id in settings
+- `9ebbc38` feat: add mobile settings view to glass sidebar
+
 ## 2026-04-02
 
 - `d9352aa` fix: brighter glass borders + refresh in header + icon rendering
