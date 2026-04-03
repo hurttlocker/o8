@@ -26,21 +26,10 @@ export function generateMetadata(): Metadata {
 
 export default function MobileLayout({ children }: { children: ReactNode }) {
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: '#111111',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Default mobile to dark theme before React hydrates */}
-      <script dangerouslySetInnerHTML={{ __html: 'try{if(!localStorage.getItem("cortex-theme"))localStorage.setItem("cortex-theme","dark")}catch(e){}' }} />
+    <>
       <style dangerouslySetInnerHTML={{ __html: [
-        'html,body{background:#111111!important;margin:0;padding:0}',
+        'html{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#111111}',
+        'body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#111111;-webkit-font-smoothing:antialiased}',
         'nextjs-portal{display:none!important}',
         '[data-nextjs-dialog-overlay]{display:none!important}',
         '::-webkit-scrollbar{width:3px}',
@@ -48,8 +37,18 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
         '::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:3px}',
         '::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}',
       ].join('') }} />
-      <MobileAuroraBg />
-      {children}
-    </div>
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          backgroundColor: '#111111',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
+        <MobileAuroraBg />
+        {children}
+      </div>
+    </>
   );
 }

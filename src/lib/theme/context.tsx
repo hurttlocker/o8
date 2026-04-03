@@ -19,7 +19,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  themeId: 'light',
+  themeId: 'dark',
   setTheme: () => {},
   themes: [],
 });
@@ -39,12 +39,12 @@ function normalizeThemeId(themeId: string | null) {
 }
 
 function readStoredThemeId() {
-  if (typeof window === 'undefined') return 'light';
+  if (typeof window === 'undefined') return 'dark';
   try {
     const saved = normalizeThemeId(localStorage.getItem(STORAGE_KEY));
-    return saved && themes.find((theme) => theme.id === saved) ? saved : 'light';
+    return saved && themes.find((theme) => theme.id === saved) ? saved : 'dark';
   } catch {
-    return 'light';
+    return 'dark';
   }
 }
 

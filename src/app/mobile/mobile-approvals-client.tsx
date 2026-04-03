@@ -247,8 +247,6 @@ export function MobileApprovalsClient({
             gap: 12,
             position: 'relative',
             zIndex: 5,
-            maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)',
-            WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)',
           } as CSSProperties}
         >
           {inConversation ? (
