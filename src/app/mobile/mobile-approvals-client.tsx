@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { MobileAuroraBg } from './mobile-aurora-bg';
@@ -52,6 +52,13 @@ function getWsBridgeUrl(token: string) {
   return `${protocol}//${host}:3002/ws?token=${encodeURIComponent(token)}`;
 }
 
+const WS_RECONNECT_BASE_DELAY_MS = 1_000;
+const WS_RECONNECT_MAX_DELAY_MS = 8_000;
+
+function getReconnectDelayMs(attempt: number) {
+  return Math.min(WS_RECONNECT_BASE_DELAY_MS * (2 ** Math.max(0, attempt - 1)), WS_RECONNECT_MAX_DELAY_MS);
+}
+
 export function MobileApprovalsClient({
   initialApprovals,
   appVersion,
@@ -73,6 +80,7 @@ export function MobileApprovalsClient({
   const [repoOptions, setRepoOptions] = useState<MobileRepoOption[]>([]);
   const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(readStoredMobileRepoPath);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
+  const reconnectAttemptRef = useRef(0);
 
   const selectedModel = useMemo(
     () => getModelOption(selectedModelId) ?? getModelOption(DEFAULT_MOBILE_CHAT_MODEL)!,
@@ -172,9 +180,13 @@ export function MobileApprovalsClient({
       socket = new WebSocket(url);
 
       socket.onopen = () => {
-        if (!cancelled) {
-          setConnectionStatus('connected');
+        if (cancelled) return;
+        if (reconnectAttemptRef.current > 0) {
+          console.info(`[mobile-ws] Reconnected after ${reconnectAttemptRef.current} attempt${reconnectAttemptRef.current === 1 ? '' : 's'}; polling approvals immediately`);
         }
+        reconnectAttemptRef.current = 0;
+        setConnectionStatus('connected');
+        void refresh();
       };
 
       socket.onerror = () => {
@@ -186,7 +198,13 @@ export function MobileApprovalsClient({
       socket.onclose = () => {
         if (cancelled) return;
         setConnectionStatus('disconnected');
-        reconnectTimer = setTimeout(connect, 2500);
+        reconnectAttemptRef.current += 1;
+        const reconnectDelayMs = getReconnectDelayMs(reconnectAttemptRef.current);
+        console.info(`[mobile-ws] Connection closed; retry ${reconnectAttemptRef.current} in ${reconnectDelayMs}ms`);
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connect();
+        }, reconnectDelayMs);
       };
     };
 
@@ -194,10 +212,11 @@ export function MobileApprovalsClient({
 
     return () => {
       cancelled = true;
+      reconnectAttemptRef.current = 0;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, []);
+  }, [refresh]);
 
   const handleResolve = useCallback(async (id: string, action: 'approve' | 'reject') => {
     setResolving({ id, action });
