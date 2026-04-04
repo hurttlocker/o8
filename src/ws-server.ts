@@ -2966,8 +2966,19 @@ async function bootstrapWsServer() {
             return;
           }
 
+          const completionCwd = lane.worktreePath ?? lane.repoPath;
+          try {
+            const { persistRuntimeSessionCost } = await import('@/lib/orchestrator/cost-persistence');
+            await persistRuntimeSessionCost({
+              sessionKey: surfaceId,
+              runtime: lane.runtime,
+              repoPath: completionCwd,
+            });
+          } catch (error) {
+            console.error('[cost-persistence] Failed to persist lane session cost:', error);
+          }
+
           if (outcome === 'completed') {
-            const completionCwd = lane.worktreePath ?? lane.repoPath;
             const {
               autoCommitCompletionWorktree,
               runCompletionTypecheck,

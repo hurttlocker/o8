@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
-import { getDb } from '@/lib/db/index';
-import { usageLogs } from '@/lib/db/schema';
+import { hydrateUsageLogAnalytics } from './usage-log-analytics';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -115,12 +114,6 @@ function parseTimestamp(value: unknown, fallback = 0): number {
     if (Number.isFinite(parsed)) return parsed;
   }
   return fallback;
-}
-
-function parseDbTimestamp(value: string | null | undefined): number {
-  if (!value) return 0;
-  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
-  return parseTimestamp(normalized, 0);
 }
 
 function parseTimestampFromName(fileName: string): number | undefined {
@@ -308,6 +301,18 @@ export async function GET(request: NextRequest) {
       });
     };
 
+    const {
+      persistedRuntimeSessionKeys,
+      llmMessages,
+      llmModelsUsed,
+      llmSessionCount,
+    } = hydrateUsageLogAnalytics({
+      sinceTs,
+      normalizeModel,
+      recordUsage,
+      finalizeSession,
+    });
+
     // ── Codex CLI sessions ────────────────────────────────────────────────────
     const codexRoots = [
       join(homedir(), '.cortex-ide', 'owned-codex'),
@@ -316,6 +321,9 @@ export async function GET(request: NextRequest) {
 
     for (const root of codexRoots) {
       for (const sessionDirName of safeReadDir(root)) {
+        if (persistedRuntimeSessionKeys.has(`codex-owned:${sessionDirName}`)) {
+          continue;
+        }
         const runsDir = join(root, sessionDirName, 'runs');
         const runFiles = safeReadDir(runsDir).filter((file) => file.endsWith('.jsonl'));
         if (runFiles.length === 0) continue;
@@ -388,6 +396,9 @@ export async function GET(request: NextRequest) {
       const files = safeReadDir(projectPath).filter((file) => file.endsWith('.jsonl'));
 
       for (const file of files) {
+        if (persistedRuntimeSessionKeys.has(`claude-code:${basename(file, '.jsonl')}`)) {
+          continue;
+        }
         const filePath = join(projectPath, file);
 
         try {
@@ -466,87 +477,8 @@ export async function GET(request: NextRequest) {
     }
 
     // ── IDE LLM chat usage logs ──────────────────────────────────────────────
-    const llmSessionMap = new Map<string, SessionAccumulator>();
-    const llmSessionKeysByModel = new Map<string, Set<string>>();
-    const llmModelsUsed = new Set<string>();
-    let llmMessages = 0;
-
-    try {
-      const db = getDb();
-      if (!db) return NextResponse.json({});
-      const rows = db.select().from(usageLogs).all();
-      for (const row of rows) {
-        if (row.agentName !== 'llm-chat') continue;
-        if (row.requestType && row.requestType !== 'chat') continue;
-
-        const ts = parseDbTimestamp(row.createdAt);
-        if (ts < sinceTs) continue;
-
-        const inputTokens = row.inputTokens ?? 0;
-        const outputTokens = row.outputTokens ?? 0;
-        const cacheTokens = row.cacheReadTokens ?? 0;
-        const cacheWriteTokens = row.cacheWriteTokens ?? 0;
-        const cost = row.costUsd ?? 0;
-
-        if (cost === 0 && inputTokens === 0 && outputTokens === 0 && cacheTokens === 0 && cacheWriteTokens === 0) {
-          continue;
-        }
-
-        const model = normalizeModel(row.model);
-        recordUsage({
-          ts,
-          cost,
-          inputTokens,
-          outputTokens,
-          cacheTokens,
-          cacheWriteTokens,
-          model,
-          agent: 'IDE LLM Chat',
-          surface: 'IDE LLM Chat',
-        });
-
-        llmMessages += 1;
-        llmModelsUsed.add(model);
-
-        const sessionKey = row.sessionKey?.trim();
-        if (!sessionKey) continue;
-
-        if (!llmSessionMap.has(sessionKey)) {
-          llmSessionMap.set(
-            sessionKey,
-            createSession(
-              sessionKey,
-              'IDE LLM Chat',
-              'IDE LLM Chat',
-              (Date.now() - ts) < ACTIVE_WINDOW_MS,
-            ),
-          );
-        }
-
-        const session = llmSessionMap.get(sessionKey)!;
-        session.active = session.active || (Date.now() - ts) < ACTIVE_WINDOW_MS;
-        session.cost += cost;
-        session.messages += 1;
-        session.inputTokens += inputTokens;
-        session.outputTokens += outputTokens;
-        session.cacheTokens += cacheTokens;
-        session.cacheWriteTokens += cacheWriteTokens;
-        session.models.add(model);
-        if (session.model === 'unknown' || session.model === '') session.model = model;
-
-        if (!llmSessionKeysByModel.has(model)) llmSessionKeysByModel.set(model, new Set<string>());
-        llmSessionKeysByModel.get(model)!.add(sessionKey);
-      }
-    } catch {
-      // database unavailable or unreadable
-    }
-
     if (llmMessages > 0) {
-      if (llmSessionMap.size > 0) {
-        for (const session of llmSessionMap.values()) {
-          finalizeSession(session);
-        }
-      } else {
+      if (llmSessionCount === 0) {
         const ideChatSessions = discoverIdeChatSessions(sinceTs);
         const sessionCount = ideChatSessions.length > 0 ? ideChatSessions.length : 1;
 
