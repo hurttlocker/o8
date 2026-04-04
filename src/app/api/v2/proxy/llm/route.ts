@@ -5,11 +5,12 @@ import { createApproval } from '@/lib/approvals/store';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
-import { getWorkspaceContext, buildSystemPrompt, buildUnscopedSystemPrompt } from '@/lib/llm/context';
+import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
-import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
+import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
 import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
 import { executeTool, type ToolResult } from '@/lib/llm/tools';
+import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
 import {
   computeCost,
   isSupportedProvider,
@@ -71,6 +72,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     messages: rawMessages,
     approvedTools: approvedToolsList,
     disableTools,
+    repoPath: rawRepoPath,
     toolOverrides: rawToolOverrides,
   } = body as {
     model: string;
@@ -78,6 +80,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     messages: Message[];
     approvedTools?: string[];
     disableTools?: boolean;
+    repoPath?: string;
     toolOverrides?: Record<string, Record<string, unknown>>;
   };
 
@@ -88,7 +91,20 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   const approvedTools = new Set(approvedToolsList ?? []);
   const toolOverrides = rawToolOverrides ?? {};
   const tabId = request.headers.get('x-tab-id')?.trim() || '';
-  const { repoRoot: scopedRepoRoot } = await resolveRepoScopeFromHeaders(request.headers);
+  const bodyRepoPath = typeof rawRepoPath === 'string' ? rawRepoPath.trim() : '';
+  if (rawRepoPath !== undefined && typeof rawRepoPath !== 'string') {
+    return jsonError('repoPath must be a string', 400);
+  }
+  const headerRepoPath = request.headers.get(LLM_REPO_PATH_HEADER)?.trim() || '';
+  const requestedRepoPath = bodyRepoPath || headerRepoPath;
+  let effectiveRepoRoot = process.cwd();
+  if (requestedRepoPath) {
+    const resolvedRepo = await resolveRepoPathFromRegistry(requestedRepoPath);
+    if (!resolvedRepo.ok) {
+      return jsonError(resolvedRepo.message, resolvedRepo.status);
+    }
+    effectiveRepoRoot = resolvedRepo.repoRoot;
+  }
   const nonSystemMessages = rawMessages.filter((message) => message.role !== 'system');
   const priorSystemMessages = rawMessages
     .filter((message) => message.role === 'system')
@@ -98,9 +114,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   const userMessageCount = nonSystemMessages.filter((message) => message.role === 'user').length;
   const isFreshChatTurn = assistantMessageCount === 0 && userMessageCount <= 1;
 
-  let systemPrompt = scopedRepoRoot
-    ? buildSystemPrompt(getWorkspaceContext(scopedRepoRoot))
-    : buildUnscopedSystemPrompt();
+  let systemPrompt = buildSystemPrompt(getWorkspaceContext(effectiveRepoRoot));
 
   let recallInfo: { factCount: number; queryMs: number } | null = null;
   const lastUserMsg = [...nonSystemMessages].reverse().find((message) => message.role === 'user');
@@ -120,7 +134,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     try {
       const ftux = await getPersonalizedChatFtuxPayload({
         userName: auth?.user.name,
-        scopedRepoRoot,
+        scopedRepoRoot: effectiveRepoRoot,
       });
       if (ftux.systemContext.trim()) {
         systemPrompt += `\n\n${ftux.systemContext}`;
@@ -159,7 +173,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       messages,
       model,
       recallInfo,
-      scopedRepoRoot,
+      scopedRepoRoot: effectiveRepoRoot,
       tabId,
     });
   }
@@ -288,7 +302,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
             const policyContext = buildPolicyContext(toolCall.name, toolCall.args, {
               runtime: 'chat',
-              workspacePath: scopedRepoRoot ?? undefined,
+              workspacePath: effectiveRepoRoot,
               sessionKey: tabId ? `llm-chat:${tabId}` : undefined,
             });
             const policyResult = approvedTools.has(toolCall.name)
@@ -367,6 +381,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                       provider,
                       messages: rawMessages,
                       approvedTools: [...approvedTools],
+                      repoPath: effectiveRepoRoot,
                     },
                   })
                 : null;
@@ -399,7 +414,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               args: toolCall.args,
             }));
 
-            const result: ToolResult = await executeTool(toolCall.name, toolCall.args, scopedRepoRoot);
+            const result: ToolResult = await executeTool(toolCall.name, toolCall.args, effectiveRepoRoot);
             if (result.sources) {
               allSources.push(...result.sources);
             }
