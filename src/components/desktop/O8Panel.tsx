@@ -8,6 +8,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { LocalhostPreviewTabs } from './LocalhostPreviewTabs';
+import type { DetectedLocalhostPreview, PreviewSelectionPayload } from '@/lib/panel/preview';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
 // ── Phosphor Icons (raw SVG, per CLAUDE.md) ──
@@ -59,6 +61,11 @@ type ChangeFilter = 'uncommitted' | 'staged' | 'unstaged' | 'branch';
 interface O8PanelProps {
   onClose: () => void;
   repoPath?: string | null;
+  previews?: DetectedLocalhostPreview[];
+  selectedPreviewId?: string | null;
+  onSelectPreview?: (id: string) => void;
+  onClosePreview?: (id: string) => void;
+  onElementSelect?: (selection: PreviewSelectionPayload) => void;
 }
 
 // ── Tab Button ──
@@ -396,7 +403,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [], selectedPreviewId, onSelectPreview, onClosePreview, onElementSelect }: O8PanelProps) {
   const [activeTab, setActiveTab] = useState<O8Tab>('changes');
 
   return (
@@ -454,9 +461,13 @@ export function O8Panel({ onClose, repoPath }: O8PanelProps) {
         {activeTab === 'changes' ? (
           <ChangesTab repoPath={repoPath} />
         ) : activeTab === 'browser' ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', fontSize: 13 }}>
-            Browser — coming soon
-          </div>
+          <LocalhostPreviewTabs
+            previews={previews}
+            selectedPreviewId={selectedPreviewId}
+            onSelectPreview={onSelectPreview ?? (() => {})}
+            onClosePreview={onClosePreview ?? (() => {})}
+            onElementSelect={onElementSelect}
+          />
         ) : (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', fontSize: 13 }}>
             Files — coming soon
