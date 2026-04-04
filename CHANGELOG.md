@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `5ac4d8e` refactor: slim settings header — remove command deck panel
 - `dffe8ae` fix: remove useEffect that forces dark theme — allows light mode toggle
 - `4f7fe6d` feat: compact model selector + fix theme toggle in settings
 - `e3c6562` feat: restore light mode with proper theme toggle
