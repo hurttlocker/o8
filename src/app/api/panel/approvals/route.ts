@@ -210,6 +210,15 @@ export async function POST(request: NextRequest) {
         actor: 'user',
       } as Parameters<typeof dispatch>[0]);
       decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
+    } else if (continuation?.kind === 'plan' && action === 'approve') {
+      // Plan continuation — create mission from approved plan
+      try {
+        const { dispatchApprovedPlan } = await import('@/lib/intake/plan-dispatch');
+        const result = await dispatchApprovedPlan(continuation);
+        decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
+      } catch (error) {
+        decisionNote = `Plan dispatch failed: ${error instanceof Error ? error.message : 'unknown'}`;
+      }
     } else if (continuation?.kind === 'runtime' && action === 'approve') {
       // Runtime continuation — launch or resume the session
       if (continuation.action === 'launch' && continuation.prompt) {

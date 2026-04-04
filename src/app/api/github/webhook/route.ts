@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
   }
 
   const payload = JSON.parse(rawBody) as {
+    action?: string;
     installation?: {
       id?: number;
       account?: { login?: string; type?: string };
@@ -129,6 +130,43 @@ export async function POST(request: NextRequest) {
           closedAt: issue.closed_at ?? null,
         });
         markGitHubSyncSuccess(repoFullName, 'issues', null);
+
+        // Trigger intake pipeline when an issue is assigned
+        if (payload.action === 'assigned' && issue.assignees && issue.assignees.length > 0) {
+          void (async () => {
+            try {
+              const { resolveRepoPath } = await import('@/lib/intake/resolve-repo');
+              const repoPath = resolveRepoPath(repoFullName);
+              if (!repoPath) {
+                console.log(`[github-intake] No local repo path for ${repoFullName}, skipping intake`);
+                return;
+              }
+              const { processAssignedIssue } = await import('@/lib/intake/github-intake');
+              await processAssignedIssue({
+                issueId: issue.id,
+                repoFullName,
+                number: issue.number,
+                title: issue.title,
+                state: issue.state,
+                author: issue.user?.login ? { login: issue.user.login } : null,
+                assignees: (issue.assignees ?? [])
+                  .map((a) => a.login ? { login: a.login } : null)
+                  .filter((a): a is { login: string } => Boolean(a)),
+                labels: (issue.labels ?? [])
+                  .map((l) => l.name ? { name: l.name, color: l.color ?? '000000' } : null)
+                  .filter((l): l is { name: string; color: string } => Boolean(l)),
+                comments: issue.comments ?? 0,
+                body: issue.body ?? '',
+                url: issue.html_url,
+                createdAt: issue.created_at,
+                updatedAt: issue.updated_at,
+                closedAt: issue.closed_at ?? null,
+              }, repoFullName, repoPath);
+            } catch (error) {
+              console.error(`[github-intake] Failed for issue #${issue.number}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          })();
+        }
       }
     } else if (event === 'pull_request') {
       const pr = payload.pull_request;
