@@ -61,10 +61,28 @@ function evaluateToolUse(input) {
         reason: 'Destructive command blocked by o8 policy',
       };
     }
+    if (/\bgit\s+reset\s+--hard\b/i.test(command)) {
+      return {
+        decision: 'block',
+        reason: 'git reset --hard blocked — use git stash or git checkout <file> instead',
+      };
+    }
+    if (/\bgit\s+clean\s+-[a-z]*f/i.test(command)) {
+      return {
+        decision: 'block',
+        reason: 'git clean -f blocked — removes untracked files permanently',
+      };
+    }
+    if (/\bgit\s+checkout\s+\.\s*$/i.test(command)) {
+      return {
+        decision: 'block',
+        reason: 'git checkout . blocked — discards all unstaged changes',
+      };
+    }
     if (/\bgit\s+push\b/i.test(command) && /(?:--force|-f)(?:\s|$)/i.test(command)) {
       return {
-        decision: 'ask_user',
-        reason: 'Force push requires confirmation',
+        decision: 'block',
+        reason: 'Force push blocked by o8 policy — never force push',
       };
     }
     if (/\bgit\s+(?:push|merge|rebase)\b/i.test(command)) {
