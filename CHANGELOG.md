@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-04
 
+- `765b53e` fix: O8 panel tab icons visibility on dark background
 - `0401382` fix: O8 panel text colors for dark theme background
 - `d07fd20` feat: O8 panel Changes tab — git status + inline diff + tab bar
 - `e55df29` feat: O8 panel
