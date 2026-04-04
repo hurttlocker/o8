@@ -18,13 +18,14 @@ import { extractApprovalContextIdsFromMetadataJson } from '@/lib/approvals/conte
 import * as schema from './schema';
 import { migrateLegacyApprovalStoreIfNeeded } from '@/lib/approvals/storage-migration';
 import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
+import { ensureUsageLogIndexes, ensureUsageLogSchema } from '@/lib/db/usage-log-migration';
 
 // ── Data directory ──
 
 const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.cortex-ide');
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 2;
+const DB_SCHEMA_VERSION = 3;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -137,7 +138,7 @@ function ensureTables(sqlite: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS usage_logs (
       id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
       model TEXT NOT NULL,
       provider TEXT NOT NULL,
       input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -146,6 +147,7 @@ function ensureTables(sqlite: Database.Database): void {
       cache_write_tokens INTEGER DEFAULT 0,
       cost_usd REAL NOT NULL DEFAULT 0,
       session_key TEXT,
+      repo_path TEXT,
       agent_name TEXT,
       request_type TEXT DEFAULT 'chat',
       billing_period TEXT NOT NULL,
@@ -391,12 +393,14 @@ function ensureTables(sqlite: Database.Database): void {
 
   ensureApprovalContextColumns(sqlite);
   ensureWatchedAgentColumns(sqlite);
+  ensureUsageLogSchema(sqlite);
   ensureApprovalEventsTable(sqlite);
   migrateLegacyApprovalStoreIfNeeded(sqlite, { approvalsTablePreviouslyMissing });
   backfillWatchedAgentColumns(sqlite);
   backfillApprovalContextColumns(sqlite);
   backfillApprovalEventsFromAuditJson(sqlite);
   ensureApprovalContextIndexes(sqlite);
+  ensureUsageLogIndexes(sqlite);
   migrateLegacyLaneStoreIfNeeded(sqlite, { lanesTablePreviouslyMissing });
 }
 
