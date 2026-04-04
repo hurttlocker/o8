@@ -3,7 +3,7 @@
 import { ComposerPrimitive, MessagePrimitive, useAuiState, type MessageState } from '@assistant-ui/react';
 import { useEffect, useState, type CSSProperties } from 'react';
 import { MobileMarkdown } from './mobile-markdown';
-import { getMessageTextContent, getMessageThinkingBlocks } from './mobile-assistant-chat-runtime';
+import { getMessageTextContent, getMessageThinkingBlocks, getMessageToolCalls } from './mobile-assistant-chat-runtime';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
 import { playSendClick } from '@/lib/mobile/sounds';
 import {
@@ -14,6 +14,7 @@ import {
   IconSpeaker,
   IconStop,
   MobilePalette,
+  type MobileChatToolCall,
   mobileCardStyle,
   mobileFontFamily,
   type ModelOption,
@@ -112,6 +113,215 @@ function ThinkingBlock({
           }}
         >
           {text}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatToolValue(value: unknown) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function getToolStatusStyle(status: string, palette: MobilePalette) {
+  if (status === 'done') {
+    return {
+      label: 'Done',
+      background: palette.successSoft,
+      border: palette.successBorder,
+      color: palette.success,
+    };
+  }
+
+  if (status === 'blocked' || status === 'error') {
+    return {
+      label: status === 'blocked' ? 'Blocked' : 'Error',
+      background: palette.dangerSoft,
+      border: palette.dangerBorder,
+      color: palette.danger,
+    };
+  }
+
+  if (status === 'calling') {
+    return {
+      label: 'Calling',
+      background: palette.accentSoft,
+      border: palette.accentBorder,
+      color: palette.accent,
+    };
+  }
+
+  return {
+    label: 'Running',
+    background: palette.warningSoft,
+    border: palette.accentBorder,
+    color: palette.rootText,
+  };
+}
+
+function ToolCallCard({
+  toolCall,
+  palette,
+}: {
+  toolCall: MobileChatToolCall;
+  palette: MobilePalette;
+}) {
+  const status = toolCall.result?.status ?? toolCall.status ?? (toolCall.result ? 'done' : 'running');
+  const statusStyle = getToolStatusStyle(status, palette);
+  const argumentsText = toolCall.arguments && Object.keys(toolCall.arguments).length > 0
+    ? formatToolValue(toolCall.arguments)
+    : '';
+  const outputText = toolCall.result?.output?.trim() ?? '';
+  const diffText = toolCall.result?.diff !== undefined ? formatToolValue(toolCall.result.diff) : '';
+
+  return (
+    <div
+      style={mobileCardStyle(palette, {
+        marginBottom: 10,
+        padding: 12,
+        borderRadius: 18,
+        background: palette.panelElevated,
+      })}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: palette.subduedText, marginBottom: 4 }}>
+            Tool
+          </div>
+          <div
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              color: palette.rootText,
+              fontFamily: '"SF Mono", "SFMono-Regular", ui-monospace, monospace',
+              wordBreak: 'break-word',
+            }}
+          >
+            {toolCall.toolName}
+          </div>
+        </div>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 28,
+            padding: '0 10px',
+            borderRadius: 999,
+            border: `1px solid ${statusStyle.border}`,
+            background: statusStyle.background,
+            color: statusStyle.color,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: 0.02,
+          }}
+        >
+          {statusStyle.label}
+        </div>
+      </div>
+
+      {toolCall.filePath ? (
+        <div
+          style={{
+            marginTop: 10,
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '6px 10px',
+            borderRadius: 14,
+            border: `1px solid ${palette.cardBorder}`,
+            background: palette.cardBackground,
+            color: palette.mutedText,
+            fontSize: 12,
+            fontWeight: 600,
+            wordBreak: 'break-all',
+          }}
+        >
+          {toolCall.filePath}
+        </div>
+      ) : null}
+
+      {argumentsText ? (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: palette.subduedText, marginBottom: 6 }}>
+            Arguments
+          </div>
+          <pre
+            style={{
+              margin: 0,
+              padding: '10px 12px',
+              borderRadius: 14,
+              border: `1px solid ${palette.cardBorder}`,
+              background: palette.cardBackground,
+              color: palette.mutedText,
+              fontSize: 12,
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: '"SF Mono", "SFMono-Regular", ui-monospace, monospace',
+              overflowX: 'auto',
+            }}
+          >
+            {argumentsText}
+          </pre>
+        </div>
+      ) : null}
+
+      {outputText ? (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: palette.subduedText, marginBottom: 6 }}>
+            Output
+          </div>
+          <pre
+            style={{
+              margin: 0,
+              padding: '10px 12px',
+              borderRadius: 14,
+              border: `1px solid ${palette.cardBorder}`,
+              background: palette.cardBackground,
+              color: palette.rootText,
+              fontSize: 12,
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: '"SF Mono", "SFMono-Regular", ui-monospace, monospace',
+              overflowX: 'auto',
+            }}
+          >
+            {outputText}
+          </pre>
+        </div>
+      ) : null}
+
+      {diffText ? (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: palette.subduedText, marginBottom: 6 }}>
+            Diff
+          </div>
+          <pre
+            style={{
+              margin: 0,
+              padding: '10px 12px',
+              borderRadius: 14,
+              border: `1px solid ${palette.cardBorder}`,
+              background: palette.cardBackground,
+              color: palette.rootText,
+              fontSize: 12,
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: '"SF Mono", "SFMono-Regular", ui-monospace, monospace',
+              overflowX: 'auto',
+            }}
+          >
+            {diffText}
+          </pre>
         </div>
       ) : null}
     </div>
@@ -394,12 +604,14 @@ export function ChatMessageRow({
 }) {
   const textContent = getMessageTextContent(message.content);
   const thinkingBlocks = message.role === 'assistant' ? getMessageThinkingBlocks(message.content) : [];
+  const toolCalls = message.role === 'assistant' ? getMessageToolCalls(message.content) : [];
   const isAssistantStreaming = message.role === 'assistant' && message.status.type === 'running';
   const hideCancelledPlaceholder = message.role === 'assistant'
     && message.status.type === 'incomplete'
     && message.status.reason === 'cancelled'
     && !textContent.trim()
-    && thinkingBlocks.length === 0;
+    && thinkingBlocks.length === 0
+    && toolCalls.length === 0;
 
   if (hideCancelledPlaceholder) {
     return null;
@@ -451,9 +663,12 @@ export function ChatMessageRow({
               isStreaming={isAssistantStreaming}
             />
           ))}
+          {toolCalls.map((toolCall) => (
+            <ToolCallCard key={toolCall.toolCallId} toolCall={toolCall} palette={palette} />
+          ))}
           {textContent ? (
             <MobileMarkdown content={textContent} textColor={palette.rootText} light={palette.rootBackground !== '#111111'} />
-          ) : isAssistantStreaming ? (
+          ) : isAssistantStreaming && toolCalls.length === 0 ? (
             <StreamingDot palette={palette} />
           ) : null}
         </div>
