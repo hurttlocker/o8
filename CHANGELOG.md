@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-04
 
+- `1ab5e33` fix: Security hardening
 - `b402264` feat: o8 agent safety hooks
 
 ## 2026-04-03
