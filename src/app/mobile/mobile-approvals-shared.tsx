@@ -135,16 +135,11 @@ export const RISK_COLORS: Record<string, string> = {
 
 export const AVAILABLE_MODELS: ModelOption[] = [
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', provider: 'google', description: 'Latest flagship' },
-  { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro', provider: 'google', description: 'Previous gen flagship' },
-  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', provider: 'google', description: 'Fast and capable' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', description: 'Stable general-purpose model' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', description: 'Faster and lighter' },
-  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', provider: 'google', description: 'Lowest cost Google option' },
-  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', provider: 'anthropic', description: 'Fast and high quality' },
-  { id: 'gpt-5.4', label: 'GPT-5.4', provider: 'openai', description: 'Latest OpenAI model' },
+  { id: 'gpt-5.4-chat-xhigh', label: 'GPT-5.4 Chat', provider: 'openai', description: 'xhigh reasoning' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'anthropic', description: 'High reasoning' },
 ];
 
-export const DEFAULT_MOBILE_CHAT_MODEL = 'gemini-2.5-pro';
+export const DEFAULT_MOBILE_CHAT_MODEL = 'gemini-3.1-pro-preview';
 export const MOBILE_CHAT_STORAGE_KEY = 'o8-mobile-chat-tab';
 export const MOBILE_CHAT_MODEL_STORAGE_KEY = 'o8-mobile-chat-model';
 export const POLL_INTERVAL = 5_000;
