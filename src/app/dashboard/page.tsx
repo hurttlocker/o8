@@ -2589,7 +2589,15 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <O8Panel onClose={handleToggleO8Panel} repoPath={globalRepoEntry?.localPath} />
+                    <O8Panel
+                      onClose={handleToggleO8Panel}
+                      repoPath={globalRepoEntry?.localPath}
+                      previews={workspacePreviews}
+                      selectedPreviewId={null}
+                      onSelectPreview={(id) => handleSelectPreviewTile('', id)}
+                      onClosePreview={(id) => handleClosePreviewTileItem('', id)}
+                      onElementSelect={handlePreviewSelection}
+                    />
                   </motion.div>
                 ) : (
                   <motion.div
