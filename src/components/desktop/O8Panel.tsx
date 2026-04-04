@@ -12,9 +12,9 @@ import { useCallback, useEffect, useState } from 'react';
 
 // ── Phosphor Icons (raw SVG, per CLAUDE.md) ──
 
-function IconGitDiff({ size = 16 }: { size?: number }) {
+function IconGitDiff({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
       <circle cx="6" cy="6" r="3" />
       <circle cx="18" cy="18" r="3" />
       <path d="M6 9v4c0 2 2 4 4 4h1" />
@@ -23,9 +23,9 @@ function IconGitDiff({ size = 16 }: { size?: number }) {
   );
 }
 
-function IconGlobeSimple({ size = 16 }: { size?: number }) {
+function IconGlobeSimple({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
       <circle cx="12" cy="12" r="10" />
       <line x1="2" y1="12" x2="22" y2="12" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
@@ -33,9 +33,9 @@ function IconGlobeSimple({ size = 16 }: { size?: number }) {
   );
 }
 
-function IconFiles({ size = 16 }: { size?: number }) {
+function IconFiles({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
       <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
       <polyline points="14 2 14 8 20 8" />
     </svg>
@@ -63,8 +63,11 @@ interface O8PanelProps {
 
 // ── Tab Button ──
 
+const O8_ICON_ACTIVE = '#e2e8f0';
+const O8_ICON_INACTIVE = 'rgba(255,255,255,0.35)';
+
 function O8TabButton({ icon, active, onClick, label }: {
-  icon: React.ReactNode;
+  icon: (color: string) => React.ReactNode;
   active: boolean;
   onClick: () => void;
   label: string;
@@ -83,14 +86,13 @@ function O8TabButton({ icon, active, onClick, label }: {
         border: 'none',
         borderRadius: 8,
         background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
-        color: active ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
         cursor: 'pointer',
-        transition: 'background 120ms ease, color 120ms ease',
+        transition: 'background 120ms ease',
       }}
-      onMouseEnter={(e) => { if (!active) { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; } }}
-      onMouseLeave={(e) => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.35)'; } }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
     >
-      {icon}
+      {icon(active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE)}
     </button>
   );
 }
@@ -416,9 +418,9 @@ export function O8Panel({ onClose, repoPath }: O8PanelProps) {
         flexShrink: 0,
         gap: 2,
       }}>
-        <O8TabButton icon={<IconGitDiff size={16} />} active={activeTab === 'changes'} onClick={() => setActiveTab('changes')} label="Changes" />
-        <O8TabButton icon={<IconGlobeSimple size={16} />} active={activeTab === 'browser'} onClick={() => setActiveTab('browser')} label="Browser" />
-        <O8TabButton icon={<IconFiles size={16} />} active={activeTab === 'files'} onClick={() => setActiveTab('files')} label="Files" />
+        <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'changes'} onClick={() => setActiveTab('changes')} label="Changes" />
+        <O8TabButton icon={(c) => <IconGlobeSimple size={16} color={c} />} active={activeTab === 'browser'} onClick={() => setActiveTab('browser')} label="Browser" />
+        <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'files'} onClick={() => setActiveTab('files')} label="Files" />
         <div style={{ flex: 1 }} />
         <button
           type="button"
