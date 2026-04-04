@@ -82,7 +82,7 @@ export function ensureUsageLogSchema(sqlite: Database.Database): void {
           ${repoPathSelect},
           agent_name,
           COALESCE(request_type, 'chat'),
-          billing_period,
+          COALESCE(billing_period, strftime('%Y-%m', 'now')),
           created_at
         FROM usage_logs;
 
