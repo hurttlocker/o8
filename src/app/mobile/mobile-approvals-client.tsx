@@ -189,6 +189,10 @@ export function MobileApprovalsClient({
     }
   }, []);
 
+  const handleThemeChange = useCallback((nextTheme: 'light' | 'dark') => {
+    setTheme(nextTheme);
+  }, [setTheme]);
+
   const handleModelChange = useCallback((modelId: string) => {
     if (!getModelOption(modelId)) return;
     setSelectedModelId(modelId);
@@ -227,7 +231,7 @@ export function MobileApprovalsClient({
         WebkitFontSmoothing: 'antialiased',
       } as CSSProperties}
     >
-      <MobileAuroraBg />
+      {palette.isDark ? <MobileAuroraBg /> : null}
 
       <div style={{ position: 'relative', zIndex: 1, height: '100%', padding: '0 16px', display: 'flex', flexDirection: 'column' }}>
         <Sidebar
@@ -364,6 +368,8 @@ export function MobileApprovalsClient({
 
           {activeView === 'settings' ? (
             <SettingsView
+              themeId={themeId}
+              onThemeChange={handleThemeChange}
               selectedModel={selectedModel}
               onModelChange={handleModelChange}
               connectionStatus={connectionStatus}
