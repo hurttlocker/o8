@@ -199,7 +199,12 @@ export function MobileApprovalsClient({
   }, []);
 
   const pendingCount = useMemo(
-    () => approvals.filter((approval) => approval.status === 'pending').length,
+    () => approvals.filter((a) => {
+      if (a.status !== 'pending') return false;
+      if (a.source === 'runtime' || a.continuation?.kind === 'runtime') return false;
+      if (a.source === 'llm-chat' && a.risk === 'low') return false;
+      return true;
+    }).length,
     [approvals],
   );
   const inConversation = activeView === 'chat' && currentTabId !== null;
