@@ -67,6 +67,7 @@ export interface LlmApprovalContinuation {
   provider: 'openai' | 'anthropic' | 'google';
   messages: Array<{ role: string; content: string }>;
   approvedTools: string[];
+  repoPath?: string;
 }
 
 export interface RuntimeApprovalContinuation {
