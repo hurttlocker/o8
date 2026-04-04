@@ -71,6 +71,15 @@ function IconPanelRightCollapse({ size = 16 }: { size?: number }) {
   );
 }
 
+function IconColumns({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="3" width="7" height="18" rx="2" />
+      <rect x="14" y="3" width="7" height="18" rx="2" />
+    </svg>
+  );
+}
+
 // ── Types ──
 
 interface TitleBarProps {
@@ -84,6 +93,8 @@ interface TitleBarProps {
   onToggleChat?: () => void;
   workspacePanelVisible?: boolean;
   onToggleWorkspacePanel?: () => void;
+  o8PanelVisible?: boolean;
+  onToggleO8Panel?: () => void;
   wsStatus?: 'connected' | 'connecting' | 'reconnecting' | 'disconnected';
 }
 
@@ -146,30 +157,33 @@ function TitleBarButton({
 }
 
 function RightPanelMorphButton({
-  chatVisible,
   workspacePanelVisible,
-  onToggleChat,
+  o8PanelVisible,
   onToggleWorkspacePanel,
+  onToggleO8Panel,
 }: {
-  chatVisible: boolean;
   workspacePanelVisible: boolean;
-  onToggleChat?: () => void;
+  o8PanelVisible: boolean;
   onToggleWorkspacePanel?: () => void;
+  onToggleO8Panel?: () => void;
 }) {
-  const panelOpen = chatVisible || workspacePanelVisible;
-  const state: 'collapsed' | 'chat' | 'review' = !panelOpen
-    ? 'collapsed'
-    : chatVisible
-      ? 'chat'
-      : 'review';
+  // 3-state cycle: collapsed → review → o8 → collapsed
+  const state: 'collapsed' | 'review' | 'o8' = o8PanelVisible
+    ? 'o8'
+    : workspacePanelVisible
+      ? 'review'
+      : 'collapsed';
+  const panelOpen = state !== 'collapsed';
   const label = state === 'collapsed'
-    ? 'Open agent chat'
-    : state === 'chat'
-      ? 'Open repo companion'
-      : 'Minimize companion panel';
+    ? 'Open review panel'
+    : state === 'review'
+      ? 'Open o8 panel'
+      : 'Close panel';
   const handleClick = state === 'collapsed'
-    ? onToggleChat
-    : onToggleWorkspacePanel;
+    ? onToggleWorkspacePanel    // collapsed → review
+    : state === 'review'
+      ? onToggleO8Panel         // review → o8
+      : onToggleO8Panel;        // o8 → collapsed (toggle off)
 
   return (
     <motion.button
@@ -206,30 +220,33 @@ function RightPanelMorphButton({
       }}
     >
       <span style={{ position: 'relative', width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-        <motion.span
-          initial={false}
-          animate={{
-            opacity: state === 'chat' ? 1 : 0,
-            scale: state === 'chat' ? 1 : 0.72,
-            rotate: state === 'chat' ? 0 : -12,
-          }}
-          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          style={{ position: 'absolute', inset: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-        >
-          <IconMessageSquare />
-        </motion.span>
+        {/* Review (delta) icon */}
         <motion.span
           initial={false}
           animate={{
             opacity: state === 'review' ? 1 : 0,
             scale: state === 'review' ? 1 : 0.72,
-            rotate: state === 'review' ? 0 : state === 'chat' ? 12 : -12,
+            rotate: state === 'review' ? 0 : -12,
           }}
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
           style={{ position: 'absolute', inset: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <IconDelta />
         </motion.span>
+        {/* O8 (columns) icon */}
+        <motion.span
+          initial={false}
+          animate={{
+            opacity: state === 'o8' ? 1 : 0,
+            scale: state === 'o8' ? 1 : 0.72,
+            rotate: state === 'o8' ? 0 : state === 'review' ? 12 : -12,
+          }}
+          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          style={{ position: 'absolute', inset: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <IconColumns />
+        </motion.span>
+        {/* Collapsed (panel) icon */}
         <motion.span
           initial={false}
           animate={{
@@ -260,6 +277,8 @@ export function TitleBar({
   onToggleChat,
   workspacePanelVisible = false,
   onToggleWorkspacePanel,
+  o8PanelVisible = false,
+  onToggleO8Panel,
   wsStatus = 'connecting',
 }: TitleBarProps) {
   const [searchExpanded, setSearchExpanded] = useState(false);
@@ -734,10 +753,10 @@ export function TitleBar({
         />
 
         <RightPanelMorphButton
-          chatVisible={chatVisible}
           workspacePanelVisible={workspacePanelVisible}
-          onToggleChat={onToggleChat}
+          o8PanelVisible={o8PanelVisible}
           onToggleWorkspacePanel={onToggleWorkspacePanel}
+          onToggleO8Panel={onToggleO8Panel}
         />
 
       </div>
