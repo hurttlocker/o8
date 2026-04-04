@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-04
 
+- `6f40b7a` refactor: left panel density + PR canvas white background + UI polish
 - `cce11bb` feat: mobile WS reconnect with exponential backoff + approval recovery
 - `ba7f905` fix: poll approvals only after mobile ws reconnect
 - `05372f8` fix: harden mobile approval reconnect recovery
