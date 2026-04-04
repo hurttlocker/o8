@@ -4068,23 +4068,17 @@ function createDesktopGlassActionStyle(variant: 'primary' | 'muted' = 'primary')
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    minHeight: 44,
-    paddingTop: 5,
-    paddingRight: 10,
-    paddingBottom: 5,
-    paddingLeft: 10,
-    borderRadius: 999,
-    border: `1px solid ${isPrimary ? 'rgba(96, 165, 250, 0.26)' : 'rgba(148, 163, 184, 0.22)'}`,
-    background: isPrimary
-      ? 'linear-gradient(180deg, rgba(255,255,255,0.68), rgba(219,234,254,0.46))'
-      : 'linear-gradient(180deg, rgba(255,255,255,0.42), rgba(226,232,240,0.24))',
-    boxShadow: isPrimary
-      ? '0 10px 24px rgba(37, 99, 235, 0.12)'
-      : '0 6px 16px rgba(15, 23, 42, 0.06)',
-    color: isPrimary ? '#1d4ed8' : '#475569',
-    backdropFilter: 'blur(14px) saturate(1.35)',
-    WebkitBackdropFilter: 'blur(14px) saturate(1.35)',
+    gap: 4,
+    minHeight: 0,
+    paddingTop: 4,
+    paddingRight: 8,
+    paddingBottom: 4,
+    paddingLeft: 8,
+    borderRadius: 6,
+    border: `1px solid ${isPrimary ? '#dbeafe' : '#e5e7eb'}`,
+    background: isPrimary ? '#eff6ff' : '#f9fafb',
+    boxShadow: 'none',
+    color: isPrimary ? '#2563eb' : '#6b7280',
     fontSize: 11,
     fontWeight: 600,
     cursor: 'pointer',
@@ -4855,15 +4849,15 @@ function PRViewer({
     : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff' }}>
       {/* Header */}
       <div style={{
         paddingTop: 16,
         paddingRight: 20,
         paddingBottom: 12,
         paddingLeft: 20,
-        borderBottom: '1px solid var(--t-divider)',
-        background: 'var(--t-panel-translucent)',
+        borderBottom: '1px solid #e5e7eb',
+        background: '#ffffff',
         flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -4883,11 +4877,11 @@ function PRViewer({
           }}>
             {stateStyle.label}
           </span>
-          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)' }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>
             #{pr.number} {pr.title}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, fontSize: 12, color: 'var(--t-text-secondary)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, fontSize: 12, color: '#6b7280' }}>
           <span>{pr.author.login}</span>
           <span>wants to merge</span>
           <span style={{
@@ -4898,7 +4892,8 @@ function PRViewer({
             paddingBottom: 1,
             paddingLeft: 5,
             borderRadius: 4,
-            background: 'var(--t-divider-subtle)',
+            background: '#f3f4f6',
+            color: '#374151',
           }}>{pr.headRefName}</span>
           <span>→</span>
           <span style={{
@@ -4909,7 +4904,8 @@ function PRViewer({
             paddingBottom: 1,
             paddingLeft: 5,
             borderRadius: 4,
-            background: 'var(--t-divider-subtle)',
+            background: '#f3f4f6',
+            color: '#374151',
           }}>{pr.baseRefName}</span>
           <span>·</span>
           <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
@@ -4960,7 +4956,7 @@ function PRViewer({
                 border: 'none',
                 fontSize: 12,
                 fontWeight: activeSection === s.id ? 600 : 400,
-                color: activeSection === s.id ? '#2563eb' : 'var(--t-text-secondary)',
+                color: activeSection === s.id ? '#2563eb' : '#6b7280',
                 background: activeSection === s.id ? 'rgba(37,99,235,0.08)' : 'transparent',
                 cursor: 'pointer',
                 fontFamily: '-apple-system, system-ui, sans-serif',
@@ -4972,7 +4968,7 @@ function PRViewer({
                 marginLeft: 6,
                 fontSize: 10,
                 fontWeight: 700,
-                color: activeSection === s.id ? '#1d4ed8' : 'var(--t-text-faint)',
+                color: activeSection === s.id ? '#1d4ed8' : '#9ca3af',
               }}>
                 {s.shortcut}
               </span>
@@ -5103,8 +5099,8 @@ function PRViewer({
           paddingRight: 20,
           paddingBottom: 6,
           paddingLeft: 20,
-          borderBottom: '1px solid var(--t-divider)',
-          background: 'var(--t-hover)',
+          borderBottom: '1px solid #e5e7eb',
+          background: '#f9fafb',
           flexShrink: 0,
         }}>
           <input
@@ -5165,7 +5161,7 @@ function PRViewer({
         )}
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: 'auto', paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20 }}>
+      <div style={{ flex: 1, overflowY: 'auto', paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20, color: '#374151' }}>
         {activeSection === 'overview' ? (
           <div>
             {/* CI Status */}
@@ -5239,7 +5235,7 @@ function PRViewer({
                 <MarkdownBody text={pr.body} />
               </div>
             ) : (
-              <div style={{ fontSize: 13, color: 'var(--t-text-muted)', fontStyle: 'italic' }}>No description provided</div>
+              <div style={{ fontSize: 13, color: '#9ca3af', fontStyle: 'italic' }}>No description provided</div>
             )}
           </div>
         ) : null}
@@ -5464,18 +5460,18 @@ function PRViewer({
                 const commentKey = `${comment.kind}:${comment.id}`;
                 return (
                 <div key={`${comment.kind}-${comment.id}`} data-pr-section="comments" data-pr-index={index} style={{
-                  marginBottom: 16,
-                  paddingBottom: 16,
+                  marginBottom: 12,
+                  paddingBottom: 12,
                   paddingLeft: 10,
                   paddingRight: 10,
                   paddingTop: 10,
-                  borderRadius: 12,
-                  borderBottom: '1px solid var(--t-divider)',
-                  background: activeItemIndex === index ? 'rgba(37,99,235,0.08)' : 'transparent',
+                  borderRadius: 8,
+                  borderBottom: '1px solid #e5e7eb',
+                  background: activeItemIndex === index ? 'rgba(37,99,235,0.04)' : 'transparent',
                   border: activeItemIndex === index ? '1px solid rgba(37,99,235,0.14)' : '1px solid transparent',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12, flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--t-text-strong)' }}>{comment.user}</span>
+                    <span style={{ fontWeight: 600, color: '#111827' }}>{comment.user}</span>
                     {comment.kind === 'review' ? (
                       <span style={{
                         fontSize: 10,
@@ -5491,7 +5487,7 @@ function PRViewer({
                         {'path' in comment ? (comment as { path: string }).path : 'review'}
                       </span>
                     ) : null}
-                    <span style={{ color: 'var(--t-text-muted)' }}>{formatAge(comment.created_at)}</span>
+                    <span style={{ color: '#9ca3af' }}>{formatAge(comment.created_at)}</span>
                     {onInjectChatContext ? (
                       <>
                         <div style={{ flex: 1 }} />
