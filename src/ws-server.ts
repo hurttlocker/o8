@@ -2852,6 +2852,15 @@ async function bootstrapWsServer() {
     );
   }
 
+  try {
+    const { reconcileStuckLanes } = await import('@/lib/lane/reconcile');
+    await reconcileStuckLanes();
+  } catch (error) {
+    console.warn(
+      `[reconcile] WS startup lane reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
   startAttachedBrowserRefreshLoop();
