@@ -4,6 +4,10 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-04-04
+
+- `b402264` feat: o8 agent safety hooks
+
 ## 2026-04-03
 
 - `eaf7ae5` feat: apply file edits on approval approve
