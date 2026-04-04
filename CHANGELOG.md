@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-04
 
+- `e55df29` feat: O8 panel
 - `a6fbeb7` refactor: decompose Canvas.tsx + fix PR ghost text + no-autoswitch tabs
 - `6f40b7a` refactor: left panel density + PR canvas white background + UI polish
 - `cce11bb` feat: mobile WS reconnect with exponential backoff + approval recovery
