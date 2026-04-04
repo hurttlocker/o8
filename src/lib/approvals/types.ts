@@ -87,7 +87,7 @@ export interface RuntimeApprovalContinuation {
 export interface LaneApprovalContinuation {
   kind: 'lane';
   laneId: string;
-  verb: 'merge' | 'create_pr';
+  verb: 'resume' | 'merge' | 'create_pr';
   commitMessage?: string;
 }
 
