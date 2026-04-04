@@ -92,7 +92,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   const toolOverrides = rawToolOverrides ?? {};
   const tabId = request.headers.get('x-tab-id')?.trim() || '';
   const bodyRepoPath = typeof rawRepoPath === 'string' ? rawRepoPath.trim() : '';
-  if (rawRepoPath !== undefined && typeof rawRepoPath !== 'string') {
+  if (rawRepoPath != null && typeof rawRepoPath !== 'string') {
     return jsonError('repoPath must be a string', 400);
   }
   const headerRepoPath = request.headers.get(LLM_REPO_PATH_HEADER)?.trim() || '';
