@@ -65,7 +65,7 @@ export const apiKeys = sqliteTable('api_keys', {
 
 export const usageLogs = sqliteTable('usage_logs', {
   id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
   /** Model used (e.g. claude-opus-4-6, gpt-5.4) */
   model: text('model').notNull(),
   /** LLM provider */
@@ -82,6 +82,8 @@ export const usageLogs = sqliteTable('usage_logs', {
   costUsd: real('cost_usd').notNull().default(0),
   /** Associated agent session key */
   sessionKey: text('session_key'),
+  /** Repository where the session ran */
+  repoPath: text('repo_path'),
   /** Agent name (for breakdown) */
   agentName: text('agent_name'),
   /** Request type: chat | completion | embedding */
