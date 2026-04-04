@@ -106,6 +106,7 @@ export async function resumeLlmApproval(
       provider: continuation.provider,
       messages: continuation.messages,
       approvedTools: nextApprovedTools,
+      repoPath: continuation.repoPath,
       toolOverrides,
     }),
     cache: 'no-store',
