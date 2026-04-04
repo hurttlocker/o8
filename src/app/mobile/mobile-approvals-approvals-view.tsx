@@ -2,6 +2,9 @@
 
 import {
   IconCheck,
+  MOBILE_BODY_TRACKING,
+  MOBILE_CARD_RADIUS,
+  MOBILE_HEADING_TRACKING,
   RISK_COLORS,
   type ApprovalItem,
   type MobilePalette,
@@ -88,23 +91,24 @@ function ApprovalCard({
         </span>
       </div>
 
-      <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.2, letterSpacing: '-0.03em', color: palette.rootText, marginBottom: 8 }}>
+      <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.2, letterSpacing: MOBILE_HEADING_TRACKING, color: palette.rootText, marginBottom: 8 }}>
         {approval.title}
       </div>
 
-      <div style={{ fontSize: 14, lineHeight: 1.65, color: palette.mutedText, marginBottom: 14 }}>
+      <div style={{ fontSize: 14, lineHeight: 1.65, letterSpacing: MOBILE_BODY_TRACKING, color: palette.mutedText, marginBottom: 14 }}>
         {approval.description || approval.summary || 'Approval required.'}
       </div>
 
       {approval.summary && approval.summary !== approval.description ? (
         <div
           style={{
-            borderRadius: 18,
+            borderRadius: MOBILE_CARD_RADIUS,
             border: `1px solid ${palette.cardBorder}`,
             background: palette.cardBackground,
             padding: '12px 14px',
             fontSize: 13,
             lineHeight: 1.6,
+            letterSpacing: MOBILE_BODY_TRACKING,
             color: palette.subduedText,
             marginBottom: 14,
           }}
@@ -124,7 +128,7 @@ function ApprovalCard({
           palette={palette}
           tone="success"
           disabled={isBusy}
-          style={{ minHeight: 48, fontSize: 14, fontWeight: 800 }}
+          style={{ minHeight: 48, fontSize: 14, fontWeight: 800, letterSpacing: MOBILE_BODY_TRACKING }}
         >
           {isApproving ? 'Approving...' : 'Approve'}
         </MobilePillButton>
@@ -133,7 +137,7 @@ function ApprovalCard({
           palette={palette}
           tone="danger"
           disabled={isBusy}
-          style={{ minHeight: 48, fontSize: 14, fontWeight: 800 }}
+          style={{ minHeight: 48, fontSize: 14, fontWeight: 800, letterSpacing: MOBILE_BODY_TRACKING }}
         >
           {isRejecting ? 'Rejecting...' : 'Reject'}
         </MobilePillButton>
@@ -201,10 +205,10 @@ export function ApprovalsView({
             }}
           >
             <IconCheck fill={palette.iconFill} style={{ opacity: 0.34 }} />
-            <div style={{ fontSize: 20, fontWeight: 800, color: palette.rootText, marginTop: 16, marginBottom: 6 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING, marginTop: 16, marginBottom: 6 }}>
               All clear
             </div>
-            <div style={{ fontSize: 13, lineHeight: 1.7, color: palette.subduedText, maxWidth: 260 }}>
+            <div style={{ fontSize: 13, lineHeight: 1.7, letterSpacing: MOBILE_BODY_TRACKING, color: palette.subduedText, maxWidth: 260 }}>
               There are no pending approvals right now. This page will refresh as new requests land.
             </div>
           </MobileGlassPanel>
