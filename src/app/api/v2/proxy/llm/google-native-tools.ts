@@ -77,6 +77,18 @@ const GEMINI_TOOL_DECLARATIONS = [{
       },
     },
     {
+      name: 'create_file',
+      description: 'Create a new file in the current project directory. Fails if the file already exists.',
+      parameters: {
+        type: 'object',
+        properties: {
+          file_path: { type: 'string', description: 'Project-relative file path to create.' },
+          content: { type: 'string', description: 'Full file contents to write.' },
+        },
+        required: ['file_path', 'content'],
+      },
+    },
+    {
       name: 'edit_file',
       description: 'Propose an exact text replacement in a project file. This creates an approval entry and does not modify the file directly.',
       parameters: {
