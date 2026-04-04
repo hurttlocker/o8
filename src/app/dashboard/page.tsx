@@ -26,6 +26,7 @@ import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
+import { O8Panel } from '@/components/desktop/O8Panel';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -122,6 +123,9 @@ const DEFAULT_LEFT_PANEL_WIDTH = 240;
 const DEFAULT_RIGHT_PANEL_WIDTH = 280;
 const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
+const DEFAULT_O8_PANEL_WIDTH = 700;
+const MIN_O8_PANEL_WIDTH = 400;
+const MAX_O8_PANEL_WIDTH = 1200;
 
 function approvalInboxFingerprint(snapshot: MobileInboxSnapshot | null | undefined): string | null {
   if (!snapshot) return null;
@@ -178,6 +182,7 @@ function DashboardInner() {
 
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
+  const [o8Width, setO8Width] = useState(DEFAULT_O8_PANEL_WIDTH);
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
   const [liveOutputCollapsed, setLiveOutputCollapsed] = useState(false);
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
@@ -197,6 +202,7 @@ function DashboardInner() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
   const [chatVisible, setChatVisible] = useState(true);
+  const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('review');
   const rightPanelMode = 'workspace' as const;
   const setRightPanelMode = (_mode: 'chat' | 'workspace') => { /* v1: right panel is always workspace */ };
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
@@ -1077,15 +1083,25 @@ function DashboardInner() {
   }, [chatVisible]);
 
   const handleToggleWorkspacePanel = useCallback(() => {
-    if (chatVisible && rightPanelMode === 'workspace') {
-      setChatVisible(false);
-      return;
-    }
+    // Open review panel (first state in the cycle)
+    setRightPanelKind('review');
     const nextView = workspaceSidePanelView === 'review' || workspaceSidePanelView === 'diff'
       ? workspaceSidePanelView
       : lastWorkspacePanelViewRef.current;
     openWorkspaceSidePanel(nextView, workspaceSidePanelRepo);
-  }, [chatVisible, openWorkspaceSidePanel, rightPanelMode, workspaceSidePanelRepo, workspaceSidePanelView]);
+  }, [openWorkspaceSidePanel, workspaceSidePanelRepo, workspaceSidePanelView]);
+
+  const handleToggleO8Panel = useCallback(() => {
+    if (rightPanelKind === 'o8' && chatVisible) {
+      // o8 → collapsed
+      setChatVisible(false);
+      setRightPanelKind('review');
+      return;
+    }
+    // review → o8
+    setRightPanelKind('o8');
+    setChatVisible(true);
+  }, [chatVisible, rightPanelKind]);
 
   useEffect(() => {
     if (rightPanelMode !== 'workspace') return;
@@ -1602,6 +1618,22 @@ function DashboardInner() {
     document.addEventListener('mouseup', onUp);
   }, [rightWidth]);
 
+  // ── O8 panel drag handle ──
+  const startO8Drag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = o8Width;
+    const onMove = (ev: MouseEvent) => {
+      setO8Width(Math.min(Math.max(startW + (startX - ev.clientX), MIN_O8_PANEL_WIDTH), MAX_O8_PANEL_WIDTH));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [o8Width]);
+
   const parsedAgents = useMemo(() => {
     try {
       return JSON.parse(agentsJson) as PaletteAgentSummary[];
@@ -2086,8 +2118,10 @@ function DashboardInner() {
         onToggleBottomPanel={toggleContextualPanelTile}
         chatVisible={false}
         onToggleChat={handleToggleWorkspacePanel}
-        workspacePanelVisible={chatVisible && rightPanelMode === 'workspace'}
+        workspacePanelVisible={chatVisible && rightPanelKind === 'review'}
         onToggleWorkspacePanel={handleToggleWorkspacePanel}
+        o8PanelVisible={chatVisible && rightPanelKind === 'o8'}
+        onToggleO8Panel={handleToggleO8Panel}
         wsStatus={wsStatus}
         renderSearch={(onClose) => (
           <UniversalSearch
@@ -2504,7 +2538,7 @@ function DashboardInner() {
             }}
           >
             <div
-              onMouseDown={startRightDrag}
+              onMouseDown={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
               onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '1'; }}
               onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '0'; }}
               style={{
@@ -2527,10 +2561,12 @@ function DashboardInner() {
               }} />
             </div>
 
-            <div
+            <motion.div
               data-mcp-scope="chat-panel"
+              initial={false}
+              animate={{ width: rightPanelKind === 'o8' ? o8Width : rightWidth }}
+              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
               style={{
-                width: rightWidth,
                 flexShrink: 0,
                 height: '100%',
                 display: 'flex',
@@ -2539,19 +2575,36 @@ function DashboardInner() {
               }}
             >
               <AnimatePresence initial={false} mode="wait">
-                <motion.div
-                  key={`${rightPanelMode}:${workspaceSidePanelView}:${workspaceSidePanelActivationKey}`}
-                  initial={{ opacity: 0, x: 12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 12 }}
-                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                  }}
-                >
+                {rightPanelKind === 'o8' ? (
+                  <motion.div
+                    key="o8-panel"
+                    initial={{ opacity: 0, x: 12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 12 }}
+                    transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <O8Panel onClose={handleToggleO8Panel} />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key={`review:${workspaceSidePanelView}:${workspaceSidePanelActivationKey}`}
+                    initial={{ opacity: 0, x: 12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 12 }}
+                    transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
                     <WorkspaceSidePanel
                       view={workspaceSidePanelView}
                       repo={workspaceSidePanelRepo}
@@ -2569,9 +2622,10 @@ function DashboardInner() {
                       onExpandReviewRail={() => setWorkspaceSidePanelCompactReview(false)}
                       onSelectCommit={handleSelectCommit}
                     />
-                </motion.div>
+                  </motion.div>
+                )}
               </AnimatePresence>
-            </div>
+            </motion.div>
           </motion.div>
         ) : null}
       </AnimatePresence>
