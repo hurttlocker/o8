@@ -76,13 +76,13 @@ function O8TabButton({ icon, active, onClick, label }: {
         height: 32,
         border: 'none',
         borderRadius: 8,
-        background: active ? 'var(--t-panel-active, rgba(0,0,0,0.06))' : 'transparent',
-        color: active ? 'var(--t-text)' : 'var(--t-text-faint)',
+        background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+        color: active ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
         cursor: 'pointer',
         transition: 'background 120ms ease, color 120ms ease',
       }}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--t-hover, rgba(0,0,0,0.04))'; }}
-      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+      onMouseEnter={(e) => { if (!active) { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; } }}
+      onMouseLeave={(e) => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.35)'; } }}
     >
       {icon}
     </button>
