@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `421cab7` feat: Apple-style collapsible tool call cards
 - `b874d03` refactor: compact chat list
 - `6e54f1e` fix: badge count matches approval view filter — hide runtime/llm-chat noise
 - `6e8c2f0` fix: filter out AI provider runtime approvals + compact approval cards
