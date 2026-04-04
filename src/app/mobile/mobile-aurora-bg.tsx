@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import type { CSSProperties } from 'react';
 
 const keyframes = `
 @keyframes auroraA {
@@ -27,7 +27,7 @@ const keyframes = `
   90% { transform: translate(-3%, 1%); }
 }`;
 
-const containerStyle: React.CSSProperties = {
+const containerStyle: CSSProperties = {
   position: 'absolute',
   top: 0,
   left: 0,
@@ -36,46 +36,47 @@ const containerStyle: React.CSSProperties = {
   zIndex: 0,
   overflow: 'hidden',
   pointerEvents: 'none',
+  background: 'radial-gradient(circle at top, rgba(37, 99, 235, 0.1), transparent 34%), radial-gradient(circle at bottom, rgba(147, 197, 253, 0.08), transparent 40%), #111111',
 };
 
-const orbBase: React.CSSProperties = {
+const orbBase: CSSProperties = {
   position: 'absolute',
   borderRadius: '50%',
-  filter: 'blur(80px)',
+  filter: 'blur(92px)',
   willChange: 'transform',
 };
 
-const orbA: React.CSSProperties = {
+const orbA: CSSProperties = {
   ...orbBase,
   width: '70vmax',
   height: '70vmax',
   top: '-15%',
   left: '-10%',
-  background: 'radial-gradient(circle, rgba(45,212,191,0.03) 0%, transparent 70%)',
+  background: 'radial-gradient(circle, rgba(37, 99, 235, 0.18) 0%, rgba(37, 99, 235, 0.02) 66%, transparent 78%)',
   animation: 'auroraA 24s ease-in-out infinite',
 };
 
-const orbB: React.CSSProperties = {
+const orbB: CSSProperties = {
   ...orbBase,
   width: '65vmax',
   height: '65vmax',
   bottom: '-20%',
   right: '-15%',
-  background: 'radial-gradient(circle, rgba(96,165,250,0.04) 0%, transparent 70%)',
+  background: 'radial-gradient(circle, rgba(147, 197, 253, 0.16) 0%, rgba(147, 197, 253, 0.03) 64%, transparent 78%)',
   animation: 'auroraB 28s ease-in-out infinite',
 };
 
-const orbC: React.CSSProperties = {
+const orbC: CSSProperties = {
   ...orbBase,
   width: '55vmax',
   height: '55vmax',
   top: '40%',
   left: '30%',
-  background: 'radial-gradient(circle, rgba(194,116,54,0.025) 0%, transparent 70%)',
+  background: 'radial-gradient(circle, rgba(239, 68, 68, 0.08) 0%, rgba(239, 68, 68, 0.01) 62%, transparent 76%)',
   animation: 'auroraC 22s ease-in-out infinite',
 };
 
-const grainStyle: React.CSSProperties = {
+const grainStyle: CSSProperties = {
   position: 'absolute',
   top: '-50%',
   left: '-50%',
@@ -85,20 +86,29 @@ const grainStyle: React.CSSProperties = {
   opacity: 0.35,
   pointerEvents: 'none',
   backgroundImage: [
-    'repeating-conic-gradient(rgba(255,255,255,0.012) 0% 25%, transparent 0% 50%)',
-    'repeating-conic-gradient(rgba(0,0,0,0.015) 0% 25%, transparent 0% 50%)',
+    'repeating-conic-gradient(rgba(255,255,255,0.01) 0% 25%, transparent 0% 50%)',
+    'repeating-conic-gradient(rgba(0,0,0,0.02) 0% 25%, transparent 0% 50%)',
   ].join(','),
   backgroundSize: '3px 3px, 4px 4px',
   animation: 'grain 8s steps(6) infinite',
 };
 
 export function MobileAuroraBg({ themeId: _themeId }: { themeId?: string } = {}) {
+  void _themeId;
   return (
     <div style={containerStyle}>
       <style dangerouslySetInnerHTML={{ __html: keyframes }} />
       <div style={orbA} />
       <div style={orbB} />
       <div style={orbC} />
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'linear-gradient(180deg, rgba(17, 17, 17, 0.08) 0%, rgba(17, 17, 17, 0.28) 38%, rgba(17, 17, 17, 0.62) 100%)',
+          zIndex: 1,
+        }}
+      />
       <div style={grainStyle} />
     </div>
   );
