@@ -2589,7 +2589,7 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <O8Panel onClose={handleToggleO8Panel} />
+                    <O8Panel onClose={handleToggleO8Panel} repoPath={globalRepoEntry?.localPath} />
                   </motion.div>
                 ) : (
                   <motion.div
