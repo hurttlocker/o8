@@ -54,25 +54,17 @@ export function SettingsView({
           paddingBottom: mobileSafeBottom(24),
         }}
       >
-        <MobileGlassPanel palette={palette} style={{ padding: 20, marginBottom: 14 }}>
-          <MobileSectionHeading
-            eyebrow="Settings"
-            title="o8 mobile"
-            subtitle="Brand-locked controls for the default model, transport status, and runtime identity."
-            palette={palette}
-          />
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 18 }}>
-            <MobileMetricChip label="Palette" value={themeId === 'light' ? 'Light' : 'Dark'} palette={palette} tone="accent" />
-            <MobileMetricChip label="Model" value={selectedModel.label} palette={palette} />
-            <MobileMetricChip
-              label="Bridge"
-              value={renderConnectionLabel(connectionStatus)}
-              palette={palette}
-              tone={connectionStatus === 'connected' ? 'success' : 'danger'}
-            />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '0 4px' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: palette.rootText, letterSpacing: MOBILE_BODY_TRACKING }}>
+              {selectedModel.label}
+            </div>
+            <div style={{ width: 6, height: 6, borderRadius: 999, backgroundColor: connectionColor, flexShrink: 0 }} />
           </div>
-        </MobileGlassPanel>
+          <div style={{ fontSize: 11, fontWeight: 600, color: palette.subduedText }}>
+            {themeId === 'light' ? 'Light' : 'Dark'}
+          </div>
+        </div>
 
         <MobileGlassPanel palette={palette} style={{ padding: 18, marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 14 }}>
