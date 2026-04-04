@@ -5,6 +5,7 @@ import {
   MOBILE_BODY_TRACKING,
   MOBILE_CARD_RADIUS,
   MOBILE_HEADING_TRACKING,
+  MOBILE_TOUCH_TARGET,
   IconGear,
   formatAboutVersion,
   mobileFontFamily,
@@ -23,6 +24,8 @@ import {
 } from './mobile-shell-primitives';
 
 interface SettingsViewProps {
+  themeId: string;
+  onThemeChange: (theme: 'light' | 'dark') => void;
   selectedModel: ModelOption;
   onModelChange: (modelId: string) => void;
   connectionStatus: 'connected' | 'disconnected';
@@ -31,6 +34,8 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({
+  themeId,
+  onThemeChange,
   selectedModel,
   onModelChange,
   connectionStatus,
@@ -58,7 +63,7 @@ export function SettingsView({
           />
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 18 }}>
-            <MobileMetricChip label="Palette" value="o8 Dark" palette={palette} tone="accent" />
+            <MobileMetricChip label="Palette" value={themeId === 'light' ? 'Light' : 'Dark'} palette={palette} tone="accent" />
             <MobileMetricChip label="Model" value={selectedModel.label} palette={palette} />
             <MobileMetricChip
               label="Bridge"
@@ -71,26 +76,44 @@ export function SettingsView({
 
         <MobileGlassPanel palette={palette} style={{ padding: 18, marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 14 }}>
-            Brand system
+            Appearance
           </div>
-          <div
-            style={{
-              borderRadius: MOBILE_CARD_RADIUS,
-              border: `1px solid ${palette.accentBorder}`,
-              background: 'rgba(37, 99, 235, 0.12)',
-              padding: 16,
-            }}
-          >
-            <div style={{ fontSize: 17, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING }}>
-              Fixed o8 Dark shell
-            </div>
-            <div style={{ fontSize: 13, lineHeight: 1.65, color: palette.subduedText, letterSpacing: MOBILE_BODY_TRACKING, marginTop: 8 }}>
-              The mobile shell stays locked to the brand palette with a graphite base, explicit blue focus, red destructive state, 14px radii, 44px touch targets, and system typography.
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
-              <MobileMetricChip label="Background" value="#111111" palette={palette} />
-              <MobileMetricChip label="Accent" value="#2563eb" palette={palette} tone="accent" />
-            </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {(['dark', 'light'] as const).map((mode) => {
+              const active = themeId === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onThemeChange(mode)}
+                  style={{
+                    flex: 1,
+                    minHeight: MOBILE_TOUCH_TARGET,
+                    borderRadius: MOBILE_CARD_RADIUS,
+                    border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
+                    background: active ? palette.accentSoft : palette.panelBackground,
+                    color: active ? palette.accent : palette.rootText,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    letterSpacing: MOBILE_BODY_TRACKING,
+                    fontFamily: mobileFontFamily(),
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 256 256" fill={active ? palette.accent : palette.iconFill}>
+                    <path d={mode === 'dark'
+                      ? 'M233.54,142.23a8,8,0,0,0-8-2,88.08,88.08,0,0,1-109.8-109.8,8,8,0,0,0-10-10,104.84,104.84,0,0,0-52.91,37A104,104,0,0,0,135.21,232.43,104.84,104.84,0,0,0,183,218.14a104.84,104.84,0,0,0,37-52.91A8,8,0,0,0,233.54,142.23Z'
+                      : 'M120,40V32a8,8,0,0,1,16,0v8a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-8-8A8,8,0,0,0,50.34,61.66Zm0,116.68-8,8a8,8,0,0,0,11.32,11.32l8-8a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l8-8a8,8,0,0,0-11.32-11.32l-8,8A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l8,8a8,8,0,0,0,11.32-11.32ZM40,120H32a8,8,0,0,0,0,16h8a8,8,0,0,0,0-16Zm88,88a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-8A8,8,0,0,0,128,208Zm96-88h-8a8,8,0,0,0,0,16h8a8,8,0,0,0,0-16Z'
+                    } />
+                  </svg>
+                  {mode === 'dark' ? 'Dark' : 'Light'}
+                </button>
+              );
+            })}
           </div>
         </MobileGlassPanel>
 
