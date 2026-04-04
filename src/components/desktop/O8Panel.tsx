@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { LIGHT_CANVAS_VARS } from './canvas-utils';
+// O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
 // ── Phosphor Icons (raw SVG, per CLAUDE.md) ──
 
@@ -149,7 +149,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
   const totalDeletions = files.reduce((sum, f) => sum + (f.deletions || 0), 0);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', ...LIGHT_CANVAS_VARS }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Filter bar */}
       <div style={{
         display: 'flex',
@@ -176,7 +176,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
               borderRadius: 6,
               border: '1px solid var(--t-divider)',
               background: 'transparent',
-              color: 'var(--t-text)',
+              color: 'rgba(255,255,255,0.85)',
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
@@ -200,7 +200,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
                 padding: 4,
                 borderRadius: 10,
                 border: '1px solid var(--t-divider)',
-                background: 'var(--t-panel, #fff)',
+                background: 'var(--t-panel, #1e2028)',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
                 zIndex: 100,
               }}>
@@ -218,7 +218,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
                       border: 'none',
                       borderRadius: 6,
                       background: filter === f ? 'var(--t-accent-soft, rgba(37,99,235,0.08))' : 'transparent',
-                      color: 'var(--t-text)',
+                      color: 'rgba(255,255,255,0.85)',
                       fontSize: 12,
                       fontWeight: 500,
                       cursor: 'pointer',
@@ -301,7 +301,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
                     paddingLeft: 12,
                     border: 'none',
                     background: isExpanded ? 'var(--t-accent-soft, rgba(37,99,235,0.06))' : 'transparent',
-                    color: 'var(--t-text)',
+                    color: 'rgba(255,255,255,0.85)',
                     fontSize: 12,
                     fontFamily: '"SF Mono", ui-monospace, monospace',
                     cursor: 'pointer',
@@ -319,7 +319,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
-                    color: file.status === 'added' ? '#22c55e' : file.status === 'deleted' ? '#ef4444' : 'var(--t-text)',
+                    color: file.status === 'added' ? '#22c55e' : file.status === 'deleted' ? '#ef4444' : 'rgba(255,255,255,0.85)',
                   }}>
                     {file.path}
                   </span>
