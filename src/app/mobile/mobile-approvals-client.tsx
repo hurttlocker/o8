@@ -70,11 +70,6 @@ export function MobileApprovalsClient({
     [selectedModelId],
   );
 
-  useEffect(() => {
-    if (themeId !== 'dark') {
-      setTheme('dark');
-    }
-  }, [setTheme, themeId]);
 
   const refresh = useCallback(async () => {
     try {
