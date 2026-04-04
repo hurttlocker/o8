@@ -6,6 +6,18 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-04
 
+- `cce11bb` feat: mobile WS reconnect with exponential backoff + approval recovery
+- `ba7f905` fix: poll approvals only after mobile ws reconnect
+- `05372f8` fix: harden mobile approval reconnect recovery
+- `f656a6e` feat: startup lane reconciliation
+- `46a3316` feat: startup lane reconciliation
+- `7dad0a6` fix: reconcile stuck lanes on startup
+- `0b84a77` feat: GitHub intake pipeline — issue assignment to plan approval
+- `8645e04` fix: persist runtime session costs to usage logs
+- `5ff257a` auto-commit: agent work before review
+- `35f8d44` fix: align persisted runtime agent labels
+- `62a62f7` fix: backfill usage log billing periods during migration
+- `65272fa` feat: persist runtime session costs to usage logs
 - `9122b6e` fix: allow null repoPath in proxy request — client sends null when no repo selected
 - `1ab5e33` fix: Security hardening
 - `b402264` feat: o8 agent safety hooks
