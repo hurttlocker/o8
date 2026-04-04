@@ -119,52 +119,6 @@ function ThinkingBlock({
   );
 }
 
-function formatToolValue(value: unknown) {
-  if (value === undefined || value === null) return '';
-  if (typeof value === 'string') return value;
-
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function getToolStatusStyle(status: string, palette: MobilePalette) {
-  if (status === 'done') {
-    return {
-      label: 'Done',
-      background: palette.successSoft,
-      border: palette.successBorder,
-      color: palette.success,
-    };
-  }
-
-  if (status === 'blocked' || status === 'error') {
-    return {
-      label: status === 'blocked' ? 'Blocked' : 'Error',
-      background: palette.dangerSoft,
-      border: palette.dangerBorder,
-      color: palette.danger,
-    };
-  }
-
-  if (status === 'calling') {
-    return {
-      label: 'Calling',
-      background: palette.accentSoft,
-      border: palette.accentBorder,
-      color: palette.accent,
-    };
-  }
-
-  return {
-    label: 'Running',
-    background: palette.warningSoft,
-    border: palette.accentBorder,
-    color: palette.rootText,
-  };
-}
 
 function ToolCallCard({
   toolCall,
@@ -173,156 +127,80 @@ function ToolCallCard({
   toolCall: MobileChatToolCall;
   palette: MobilePalette;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const status = toolCall.result?.status ?? toolCall.status ?? (toolCall.result ? 'done' : 'running');
-  const statusStyle = getToolStatusStyle(status, palette);
-  const argumentsText = toolCall.arguments && Object.keys(toolCall.arguments).length > 0
-    ? formatToolValue(toolCall.arguments)
-    : '';
+  const isDone = status === 'done';
+  const isError = status === 'error' || status === 'blocked';
+  const statusColor = isError ? palette.danger : isDone ? palette.success : palette.accent;
   const outputText = toolCall.result?.output?.trim() ?? '';
-  const diffText = toolCall.result?.diff !== undefined ? formatToolValue(toolCall.result.diff) : '';
+  const lineCount = outputText ? outputText.split('\n').length : 0;
+  const displayLabel = toolCall.filePath
+    ? toolCall.filePath.split('/').pop() ?? toolCall.toolName
+    : toolCall.toolName.replace(/_/g, ' ');
 
   return (
-    <div
-      style={mobileCardStyle(palette, {
-        marginBottom: 10,
-        padding: 12,
-        borderRadius: 18,
-        background: palette.panelElevated,
-      })}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: palette.subduedText, marginBottom: 4 }}>
-            Tool
-          </div>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              color: palette.rootText,
-              fontFamily: '"SF Mono", "SFMono-Regular", ui-monospace, monospace',
-              wordBreak: 'break-word',
-            }}
-          >
+    <div style={{ marginBottom: 8 }}>
+      <button
+        type="button"
+        onClick={() => { if (outputText) setExpanded((v) => !v); }}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 12px',
+          borderRadius: 10,
+          border: `1px solid ${palette.cardBorder}`,
+          background: palette.panelElevated,
+          cursor: outputText ? 'pointer' : 'default',
+          fontFamily: '"SF Mono", Menlo, monospace',
+          fontSize: 12,
+          color: palette.rootText,
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ width: 6, height: 6, borderRadius: 999, backgroundColor: statusColor, flexShrink: 0 }} />
+        <span style={{ fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {displayLabel}
+        </span>
+        {toolCall.filePath ? (
+          <span style={{ fontSize: 10, color: palette.subduedText, flexShrink: 0 }}>
             {toolCall.toolName}
-          </div>
-        </div>
-        <div
+          </span>
+        ) : null}
+        {outputText ? (
+          <>
+            <span style={{ fontSize: 10, color: palette.subduedText }}>{lineCount} lines</span>
+            <IconCaretDown fill={palette.subduedText} style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.2s ease', flexShrink: 0 } as React.CSSProperties} />
+          </>
+        ) : (
+          <span style={{ fontSize: 10, color: statusColor, fontWeight: 700 }}>
+            {isDone ? 'done' : isError ? 'error' : 'running...'}
+          </span>
+        )}
+      </button>
+      {expanded && outputText ? (
+        <pre
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: 28,
-            padding: '0 10px',
-            borderRadius: 999,
-            border: `1px solid ${statusStyle.border}`,
-            background: statusStyle.background,
-            color: statusStyle.color,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: 0.02,
-          }}
-        >
-          {statusStyle.label}
-        </div>
-      </div>
-
-      {toolCall.filePath ? (
-        <div
-          style={{
-            marginTop: 10,
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '6px 10px',
-            borderRadius: 14,
+            margin: 0,
+            marginTop: 4,
+            padding: '10px 12px',
+            borderRadius: 10,
             border: `1px solid ${palette.cardBorder}`,
-            background: palette.cardBackground,
-            color: palette.mutedText,
+            background: palette.isDark ? '#1e1e2e' : '#f8f9fc',
+            color: palette.isDark ? '#dbe4f0' : '#24292f',
             fontSize: 12,
-            fontWeight: 600,
-            wordBreak: 'break-all',
+            lineHeight: 1.55,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontFamily: '"SF Mono", Menlo, monospace',
+            overflowX: 'auto',
+            maxHeight: 280,
+            overflowY: 'auto',
           }}
         >
-          {toolCall.filePath}
-        </div>
-      ) : null}
-
-      {argumentsText ? (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: palette.subduedText, marginBottom: 6 }}>
-            Arguments
-          </div>
-          <pre
-            style={{
-              margin: 0,
-              padding: '10px 12px',
-              borderRadius: 14,
-              border: `1px solid ${palette.cardBorder}`,
-              background: palette.cardBackground,
-              color: palette.mutedText,
-              fontSize: 12,
-              lineHeight: 1.55,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: '"SF Mono", "SFMono-Regular", ui-monospace, monospace',
-              overflowX: 'auto',
-            }}
-          >
-            {argumentsText}
-          </pre>
-        </div>
-      ) : null}
-
-      {outputText ? (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: palette.subduedText, marginBottom: 6 }}>
-            Output
-          </div>
-          <pre
-            style={{
-              margin: 0,
-              padding: '10px 12px',
-              borderRadius: 14,
-              border: `1px solid ${palette.cardBorder}`,
-              background: palette.cardBackground,
-              color: palette.rootText,
-              fontSize: 12,
-              lineHeight: 1.55,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: '"SF Mono", "SFMono-Regular", ui-monospace, monospace',
-              overflowX: 'auto',
-            }}
-          >
-            {outputText}
-          </pre>
-        </div>
-      ) : null}
-
-      {diffText ? (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: palette.subduedText, marginBottom: 6 }}>
-            Diff
-          </div>
-          <pre
-            style={{
-              margin: 0,
-              padding: '10px 12px',
-              borderRadius: 14,
-              border: `1px solid ${palette.cardBorder}`,
-              background: palette.cardBackground,
-              color: palette.rootText,
-              fontSize: 12,
-              lineHeight: 1.55,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: '"SF Mono", "SFMono-Regular", ui-monospace, monospace',
-              overflowX: 'auto',
-            }}
-          >
-            {diffText}
-          </pre>
-        </div>
+          {outputText}
+        </pre>
       ) : null}
     </div>
   );
