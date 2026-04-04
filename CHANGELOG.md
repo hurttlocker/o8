@@ -6,6 +6,10 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `eaf7ae5` feat: apply file edits on approval approve
+- `53c82c1` feat: add github tool for AI provider — gh CLI access
+- `88140fa` feat: expand shell allowlist — npm, npx, node, cargo
+- `8bcba20` feat: add create_file tool for AI provider
 - `e435d4d` fix: trim model list to 3
 - `b673d36` feat: syntax-highlighted tool output — expand shows real code colors
 - `421cab7` feat: Apple-style collapsible tool call cards
