@@ -40,10 +40,10 @@ function parseDbTimestamp(value: string | null | undefined): number {
 }
 
 function runtimeSurfaceFromRow(row: typeof usageLogs.$inferSelect): AnalyticsSurfaceKey | null {
-  if (row.agentName === 'codex' || row.sessionKey?.startsWith('codex')) {
+  if (row.agentName === 'codex' || row.agentName === 'Codex CLI' || row.sessionKey?.startsWith('codex')) {
     return 'Codex CLI';
   }
-  if (row.agentName === 'claude-code' || row.sessionKey?.startsWith('claude-code:')) {
+  if (row.agentName === 'claude-code' || row.agentName === 'Claude Code' || row.sessionKey?.startsWith('claude-code:')) {
     return 'Claude Code';
   }
   return null;
