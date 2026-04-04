@@ -166,7 +166,7 @@ export class WorktreeManager {
     };
 
     await this.bootstrapEnvFiles(worktreePath, opts);
-
+    await this.injectSafetyHooks(worktreePath);
 
     // Run project setup unless skipped
     if (!opts.skipSetup) {
@@ -338,6 +338,62 @@ export class WorktreeManager {
     }
 
     return null;
+  }
+
+  // ── Safety Hook Injection ──
+
+  /**
+   * Inject o8 safety hooks into a worktree's .claude/settings.json.
+   * Ensures every dispatched agent gets:
+   *  - PreToolUse: destructive command blocker
+   *  - PostToolUse: typecheck after edits + completion gate
+   *
+   * Hooks resolve relative to the o8 install (this.repoRoot) so they work
+   * regardless of where the user's repo lives.
+   */
+  private async injectSafetyHooks(worktreePath: string): Promise<void> {
+    try {
+      const hooksDir = path.join(worktreePath, '.claude');
+      await mkdir(hooksDir, { recursive: true });
+
+      const o8Root = this.repoRoot;
+      const settings = {
+        hooks: {
+          PreToolUse: [{
+            matcher: '*',
+            hooks: [{
+              type: 'command',
+              command: `node "${path.join(o8Root, 'dist/hooks/claude-code-pretool-hook.js')}"`,
+              timeout: 10,
+            }],
+          }],
+          PostToolUse: [
+            {
+              matcher: 'Write|Edit|MultiEdit',
+              hooks: [{
+                type: 'command',
+                command: `node "${path.join(o8Root, 'dist/hooks/post-edit-typecheck.js')}"`,
+                timeout: 35,
+              }],
+            },
+            {
+              matcher: 'Stop|TaskComplete',
+              hooks: [{
+                type: 'command',
+                command: `node "${path.join(o8Root, 'dist/hooks/completion-gate.js')}"`,
+                timeout: 50,
+              }],
+            },
+          ],
+        },
+      };
+
+      const settingsPath = path.join(hooksDir, 'settings.json');
+      await writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+    } catch {
+      // Best-effort — don't block worktree creation if hook injection fails
+      console.log('[worktree] hook injection failed (non-fatal)');
+    }
   }
 
   // ── Conflict Detection ──
