@@ -1,355 +1,31 @@
 export const dynamic = 'force-dynamic';
 
-/**
- * POST /api/v2/proxy/llm
- *
- * Token relay — proxies LLM API calls, meters tokens, enforces budgets.
- * This is the revenue surface for Cortex IDE.
- *
- * Streaming response via SSE (Server-Sent Events):
- *   data: {"type":"content","text":"Hello"}
- *   data: {"type":"usage","inputTokens":12,"outputTokens":45,"costUsd":0.0023}
- *   data: [DONE]
- *
- * Issue: https://github.com/hurttlocker/cortex-ide/issues/232
- */
-
 import { NextRequest } from 'next/server';
 import { createApproval } from '@/lib/approvals/store';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt, buildUnscopedSystemPrompt } from '@/lib/llm/context';
-import { parseInlineMarkdownDataImages } from '@/lib/llm/inline-images';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
 import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
 import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
-import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, type ToolResult } from '@/lib/llm/tools';
-
-// ── Pricing (per 1M tokens) ──
-
-const PRICING: Record<string, { input: number; output: number }> = {
-  // Google
-  'gemini-3.1-pro-preview': { input: 1.25, output: 10 },
-  'gemini-3-pro-preview':   { input: 1.25, output: 10 },
-  'gemini-3-flash-preview': { input: 0.15, output: 0.60 },
-  'gemini-2.5-pro':         { input: 1.25, output: 10 },
-  'gemini-2.5-flash':       { input: 0.15, output: 0.60 },
-  'gemini-2.5-flash-lite':  { input: 0.04, output: 0.15 },
-  // Anthropic
-  'claude-opus-4-6':   { input: 15,   output: 75 },
-  'claude-sonnet-4-5': { input: 3,    output: 15 },
-  'claude-haiku-4-5':  { input: 0.80, output: 4 },
-  // OpenAI
-  'gpt-5.4':           { input: 2.50, output: 10 },
-  'gpt-4o':            { input: 2.50, output: 10 },
-  'o3':                { input: 10,   output: 40 },
-};
-
-function computeCost(model: string, inputTokens: number, outputTokens: number): number {
-  const price = PRICING[model];
-  if (!price) return 0;
-  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
-}
-
-// ── Provider configs ──
-
-type Provider = 'anthropic' | 'openai' | 'google';
-
-interface ProviderConfig {
-  url: string;
-  envKey: string;
-  buildHeaders: (apiKey: string) => Record<string, string>;
-  buildBody: (model: string, messages: Message[]) => Record<string, unknown>;
-  parseStream: (line: string) => StreamEvent | null;
-}
-
-type StreamEvent =
-  | { type: 'content'; text: string }
-  | { type: 'usage'; inputTokens: number; outputTokens: number }
-  | { type: 'done' }
-  | { type: 'tool_call_start'; toolName: string; toolId: string }
-  | { type: 'tool_call_delta'; json: string }
-  | { type: 'tool_call_end' }
-  | { type: 'tool_call'; toolName: string; toolId: string; args: Record<string, unknown> }
-  | { type: 'thinking'; text: string }
-  | { type: 'thinking_done' };
-
-interface Message {
-  role: string;
-  content: string;
-}
-
-const PROVIDERS: Record<Provider, ProviderConfig> = {
-  anthropic: {
-    url: 'https://api.anthropic.com/v1/messages',
-    envKey: 'ANTHROPIC_API_KEY',
-    buildHeaders: (apiKey) => ({
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    }),
-    buildBody: (model, messages) => {
-      // Detect if model supports extended thinking
-      const isThinkingModel = /opus|sonnet-4/.test(model);
-      const maxTokens = isThinkingModel ? 16384 : 4096;
-
-      return {
-        model,
-        max_tokens: maxTokens,
-        stream: true,
-        // Extended thinking — Anthropic requires explicit opt-in
-        ...(isThinkingModel ? {
-          thinking: { type: 'enabled', budget_tokens: 10000 },
-        } : {}),
-        messages: messages
-          .filter(m => m.role !== 'system')
-          .map(m => {
-            const parsedContent = parseInlineMarkdownDataImages(m.content);
-            if (parsedContent.hasImages) {
-              const contentParts: Record<string, unknown>[] = parsedContent.parts.map((part) => (
-                part.type === 'text'
-                  ? { type: 'text', text: part.text }
-                  : {
-                      type: 'image',
-                      source: {
-                        type: 'base64',
-                        media_type: part.image.mimeType,
-                        data: part.image.base64Data,
-                      },
-                    }
-              ));
-              return { role: m.role, content: contentParts };
-            }
-            return { role: m.role, content: m.content };
-          }),
-        ...(messages.find(m => m.role === 'system')
-          ? { system: messages.find(m => m.role === 'system')!.content }
-          : {}),
-        tools: toolsForAnthropic(),
-      };
-    },
-    parseStream: (line) => {
-      if (!line.startsWith('data: ')) return null;
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') return { type: 'done' };
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-          return { type: 'content', text: parsed.delta.text };
-        }
-        // Extended thinking detection
-        if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'thinking') {
-          return { type: 'thinking', text: '' };
-        }
-        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'thinking_delta') {
-          return { type: 'thinking', text: parsed.delta.thinking ?? '' };
-        }
-        // Tool use detection
-        if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
-          return { type: 'tool_call_start', toolName: parsed.content_block.name, toolId: parsed.content_block.id };
-        }
-        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'input_json_delta') {
-          return { type: 'tool_call_delta', json: parsed.delta.partial_json };
-        }
-        if (parsed.type === 'content_block_stop') {
-          return { type: 'tool_call_end' };
-        }
-        if (parsed.type === 'message_delta' && parsed.usage) {
-          return { type: 'usage', inputTokens: parsed.usage.input_tokens ?? 0, outputTokens: parsed.usage.output_tokens ?? 0 };
-        }
-        if (parsed.type === 'message_start' && parsed.message?.usage) {
-          return { type: 'usage', inputTokens: parsed.message.usage.input_tokens ?? 0, outputTokens: 0 };
-        }
-      } catch { /* ignore */ }
-      return null;
-    },
-  },
-
-  openai: {
-    url: 'https://api.openai.com/v1/chat/completions',
-    envKey: 'OPENAI_API_KEY',
-    buildHeaders: (apiKey) => ({
-      'Authorization': `Bearer ${apiKey}`,
-      'content-type': 'application/json',
-    }),
-    buildBody: (model, messages) => {
-      // Detect reasoning models (o1, o3, o3-mini)
-      const isReasoningModel = /^o[1-9]|^o3/.test(model);
-
-      return {
-      model,
-      stream: true,
-      stream_options: { include_usage: true },
-      // Reasoning models: set effort level
-      ...(isReasoningModel ? {
-        reasoning_effort: 'medium',
-      } : {}),
-      messages: messages.map(m => {
-        const parsedContent = parseInlineMarkdownDataImages(m.content);
-        if (parsedContent.hasImages) {
-          return {
-            role: m.role,
-            content: parsedContent.parts.map((part) => (
-              part.type === 'text'
-                ? { type: 'text', text: part.text }
-                : { type: 'image_url', image_url: { url: part.image.dataUri } }
-            )),
-          };
-        }
-        return m;
-      }),
-      tools: toolsForOpenAI(),
-    };
-    },
-    parseStream: (line) => {
-      if (!line.startsWith('data: ')) return null;
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') return { type: 'done' };
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed.choices?.[0]?.delta?.content) {
-          return { type: 'content', text: parsed.choices[0].delta.content };
-        }
-        // OpenAI reasoning content (o1, o3 models)
-        if (parsed.choices?.[0]?.delta?.reasoning_content) {
-          return { type: 'thinking', text: parsed.choices[0].delta.reasoning_content };
-        }
-        // OpenAI tool calls
-        const tc = parsed.choices?.[0]?.delta?.tool_calls?.[0];
-        if (tc?.function?.name) {
-          return { type: 'tool_call_start', toolName: tc.function.name, toolId: tc.id || '' };
-        }
-        if (tc?.function?.arguments) {
-          return { type: 'tool_call_delta', json: tc.function.arguments };
-        }
-        if (parsed.choices?.[0]?.finish_reason === 'tool_calls') {
-          return { type: 'tool_call_end' };
-        }
-        if (parsed.usage) {
-          return { type: 'usage', inputTokens: parsed.usage.prompt_tokens ?? 0, outputTokens: parsed.usage.completion_tokens ?? 0 };
-        }
-      } catch { /* ignore */ }
-      return null;
-    },
-  },
-
-  google: {
-    url: 'https://generativelanguage.googleapis.com/v1beta/models',
-    envKey: 'GOOGLE_AI_API_KEY',
-    buildHeaders: () => ({
-      'content-type': 'application/json',
-    }),
-    buildBody: (model, messages) => ({
-      contents: messages
-        .filter(m => m.role !== 'system')
-        .map(m => {
-          const parsedContent = parseInlineMarkdownDataImages(m.content);
-          const parts: Record<string, unknown>[] = parsedContent.hasImages
-            ? parsedContent.parts.map((part) => (
-                part.type === 'text'
-                  ? { text: part.text }
-                  : { inlineData: { mimeType: part.image.mimeType, data: part.image.base64Data } }
-              ))
-            : [{ text: m.content }];
-          return { role: m.role === 'assistant' ? 'model' : 'user', parts };
-        }),
-      ...(messages.find(m => m.role === 'system')
-        ? { systemInstruction: { parts: [{ text: messages.find(m => m.role === 'system')!.content }] } }
-        : {}),
-      // Enable thinking for Flash and Pro models
-      generationConfig: {
-        thinkingConfig: { includeThoughts: true },
-      },
-      tools: toolsForGoogle(),
-    }),
-    parseStream: (line) => {
-      // Google SSE: "data: {...}" lines
-      let raw = line.trim();
-      if (!raw) return null;
-      if (raw.startsWith('data: ')) raw = raw.slice(6).trim();
-      if (!raw || raw === '[' || raw === ']' || raw === ',') return null;
-      try {
-        const parsed = JSON.parse(raw.replace(/^,/, ''));
-        const parts = parsed.candidates?.[0]?.content?.parts;
-        if (parts) {
-          let thinkingText = '';
-          let contentText = '';
-          let imageText = '';
-          let toolCall: { name: string; args: Record<string, unknown> } | null = null;
-
-          for (const part of parts) {
-            // Google thinking/thought parts
-            if (part.thought === true && part.text) {
-              thinkingText += part.text;
-              continue;
-            }
-            if (part.functionCall) {
-              toolCall = {
-                name: part.functionCall.name,
-                args: part.functionCall.args ?? {},
-              };
-              continue;
-            }
-            if (part.text) {
-              contentText += part.text;
-              continue;
-            }
-            if (part.inlineData) {
-              // Gemini returns images as base64 inlineData
-              const mime = part.inlineData.mimeType || 'image/png';
-              const b64 = part.inlineData.data;
-              imageText += `\n![Generated Image](data:${mime};base64,${b64})\n`;
-            }
-          }
-
-          if (contentText || imageText) {
-            return { type: 'content', text: `${contentText}${imageText}` };
-          }
-          if (toolCall) {
-            return {
-              type: 'tool_call',
-              toolName: toolCall.name,
-              toolId: toolCall.name + '-' + Date.now(),
-              args: toolCall.args,
-            };
-          }
-          if (thinkingText) {
-            return { type: 'thinking', text: thinkingText };
-          }
-        }
-        if (parsed.usageMetadata) {
-          return {
-            type: 'usage',
-            inputTokens: parsed.usageMetadata.promptTokenCount ?? 0,
-            outputTokens: parsed.usageMetadata.candidatesTokenCount ?? 0,
-          };
-        }
-      } catch { /* ignore */ }
-      return null;
-    },
-  },
-};
-
-// ── Google model fallback chain ──
-// When an overloaded Google model returns 503/429 or times out, retry with a stable fallback.
-
-const GOOGLE_FALLBACKS: Record<string, string> = {
-  // Fallbacks disabled — testing 3.1 / 3 directly
-  // 'gemini-3.1-pro-preview': 'gemini-2.5-pro',
-  // 'gemini-3-pro-preview': 'gemini-2.5-pro',
-  // 'gemini-3-flash-preview': 'gemini-2.5-flash',
-  // 'gemini-3.1-flash-lite-preview': 'gemini-2.5-flash-lite',
-};
+import { executeTool, type ToolResult } from '@/lib/llm/tools';
+import {
+  computeCost,
+  isSupportedProvider,
+  PROVIDERS,
+  resolveApiKey,
+  type Message,
+} from './provider-config';
+import { createGoogleToolResponseStream } from './google-native-tools';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
 
-// ── Resolve API key ──
-
-function resolveApiKey(provider: Provider): string | null {
-  // For v1: use server-side env vars (BYOK later via api_keys table)
-  const config = PROVIDERS[provider];
-  return process.env[config.envKey] ?? null;
+function jsonError(message: string, status: number) {
+  return new Response(
+    JSON.stringify({ error: message }),
+    { status, headers: { 'Content-Type': 'application/json' } },
+  );
 }
 
 function approvalTitleForTool(toolName: string) {
@@ -363,25 +39,52 @@ function approvalTitleForTool(toolName: string) {
   return `Execute ${toolName}`;
 }
 
-// ── Handler ──
+async function fetchWithTimeout(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers,
+      body,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthContext | null) => {
   const body = await request.json().catch(() => null);
   if (!body?.model || !body?.provider || !Array.isArray(body?.messages)) {
-    return new Response(
-      JSON.stringify({ error: 'model, provider, and messages are required' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    );
+    return jsonError('model, provider, and messages are required', 400);
   }
 
-  const { model, provider, messages: rawMessages, approvedTools: approvedToolsList, disableTools, toolOverrides: rawToolOverrides } = body as {
+  const {
+    model,
+    provider,
+    messages: rawMessages,
+    approvedTools: approvedToolsList,
+    disableTools,
+    toolOverrides: rawToolOverrides,
+  } = body as {
     model: string;
-    provider: Provider;
+    provider: string;
     messages: Message[];
     approvedTools?: string[];
     disableTools?: boolean;
     toolOverrides?: Record<string, Record<string, unknown>>;
   };
+
+  if (!isSupportedProvider(provider)) {
+    return jsonError(`Unsupported provider: ${provider}`, 400);
+  }
+
   const approvedTools = new Set(approvedToolsList ?? []);
   const toolOverrides = rawToolOverrides ?? {};
   const tabId = request.headers.get('x-tab-id')?.trim() || '';
@@ -395,24 +98,21 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   const userMessageCount = nonSystemMessages.filter((message) => message.role === 'user').length;
   const isFreshChatTurn = assistantMessageCount === 0 && userMessageCount <= 1;
 
-  // Inject workspace context as system prompt (Phase 1)
   let systemPrompt = scopedRepoRoot
     ? buildSystemPrompt(getWorkspaceContext(scopedRepoRoot))
     : buildUnscopedSystemPrompt();
 
-  // Phase A: Cortex memory recall — search for relevant facts based on user's message
   let recallInfo: { factCount: number; queryMs: number } | null = null;
-  const lastUserMsg = [...nonSystemMessages].reverse().find(m => m.role === 'user');
+  const lastUserMsg = [...nonSystemMessages].reverse().find((message) => message.role === 'user');
   if (lastUserMsg?.content) {
     try {
       const recall = await recallMemories(lastUserMsg.content);
       if (recall && recall.factCount > 0) {
         systemPrompt += `\n\n${recall.text}`;
         recallInfo = { factCount: recall.factCount, queryMs: recall.queryMs };
-        console.log(`[memory-recall] ${recall.factCount} facts recalled in ${recall.queryMs}ms`);
       }
-    } catch (err) {
-      console.error('[memory-recall] Failed:', err);
+    } catch (error) {
+      console.error('[memory-recall] Failed:', error);
     }
   }
 
@@ -436,474 +136,375 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
   const messages: Message[] = [{ role: 'system', content: systemPrompt }, ...nonSystemMessages];
 
-  if (!PROVIDERS[provider]) {
-    return new Response(
-      JSON.stringify({ error: `Unsupported provider: ${provider}` }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    );
-  }
-
-  // Check budget for authenticated users on managed keys
   if (auth?.user && auth.user.plan !== 'free') {
     const spent = getCurrentPeriodCost(auth.user.id);
     const budget = auth.user.tokenBudgetUsd;
     if (budget != null && spent >= budget) {
-      return new Response(
-        JSON.stringify({ error: 'Monthly token budget exceeded. Upgrade your plan or add a BYOK key.' }),
-        { status: 402, headers: { 'Content-Type': 'application/json' } },
-      );
+      return jsonError('Monthly token budget exceeded. Upgrade your plan or add a BYOK key.', 402);
     }
   }
 
   const apiKey = resolveApiKey(provider);
   if (!apiKey) {
-    return new Response(
-      JSON.stringify({ error: `No API key configured for ${provider}. Set ${PROVIDERS[provider].envKey} in your environment.` }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    );
+    const envKey = provider === 'google' ? 'GOOGLE_AI_API_KEY' : PROVIDERS[provider].envKey;
+    return jsonError(`No API key configured for ${provider}. Set ${envKey} in your environment.`, 400);
+  }
+
+  if (provider === 'google') {
+    return createGoogleToolResponseStream({
+      apiKey,
+      auth,
+      disableTools,
+      lastUserContent: lastUserMsg?.content,
+      messages,
+      model,
+      recallInfo,
+      scopedRepoRoot,
+      tabId,
+    });
   }
 
   const config = PROVIDERS[provider];
-  console.log(`[llm-proxy] ${provider}/${model} — ${messages.length} messages`);
-
-  // Build the upstream request
-  const buildGoogleUrl = (m: string) => `${config.url}/${m}:streamGenerateContent?alt=sse&key=${apiKey}`;
-
-  let url = config.url;
-  if (provider === 'google') {
-    url = buildGoogleUrl(model);
-  }
-
   const headers = config.buildHeaders(apiKey);
   const upstreamBody = config.buildBody(model, messages) as Record<string, unknown>;
   if (disableTools) {
     delete upstreamBody.tools;
   }
 
-  // ── Fetch with timeout + Google model fallback ──
-  // Wraps fetch in an AbortController. On 503/429/timeout for Google models,
-  // retries once with the fallback model from GOOGLE_FALLBACKS.
-
-  async function fetchWithTimeout(
-    fetchUrl: string,
-    fetchBody: string,
-  ): Promise<{ response: globalThis.Response; fallbackUsed: { originalModel: string; fallbackModel: string; reason: string } | null }> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-
-    try {
-      const res = await fetch(fetchUrl, {
-        method: 'POST',
-        headers,
-        body: fetchBody,
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-
-      // Check for retryable errors on Google models
-      if (!res.ok && provider === 'google' && (res.status === 503 || res.status === 429)) {
-        const fallbackModel = GOOGLE_FALLBACKS[model];
-        if (fallbackModel) {
-          const reason = `Model overloaded (${res.status})`;
-          console.log(`[llm-proxy] Fallback: ${model} → ${fallbackModel} (${reason})`);
-          const fallbackUrl = buildGoogleUrl(fallbackModel);
-          // Rebuild body with fallback model (contents stay the same, model is in URL for Google)
-          const fallbackRes = await fetch(fallbackUrl, {
-            method: 'POST',
-            headers,
-            body: fetchBody,
-          });
-          return { response: fallbackRes, fallbackUsed: { originalModel: model, fallbackModel, reason } };
-        }
-      }
-
-      return { response: res, fallbackUsed: null };
-    } catch (err: unknown) {
-      clearTimeout(timer);
-
-      // Timeout or network error — try fallback for Google models
-      if (provider === 'google') {
-        const isTimeout = err instanceof DOMException && err.name === 'AbortError';
-        const fallbackModel = GOOGLE_FALLBACKS[model];
-        if (fallbackModel) {
-          const reason = isTimeout ? 'Upstream timeout (15s)' : 'Network error';
-          console.log(`[llm-proxy] Fallback: ${model} → ${fallbackModel} (${reason})`);
-          const fallbackUrl = buildGoogleUrl(fallbackModel);
-          const fallbackRes = await fetch(fallbackUrl, {
-            method: 'POST',
-            headers,
-            body: fetchBody,
-          });
-          return { response: fallbackRes, fallbackUsed: { originalModel: model, fallbackModel, reason } };
-        }
-      }
-
-      throw err;
-    }
+  let upstream: globalThis.Response;
+  try {
+    upstream = await fetchWithTimeout(config.url, headers, JSON.stringify(upstreamBody));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Proxy request failed', 502);
   }
 
-  try {
-    const { response: upstream, fallbackUsed } = await fetchWithTimeout(url, JSON.stringify(upstreamBody));
+  if (!upstream.ok) {
+    const errText = await upstream.text().catch(() => 'Unknown error');
+    return jsonError(`${provider} API error (${upstream.status}): ${errText.slice(0, 500)}`, upstream.status);
+  }
 
-    if (!upstream.ok) {
-      const errText = await upstream.text().catch(() => 'Unknown error');
-      return new Response(
-        JSON.stringify({ error: `${provider} API error (${upstream.status}): ${errText.slice(0, 500)}` }),
-        { status: upstream.status, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let fullResponseText = '';
 
-    // Stream the response with tool call support
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
-    let fullResponseText = '';
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const enqueue = (data: string) => {
+        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+      };
 
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        const enqueue = (data: string) => controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+      if (recallInfo) {
+        enqueue(JSON.stringify({
+          type: 'memory_recall',
+          factCount: recallInfo.factCount,
+          queryMs: recallInfo.queryMs,
+        }));
+      }
 
-        // Signal fallback to frontend before any content
-        if (fallbackUsed) {
+      async function processStream(response: globalThis.Response): Promise<{
+        toolCalls: Array<{ name: string; id: string; args: Record<string, unknown> }>;
+      }> {
+        const reader = response.body?.getReader();
+        if (!reader) return { toolCalls: [] };
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const toolCalls: Array<{ name: string; id: string; args: Record<string, unknown> }> = [];
+        let currentToolName = '';
+        let currentToolId = '';
+        let currentToolArgs = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            const parsed = config.parseStream(line);
+            if (!parsed) continue;
+
+            if (parsed.type === 'thinking') {
+              enqueue(JSON.stringify({ type: 'thinking', text: parsed.text }));
+              continue;
+            }
+            if (parsed.type === 'content') {
+              fullResponseText += parsed.text;
+              enqueue(JSON.stringify({ type: 'content', text: parsed.text }));
+              continue;
+            }
+            if (parsed.type === 'usage') {
+              totalInputTokens += parsed.inputTokens;
+              totalOutputTokens += parsed.outputTokens;
+              continue;
+            }
+            if (parsed.type === 'tool_call_start') {
+              currentToolName = parsed.toolName;
+              currentToolId = parsed.toolId;
+              currentToolArgs = '';
+              enqueue(JSON.stringify({ type: 'tool_call', name: parsed.toolName, status: 'calling' }));
+              continue;
+            }
+            if (parsed.type === 'tool_call_delta') {
+              currentToolArgs += parsed.json;
+              continue;
+            }
+            if (parsed.type === 'tool_call_end') {
+              try {
+                const args = currentToolArgs ? JSON.parse(currentToolArgs) as Record<string, unknown> : {};
+                toolCalls.push({ name: currentToolName, id: currentToolId, args });
+              } catch {
+                toolCalls.push({ name: currentToolName, id: currentToolId, args: {} });
+              }
+              continue;
+            }
+            if (parsed.type === 'tool_call') {
+              toolCalls.push({ name: parsed.toolName, id: parsed.toolId, args: parsed.args });
+              enqueue(JSON.stringify({ type: 'tool_call', name: parsed.toolName, status: 'calling' }));
+            }
+          }
+        }
+
+        return { toolCalls };
+      }
+
+      try {
+        let { toolCalls } = await processStream(upstream);
+        let loopCount = 0;
+        const allSources: Array<{ title: string; url?: string; path?: string }> = [];
+
+        while (toolCalls.length > 0 && loopCount < 8) {
+          loopCount += 1;
+          const toolResultParts: string[] = [];
+
+          for (const toolCall of toolCalls) {
+            const toolOverride = toolOverrides[toolCall.name];
+            if (toolOverride && typeof toolOverride === 'object') {
+              toolCall.args = { ...toolCall.args, ...toolOverride };
+            }
+
+            const policyContext = buildPolicyContext(toolCall.name, toolCall.args, {
+              runtime: 'chat',
+              workspacePath: scopedRepoRoot ?? undefined,
+              sessionKey: tabId ? `llm-chat:${tabId}` : undefined,
+            });
+            const policyResult = approvedTools.has(toolCall.name)
+              ? { requiresApproval: false, risk: 'low' as const, reason: 'Pre-approved', ruleId: 'pre-approved', blocked: false }
+              : evaluatePolicy(policyContext);
+
+            if (policyResult.blocked) {
+              const command = (toolCall.args.command as string) || toolCall.name;
+              enqueue(JSON.stringify({
+                type: 'tool_result',
+                name: toolCall.name,
+                status: 'blocked',
+                preview: `Blocked: ${policyResult.reason}`,
+              }));
+              messages.push(
+                { role: 'assistant', content: `I'll run: ${command}` },
+                { role: 'user', content: `Tool "${toolCall.name}" was blocked by policy "${policyResult.ruleId}": ${policyResult.reason}. Suggest a safe alternative.` },
+              );
+              continue;
+            }
+
+            if (policyResult.requiresApproval) {
+              const command = toolCall.name === 'run_terminal_command' ? (toolCall.args.command as string) : '';
+              let summary = `Execute ${toolCall.name}`;
+              let diff: { before?: string; after?: string; path?: string } | undefined;
+
+              if (toolCall.name === 'create_github_issue') {
+                summary = `Create issue: "${toolCall.args.title}" in ${toolCall.args.repo}`;
+              } else if (toolCall.name === 'create_pull_request') {
+                summary = `Create PR: "${toolCall.args.title}" on branch ${toolCall.args.branch}`;
+              } else if (toolCall.name === 'run_terminal_command') {
+                summary = `Run command: ${command}`;
+              } else if (toolCall.name === 'write_file') {
+                const filePath = String(toolCall.args.path || '');
+                const content = String(toolCall.args.content || '');
+                summary = `Write to ${filePath} (${content.split('\n').length} lines)`;
+                diff = { before: '', after: content, path: filePath };
+              } else if (toolCall.name === 'edit_file') {
+                const filePath = String(toolCall.args.path || '');
+                summary = `Edit ${filePath}`;
+                diff = {
+                  before: String(toolCall.args.oldText || ''),
+                  after: String(toolCall.args.newText || ''),
+                  path: filePath,
+                };
+              } else if (toolCall.name === 'delete_file') {
+                summary = `Delete file: ${toolCall.args.path}`;
+              }
+
+              const approval = tabId
+                ? createApproval({
+                    source: 'llm-chat',
+                    runtime: 'chat',
+                    agent: 'Chat',
+                    sessionKey: `llm-chat:${tabId}`,
+                    title: approvalTitleForTool(toolCall.name),
+                    description: summary,
+                    summary,
+                    toolName: toolCall.name,
+                    args: toolCall.args,
+                    command: command || undefined,
+                    editable: toolCall.name === 'run_terminal_command',
+                    diff,
+                    risk: policyResult.risk,
+                    policyRuleId: policyResult.ruleId,
+                    metadata: {
+                      Model: model,
+                      Tool: toolCall.name,
+                      ...(command ? { Command: command } : {}),
+                      ...(!command && toolCall.args.path ? { Path: String(toolCall.args.path) } : {}),
+                    },
+                    continuation: {
+                      kind: 'llm-chat',
+                      tabId,
+                      model,
+                      provider,
+                      messages: rawMessages,
+                      approvedTools: [...approvedTools],
+                    },
+                  })
+                : null;
+
+              enqueue(JSON.stringify({
+                type: 'approval_required',
+                id: approval?.id,
+                name: toolCall.name,
+                args: toolCall.args,
+                editable: toolCall.name === 'run_terminal_command',
+                summary,
+                diff,
+              }));
+              enqueue(JSON.stringify({ type: 'content', text: '' }));
+              enqueue(JSON.stringify({
+                type: 'usage',
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens,
+                costUsd: 0,
+              }));
+              enqueue('[DONE]');
+              controller.close();
+              return;
+            }
+
+            enqueue(JSON.stringify({
+              type: 'tool_call',
+              name: toolCall.name,
+              status: 'running',
+              args: toolCall.args,
+            }));
+
+            const result: ToolResult = await executeTool(toolCall.name, toolCall.args, scopedRepoRoot);
+            if (result.sources) {
+              allSources.push(...result.sources);
+            }
+
+            enqueue(JSON.stringify({
+              type: 'tool_result',
+              name: toolCall.name,
+              status: 'done',
+              preview: result.content.slice(0, 200),
+            }));
+            toolResultParts.push(`[${toolCall.name}] ${result.content}`);
+          }
+
+          const toolNames = toolCalls.map((toolCall) => toolCall.name).join(', ');
+          messages.push(
+            { role: 'assistant', content: `I used the following tools: ${toolNames}` },
+            {
+              role: 'user',
+              content: `Tool results:\n\n${toolResultParts.join('\n\n---\n\n')}\n\nBased on these results, provide your complete response to the user. Do not call more tools unless absolutely necessary.`,
+            },
+          );
+
+          let followResponse: globalThis.Response;
+          try {
+            followResponse = await fetchWithTimeout(
+              config.url,
+              headers,
+              JSON.stringify(config.buildBody(model, messages)),
+            );
+          } catch {
+            break;
+          }
+          if (!followResponse.ok) {
+            break;
+          }
+          const followResult = await processStream(followResponse);
+          toolCalls = followResult.toolCalls;
+        }
+
+        if (lastUserMsg?.content && fullResponseText.length > 50) {
+          extractAndStoreFacts(lastUserMsg.content, fullResponseText, tabId || undefined)
+            .catch((error) => {
+              console.error('[memory-extract] Phase B failed:', error);
+            });
+        }
+
+        const seen = new Set<string>();
+        const sources = allSources.filter((source) => {
+          const key = `${source.title}|${source.url ?? ''}|${source.path ?? ''}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        if (sources.length > 0) {
           enqueue(JSON.stringify({
-            type: 'fallback',
-            originalModel: fallbackUsed.originalModel,
-            fallbackModel: fallbackUsed.fallbackModel,
-            reason: fallbackUsed.reason,
+            type: 'sources',
+            sources: sources.map((source, index) => ({ ...source, index: index + 1 })),
           }));
         }
 
-        // Send memory recall indicator if facts were found
-        if (recallInfo) {
-          enqueue(JSON.stringify({ type: 'memory_recall', factCount: recallInfo.factCount, queryMs: recallInfo.queryMs }));
-        }
+        const costUsd = computeCost(model, totalInputTokens, totalOutputTokens);
+        enqueue(JSON.stringify({
+          type: 'usage',
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          costUsd,
+        }));
+        enqueue('[DONE]');
 
-        // Helper: read a stream and process events
-        async function processStream(response: globalThis.Response): Promise<{
-          toolCalls: { name: string; id: string; args: Record<string, unknown> }[];
-        }> {
-          const reader = response.body?.getReader();
-          if (!reader) return { toolCalls: [] };
-
-          const decoder = new TextDecoder();
-          let buffer = '';
-          const toolCalls: { name: string; id: string; args: Record<string, unknown> }[] = [];
-          let currentToolName = '';
-          let currentToolId = '';
-          let currentToolArgs = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() ?? '';
-
-            for (const line of lines) {
-              const parsed = config.parseStream(line);
-              if (!parsed) continue;
-
-              if (parsed.type === 'thinking') {
-                enqueue(JSON.stringify({ type: 'thinking', text: parsed.text }));
-              } else if (parsed.type === 'content') {
-                fullResponseText += parsed.text;
-                enqueue(JSON.stringify({ type: 'content', text: parsed.text }));
-              } else if (parsed.type === 'usage') {
-                totalInputTokens += parsed.inputTokens;
-                totalOutputTokens += parsed.outputTokens;
-              } else if (parsed.type === 'tool_call_start') {
-                currentToolName = parsed.toolName;
-                currentToolId = parsed.toolId;
-                currentToolArgs = '';
-                // Notify frontend
-                enqueue(JSON.stringify({ type: 'tool_call', name: parsed.toolName, status: 'calling' }));
-              } else if (parsed.type === 'tool_call_delta') {
-                currentToolArgs += parsed.json;
-              } else if (parsed.type === 'tool_call_end') {
-                try {
-                  const args = currentToolArgs ? JSON.parse(currentToolArgs) : {};
-                  toolCalls.push({ name: currentToolName, id: currentToolId, args });
-                } catch {
-                  toolCalls.push({ name: currentToolName, id: currentToolId, args: {} });
-                }
-              } else if (parsed.type === 'tool_call') {
-                // Google returns complete tool calls
-                toolCalls.push({ name: parsed.toolName, id: parsed.toolId, args: parsed.args });
-                enqueue(JSON.stringify({ type: 'tool_call', name: parsed.toolName, status: 'calling' }));
-              } else if (parsed.type === 'done') {
-                break;
-              }
-            }
-          }
-
-          return { toolCalls };
-        }
-
-        try {
-          // Process initial stream
-          let { toolCalls } = await processStream(upstream);
-          let loopCount = 0;
-          const maxLoops = 8; // Safety limit — allows multi-step tool chains
-          const allSources: { title: string; url?: string; path?: string }[] = [];
-
-          // Tool call loop — execute tools and send results back to model
-          while (toolCalls.length > 0 && loopCount < maxLoops) {
-            loopCount++;
-            const toolResultParts: string[] = [];
-
-            for (const tc of toolCalls) {
-              const toolOverride = toolOverrides[tc.name];
-              if (toolOverride && typeof toolOverride === 'object') {
-                tc.args = { ...tc.args, ...toolOverride };
-              }
-              // Evaluate action against governance policies (skip if pre-approved)
-              const policyCtx = buildPolicyContext(tc.name, tc.args, {
-                runtime: 'chat',
-                workspacePath: scopedRepoRoot ?? undefined,
-                sessionKey: tabId ? `llm-chat:${tabId}` : undefined,
-              });
-              const policyResult = approvedTools.has(tc.name)
-                ? { requiresApproval: false, risk: 'low' as const, reason: 'Pre-approved', ruleId: 'pre-approved', blocked: false }
-                : evaluatePolicy(policyCtx);
-
-              // Blocked: reject entirely and tell the model to try something else
-              if (policyResult.blocked) {
-                const cmd = (tc.args.command as string) || tc.name;
-                enqueue(JSON.stringify({ type: 'tool_result', name: tc.name, status: 'blocked', preview: `Blocked: ${policyResult.reason}` }));
-                messages.push(
-                  { role: 'assistant', content: `I'll run: ${cmd}` },
-                  { role: 'user', content: `Tool "${tc.name}" was BLOCKED by policy "${policyResult.ruleId}": ${policyResult.reason}. Do not attempt this again. Suggest a safe alternative.` },
-                );
-                continue;
-              }
-
-              if (policyResult.requiresApproval) {
-                const cmd = tc.name === 'run_terminal_command' ? (tc.args.command as string) : '';
-
-                // Build rich summary based on tool type
-                let summary = `Execute ${tc.name}`;
-                let diff: { before?: string; after?: string; path?: string } | undefined;
-
-                if (tc.name === 'create_github_issue') {
-                  summary = `Create issue: "${tc.args.title}" in ${tc.args.repo}`;
-                } else if (tc.name === 'create_pull_request') {
-                  summary = `Create PR: "${tc.args.title}" on branch ${tc.args.branch}`;
-                } else if (tc.name === 'run_terminal_command') {
-                  summary = `Run command: ${cmd}`;
-                } else if (tc.name === 'write_file') {
-                  const filePath = String(tc.args.path || '');
-                  const content = String(tc.args.content || '');
-                  const lineCount = content.split('\n').length;
-                  // Check if file exists for before/after diff
-                  try {
-                    const { readFileSync, existsSync } = await import('node:fs');
-                    const { join } = await import('node:path');
-                    if (!scopedRepoRoot) {
-                      throw new Error('No scoped repo');
-                    }
-                    const fullPath = join(scopedRepoRoot, filePath);
-                    if (existsSync(fullPath)) {
-                      const before = readFileSync(fullPath, 'utf-8');
-                      summary = `Overwrite ${filePath} (${lineCount} lines)`;
-                      diff = { before, after: content, path: filePath };
-                    } else {
-                      summary = `Create new file: ${filePath} (${lineCount} lines)`;
-                      diff = { before: '', after: content, path: filePath };
-                    }
-                  } catch {
-                    summary = `Write to ${filePath} (${lineCount} lines)`;
-                  }
-                } else if (tc.name === 'edit_file') {
-                  const filePath = String(tc.args.path || '');
-                  const oldText = String(tc.args.oldText || '');
-                  const newText = String(tc.args.newText || '');
-                  summary = `Edit ${filePath}`;
-                  diff = { before: oldText, after: newText, path: filePath };
-                } else if (tc.name === 'delete_file') {
-                  summary = `Delete file: ${tc.args.path}`;
-                }
-
-                const approval = tabId
-                  ? createApproval({
-                      source: 'llm-chat',
-                      runtime: 'chat',
-                      agent: 'Chat',
-                      sessionKey: `llm-chat:${tabId}`,
-                      title: approvalTitleForTool(tc.name),
-                      description: summary,
-                      summary,
-                      toolName: tc.name,
-                      args: tc.args,
-                      command: cmd || undefined,
-                      editable: tc.name === 'run_terminal_command',
-                      diff,
-                      risk: policyResult.risk,
-                      policyRuleId: policyResult.ruleId,
-                      metadata: {
-                        Model: model,
-                        Tool: tc.name,
-                        ...(cmd ? { Command: cmd } : {}),
-                        ...(!cmd && tc.args.path ? { Path: String(tc.args.path) } : {}),
-                      },
-                      continuation: {
-                        kind: 'llm-chat',
-                        tabId,
-                        model,
-                        provider,
-                        messages: rawMessages,
-                        approvedTools: [...approvedTools],
-                      },
-                    })
-                  : null;
-
-                enqueue(JSON.stringify({
-                  type: 'approval_required',
-                  id: approval?.id,
-                  name: tc.name,
-                  args: tc.args,
-                  editable: tc.name === 'run_terminal_command',
-                  summary,
-                  diff,
-                }));
-                // Stop the loop — frontend will re-submit with approval
-                enqueue(JSON.stringify({ type: 'content', text: '' }));
-                enqueue(JSON.stringify({ type: 'usage', inputTokens: totalInputTokens, outputTokens: totalOutputTokens, costUsd: 0 }));
-                enqueue('[DONE]');
-                controller.close();
-                return;
-              }
-
-              enqueue(JSON.stringify({ type: 'tool_call', name: tc.name, status: 'running', args: tc.args }));
-
-              // Execute the tool
-              const result: ToolResult = await executeTool(tc.name, tc.args, scopedRepoRoot);
-
-              if (result.sources) {
-                allSources.push(...result.sources);
-              }
-
-              enqueue(JSON.stringify({ type: 'tool_result', name: tc.name, status: 'done', preview: result.content.slice(0, 200) }));
-
-              toolResultParts.push(`[${tc.name}] ${result.content}`);
-            }
-
-            // Combine ALL tool results from this turn into one clean message pair
-            const toolNames = toolCalls.map(tc => tc.name).join(', ');
-            messages.push(
-              { role: 'assistant', content: `I used the following tools: ${toolNames}` },
-              { role: 'user', content: `Tool results:\n\n${toolResultParts.join('\n\n---\n\n')}\n\nBased on these results, provide your complete response to the user. Do not call more tools unless absolutely necessary.` }
-            );
-
-            // Make follow-up request to model with tool results
-            // Use the fallback model if the initial request fell back
-            const activeModel = fallbackUsed ? fallbackUsed.fallbackModel : model;
-            const followUrl = provider === 'google'
-              ? buildGoogleUrl(activeModel)
-              : config.url;
-            const followBody = config.buildBody(activeModel, messages);
-            const followController = new AbortController();
-            const followTimer = setTimeout(() => followController.abort(), UPSTREAM_TIMEOUT_MS);
-            let followRes: globalThis.Response;
-            try {
-              followRes = await fetch(followUrl, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(followBody),
-                signal: followController.signal,
-              });
-            } catch {
-              clearTimeout(followTimer);
-              break;
-            }
-            clearTimeout(followTimer);
-
-            if (!followRes.ok) break;
-
-            const result = await processStream(followRes);
-            toolCalls = result.toolCalls;
-          }
-
-          // Send numbered sources (deduplicated)
-          if (allSources.length > 0) {
-            const seen = new Set<string>();
-            const unique = allSources.filter(s => {
-              const key = `${s.title}|${s.url ?? ''}|${s.path ?? ''}`;
-              if (seen.has(key)) return false;
-              seen.add(key);
-              return true;
+        if (auth?.user && totalOutputTokens > 0) {
+          try {
+            logUsage({
+              userId: auth.user.id,
+              model,
+              provider,
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              costUsd,
+              agentName: 'llm-chat',
+              requestType: 'chat',
             });
-            const numbered = unique.map((s, i) => ({ ...s, index: i + 1 }));
-            enqueue(JSON.stringify({ type: 'sources', sources: numbered }));
+          } catch (error) {
+            console.error('[proxy/llm] Failed to log usage:', error);
           }
-
-          // Send final usage event
-          const costUsd = computeCost(model, totalInputTokens, totalOutputTokens);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: 'usage',
-            inputTokens: totalInputTokens,
-            outputTokens: totalOutputTokens,
-            costUsd,
-          })}\n\n`));
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          console.log(`[llm-proxy] ${provider}/${model} — ${totalInputTokens} in / ${totalOutputTokens} out — $${costUsd.toFixed(4)}`);
-
-          // Log usage for authenticated users
-          if (auth?.user && totalOutputTokens > 0) {
-            try {
-              logUsage({
-                userId: auth.user.id,
-                model,
-                provider,
-                inputTokens: totalInputTokens,
-                outputTokens: totalOutputTokens,
-                costUsd,
-                agentName: 'llm-chat',
-                requestType: 'chat',
-              });
-            } catch (e) {
-              console.error('[proxy/llm] Failed to log usage:', e);
-            }
-          }
-          // Phase B: Background fact extraction (fire-and-forget)
-          if (lastUserMsg?.content && fullResponseText.length > 50) {
-            const tabIdHeader = request.headers.get('x-tab-id') || undefined;
-            extractAndStoreFacts(lastUserMsg.content, fullResponseText, tabIdHeader)
-              .then(result => {
-                if (result && result.factsStored > 0) {
-                  console.log(`[memory-extract] Phase B: ${result.factsStored} new facts stored in ${result.durationMs}ms`);
-                }
-              })
-              .catch(err => {
-                console.error('[memory-extract] Phase B failed:', err);
-              });
-          }
-        } catch (err) {
-          try {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-              type: 'error',
-              message: err instanceof Error ? err.message : 'Stream error',
-            })}\n\n`));
-          } catch { /* controller may already be closed */ }
-        } finally {
-          try {
-            controller.close();
-          } catch { /* already closed (e.g. approval early-exit) */ }
         }
-      },
-    });
+      } catch (error) {
+        enqueue(JSON.stringify({
+          type: 'error',
+          message: error instanceof Error ? error.message : 'Stream error',
+        }));
+      } finally {
+        try {
+          controller.close();
+        } catch {
+          return;
+        }
+      }
+    },
+  });
 
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
-  } catch (err) {
-    return new Response(
-      JSON.stringify({ error: err instanceof Error ? err.message : 'Proxy request failed' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } },
-    );
-  }
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
 });
