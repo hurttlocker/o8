@@ -91,55 +91,42 @@ function ApprovalCard({
         </span>
       </div>
 
-      <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.2, letterSpacing: MOBILE_HEADING_TRACKING, color: palette.rootText, marginBottom: 8 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.3, letterSpacing: MOBILE_HEADING_TRACKING, color: palette.rootText, marginBottom: 4 }}>
         {approval.title}
       </div>
 
-      <div style={{ fontSize: 14, lineHeight: 1.65, letterSpacing: MOBILE_BODY_TRACKING, color: palette.mutedText, marginBottom: 14 }}>
+      <div style={{ fontSize: 13, lineHeight: 1.55, letterSpacing: MOBILE_BODY_TRACKING, color: palette.mutedText, marginBottom: 10 }}>
         {approval.description || approval.summary || 'Approval required.'}
       </div>
 
-      {approval.summary && approval.summary !== approval.description ? (
-        <div
-          style={{
-            borderRadius: MOBILE_CARD_RADIUS,
-            border: `1px solid ${palette.cardBorder}`,
-            background: palette.cardBackground,
-            padding: '12px 14px',
-            fontSize: 13,
-            lineHeight: 1.6,
-            letterSpacing: MOBILE_BODY_TRACKING,
-            color: palette.subduedText,
-            marginBottom: 14,
-          }}
-        >
-          {approval.summary}
-        </div>
-      ) : null}
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
-        <MobileMetricChip label="Agent" value={agent} palette={palette} />
-        <MobileMetricChip label="Session" value={approval.sessionKey || 'n/a'} palette={palette} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 11, color: palette.subduedText }}>
+        <span style={{ fontWeight: 600 }}>{agent}</span>
+        {approval.sessionKey ? (
+          <>
+            <span style={{ opacity: 0.4 }}>/</span>
+            <span style={{ fontFamily: 'SF Mono, Menlo, monospace', fontSize: 10 }}>{approval.sessionKey.split(':').pop()?.slice(0, 12)}</span>
+          </>
+        ) : null}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <MobilePillButton
           onClick={() => onResolve(approval.id, 'approve')}
           palette={palette}
           tone="success"
           disabled={isBusy}
-          style={{ minHeight: 48, fontSize: 14, fontWeight: 800, letterSpacing: MOBILE_BODY_TRACKING }}
+          style={{ minHeight: 40, fontSize: 13, fontWeight: 700 }}
         >
-          {isApproving ? 'Approving...' : 'Approve'}
+          {isApproving ? '...' : 'Approve'}
         </MobilePillButton>
         <MobilePillButton
           onClick={() => onResolve(approval.id, 'reject')}
           palette={palette}
           tone="danger"
           disabled={isBusy}
-          style={{ minHeight: 48, fontSize: 14, fontWeight: 800, letterSpacing: MOBILE_BODY_TRACKING }}
+          style={{ minHeight: 40, fontSize: 13, fontWeight: 700 }}
         >
-          {isRejecting ? 'Rejecting...' : 'Reject'}
+          {isRejecting ? '...' : 'Reject'}
         </MobilePillButton>
       </div>
     </MobileGlassPanel>
@@ -157,7 +144,15 @@ export function ApprovalsView({
   resolving: { id: string; action: 'approve' | 'reject' } | null;
   palette: MobilePalette;
 }) {
-  const pending = approvals.filter((approval) => approval.status === 'pending');
+  const pending = approvals.filter((approval) => {
+    if (approval.status !== 'pending') return false;
+    // Hide Claude Code runtime approvals — user runs with bypass permissions
+    if (approval.source === 'runtime') return false;
+    if (approval.continuation?.kind === 'runtime') return false;
+    // Hide LLM chat approvals (low-risk, auto-resolved)
+    if (approval.source === 'llm-chat' && approval.risk === 'low') return false;
+    return true;
+  });
 
   return (
     <MobileSurfaceRoot>
