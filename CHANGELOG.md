@@ -6,7 +6,10 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `9e18da3` feat: tool call card renderer components
+- `9af3972` feat: tool call SSE protocol types and parser
 - `e28fcf3` feat: theme-aware markdown renderer + light mode code blocks
+- `898d555` feat: rebrand mobile shell for o8
 - `dea5185` feat: rebuild mobile approvals and sidebar surfaces
 - `8b4199f` feat: rebuild mobile approvals and sidebar surfaces
 - `fcd91ca` feat: replace custom mobile chat with @assistant-ui/react Thread
