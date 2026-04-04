@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `b874d03` refactor: compact chat list
 - `6e54f1e` fix: badge count matches approval view filter — hide runtime/llm-chat noise
 - `6e8c2f0` fix: filter out AI provider runtime approvals + compact approval cards
 - `3f18d36` refactor: slim sidebar — compact nav, no command deck bloat
