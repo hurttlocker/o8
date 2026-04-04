@@ -77,22 +77,20 @@ export function Sidebar({
 
   const navButtonStyle = (active: boolean): CSSProperties => ({
     width: '100%',
-    minHeight: MOBILE_TOUCH_TARGET * 2,
-    borderRadius: MOBILE_CARD_RADIUS,
-    border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
-    background: active ? palette.accentSoft : palette.panelBackground,
-    padding: 16,
+    height: MOBILE_TOUCH_TARGET,
+    borderRadius: 10,
+    border: 'none',
+    background: active ? palette.accentSoft : 'transparent',
+    paddingLeft: 12,
+    paddingRight: 12,
     color: palette.rootText,
     display: 'flex',
-    alignItems: 'flex-start',
-    gap: 14,
+    alignItems: 'center',
+    gap: 10,
     textAlign: 'left',
     cursor: 'pointer',
     fontFamily: mobileFontFamily(),
     letterSpacing: MOBILE_BODY_TRACKING,
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    transition: 'background 0.22s ease, border-color 0.22s ease, transform 0.22s ease',
   });
 
   return (
@@ -136,100 +134,34 @@ export function Sidebar({
           fontFamily: mobileFontFamily(),
         }}
       >
-        <MobileGlassPanel palette={palette} style={{ padding: 18 }}>
-          <div
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 2px' }}>
+          <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: MOBILE_HEADING_TRACKING, color: palette.rootText }}>
+            o8
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
             style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 12,
+              height: 32,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 10,
+              border: `1px solid ${palette.cardBorder}`,
+              background: palette.panelBackground,
+              color: palette.subduedText,
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 600,
+              fontFamily: mobileFontFamily(),
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
-              <div
-                style={{
-                  width: MOBILE_TOUCH_TARGET,
-                  height: MOBILE_TOUCH_TARGET,
-                  borderRadius: MOBILE_CARD_RADIUS,
-                  border: `1px solid ${palette.accentBorder}`,
-                  background: 'rgba(37, 99, 235, 0.22)',
-                  color: palette.rootText,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 17,
-                  fontWeight: 800,
-                  letterSpacing: MOBILE_HEADING_TRACKING,
-                  flexShrink: 0,
-                }}
-              >
-                o8
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: '0.12em',
-                    textTransform: 'uppercase',
-                    color: palette.subduedText,
-                    marginBottom: 6,
-                  }}
-                >
-                  o8 mobile
-                </div>
-                <div
-                  style={{
-                    fontSize: 23,
-                    fontWeight: 800,
-                    lineHeight: 1.05,
-                    letterSpacing: MOBILE_HEADING_TRACKING,
-                    color: palette.rootText,
-                  }}
-                >
-                  Command Deck
-                </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    lineHeight: 1.6,
-                    letterSpacing: MOBILE_BODY_TRACKING,
-                    color: palette.subduedText,
-                    marginTop: 8,
-                  }}
-                >
-                  Branded navigation for chats, approvals, and runtime controls.
-                </div>
-              </div>
-            </div>
-            <div style={{ flexShrink: 0 }}>
-              <button
-                type="button"
-                onClick={onClose}
-                style={{
-                  width: MOBILE_TOUCH_TARGET,
-                  height: MOBILE_TOUCH_TARGET,
-                  borderRadius: MOBILE_CARD_RADIUS,
-                  border: `1px solid ${palette.cardBorder}`,
-                  background: palette.panelBackground,
-                  color: palette.rootText,
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  letterSpacing: MOBILE_BODY_TRACKING,
-                  fontFamily: mobileFontFamily(),
-                }}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </MobileGlassPanel>
+            Done
+          </button>
+        </div>
 
-        <MobileThreadListRoot style={{ gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {navItems.map((item) => {
             const active = activeView === item.id;
-
             return (
               <button
                 key={item.id}
@@ -240,121 +172,41 @@ export function Sidebar({
                 }}
                 style={navButtonStyle(active)}
               >
-                <div
-                  style={{
-                    width: MOBILE_TOUCH_TARGET,
-                    height: MOBILE_TOUCH_TARGET,
-                    borderRadius: MOBILE_CARD_RADIUS,
-                    border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
-                    background: active ? 'rgba(37, 99, 235, 0.2)' : palette.cardBackground,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  {item.icon}
-                </div>
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
+                {item.icon}
+                <span style={{ flex: 1, fontSize: 15, fontWeight: active ? 700 : 500, color: active ? palette.rootText : palette.mutedText }}>
+                  {item.label}
+                </span>
+                {item.badge ? (
+                  <span
                     style={{
-                      display: 'flex',
+                      minWidth: 20,
+                      height: 20,
+                      borderRadius: 999,
+                      paddingLeft: 6,
+                      paddingRight: 6,
+                      backgroundColor: palette.danger,
+                      color: '#ffffff',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      gap: 8,
-                      marginBottom: 6,
+                      justifyContent: 'center',
                     }}
                   >
-                    <span style={{ fontSize: 16, fontWeight: 700, color: palette.rootText }}>
-                      {item.label}
-                    </span>
-                    {item.badge ? (
-                      <span
-                        style={{
-                          minWidth: 24,
-                          height: 24,
-                          borderRadius: 999,
-                          paddingLeft: 8,
-                          paddingRight: 8,
-                          backgroundColor: palette.danger,
-                          color: '#ffffff',
-                          fontSize: 11,
-                          fontWeight: 700,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        {item.badge}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div style={{ fontSize: 13, lineHeight: 1.55, color: palette.subduedText }}>
-                    {item.description}
-                  </div>
-                </div>
+                    {item.badge}
+                  </span>
+                ) : null}
               </button>
             );
           })}
-        </MobileThreadListRoot>
+        </div>
 
-        <MobileGlassPanel palette={palette} style={{ padding: 18, marginTop: 'auto' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 10,
-              marginBottom: 14,
-            }}
-          >
-            <MobileMetricChip
-              label="Palette"
-              value="o8 Dark"
-              palette={palette}
-              tone="accent"
-            />
-            <MobileMetricChip
-              label="Model"
-              value={selectedModelLabel}
-              palette={palette}
-            />
+        <div style={{ marginTop: 'auto', padding: '0 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: palette.subduedText }}>
+            <MobileStatusDot color={connectionColor} />
+            <span>{selectedModelLabel}</span>
           </div>
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              borderRadius: MOBILE_CARD_RADIUS,
-              border: `1px solid ${connectionStatus === 'connected' ? palette.successBorder : palette.dangerBorder}`,
-              background: connectionStatus === 'connected' ? palette.successSoft : palette.dangerSoft,
-              padding: '12px 14px',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 12, color: palette.subduedText, marginBottom: 4 }}>
-                Transport
-              </div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: palette.rootText }}>
-                WebSocket Bridge
-              </div>
-            </div>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                fontSize: 13,
-                fontWeight: 700,
-                color: palette.rootText,
-              }}
-            >
-              <MobileStatusDot color={connectionColor} />
-              {renderConnectionLabel(connectionStatus)}
-            </span>
-          </div>
-        </MobileGlassPanel>
+        </div>
       </div>
     </>
   );
