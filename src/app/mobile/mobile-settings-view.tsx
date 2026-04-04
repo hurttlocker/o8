@@ -118,63 +118,51 @@ export function SettingsView({
         </MobileGlassPanel>
 
         <MobileGlassPanel palette={palette} style={{ padding: 18, marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 12 }}>
             Model
           </div>
-          <MobileThreadListRoot style={{ gap: 10 }}>
-            {AVAILABLE_MODELS.map((model) => {
-              const active = selectedModel.id === model.id;
-
-              return (
-                <button
-                  key={model.id}
-                  type="button"
-                  onClick={() => onModelChange(model.id)}
+          {AVAILABLE_MODELS.map((model, index) => {
+            const active = selectedModel.id === model.id;
+            const providerColors: Record<string, string> = { google: '#4285f4', anthropic: '#d97706', openai: '#10a37f' };
+            return (
+              <button
+                key={model.id}
+                type="button"
+                onClick={() => onModelChange(model.id)}
+                style={{
+                  width: '100%',
+                  height: MOBILE_TOUCH_TARGET,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '0 12px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: active ? palette.accentSoft : 'transparent',
+                  cursor: 'pointer',
+                  fontFamily: mobileFontFamily(),
+                  marginBottom: index < AVAILABLE_MODELS.length - 1 ? 2 : 0,
+                }}
+              >
+                <div
                   style={{
-                    width: '100%',
-                    minHeight: 72,
-                    borderRadius: MOBILE_CARD_RADIUS,
-                    border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
-                    background: active ? palette.accentSoft : palette.panelBackground,
-                    padding: 16,
-                    color: palette.rootText,
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    fontFamily: mobileFontFamily(),
-                    letterSpacing: MOBILE_BODY_TRACKING,
-                    display: 'flex',
-                    gap: 12,
-                    alignItems: 'flex-start',
-                    backdropFilter: 'blur(20px)',
-                    WebkitBackdropFilter: 'blur(20px)',
+                    width: 8,
+                    height: 8,
+                    borderRadius: 999,
+                    border: active ? 'none' : `1.5px solid ${palette.mutedText}`,
+                    backgroundColor: active ? palette.accent : 'transparent',
+                    flexShrink: 0,
                   }}
-                >
-                  <div
-                    style={{
-                      width: 12,
-                      height: 12,
-                      marginTop: 5,
-                      borderRadius: 999,
-                      border: `1px solid ${active ? palette.accent : palette.cardBorder}`,
-                      backgroundColor: active ? palette.accent : 'transparent',
-                      flexShrink: 0,
-                    }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING }}>
-                      {model.label}
-                    </div>
-                    <div style={{ fontSize: 12, color: palette.subduedText, marginTop: 4, lineHeight: 1.6, letterSpacing: MOBILE_BODY_TRACKING }}>
-                      {model.description}
-                    </div>
-                    <div style={{ fontSize: 11, color: palette.subduedText, marginTop: 6, letterSpacing: MOBILE_BODY_TRACKING }}>
-                      {model.id}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </MobileThreadListRoot>
+                />
+                <div style={{ flex: 1, fontSize: 14, fontWeight: active ? 700 : 500, color: active ? palette.rootText : palette.mutedText, textAlign: 'left', letterSpacing: MOBILE_BODY_TRACKING }}>
+                  {model.label}
+                </div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: providerColors[model.provider] ?? palette.subduedText, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  {model.provider}
+                </div>
+              </button>
+            );
+          })}
         </MobileGlassPanel>
 
         <MobileGlassPanel palette={palette} style={{ padding: 18, marginBottom: 14 }}>
