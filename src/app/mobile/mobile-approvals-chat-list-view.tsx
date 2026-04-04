@@ -232,24 +232,22 @@ export function ChatListView({
           paddingBottom: mobileSafeBottom(24),
         }}
       >
-        <MobileGlassPanel palette={palette} style={{ padding: 20, marginBottom: 14 }}>
-          <MobileSectionHeading
-            eyebrow="Chats"
-            title="Recent conversations"
-            subtitle="Open a saved thread, long-press for management actions, or start a fresh o8 mobile chat."
-            palette={palette}
-            action={(
-              <div style={{ display: 'grid', gap: 8 }}>
-                <MobilePillButton onClick={onRefresh} palette={palette}>
-                  Refresh
-                </MobilePillButton>
-                <MobilePillButton onClick={onNewChat} palette={palette} tone="accent">
-                  New chat
-                </MobilePillButton>
-              </div>
-            )}
-          />
-        </MobileGlassPanel>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px', marginBottom: 10 }}>
+          <button
+            type="button"
+            onClick={onRefresh}
+            style={{ border: 'none', background: 'transparent', color: palette.subduedText, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: mobileFontFamily(), padding: 0 }}
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={onNewChat}
+            style={{ border: 'none', background: palette.accentSoft, color: palette.accent, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: mobileFontFamily(), padding: '6px 14px', borderRadius: 10 }}
+          >
+            New chat
+          </button>
+        </div>
 
         {loading ? (
           <MobileGlassPanel palette={palette} style={{ padding: '28px 20px', textAlign: 'center' }}>
@@ -363,80 +361,38 @@ export function ChatListView({
                   }}
                   style={{
                     width: '100%',
-                    padding: 0,
+                    height: 56,
+                    paddingLeft: 14,
+                    paddingRight: 14,
                     border: 'none',
+                    borderBottom: `1px solid ${palette.cardBorder}`,
                     background: 'transparent',
                     textAlign: 'left',
                     cursor: 'pointer',
                     fontFamily: mobileFontFamily(),
                     userSelect: 'none',
                     WebkitUserSelect: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
                   }}
                 >
-                  <MobileGlassPanel palette={palette} style={{ padding: 16 }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: palette.rootText, lineHeight: 1.3 }}>
-                          {conversation.title || 'Untitled conversation'}
-                        </div>
-                        <div style={{ fontSize: 12, color: palette.subduedText, marginTop: 4 }}>
-                          {chatTimeAgo(conversation.updatedAt)}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        {conversation.starred ? (
-                          <span
-                            style={{
-                              width: 30,
-                              height: 30,
-                              borderRadius: 999,
-                              border: `1px solid ${palette.warningSoft}`,
-                              background: palette.warningSoft,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            <IconStar fill={palette.accent} size={14} />
-                          </span>
-                        ) : null}
-                        {conversation.model ? (
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              minHeight: 28,
-                              paddingLeft: 10,
-                              paddingRight: 10,
-                              borderRadius: 999,
-                              border: `1px solid ${palette.cardBorder}`,
-                              background: palette.cardBackground,
-                              fontSize: 11,
-                              fontWeight: 700,
-                              color: palette.subduedText,
-                            }}
-                          >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: palette.rootText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {conversation.starred ? (
+                        <IconStar fill={palette.warning} size={12} style={{ marginRight: 6, verticalAlign: -1 } as React.CSSProperties} />
+                      ) : null}
+                      {conversation.title || 'Untitled'}
+                    </div>
+                    <div style={{ fontSize: 11, color: palette.subduedText, marginTop: 2 }}>
+                      {chatTimeAgo(conversation.updatedAt)}
+                      {conversation.model ? (
+                        <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: palette.subduedText }}>
                             {truncateText(conversation.model, 24)}
                           </span>
                         ) : null}
                       </div>
                     </div>
-
-                    <div
-                      style={{
-                        fontSize: 13,
-                        lineHeight: 1.65,
-                        letterSpacing: MOBILE_BODY_TRACKING,
-                        color: palette.mutedText,
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                      } as CSSProperties}
-                    >
-                      {preview}
-                    </div>
-                  </MobileGlassPanel>
                 </button>
               );
             })}
