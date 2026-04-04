@@ -181,12 +181,15 @@ export function MobileApprovalsClient({
 
       socket.onopen = () => {
         if (cancelled) return;
-        if (reconnectAttemptRef.current > 0) {
+        const shouldRefreshApprovals = reconnectAttemptRef.current > 0;
+        if (shouldRefreshApprovals) {
           console.info(`[mobile-ws] Reconnected after ${reconnectAttemptRef.current} attempt${reconnectAttemptRef.current === 1 ? '' : 's'}; polling approvals immediately`);
         }
         reconnectAttemptRef.current = 0;
         setConnectionStatus('connected');
-        void refresh();
+        if (shouldRefreshApprovals) {
+          void refresh();
+        }
       };
 
       socket.onerror = () => {
