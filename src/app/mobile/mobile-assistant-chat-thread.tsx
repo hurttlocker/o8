@@ -9,6 +9,7 @@ import {
   type PersistedMobileChatMessage,
 } from './mobile-assistant-chat-runtime';
 import { ChatMessageRow, ComposerBar, EmptyState, ModelBadge } from './mobile-assistant-chat-ui';
+import { MobileRepoPicker } from './mobile-repo-picker';
 import { initSounds } from '@/lib/mobile/sounds';
 import {
   DEFAULT_MOBILE_CHAT_MODEL,
@@ -20,18 +21,25 @@ import {
   getConversationTitle,
   type ModelOption,
 } from './mobile-approvals-shared';
+import { getRepoBasename, type MobileRepoOption } from './mobile-chat-repos';
 
 function MobileAssistantThreadSurface({
   tabId,
   initialMessages,
   onConversationSaved,
   selectedModel,
+  repoPath,
+  repoOptions,
+  onRepoPathChange,
   palette,
 }: {
   tabId: string;
   initialMessages: PersistedMobileChatMessage[];
   onConversationSaved: () => void;
   selectedModel: ModelOption;
+  repoPath: string | null;
+  repoOptions: MobileRepoOption[];
+  onRepoPathChange: (repoPath: string | null) => void;
   palette: MobilePalette;
 }) {
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
@@ -43,12 +51,12 @@ function MobileAssistantThreadSurface({
     [threadMessages],
   );
   const persistSignature = useMemo(
-    () => JSON.stringify({ model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL, messages: persistedMessages }),
-    [persistedMessages, selectedModel.id],
+    () => JSON.stringify({ model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL, repoPath, messages: persistedMessages }),
+    [persistedMessages, repoPath, selectedModel.id],
   );
   const visibleActiveMessageId = isThreadRunning ? null : activeMessageId;
   const lastSavedSignatureRef = useRef(
-    JSON.stringify({ model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL, messages: initialMessages }),
+    JSON.stringify({ model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL, repoPath, messages: initialMessages }),
   );
 
   useEffect(() => {
@@ -68,6 +76,8 @@ function MobileAssistantThreadSurface({
           messages,
           model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL,
           title: getConversationTitle(messages),
+          repoName: getRepoBasename(repoPath),
+          repoPath,
         }),
       });
       lastSavedSignatureRef.current = signature;
@@ -75,7 +85,7 @@ function MobileAssistantThreadSurface({
     } catch {
       // Ignore persistence errors to keep the mobile thread responsive.
     }
-  }, [onConversationSaved, selectedModel.id, tabId]);
+  }, [onConversationSaved, repoPath, selectedModel.id, tabId]);
 
   useEffect(() => {
     if (isThreadRunning || persistedMessages.length === 0) return;
@@ -94,7 +104,15 @@ function MobileAssistantThreadSurface({
         position: 'relative',
       }}
     >
-      <ModelBadge palette={palette} selectedModel={selectedModel} />
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <ModelBadge palette={palette} selectedModel={selectedModel} />
+        <MobileRepoPicker
+          palette={palette}
+          repoOptions={repoOptions}
+          selectedRepoPath={repoPath}
+          onSelectRepoPath={onRepoPathChange}
+        />
+      </div>
       <ThreadPrimitive.Viewport
         autoScroll
         scrollToBottomOnRunStart
@@ -170,17 +188,23 @@ export function MobileAssistantChatThread({
   initialMessages,
   onConversationSaved,
   selectedModel,
+  repoPath,
+  repoOptions,
+  onRepoPathChange,
   palette,
 }: {
   tabId: string;
   initialMessages: PersistedMobileChatMessage[];
   onConversationSaved: () => void;
   selectedModel: ModelOption;
+  repoPath: string | null;
+  repoOptions: MobileRepoOption[];
+  onRepoPathChange: (repoPath: string | null) => void;
   palette: MobilePalette;
 }) {
   const chatModel = useMemo(
-    () => createMobileChatModel(selectedModel),
-    [selectedModel],
+    () => createMobileChatModel(selectedModel, repoPath),
+    [repoPath, selectedModel],
   );
   const runtime = useLocalRuntime(chatModel, {
     initialMessages: toAssistantUiMessages(initialMessages),
@@ -193,6 +217,9 @@ export function MobileAssistantChatThread({
         initialMessages={initialMessages}
         onConversationSaved={onConversationSaved}
         selectedModel={selectedModel}
+        repoPath={repoPath}
+        repoOptions={repoOptions}
+        onRepoPathChange={onRepoPathChange}
         palette={palette}
       />
     </AssistantRuntimeProvider>
