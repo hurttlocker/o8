@@ -44,10 +44,29 @@ export interface ApprovalItem {
   continuation?: { kind: 'llm-chat' | 'runtime' | 'lane' };
 }
 
+export type MobileChatToolStatus = 'calling' | 'running' | 'done' | 'blocked' | 'error';
+
+export interface MobileChatToolResult {
+  output?: string;
+  diff?: unknown;
+  status?: MobileChatToolStatus;
+}
+
+export interface MobileChatToolCall {
+  toolCallId: string;
+  toolName: string;
+  arguments?: Record<string, unknown>;
+  filePath?: string;
+  status?: MobileChatToolStatus;
+  result?: MobileChatToolResult;
+  isError?: boolean;
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   thinking?: string;
+  toolCalls?: MobileChatToolCall[];
 }
 
 export interface ChatHistoryRecord {
@@ -389,6 +408,96 @@ export function extractMessageContent(content: unknown): string {
   return '';
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readToolStatus(value: unknown): MobileChatToolStatus | undefined {
+  return value === 'calling'
+    || value === 'running'
+    || value === 'done'
+    || value === 'blocked'
+    || value === 'error'
+    ? value
+    : undefined;
+}
+
+function normalizeToolArguments(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  return value;
+}
+
+function normalizeToolResult(value: unknown): MobileChatToolResult | undefined {
+  if (typeof value === 'string') {
+    return value.trim() ? { output: value } : undefined;
+  }
+
+  if (!isRecord(value)) return undefined;
+
+  const output = typeof value.output === 'string'
+    ? value.output
+    : (typeof value.preview === 'string' ? value.preview : undefined);
+  const status = readToolStatus(value.status);
+  const diff = Object.prototype.hasOwnProperty.call(value, 'diff') ? value.diff : undefined;
+
+  if (!output?.trim() && diff === undefined && !status) return undefined;
+
+  return {
+    ...(output?.trim() ? { output } : {}),
+    ...(diff !== undefined ? { diff } : {}),
+    ...(status ? { status } : {}),
+  };
+}
+
+function normalizeToolCalls(value: unknown): MobileChatToolCall[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const toolCalls = value.reduce<MobileChatToolCall[]>((acc, entry, index) => {
+    if (!isRecord(entry)) return acc;
+
+    const toolName = typeof entry.toolName === 'string'
+      ? entry.toolName
+      : (typeof entry.name === 'string' ? entry.name : '');
+    if (!toolName.trim()) return acc;
+
+    const toolCallId = typeof entry.toolCallId === 'string' && entry.toolCallId.trim()
+      ? entry.toolCallId
+      : `mobile-tool-call-${index}-${toolName}`;
+    const argumentsValue = normalizeToolArguments(
+      Object.prototype.hasOwnProperty.call(entry, 'arguments')
+        ? entry.arguments
+        : entry.args,
+    );
+    const status = readToolStatus(entry.status);
+    const filePath = typeof entry.filePath === 'string' && entry.filePath.trim()
+      ? entry.filePath
+      : undefined;
+    const result = normalizeToolResult(
+      Object.prototype.hasOwnProperty.call(entry, 'result')
+        ? entry.result
+        : {
+            output: typeof entry.output === 'string' ? entry.output : entry.preview,
+            diff: entry.diff,
+            status: entry.status,
+          },
+    );
+
+    acc.push({
+      toolCallId,
+      toolName,
+      ...(argumentsValue ? { arguments: argumentsValue } : {}),
+      ...(filePath ? { filePath } : {}),
+      ...(status ? { status } : {}),
+      ...(result ? { result } : {}),
+      ...(entry.isError === true ? { isError: true } : {}),
+    });
+
+    return acc;
+  }, []);
+
+  return toolCalls.length > 0 ? toolCalls : undefined;
+}
+
 export function normalizeChatMessages(messages: unknown): ChatMessage[] {
   if (!Array.isArray(messages)) return [];
 
@@ -400,10 +509,14 @@ export function normalizeChatMessages(messages: unknown): ChatMessage[] {
     const thinking = 'thinking' in message && typeof message.thinking === 'string'
       ? message.thinking
       : undefined;
+    const toolCalls = 'toolCalls' in message
+      ? normalizeToolCalls(message.toolCalls)
+      : undefined;
     acc.push({
       role,
       content,
       ...(thinking?.trim() ? { thinking } : {}),
+      ...(toolCalls ? { toolCalls } : {}),
     });
     return acc;
   }, []);
