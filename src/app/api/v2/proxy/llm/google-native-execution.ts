@@ -6,7 +6,79 @@ import { createApproval } from '@/lib/approvals/store';
 
 const MAX_FILE_BYTES = 64_000;
 const MAX_SHELL_OUTPUT = 12_000;
-const SHELL_TIMEOUT_MS = 15_000;
+const SHELL_TIMEOUT_MS = 30_000;
+const BLOCKED_SHELL_COMMANDS = new Set([
+  'rm',
+  'mv',
+  'cp',
+  'chmod',
+  'chown',
+  'curl',
+  'wget',
+  'sudo',
+  'su',
+  'kill',
+  'pkill',
+  'dd',
+  'mkfs',
+  'fdisk',
+]);
+const ALLOWED_GIT_SUBCOMMANDS = new Set(['status', 'log', 'diff']);
+const ALLOWED_SHELL_COMMAND_LIST = [
+  'git status',
+  'git log',
+  'git diff',
+  'ls',
+  'cat',
+  'grep',
+  'find',
+  'wc',
+  'head',
+  'tail',
+  'sort',
+  'uniq',
+  'tr',
+  'cut',
+  'diff',
+  'stat',
+  'file',
+  'which',
+  'env',
+  'echo',
+  'printf',
+  'npm',
+  'npx',
+  'node',
+  'cargo',
+  'python',
+  'python3',
+];
+const ALLOWED_SHELL_COMMANDS = new Set([
+  'ls',
+  'cat',
+  'grep',
+  'find',
+  'wc',
+  'head',
+  'tail',
+  'sort',
+  'uniq',
+  'tr',
+  'cut',
+  'diff',
+  'stat',
+  'file',
+  'which',
+  'env',
+  'echo',
+  'printf',
+  'npm',
+  'npx',
+  'node',
+  'cargo',
+  'python',
+  'python3',
+]);
 
 const execFile = promisify(execFileCallback);
 
@@ -130,13 +202,45 @@ function tokenizeShellCommand(command: string): { tokens: string[] } | { error: 
   return tokens.length > 0 ? { tokens } : { error: 'command is required.' };
 }
 
+function validateEnvCommand(args: string[]): { executable: string; args: string[] } | { error: string } {
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (
+      token === '-i'
+      || token === '--ignore-environment'
+      || token === '-0'
+      || token === '--null'
+    ) {
+      continue;
+    }
+    if (token === '-u' || token === '--unset') {
+      const nextToken = args[index + 1];
+      if (!nextToken || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(nextToken)) {
+        return { error: '`env` requires a valid variable name after `-u/--unset`.' };
+      }
+      index += 1;
+      continue;
+    }
+    if (/^[A-Za-z_][A-Za-z0-9_]*=.*$/.test(token)) {
+      continue;
+    }
+    return { error: '`env` may inspect or shape environment variables, but it cannot execute a subcommand.' };
+  }
+
+  return { executable: 'env', args };
+}
+
 function validateShellCommand(tokens: string[], repoRoot: string | null): { executable: string; args: string[] } | { error: string } {
   const [command, ...args] = tokens;
-  const simpleCommands = new Set(['ls', 'cat', 'grep', 'find', 'wc', 'head', 'tail']);
+  const allowedShellCommandsMessage = `Allowed shell commands: ${ALLOWED_SHELL_COMMAND_LIST.join(', ')}.`;
+
+  if (BLOCKED_SHELL_COMMANDS.has(command)) {
+    return { error: `Blocked shell command: ${command}` };
+  }
 
   if (command === 'git') {
     const subcommand = args[0];
-    if (!subcommand || !new Set(['status', 'log', 'diff']).has(subcommand)) {
+    if (!subcommand || !ALLOWED_GIT_SUBCOMMANDS.has(subcommand)) {
       return { error: 'Only `git status`, `git log`, and `git diff` are allowed.' };
     }
     for (const token of args.slice(1)) {
@@ -149,8 +253,12 @@ function validateShellCommand(tokens: string[], repoRoot: string | null): { exec
     return { executable: command, args };
   }
 
-  if (!simpleCommands.has(command)) {
-    return { error: 'Allowed shell commands: ls, cat, grep, find, git status, git log, git diff, wc, head, tail.' };
+  if (command === 'env') {
+    return validateEnvCommand(args);
+  }
+
+  if (!ALLOWED_SHELL_COMMANDS.has(command)) {
+    return { error: allowedShellCommandsMessage };
   }
 
   for (const token of args) {
@@ -167,6 +275,9 @@ function validateShellCommand(tokens: string[], repoRoot: string | null): { exec
     }
     if (command === 'grep' && (token === '-f' || token.startsWith('--file') || token.startsWith('--exclude-from'))) {
       return { error: `Disallowed grep flag: ${token}` };
+    }
+    if (command === 'sort' && (token === '-o' || token === '--output' || token.startsWith('--output='))) {
+      return { error: `Disallowed sort flag: ${token}` };
     }
     const tokenError = isDisallowedToken(token, repoRoot);
     if (tokenError) return { error: tokenError };
