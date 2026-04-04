@@ -405,6 +405,14 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           decisionNote = `Lane ${continuation.verb} failed: ${sanitizeErrorMessage(error, 'unknown')}`;
         }
+      } else if (continuation?.kind === 'plan' && action === 'approve') {
+        try {
+          const { dispatchApprovedPlan } = await import('@/lib/intake/plan-dispatch');
+          const result = await dispatchApprovedPlan(continuation);
+          decisionNote = result.note;
+        } catch (error) {
+          decisionNote = `Plan dispatch failed: ${sanitizeErrorMessage(error, 'unknown')}`;
+        }
       } else if (continuation?.kind === 'runtime' && action === 'approve') {
         try {
           if (continuation.action === 'launch' && continuation.prompt) {
