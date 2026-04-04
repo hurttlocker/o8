@@ -100,6 +100,17 @@ const GEMINI_TOOL_DECLARATIONS = [{
         required: ['command'],
       },
     },
+    {
+      name: 'github',
+      description: 'Run a scoped GitHub CLI command in the current project directory without the leading `gh` prefix.',
+      parameters: {
+        type: 'object',
+        properties: {
+          subcommand: { type: 'string', description: 'GitHub CLI subcommand to append to `gh`, such as `pr list` or `issue view 123`.' },
+        },
+        required: ['subcommand'],
+      },
+    },
   ],
 }];
 
