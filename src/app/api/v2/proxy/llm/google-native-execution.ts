@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { createApproval } from '@/lib/approvals/store';
 
@@ -316,6 +316,84 @@ async function executeEditFile(
   }
 }
 
+async function executeCreateFile(argumentsValue: Record<string, unknown>, repoRoot: string | null): Promise<NativeToolResult> {
+  const filePath = extractFilePath(argumentsValue);
+  const content = argumentsValue.content;
+
+  if (!filePath || typeof content !== 'string') {
+    return {
+      status: 'error',
+      output: 'file_path and content are required.',
+      response: { status: 'error', message: 'file_path and content are required.' },
+    };
+  }
+
+  const resolved = resolveProjectPath(repoRoot, filePath);
+  if ('error' in resolved) {
+    return {
+      status: 'error',
+      output: resolved.error,
+      response: { status: 'error', filePath, message: resolved.error },
+    };
+  }
+  if (resolved.relativePath === '.') {
+    return {
+      status: 'error',
+      output: 'file_path must point to a file within the project directory.',
+      response: { status: 'error', filePath, message: 'file_path must point to a file within the project directory.' },
+    };
+  }
+
+  try {
+    await fs.stat(resolved.resolvedPath);
+    return {
+      status: 'error',
+      output: `${resolved.relativePath} already exists. Use edit_file instead.`,
+      response: {
+        status: 'error',
+        filePath: resolved.relativePath,
+        message: 'File already exists. Use edit_file instead.',
+      },
+    };
+  } catch (error) {
+    const errorCode = typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code)
+      : undefined;
+    if (errorCode !== 'ENOENT') {
+      const message = error instanceof Error ? error.message : 'Unable to create file.';
+      return {
+        status: 'error',
+        output: message,
+        response: { status: 'error', filePath: resolved.relativePath, message },
+      };
+    }
+  }
+
+  try {
+    await fs.mkdir(dirname(resolved.resolvedPath), { recursive: true });
+    await fs.writeFile(resolved.resolvedPath, content, 'utf8');
+
+    const bytes = Buffer.byteLength(content, 'utf8');
+    return {
+      status: 'done',
+      output: `Created ${resolved.relativePath} (${bytes} bytes).`,
+      response: {
+        status: 'done',
+        filePath: resolved.relativePath,
+        bytes,
+        message: 'File created successfully.',
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to create file.';
+    return {
+      status: 'error',
+      output: message,
+      response: { status: 'error', filePath: resolved.relativePath, message },
+    };
+  }
+}
+
 async function executeShell(argumentsValue: Record<string, unknown>, repoRoot: string | null): Promise<NativeToolResult> {
   const command = typeof argumentsValue.command === 'string' ? argumentsValue.command.trim() : '';
   if (!command) {
@@ -396,6 +474,9 @@ export async function executeNativeTool(
 ): Promise<NativeToolResult> {
   if (toolName === 'read_file') {
     return executeReadFile(argumentsValue, options.repoRoot);
+  }
+  if (toolName === 'create_file') {
+    return executeCreateFile(argumentsValue, options.repoRoot);
   }
   if (toolName === 'edit_file') {
     return executeEditFile(argumentsValue, options.repoRoot, options.model, options.tabId);
