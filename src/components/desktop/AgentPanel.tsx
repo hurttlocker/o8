@@ -736,7 +736,7 @@ function SidebarSection({
         ) : null}
       </div>
       {open ? (
-        <div style={{ paddingRight: 14, paddingBottom: 10, paddingLeft: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ paddingRight: 0, paddingBottom: 4, paddingLeft: 0, display: 'flex', flexDirection: 'column', gap: 0 }}>
           {children}
         </div>
       ) : null}
@@ -781,6 +781,7 @@ function ActivityDock({
           gap: 8,
           padding: '8px 14px',
           border: 'none',
+          borderBottom: open ? '1px solid var(--t-divider-subtle)' : 'none',
           background: 'transparent',
           cursor: 'pointer',
           color: 'var(--t-text)',
@@ -828,8 +829,8 @@ function ActivityDock({
               minHeight: 0,
               overflowY: 'auto',
               scrollbarWidth: 'none',
-              maskImage: 'linear-gradient(to bottom, transparent 0px, black 18px, black calc(100% - 8px), transparent 100%)',
-              WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 18px, black calc(100% - 8px), transparent 100%)',
+              maskImage: 'linear-gradient(to bottom, black 0px, black calc(100% - 8px), transparent 100%)',
+              WebkitMaskImage: 'linear-gradient(to bottom, black 0px, black calc(100% - 8px), transparent 100%)',
             } as React.CSSProperties}
             className="hide-scrollbar"
           >
@@ -866,90 +867,19 @@ function GhostPulseBar({
 function AgentPanelEmptyState() {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12, scale: 0.985 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -10, scale: 0.985 }}
-      transition={EMPTY_STATE_SPRING}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
       style={{
-        marginTop: 10,
-        marginRight: 4,
-        marginBottom: 8,
-        marginLeft: 4,
-        padding: 14,
-        borderRadius: 14,
-        border: '1px solid var(--t-panel-border)',
-        background: `linear-gradient(180deg, ${THEME_PANEL_GLASS} 0%, ${THEME_BG_CARD} 100%)`,
-        boxShadow: '0 12px 28px rgba(4, 8, 14, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.35)',
-        overflow: 'hidden',
+        padding: '10px 14px',
+        fontSize: 12,
+        color: 'var(--t-text-faint)',
+        letterSpacing: '-0.01em',
+        fontFamily: 'system-ui, sans-serif',
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              lineHeight: 1.4,
-              color: 'var(--t-text)',
-              letterSpacing: '-0.02em',
-              fontFamily: 'system-ui, sans-serif',
-            }}
-          >
-            Your agents appear here as they work.
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              lineHeight: 1.55,
-              color: 'var(--t-text-muted)',
-              letterSpacing: '-0.01em',
-              fontFamily: 'system-ui, sans-serif',
-            }}
-          >
-            Start one from the chat.
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {[0, 1].map((index) => (
-            <div
-              key={index}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '12px 12px 11px',
-                borderRadius: 14,
-                border: '1px solid rgba(148, 163, 184, 0.16)',
-                background: 'rgba(255, 255, 255, 0.36)',
-                opacity: index === 0 ? 0.92 : 0.72,
-              }}
-            >
-              <div
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 14,
-                  background: 'linear-gradient(180deg, rgba(37, 99, 235, 0.12) 0%, rgba(148, 163, 184, 0.16) 100%)',
-                  border: '1px solid rgba(37, 99, 235, 0.12)',
-                  flexShrink: 0,
-                }}
-              />
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                  <GhostPulseBar width={index === 0 ? '48%' : '42%'} height={10} />
-                  <GhostPulseBar width={54} height={18} opacity={0.78} />
-                </div>
-                <GhostPulseBar width={index === 0 ? '72%' : '64%'} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <GhostPulseBar width={80} height={18} opacity={0.78} />
-                  <GhostPulseBar width={58} height={18} opacity={0.68} />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      No active agents. Start one from the chat.
     </motion.div>
   );
 }
@@ -2447,17 +2377,13 @@ const ActivityFeed = memo(function ActivityFeed({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {/* Repo selector + filter tabs — Apple toolbar style */}
+      {/* Repo selector + filter tabs */}
       <div style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 3,
         padding: '8px 8px 6px',
-        background: 'var(--t-panel, #f5f7fb)',
       }}>
         <div
           style={{
-            borderRadius: 14,
+            borderRadius: 12,
             border: '0.5px solid var(--t-divider-subtle)',
             background: 'var(--t-chrome)',
             overflow: 'hidden',
@@ -2726,7 +2652,7 @@ const ActivityFeed = memo(function ActivityFeed({
                         justifyContent: 'center',
                         borderRadius: 999,
                         background: active ? THEME_ACCENT : 'rgba(148, 163, 184, 0.16)',
-                        color: active ? '#ffffff' : 'var(--t-text-faint)',
+                        color: '#ffffff',
                         boxShadow: '0 0 0 2px var(--t-panel)',
                         fontSize: 9,
                         fontWeight: 700,
@@ -2771,10 +2697,8 @@ const ActivityFeed = memo(function ActivityFeed({
             color: 'var(--t-text-faint)',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
-            position: repoPickerOpen ? 'relative' : 'sticky',
-            top: groupedHeaderStickyTop,
-            background: 'var(--t-panel)',
-            zIndex: 2,
+            position: 'relative',
+            zIndex: 1,
           }}>
             {group.label}
           </div>
@@ -4711,10 +4635,10 @@ export const AgentPanel = memo(function AgentPanel({
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
-            marginTop: 4,
-            paddingLeft: 4,
-            paddingRight: 4,
-            paddingBottom: 2,
+            marginTop: 0,
+            paddingLeft: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
           }}
         >
           <ActivityDock

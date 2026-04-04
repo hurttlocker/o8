@@ -2340,41 +2340,7 @@ function RepoCard({
           ) : null}
 
           {unmatchedRepoPackets.length > 0 ? (
-            <div style={{ marginTop: 8, marginLeft: 24, marginBottom: 8, paddingLeft: 12, borderLeft: '1px solid var(--t-divider-subtle)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  color: 'var(--t-text-faint)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.04em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                <span>Planned Work</span>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minWidth: 18,
-                    height: 18,
-                    padding: '0 6px',
-                    borderRadius: 999,
-                    background: 'var(--t-divider-subtle)',
-                    color: 'var(--t-text-secondary)',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                    textTransform: 'none',
-                    letterSpacing: 'normal',
-                  }}
-                >
-                  {unmatchedRepoPackets.length}
-                </span>
-              </div>
+            <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 0 }}>
               {unmatchedRepoPackets.map((packet) => {
                 const runtimeTone = orchestratorRuntimeTone(packet.runtime);
                 const statusTone = orchestratorStatusTone(packet.status);
@@ -2384,92 +2350,41 @@ function RepoCard({
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 10,
-                      padding: '8px 10px',
-                      borderRadius: 12,
-                      border: '1px solid var(--t-panel-border)',
-                      background: 'rgba(255, 255, 255, 0.52)',
+                      gap: 8,
+                      padding: '6px 14px',
+                      borderBottom: '1px solid var(--t-divider-subtle)',
+                      cursor: 'default',
                     }}
                   >
                     <span
                       style={{
-                        width: 8,
-                        height: 8,
+                        width: 6,
+                        height: 6,
                         borderRadius: '50%',
                         background: statusTone.dot,
-                        boxShadow: `0 0 12px ${statusTone.dot}44`,
                         flexShrink: 0,
                       }}
                     />
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            padding: '2px 6px',
-                            borderRadius: 999,
-                            background: 'var(--t-divider-subtle)',
-                            color: 'var(--t-text-secondary)',
-                            fontSize: 9,
-                            fontWeight: 800,
-                            letterSpacing: '0.04em',
-                            textTransform: 'uppercase',
-                            flexShrink: 0,
-                          }}
-                        >
-                          {packet.referenceLabel}
-                        </span>
-                        <span
-                          style={{
-                            minWidth: 0,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            fontSize: 11.5,
-                            fontWeight: 640,
-                            color: 'var(--t-text)',
-                          }}
-                        >
-                          {packet.title}
-                        </span>
-                      </span>
-                      <span
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          marginTop: 2,
-                          minWidth: 0,
-                          overflow: 'hidden',
-                          whiteSpace: 'nowrap',
-                          textOverflow: 'ellipsis',
-                          fontSize: 10,
-                          lineHeight: 1.3,
-                          color: 'var(--t-text-faint)',
-                        }}
-                      >
-                        <span>{packet.branchTarget || 'new lane target'}</span>
-                        <span>·</span>
-                        <span>{runtimeTone.label}</span>
-                        <span>·</span>
-                        <span>{statusTone.label}</span>
-                      </span>
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: 'var(--t-text)',
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      {packet.title}
                     </span>
                     <span
-                      title={runtimeTone.label}
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 28,
-                        height: 28,
-                        borderRadius: 999,
-                        background: runtimeTone.background,
-                        border: `1px solid ${runtimeTone.border}`,
-                        color: runtimeTone.color,
                         fontSize: 10,
-                        fontWeight: 700,
+                        fontWeight: 600,
+                        color: runtimeTone.color,
                         letterSpacing: '-0.01em',
                         flexShrink: 0,
                       }}

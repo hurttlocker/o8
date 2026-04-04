@@ -118,7 +118,7 @@ import {
 } from '@/lib/tiles/operations';
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
-const DEFAULT_LEFT_PANEL_WIDTH = 200;
+const DEFAULT_LEFT_PANEL_WIDTH = 240;
 const DEFAULT_RIGHT_PANEL_WIDTH = 280;
 const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
@@ -994,11 +994,18 @@ function DashboardInner() {
   }, [openCanvasTab]);
 
   const handleReviewPR = useCallback((prNumber: number, repo?: string) => {
+    openCanvasTab({
+      id: `pr:${prNumber}${repo ? `:${repo}` : ''}`,
+      kind: 'pr',
+      label: `PR #${prNumber}`,
+      resourceId: String(prNumber),
+      meta: repo ? { repo } : undefined,
+    });
     openWorkspaceSidePanel('review', getWorkspaceSidePanelRepoBySlug(repo), {
       pullRequestNumber: prNumber,
-      compactReview: false,
+      compactReview: true,
     });
-  }, [getWorkspaceSidePanelRepoBySlug, openWorkspaceSidePanel]);
+  }, [getWorkspaceSidePanelRepoBySlug, openCanvasTab, openWorkspaceSidePanel]);
 
   const handleDeepReviewPR = useCallback((prNumber: number, repo?: string) => {
     handleSelectPR(prNumber, repo);
