@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { applyApprovedFileEdit } from '@/lib/approvals/file-edit';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
 import {
@@ -19,6 +20,13 @@ export const dynamic = 'force-dynamic';
 function invalidateApprovalCaches() {
   invalidateCommandCenterSnapshotCaches();
   invalidateInboxCache();
+}
+
+function mergeDecisionNotes(...notes: Array<string | null | undefined>) {
+  return notes
+    .map((note) => note?.trim())
+    .filter((note): note is string => Boolean(note))
+    .join(' ');
 }
 
 /**
@@ -149,24 +157,47 @@ export async function POST(request: NextRequest) {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   }
-  const approval = resolveApproval(id, action, 'desktop');
-  if (!approval) {
-    return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
-  }
-  // Route resolution based on continuation type
-  let decisionNote = action === 'approve' ? 'Approved.' : 'Denied.';
-  let assistantMessage: unknown = undefined;
-  let nextApproval: unknown = undefined;
-
-  const continuation = approval.continuation;
 
   try {
+    let appliedEdit: { filePath: string; message: string } | undefined;
+    if (action === 'approve' && current.toolName === 'edit_file') {
+      const applyResult = await applyApprovedFileEdit(current);
+      if (!applyResult.ok) {
+        return NextResponse.json({
+          ok: false,
+          error: applyResult.error,
+          code: applyResult.code,
+          approval: current,
+        }, {
+          status: applyResult.status,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        });
+      }
+
+      appliedEdit = {
+        filePath: applyResult.filePath,
+        message: applyResult.message,
+      };
+    }
+
+    const approval = resolveApproval(id, action, 'desktop');
+    if (!approval) {
+      return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
+    }
+
+    // Route resolution based on continuation type
+    let decisionNote = appliedEdit?.message ?? (action === 'approve' ? 'Approved.' : 'Denied.');
+    let assistantMessage: unknown = undefined;
+    let nextApproval: unknown = undefined;
+
+    const continuation = approval.continuation;
+
     if (continuation?.kind === 'llm-chat') {
       // LLM chat continuation
       const decision = action === 'approve'
         ? await resumeLlmApproval(request.url, approval, { actor: 'desktop', editedCommand })
         : rejectLlmApproval(approval, 'desktop');
-      decisionNote = decision.note;
+      decisionNote = mergeDecisionNotes(appliedEdit?.message, decision.note);
       assistantMessage = decision.assistantMessage;
       nextApproval = decision.nextApproval;
     } else if (continuation?.kind === 'lane' && action === 'approve') {
@@ -178,23 +209,53 @@ export async function POST(request: NextRequest) {
         commitMessage: continuation.commitMessage,
         actor: 'user',
       } as Parameters<typeof dispatch>[0]);
-      decisionNote = result.note;
+      decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
     } else if (continuation?.kind === 'runtime' && action === 'approve') {
       // Runtime continuation — launch or resume the session
       if (continuation.action === 'launch' && continuation.prompt) {
         const rt = getRuntime(continuation.runtimeId);
         if (rt) {
           const result = await rt.launch({ cwd: continuation.cwd || process.cwd(), prompt: continuation.prompt });
-          decisionNote = result.note;
+          decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
         }
       } else if (continuation.action === 'resume' && continuation.message) {
         const rt = getRuntime(continuation.runtimeId);
         if (rt) {
           const result = await rt.resume(continuation.sessionKey, continuation.message);
-          decisionNote = result.note;
+          decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
         }
       }
     }
+
+    invalidateApprovalCaches();
+    await publishRealtimeMutation({
+      mutation: {
+        mutationId: `approval-${action}-${approval.id}`,
+        source: 'desktop',
+        action,
+        sessionKey: approval.sessionKey,
+        surfaceId: approval.sessionKey,
+        status: 'completed',
+        note: decisionNote,
+        createdAt: new Date().toISOString(),
+        settledAt: new Date().toISOString(),
+      },
+      refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
+      sessionKeys: [approval.sessionKey],
+      fresh: true,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      approval,
+      resolved: action,
+      note: decisionNote,
+      assistantMessage,
+      nextApproval,
+      appliedEdit,
+    }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
   } catch (error) {
     return NextResponse.json({
       ok: false,
@@ -204,33 +265,4 @@ export async function POST(request: NextRequest) {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   }
-
-  invalidateApprovalCaches();
-  await publishRealtimeMutation({
-    mutation: {
-      mutationId: `approval-${action}-${approval.id}`,
-      source: 'desktop',
-      action,
-      sessionKey: approval.sessionKey,
-      surfaceId: approval.sessionKey,
-      status: 'completed',
-      note: decisionNote,
-      createdAt: new Date().toISOString(),
-      settledAt: new Date().toISOString(),
-    },
-    refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
-    sessionKeys: [approval.sessionKey],
-    fresh: true,
-  });
-
-  return NextResponse.json({
-    ok: true,
-    approval,
-    resolved: action,
-    note: decisionNote,
-    assistantMessage,
-    nextApproval,
-  }, {
-    headers: { 'Cache-Control': 'no-store, max-age=0' },
-  });
 }

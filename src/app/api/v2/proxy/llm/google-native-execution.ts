@@ -2,6 +2,7 @@ import { execFile as execFileCallback } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { APPROVAL_REPO_ROOT_METADATA_KEY } from '@/lib/approvals/file-edit';
 import { createApproval } from '@/lib/approvals/store';
 
 const MAX_FILE_BYTES = 64_000;
@@ -291,6 +292,7 @@ async function executeEditFile(
       metadata: {
         Model: model,
         Path: resolved.relativePath,
+        ...(repoRoot ? { [APPROVAL_REPO_ROOT_METADATA_KEY]: resolve(repoRoot) } : {}),
       },
     });
 
