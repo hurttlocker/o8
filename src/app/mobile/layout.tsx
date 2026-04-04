@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
-import { MobileAuroraBg } from './mobile-aurora-bg';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,9 +35,9 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
           maxHeight: '100dvh',
           overflow: 'hidden',
           position: 'relative',
+          background: '#111111',
         }}
       >
-        <MobileAuroraBg />
         {children}
       </div>
     </>

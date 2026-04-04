@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { MobileAssistantChatThread } from './mobile-assistant-chat-thread';
 import {
   MOBILE_CHAT_STORAGE_KEY,
+  MOBILE_BODY_TRACKING,
+  MOBILE_HEADING_TRACKING,
   MobilePalette,
   generateChatTabId,
   normalizeChatMessages,
@@ -79,8 +81,8 @@ export function AssistantChatView({
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 100, color: palette.subduedText }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, color: palette.rootText }}>Loading conversation</div>
-          <div style={{ fontSize: 13, textAlign: 'center', padding: '0 32px', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: MOBILE_HEADING_TRACKING, marginBottom: 4, color: palette.rootText }}>Loading conversation</div>
+          <div style={{ fontSize: 13, textAlign: 'center', padding: '0 32px', lineHeight: 1.6, letterSpacing: MOBILE_BODY_TRACKING }}>
             Pulling saved messages from your chat history.
           </div>
         </div>
