@@ -1,4 +1,4 @@
-import { execFile as execFileCallback } from 'node:child_process';
+import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -7,6 +7,7 @@ import { createApproval } from '@/lib/approvals/store';
 const MAX_FILE_BYTES = 64_000;
 const MAX_SHELL_OUTPUT = 12_000;
 const SHELL_TIMEOUT_MS = 15_000;
+const GITHUB_BLOCKED_SUBCOMMANDS = new Set(['auth', 'secret', 'ssh-key', 'gpg-key']);
 
 const execFile = promisify(execFileCallback);
 
@@ -173,6 +174,25 @@ function validateShellCommand(tokens: string[], repoRoot: string | null): { exec
   }
 
   return { executable: command, args };
+}
+
+function validateGithubSubcommand(tokens: string[]): { args: string[]; subcommand: string } | { error: string } {
+  if (tokens.length === 0) {
+    return { error: 'subcommand is required.' };
+  }
+
+  const [command, ...args] = tokens;
+  if (GITHUB_BLOCKED_SUBCOMMANDS.has(command)) {
+    return { error: `Blocked GitHub CLI subcommand: ${command}` };
+  }
+  if (command === 'repo' && args[0] === 'delete') {
+    return { error: 'Blocked GitHub CLI subcommand: repo delete' };
+  }
+
+  return {
+    args: tokens,
+    subcommand: tokens.map((token) => (/[\s"]/u.test(token) ? JSON.stringify(token) : token)).join(' '),
+  };
 }
 
 async function executeReadFile(argumentsValue: Record<string, unknown>, repoRoot: string | null): Promise<NativeToolResult> {
@@ -389,6 +409,138 @@ async function executeShell(argumentsValue: Record<string, unknown>, repoRoot: s
   }
 }
 
+async function executeGithub(argumentsValue: Record<string, unknown>, repoRoot: string | null): Promise<NativeToolResult> {
+  const subcommand = typeof argumentsValue.subcommand === 'string' ? argumentsValue.subcommand.trim() : '';
+  if (!subcommand) {
+    return {
+      status: 'error',
+      output: 'subcommand is required.',
+      response: { status: 'error', message: 'subcommand is required.' },
+    };
+  }
+  if (!repoRoot) {
+    return {
+      status: 'error',
+      output: 'No project directory is scoped to this request.',
+      response: { status: 'error', message: 'No project directory is scoped to this request.' },
+    };
+  }
+
+  const tokenized = tokenizeShellCommand(subcommand);
+  if ('error' in tokenized) {
+    return {
+      status: 'blocked',
+      output: tokenized.error,
+      response: { status: 'blocked', subcommand, message: tokenized.error },
+    };
+  }
+
+  const validated = validateGithubSubcommand(tokenized.tokens);
+  if ('error' in validated) {
+    return {
+      status: 'blocked',
+      output: validated.error,
+      response: { status: 'blocked', subcommand, message: validated.error },
+    };
+  }
+
+  const command = `gh ${validated.subcommand}`;
+
+  return new Promise<NativeToolResult>((resolveResult) => {
+    const child = spawn('gh', validated.args, {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        FORCE_COLOR: '0',
+        GH_NO_UPDATE_NOTIFIER: '1',
+        GH_PAGER: 'cat',
+        NO_COLOR: '1',
+        PAGER: 'cat',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, SHELL_TIMEOUT_MS);
+
+    const finish = (result: NativeToolResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveResult(result);
+    };
+
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (error) => {
+      finish({
+        status: 'error',
+        output: error.message,
+        response: {
+          status: 'error',
+          command,
+          output: error.message,
+        },
+      });
+    });
+
+    child.on('close', (code, signal) => {
+      if (timedOut) {
+        const output = truncateOutput(
+          [stdout, stderr, `Command timed out after ${SHELL_TIMEOUT_MS}ms.`].filter(Boolean).join('\n').trim(),
+          MAX_SHELL_OUTPUT,
+        );
+        finish({
+          status: 'error',
+          output,
+          response: {
+            status: 'error',
+            command,
+            output,
+            exitCode: code,
+            signal,
+          },
+        });
+        return;
+      }
+
+      if (code === 0) {
+        const output = truncateOutput(stdout.trim() || '(command completed with no output)', MAX_SHELL_OUTPUT);
+        finish({
+          status: 'done',
+          output,
+          response: { status: 'done', command, output },
+        });
+        return;
+      }
+
+      const output = truncateOutput([stdout, stderr].filter(Boolean).join('\n').trim() || 'Command failed.', MAX_SHELL_OUTPUT);
+      finish({
+        status: 'error',
+        output,
+        response: {
+          status: 'error',
+          command,
+          output,
+          exitCode: code,
+          signal,
+        },
+      });
+    });
+  });
+}
+
 export async function executeNativeTool(
   toolName: string,
   argumentsValue: Record<string, unknown>,
@@ -402,6 +554,9 @@ export async function executeNativeTool(
   }
   if (toolName === 'shell') {
     return executeShell(argumentsValue, options.repoRoot);
+  }
+  if (toolName === 'github') {
+    return executeGithub(argumentsValue, options.repoRoot);
   }
   return {
     status: 'error',
