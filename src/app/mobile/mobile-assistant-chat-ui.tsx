@@ -2,7 +2,7 @@
 
 import { ComposerPrimitive, MessagePrimitive, useAuiState, type MessageState } from '@assistant-ui/react';
 import { useEffect, useState, type CSSProperties } from 'react';
-import { MobileMarkdown } from './mobile-markdown';
+import { MobileMarkdown, codeTheme, highlightCode } from './mobile-markdown';
 import { getMessageTextContent, getMessageThinkingBlocks, getMessageToolCalls } from './mobile-assistant-chat-runtime';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
 import { playSendClick } from '@/lib/mobile/sounds';
@@ -120,6 +120,53 @@ function ThinkingBlock({
 }
 
 
+function ToolOutputBlock({ code, light, palette }: { code: string; light: boolean; palette: MobilePalette }) {
+  const t = codeTheme(light);
+  const lines = highlightCode(code);
+  return (
+    <pre
+      style={{
+        margin: 0,
+        marginTop: 4,
+        padding: '10px 12px',
+        borderRadius: 10,
+        border: `1px solid ${palette.cardBorder}`,
+        background: t.bg,
+        color: t.text,
+        fontSize: 12,
+        lineHeight: 1.55,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        fontFamily: '"SF Mono", Menlo, monospace',
+        overflowX: 'auto',
+        maxHeight: 280,
+        overflowY: 'auto',
+      }}
+    >
+      {lines.map((line, i) => (
+        <span key={i}>
+          {line.tokens.map((token, j) => (
+            <span
+              key={j}
+              style={{
+                color: token.type === 'keyword' ? t.keyword
+                  : token.type === 'string' ? t.string
+                  : token.type === 'number' ? t.number
+                  : token.type === 'comment' ? t.comment
+                  : token.type === 'function' ? t.fn
+                  : t.text,
+              }}
+            >
+              {token.value}
+            </span>
+          ))}
+          {i < lines.length - 1 ? '\n' : null}
+        </span>
+      ))}
+    </pre>
+  );
+}
+
 function ToolCallCard({
   toolCall,
   palette,
@@ -180,27 +227,7 @@ function ToolCallCard({
         )}
       </button>
       {expanded && outputText ? (
-        <pre
-          style={{
-            margin: 0,
-            marginTop: 4,
-            padding: '10px 12px',
-            borderRadius: 10,
-            border: `1px solid ${palette.cardBorder}`,
-            background: palette.isDark ? '#1e1e2e' : '#f8f9fc',
-            color: palette.isDark ? '#dbe4f0' : '#24292f',
-            fontSize: 12,
-            lineHeight: 1.55,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            fontFamily: '"SF Mono", Menlo, monospace',
-            overflowX: 'auto',
-            maxHeight: 280,
-            overflowY: 'auto',
-          }}
-        >
-          {outputText}
-        </pre>
+        <ToolOutputBlock code={outputText} light={!palette.isDark} palette={palette} />
       ) : null}
     </div>
   );
