@@ -91,7 +91,18 @@ export interface LaneApprovalContinuation {
   commitMessage?: string;
 }
 
-export type ApprovalContinuation = LlmApprovalContinuation | RuntimeApprovalContinuation | LaneApprovalContinuation;
+export interface PlanApprovalContinuation {
+  kind: 'plan';
+  repoPath: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueUrl: string;
+  tasks: Array<{ title: string; body: string }>;
+  runtime: 'codex' | 'claude-code';
+  constraints?: string;
+}
+
+export type ApprovalContinuation = LlmApprovalContinuation | RuntimeApprovalContinuation | LaneApprovalContinuation | PlanApprovalContinuation;
 
 export interface ApprovalRecord {
   id: string;
