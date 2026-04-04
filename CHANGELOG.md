@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `b673d36` feat: syntax-highlighted tool output — expand shows real code colors
 - `421cab7` feat: Apple-style collapsible tool call cards
 - `b874d03` refactor: compact chat list
 - `6e54f1e` fix: badge count matches approval view filter — hide runtime/llm-chat noise
