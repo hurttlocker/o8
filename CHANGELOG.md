@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-04
 
+- `5d6b8bd` feat: O8 Browser tab — wire LocalhostPreviewTabs into O8 panel
 - `72f9e97` fix: O8 tab icons collapsing to 1.6px — add explicit size in style
 - `48b9347` fix: O8 icons
 - `6782ecb` fix: O8 tab icons
