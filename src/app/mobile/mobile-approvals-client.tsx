@@ -29,6 +29,13 @@ import {
   type MobileView,
 } from './mobile-approvals-shared';
 import { SettingsView } from './mobile-settings-view';
+import {
+  getMobileRepoLabel,
+  normalizeMobileRepoList,
+  readStoredMobileRepoPath,
+  writeStoredMobileRepoPath,
+  type MobileRepoOption,
+} from './mobile-chat-repos';
 
 function getWsToken() {
   if (typeof document === 'undefined') return null;
@@ -63,13 +70,18 @@ export function MobileApprovalsClient({
   const [recentConversations, setRecentConversations] = useState<ChatHistoryRecord[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState(readStoredMobileModel);
+  const [repoOptions, setRepoOptions] = useState<MobileRepoOption[]>([]);
+  const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(readStoredMobileRepoPath);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
 
   const selectedModel = useMemo(
     () => getModelOption(selectedModelId) ?? getModelOption(DEFAULT_MOBILE_CHAT_MODEL)!,
     [selectedModelId],
   );
-
+  const selectedRepoLabel = useMemo(
+    () => getMobileRepoLabel(selectedRepoPath, repoOptions),
+    [repoOptions, selectedRepoPath],
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -109,6 +121,38 @@ export function MobileApprovalsClient({
       void loadRecentConversations();
     }
   }, [activeView, currentTabId, loadRecentConversations]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch('/api/v2/repos', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Failed to load repositories');
+        const data = await response.json();
+        const nextRepos = normalizeMobileRepoList(data);
+        if (cancelled) return;
+
+        setRepoOptions(nextRepos);
+        setSelectedRepoPath((current) => {
+          if (!current) return current;
+          return nextRepos.some((repo) => repo.localPath === current) ? current : null;
+        });
+      } catch {
+        if (!cancelled) {
+          setRepoOptions([]);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    writeStoredMobileRepoPath(selectedRepoPath);
+  }, [selectedRepoPath]);
 
   useEffect(() => {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -196,6 +240,10 @@ export function MobileApprovalsClient({
     } catch {
       // Ignore local storage failures on constrained browsers.
     }
+  }, []);
+
+  const handleRepoChange = useCallback((repoPath: string | null) => {
+    setSelectedRepoPath(repoPath);
   }, []);
 
   const pendingCount = useMemo(
@@ -289,18 +337,46 @@ export function MobileApprovalsClient({
 
           <div
             style={{
-              fontSize: 18,
-              fontWeight: 800,
-              letterSpacing: '-0.02em',
               flex: 1,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              textAlign: 'center',
-              color: palette.rootText,
+              minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 2,
             }}
           >
-            {viewTitle}
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 800,
+                letterSpacing: '-0.02em',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                textAlign: 'center',
+                color: palette.rootText,
+              }}
+            >
+              {viewTitle}
+            </div>
+            {inConversation ? (
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.01em',
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: palette.subduedText,
+                }}
+              >
+                {selectedRepoLabel}
+              </div>
+            ) : null}
           </div>
 
           {activeView === 'approvals' ? (
@@ -362,6 +438,10 @@ export function MobileApprovalsClient({
                 void loadRecentConversations();
               }}
               selectedModel={selectedModel}
+              repoPath={selectedRepoPath}
+              repoOptions={repoOptions}
+              onRepoPathChange={handleRepoChange}
+              onRepoPathLoaded={handleRepoChange}
               palette={palette}
             />
           ) : null}

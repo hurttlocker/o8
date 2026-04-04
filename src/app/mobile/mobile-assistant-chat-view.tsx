@@ -12,18 +12,27 @@ import {
   type ChatMessage,
   type ModelOption,
 } from './mobile-approvals-shared';
+import type { MobileRepoOption } from './mobile-chat-repos';
 
 export function AssistantChatView({
   currentTabId,
   onTabIdChange,
   onConversationSaved,
   selectedModel,
+  repoPath,
+  repoOptions,
+  onRepoPathChange,
+  onRepoPathLoaded,
   palette,
 }: {
   currentTabId: string | null;
   onTabIdChange: (tabId: string) => void;
   onConversationSaved: () => void;
   selectedModel: ModelOption;
+  repoPath: string | null;
+  repoOptions: MobileRepoOption[];
+  onRepoPathChange: (repoPath: string | null) => void;
+  onRepoPathLoaded: (repoPath: string | null) => void;
   palette: MobilePalette;
 }) {
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -57,9 +66,12 @@ export function AssistantChatView({
         });
         if (!response.ok) throw new Error('Failed to load chat history');
 
-        const data = await response.json() as { messages?: unknown };
+        const data = await response.json() as { exists?: boolean; messages?: unknown; repoPath?: unknown };
         if (!cancelled) {
           setInitialMessages(normalizeChatMessages(data.messages));
+          if (data.exists === true) {
+            onRepoPathLoaded(typeof data.repoPath === 'string' && data.repoPath.trim() ? data.repoPath : null);
+          }
         }
       } catch {
         if (!cancelled) {
@@ -75,7 +87,7 @@ export function AssistantChatView({
     return () => {
       cancelled = true;
     };
-  }, [currentTabId]);
+  }, [currentTabId, onRepoPathLoaded]);
 
   if (historyLoading || !currentTabId) {
     return (
@@ -97,6 +109,9 @@ export function AssistantChatView({
       initialMessages={initialMessages}
       onConversationSaved={onConversationSaved}
       selectedModel={selectedModel}
+      repoPath={repoPath}
+      repoOptions={repoOptions}
+      onRepoPathChange={onRepoPathChange}
       palette={palette}
     />
   );

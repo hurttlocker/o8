@@ -7,7 +7,7 @@ import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt, buildUnscopedSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
-import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
+import { resolveRegisteredRepoScope, resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
 import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
 import { executeTool, type ToolResult } from '@/lib/llm/tools';
 import {
@@ -79,6 +79,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     approvedTools?: string[];
     disableTools?: boolean;
     toolOverrides?: Record<string, Record<string, unknown>>;
+    repoPath?: string | null;
   };
 
   if (!isSupportedProvider(provider)) {
@@ -88,7 +89,9 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   const approvedTools = new Set(approvedToolsList ?? []);
   const toolOverrides = rawToolOverrides ?? {};
   const tabId = request.headers.get('x-tab-id')?.trim() || '';
-  const { repoRoot: scopedRepoRoot } = await resolveRepoScopeFromHeaders(request.headers);
+  const scopedRepoRoot = typeof body.repoPath === 'string' && body.repoPath.trim()
+    ? (await resolveRegisteredRepoScope(body.repoPath)).repoRoot
+    : (await resolveRepoScopeFromHeaders(request.headers)).repoRoot;
   const nonSystemMessages = rawMessages.filter((message) => message.role !== 'system');
   const priorSystemMessages = rawMessages
     .filter((message) => message.role === 'system')
