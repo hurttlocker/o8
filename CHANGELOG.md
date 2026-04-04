@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-03
 
+- `4f7fe6d` feat: compact model selector + fix theme toggle in settings
 - `e3c6562` feat: restore light mode with proper theme toggle
 - `9e18da3` feat: tool call card renderer components
 - `9af3972` feat: tool call SSE protocol types and parser
