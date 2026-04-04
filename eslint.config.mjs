@@ -14,6 +14,7 @@ const config = [
       '**/.cortex-worktrees/**',
       'out/**',
       'build/**',
+      'dist/**',
       'coverage/**',
       'electron/**',
       'src-tauri/target/**',
@@ -21,6 +22,12 @@ const config = [
       'tmp/**',
       'next-env.d.ts',
     ],
+  },
+  {
+    files: ['src/app/api/**/*.ts', 'src/lib/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
   },
 ];
 
