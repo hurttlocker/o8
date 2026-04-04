@@ -94,6 +94,8 @@ export interface TerminalTab {
   chatCheckpoints?: PersistedChatCheckpoint[];
   linkedIssue?: LinkedIssueRef | null;
   canvasTab?: CanvasTab;
+  /** True when tab was loaded in background and hasn't been viewed yet */
+  unseen?: boolean;
   orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
   supervisorStatus?: string | null;
   autoArchiveOnIdle?: boolean;
@@ -2980,6 +2982,15 @@ const TabBar = memo(function TabBar({
               }}
             >
               {/* Icons removed — text-only minimal tabs */}
+                {tab.unseen ? (
+                  <span style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: '#2563eb',
+                    flexShrink: 0,
+                  }} />
+                ) : null}
                 <span style={{
                   maxWidth: 160,
                   overflow: 'hidden',
@@ -4630,6 +4641,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       repo?: RegisteredRepo;
       createNew?: boolean;
     }) => {
+      // PR/issue tabs load in background — don't auto-switch away from the user's current context
+      const backgroundLoad = canvasTab.kind === 'pr' || canvasTab.kind === 'issue';
       const currentTabs = tabsRef.current;
       const matchingExisting = options?.createNew
         ? null
@@ -4652,7 +4665,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               }
             : tab
         )));
-        setActiveTabId(resolvedTabId);
+        if (!backgroundLoad) {
+          setActiveTabId(resolvedTabId);
+        }
         return resolvedTabId;
       }
 
@@ -4665,11 +4680,14 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         tmuxSession: null,
         repo: options?.repo,
         canvasTab,
+        unseen: backgroundLoad,
         createdAt: now,
         lastActivity: now,
       };
       setTabs((prev) => [...prev, newTab]);
-      setActiveTabId(resolvedTabId);
+      if (!backgroundLoad) {
+        setActiveTabId(resolvedTabId);
+      }
       return resolvedTabId;
     }, []);
 
@@ -5481,7 +5499,10 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           tabs={visibleTabs}
           activeTabId={effectiveActiveTabId}
           launchRequestKey={launchRequestKey}
-          onSelectTab={setActiveTabId}
+          onSelectTab={(id: string) => {
+            setActiveTabId(id);
+            setTabs((prev) => prev.map((tab) => tab.id === id && tab.unseen ? { ...tab, unseen: false } : tab));
+          }}
           onCloseTab={handleCloseTab}
           onNewTab={handleNewTab}
           onNewChatTab={handleNewChatTab}
