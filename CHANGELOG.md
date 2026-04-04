@@ -8,6 +8,8 @@ Development activity for Rainwater IDE.
 
 - `1ab5e33` fix: Security hardening
 - `b402264` feat: o8 agent safety hooks
+- `9dc4866` feat: mobile repo picker for multi-repo chat
+- `f6777fa` feat: repo-scoped tool execution + repos API
 
 ## 2026-04-03
 
