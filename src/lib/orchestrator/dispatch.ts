@@ -13,7 +13,7 @@ import type { OrchestratorLaneBinding, OrchestratorMissionState, OrchestratorPac
 import { truncateText } from '@/lib/util/text';
 
 export const MAX_PARALLEL_DISPATCHES = 4;
-export const FILE_SIZE_BLOCK_THRESHOLD_LINES = 600;
+export const FILE_SIZE_BLOCK_THRESHOLD_LINES = 800;
 const FILE_SIZE_WARNING_BUFFER_LINES = 100;
 const FILE_SIZE_WARNING_THRESHOLD_LINES = FILE_SIZE_BLOCK_THRESHOLD_LINES - FILE_SIZE_WARNING_BUFFER_LINES;
 const MAX_THRESHOLD_GUIDANCE_FILES = 6;
@@ -427,7 +427,7 @@ async function buildPacketPrompt(
     ...priorAttemptLearningSections,
     ...fileSizeSections,
     ...preservationSections,
-    'Files in this repository follow a 600-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
+    'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     ...buildPacketSelfReviewInstructions(baseBranch),
     'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
