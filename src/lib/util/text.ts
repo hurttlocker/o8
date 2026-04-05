@@ -21,3 +21,4 @@ export function truncateText(
 
   return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
+// PR density test
