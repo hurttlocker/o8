@@ -6,6 +6,9 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `d9206f5` feat: MCP dispatch DX overhaul
+- `b80058b` chore: remove OpenCode from open-in editor list
+- `feae542` docs: add AI provider harness ban impact analysis
 - `e994493` chore: remove stale runtimes + fix canvas picker dark mode
 - `7bdef27` fix: lane card click falls back to lanes API for session lookup
 - `27321d5` fix: make lane cards clickable — opens transcript on click
