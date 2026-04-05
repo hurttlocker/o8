@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `067dd2f` feat: PR list view in O8 panel — all open PRs on one page
 - `c876348` refactor: neutral tone PR action buttons — no colored backgrounds
 - `da722f7` feat: PR review tab in O8 panel — replaces canvas PR viewer
 - `ddcbca5` refactor: reorder O8 tabs — Changes, Files, Browser
