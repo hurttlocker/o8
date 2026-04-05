@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `e0663e0` refactor: reorder activity tabs to match dev workflow + compact PR badge
 - `2bd6c5b` feat: port hover popover + open ports in O8 browser tab
 - `4f7c1ba` fix: review fixes for — render loop, CSS shorthand, stale state
 - `c544a1b` chore: remove unrelated AI provider settings change
