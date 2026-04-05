@@ -16,7 +16,7 @@ import {
 import { githubInstallationFetch } from './auth';
 import { getGitHubAppConfig } from './env';
 
-const GITHUB_SNAPSHOT_TTL_MS = 30_000; // 30s — agents create issues frequently
+const GITHUB_SNAPSHOT_TTL_MS = 120_000; // 2 min — balance freshness with rate limit budget
 
 const MAX_ISSUE_PAGES = 5; // 5 pages * 100 = 500 issues max
 

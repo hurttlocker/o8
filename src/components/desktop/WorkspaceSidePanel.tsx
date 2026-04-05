@@ -1687,7 +1687,7 @@ const ReviewTab = memo(function ReviewTab({
       }
     }
     void fetchReview();
-    const id = window.setInterval(() => { void fetchReview(); }, 30_000);
+    const id = window.setInterval(() => { void fetchReview(); }, 120_000); // 2 min — conserve GitHub rate limit
     return () => {
       active = false;
       window.clearInterval(id);
