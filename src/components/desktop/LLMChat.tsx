@@ -951,60 +951,78 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
         </div>
       )}
 
-      {/* Tool calls display */}
-      {!isUser && visibleToolCalls.length > 0 && !(message.thinkingSteps && message.thinkingSteps.length > 0) && (
-        <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              maxWidth: '90%',
-              marginTop: 4,
-            }}>
-          {visibleToolCalls.map((tc, i) => (
-            <div key={i} style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              paddingTop: 6,
-              paddingBottom: 6,
-              paddingLeft: 10,
-              paddingRight: 10,
-              background: THEME_BG_CARD,
-              border: '1px solid var(--t-panel-border)',
-              borderRadius: 8,
-              fontSize: 12,
-              fontFamily: '-apple-system, system-ui, sans-serif',
-              animation: 'llmFadeIn 200ms ease-out',
-            }}>
-              <div style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: tc.status === 'done' ? '#10b981' : '#3b82f6',
-                flexShrink: 0,
-                ...(tc.status !== 'done' ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}),
-              }} />
-              <span style={{ color: 'var(--t-text-secondary)', fontWeight: 500 }}>
-                {tc.name === 'search_web' ? '🔍 Searched' :
-                 tc.name === 'read_file' ? '📄 Read' :
-                 tc.name === 'list_files' ? '📁 Listed' :
-                 tc.name === 'search_code' ? '🔎 Searched code' :
-                 `🔧 ${tc.name}`}
-              </span>
-              <span style={{ color: 'var(--t-text-muted)' }}>
-                {tc.name === 'search_web' && tc.args?.query ? `"${tc.args.query}"` :
-                 tc.name === 'read_file' && tc.args?.path ? String(tc.args.path) :
-                 tc.name === 'search_code' && tc.args?.query ? `"${tc.args.query}"` :
-                 tc.name === 'list_files' && tc.args?.path ? String(tc.args.path) :
-                 ''}
-              </span>
-              {tc.status === 'done' && (
-                <Check size={12} style={{ color: '#10b981', marginLeft: 'auto' }} />
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Tool calls display — collapse consecutive exec_commands */}
+      {!isUser && visibleToolCalls.length > 0 && !(message.thinkingSteps && message.thinkingSteps.length > 0) && (() => {
+        // Group consecutive exec_commands into a single summary
+        const groups: { kind: 'single'; tc: typeof visibleToolCalls[0] }[] | { kind: 'group'; count: number; allDone: boolean }[] = [];
+        type ToolGroup = { kind: 'single'; tc: typeof visibleToolCalls[0] } | { kind: 'group'; count: number; allDone: boolean };
+        const collapsed: ToolGroup[] = [];
+        let execRun = 0;
+        let execAllDone = true;
+        for (const tc of visibleToolCalls) {
+          if (tc.name === 'exec_command' || tc.name === 'shell' || tc.name === 'bash') {
+            execRun++;
+            if (tc.status !== 'done') execAllDone = false;
+          } else {
+            if (execRun > 0) {
+              collapsed.push({ kind: 'group', count: execRun, allDone: execAllDone });
+              execRun = 0; execAllDone = true;
+            }
+            collapsed.push({ kind: 'single', tc });
+          }
+        }
+        if (execRun > 0) collapsed.push({ kind: 'group', count: execRun, allDone: execAllDone });
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '90%', marginTop: 4 }}>
+            {collapsed.map((item, i) => {
+              if (item.kind === 'group') {
+                return (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    paddingTop: 5, paddingBottom: 5, paddingLeft: 10, paddingRight: 10,
+                    background: THEME_BG_CARD, border: '1px solid var(--t-panel-border)',
+                    borderRadius: 8, fontSize: 12, fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: item.allDone ? '#10b981' : '#3b82f6', flexShrink: 0, ...(item.allDone ? {} : { animation: 'llmDot 1.4s ease-in-out infinite' }) }} />
+                    <span style={{ color: 'var(--t-text-secondary)', fontWeight: 500 }}>
+                      {item.count} command{item.count > 1 ? 's' : ''} executed
+                    </span>
+                    {item.allDone && <Check size={12} style={{ color: '#10b981', marginLeft: 'auto' }} />}
+                  </div>
+                );
+              }
+              const tc = item.tc;
+              return (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  paddingTop: 6, paddingBottom: 6, paddingLeft: 10, paddingRight: 10,
+                  background: THEME_BG_CARD, border: '1px solid var(--t-panel-border)',
+                  borderRadius: 8, fontSize: 12, fontFamily: '-apple-system, system-ui, sans-serif',
+                  animation: 'llmFadeIn 200ms ease-out',
+                }}>
+                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: tc.status === 'done' ? '#10b981' : '#3b82f6', flexShrink: 0, ...(tc.status !== 'done' ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}) }} />
+                  <span style={{ color: 'var(--t-text-secondary)', fontWeight: 500 }}>
+                    {tc.name === 'search_web' ? 'Searched' :
+                     tc.name === 'read_file' ? 'Read' :
+                     tc.name === 'list_files' ? 'Listed' :
+                     tc.name === 'search_code' ? 'Searched code' :
+                     tc.name}
+                  </span>
+                  <span style={{ color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {tc.name === 'search_web' && tc.args?.query ? `"${tc.args.query}"` :
+                     tc.name === 'read_file' && tc.args?.path ? String(tc.args.path) :
+                     tc.name === 'search_code' && tc.args?.query ? `"${tc.args.query}"` :
+                     tc.name === 'list_files' && tc.args?.path ? String(tc.args.path) :
+                     tc.preview ? String(tc.preview).slice(0, 60) : ''}
+                  </span>
+                  {tc.status === 'done' && <Check size={12} style={{ color: '#10b981', marginLeft: 'auto' }} />}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Sources */}
       {!isUser && message.sources && message.sources.length > 0 && (
