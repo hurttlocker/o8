@@ -258,6 +258,13 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
       if (data.ok) {
         setActionResult(action === 'approve' ? 'Approved' : action === 'merge' ? 'Merged' : 'Changes requested');
         setReviewComment('');
+        // Re-fetch PR to update state (Open → Merged, hide action buttons)
+        if (action === 'merge') {
+          setPr((prev) => prev ? { ...prev, state: 'closed', mergedAt: new Date().toISOString() } : prev);
+          // Refresh PR list too
+          const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+          fetch(`/api/panel/prs${repoParam}`).then((r) => r.json()).then((d) => setPrList(d.prs ?? [])).catch(() => {});
+        }
       } else {
         setActionResult(data.error || 'Action failed');
       }
