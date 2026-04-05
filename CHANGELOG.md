@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `2ddfbb8` refactor: tighter file tree + editor text for O8 side panel
 - `a749385` feat: editable file viewer in O8 Files tab — Cursor-style editing
 - `08a5f97` feat: file browser in O8 panel Files tab — Cursor-style split layout
 - `cf190ea` fix: force white xterm viewport + dark header text in global terminal
