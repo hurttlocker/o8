@@ -211,8 +211,6 @@ const CLI_AGENTS = [
   { id: 'claude', label: 'Claude Code', color: '#e07a3a', command: 'claude' },
   { id: 'codex', label: 'Codex', color: '#6b7280', command: 'codex' },
   { id: 'gemini', label: 'Gemini CLI', color: '#4285f4', command: 'gemini' },
-  { id: 'opencode', label: 'OpenCode', color: '#f97316', command: 'opencode' },
-  { id: 'aider', label: 'Aider', color: '#eab308', command: 'aider' },
 ];
 
 interface RegisteredRepo {
@@ -3136,6 +3134,8 @@ const TabBar = memo(function TabBar({
             marginTop: 4,
             minWidth: 220,
             background: THEME_PANEL_GLASS,
+            backdropFilter: 'blur(24px) saturate(1.6)',
+            WebkitBackdropFilter: 'blur(24px) saturate(1.6)',
             border: '1px solid var(--t-panel-border)',
             borderRadius: 10,
             overflow: 'hidden',
@@ -3269,9 +3269,9 @@ const TabBar = memo(function TabBar({
                   paddingBottom: 6,
                   paddingLeft: 10,
                   border: 'none',
-                  borderBottom: '1px solid #f1f5f9',
+                  borderBottom: '1px solid var(--t-divider)',
                   background: 'transparent',
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                   fontSize: 11,
                   cursor: 'pointer',
                   fontFamily: '-apple-system, system-ui, sans-serif',
@@ -3310,19 +3310,19 @@ const TabBar = memo(function TabBar({
                     paddingLeft: 12,
                     border: 'none',
                     background: 'transparent',
-                    color: '#1e293b',
+                    color: 'var(--t-text)',
                     fontSize: 13,
                     fontFamily: '-apple-system, system-ui, sans-serif',
                     cursor: 'pointer',
                     textAlign: 'left',
                     transition: 'background 100ms',
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                  onMouseEnter={(e) => { (e.currentTarget).style.background = 'var(--t-hover)'; }}
                   onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
                 >
                   <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {agent.id === 'shell' ? (
-                      <TerminalIcon size={14} style={{ color: '#94a3b8' }} />
+                      <TerminalIcon size={14} style={{ color: 'var(--t-text-muted)' }} />
                     ) : (
                       <AgentDot color={agent.color} size={10} />
                     )}
@@ -3330,7 +3330,7 @@ const TabBar = memo(function TabBar({
                   <div>
                     <div style={{ fontWeight: 500 }}>{agent.label}</div>
                     {agent.command && (
-                      <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>
+                      <div style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: 'ui-monospace, monospace' }}>
                         $ {agent.command}
                       </div>
                     )}
@@ -3354,9 +3354,9 @@ const TabBar = memo(function TabBar({
                   paddingBottom: 6,
                   paddingLeft: 10,
                   border: 'none',
-                  borderBottom: '1px solid #f1f5f9',
+                  borderBottom: '1px solid var(--t-divider)',
                   background: 'transparent',
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                   fontSize: 11,
                   cursor: 'pointer',
                   fontFamily: '-apple-system, system-ui, sans-serif',
@@ -3387,14 +3387,14 @@ const TabBar = memo(function TabBar({
                     paddingLeft: 12,
                     border: 'none',
                     background: 'transparent',
-                    color: '#1e293b',
+                    color: 'var(--t-text)',
                     fontSize: 13,
                     fontFamily: '-apple-system, system-ui, sans-serif',
                     cursor: 'pointer',
                     textAlign: 'left',
                     transition: 'background 100ms',
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                  onMouseEnter={(e) => { (e.currentTarget).style.background = 'var(--t-hover)'; }}
                   onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
                 >
                   <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -3402,7 +3402,7 @@ const TabBar = memo(function TabBar({
                   </span>
                   <div>
                     <div style={{ fontWeight: 500 }}>{rt.label}</div>
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Agent conversation</div>
+                    <div style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>Agent conversation</div>
                   </div>
                 </button>
               ))}
@@ -3423,9 +3423,9 @@ const TabBar = memo(function TabBar({
                   paddingBottom: 6,
                   paddingLeft: 10,
                   border: 'none',
-                  borderBottom: '1px solid #f1f5f9',
+                  borderBottom: '1px solid var(--t-divider)',
                   background: 'transparent',
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                   fontSize: 11,
                   cursor: 'pointer',
                   fontFamily: '-apple-system, system-ui, sans-serif',
@@ -3440,7 +3440,7 @@ const TabBar = memo(function TabBar({
                 paddingLeft: 10,
                 fontSize: 10,
                 fontWeight: 600,
-                color: '#94a3b8',
+                color: 'var(--t-text-faint)',
                 letterSpacing: '0.05em',
                 textTransform: 'uppercase',
               }}>
@@ -3467,20 +3467,20 @@ const TabBar = memo(function TabBar({
                   paddingLeft: 12,
                   border: 'none',
                   background: 'transparent',
-                  color: '#64748b',
+                  color: 'var(--t-text-secondary)',
                   fontSize: 13,
                   cursor: 'pointer',
                   textAlign: 'left',
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   transition: 'background 100ms',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = 'var(--t-hover)'; }}
                 onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
               >
-                <TerminalIcon size={14} style={{ color: '#94a3b8' }} />
+                <TerminalIcon size={14} style={{ color: 'var(--t-text-muted)' }} />
                 <div>
                   <div style={{ fontWeight: 500 }}>No repo (home dir)</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8' }}>~/</div>
+                  <div style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>~/</div>
                 </div>
               </button>
 
@@ -3493,7 +3493,7 @@ const TabBar = memo(function TabBar({
                   paddingLeft: 10,
                   fontSize: 10,
                   fontWeight: 600,
-                  color: '#94a3b8',
+                  color: 'var(--t-text-faint)',
                   letterSpacing: '0.05em',
                   textTransform: 'uppercase',
                 }}>
@@ -3521,20 +3521,20 @@ const TabBar = memo(function TabBar({
                     paddingLeft: 12,
                     border: 'none',
                     background: 'transparent',
-                    color: '#1e293b',
+                    color: 'var(--t-text)',
                     fontSize: 13,
                     cursor: 'pointer',
                     textAlign: 'left',
                     fontFamily: '-apple-system, system-ui, sans-serif',
                     transition: 'background 100ms',
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                  onMouseEnter={(e) => { (e.currentTarget).style.background = 'var(--t-hover)'; }}
                   onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
                 >
                   <AgentDot color={selectedAgent.color} size={8} />
                   <div>
                     <div style={{ fontWeight: 500 }}>{repo.name}</div>
-                    <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>
+                    <div style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: 'ui-monospace, monospace' }}>
                       {repo.localPath.replace(/^\/Users\/[^/]+\//, '~/')}
                     </div>
                   </div>
@@ -3542,7 +3542,7 @@ const TabBar = memo(function TabBar({
               ))}
 
               {/* Divider */}
-              <div style={{ height: 1, background: '#f1f5f9', marginTop: 4, marginBottom: 4 }} />
+              <div style={{ height: 1, background: 'var(--t-divider)', marginTop: 4, marginBottom: 4 }} />
 
               {/* Open folder — native dialog */}
               <button
@@ -3588,17 +3588,17 @@ const TabBar = memo(function TabBar({
                   paddingLeft: 12,
                   border: 'none',
                   background: 'transparent',
-                  color: '#1e293b',
+                  color: 'var(--t-text)',
                   fontSize: 13,
                   cursor: 'pointer',
                   textAlign: 'left',
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   transition: 'background 100ms',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = 'var(--t-hover)'; }}
                 onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
               >
-                <span style={{ fontSize: 14, color: '#94a3b8', width: 20, textAlign: 'center' }}>📂</span>
+                <span style={{ fontSize: 14, color: 'var(--t-text-muted)', width: 20, textAlign: 'center' }}>📂</span>
                 <div style={{ fontWeight: 500 }}>Open folder...</div>
               </button>
             </>)}
