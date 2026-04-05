@@ -109,18 +109,18 @@ function TreeNode({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 4,
+          gap: 3,
           width: '100%',
-          height: 26,
-          paddingLeft: 8 + depth * 16,
-          paddingRight: 8,
+          height: 22,
+          paddingLeft: 6 + depth * 14,
+          paddingRight: 6,
           border: 'none',
           borderRadius: 0,
           background: isSelected ? 'rgba(37, 99, 235, 0.12)' : 'transparent',
           color: isDir ? 'var(--t-text)' : extensionColor(node.name),
           cursor: 'pointer',
           fontFamily: '"SF Mono", ui-monospace, monospace',
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: isDir ? 600 : 400,
           textAlign: 'left',
           letterSpacing: '-0.01em',
@@ -278,8 +278,8 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
     }}>
       {/* Left — File tree */}
       <div style={{
-        width: 260,
-        minWidth: 200,
+        width: 220,
+        minWidth: 180,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
@@ -414,11 +414,11 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
                   >
                     {editContent.split('\n').map((_, i) => (
                       <div key={i} style={{
-                        height: 20,
-                        lineHeight: '20px',
+                        height: 18,
+                        lineHeight: '18px',
                         textAlign: 'right',
                         paddingRight: 8,
-                        fontSize: 11,
+                        fontSize: 10,
                         fontFamily: '"SF Mono", ui-monospace, monospace',
                         color: 'var(--t-text-faint)',
                       }}>
@@ -444,8 +444,8 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
                       background: 'transparent',
                       color: 'var(--t-text)',
                       fontFamily: '"SF Mono", ui-monospace, monospace',
-                      fontSize: 12,
-                      lineHeight: '20px',
+                      fontSize: 11,
+                      lineHeight: '18px',
                       paddingTop: 8,
                       paddingBottom: 8,
                       paddingLeft: 12,
