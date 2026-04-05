@@ -1,7 +1,9 @@
 'use client';
 
 import { createPortal } from 'react-dom';
+import { useState, useEffect } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { isTauri } from '@/lib/tauri/bridge';
 
 function resolveFloatingPosition(anchorRect: DOMRect, width: number) {
   const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440;
@@ -47,6 +49,9 @@ export function BlueGlassHoverCard({
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
 }) {
+  const [inTauri, setInTauri] = useState(false);
+  useEffect(() => { setInTauri(isTauri()); }, []);
+
   const content = (
     <div
       onMouseEnter={onMouseEnter}
@@ -57,12 +62,12 @@ export function BlueGlassHoverCard({
         width,
         padding: '14px 15px 13px',
         borderRadius: 18,
-        border: '1px solid var(--t-panel-border)',
-        background: 'var(--t-panel-solid, var(--t-panel-translucent))',
-        backdropFilter: 'blur(32px) saturate(1.3)',
-        WebkitBackdropFilter: 'blur(32px) saturate(1.3)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.1)',
-        color: 'var(--t-text)',
+        border: inTauri ? '1px solid var(--t-panel-border)' : '1px solid rgba(255, 255, 255, 0.1)',
+        background: inTauri ? 'var(--t-panel-solid, var(--t-panel-translucent))' : '#1e2028',
+        backdropFilter: inTauri ? 'blur(32px) saturate(1.3)' : 'none',
+        WebkitBackdropFilter: inTauri ? 'blur(32px) saturate(1.3)' : 'none',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.15)',
+        color: inTauri ? 'var(--t-text)' : '#e2e8f0',
         pointerEvents: interactive ? 'auto' : 'none',
         ...(anchorRect ? resolveFloatingPosition(anchorRect, width) : null),
         ...style,
