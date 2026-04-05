@@ -278,6 +278,12 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
         if (!containerRef.current || disposed) { term.dispose(); return; }
 
         term.open(containerRef.current);
+        // Force white background on xterm viewport — the xterm CSS sets its own
+        // background that can override the theme in some environments
+        const viewport = containerRef.current.querySelector('.xterm-viewport') as HTMLElement | null;
+        if (viewport) viewport.style.background = '#ffffff';
+        const screen = containerRef.current.querySelector('.xterm-screen') as HTMLElement | null;
+        if (screen) screen.style.background = '#ffffff';
         fitAddon.fit();
         termRef.current = term;
         fitAddonRef.current = fitAddon;
@@ -581,6 +587,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
           paddingRight: 8,
           position: 'relative',
           zIndex: 30,
+          color: '#374151',
         } as React.CSSProperties}>
           <div style={{
             display: 'inline-flex',
@@ -596,7 +603,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
               fontSize: 12,
               fontWeight: 700,
               letterSpacing: '-0.01em',
-              color: 'var(--t-text)',
+              color: '#374151',
               whiteSpace: 'nowrap',
             }}>
               Global Terminal
@@ -633,9 +640,9 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                     paddingLeft: 10,
                     borderRadius: 8,
                     border: 'none',
-                    background: isActive ? 'var(--t-panel)' : 'transparent',
-                    boxShadow: isActive ? 'var(--t-panel-shadow)' : 'none',
-                    color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                    background: isActive ? '#e8eaef' : 'transparent',
+                    boxShadow: 'none',
+                    color: isActive ? '#111827' : '#6b7280',
                     cursor: 'pointer',
                     flexShrink: 0,
                   }}
@@ -661,7 +668,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                         width: 16,
                         height: 16,
                         borderRadius: 4,
-                        color: 'var(--t-text-muted)',
+                        color: '#9ca3af',
                       }}
                     >
                       <XIcon size={10} />
@@ -687,11 +694,11 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 borderRadius: 8,
                 border: 'none',
                 background: 'transparent',
-                color: 'var(--t-text-secondary)',
+                color: '#6b7280',
                 cursor: 'pointer',
                 flexShrink: 0,
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#e5e7eb'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
               <PlusIcon size={14} />
@@ -776,11 +783,11 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 borderRadius: 8,
                 border: 'none',
                 background: 'transparent',
-                color: 'var(--t-text-secondary)',
+                color: '#6b7280',
                 cursor: 'pointer',
                 flexShrink: 0,
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#e5e7eb'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
               <SplitVerticalIcon />
@@ -801,11 +808,11 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 borderRadius: 8,
                 border: 'none',
                 background: 'transparent',
-                color: 'var(--t-text-secondary)',
+                color: '#6b7280',
                 cursor: 'pointer',
                 flexShrink: 0,
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#e5e7eb'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
               <SplitHorizontalIcon />
@@ -825,13 +832,13 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
               borderRadius: 8,
               border: 'none',
               background: 'transparent',
-              color: 'var(--t-text-secondary)',
+              color: '#6b7280',
               cursor: 'pointer',
               padding: 0,
               flexShrink: 0,
               transition: 'background 120ms ease',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#e5e7eb'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <XIcon size={14} />
