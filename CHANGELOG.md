@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `7bdef27` fix: lane card click falls back to lanes API for session lookup
 - `27321d5` fix: make lane cards clickable — opens transcript on click
 - `b10879c` fix: always show worktree branches — they have session history
 - `b7ccc19` feat: truthful worktree status + cleanup stale worktrees
