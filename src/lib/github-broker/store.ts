@@ -245,6 +245,20 @@ export function markGitHubSyncSuccess(repoFullName: string, resource: GitHubSync
   `).run(key, repoFullName, resource, etag ?? null);
 }
 
+/**
+ * Invalidate the sync cache for a resource — clears the ETag and
+ * resets last_successful_at so the next ensureGitHub* call forces
+ * a fresh fetch. Call after merge/approve/close actions.
+ */
+export function invalidateGitHubSync(repoFullName: string, resource: GitHubSyncResource) {
+  const sqlite = getSqlite();
+  const key = `${repoFullName}:${resource}`;
+  sqlite.prepare(`
+    UPDATE github_sync_state SET etag = '', last_successful_at = NULL, updated_at = datetime('now')
+    WHERE key = ?
+  `).run(key);
+}
+
 export function markGitHubSyncError(repoFullName: string, resource: GitHubSyncResource, error: string) {
   const sqlite = getSqlite();
   const key = `${repoFullName}:${resource}`;

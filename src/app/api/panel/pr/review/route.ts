@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   DEFAULT_GITHUB_REPO,
   commentOnGitHubPullRequest,
+  invalidateGitHubSync,
   mergeGitHubPullRequest,
   resolveRepoSlug,
   reviewGitHubPullRequest,
@@ -42,6 +43,7 @@ export async function POST(request: Request) {
   try {
     if (action === 'approve') {
       await reviewGitHubPullRequest(repo, prNumber, { event: 'APPROVE', body: comment || undefined });
+      invalidateGitHubSync(repo, 'pull_requests');
       return NextResponse.json({ ok: true, success: true, action: 'approved' });
     }
 
@@ -50,6 +52,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Comment required for request_changes' }, { status: 400 });
       }
       await reviewGitHubPullRequest(repo, prNumber, { event: 'REQUEST_CHANGES', body: comment });
+      invalidateGitHubSync(repo, 'pull_requests');
       return NextResponse.json({ ok: true, success: true, action: 'changes_requested' });
     }
 
@@ -63,6 +66,7 @@ export async function POST(request: Request) {
 
     if (action === 'merge') {
       await mergeGitHubPullRequest(repo, prNumber, { deleteBranch: true });
+      invalidateGitHubSync(repo, 'pull_requests');
       return NextResponse.json({ ok: true, success: true, action: 'merged' });
     }
 
