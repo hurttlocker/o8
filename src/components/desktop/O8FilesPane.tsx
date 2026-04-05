@@ -183,6 +183,7 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [rootFilesExpanded, setRootFilesExpanded] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [editContent, setEditContent] = useState<string>('');
@@ -307,7 +308,8 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
           paddingTop: 2,
           paddingBottom: 2,
         }}>
-          {tree.map((node) => (
+          {/* Directories first */}
+          {tree.filter((n) => n.type === 'dir').map((node) => (
             <TreeNode
               key={node.path}
               node={node}
@@ -319,6 +321,75 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
               onSelectFile={handleSelectFile}
             />
           ))}
+          {/* Root files — collapsible section */}
+          {(() => {
+            const rootFiles = tree.filter((n) => n.type === 'file');
+            if (rootFiles.length === 0) return null;
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setRootFilesExpanded((v) => !v)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    width: '100%',
+                    height: 24,
+                    paddingLeft: 6,
+                    paddingRight: 6,
+                    marginTop: 4,
+                    border: 'none',
+                    borderRadius: 0,
+                    background: 'transparent',
+                    color: 'var(--t-text-faint)',
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.03em',
+                    textTransform: 'uppercase' as const,
+                    textAlign: 'left',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <ChevronIcon open={rootFilesExpanded} size={9} />
+                  <span>Files</span>
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: 16,
+                    height: 14,
+                    padding: '0 4px',
+                    borderRadius: 999,
+                    background: 'var(--t-divider-subtle)',
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    textTransform: 'none' as const,
+                    letterSpacing: 'normal',
+                  }}>
+                    {rootFiles.length}
+                  </span>
+                </button>
+                {rootFilesExpanded ? rootFiles.map((node) => (
+                  <TreeNode
+                    key={node.path}
+                    node={node}
+                    depth={0}
+                    selectedPath={selectedPath}
+                    expandedDirs={expandedDirs}
+                    changedFiles={changedFiles}
+                    onToggleDir={handleToggleDir}
+                    onSelectFile={handleSelectFile}
+                  />
+                )) : null}
+              </>
+            );
+          })()}
         </div>
       </div>
 
