@@ -2439,10 +2439,11 @@ const ActivityFeed = memo(function ActivityFeed({
               }} />
             </button>
 
-            {/* Merge banner — only if there's an open PR on this repo */}
+            {/* PR count badge — click to open O8 PRs list */}
             {extras.prs.some(p => p.kind === 'pr' && (p.state === 'open')) ? (() => {
-              const openPr = extras.prs.find(p => p.kind === 'pr' && p.state === 'open') as (ActivityItem & { kind: 'pr' }) | undefined;
-              if (!openPr) return null;
+              const openPrs = extras.prs.filter(p => p.kind === 'pr' && p.state === 'open');
+              if (openPrs.length === 0) return null;
+              const firstPr = openPrs[0] as (ActivityItem & { kind: 'pr' });
               return (
                 <div style={{
                   marginLeft: 'auto',
@@ -2455,11 +2456,11 @@ const ActivityFeed = memo(function ActivityFeed({
                     color: 'var(--t-text-muted)',
                     fontFamily: '"SF Mono", ui-monospace, monospace',
                   }}>
-                    PR #{openPr.number}
+                    {openPrs.length} PR{openPrs.length === 1 ? '' : 's'}
                   </span>
                   <button
                     type="button"
-                    onClick={() => (onReviewPR ?? onSelectPR)?.(openPr.number, openPr.repo)}
+                    onClick={() => (onReviewPR ?? onSelectPR)?.(0, firstPr.repo)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
