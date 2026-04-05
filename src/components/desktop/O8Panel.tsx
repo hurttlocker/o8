@@ -8,8 +8,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { LocalhostPreviewTabs } from './LocalhostPreviewTabs';
-import type { DetectedLocalhostPreview, PreviewSelectionPayload } from '@/lib/panel/preview';
+import { O8BrowserPane } from './O8BrowserPane';
+import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
 // ── Phosphor Icons (raw SVG, per CLAUDE.md) ──
@@ -62,10 +62,6 @@ interface O8PanelProps {
   onClose: () => void;
   repoPath?: string | null;
   previews?: DetectedLocalhostPreview[];
-  selectedPreviewId?: string | null;
-  onSelectPreview?: (id: string) => void;
-  onClosePreview?: (id: string) => void;
-  onElementSelect?: (selection: PreviewSelectionPayload) => void;
 }
 
 // ── Tab Button ──
@@ -403,7 +399,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], selectedPreviewId, onSelectPreview, onClosePreview, onElementSelect }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [] }: O8PanelProps) {
   const [activeTab, setActiveTab] = useState<O8Tab>('changes');
 
   return (
@@ -461,13 +457,7 @@ export function O8Panel({ onClose, repoPath, previews = [], selectedPreviewId, o
         {activeTab === 'changes' ? (
           <ChangesTab repoPath={repoPath} />
         ) : activeTab === 'browser' ? (
-          <LocalhostPreviewTabs
-            previews={previews}
-            selectedPreviewId={selectedPreviewId}
-            onSelectPreview={onSelectPreview ?? (() => {})}
-            onClosePreview={onClosePreview ?? (() => {})}
-            onElementSelect={onElementSelect}
-          />
+          <O8BrowserPane previews={previews} />
         ) : (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', fontSize: 13 }}>
             Files — coming soon
