@@ -203,6 +203,8 @@ function DashboardInner() {
   const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
   const [chatVisible, setChatVisible] = useState(true);
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('review');
+  const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
+  const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
   const rightPanelMode = 'workspace' as const;
   const setRightPanelMode = (_mode: 'chat' | 'workspace') => { /* v1: right panel is always workspace */ };
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
@@ -1000,18 +1002,12 @@ function DashboardInner() {
   }, [openCanvasTab]);
 
   const handleReviewPR = useCallback((prNumber: number, repo?: string) => {
-    openCanvasTab({
-      id: `pr:${prNumber}${repo ? `:${repo}` : ''}`,
-      kind: 'pr',
-      label: `PR #${prNumber}`,
-      resourceId: String(prNumber),
-      meta: repo ? { repo } : undefined,
-    });
-    openWorkspaceSidePanel('review', getWorkspaceSidePanelRepoBySlug(repo), {
-      pullRequestNumber: prNumber,
-      compactReview: true,
-    });
-  }, [getWorkspaceSidePanelRepoBySlug, openCanvasTab, openWorkspaceSidePanel]);
+    // Open O8 panel to PRs tab instead of canvas
+    setO8PrNumber(prNumber);
+    setO8PrRepo(repo ?? null);
+    setRightPanelKind('o8');
+    setChatVisible(true);
+  }, []);
 
   const handleDeepReviewPR = useCallback((prNumber: number, repo?: string) => {
     handleSelectPR(prNumber, repo);
@@ -2593,6 +2589,8 @@ function DashboardInner() {
                       onClose={handleToggleO8Panel}
                       repoPath={globalRepoEntry?.localPath}
                       previews={workspacePreviews}
+                      prNumber={o8PrNumber}
+                      prRepo={o8PrRepo}
                       onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
                       onOpenFile={(filePath) => {
                         const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
