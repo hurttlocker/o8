@@ -107,7 +107,7 @@ function StateBadge({ state, merged }: { state: string; merged: boolean }) {
 interface PRSummary {
   number: number;
   title: string;
-  author: string;
+  author: string | { login: string };
   headRefName: string;
   baseRefName: string;
   state: string;
@@ -152,7 +152,7 @@ function PRListItem({ pr, active, onClick }: { pr: PRSummary; active: boolean; o
           <span>{pr.baseRefName} &larr; {pr.headRefName}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, fontSize: 10 }}>
-          <span style={{ color: 'var(--t-text-secondary)' }}>{pr.author}</span>
+          <span style={{ color: 'var(--t-text-secondary)' }}>{typeof pr.author === 'string' ? pr.author : pr.author?.login}</span>
           <span style={{ color: 'var(--t-text-faint)' }}>&middot;</span>
           <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
           <span style={{ color: '#ef4444', fontWeight: 600 }}>-{pr.deletions}</span>
@@ -400,7 +400,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
           fontSize: 11,
         }}>
           <StateBadge state={pr.state} merged={isMerged} />
-          <span style={{ color: 'var(--t-text-secondary)' }}>{pr.author?.login}</span>
+          <span style={{ color: 'var(--t-text-secondary)' }}>{typeof pr.author === 'string' ? pr.author : pr.author?.login}</span>
           <span style={{ color: 'var(--t-text-faint)' }}>&middot;</span>
           <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
           <span style={{ color: '#ef4444', fontWeight: 600 }}>-{pr.deletions}</span>
