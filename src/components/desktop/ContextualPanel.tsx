@@ -22,8 +22,6 @@ const CLI_AGENTS = [
   { id: 'claude', label: 'Claude Code', color: '#e07a3a', command: 'claude' },
   { id: 'codex', label: 'Codex', color: '#6b7280', command: 'codex' },
   { id: 'gemini', label: 'Gemini CLI', color: '#4285f4', command: 'gemini' },
-  { id: 'opencode', label: 'OpenCode', color: '#f97316', command: 'opencode' },
-  { id: 'aider', label: 'Aider', color: '#eab308', command: 'aider' },
 ] as const;
 
 type CliAgent = (typeof CLI_AGENTS)[number];
