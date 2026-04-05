@@ -1,0 +1,730 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  FOCUS_REPO_SETUP_EVENT,
+  OPEN_REPO_WORKSPACE_EVENT,
+  buildBranchAgentMapFromIdeSessions,
+  defaultWorkspaceName,
+  getWorkspaceBranchPreview,
+  githubUrlFromRemote,
+  requestJson,
+  sortRepoEntries,
+  type BranchAgent,
+  type FocusRepoSetupDetail,
+  type IdeWorkspaceSession,
+  type OpenRepoWorkspaceDetail,
+  type OrchestratorPacket,
+  type RepoRegistryEntry,
+  type RepoSetupConfig,
+  type ValidatedRepoCandidate,
+  type WorkspaceAgentLaunchRequest,
+  type WorkspaceCreateResult,
+} from './shared';
+import { RepoRegistryList } from './RepoRegistryList';
+import { RepoRegistryModals } from './RepoRegistryModals';
+
+export function RepoRegistrySection({
+  onSelectSession,
+  onSelectPR,
+  onReviewPR,
+  onRepoRemoved,
+  onLaunchComplete,
+  onLaunchWorkspaceAgent,
+  onRegistryStateChange,
+  activeSessionKey = null,
+  activeRepoLocalPath = null,
+  activeWorkspacePath = null,
+  sectionOpen,
+  onSectionOpenChange,
+  launchIntent,
+  workspaceIntent,
+  addIntent,
+  orchestratorPackets = [],
+  ideWorkspaceSessions,
+  hideHeader = false,
+}: {
+  onSelectSession?: (sessionKey: string) => void;
+  onSelectPR?: (prNumber: number, repo?: string) => void;
+  onReviewPR?: (prNumber: number, repo?: string) => void;
+  onRepoRemoved?: (repo: RepoRegistryEntry) => void;
+  onLaunchComplete?: () => void;
+  onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
+  onRegistryStateChange?: (state: { loading: boolean; count: number; hasError: boolean }) => void;
+  activeSessionKey?: string | null;
+  activeRepoLocalPath?: string | null;
+  activeWorkspacePath?: string | null;
+  sectionOpen?: boolean;
+  onSectionOpenChange?: (open: boolean) => void;
+  launchIntent?: { repoPath: string | null; nonce: number } | null;
+  workspaceIntent?: { repoPath: string | null; nonce: number } | null;
+  addIntent?: { nonce: number } | null;
+  orchestratorPackets?: OrchestratorPacket[];
+  ideWorkspaceSessions?: IdeWorkspaceSession[];
+  hideHeader?: boolean;
+} = {}) {
+  const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reposOpenInternal, setReposOpenInternal] = useState(true);
+  const reposOpen = sectionOpen ?? reposOpenInternal;
+  const setReposOpen = useCallback((next: boolean) => {
+    if (onSectionOpenChange) onSectionOpenChange(next);
+    else setReposOpenInternal(next);
+  }, [onSectionOpenChange]);
+  const [expandedRepoId, setExpandedRepoId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      return sessionStorage.getItem('cortex-repo-expanded-id');
+    } catch {
+      return null;
+    }
+  });
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [repoPathInput, setRepoPathInput] = useState('');
+  const [validating, setValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [validationResult, setValidationResult] = useState<ValidatedRepoCandidate | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  const [workspaceRepo, setWorkspaceRepo] = useState<RepoRegistryEntry | null>(null);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [workspaceBaseBranch, setWorkspaceBaseBranch] = useState('');
+  const [workspaceUseSetup, setWorkspaceUseSetup] = useState(true);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [workspaceResult, setWorkspaceResult] = useState<WorkspaceCreateResult | null>(null);
+  const [workspaceNotice, setWorkspaceNotice] = useState<Record<string, WorkspaceCreateResult>>({});
+
+  const [launchRepo, setLaunchRepo] = useState<RepoRegistryEntry | null>(null);
+  const [launchRuntime, setLaunchRuntime] = useState<'codex' | 'claude-code'>(() => {
+    if (typeof window === 'undefined') return 'codex';
+    try {
+      const saved = window.localStorage.getItem('cortex-workspace-launch-runtime');
+      return saved === 'claude-code' ? 'claude-code' : 'codex';
+    } catch {
+      return 'codex';
+    }
+  });
+  const [launchTaskName, setLaunchTaskName] = useState('');
+  const [launchPrompt, setLaunchPrompt] = useState('');
+  const [launchLoading, setLaunchLoading] = useState(false);
+
+  useEffect(() => {
+    const handleFocusRepoSetup = (event: Event) => {
+      const detail = (event as CustomEvent<FocusRepoSetupDetail>).detail;
+      if (!detail) return;
+      const targetRepo = repos.find((repo) => repo.id === detail.repoId || repo.localPath === detail.repoPath);
+      if (!targetRepo) return;
+      setReposOpen(true);
+      setExpandedRepoId(targetRepo.id);
+      try {
+        sessionStorage.setItem('cortex-repo-expanded-id', targetRepo.id);
+      } catch {
+        // Ignore session storage failures and still reveal the repo.
+      }
+    };
+
+    window.addEventListener(FOCUS_REPO_SETUP_EVENT, handleFocusRepoSetup as EventListener);
+    return () => {
+      window.removeEventListener(FOCUS_REPO_SETUP_EVENT, handleFocusRepoSetup as EventListener);
+    };
+  }, [repos, setReposOpen]);
+
+  const [launchError, setLaunchError] = useState<string | null>(null);
+
+  const [removeTarget, setRemoveTarget] = useState<RepoRegistryEntry | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const handledLaunchIntentNonceRef = useRef<number | null>(null);
+  const handledWorkspaceIntentNonceRef = useRef<number | null>(null);
+  const handledAddIntentNonceRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    try {
+      if (expandedRepoId) sessionStorage.setItem('cortex-repo-expanded-id', expandedRepoId);
+      else sessionStorage.removeItem('cortex-repo-expanded-id');
+    } catch { /* ignore */ }
+  }, [expandedRepoId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('cortex-workspace-launch-runtime', launchRuntime);
+    } catch {
+      // ignore local preference persistence failures
+    }
+  }, [launchRuntime]);
+
+  const loadRepos = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await requestJson<{ repos: RepoRegistryEntry[] }>('/api/panel/repos');
+      setRepos(sortRepoEntries(data.repos ?? []));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to load repositories.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const touchRepo = useCallback(async (repo: RepoRegistryEntry) => {
+    const touched = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'touch', id: repo.id }),
+    });
+
+    setRepos((current) => sortRepoEntries(
+      current.map((entry) => (entry.id === repo.id ? touched.repo : entry)),
+    ));
+  }, []);
+
+  useEffect(() => {
+    void loadRepos();
+  }, [loadRepos]);
+
+  useEffect(() => {
+    onRegistryStateChange?.({
+      loading,
+      count: repos.length,
+      hasError: Boolean(loadError),
+    });
+  }, [loadError, loading, onRegistryStateChange, repos.length]);
+
+  // ── Agent ↔ Branch association (#168) ──
+  const [agentBranchMap, setAgentBranchMap] = useState<Map<string, Map<string, BranchAgent[]>>>(new Map());
+  const ideAgentBranchMap = useMemo(
+    () => buildBranchAgentMapFromIdeSessions(ideWorkspaceSessions ?? []),
+    [ideWorkspaceSessions],
+  );
+  const effectiveAgentBranchMap = ideWorkspaceSessions ? ideAgentBranchMap : agentBranchMap;
+
+  useEffect(() => {
+    if (ideWorkspaceSessions) {
+      return;
+    }
+    function fetchAgentBranches() {
+      fetch('/api/panel/workspaces')
+        .then(r => r.json())
+        .then((data: { workspaces?: Array<{
+          repo: string;
+          branch: string;
+          agentName: string;
+          sessionKey: string;
+          runtime?: string;
+          agentStatus: string;
+          currentTask?: string | null;
+          localDiff?: { additions: number; deletions: number; changedFiles: number };
+          pr?: { additions: number; deletions: number; changedFiles: number } | null;
+        }> }) => {
+          const map = new Map<string, Map<string, BranchAgent[]>>();
+          const AGENT_COLORS: Record<string, string> = {
+            'Assistant': '#111827',
+            'Niot': '#2563eb',
+            'Hawk': '#f59e0b',
+          };
+          for (const ws of data.workspaces ?? []) {
+            if (!ws.branch || ws.branch.startsWith('surface/')) continue;
+            const repoKey = ws.repo;
+            if (!map.has(repoKey)) map.set(repoKey, new Map());
+            const branchMap = map.get(repoKey)!;
+            if (!branchMap.has(ws.branch)) branchMap.set(ws.branch, []);
+            // Derive agent display name
+            const agentName = ws.agentName.split(' ')[0] || ws.agentName;
+            const isCodex = agentName.toLowerCase().includes('codex');
+            const isClaude = agentName.toLowerCase().includes('claude');
+            const displayName = isCodex ? 'Codex' : isClaude ? 'Claude Code' : agentName;
+            const color = AGENT_COLORS[displayName] ?? (isCodex ? '#10b981' : isClaude ? '#8b5cf6' : '#6b7280');
+            const diffSource = ws.pr ?? ws.localDiff ?? null;
+            // Deduplicate by session key
+            const existing = branchMap.get(ws.branch)!;
+            if (!existing.some(a => a.sessionKey === ws.sessionKey)) {
+              existing.push({
+                name: displayName,
+                agentName: ws.agentName,
+                sessionKey: ws.sessionKey,
+                color,
+                runtime: ws.runtime ?? (isClaude ? 'claude-code' : 'codex'),
+                status: ws.agentStatus,
+                currentTask: ws.currentTask ?? null,
+                additions: diffSource?.additions,
+                deletions: diffSource?.deletions,
+                changedFiles: diffSource?.changedFiles,
+              });
+            }
+          }
+          setAgentBranchMap(map);
+        })
+        .catch(() => {});
+    }
+    fetchAgentBranches();
+    const id = setInterval(fetchAgentBranches, 30_000);
+    return () => clearInterval(id);
+  }, [ideWorkspaceSessions]);
+
+  // ── Port data for running indicators (#170) ──
+  const [portsByRepo, setPortsByRepo] = useState<Map<string, number[]>>(new Map());
+
+  useEffect(() => {
+    function fetchPorts() {
+      fetch('/api/panel/ports')
+        .then(r => r.json())
+        .then((data: { groups?: { repo: string; ports: number[] }[] }) => {
+          const map = new Map<string, number[]>();
+          for (const g of data.groups ?? []) {
+            map.set(g.repo, g.ports);
+          }
+          setPortsByRepo(map);
+        })
+        .catch(() => {});
+    }
+    fetchPorts();
+    const id = setInterval(fetchPorts, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const resetAddModal = useCallback(() => {
+    setAddOpen(false);
+    setRepoPathInput('');
+    setValidationError(null);
+    setValidationResult(null);
+    setValidating(false);
+    setAdding(false);
+  }, []);
+
+  const validateRepoPath = useCallback(async (localPath: string) => {
+    setValidating(true);
+    setValidationError(null);
+    setValidationResult(null);
+
+    try {
+      const data = await requestJson<{ repo: ValidatedRepoCandidate }>('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'validate', localPath }),
+      });
+      setValidationResult(data.repo);
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : 'Validation failed.');
+    } finally {
+      setValidating(false);
+    }
+  }, []);
+
+  const pickFolderPath = useCallback(async () => {
+    let folderPath: string | null = null;
+
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const result = await open({ directory: true, title: 'Select project folder' });
+      if (typeof result === 'string') folderPath = result;
+    } catch {
+      try {
+        const response = await fetch('/api/panel/browse-folder', { method: 'POST' });
+        const data = await response.json() as { path?: string | null };
+        if (typeof data.path === 'string') folderPath = data.path;
+      } catch {
+        folderPath = window.prompt('Enter folder path:');
+      }
+    }
+
+    const trimmedPath = folderPath?.trim() ?? '';
+    return trimmedPath.length > 0 ? trimmedPath : null;
+  }, []);
+
+  const handleBrowseForRepo = useCallback(async () => {
+    setAddOpen(true);
+    setValidationError(null);
+    setValidationResult(null);
+    setValidating(false);
+    setAdding(false);
+    const folderPath = await pickFolderPath();
+    if (!folderPath) return;
+    setRepoPathInput(folderPath);
+    await validateRepoPath(folderPath);
+  }, [pickFolderPath, validateRepoPath]);
+
+  const handleValidate = useCallback(async () => {
+    const localPath = repoPathInput.trim();
+    if (!localPath) {
+      setValidationError('Enter a local folder path.');
+      setValidationResult(null);
+      return;
+    }
+
+    await validateRepoPath(localPath);
+  }, [repoPathInput, validateRepoPath]);
+
+  const handleAddRepo = useCallback(async () => {
+    const localPath = repoPathInput.trim();
+    if (!localPath) {
+      setValidationError('Enter a local folder path.');
+      return;
+    }
+
+    setAdding(true);
+    setValidationError(null);
+
+    try {
+      await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', localPath }),
+      });
+      await loadRepos();
+      resetAddModal();
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : 'Unable to add repository.');
+    } finally {
+      setAdding(false);
+    }
+  }, [loadRepos, repoPathInput, resetAddModal]);
+
+  const handleSaveSetup = useCallback(async (repoId: string, setup: RepoSetupConfig) => {
+    const data = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update', id: repoId, setup }),
+    });
+
+    setRepos((current) => sortRepoEntries(
+      current.map((repo) => (repo.id === repoId ? data.repo : repo)),
+    ));
+  }, []);
+
+  const handleOpenGitHub = useCallback((repo: RepoRegistryEntry) => {
+    const githubUrl = githubUrlFromRemote(repo.remoteUrl);
+    if (!githubUrl) return;
+
+    void requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'touch', id: repo.id }),
+    }).then((data) => {
+      setRepos((current) => sortRepoEntries(
+        current.map((entry) => (entry.id === repo.id ? data.repo : entry)),
+      ));
+    }).catch(() => null);
+
+    window.open(githubUrl, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  const openLaunchModal = useCallback((repo: RepoRegistryEntry) => {
+    setLaunchRepo(repo);
+    setLaunchTaskName('');
+    setLaunchPrompt('');
+    setLaunchError(null);
+  }, []);
+
+  const closeLaunchModal = useCallback(() => {
+    setLaunchRepo(null);
+    setLaunchTaskName('');
+    setLaunchPrompt('');
+    setLaunchLoading(false);
+    setLaunchError(null);
+  }, []);
+
+  const launchIntoWorkspace = useCallback(async (
+    repo: RepoRegistryEntry,
+    options?: {
+      runtime?: 'codex' | 'claude-code';
+      label?: string;
+      initialText?: string;
+      autoSend?: boolean;
+    },
+  ) => {
+    if (!onLaunchWorkspaceAgent) {
+      openLaunchModal(repo);
+      return;
+    }
+
+    await onLaunchWorkspaceAgent({
+      repoPath: repo.localPath,
+      runtime: options?.runtime,
+      label: options?.label,
+      initialText: options?.initialText,
+      autoSend: options?.autoSend,
+      createNew: true,
+    });
+
+    try {
+      await touchRepo(repo);
+    } catch {
+      // Repo recency is best-effort; do not fail the launch if touch misses.
+    }
+    onLaunchComplete?.();
+  }, [onLaunchComplete, onLaunchWorkspaceAgent, openLaunchModal, touchRepo]);
+
+  const handleLaunchAgent = useCallback(async () => {
+    if (!launchRepo) return;
+
+    setLaunchLoading(true);
+    setLaunchError(null);
+
+    try {
+      await launchIntoWorkspace(launchRepo, {
+        runtime: launchRuntime,
+        label: launchTaskName.trim() || undefined,
+        initialText: launchPrompt.trim() || undefined,
+        autoSend: launchPrompt.trim().length > 0,
+      });
+      closeLaunchModal();
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : 'Unable to launch agent.');
+    } finally {
+      setLaunchLoading(false);
+    }
+  }, [
+    launchPrompt,
+    launchRepo,
+    launchRuntime,
+    launchTaskName,
+    closeLaunchModal,
+    launchIntoWorkspace,
+  ]);
+
+  const openWorkspaceModal = useCallback((repo: RepoRegistryEntry) => {
+    setWorkspaceRepo(repo);
+    setWorkspaceName(defaultWorkspaceName(repo.name));
+    setWorkspaceBaseBranch(repo.defaultBranch);
+    setWorkspaceUseSetup(repo.setup.installOnCreateWorkspace);
+    setWorkspaceError(null);
+    setWorkspaceResult(null);
+  }, []);
+
+  const closeWorkspaceModal = useCallback(() => {
+    setWorkspaceRepo(null);
+    setWorkspaceName('');
+    setWorkspaceBaseBranch('');
+    setWorkspaceUseSetup(true);
+    setWorkspaceError(null);
+    setWorkspaceResult(null);
+    setWorkspaceLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const handleOpenRepoWorkspace = (event: Event) => {
+      const detail = (event as CustomEvent<OpenRepoWorkspaceDetail>).detail;
+      if (!detail) return;
+      const targetRepo = repos.find((repo) => repo.id === detail.repoId || repo.localPath === detail.repoPath);
+      if (!targetRepo) return;
+      setReposOpen(true);
+      setExpandedRepoId(targetRepo.id);
+      openWorkspaceModal(targetRepo);
+      try {
+        sessionStorage.setItem('cortex-repo-expanded-id', targetRepo.id);
+      } catch {
+        // Ignore session storage failures and still reveal the repo.
+      }
+    };
+
+    window.addEventListener(OPEN_REPO_WORKSPACE_EVENT, handleOpenRepoWorkspace as EventListener);
+    return () => {
+      window.removeEventListener(OPEN_REPO_WORKSPACE_EVENT, handleOpenRepoWorkspace as EventListener);
+    };
+  }, [openWorkspaceModal, repos, setReposOpen]);
+
+  const handleCreateWorkspace = useCallback(async () => {
+    if (!workspaceRepo) return;
+
+    const taskName = workspaceName.trim();
+    if (!taskName) {
+      setWorkspaceError('Workspace name is required.');
+      return;
+    }
+
+    setWorkspaceLoading(true);
+    setWorkspaceError(null);
+
+    try {
+      const data = await requestJson<{ worktree: WorkspaceCreateResult }>('/api/worktrees', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo: workspaceRepo.localPath,
+          agentType: 'workspace',
+          taskName,
+          baseBranch: workspaceBaseBranch.trim() || undefined,
+          skipSetup: !workspaceUseSetup,
+          envMode: workspaceRepo.setup.envMode,
+          envFiles: workspaceRepo.setup.envFiles,
+        }),
+      });
+
+      setWorkspaceResult(data.worktree);
+      setWorkspaceNotice((current) => ({
+        ...current,
+        [workspaceRepo.id]: data.worktree,
+      }));
+
+      const touched = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'touch', id: workspaceRepo.id }),
+      });
+
+      setRepos((current) => sortRepoEntries(
+        current.map((repo) => (repo.id === workspaceRepo.id ? touched.repo : repo)),
+      ));
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Unable to create workspace.');
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }, [workspaceBaseBranch, workspaceName, workspaceRepo, workspaceUseSetup]);
+
+  const handleRemoveRepo = useCallback(async () => {
+    if (!removeTarget) return;
+
+    setRemoveBusy(true);
+    setRemoveError(null);
+    try {
+      await requestJson<{ ok: boolean }>('/api/panel/repos', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: removeTarget.id }),
+      });
+      setRepos((current) => current.filter((repo) => repo.id !== removeTarget.id));
+      setWorkspaceNotice((current) => {
+        const next = { ...current };
+        delete next[removeTarget.id];
+        return next;
+      });
+      onRepoRemoved?.(removeTarget);
+      setRemoveTarget(null);
+    } catch (error) {
+      setRemoveError(error instanceof Error ? error.message : 'Unable to remove repository.');
+    } finally {
+      setRemoveBusy(false);
+    }
+  }, [onRepoRemoved, removeTarget]);
+
+  const activeRepoEntry = useMemo(
+    () => repos.find((repo) => repo.localPath === activeRepoLocalPath) ?? null,
+    [activeRepoLocalPath, repos],
+  );
+
+  const orderedRepos = useMemo(() => {
+    if (!activeRepoEntry) return repos;
+    return [activeRepoEntry, ...repos.filter((repo) => repo.id !== activeRepoEntry.id)];
+  }, [activeRepoEntry, repos]);
+
+  useEffect(() => {
+    if (!activeRepoEntry) return;
+    setExpandedRepoId((current) => current ?? activeRepoEntry.id);
+  }, [activeRepoEntry]);
+
+  useEffect(() => {
+    if (!launchIntent?.repoPath) return;
+    if (handledLaunchIntentNonceRef.current === launchIntent.nonce) return;
+    const match = repos.find((repo) => repo.localPath === launchIntent.repoPath);
+    if (!match) return;
+    handledLaunchIntentNonceRef.current = launchIntent.nonce;
+    setReposOpen(true);
+    setExpandedRepoId(match.id);
+    openLaunchModal(match);
+  }, [launchIntent?.nonce, launchIntent?.repoPath, openLaunchModal, repos, setReposOpen]);
+
+  useEffect(() => {
+    if (!workspaceIntent?.repoPath) return;
+    if (handledWorkspaceIntentNonceRef.current === workspaceIntent.nonce) return;
+    const match = repos.find((repo) => repo.localPath === workspaceIntent.repoPath);
+    if (!match) return;
+    handledWorkspaceIntentNonceRef.current = workspaceIntent.nonce;
+    setReposOpen(true);
+    setExpandedRepoId(match.id);
+    openWorkspaceModal(match);
+  }, [openWorkspaceModal, repos, setReposOpen, workspaceIntent?.nonce, workspaceIntent?.repoPath]);
+
+  useEffect(() => {
+    if (!addIntent?.nonce) return;
+    if (handledAddIntentNonceRef.current === addIntent.nonce) return;
+    handledAddIntentNonceRef.current = addIntent.nonce;
+    setReposOpen(true);
+    void handleBrowseForRepo();
+  }, [addIntent?.nonce, handleBrowseForRepo, setReposOpen]);
+
+  const branchPreview = useMemo(() => getWorkspaceBranchPreview(workspaceName), [workspaceName]);
+  const showEmptyState = !loading && !loadError && repos.length === 0;
+
+  return (
+    <>
+      <RepoRegistryList
+        hideHeader={hideHeader}
+        reposOpen={reposOpen}
+        loading={loading}
+        reposCount={repos.length}
+        loadError={loadError}
+        showEmptyState={showEmptyState}
+        orderedRepos={orderedRepos}
+        workspaceNotice={workspaceNotice}
+        onToggleOpen={() => setReposOpen(!reposOpen)}
+        launchIntoWorkspace={launchIntoWorkspace}
+        openWorkspaceModal={openWorkspaceModal}
+        handleOpenGitHub={handleOpenGitHub}
+        setRemoveTarget={setRemoveTarget}
+        handleSaveSetup={handleSaveSetup}
+        onSelectSession={onSelectSession}
+        onSelectPR={onSelectPR}
+        onReviewPR={onReviewPR}
+        activeSessionKey={activeSessionKey}
+        effectiveAgentBranchMap={effectiveAgentBranchMap}
+        orchestratorPackets={orchestratorPackets}
+        portsByRepo={portsByRepo}
+        expandedRepoId={expandedRepoId}
+        setExpandedRepoId={setExpandedRepoId}
+        activeRepoLocalPath={activeRepoLocalPath}
+        activeWorkspacePath={activeWorkspacePath}
+      />
+
+      <RepoRegistryModals
+        addOpen={addOpen}
+        resetAddModal={resetAddModal}
+        repoPathInput={repoPathInput}
+        setRepoPathInput={setRepoPathInput}
+        validating={validating}
+        validationError={validationError}
+        setValidationError={setValidationError}
+        validationResult={validationResult}
+        setValidationResult={setValidationResult}
+        adding={adding}
+        handleBrowseForRepo={handleBrowseForRepo}
+        handleValidate={handleValidate}
+        handleAddRepo={handleAddRepo}
+        workspaceRepo={workspaceRepo}
+        closeWorkspaceModal={closeWorkspaceModal}
+        workspaceName={workspaceName}
+        setWorkspaceName={setWorkspaceName}
+        branchPreview={branchPreview}
+        workspaceBaseBranch={workspaceBaseBranch}
+        setWorkspaceBaseBranch={setWorkspaceBaseBranch}
+        workspaceUseSetup={workspaceUseSetup}
+        setWorkspaceUseSetup={setWorkspaceUseSetup}
+        workspaceError={workspaceError}
+        workspaceResult={workspaceResult}
+        workspaceLoading={workspaceLoading}
+        handleCreateWorkspace={handleCreateWorkspace}
+        launchRepo={launchRepo}
+        closeLaunchModal={closeLaunchModal}
+        launchRuntime={launchRuntime}
+        setLaunchRuntime={setLaunchRuntime}
+        launchTaskName={launchTaskName}
+        setLaunchTaskName={setLaunchTaskName}
+        launchPrompt={launchPrompt}
+        setLaunchPrompt={setLaunchPrompt}
+        launchError={launchError}
+        launchLoading={launchLoading}
+        handleLaunchAgent={handleLaunchAgent}
+        removeTarget={removeTarget}
+        setRemoveTarget={setRemoveTarget}
+        removeError={removeError}
+        setRemoveError={setRemoveError}
+        removeBusy={removeBusy}
+        setRemoveBusy={setRemoveBusy}
+        handleRemoveRepo={handleRemoveRepo}
+      />
+    </>
+  );
+}
