@@ -1012,12 +1012,12 @@ function getMessageText(msg: TranscriptMessage): string {
 }
 
 // Padding/spacing constants for transcript cards
-const TX_PADDING_V = 10; // paddingTop + paddingBottom
-const TX_PADDING_H = 14;
-const TX_ROLE_HEIGHT = 20; // role label line
+const TX_PADDING_V = 12; // paddingTop + paddingBottom
+const TX_PADDING_H = 0;  // no horizontal padding — full-width like chat
+const TX_ROLE_HEIGHT = 18; // role label line
 const TX_GAP = 4;          // gap between role label and content
-const TX_MARGIN_BOTTOM = 12;
-const TX_CONTAINER_PAD_H = 24; // container horizontal padding
+const TX_MARGIN_BOTTOM = 8;
+const TX_CONTAINER_PAD_H = 16; // container horizontal padding
 
 const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessionKey: string }) {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
@@ -1168,6 +1168,7 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
           <div style={{ position: 'absolute', top: 16 + offsetY, left: TX_CONTAINER_PAD_H, right: TX_CONTAINER_PAD_H }}>
             {visibleMessages.map((msg, i) => {
               const globalIdx = startIdx + i;
+              const isUser = msg.role === 'user';
               return (
                 <div
                   key={globalIdx}
@@ -1175,16 +1176,15 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
                     marginBottom: TX_MARGIN_BOTTOM,
                     paddingTop: TX_PADDING_V,
                     paddingBottom: TX_PADDING_V,
-                    paddingLeft: TX_PADDING_H,
-                    paddingRight: TX_PADDING_H,
-                    borderRadius: 12,
-                    background: msg.role === 'assistant'
-                      ? 'var(--t-panel-translucent)'
-                      : 'rgba(37, 99, 235, 0.04)',
-                    border: '1px solid var(--t-divider-subtle)',
-                    fontSize: 13,
-                    lineHeight: 1.55,
-                    color: 'var(--t-text)',
+                    paddingLeft: 16,
+                    paddingRight: 16,
+                    borderRadius: 0,
+                    background: 'transparent',
+                    borderBottom: '1px solid var(--t-divider-subtle)',
+                    fontSize: 14,
+                    lineHeight: 1.6,
+                    color: isUser ? 'var(--t-text-muted)' : 'var(--t-text)',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
                     // Pretext: explicit height — browser never calculates this
                     height: messageHeights[globalIdx] - TX_MARGIN_BOTTOM,
                     boxSizing: 'border-box',
@@ -1193,12 +1193,11 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
                   <div style={{
                     fontSize: 11,
                     fontWeight: 600,
-                    color: msg.role === 'assistant' ? 'var(--t-text-secondary)' : '#2563eb',
+                    color: isUser ? '#2563eb' : 'var(--t-text-secondary)',
                     marginBottom: TX_GAP,
-                    textTransform: 'uppercase' as const,
-                    letterSpacing: '0.04em',
+                    letterSpacing: '0.02em',
                   }}>
-                    {msg.role}
+                    {isUser ? 'You' : 'Agent'}
                   </div>
                   <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                     {getMessageText(msg)}
