@@ -1429,11 +1429,17 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     void fetchTranscript();
   }, [active, fetchTranscript]);
 
+  // Poll transcript — 2s for active agent sessions, 5s for idle/other
+  const supervisorActive = (() => {
+    const sv = tab.supervisorStatus?.trim().toLowerCase();
+    return sv === 'running' || sv === 'launched' || sv === 'waiting';
+  })();
+  const transcriptPollMs = isAgentRuntimeTab(tab) && supervisorActive ? 2_000 : 5_000;
   useEffect(() => {
     if (!active || !normalizedSessionKey) return;
-    const id = setInterval(() => { void fetchTranscript(); }, 5_000);
+    const id = setInterval(() => { void fetchTranscript(); }, transcriptPollMs);
     return () => clearInterval(id);
-  }, [active, fetchTranscript, normalizedSessionKey]);
+  }, [active, fetchTranscript, normalizedSessionKey, transcriptPollMs]);
 
   // Fast retry for new runtime session tabs — polls every 1.5s until transcript arrives
   const isAgentTab = isAgentRuntimeTab(tab);
@@ -2171,6 +2177,46 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                   isLast
                   onRunInTerminal={onRunInTerminal}
                 />
+              ) : null}
+              {/* Thinking indicator for autonomous agent sessions (not user-initiated streaming) */}
+              {!agentRunning && isRuntimeBound && (() => {
+                const sv = tab.supervisorStatus?.trim().toLowerCase();
+                return sv === 'running' || sv === 'launched' || sv === 'waiting';
+              })() && messages.length > 0 ? (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingTop: 12,
+                  paddingRight: 16,
+                  paddingBottom: 12,
+                  paddingLeft: 16,
+                }}>
+                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                    {[0, 1, 2].map((i) => (
+                      <span
+                        key={i}
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          background: '#22c55e',
+                          opacity: 0.4,
+                          animation: `o8ThinkPulse 1.4s ease-in-out ${i * 0.2}s infinite`,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <span style={{
+                    fontSize: 11,
+                    color: 'var(--t-text-faint)',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    fontWeight: 500,
+                  }}>
+                    Agent working...
+                  </span>
+                  <style>{`@keyframes o8ThinkPulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.1); } }`}</style>
+                </div>
               ) : null}
             </div>
           </Suspense>
