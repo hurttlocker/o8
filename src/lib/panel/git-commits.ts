@@ -288,9 +288,18 @@ export function getLocalCommitDetail(sha: string, workspace?: string | null) {
     previousPath: file.previousPath,
   }));
   const stat = runGit(root, ['diff-tree', '--no-commit-id', '--stat', sha]).trim();
-  const diff = truncateDiff(commitDiffFiles.map((file) => file.diff).join('\n\n').trim() || '(diff too large or unavailable)');
   const totalAdditions = files.reduce((sum, file) => sum + (file.additions ?? 0), 0);
   const totalDeletions = files.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
+  let diff = '(diff too large or unavailable)';
+
+  try {
+    const rawDiff = runGit(root, ['diff-tree', '-p', '--no-commit-id', sha]);
+    diff = rawDiff.length > 50_000
+      ? `${rawDiff.slice(0, 50_000)}\n\n... (truncated at 50KB)`
+      : rawDiff;
+  } catch {
+    diff = '(diff too large or unavailable)';
+  }
 
   return {
     hash: fullHash,
