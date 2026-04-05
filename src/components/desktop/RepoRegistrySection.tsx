@@ -2539,19 +2539,30 @@ function RepoCard({
                       }}>
                         {branch.name}
                       </span>
-                      {branch.isWorktree ? (
-                        <span style={{
-                          fontSize: 10,
-                          lineHeight: 1.2,
-                          color: 'var(--t-text-faint)',
-                          minWidth: 0,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}>
-                          {worktreeTone?.label ?? 'Workspace tracked'}
-                        </span>
-                      ) : null}
+                      {branch.isWorktree ? (() => {
+                        // Show lane-aware status: session presence determines label
+                        const hasPacketSession = branchPackets.some(p => p.lane?.sessionKey);
+                        const hasAgentSession = branchAgents.length > 0;
+                        const hasSession = hasPacketSession || hasAgentSession;
+                        const laneStatus = branchPackets.find(p => p.lane?.lastEventLabel)?.lane?.lastEventLabel;
+                        const statusLabel = hasSession
+                          ? (laneStatus === 'agent_completed' ? 'Completed' : laneStatus === 'session_launched' ? 'Working' : 'Has session')
+                          : worktreeTone?.label ?? 'No session';
+                        const statusColor = hasSession ? '#15803d' : 'var(--t-text-faint)';
+                        return (
+                          <span style={{
+                            fontSize: 10,
+                            lineHeight: 1.2,
+                            color: statusColor,
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {statusLabel}
+                          </span>
+                        );
+                      })() : null}
                     </div>
                     {isActiveScope ? (
                       <span
