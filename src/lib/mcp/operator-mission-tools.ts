@@ -24,6 +24,7 @@ interface CreateMissionInput {
   repoPath: string;
   runtime: OrchestratorRuntime;
   constraints: string;
+  sequential?: boolean;
 }
 
 interface InlineIssue {
@@ -37,6 +38,7 @@ interface CreateMissionInlineInput {
   repoPath: string;
   runtime: OrchestratorRuntime;
   constraints: string;
+  sequential?: boolean;
 }
 
 interface ApiSuccessResponse<T> {
@@ -219,6 +221,7 @@ export async function createMission(input: CreateMissionInput) {
           repoPath,
           runtime: input.runtime,
           constraints: input.constraints,
+          sequential: input.sequential,
         } satisfies CreateMissionRequest),
       },
     );
@@ -253,6 +256,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           repoPath,
           runtime: input.runtime,
           constraints: input.constraints,
+          sequential: input.sequential,
         } satisfies CreateMissionRequest),
       },
     );
