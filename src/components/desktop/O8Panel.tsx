@@ -79,6 +79,7 @@ interface O8PanelProps {
   onOpenFile?: (filePath: string) => void;
   prNumber?: number | null;
   prRepo?: string | null;
+  repoSlug?: string | null;
   activeTab?: O8Tab | null;
 }
 
@@ -417,7 +418,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, activeTab: externalTab }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab }: O8PanelProps) {
   const [activeTab, setActiveTab] = useState<O8Tab>('changes');
 
   // Switch to PRs tab when a PR number is provided externally
@@ -491,7 +492,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         <O8FilesPane repoPath={repoPath ?? undefined} onOpenFile={onOpenFile} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8PRPane prNumber={prNumber} repo={prRepo} />
+        <O8PRPane prNumber={prNumber} repo={prRepo ?? repoSlug} />
       </div>
     </div>
   );
