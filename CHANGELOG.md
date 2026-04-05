@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `27321d5` fix: make lane cards clickable — opens transcript on click
 - `b10879c` fix: always show worktree branches — they have session history
 - `b7ccc19` feat: truthful worktree status + cleanup stale worktrees
 - `83743d3` feat: click worktree → open agent transcript in canvas ( v1)
