@@ -17,6 +17,7 @@ interface PRFile {
   additions: number;
   deletions: number;
   status?: string;
+  patch?: string | null;
 }
 
 interface PRDetail {
@@ -31,6 +32,7 @@ interface PRDetail {
   deletions: number;
   changedFiles: number;
   mergedAt: string | null;
+  mergeable?: boolean;
   files: PRFile[];
   diffStat: string;
   url: string;
@@ -400,6 +402,11 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
           fontSize: 11,
         }}>
           <StateBadge state={pr.state} merged={isMerged} />
+          {pr.mergeable === true ? (
+            <span style={{ padding: '2px 8px', borderRadius: 999, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', fontSize: 10, fontWeight: 600 }}>No conflicts</span>
+          ) : pr.mergeable === false && !isMerged ? (
+            <span style={{ padding: '2px 8px', borderRadius: 999, background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', fontSize: 10, fontWeight: 600 }}>Conflicts</span>
+          ) : null}
           <span style={{ color: 'var(--t-text-secondary)' }}>{typeof pr.author === 'string' ? pr.author : pr.author?.login}</span>
           <span style={{ color: 'var(--t-text-faint)' }}>&middot;</span>
           <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
@@ -447,41 +454,59 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
               </button>
               {isExpanded ? (
                 <div style={{
-                  padding: '8px 14px 8px 36px',
                   borderBottom: '1px solid var(--t-divider-subtle)',
-                  background: 'rgba(0,0,0,0.15)',
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                   fontSize: 11,
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                  color: 'var(--t-text-secondary)',
+                  lineHeight: 1.5,
+                  overflow: 'hidden',
                 }}>
-                  {/* Show diff stat lines for this file from the PR diffStat */}
-                  {pr.diffStat
-                    .split('\n')
-                    .filter((line) => line.includes(file.path.split('/').pop() ?? ''))
-                    .map((line, i) => <div key={i}>{line}</div>)
-                  }
+                  {/* Inline diff patch */}
+                  {file.patch ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      {file.patch.split('\n').map((line, i) => {
+                        const isAdd = line.startsWith('+') && !line.startsWith('+++');
+                        const isDel = line.startsWith('-') && !line.startsWith('---');
+                        const isHunk = line.startsWith('@@');
+                        return (
+                          <div
+                            key={i}
+                            style={{
+                              padding: '0 14px 0 36px',
+                              background: isAdd ? 'rgba(34, 197, 94, 0.08)' : isDel ? 'rgba(239, 68, 68, 0.08)' : isHunk ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                              color: isAdd ? '#22c55e' : isDel ? '#ef4444' : isHunk ? '#3b82f6' : 'var(--t-text-secondary)',
+                              whiteSpace: 'pre',
+                              minHeight: 18,
+                            }}
+                          >
+                            {line || '\u200b'}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '8px 14px 8px 36px', color: 'var(--t-text-faint)' }}>Diff not available</div>
+                  )}
                   {/* Review comments on this file */}
-                  {pr.reviewComments
-                    .filter((c) => c.path === file.path)
-                    .map((comment) => (
-                      <div key={comment.id} style={{
-                        marginTop: 8,
-                        padding: '6px 10px',
-                        borderRadius: 8,
-                        background: 'rgba(37, 99, 235, 0.08)',
-                        border: '1px solid rgba(37, 99, 235, 0.15)',
-                      }}>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: '#3b82f6', marginBottom: 2 }}>
-                          {comment.user} {comment.line ? `· L${comment.line}` : ''}
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--t-text)', whiteSpace: 'pre-wrap' }}>{comment.body}</div>
-                      </div>
-                    ))
-                  }
-                  {pr.reviewComments.filter((c) => c.path === file.path).length === 0 && !pr.diffStat.includes(file.path.split('/').pop() ?? '') ? (
-                    <span style={{ color: 'var(--t-text-faint)' }}>No inline comments</span>
+                  {pr.reviewComments.filter((c) => c.path === file.path).length > 0 ? (
+                    <div style={{ padding: '6px 14px 8px 36px' }}>
+                      {pr.reviewComments
+                        .filter((c) => c.path === file.path)
+                        .map((comment) => (
+                          <div key={comment.id} style={{
+                            marginTop: 4,
+                            padding: '5px 8px',
+                            borderRadius: 6,
+                            background: 'rgba(37, 99, 235, 0.06)',
+                            border: '1px solid rgba(37, 99, 235, 0.12)',
+                          }}>
+                            <div style={{ fontSize: 10, fontWeight: 600, color: '#3b82f6', marginBottom: 2 }}>
+                              {comment.user} {comment.line ? `· L${comment.line}` : ''}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--t-text)', whiteSpace: 'pre-wrap' }}>{comment.body}</div>
+                          </div>
+                        ))
+                      }
+                    </div>
                   ) : null}
                 </div>
               ) : null}
