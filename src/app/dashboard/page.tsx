@@ -2593,6 +2593,15 @@ function DashboardInner() {
                       onClose={handleToggleO8Panel}
                       repoPath={globalRepoEntry?.localPath}
                       previews={workspacePreviews}
+                      onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
+                      onOpenFile={(filePath) => {
+                        const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
+                        void (async () => {
+                          const target = await waitForWorkspaceTerminalTarget({});
+                          if (target) target.handle.openInspectorTab(tab);
+                          else openCanvasTab(tab);
+                        })();
+                      }}
                     />
                   </motion.div>
                 ) : (

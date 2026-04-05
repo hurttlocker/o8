@@ -28,6 +28,8 @@ interface BrowserTab {
 
 interface O8BrowserPaneProps {
   previews?: DetectedLocalhostPreview[];
+  onEditWithAI?: (context: string) => void;
+  onOpenFile?: (filePath: string) => void;
 }
 
 // ── Helpers ──
@@ -60,7 +62,7 @@ function newTabId(): string {
 
 // ── Component ──
 
-export function O8BrowserPane({ previews = [] }: O8BrowserPaneProps) {
+export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile }: O8BrowserPaneProps) {
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState('');
@@ -523,6 +525,8 @@ export function O8BrowserPane({ previews = [] }: O8BrowserPaneProps) {
                 <O8ElementPanel
                   element={selectedElement}
                   onClose={() => setSelectedElement(null)}
+                  onEditWithAI={onEditWithAI}
+                  onOpenSource={onOpenFile ? (file) => onOpenFile(file) : undefined}
                 />
               </div>
             ) : null}
