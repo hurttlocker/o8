@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8FilesPane } from './O8FilesPane';
+import { O8PRPane } from './O8PRPane';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
@@ -45,9 +46,20 @@ function IconFiles({ size = 16, color = '#e2e8f0' }: { size?: number; color?: st
   );
 }
 
+function IconGitPullRequest({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+      <line x1="6" y1="9" x2="6" y2="21" />
+    </svg>
+  );
+}
+
 // ── Types ──
 
-type O8Tab = 'changes' | 'browser' | 'files';
+type O8Tab = 'changes' | 'browser' | 'files' | 'prs';
 
 interface GitChangedFile {
   path: string;
@@ -65,6 +77,9 @@ interface O8PanelProps {
   previews?: DetectedLocalhostPreview[];
   onEditWithAI?: (context: string) => void;
   onOpenFile?: (filePath: string) => void;
+  prNumber?: number | null;
+  prRepo?: string | null;
+  activeTab?: O8Tab | null;
 }
 
 // ── Tab Button ──
@@ -402,8 +417,17 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, activeTab: externalTab }: O8PanelProps) {
   const [activeTab, setActiveTab] = useState<O8Tab>('changes');
+
+  // Switch to PRs tab when a PR number is provided externally
+  useEffect(() => {
+    if (externalTab) setActiveTab(externalTab);
+  }, [externalTab]);
+
+  useEffect(() => {
+    if (prNumber) setActiveTab('prs');
+  }, [prNumber]);
 
   return (
     <div style={{
@@ -426,6 +450,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       }}>
         <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'changes'} onClick={() => setActiveTab('changes')} label="Changes" />
         <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'files'} onClick={() => setActiveTab('files')} label="Files" />
+        <O8TabButton icon={(c) => <IconGitPullRequest size={16} color={c} />} active={activeTab === 'prs'} onClick={() => setActiveTab('prs')} label="PRs" />
         <O8TabButton icon={(c) => <IconGlobeSimple size={16} color={c} />} active={activeTab === 'browser'} onClick={() => setActiveTab('browser')} label="Browser" />
         <div style={{ flex: 1 }} />
         <button
@@ -464,6 +489,9 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'files' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8FilesPane repoPath={repoPath ?? undefined} onOpenFile={onOpenFile} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8PRPane prNumber={prNumber} repo={prRepo} />
       </div>
     </div>
   );
