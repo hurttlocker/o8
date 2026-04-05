@@ -3015,7 +3015,7 @@ const ActivityFeed = memo(function ActivityFeed({
                         {onSelectCommit ? (
                           <BlueGlassActionButton
                             icon={<GitCommit size={12} strokeWidth={2} />}
-                            label="Open in Workspace"
+                            label="Open in Changes"
                             onClick={() => onSelectCommit(item.hash, item.repo ? { repo: item.repo } : undefined)}
                           />
                         ) : null}
