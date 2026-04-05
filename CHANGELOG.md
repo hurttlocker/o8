@@ -6,6 +6,11 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `fc0e122` refactor: decompose RepoRegistrySection.tsx into modules
+- `0ef7c14` refactor: decompose AgentPanel.tsx into modules
+- `d6996ec` refactor: decompose LLMChat.tsx into modules
+- `2e6bb83` refactor: decompose WorkspaceTerminal.tsx into modules
+- `96bf7a4` refactor: decompose Canvas.tsx into modules
 - `d663b6e` fix: add danger-full-access sandbox to agent runtime owned session launch
 - `d9206f5` feat: MCP dispatch DX overhaul
 - `b80058b` chore: remove OpenCode from open-in editor list
