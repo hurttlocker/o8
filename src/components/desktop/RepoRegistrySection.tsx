@@ -1685,6 +1685,16 @@ function RepoCard({
     () => repoScopedPackets.filter((packet) => !visibleBranches.some((branch) => packetMatchesBranch(packet, repo, branch, agentsByBranch?.get(branch.name) ?? []))),
     [agentsByBranch, repo, repoScopedPackets, visibleBranches],
   );
+  // All session keys bound to any repo-scoped packet — used to de-duplicate
+  // sessions that already show as packet cards (whether branch-matched or unmatched)
+  const allPacketBoundSessionKeys = useMemo(
+    () => new Set(
+      repoScopedPackets
+        .map((packet) => packet.lane?.sessionKey ?? null)
+        .filter((value): value is string => Boolean(value)),
+    ),
+    [repoScopedPackets],
+  );
   const showHeaderHover = hoveringHeader && (
     prPreviewLoading
     || prPreview.length > 0
@@ -2414,7 +2424,7 @@ function RepoCard({
                       .filter((value): value is string => Boolean(value)),
                   );
                   const orderedBranchAgents = [...branchAgents]
-                    .filter((agent) => !packetBoundSessionKeys.has(agent.sessionKey))
+                    .filter((agent) => !packetBoundSessionKeys.has(agent.sessionKey) && !allPacketBoundSessionKeys.has(agent.sessionKey))
                     .sort(compareBranchAgents);
                   const sessionsExpanded = sessionDisclosureByBranch[branch.name] ?? true;
                   const isIdleWorktree = branch.isWorktree && branch.isStale;
