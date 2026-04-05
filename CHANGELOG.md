@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `1ad8848` feat: thinking indicator + faster polling for active agent sessions
 - `e0663e0` refactor: reorder activity tabs to match dev workflow + compact PR badge
 - `2bd6c5b` feat: port hover popover + open ports in O8 browser tab
 - `4f7c1ba` fix: review fixes for — render loop, CSS shorthand, stale state
