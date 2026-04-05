@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `88e94cd` feat: dispatch pipeline hardening
 - `779d9a4` feat: wire Edit with AI + Open Source callbacks in O8 element panel
 - `10c0f8f` fix: collapse consecutive exec_command tool calls into summary pill
 - `a94b9b8` fix: white canvas background for agent transcript + chat views
