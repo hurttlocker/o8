@@ -205,6 +205,8 @@ function DashboardInner() {
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('review');
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
+  const [o8BrowserUrl, setO8BrowserUrl] = useState<string | null>(null);
+  const [o8ActiveTab, setO8ActiveTab] = useState<'changes' | 'browser' | 'files' | 'prs' | null>(null);
   const rightPanelMode = 'workspace' as const;
   const setRightPanelMode = (_mode: 'chat' | 'workspace') => { /* v1: right panel is always workspace */ };
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
@@ -2322,29 +2324,11 @@ function DashboardInner() {
         )}
         thoughtsOpen={thoughtsOpen}
         onThoughtsToggle={() => setThoughtsOpen(v => !v)}
-        onPortPreview={(port, url, repo) => {
-          const previewId = `preview-${port}`;
-          setWorkspacePreviews((current) => {
-            if (current.some((preview) => preview.id === previewId)) {
-              return current;
-            }
-            return [
-              ...current,
-              {
-                id: previewId,
-                tabId: '',
-                url,
-                port,
-                detectedAt: Date.now(),
-              },
-            ];
-          });
-          ensureTileKind('preview', {
-            direction: 'vertical',
-            preferredKinds: ['terminal', 'contextual-panel'],
-            ratio: 0.56,
-            selectedPreviewId: previewId,
-          });
+        onPortPreview={(_port, url) => {
+          setO8BrowserUrl(url);
+          setO8ActiveTab('browser');
+          setRightPanelKind('o8');
+          setChatVisible(true);
         }}
       />}
 
@@ -2592,6 +2576,8 @@ function DashboardInner() {
                       prNumber={o8PrNumber}
                       prRepo={o8PrRepo}
                       repoSlug={repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
+                      browserUrl={o8BrowserUrl}
+                      activeTab={o8ActiveTab}
                       onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
                       onOpenFile={(filePath) => {
                         const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
