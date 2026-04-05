@@ -266,6 +266,81 @@ export function checkFileSizeThresholds(packet: OrchestratorPacket): string[] {
   ].filter((value): value is string => Boolean(value));
 }
 
+const PRESERVATION_MAX_EXPORTS = 12;
+const PRESERVATION_DELETE_BUDGET_RATIO = 0.1;  // max 10% of existing lines deletable
+const PRESERVATION_ADD_BUDGET_RATIO = 0.2;     // max 20% of existing lines addable
+const PRESERVATION_MIN_DELETE_BUDGET = 5;
+
+function formatExportList(symbols: FileSkeleton['symbols']): string {
+  const exported = symbols.filter((s) => s.exported);
+  if (exported.length === 0) {
+    return '';
+  }
+
+  const lines = exported
+    .slice(0, PRESERVATION_MAX_EXPORTS)
+    .map((s) => `  - ${truncateText(s.signature, 120)}`);
+
+  if (exported.length > PRESERVATION_MAX_EXPORTS) {
+    lines.push(`  - (+${exported.length - PRESERVATION_MAX_EXPORTS} more exports)`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Build a preservation envelope for existing files referenced by this packet.
+ * Injects diff budgets + structural contracts so agents don't rewrite files.
+ * (#482) — Proved effective in Round 2 dogfooding: P3 was a clean merge.
+ */
+export function buildPreservationEnvelope(packet: OrchestratorPacket): string[] {
+  const repoPath = packet.workspaceTargetPath;
+  if (!repoPath) {
+    return [];
+  }
+
+  const scopeText = buildPacketScopeText(packet);
+  if (!scopeText) {
+    return [];
+  }
+
+  const matchedFiles = getAllCached(repoPath).filter((file) => packetMentionsSkeletonFile(scopeText, file));
+  if (matchedFiles.length === 0) {
+    return [];
+  }
+
+  // Only envelope files that actually exist and have content — new files get no envelope
+  const existingFiles = matchedFiles.filter((file) => file.lineCount > 0);
+  if (existingFiles.length === 0) {
+    return [];
+  }
+
+  const sections: string[] = ['File preservation contracts (DO NOT REWRITE existing files):'];
+
+  for (const file of existingFiles.slice(0, MAX_THRESHOLD_GUIDANCE_FILES)) {
+    const addBudget = Math.ceil(file.lineCount * PRESERVATION_ADD_BUDGET_RATIO);
+    const deleteBudget = Math.max(PRESERVATION_MIN_DELETE_BUDGET, Math.ceil(file.lineCount * PRESERVATION_DELETE_BUDGET_RATIO));
+    const exportList = formatExportList(file.symbols);
+
+    sections.push(
+      `${file.relativePath} (${file.lineCount} lines):`,
+      `  DIFF BUDGET: add up to ${addBudget} lines, delete no more than ${deleteBudget} existing lines.`,
+      `  Make surgical additions only — do not rewrite or reorganize existing code.`,
+    );
+
+    if (exportList) {
+      sections.push(
+        `  STRUCTURAL CONTRACT — these exports MUST be preserved:`,
+        exportList,
+      );
+    }
+  }
+
+  sections.push('If your task cannot be completed within these budgets, surface it as a blocker to the operator.');
+
+  return sections;
+}
+
 async function buildDependencyContextSections(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
@@ -327,6 +402,7 @@ async function buildPacketPrompt(
     ? buildAttemptLearningSections(await readAttemptLearnings(worktreePath))
     : [];
   const fileSizeSections = checkFileSizeThresholds(packet);
+  const preservationSections = buildPreservationEnvelope(packet);
   if (dependencySections.length > 0) {
     console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
   }
@@ -335,6 +411,9 @@ async function buildPacketPrompt(
   }
   if (fileSizeSections.length > 0) {
     console.log(`[dispatch] Injected file size governance guidance for packet ${packet.id}`);
+  }
+  if (preservationSections.length > 0) {
+    console.log(`[dispatch] Injected preservation envelope for packet ${packet.id} (${preservationSections.length - 2} files)`);
   }
 
   return [
@@ -347,6 +426,7 @@ async function buildPacketPrompt(
     priorAttemptLearningSections.length > 0 ? 'Prior attempt learnings:' : null,
     ...priorAttemptLearningSections,
     ...fileSizeSections,
+    ...preservationSections,
     'Files in this repository follow a 600-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     ...buildPacketSelfReviewInstructions(baseBranch),
     'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
