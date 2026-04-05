@@ -676,6 +676,33 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           console.log(`[lane-merge] Rebase failed for ${actualBranch}, attempting direct merge`);
         }
 
+        // (#482) Typecheck after rebase — catches integration drift that agents
+        // can't detect in their isolated branches. Only run if rebase succeeded
+        // (if rebase failed, we're about to try direct merge which has its own risks).
+        if (!rebaseFailed) {
+          try {
+            await execFileAsync('npx', ['tsc', '--noEmit'], {
+              cwd: lane.worktreePath!,
+              timeout: 120_000,
+              maxBuffer: 4 * 1024 * 1024,
+            });
+            console.log(`[lane-merge] Typecheck passed for ${actualBranch}`);
+          } catch (tscErr) {
+            const tscOutput = tscErr instanceof Error && 'stdout' in tscErr
+              ? String((tscErr as { stdout: unknown }).stdout).slice(0, 2000)
+              : tscErr instanceof Error && 'stderr' in tscErr
+                ? String((tscErr as { stderr: unknown }).stderr).slice(0, 2000)
+                : 'Unknown typecheck error';
+            console.error(`[lane-merge] Typecheck failed for ${actualBranch}:\n${tscOutput}`);
+            setLaneStatus(command.laneId, 'reviewing', 'system', 'typecheck_failed');
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: `Typecheck failed after rebase onto ${lane.baseBranch}. Fix type errors before merging.\n\n${tscOutput}`,
+            };
+          }
+        }
+
         // Perform merge using the actual branch ref
         const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: lane.repoPath })).stdout.trim();
         await execFileAsync('git', ['checkout', lane.baseBranch], { cwd: lane.repoPath });
