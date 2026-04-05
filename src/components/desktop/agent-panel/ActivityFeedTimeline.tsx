@@ -1,0 +1,721 @@
+'use client';
+
+import { memo, type ReactNode } from 'react';
+import {
+  AlertCircle,
+  ArrowRight,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  GitCommit,
+  GitPullRequest,
+  MessageSquare,
+  PlayCircle,
+  XCircle,
+  Zap,
+} from 'lucide-react';
+import {
+  BlueGlassActionButton,
+  BlueGlassHoverCard,
+  BlueGlassMetricPill,
+  BlueGlassSparklineLane,
+} from '../BlueGlassHoverCard';
+import {
+  activityItemKey,
+  mergeRiskLabel,
+  severityColor,
+  shortRepoLabel,
+} from './shared';
+import type {
+  ActivityItem,
+  AgentDetail,
+  CIHoverDetail,
+  FeedFilter,
+  PRHoverDetail,
+  RepoTaskLaunchRequest,
+} from './types';
+
+const FEED_ICON: Record<string, { icon: ReactNode; bg: string; color: string }> = {
+  commit: { icon: <GitCommit size={11} strokeWidth={2} />, bg: 'rgba(34,197,94,0.08)', color: '#22c55e' },
+  issue: { icon: <AlertCircle size={11} strokeWidth={2} />, bg: 'rgba(139,92,246,0.08)', color: '#8b5cf6' },
+  pr: { icon: <GitPullRequest size={11} strokeWidth={2} />, bg: 'rgba(37,99,235,0.08)', color: '#2563eb' },
+  ci_success: { icon: <CheckCircle2 size={11} strokeWidth={2} />, bg: 'rgba(34,197,94,0.08)', color: '#22c55e' },
+  ci_failure: { icon: <XCircle size={11} strokeWidth={2} />, bg: 'rgba(239,68,68,0.08)', color: '#ef4444' },
+  ci_pending: { icon: <Clock size={11} strokeWidth={2} />, bg: 'rgba(245,158,11,0.08)', color: '#f59e0b' },
+  event: { icon: <Zap size={11} strokeWidth={2} />, bg: 'rgba(100,116,139,0.08)', color: '#64748b' },
+};
+
+function feedIcon(item: ActivityItem) {
+  if (item.kind === 'ci') {
+    if (item.conclusion === 'success') return FEED_ICON.ci_success;
+    if (item.conclusion === 'failure') return FEED_ICON.ci_failure;
+    return FEED_ICON.ci_pending;
+  }
+  if (item.kind === 'event') {
+    const color = severityColor[item.data.severity] ?? '#64748b';
+    return { icon: <Zap size={11} strokeWidth={2} />, bg: `${color}10`, color };
+  }
+  return FEED_ICON[item.kind] ?? FEED_ICON.event;
+}
+
+function activityItemTitle(item: ActivityItem) {
+  if (item.kind === 'commit') return item.message;
+  if (item.kind === 'event') return item.data.title;
+  if (item.kind === 'issue') return `#${item.number} ${item.title}`;
+  if (item.kind === 'pr') return `#${item.number} ${item.title}`;
+  return item.title;
+}
+
+function activityItemEyebrow(item: ActivityItem) {
+  if (item.kind === 'commit') return 'Commit';
+  if (item.kind === 'pr') return 'Pull Request';
+  if (item.kind === 'ci') return 'CI Run';
+  if (item.kind === 'issue') return 'Issue';
+  return 'Activity';
+}
+
+function activityItemSubtitle(item: ActivityItem, agentForEvent: AgentDetail | null) {
+  if (item.kind === 'pr') return `${item.author} • ${item.branch}`;
+  if (item.kind === 'ci') return `${item.workflow} • ${item.branch}`;
+  if (item.kind === 'issue') return `${item.author} opened this in ${shortRepoLabel(item.repo)}`;
+  if (item.kind === 'commit') return `${shortRepoLabel(item.repo)} • ${item.hash}`;
+  return agentForEvent ? `${agentForEvent.name} • ${agentForEvent.model}` : item.data.timestamp;
+}
+
+interface ActivityFeedTimelineProps {
+  grouped: Array<{ label: string; items: ActivityItem[] }>;
+  filteredLength: number;
+  filter: FeedFilter;
+  repoLabel: string;
+  items: ActivityItem[];
+  agents: AgentDetail[];
+  hoveredItemKey: string | null;
+  hoveredItemRect: DOMRect | null;
+  prHoverDetails: Record<string, PRHoverDetail>;
+  ciHoverDetails: Record<string, CIHoverDetail>;
+  commitStack: Array<Extract<ActivityItem, { kind: 'commit' }>>;
+  onOpenHoverCard: (key: string, rect: DOMRect) => void;
+  onUpdateHoveredRect: (rect: DOMRect) => void;
+  onScheduleHoverClose: () => void;
+  onCancelHoverClose: () => void;
+  onSelectSession?: (sessionKey: string) => void;
+  onSelectIssue?: (issueNumber: number, repo?: string) => void;
+  onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
+  onSelectPR?: (prNumber: number, repo?: string) => void;
+  onReviewPR?: (prNumber: number, repo?: string) => void;
+  onLaunchTask?: (request: RepoTaskLaunchRequest) => void;
+}
+
+export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
+  grouped,
+  filteredLength,
+  filter,
+  repoLabel,
+  items,
+  agents,
+  hoveredItemKey,
+  hoveredItemRect,
+  prHoverDetails,
+  ciHoverDetails,
+  commitStack,
+  onOpenHoverCard,
+  onUpdateHoveredRect,
+  onScheduleHoverClose,
+  onCancelHoverClose,
+  onSelectSession,
+  onSelectIssue,
+  onSelectCommit,
+  onSelectPR,
+  onReviewPR,
+  onLaunchTask,
+}: ActivityFeedTimelineProps) {
+  if (filteredLength === 0) {
+    return (
+      <div
+        style={{
+          padding: '16px 14px',
+          fontSize: 11,
+          color: 'var(--t-text-muted)',
+          textAlign: 'center',
+          lineHeight: 1.5,
+          letterSpacing: '-0.01em',
+          fontFamily: 'system-ui, sans-serif',
+        }}
+      >
+        {`${filter === 'all' ? 'Activity' : filter.charAt(0).toUpperCase() + filter.slice(1)} activity will appear here as ${repoLabel} work lands.`}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {grouped.map((group) => (
+        <div key={group.label}>
+          <div
+            style={{
+              padding: '6px 14px 3px',
+              fontSize: 10,
+              fontWeight: 700,
+              color: 'var(--t-text-faint)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              position: 'relative',
+              zIndex: 1,
+            }}
+          >
+            {group.label}
+          </div>
+          {group.items.map((item) => {
+            const icon = feedIcon(item);
+            const key = activityItemKey(item);
+            const clickable = (item.kind === 'commit' && !!onSelectCommit) || item.kind === 'issue' || item.kind === 'ci';
+            const agentForEvent = item.kind === 'event'
+              ? agents.find((agent) => agent.id === item.data.agentId) ?? null
+              : null;
+            const prDetail = item.kind === 'pr' ? prHoverDetails[key] ?? null : null;
+            const ciDetail = item.kind === 'ci' ? ciHoverDetails[key] ?? null : null;
+            const mergeRisk = item.kind === 'pr' ? mergeRiskLabel(prDetail) : null;
+            const handleClick = () => {
+              if (item.kind === 'commit') {
+                onSelectCommit?.(item.hash, item.repo ? { repo: item.repo } : undefined);
+                return;
+              }
+              if (item.kind === 'issue' && onSelectIssue) {
+                onSelectIssue(item.number, item.repo);
+                return;
+              }
+              if (item.kind === 'issue') {
+                window.open(`https://github.com/${item.repo}/issues/${item.number}`, '_blank', 'noopener,noreferrer');
+                return;
+              }
+              if (item.kind === 'ci') {
+                window.open(`https://github.com/${item.repo}/actions/runs/${item.id}`, '_blank', 'noopener,noreferrer');
+              }
+            };
+
+            return (
+              <div
+                key={key}
+                onClick={clickable ? handleClick : undefined}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 8,
+                  padding: '7px 14px',
+                  position: 'relative',
+                  cursor: clickable ? 'pointer' : 'default',
+                  transition: 'background 100ms ease',
+                }}
+                onMouseEnter={(event) => {
+                  onOpenHoverCard(key, (event.currentTarget as HTMLDivElement).getBoundingClientRect());
+                  if (clickable) {
+                    (event.currentTarget as HTMLDivElement).style.background = 'rgba(37,99,235,0.04)';
+                  }
+                }}
+                onMouseMove={(event) => {
+                  if (hoveredItemKey === key) {
+                    onUpdateHoveredRect((event.currentTarget as HTMLDivElement).getBoundingClientRect());
+                  }
+                }}
+                onMouseLeave={(event) => {
+                  onScheduleHoverClose();
+                  if (clickable) {
+                    (event.currentTarget as HTMLDivElement).style.background = 'transparent';
+                  }
+                }}
+              >
+                <div
+                  style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: '50%',
+                    background: icon.bg,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    marginTop: 1,
+                    color: icon.color,
+                  }}
+                >
+                  {icon.icon}
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--t-text)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      lineHeight: 1.4,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {activityItemTitle(item)}
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      marginTop: 1,
+                      fontSize: 10,
+                      color: 'var(--t-text-muted)',
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {item.kind === 'commit' ? (
+                      <>
+                        <span style={{ color: 'var(--t-text-secondary)' }}>{item.hash}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.age}</span>
+                      </>
+                    ) : item.kind === 'pr' ? (
+                      <>
+                        <span style={{ color: '#22c55e' }}>+{item.additions}</span>
+                        <span style={{ color: '#ef4444' }}>-{item.deletions}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.branch}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.age}</span>
+                      </>
+                    ) : item.kind === 'ci' ? (
+                      <>
+                        <span>{item.workflow}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.branch}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span
+                          style={{
+                            color: item.conclusion === 'success' ? '#22c55e' : item.conclusion === 'failure' ? '#ef4444' : '#f59e0b',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {item.conclusion || item.status}
+                        </span>
+                      </>
+                    ) : item.kind === 'issue' ? (
+                      <>
+                        {item.labels.slice(0, 2).map((label) => (
+                          <span
+                            key={label.name}
+                            style={{
+                              padding: '0 4px',
+                              borderRadius: 4,
+                              background: `#${label.color}18`,
+                              color: `#${label.color}`,
+                              fontSize: 9,
+                              fontWeight: 600,
+                              fontFamily: '-apple-system, system-ui, sans-serif',
+                            }}
+                          >
+                            {label.name}
+                          </span>
+                        ))}
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.age}</span>
+                      </>
+                    ) : (
+                      <span>{item.data.timestamp}</span>
+                    )}
+                  </div>
+                </div>
+
+                {item.kind === 'pr' && item.state ? (
+                  <span
+                    style={{
+                      padding: '1px 6px',
+                      borderRadius: 999,
+                      fontSize: 9,
+                      fontWeight: 700,
+                      flexShrink: 0,
+                      marginTop: 2,
+                      background: item.state === 'merged' ? 'rgba(139,92,246,0.1)' : item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                      color: item.state === 'merged' ? '#8b5cf6' : item.state === 'open' ? '#22c55e' : '#ef4444',
+                      textTransform: 'uppercase',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                    }}
+                  >
+                    {item.state}
+                  </span>
+                ) : null}
+                {item.kind === 'issue' ? (
+                  <button
+                    type="button"
+                    title={`Launch agent on #${item.number}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onLaunchTask?.({ kind: 'issue', repo: item.repo, number: item.number, title: item.title, body: item.body });
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 22,
+                      height: 22,
+                      borderRadius: 6,
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--t-text-muted)',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      padding: 0,
+                      transition: 'color 120ms, background 120ms',
+                    }}
+                    onMouseEnter={(event) => {
+                      event.currentTarget.style.color = '#2563eb';
+                      event.currentTarget.style.background = 'rgba(37,99,235,0.08)';
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.color = 'var(--t-text-muted)';
+                      event.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <PlayCircle size={13} strokeWidth={2} />
+                  </button>
+                ) : null}
+                {item.kind === 'issue' && item.state ? (
+                  <span
+                    style={{
+                      padding: '1px 6px',
+                      borderRadius: 999,
+                      fontSize: 9,
+                      fontWeight: 700,
+                      flexShrink: 0,
+                      marginTop: 2,
+                      background: item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(139,92,246,0.1)',
+                      color: item.state === 'open' ? '#22c55e' : '#8b5cf6',
+                      textTransform: 'uppercase',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                    }}
+                  >
+                    {item.state}
+                  </span>
+                ) : null}
+
+                {hoveredItemKey === key ? (
+                  <BlueGlassHoverCard
+                    eyebrow={activityItemEyebrow(item)}
+                    title={activityItemTitle(item)}
+                    subtitle={activityItemSubtitle(item, agentForEvent)}
+                    anchorRect={hoveredItemRect}
+                    interactive
+                    onMouseEnter={onCancelHoverClose}
+                    onMouseLeave={onScheduleHoverClose}
+                    footer={item.kind === 'pr' ? (
+                      <>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <BlueGlassMetricPill label="State" value={mergeRisk?.label ?? 'reviewing'} color={mergeRisk?.color ?? '#64748b'} />
+                          <BlueGlassMetricPill label="Checks" value={`${item.checkSummary?.failed ?? 0} fail · ${item.checkSummary?.pending ?? 0} pending`} color={item.checkSummary?.failed ? '#dc2626' : item.checkSummary?.pending ? '#d97706' : '#1d4ed8'} />
+                          <BlueGlassMetricPill label="Files" value={String(item.changedFiles)} color="rgba(15,23,42,0.78)" />
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          {onLaunchTask ? (
+                            <BlueGlassActionButton
+                              icon={<PlayCircle size={12} strokeWidth={2} />}
+                              label="Launch review"
+                              onClick={() => onLaunchTask({ kind: 'pr', repo: item.repo, number: item.number, title: item.title, branch: item.branch })}
+                            />
+                          ) : null}
+                          {onReviewPR ? (
+                            <BlueGlassActionButton
+                              icon={<GitPullRequest size={12} strokeWidth={2} />}
+                              label="Review"
+                              onClick={() => onReviewPR(item.number, item.repo)}
+                            />
+                          ) : null}
+                          {onSelectPR ? (
+                            <BlueGlassActionButton
+                              icon={<ArrowRight size={12} strokeWidth={2} />}
+                              label="Open full PR"
+                              onClick={() => onSelectPR(item.number, item.repo)}
+                            />
+                          ) : null}
+                          <BlueGlassActionButton
+                            icon={<ExternalLink size={12} strokeWidth={2} />}
+                            label="Open on GitHub"
+                            onClick={() => window.open(`https://github.com/${item.repo}/pull/${item.number}`, '_blank', 'noopener,noreferrer')}
+                          />
+                        </div>
+                      </>
+                    ) : item.kind === 'ci' ? (
+                      <>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <BlueGlassMetricPill label="Result" value={item.conclusion || item.status} color={item.conclusion === 'success' ? '#16a34a' : item.conclusion === 'failure' ? '#dc2626' : '#d97706'} />
+                          <BlueGlassMetricPill label="Age" value={item.age} color="rgba(15,23,42,0.78)" />
+                        </div>
+                        <BlueGlassActionButton
+                          icon={<ExternalLink size={12} strokeWidth={2} />}
+                          label="Open Run"
+                          onClick={() => window.open(`https://github.com/${item.repo}/actions/runs/${item.id}`, '_blank', 'noopener,noreferrer')}
+                        />
+                      </>
+                    ) : item.kind === 'commit' ? (
+                      <>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <BlueGlassMetricPill label="Hash" value={item.hash} color="#1d4ed8" />
+                          <BlueGlassMetricPill label="Age" value={item.age} color="rgba(15,23,42,0.78)" />
+                        </div>
+                        {onSelectCommit ? (
+                          <BlueGlassActionButton
+                            icon={<GitCommit size={12} strokeWidth={2} />}
+                            label="Open in Changes"
+                            onClick={() => onSelectCommit(item.hash, item.repo ? { repo: item.repo } : undefined)}
+                          />
+                        ) : null}
+                      </>
+                    ) : item.kind === 'issue' ? (
+                      <>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <BlueGlassMetricPill label="Comments" value={String(item.comments)} color="#1d4ed8" />
+                          <BlueGlassMetricPill label="Owner" value={item.assignees[0] ?? 'unassigned'} color={item.assignees[0] ? 'rgba(15,23,42,0.78)' : '#d97706'} />
+                          <BlueGlassMetricPill label="Age" value={item.age} color="rgba(15,23,42,0.78)" />
+                        </div>
+                        <BlueGlassActionButton
+                          icon={<PlayCircle size={12} strokeWidth={2} />}
+                          label="Launch agent"
+                          onClick={() => onLaunchTask?.({ kind: 'issue', repo: item.repo, number: item.number, title: item.title, body: item.body })}
+                        />
+                        <BlueGlassActionButton
+                          icon={<ExternalLink size={12} strokeWidth={2} />}
+                          label="Open Issue"
+                          onClick={() => window.open(`https://github.com/${item.repo}/issues/${item.number}`, '_blank', 'noopener,noreferrer')}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 11, color: 'rgba(15, 23, 42, 0.62)' }}>{item.data.severity}</div>
+                        {agentForEvent?.sessionKey && onSelectSession ? (
+                          <BlueGlassActionButton
+                            icon={<MessageSquare size={12} strokeWidth={2} />}
+                            label="Steer agent"
+                            onClick={() => onSelectSession(agentForEvent.sessionKey)}
+                          />
+                        ) : null}
+                      </>
+                    )}
+                  >
+                    {item.kind === 'event' ? (
+                      <>
+                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.76)' }}>
+                          {item.data.detail}
+                        </div>
+                        <BlueGlassSparklineLane
+                          segments={items
+                            .filter((candidate): candidate is Extract<ActivityItem, { kind: 'event' }> => candidate.kind === 'event' && candidate.data.agentId === item.data.agentId)
+                            .slice(0, 4)
+                            .map((candidate, index) => ({
+                              label: `${index + 1}`,
+                              value: Math.max(1, 4 - index),
+                              color: severityColor[candidate.data.severity] ?? '#64748b',
+                            }))}
+                        />
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                          Next move: steer the active runtime lane if this event changes priority.
+                        </div>
+                      </>
+                    ) : item.kind === 'issue' ? (
+                      <>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {item.labels.slice(0, 4).map((label) => (
+                            <span
+                              key={label.name}
+                              style={{
+                                padding: '2px 7px',
+                                borderRadius: 999,
+                                background: `#${label.color}18`,
+                                color: `#${label.color}`,
+                                fontSize: 10,
+                                fontWeight: 700,
+                              }}
+                            >
+                              {label.name}
+                            </span>
+                          ))}
+                        </div>
+                        {item.body ? (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              lineHeight: 1.55,
+                              color: 'rgba(15, 23, 42, 0.76)',
+                              padding: '8px 10px',
+                              borderRadius: 12,
+                              background: 'rgba(255,255,255,0.28)',
+                            }}
+                          >
+                            {item.body.length > 180 ? `${item.body.slice(0, 177).trimEnd()}...` : item.body}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.62)' }}>
+                            No description yet. The thread context is still mostly in labels, assignment, and comments.
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'rgba(15, 23, 42, 0.66)' }}>
+                          <span>Assignee: {item.assignees.length ? item.assignees.join(', ') : 'Unassigned'}</span>
+                          <span>{item.comments} comment{item.comments === 1 ? '' : 's'}</span>
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                          Next move: assign or open the issue before it drifts out of the activity lane.
+                        </div>
+                      </>
+                    ) : item.kind === 'ci' ? (
+                      <>
+                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.76)' }}>
+                          {item.workflow} on <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{item.branch}</span>
+                        </div>
+                        {ciDetail?.failingJobs?.length ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#dc2626' }}>
+                              Failing jobs
+                            </div>
+                            {ciDetail.failingJobs.map((job) => (
+                              <div
+                                key={`${job.name}-${job.failingStep ?? 'none'}`}
+                                style={{
+                                  padding: '6px 8px',
+                                  borderRadius: 10,
+                                  background: 'rgba(255,255,255,0.28)',
+                                  fontSize: 11,
+                                  color: 'rgba(15, 23, 42, 0.78)',
+                                }}
+                              >
+                                <div style={{ fontWeight: 700 }}>{job.name}</div>
+                                {job.failingStep ? (
+                                  <div style={{ marginTop: 2, color: 'rgba(15, 23, 42, 0.62)' }}>
+                                    {job.failingStep}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        {ciDetail?.summaryLine ? (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              lineHeight: 1.5,
+                              color: 'rgba(15, 23, 42, 0.74)',
+                              padding: '7px 8px',
+                              borderRadius: 10,
+                              background: 'rgba(255,255,255,0.28)',
+                            }}
+                          >
+                            {ciDetail.summaryLine}
+                          </div>
+                        ) : null}
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                          Next move: inspect the failing run and decide whether to review or steer the agent.
+                        </div>
+                      </>
+                    ) : item.kind === 'pr' ? (
+                      <>
+                        <BlueGlassSparklineLane
+                          segments={[
+                            { label: 'Pass', value: item.checkSummary?.passed ?? 0, color: '#22c55e' },
+                            { label: 'Fail', value: item.checkSummary?.failed ?? 0, color: '#ef4444' },
+                            { label: 'Pending', value: item.checkSummary?.pending ?? 0, color: '#f59e0b' },
+                          ]}
+                        />
+                        {item.failingChecks && item.failingChecks.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#dc2626' }}>
+                              Top failing checks
+                            </div>
+                            {item.failingChecks.map((check) => (
+                              <div
+                                key={check}
+                                style={{
+                                  fontSize: 11,
+                                  lineHeight: 1.45,
+                                  color: 'rgba(15, 23, 42, 0.76)',
+                                  padding: '6px 8px',
+                                  borderRadius: 10,
+                                  background: 'rgba(255,255,255,0.28)',
+                                }}
+                              >
+                                {check}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.76)' }}>
+                          Branch <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{item.branch}</span> has an active merge path.
+                        </div>
+                        {prDetail?.files?.length ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#1d4ed8' }}>
+                              Changed files
+                            </div>
+                            {prDetail.files.slice(0, 3).map((file) => (
+                              <div
+                                key={file.path}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  padding: '6px 8px',
+                                  borderRadius: 10,
+                                  background: 'rgba(255,255,255,0.28)',
+                                  fontSize: 11,
+                                }}
+                              >
+                                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(15,23,42,0.78)' }}>
+                                  {file.path}
+                                </span>
+                                <span style={{ color: '#16a34a', fontWeight: 700 }}>+{file.additions}</span>
+                                <span style={{ color: '#dc2626', fontWeight: 700 }}>-{file.deletions}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                          Next move: {mergeRisk?.label === 'merge ready'
+                            ? 'review and merge while the branch is green.'
+                            : mergeRisk?.label === 'conflicts'
+                              ? 'resolve merge conflicts before stacking more work.'
+                              : mergeRisk?.label === 'ci red'
+                                ? 'inspect the failing checks before review.'
+                                : 'review the PR before you steer more changes into this branch.'}
+                        </div>
+                      </>
+                    ) : item.kind === 'commit' ? (
+                      <>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {commitStack.map((commit) => (
+                            <div
+                              key={commit.hash}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8,
+                                padding: '6px 8px',
+                                borderRadius: 10,
+                                background: commit.hash === item.hash ? 'rgba(255,255,255,0.42)' : 'rgba(255,255,255,0.18)',
+                              }}
+                            >
+                              <span style={{ fontSize: 10, fontFamily: '"SF Mono", ui-monospace, monospace', color: '#1d4ed8', fontWeight: 700 }}>{commit.hash}</span>
+                              <span style={{ fontSize: 11, color: 'rgba(15, 23, 42, 0.76)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {commit.message}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                          Next move: open the commit in canvas and compare it against the active workspace.
+                        </div>
+                      </>
+                    ) : null}
+                  </BlueGlassHoverCard>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </>
+  );
+});
