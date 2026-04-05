@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionButton,
   CheckIcon,
@@ -121,11 +121,16 @@ export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8Change
     }
   }, [filter, repoPath]);
 
+  // Track in-flight + cached SHAs via ref to avoid re-render loops in useCallback deps
+  const diffCacheRef = useRef<Set<string>>(new Set());
+  const inFlightRef = useRef<Set<string>>(new Set());
+
   const loadCommitDiff = useCallback(async (sha: string) => {
     const resolvedSha = resolveCommitSha(sha);
     if (!repoPath || !resolvedSha) return;
-    if (commitDiffs[resolvedSha] || commitDiffLoadingBySha[resolvedSha]) return;
+    if (diffCacheRef.current.has(resolvedSha) || inFlightRef.current.has(resolvedSha)) return;
 
+    inFlightRef.current.add(resolvedSha);
     setCommitDiffLoadingBySha((current) => ({ ...current, [resolvedSha]: true }));
     setCommitDiffErrors((current) => {
       const next = { ...current };
@@ -139,6 +144,7 @@ export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8Change
       const response = await fetch(`/api/panel/commit-diff?sha=${shaParam}&workspace=${workspaceParam}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json() as { files?: CommitDiffFile[] };
+      diffCacheRef.current.add(resolvedSha);
       setCommitDiffs((current) => ({
         ...current,
         [resolvedSha]: Array.isArray(data.files) ? data.files : [],
@@ -149,9 +155,10 @@ export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8Change
         [resolvedSha]: 'Failed to load commit diff',
       }));
     } finally {
+      inFlightRef.current.delete(resolvedSha);
       setCommitDiffLoadingBySha((current) => ({ ...current, [resolvedSha]: false }));
     }
-  }, [commitDiffLoadingBySha, commitDiffs, repoPath, resolveCommitSha]);
+  }, [repoPath, resolveCommitSha]);
 
   const handleFileClick = useCallback(async (filePath: string) => {
     if (expandedFile === filePath) {
@@ -217,6 +224,8 @@ export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8Change
     setCommitDiffErrors({});
     setCommitDiffLoadingBySha({});
     setCopiedCommitSha(null);
+    diffCacheRef.current.clear();
+    inFlightRef.current.clear();
   }, [initialCommitSha, repoPath]);
 
   useEffect(() => {
@@ -226,11 +235,11 @@ export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8Change
   }, [initialCommitSha, resolveCommitSha]);
 
   useEffect(() => {
-    if (filter !== 'commits' || !expandedCommitSha) return;
+    if (filter !== 'commits' || !expandedCommitSha || loading) return;
     const resolvedSha = resolveCommitSha(expandedCommitSha);
     if (!resolvedSha) return;
     void loadCommitDiff(resolvedSha);
-  }, [expandedCommitSha, filter, loadCommitDiff, resolveCommitSha]);
+  }, [expandedCommitSha, filter, loading, loadCommitDiff, resolveCommitSha]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#1e2028' }}>
@@ -276,7 +285,7 @@ export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8Change
           </button>
           {filterOpen ? (
             <>
-              <div onClick={() => setFilterOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
+              <div onClick={() => setFilterOpen(false)} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 99 }} />
               <div
                 style={{
                   position: 'absolute',

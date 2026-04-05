@@ -1097,9 +1097,12 @@ function DashboardInner() {
 
   const handleToggleO8Panel = useCallback(() => {
     if (rightPanelKind === 'o8' && chatVisible) {
-      // o8 → collapsed
+      // o8 → collapsed — clear commit context so reopening doesn't re-expand stale commit
       setChatVisible(false);
       setRightPanelKind('review');
+      setO8CommitSha(null);
+      setO8CommitRepoPath(null);
+      setO8CommitRepoSlug(null);
       return;
     }
     // review → o8
