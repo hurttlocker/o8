@@ -339,7 +339,7 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       width: '100%',
       display: visible ? 'flex' : 'none',
       flexDirection: 'column',
-      background: 'var(--t-panel)',
+      background: '#ffffff',
       overflow: 'hidden',
     }}>
       {inlineImages.map((img) => (
@@ -357,7 +357,7 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
         </div>
       ))}
       <div ref={containerRef} style={{
-        flex: 1, width: '100%', background: 'var(--t-panel)', paddingTop: 2, paddingLeft: 2,
+        flex: 1, width: '100%', background: '#ffffff', paddingTop: 2, paddingLeft: 2,
       }} />
     </div>
   );
