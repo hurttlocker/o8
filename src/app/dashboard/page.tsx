@@ -26,7 +26,7 @@ import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
-import { O8Panel } from '@/components/desktop/O8Panel';
+import { O8Panel, type O8Tab } from '@/components/desktop/O8Panel';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -203,8 +203,12 @@ function DashboardInner() {
   const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
   const [chatVisible, setChatVisible] = useState(true);
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('review');
+  const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>('changes');
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
+  const [o8CommitSha, setO8CommitSha] = useState<string | null>(null);
+  const [o8CommitRepoPath, setO8CommitRepoPath] = useState<string | null>(null);
+  const [o8CommitRepoSlug, setO8CommitRepoSlug] = useState<string | null>(null);
   const rightPanelMode = 'workspace' as const;
   const setRightPanelMode = (_mode: 'chat' | 'workspace') => { /* v1: right panel is always workspace */ };
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
@@ -1003,6 +1007,10 @@ function DashboardInner() {
 
   const handleReviewPR = useCallback((prNumber: number, repo?: string) => {
     // Open O8 panel to PRs tab — prNumber 0 means show the list
+    setO8CommitSha(null);
+    setO8CommitRepoPath(null);
+    setO8CommitRepoSlug(null);
+    setO8ActiveTab('prs');
     setO8PrNumber(prNumber || null);
     setO8PrRepo(repo ?? null);
     setRightPanelKind('o8');
@@ -1556,31 +1564,19 @@ function DashboardInner() {
     }
 
     const repoPath = matchedRepo?.localPath ?? nextMeta.workspace ?? globalRepoEntry?.localPath ?? null;
-    const canvasTab: CanvasTab = {
-      id: `commit:${hash}${nextMeta.workspace ? `:${nextMeta.workspace}` : ''}`,
-      kind: 'commit',
-      label: hash.slice(0, 7),
-      resourceId: hash,
-      meta: Object.keys(nextMeta).length > 0 ? nextMeta : undefined,
-    };
+    const repoSlug = nextMeta.repo
+      ?? repoSlugFromRemote(matchedRepo?.remoteUrl)
+      ?? null;
 
-    void (async () => {
-      const workspaceTarget = await waitForWorkspaceTerminalTarget({ repoPath });
-      if (workspaceTarget) {
-        workspaceTarget.handle.openInspectorTab(canvasTab, {
-          repo: matchedRepo ? {
-            name: matchedRepo.name,
-            localPath: matchedRepo.localPath,
-            branch: matchedRepo.readiness?.currentBranch ?? matchedRepo.defaultBranch,
-            readiness: matchedRepo.readiness ?? null,
-            remoteUrl: matchedRepo.remoteUrl ?? undefined,
-          } : undefined,
-        });
-        return;
-      }
-      openCanvasTab(canvasTab);
-    })();
-  }, [globalRepoEntries, globalRepoEntry, openCanvasTab, waitForWorkspaceTerminalTarget]);
+    setO8PrNumber(null);
+    setO8PrRepo(null);
+    setO8ActiveTab('changes');
+    setO8CommitSha(hash);
+    setO8CommitRepoPath(repoPath);
+    setO8CommitRepoSlug(repoSlug);
+    setRightPanelKind('o8');
+    setChatVisible(true);
+  }, [globalRepoEntries, globalRepoEntry]);
 
   // ── Left drag handle ──
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
@@ -2587,11 +2583,14 @@ function DashboardInner() {
                   >
                     <O8Panel
                       onClose={handleToggleO8Panel}
-                      repoPath={globalRepoEntry?.localPath}
+                      repoPath={o8CommitRepoPath ?? globalRepoEntry?.localPath}
                       previews={workspacePreviews}
+                      activeTab={o8ActiveTab}
+                      onActiveTabChange={setO8ActiveTab}
                       prNumber={o8PrNumber}
                       prRepo={o8PrRepo}
-                      repoSlug={repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
+                      repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
+                      commitSha={o8CommitSha}
                       onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
                       onOpenFile={(filePath) => {
                         const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
