@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `6302be2` fix: white background for global terminal content area
 - `f6949a5` fix: dark neomorphic nav rail icons in browser mode
 - `6e37594` fix: de-duplicate sessions already shown as packet cards in workspace panel
 - `17b515e` chore: bump file size ceiling from 600 to 800 lines
