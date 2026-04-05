@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
       repoPath,
       runtime: runtimeValue,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
+      sequential: record.sequential === true,
     });
     return operatorSuccess(result, 201);
   } catch (error) {
