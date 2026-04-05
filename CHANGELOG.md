@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `04a5a76` feat: PR count badge on repo card — click to open O8 PRs list
 - `42b93c4` fix: handle PR author as string or {login} object
 - `5af7280` fix: pass repo slug to O8 PRs tab for PR list fetching
 - `067dd2f` feat: PR list view in O8 panel — all open PRs on one page
