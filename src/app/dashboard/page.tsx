@@ -980,11 +980,19 @@ function DashboardInner() {
 
   // ── Routing callbacks for AgentPanel ──
   const handleSelectSession = useCallback((sessionKey: string) => {
-    // Agent clicks only change the chat session — terminal is independent
-    setChatVisible(true);
-    setRightPanelMode('chat');
-    setActiveSessionKey(sessionKey);
-  }, []);
+    // Open the session transcript in a canvas chat tab
+    void (async () => {
+      const target = await waitForWorkspaceTerminalTarget({});
+      if (!target) return;
+      // Determine runtime from session key prefix
+      const runtime = sessionKey.startsWith('claude-code') ? 'claude-code' : 'codex';
+      target.handle.openCliChatSession({
+        runtime,
+        targetSessionKey: sessionKey,
+        label: sessionKey.split(':').pop()?.slice(0, 12) ?? 'Session',
+      });
+    })();
+  }, [waitForWorkspaceTerminalTarget]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     openCanvasTab({

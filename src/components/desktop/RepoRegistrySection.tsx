@@ -2464,6 +2464,32 @@ function RepoCard({
                   <div key={branch.name}>
                   <div
                     onClick={() => {
+                      // Worktrees with agent sessions → open transcript instead of checkout
+                      if (branch.isWorktree) {
+                        const wtPath = branch.worktreePath ?? worktree?.path;
+                        // Try in-memory matches first (packets + agents)
+                        const packetSession = branchPackets.find(p => p.lane?.sessionKey)?.lane?.sessionKey;
+                        const pathMatchedPacket = !packetSession && wtPath
+                          ? orchestratorPackets.find(p => p.lane?.sessionKey && p.lane.worktreePath === wtPath)
+                          : null;
+                        const agentSession = branchAgents[0]?.sessionKey;
+                        const sessionKey = packetSession ?? pathMatchedPacket?.lane?.sessionKey ?? agentSession;
+                        if (sessionKey && onSelectSession) {
+                          onSelectSession(sessionKey);
+                          return;
+                        }
+                        // Fallback: look up session from lanes API by worktree path
+                        if (wtPath && onSelectSession) {
+                          void fetch('/api/lanes?active=true')
+                            .then(r => r.json())
+                            .then((data: { lanes?: Array<{ worktreePath?: string; sessionKey?: string }> }) => {
+                              const lane = data.lanes?.find(l => l.worktreePath === wtPath && l.sessionKey);
+                              if (lane?.sessionKey) onSelectSession(lane.sessionKey);
+                            })
+                            .catch(() => {});
+                          return;
+                        }
+                      }
                       if (!branch.current && !checkoutBusy) {
                         handleCheckout(branch.name);
                       }
