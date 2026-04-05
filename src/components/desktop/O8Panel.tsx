@@ -81,6 +81,7 @@ interface O8PanelProps {
   prRepo?: string | null;
   repoSlug?: string | null;
   activeTab?: O8Tab | null;
+  browserUrl?: string | null;
 }
 
 // ── Tab Button ──
@@ -418,7 +419,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl }: O8PanelProps) {
   const [activeTab, setActiveTab] = useState<O8Tab>('changes');
 
   // Switch to PRs tab when a PR number is provided externally
@@ -486,7 +487,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         <ChangesTab repoPath={repoPath} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} />
+        <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'files' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8FilesPane repoPath={repoPath ?? undefined} onOpenFile={onOpenFile} />

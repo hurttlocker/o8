@@ -7,7 +7,8 @@
  * Fixed at 44px — no hover-expand.
  */
 
-import { useState, useEffect, cloneElement, isValidElement, type ReactElement } from 'react';
+import { useState, useEffect, useRef, cloneElement, isValidElement, type ReactElement } from 'react';
+import { createPortal } from 'react-dom';
 import { isTauri } from '@/lib/tauri/bridge';
 import {
   UsersThree,
@@ -355,6 +356,9 @@ function buildPortTooltip(groups: PortGroup[], total: number): string {
 function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: string, repo?: string) => void }) {
   const [groups, setGroups] = useState<PortGroup[]>([]);
   const [total, setTotal] = useState(0);
+  const [hovered, setHovered] = useState(false);
+  const hideTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const badgeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function fetchPorts() {
@@ -371,13 +375,21 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
     return () => clearInterval(id);
   }, []);
 
+  const showPopover = () => {
+    if (hideTimeout.current) { clearTimeout(hideTimeout.current); hideTimeout.current = null; }
+    setHovered(true);
+  };
+  const scheduleHide = () => {
+    hideTimeout.current = setTimeout(() => setHovered(false), 200);
+  };
+
   if (total === 0) return null;
 
-  const tooltip = buildPortTooltip(groups, total);
   const ariaLabel = `${total} active port${total === 1 ? '' : 's'}`;
+  const allPorts = groups.flatMap(g => g.ports.map(p => ({ port: p, repo: g.repo })));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, position: 'relative' }}>
       <div style={{
         height: 1,
         width: 24,
@@ -388,15 +400,10 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
         display: 'flex', justifyContent: 'center', padding: '2px 0',
       }}>
         <div
-          title={tooltip}
+          ref={badgeRef}
           aria-label={ariaLabel}
-          onClick={() => {
-            if (groups.length > 0 && groups[0].ports.length > 0) {
-              const port = groups[0].ports[0];
-              const url = `http://localhost:${port}`;
-              onPortPreview ? onPortPreview(port, url, groups[0].repo) : window.open(url, '_blank');
-            }
-          }}
+          onMouseEnter={showPopover}
+          onMouseLeave={scheduleHide}
           style={{
             width: 22, height: 22, borderRadius: 6,
             background: 'rgba(34,197,94,0.1)',
@@ -410,6 +417,85 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
           {total}
         </div>
       </div>
+
+      {/* Ports hover popover — portalled to body to escape transform context */}
+      {hovered && createPortal(
+        <div
+          onMouseEnter={showPopover}
+          onMouseLeave={scheduleHide}
+          style={{
+            position: 'fixed',
+            bottom: Math.max(8, window.innerHeight - (badgeRef.current?.getBoundingClientRect().top ?? 0) - 8),
+            left: 64,
+            minWidth: 180,
+            padding: 6,
+            borderRadius: 10,
+            background: '#1e2028',
+            border: '1px solid rgba(255,255,255,0.1)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+            zIndex: 9999,
+          }}
+        >
+          <div style={{
+            paddingTop: 4,
+            paddingRight: 8,
+            paddingBottom: 6,
+            paddingLeft: 8,
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'rgba(255,255,255,0.5)',
+            letterSpacing: '-0.01em',
+          }}>
+            {total} active port{total === 1 ? '' : 's'}
+          </div>
+          {allPorts.map(({ port, repo }) => (
+            <button
+              key={port}
+              type="button"
+              onClick={() => {
+                setHovered(false);
+                const url = `http://localhost:${port}`;
+                onPortPreview ? onPortPreview(port, url, repo) : window.open(url, '_blank');
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                paddingTop: 6,
+                paddingRight: 8,
+                paddingBottom: 6,
+                paddingLeft: 8,
+                border: 'none',
+                borderRadius: 6,
+                background: 'transparent',
+                color: '#e2e8f0',
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span style={{
+                width: 6, height: 6, borderRadius: 3,
+                background: '#22c55e',
+                flexShrink: 0,
+              }} />
+              <span style={{ flex: 1 }}>{portLabel(port)}</span>
+              <span style={{
+                fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.4)',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+              }}>
+                :{port}
+              </span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

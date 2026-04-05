@@ -30,6 +30,7 @@ interface O8BrowserPaneProps {
   previews?: DetectedLocalhostPreview[];
   onEditWithAI?: (context: string) => void;
   onOpenFile?: (filePath: string) => void;
+  navigateToUrl?: string | null;
 }
 
 // ── Helpers ──
@@ -62,7 +63,7 @@ function newTabId(): string {
 
 // ── Component ──
 
-export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile }: O8BrowserPaneProps) {
+export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigateToUrl }: O8BrowserPaneProps) {
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState('');
@@ -86,6 +87,28 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile }: O8Bro
     setActiveTabId(initial[0].id);
     setUrlInput(initial[0].url);
   }, [previews]);
+
+  // Navigate to externally-provided URL (e.g. from port popover)
+  const lastNavigatedUrl = useRef<string | null>(null);
+  useEffect(() => {
+    if (!navigateToUrl || navigateToUrl === lastNavigatedUrl.current) return;
+    lastNavigatedUrl.current = navigateToUrl;
+    const normalized = normalizeUrl(navigateToUrl);
+    if (!normalized) return;
+    // Check if a tab with this URL already exists
+    const existing = tabs.find(t => t.url === normalized);
+    if (existing) {
+      setActiveTabId(existing.id);
+      setUrlInput(normalized);
+      return;
+    }
+    // Create a new tab for this URL
+    const id = newTabId();
+    const newTab: BrowserTab = { id, url: normalized, title: titleFromUrl(normalized) };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(id);
+    setUrlInput(normalized);
+  }, [navigateToUrl, tabs]);
 
   const activeTab = tabs.find(t => t.id === activeTabId) ?? null;
 
