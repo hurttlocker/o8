@@ -2368,9 +2368,19 @@ function RepoCard({
                   <div
                     key={packet.id}
                     onClick={() => {
-                      if (packet.lane?.sessionKey && onSelectSession) {
+                      if (!onSelectSession) return;
+                      if (packet.lane?.sessionKey) {
                         onSelectSession(packet.lane.sessionKey);
+                        return;
                       }
+                      // Fallback: look up session from lanes API by packet ID
+                      void fetch('/api/lanes?active=true')
+                        .then(r => r.json())
+                        .then((data: { lanes?: Array<{ packetId?: string; sessionKey?: string }> }) => {
+                          const lane = data.lanes?.find(l => l.packetId === packet.id && l.sessionKey);
+                          if (lane?.sessionKey) onSelectSession(lane.sessionKey);
+                        })
+                        .catch(() => {});
                     }}
                     style={{
                       display: 'flex',
@@ -2378,7 +2388,7 @@ function RepoCard({
                       gap: 8,
                       padding: '6px 14px',
                       borderBottom: '1px solid var(--t-divider-subtle)',
-                      cursor: packet.lane?.sessionKey && onSelectSession ? 'pointer' : 'default',
+                      cursor: onSelectSession ? 'pointer' : 'default',
                     }}
                   >
                     <span
