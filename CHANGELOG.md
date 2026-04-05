@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `a349f4a` fix: update PR state to Merged after successful merge action
 - `9a24a49` test: multi-PR view
 - `e833312` feat: inline file diffs + merge conflict badge in O8 PR review
 - `12d859b` fix: PR count in activity card + dark hover card in browser mode
