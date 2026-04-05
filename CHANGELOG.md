@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `65d73b1` feat: visual element selection panel for O8 Browser tab
 - `c992ca2` refactor: restyle transcript viewer to match LLM chat
 
 ## 2026-04-04
