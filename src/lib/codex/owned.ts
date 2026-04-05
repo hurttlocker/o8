@@ -431,11 +431,11 @@ async function resolveRepoContext(repoPath: string) {
 }
 
 function runArgsForLaunch(repoPath: string, prompt: string) {
-  return ['exec', '--json', '--dangerously-bypass-approvals-and-sandbox', '-C', repoPath, prompt];
+  return ['exec', '--json', '--dangerously-bypass-approvals-and-sandbox', '-s', 'danger-full-access', '-C', repoPath, prompt];
 }
 
 function runArgsForResume(threadId: string, prompt: string) {
-  return ['exec', 'resume', threadId, '--json', '--dangerously-bypass-approvals-and-sandbox', prompt];
+  return ['exec', 'resume', threadId, '--json', '--dangerously-bypass-approvals-and-sandbox', '-s', 'danger-full-access', prompt];
 }
 
 async function loadOwnedSession(sessionDir: string) {
