@@ -121,7 +121,7 @@ const FEATURES = [
   { title: 'Command your AI agents', subtitle: 'Dispatch tasks to Claude, Codex, or any runtime. Watch them work in real-time.', previewLabel: 'Agent dashboard with live sessions' },
   { title: 'Approve from anywhere', subtitle: 'Review code, approve merges, and steer agents from your phone.', previewLabel: 'Mobile approval surface' },
   { title: 'Organizational memory', subtitle: 'Your codebase context persists across sessions. Agents never start from zero.', previewLabel: 'Cortex memory graph' },
-  { title: 'Every runtime, one dashboard', subtitle: 'Claude Code, Codex, Gemini, OpenClaw — unified under one governance layer.', previewLabel: 'Multi-runtime workspace' },
+  { title: 'Every runtime, one dashboard', subtitle: 'Claude Code, Codex, Gemini — unified under one governance layer.', previewLabel: 'Multi-runtime workspace' },
 ];
 
 const SLIDE_MS = 5000;
