@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `17b515e` chore: bump file size ceiling from 600 to 800 lines
 - `88e94cd` feat: dispatch pipeline hardening
 - `779d9a4` feat: wire Edit with AI + Open Source callbacks in O8 element panel
 - `10c0f8f` fix: collapse consecutive exec_command tool calls into summary pill
