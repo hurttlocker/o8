@@ -2591,6 +2591,7 @@ function DashboardInner() {
                       previews={workspacePreviews}
                       prNumber={o8PrNumber}
                       prRepo={o8PrRepo}
+                      repoSlug={repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
                       onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
                       onOpenFile={(filePath) => {
                         const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
