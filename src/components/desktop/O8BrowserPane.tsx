@@ -16,6 +16,7 @@ import {
   ELEMENT_PICKER_RESULT_EVENT,
   type PickedElement,
 } from '@/lib/browser/element-picker-bridge';
+import { O8ElementPanel } from './O8ElementPanel';
 
 // ── Types ──
 
@@ -512,6 +513,17 @@ export function O8BrowserPane({ previews = [] }: O8BrowserPaneProps) {
                     <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
                 </button>
+              </div>
+            ) : null}
+            {/* Element editing panel */}
+            {selectedElement ? (
+              <div style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10,
+              }}>
+                <O8ElementPanel
+                  element={selectedElement}
+                  onClose={() => setSelectedElement(null)}
+                />
               </div>
             ) : null}
             {/* Hint for non-localhost URLs that may block iframe embedding */}
