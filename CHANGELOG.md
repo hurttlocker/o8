@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `10c0f8f` fix: collapse consecutive exec_command tool calls into summary pill
 - `a94b9b8` fix: white canvas background for agent transcript + chat views
 - `65d73b1` feat: visual element selection panel for O8 Browser tab
 - `c992ca2` refactor: restyle transcript viewer to match LLM chat
