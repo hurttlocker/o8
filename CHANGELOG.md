@@ -6,6 +6,12 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `2bd6c5b` feat: port hover popover + open ports in O8 browser tab
+- `4f7c1ba` fix: review fixes for — render loop, CSS shorthand, stale state
+- `c544a1b` chore: remove unrelated AI provider settings change
+- `7f7cb53` fix: preserve canvas commit viewer diff payload
+- `90ab84e` auto-commit: agent work before review
+- `23a33db` feat: open activity commits in O8 changes pane
 - `376f426` feat: instant PR cache invalidation after merge/approve/request changes
 - `a349f4a` fix: update PR state to Merged after successful merge action
 - `9a24a49` test: multi-PR view
