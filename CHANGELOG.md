@@ -4,6 +4,10 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-04-05
+
+- `c992ca2` refactor: restyle transcript viewer to match LLM chat
+
 ## 2026-04-04
 
 - `dff3af1` fix: persist O8 Browser tabs across tab switches
