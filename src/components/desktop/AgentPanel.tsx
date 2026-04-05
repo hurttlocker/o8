@@ -1840,9 +1840,9 @@ type FeedFilter = 'all' | 'commit' | 'issue' | 'pr' | 'ci';
 
 const FILTER_TABS: { key: FeedFilter; label: string; icon: React.ReactNode }[] = [
   { key: 'all', label: 'All', icon: <Zap size={11} strokeWidth={2} /> },
-  { key: 'commit', label: 'Commits', icon: <GitCommit size={11} strokeWidth={2} /> },
   { key: 'issue', label: 'Issues', icon: <AlertCircle size={11} strokeWidth={2} /> },
   { key: 'pr', label: 'PRs', icon: <GitPullRequest size={11} strokeWidth={2} /> },
+  { key: 'commit', label: 'Commits', icon: <GitCommit size={11} strokeWidth={2} /> },
   { key: 'ci', label: 'CI', icon: <CheckCircle2 size={11} strokeWidth={2} /> },
 ];
 
@@ -2439,49 +2439,40 @@ const ActivityFeed = memo(function ActivityFeed({
               }} />
             </button>
 
-            {/* PR count badge — click to open O8 PRs list */}
+            {/* PR count badge — compact inline, click to open O8 PRs list */}
             {extras.prs.some(p => p.kind === 'pr' && (p.state === 'open')) ? (() => {
               const openPrs = extras.prs.filter(p => p.kind === 'pr' && p.state === 'open');
               if (openPrs.length === 0) return null;
               const firstPr = openPrs[0] as (ActivityItem & { kind: 'pr' });
               return (
-                <div style={{
-                  marginLeft: 'auto',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}>
-                  <span style={{
+                <button
+                  type="button"
+                  onClick={() => (onReviewPR ?? onSelectPR)?.(0, firstPr.repo)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    height: 22,
+                    paddingTop: 0,
+                    paddingRight: 7,
+                    paddingBottom: 0,
+                    paddingLeft: 5,
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'rgba(34, 197, 94, 0.12)',
+                    color: '#16a34a',
                     fontSize: 10,
-                    color: 'var(--t-text-muted)',
+                    fontWeight: 700,
+                    cursor: 'pointer',
                     fontFamily: '"SF Mono", ui-monospace, monospace',
-                  }}>
-                    {openPrs.length} PR{openPrs.length === 1 ? '' : 's'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => (onReviewPR ?? onSelectPR)?.(0, firstPr.repo)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      minHeight: 26,
-                      padding: '0 8px',
-                      borderRadius: 7,
-                      border: 'none',
-                      background: 'rgba(34, 197, 94, 0.1)',
-                      color: '#16a34a',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
-                      letterSpacing: '-0.01em',
-                    }}
-                  >
-                    <GitPullRequest size={10} strokeWidth={2.5} />
-                    Review
-                  </button>
-                </div>
+                    letterSpacing: '-0.01em',
+                    marginLeft: 'auto',
+                    flexShrink: 0,
+                  }}
+                >
+                  <GitPullRequest size={10} strokeWidth={2.5} />
+                  {openPrs.length}
+                </button>
               );
             })() : null}
           </div>
