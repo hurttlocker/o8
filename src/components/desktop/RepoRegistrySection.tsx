@@ -1675,8 +1675,8 @@ function RepoCard({
     () => branches.filter((branch) => {
       const hasAgent = Boolean(agentsByBranch?.get(branch.name)?.length);
       const isPacketTarget = repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
-      // Worktree branches only show when they have an active agent or packet
-      if (branch.isWorktree && !hasAgent && !isPacketTarget && !showAllBranches) return false;
+      // Worktree branches always show — they were created by the orchestrator
+      // and may have session history even after the agent completes
       return (
         branch.isWorktree
         || !branch.current
