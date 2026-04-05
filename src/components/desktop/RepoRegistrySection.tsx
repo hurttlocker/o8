@@ -2367,13 +2367,18 @@ function RepoCard({
                 return (
                   <div
                     key={packet.id}
+                    onClick={() => {
+                      if (packet.lane?.sessionKey && onSelectSession) {
+                        onSelectSession(packet.lane.sessionKey);
+                      }
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 8,
                       padding: '6px 14px',
                       borderBottom: '1px solid var(--t-divider-subtle)',
-                      cursor: 'default',
+                      cursor: packet.lane?.sessionKey && onSelectSession ? 'pointer' : 'default',
                     }}
                   >
                     <span
