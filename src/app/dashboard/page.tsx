@@ -2593,10 +2593,6 @@ function DashboardInner() {
                       onClose={handleToggleO8Panel}
                       repoPath={globalRepoEntry?.localPath}
                       previews={workspacePreviews}
-                      selectedPreviewId={null}
-                      onSelectPreview={(id) => handleSelectPreviewTile('', id)}
-                      onClosePreview={(id) => handleClosePreviewTileItem('', id)}
-                      onElementSelect={handlePreviewSelection}
                     />
                   </motion.div>
                 ) : (

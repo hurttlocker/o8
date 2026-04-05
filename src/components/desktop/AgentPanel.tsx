@@ -2193,7 +2193,7 @@ const ActivityFeed = memo(function ActivityFeed({
       } catch { /* silent */ }
     }
     fetchExtras();
-    const id = setInterval(fetchExtras, 120_000); // 2 min — conserve GitHub rate limit
+    const id = setInterval(fetchExtras, 300_000); // 5 min — conserve GitHub rate limit
     return () => clearInterval(id);
   }, [repo, isAllRepos, allRepos, refreshKey]);
 
@@ -4311,8 +4311,8 @@ export const AgentPanel = memo(function AgentPanel({
     };
 
     void fetchAll();
-    // Safety-net: 60s when WS connected, 30s when disconnected
-    const ms = wsConnected ? 60_000 : 30_000;
+    // Safety-net: 120s when WS connected, 60s when disconnected (conserve GitHub rate limit)
+    const ms = wsConnected ? 120_000 : 60_000;
     const id = setInterval(fetchAll, ms);
     return () => { clearInterval(id); if (debounceTimer) clearTimeout(debounceTimer); };
   }, [wsConnected]);
@@ -4339,7 +4339,7 @@ export const AgentPanel = memo(function AgentPanel({
       } catch { /* silent */ }
     }
     void fetchCommits();
-    const id = setInterval(fetchCommits, 30_000);
+    const id = setInterval(fetchCommits, 120_000); // 2 min — conserve rate limit
     return () => clearInterval(id);
   }, [effectiveScopedRepo]);
 
@@ -4369,7 +4369,7 @@ export const AgentPanel = memo(function AgentPanel({
       }
     }
     void fetchGitHub();
-    const id = setInterval(fetchGitHub, 60_000);
+    const id = setInterval(fetchGitHub, 300_000); // 5 min — conserve rate limit
     return () => clearInterval(id);
   }, [effectiveScopedRepo]);
 
