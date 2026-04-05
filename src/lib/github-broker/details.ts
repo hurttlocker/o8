@@ -70,6 +70,7 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
     additions?: number;
     deletions?: number;
     status?: string;
+    patch?: string;
   }>>(filesResponse.response);
 
   let statusCheckRollup: Array<{ name: string; status?: string | null; conclusion?: string | null }> = [];
@@ -121,6 +122,7 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
       status: file.status ?? 'modified',
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
+      patch: file.patch ?? null,
     })),
   };
 }
