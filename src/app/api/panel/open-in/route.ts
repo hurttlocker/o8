@@ -18,7 +18,6 @@ const EDITORS: Record<string, { command: string }> = {
   'jetbrains':    { command: 'idea "{path}"' },
   'windsurf':     { command: 'windsurf "{path}"' },
   'claude-code':  { command: 'claude "{path}"' },
-  'opencode':     { command: 'opencode "{path}"' },
 };
 
 // GET — return available editors (checks which CLIs exist)
@@ -38,7 +37,6 @@ export async function GET() {
       { id: 'xcode', name: 'Xcode', bin: 'xcodebuild' },
       { id: 'jetbrains', name: 'JetBrains', bin: 'idea' },
       { id: 'claude-code', name: 'Claude Code', bin: 'claude' },
-      { id: 'opencode', name: 'OpenCode', bin: 'opencode' },
     ];
 
     for (const editor of editors) {
