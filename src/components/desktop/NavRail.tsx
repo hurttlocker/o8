@@ -65,22 +65,46 @@ const NAV_ITEMS: NavItem[] = [
 const BRAND_MARK_BLUE = '#2563eb';
 
 // ── Neomorphic icon container styles ──
+// Tauri uses macOS vibrancy so semi-transparent white works beautifully.
+// Browser has no vibrancy — dark backgrounds need dark neo containers.
 
-const NEO_INACTIVE = {
-  background: 'var(--neo-inactive-bg, rgba(255, 255, 255, 0.55))',
-  boxShadow: 'var(--neo-inactive-shadow, 0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.6))',
-};
-const NEO_ACTIVE = {
-  background: 'var(--neo-active-bg, rgba(255, 255, 255, 0.95))',
-  boxShadow: 'var(--neo-active-shadow, 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9))',
-};
-const NEO_HOVER = {
-  background: 'var(--neo-hover-bg, rgba(255, 255, 255, 0.8))',
-  boxShadow: 'var(--neo-hover-shadow, 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9))',
+const NEO_LIGHT = {
+  inactive: {
+    background: 'rgba(255, 255, 255, 0.55)',
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
+  },
+  active: {
+    background: 'rgba(255, 255, 255, 0.95)',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+  },
+  hover: {
+    background: 'rgba(255, 255, 255, 0.8)',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+  },
 };
 
-function neoIconStyle(active: boolean): React.CSSProperties {
-  const preset = active ? NEO_ACTIVE : NEO_INACTIVE;
+const NEO_DARK = {
+  inactive: {
+    background: 'rgba(255, 255, 255, 0.08)',
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+  },
+  active: {
+    background: 'rgba(255, 255, 255, 0.16)',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+  },
+  hover: {
+    background: 'rgba(255, 255, 255, 0.12)',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+  },
+};
+
+function getNeoPreset(useTauri: boolean) {
+  return useTauri ? NEO_LIGHT : NEO_DARK;
+}
+
+function neoIconStyle(active: boolean, useTauri = true): React.CSSProperties {
+  const neo = getNeoPreset(useTauri);
+  const preset = active ? neo.active : neo.inactive;
   return {
     width: 32,
     height: 32,
@@ -95,17 +119,19 @@ function neoIconStyle(active: boolean): React.CSSProperties {
   };
 }
 
-function applyNeoHover(el: HTMLElement, active: boolean) {
+function applyNeoHover(el: HTMLElement, active: boolean, useTauri = true) {
   if (!active) {
-    el.style.background = NEO_HOVER.background;
-    el.style.boxShadow = NEO_HOVER.boxShadow;
+    const neo = getNeoPreset(useTauri);
+    el.style.background = neo.hover.background;
+    el.style.boxShadow = neo.hover.boxShadow;
   }
 }
 
-function resetNeoHover(el: HTMLElement, active: boolean) {
+function resetNeoHover(el: HTMLElement, active: boolean, useTauri = true) {
   if (!active) {
-    el.style.background = NEO_INACTIVE.background;
-    el.style.boxShadow = NEO_INACTIVE.boxShadow;
+    const neo = getNeoPreset(useTauri);
+    el.style.background = neo.inactive.background;
+    el.style.boxShadow = neo.inactive.boxShadow;
   }
 }
 
@@ -143,12 +169,14 @@ function NavButton({
   onClick,
   badge,
   onPrefetch,
+  useTauri = true,
 }: {
   item: NavItem;
   active: boolean;
   onClick: () => void;
   badge?: number;
   onPrefetch?: () => void;
+  useTauri?: boolean;
 }) {
   const IconComponent = item.icon;
 
@@ -173,15 +201,15 @@ function NavButton({
       }}
       onMouseEnter={(e) => {
         const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
-        if (neo) applyNeoHover(neo, active);
+        if (neo) applyNeoHover(neo, active, useTauri);
         onPrefetch?.();
       }}
       onMouseLeave={(e) => {
         const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
-        if (neo) resetNeoHover(neo, active);
+        if (neo) resetNeoHover(neo, active, useTauri);
       }}
     >
-      <div data-neo="" style={neoIconStyle(active)}>
+      <div data-neo="" style={neoIconStyle(active, useTauri)}>
         <IconComponent
           size={18}
           weight={active ? 'duotone' : 'regular'}
@@ -221,6 +249,7 @@ function UtilButton({
   badge,
   active,
   tint,
+  useTauri = true,
 }: {
   icon: PhosphorIcon;
   label: string;
@@ -228,6 +257,7 @@ function UtilButton({
   badge?: number;
   active?: boolean;
   tint?: string;
+  useTauri?: boolean;
 }) {
   const activeColor = tint ?? BRAND_MARK_BLUE;
   return (
@@ -250,14 +280,14 @@ function UtilButton({
       }}
       onMouseEnter={(e) => {
         const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
-        if (neo) applyNeoHover(neo, !!active);
+        if (neo) applyNeoHover(neo, !!active, useTauri);
       }}
       onMouseLeave={(e) => {
         const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
-        if (neo) resetNeoHover(neo, !!active);
+        if (neo) resetNeoHover(neo, !!active, useTauri);
       }}
     >
-      <div data-neo="" style={neoIconStyle(!!active)}>
+      <div data-neo="" style={neoIconStyle(!!active, useTauri)}>
         <IconComponent
           size={18}
           weight={active ? 'duotone' : 'regular'}
@@ -448,6 +478,7 @@ export function NavRail({
             active={activeSection === item.id}
             onClick={() => onSectionChange(item.id)}
             badge={item.id === 'approvals' ? approvalCount : undefined}
+            useTauri={inTauri}
             onPrefetch={
               item.id === 'settings' ? () => { import('@/components/desktop/SettingsPage'); }
               : item.id === 'analytics' ? () => { import('@/components/desktop/AnalyticsPage'); }
@@ -466,6 +497,7 @@ export function NavRail({
           label="Thoughts"
           onClick={onThoughtsToggle}
           active={thoughtsOpen}
+          useTauri={inTauri}
         />
         <div ref={setAlertAnchorEl} style={{ position: 'relative', width: '100%' }}>
           <UtilButton
@@ -473,6 +505,7 @@ export function NavRail({
             label="Alerts"
             onClick={onAlertClick}
             badge={alertCount}
+            useTauri={inTauri}
           />
           {alertTrayNode}
         </div>
@@ -481,6 +514,7 @@ export function NavRail({
           label="Settings"
           onClick={() => onSectionChange('settings')}
           tint="#ef4444"
+          useTauri={inTauri}
         />
       </div>
     </nav>
