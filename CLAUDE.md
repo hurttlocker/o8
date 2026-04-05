@@ -159,7 +159,7 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 
 ### ALWAYS
 - **`npx tsc --noEmit` before every commit**
-- **Respect the 600-line file ceiling** — if your changes would push a file past 600 lines, decompose first. Extract helpers, hooks, or modules before adding new logic. Layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) are explicitly waived.
+- **Respect the 800-line file ceiling** — if your changes would push a file past 800 lines, decompose first. Extract helpers, hooks, or modules before adding new logic. Layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) are explicitly waived.
 - **Apple HIG**: 44px touch targets, 14px card radii, spring curves
 - **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props
 - **Build for both runtimes** — Codex and Claude Code. The adapter interface allows adding new runtimes later.
