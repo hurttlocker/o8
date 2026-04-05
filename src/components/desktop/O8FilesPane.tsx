@@ -185,9 +185,13 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState<string>('');
+  const [isDirty, setIsDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [repoName, setRepoName] = useState('');
-  const contentRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lineNumberRef = useRef<HTMLDivElement>(null);
 
   // Fetch tree
   useEffect(() => {
@@ -216,17 +220,54 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
     setSelectedPath(filePath);
     setFileLoading(true);
     setFileContent(null);
+    setEditContent('');
+    setIsDirty(false);
     const params = new URLSearchParams({ path: filePath });
     if (repoPath) params.set('workspace', repoPath);
     fetch(`/api/v2/files?${params}`)
       .then((r) => r.json())
       .then((data) => {
-        setFileContent(data.content ?? null);
-        if (contentRef.current) contentRef.current.scrollTop = 0;
+        const content = data.content ?? '';
+        setFileContent(content);
+        setEditContent(content);
       })
       .catch(() => setFileContent(null))
       .finally(() => setFileLoading(false));
   }, [repoPath]);
+
+  const handleSave = useCallback(async () => {
+    if (!selectedPath || !isDirty) return;
+    setSaving(true);
+    try {
+      await fetch('/api/v2/files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: selectedPath, content: editContent, workspace: repoPath }),
+      });
+      setFileContent(editContent);
+      setIsDirty(false);
+    } catch { /* ignore */ }
+    finally { setSaving(false); }
+  }, [selectedPath, editContent, isDirty, repoPath]);
+
+  // Cmd+S to save
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's' && isDirty && selectedPath) {
+        e.preventDefault();
+        void handleSave();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSave, isDirty, selectedPath]);
+
+  // Sync scroll between line numbers and textarea
+  const handleEditorScroll = useCallback(() => {
+    if (textareaRef.current && lineNumberRef.current) {
+      lineNumberRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
+  }, []);
 
   return (
     <div style={{
@@ -291,88 +332,148 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
       }}>
         {selectedPath ? (
           <>
-            {/* File header */}
+            {/* Breadcrumb path bar */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              padding: '6px 12px',
+              gap: 4,
+              padding: '5px 12px',
               borderBottom: '1px solid var(--t-divider-subtle)',
               flexShrink: 0,
+              overflow: 'hidden',
             }}>
-              <FileIcon size={13} />
-              <span style={{
-                flex: 1,
-                fontSize: 12,
-                fontWeight: 600,
-                color: 'var(--t-text)',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
-                {selectedPath}
-              </span>
-              {onOpenFile ? (
+              {selectedPath.split('/').map((segment, i, arr) => (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                  {i > 0 ? (
+                    <span style={{ color: 'var(--t-text-faint)', fontSize: 10 }}>&gt;</span>
+                  ) : null}
+                  <span style={{
+                    fontSize: 12,
+                    fontWeight: i === arr.length - 1 ? 600 : 400,
+                    color: i === arr.length - 1 ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                  }}>
+                    {segment}
+                  </span>
+                </span>
+              ))}
+              <div style={{ flex: 1 }} />
+              {isDirty ? (
                 <button
                   type="button"
-                  onClick={() => onOpenFile(selectedPath)}
+                  onClick={() => void handleSave()}
+                  disabled={saving}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 4,
-                    padding: '3px 8px',
+                    padding: '2px 10px',
                     borderRadius: 6,
-                    border: '1px solid var(--t-divider)',
-                    background: 'transparent',
-                    color: 'var(--t-text-secondary)',
-                    fontSize: 10,
+                    border: 'none',
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    fontSize: 11,
                     fontWeight: 600,
-                    cursor: 'pointer',
+                    cursor: saving ? 'wait' : 'pointer',
                     flexShrink: 0,
+                    opacity: saving ? 0.7 : 1,
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                 >
-                  Open
+                  {saving ? 'Saving...' : 'Save'}
                 </button>
               ) : null}
+              {isDirty ? (
+                <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600, flexShrink: 0 }}>Modified</span>
+              ) : null}
             </div>
-            {/* File content */}
-            <div
-              ref={contentRef}
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                overflowX: 'auto',
-                padding: '8px 0',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                fontSize: 12,
-                lineHeight: 1.6,
-                color: 'var(--t-text)',
-                whiteSpace: 'pre',
-                tabSize: 2,
-              }}
-            >
+            {/* Editor area — textarea with line numbers */}
+            <div style={{
+              flex: 1,
+              display: 'flex',
+              overflow: 'hidden',
+              position: 'relative',
+            }}>
               {fileLoading ? (
                 <div style={{ padding: '12px 16px', color: 'var(--t-text-faint)', fontSize: 12 }}>Loading...</div>
               ) : fileContent !== null ? (
-                fileContent.split('\n').map((line, i) => (
-                  <div key={i} style={{ display: 'flex', minHeight: 20 }}>
-                    <span style={{
+                <>
+                  {/* Line numbers gutter */}
+                  <div
+                    ref={lineNumberRef}
+                    style={{
                       width: 48,
-                      textAlign: 'right',
-                      paddingRight: 12,
-                      color: 'var(--t-text-faint)',
-                      userSelect: 'none',
                       flexShrink: 0,
-                      fontSize: 11,
-                    }}>
-                      {i + 1}
-                    </span>
-                    <span style={{ flex: 1, paddingRight: 16 }}>{line || '\u200b'}</span>
+                      overflowY: 'hidden',
+                      overflowX: 'hidden',
+                      paddingTop: 8,
+                      paddingBottom: 8,
+                      background: 'var(--t-bg-subtle)',
+                      borderRight: '1px solid var(--t-divider-subtle)',
+                      userSelect: 'none',
+                    }}
+                  >
+                    {editContent.split('\n').map((_, i) => (
+                      <div key={i} style={{
+                        height: 20,
+                        lineHeight: '20px',
+                        textAlign: 'right',
+                        paddingRight: 8,
+                        fontSize: 11,
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        color: 'var(--t-text-faint)',
+                      }}>
+                        {i + 1}
+                      </div>
+                    ))}
                   </div>
-                ))
+                  {/* Textarea editor */}
+                  <textarea
+                    ref={textareaRef}
+                    value={editContent}
+                    onChange={(e) => {
+                      setEditContent(e.target.value);
+                      setIsDirty(e.target.value !== fileContent);
+                    }}
+                    onScroll={handleEditorScroll}
+                    spellCheck={false}
+                    style={{
+                      flex: 1,
+                      resize: 'none',
+                      border: 'none',
+                      outline: 'none',
+                      background: 'transparent',
+                      color: 'var(--t-text)',
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                      fontSize: 12,
+                      lineHeight: '20px',
+                      paddingTop: 8,
+                      paddingBottom: 8,
+                      paddingLeft: 12,
+                      paddingRight: 16,
+                      whiteSpace: 'pre',
+                      tabSize: 2,
+                      overflowX: 'auto',
+                      overflowY: 'auto',
+                    }}
+                    onKeyDown={(e) => {
+                      // Tab inserts 2 spaces instead of changing focus
+                      if (e.key === 'Tab') {
+                        e.preventDefault();
+                        const ta = e.currentTarget;
+                        const start = ta.selectionStart;
+                        const end = ta.selectionEnd;
+                        const value = ta.value;
+                        const newValue = value.substring(0, start) + '  ' + value.substring(end);
+                        setEditContent(newValue);
+                        setIsDirty(newValue !== fileContent);
+                        requestAnimationFrame(() => {
+                          ta.selectionStart = start + 2;
+                          ta.selectionEnd = start + 2;
+                        });
+                      }
+                    }}
+                  />
+                </>
               ) : (
                 <div style={{ padding: '12px 16px', color: 'var(--t-text-faint)', fontSize: 12 }}>Unable to read file</div>
               )}
@@ -390,6 +491,7 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
           }}>
             <FileIcon size={32} />
             <span style={{ fontSize: 13, fontWeight: 500 }}>Select a file to view</span>
+            <span style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>Cmd+S to save changes</span>
           </div>
         )}
       </div>
