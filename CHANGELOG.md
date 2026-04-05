@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `da722f7` feat: PR review tab in O8 panel — replaces canvas PR viewer
 - `ddcbca5` refactor: reorder O8 tabs — Changes, Files, Browser
 - `0601aad` feat: collapsible root files section in O8 file tree
 - `2ddfbb8` refactor: tighter file tree + editor text for O8 side panel
