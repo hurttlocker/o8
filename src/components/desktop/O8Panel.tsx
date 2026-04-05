@@ -62,6 +62,8 @@ interface O8PanelProps {
   onClose: () => void;
   repoPath?: string | null;
   previews?: DetectedLocalhostPreview[];
+  onEditWithAI?: (context: string) => void;
+  onOpenFile?: (filePath: string) => void;
 }
 
 // ── Tab Button ──
@@ -399,7 +401,7 @@ function ChangesTab({ repoPath }: { repoPath?: string | null }) {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [] }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile }: O8PanelProps) {
   const [activeTab, setActiveTab] = useState<O8Tab>('changes');
 
   return (
@@ -457,7 +459,7 @@ export function O8Panel({ onClose, repoPath, previews = [] }: O8PanelProps) {
         <ChangesTab repoPath={repoPath} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8BrowserPane previews={previews} />
+        <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'files' ? 'flex' : 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', fontSize: 13 }}>
         Files — coming soon
