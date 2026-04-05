@@ -48,7 +48,7 @@ import { FileViewer } from './FileViewer';
 import { PRViewer } from './PRViewer';
 import { CommitViewer } from './CommitViewer';
 import { DiffStatusIcon, renderDiffLines } from './diff-utils';
-import { repoSlugFromRemote, readinessTone, formatAge, type CanvasRepoTaskLaunchRequest } from './canvas-utils';
+import { repoSlugFromRemote, readinessTone, formatAge, LIGHT_CANVAS_VARS, type CanvasRepoTaskLaunchRequest } from './canvas-utils';
 export { type CanvasRepoTaskLaunchRequest } from './canvas-utils';
 // GraphExplorer3D lazy-loaded — only needed for 'memory' tab kind
 import { lazy, Suspense } from 'react';
@@ -1151,7 +1151,9 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
       style={{
         overflowY: 'auto',
         height: '100%',
-      }}
+        background: '#ffffff',
+        ...LIGHT_CANVAS_VARS,
+      } as React.CSSProperties}
     >
       {messages.length === 0 ? (
         <div style={{ color: 'var(--t-text-muted)', fontSize: 13, padding: 16, margin: '16px 24px' }}>
@@ -1173,17 +1175,16 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
                 <div
                   key={globalIdx}
                   style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: isUser ? 'flex-end' : 'flex-start',
                     marginBottom: TX_MARGIN_BOTTOM,
                     paddingTop: TX_PADDING_V,
                     paddingBottom: TX_PADDING_V,
                     paddingLeft: 16,
                     paddingRight: 16,
-                    borderRadius: 0,
-                    background: 'transparent',
-                    borderBottom: '1px solid var(--t-divider-subtle)',
                     fontSize: 14,
                     lineHeight: 1.6,
-                    color: isUser ? 'var(--t-text-muted)' : 'var(--t-text)',
                     fontFamily: '-apple-system, system-ui, sans-serif',
                     // Pretext: explicit height — browser never calculates this
                     height: messageHeights[globalIdx] - TX_MARGIN_BOTTOM,
@@ -1191,15 +1192,11 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
                   }}
                 >
                   <div style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: isUser ? '#2563eb' : 'var(--t-text-secondary)',
-                    marginBottom: TX_GAP,
-                    letterSpacing: '0.02em',
+                    maxWidth: isUser ? '75%' : '90%',
+                    color: isUser ? '#6b7280' : '#111827',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
                   }}>
-                    {isUser ? 'You' : 'Agent'}
-                  </div>
-                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                     {getMessageText(msg)}
                   </div>
                 </div>
