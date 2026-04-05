@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `83743d3` feat: click worktree → open agent transcript in canvas ( v1)
 - `1ad8848` feat: thinking indicator + faster polling for active agent sessions
 - `e0663e0` refactor: reorder activity tabs to match dev workflow + compact PR badge
 - `2bd6c5b` feat: port hover popover + open ports in O8 browser tab
