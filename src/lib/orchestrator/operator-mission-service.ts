@@ -42,6 +42,8 @@ export interface CreateMissionInput {
   repoPath: string;
   runtime: OrchestratorRuntime;
   constraints: string;
+  /** When true, packets are chained sequentially (P2 after P1, etc.). Default: false (parallel). */
+  sequential?: boolean;
 }
 
 export interface DispatchMissionInput {
@@ -492,7 +494,7 @@ export async function createMission(input: CreateMissionInput) {
   const packets = loadedIssues.map((issue, index) => {
     const dependencyNumbers = explicitDependencies[index].length > 0
       ? explicitDependencies[index]
-      : !hasExplicitDependencies && index > 0
+      : !hasExplicitDependencies && input.sequential && index > 0
         ? [loadedIssues[index - 1]!.number]
         : [];
 

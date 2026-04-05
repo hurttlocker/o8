@@ -159,7 +159,11 @@ function parseIssueList(value: unknown) {
   }
 
   const issues = value
-    .map((entry) => typeof entry === 'string' ? entry.trim() : '')
+    .map((entry) => {
+      if (typeof entry === 'string') return entry.trim();
+      if (typeof entry === 'number' && Number.isFinite(entry)) return String(Math.floor(entry));
+      return '';
+    })
     .filter(Boolean);
 
   if (issues.length === 0) {
@@ -240,7 +244,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'o8_send',
     description:
-      'Send a task to o8 for agent execution, or steer an existing session with a follow-up message.',
+      'Send a task to o8 for agent execution, or steer an existing session with a follow-up message. Example: o8_send({message: "Fix the login bug in auth.ts", repoPath: "/path/to/repo"}) launches a new agent. o8_send({message: "Also update the tests", sessionKey: "codex-owned:abc123"}) steers an existing one.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -267,7 +271,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'o8_status',
     description:
-      'Get a composite overview: running agents, pending approvals, and recent activity.',
+      'Get a composite overview: running agents, pending approvals, and recent activity. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -281,7 +285,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'o8_approve',
     description:
-      'Approve a pending agent action. Use o8_status first to see pending approvals.',
+      'Approve a pending agent action. Call o8_status() first to see pending approvals and get the approval ID. Example: o8_approve({id: "appr-abc123"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -296,7 +300,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'o8_reject',
     description:
-      'Reject a pending agent action with an optional reason.',
+      'Reject a pending agent action with an optional reason. Example: o8_reject({id: "appr-abc123", reason: "Needs error handling"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -315,7 +319,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'o8_history',
     description:
-      'Read the recent transcript of an agent session.',
+      'Read the recent transcript of an agent session. Returns the last N messages (default 15). Example: o8_history({sessionKey: "codex-owned:abc123", limit: 30})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -334,14 +338,14 @@ const TOOLS: McpTool[] = [
   {
     name: 'create_mission',
     description:
-      'Create a sprint mission from GitHub issues or inline issue objects. Use `issues` with GitHub issue refs (requires `gh` CLI), or `issues_inline` with pre-built objects (no GitHub dependency). Provide one or the other, not both.',
+      'Create a sprint mission from GitHub issues and dispatch agents. By default, all packets run in parallel and dispatch immediately. Use `issues` with GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks. Examples: create_mission({issues: [495, 496, 497], repoPath: "/path/to/repo"}) creates and dispatches 3 parallel agents. create_mission({issues: [100, 101], repoPath: "/path", sequential: true, dispatch: false}) creates a sequential plan without dispatching.',
     inputSchema: {
       type: 'object',
       properties: {
         issues: {
           type: 'array',
-          items: { type: 'string' },
-          description: 'GitHub issue references such as "334", "#334", or an issue URL. Requires `gh` CLI access.',
+          items: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+          description: 'GitHub issue references. Accepts any format: 495, "#495", "495", or "https://github.com/org/repo/issues/495". Fetches full issue data via `gh` CLI.',
         },
         issues_inline: {
           type: 'array',
@@ -369,6 +373,14 @@ const TOOLS: McpTool[] = [
           type: 'string',
           description: 'Optional sprint-wide constraints that should be included in packet scope.',
         },
+        sequential: {
+          type: 'boolean',
+          description: 'When true, packets run sequentially (P2 after P1, etc.). Default: false (all packets run in parallel).',
+        },
+        dispatch: {
+          type: 'boolean',
+          description: 'When true (default), immediately dispatches all packets after creation. Set false to create without dispatching.',
+        },
       },
       required: ['repoPath'],
     },
@@ -376,7 +388,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'dispatch_mission',
     description:
-      'Run the mission dispatch loop for the current mission or a specific mission ID.',
+      'Run the mission dispatch loop. Usually not needed since create_mission auto-dispatches by default. Use this to re-dispatch after resetting failed packets. Example: dispatch_mission() dispatches current mission. dispatch_mission({missionId: "mission-abc123"}) dispatches a specific one.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -390,7 +402,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'get_mission_status',
     description:
-      'Read sprint-level mission status, including waves, packet state, active lanes, blockers, and optional cost.',
+      'Read sprint-level mission status: waves, packet state, active agents, blockers, and optional cost. Example: get_mission_status() returns current mission. get_mission_status({includeCost: true}) adds cost breakdown.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -408,7 +420,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'submit_review',
     description:
-      'Record orchestrator review findings for a packet and relay the review context to downstream dependent packets.',
+      'Record review findings for a completed packet. Findings are relayed to downstream dependent packets. Example: submit_review({packetId: "pkt-abc", approved: true, findings: [{file: "src/foo.ts", severity: "warning", description: "CSS shorthand used", resolution: "Use paddingTop/paddingLeft"}]})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -442,7 +454,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'approve_and_merge',
     description:
-      'Send a reviewed packet through the lane merge command so the existing policy engine can evaluate and execute the merge.',
+      'Merge a reviewed packet to main through the lane merge pipeline. Runs the governance policy engine before merging. Example: approve_and_merge({packetId: "pkt-abc"}) or approve_and_merge({packetId: "pkt-abc", commitMessage: "feat: add login flow (#100)"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -461,7 +473,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'reset_packet',
     description:
-      'Reset a stuck or failed packet back to queued/draft state so it can be re-dispatched. Archives the old lane.',
+      'Reset a stuck or failed packet back to queued state so it can be re-dispatched. Archives the old lane and session. Call dispatch_mission() after to re-launch. Example: reset_packet({packetId: "pkt-abc", reason: "agent timed out"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -669,6 +681,9 @@ async function handleCreateMission(args: Record<string, unknown>): Promise<McpTo
       return textResult('Provide either `issues` (GitHub refs) or `issues_inline` (inline objects).', true);
     }
 
+    const shouldDispatch = args.dispatch !== false;
+    const sequential = args.sequential === true;
+
     if (inlineIssues) {
       const parsed = inlineIssues.map((entry) => {
         if (typeof entry !== 'object' || entry === null) throw new Error('Each inline issue must be an object.');
@@ -679,22 +694,32 @@ async function handleCreateMission(args: Record<string, unknown>): Promise<McpTo
         if (!title) throw new Error('Each inline issue must have a title.');
         return { number: num, title, body: typeof e.body === 'string' ? e.body : '' };
       });
-      const result = await createMissionInline({
+      const createResult = await createMissionInline({
         issues_inline: parsed,
         repoPath,
         runtime,
         constraints,
+        sequential,
       });
-      return jsonResult(result);
+      if (shouldDispatch && createResult && !('error' in createResult)) {
+        const dispatchResult = await dispatchMission({ missionId: createResult.missionId });
+        return jsonResult({ ...createResult, dispatch: dispatchResult });
+      }
+      return jsonResult(createResult);
     }
 
-    const result = await createMission({
+    const createResult = await createMission({
       issues: parseIssueList(args.issues),
       repoPath,
       runtime,
       constraints,
+      sequential,
     });
-    return jsonResult(result);
+    if (shouldDispatch && createResult && !('error' in createResult)) {
+      const dispatchResult = await dispatchMission({ missionId: createResult.missionId });
+      return jsonResult({ ...createResult, dispatch: dispatchResult });
+    }
+    return jsonResult(createResult);
   } catch (error) {
     console.error(`${'[mcp-operator]'} create_mission failed: ${errorText(error)}`);
     return textResult(`Failed to create mission: ${errorText(error)}`, true);
