@@ -452,17 +452,15 @@ export function O8Panel({ onClose, repoPath, previews = [] }: O8PanelProps) {
         </button>
       </div>
 
-      {/* Tab content */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {activeTab === 'changes' ? (
-          <ChangesTab repoPath={repoPath} />
-        ) : activeTab === 'browser' ? (
-          <O8BrowserPane previews={previews} />
-        ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', fontSize: 13 }}>
-            Files — coming soon
-          </div>
-        )}
+      {/* Tab content — all tabs stay mounted to preserve state */}
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'changes' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <ChangesTab repoPath={repoPath} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8BrowserPane previews={previews} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'files' ? 'flex' : 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', fontSize: 13 }}>
+        Files — coming soon
       </div>
     </div>
   );
