@@ -1002,8 +1002,8 @@ function DashboardInner() {
   }, [openCanvasTab]);
 
   const handleReviewPR = useCallback((prNumber: number, repo?: string) => {
-    // Open O8 panel to PRs tab instead of canvas
-    setO8PrNumber(prNumber);
+    // Open O8 panel to PRs tab — prNumber 0 means show the list
+    setO8PrNumber(prNumber || null);
     setO8PrRepo(repo ?? null);
     setRightPanelKind('o8');
     setChatVisible(true);

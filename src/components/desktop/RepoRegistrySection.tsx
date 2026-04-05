@@ -1453,6 +1453,15 @@ function RepoCard({
   ) : null;
   const prBadge = prPreview.length > 0 ? (
     <span
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        e.stopPropagation();
+        // Open O8 panel to PRs tab — uses onReviewPR with no specific PR number
+        // to trigger the list view
+        if (onReviewPR) onReviewPR(0, githubSlug ?? undefined);
+      }}
+      onKeyDown={(e) => { if (e.key === 'Enter' && onReviewPR) { e.stopPropagation(); onReviewPR(0, githubSlug ?? undefined); } }}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -1462,6 +1471,7 @@ function RepoCard({
         background: THEME_ACCENT_SOFT,
         border: `1px solid ${THEME_ACCENT_BORDER}`,
         flexShrink: 0,
+        cursor: onReviewPR ? 'pointer' : 'default',
       }}
     >
       <GitPullRequest size={10} strokeWidth={2.2} color="currentColor" />
@@ -1473,7 +1483,7 @@ function RepoCard({
           fontFamily: '"SF Mono", ui-monospace, monospace',
         }}
       >
-        PR #{prPreview[0].number}
+        {prPreview.length} PR{prPreview.length === 1 ? '' : 's'}
       </span>
     </span>
   ) : null;
