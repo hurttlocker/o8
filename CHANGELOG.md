@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `d663b6e` fix: add danger-full-access sandbox to agent runtime owned session launch
 - `d9206f5` feat: MCP dispatch DX overhaul
 - `b80058b` chore: remove OpenCode from open-in editor list
 - `feae542` docs: add AI provider harness ban impact analysis
