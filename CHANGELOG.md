@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `376f426` feat: instant PR cache invalidation after merge/approve/request changes
 - `a349f4a` fix: update PR state to Merged after successful merge action
 - `9a24a49` test: multi-PR view
 - `e833312` feat: inline file diffs + merge conflict badge in O8 PR review
