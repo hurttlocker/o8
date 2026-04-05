@@ -65,6 +65,7 @@ import {
 } from '@/lib/panel/preview';
 import type { LLMMessage } from './LLMChat';
 import type { CanvasRepoTaskLaunchRequest, CanvasTab } from './Canvas';
+import { LIGHT_CANVAS_VARS } from './canvas-utils';
 
 const LazyLLMChat = lazy(() => import('./LLMChat'));
 const LazyMessageBubble = lazy(() => import('./LLMChat').then((m) => ({ default: m.MessageBubble })));
@@ -1958,7 +1959,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   const canSend = draft.trim().length > 0 || queuedContextCards.length > 0;
 
   return (
-    <div data-vibrancy-passthrough="" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg-gradient)', position: 'relative' }}>
+    <div data-vibrancy-passthrough="" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: '#ffffff', ...LIGHT_CANVAS_VARS, position: 'relative' } as React.CSSProperties}>
       <div
         ref={scrollRef}
         className="cortex-themed-scroll"
