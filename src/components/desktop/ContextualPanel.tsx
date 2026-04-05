@@ -249,7 +249,7 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
           lineHeight: 1.35,
           cursorBlink: true,
           cursorStyle: 'block',
-          allowTransparency: true,
+          allowTransparency: false,
           allowProposedApi: true,
           scrollback: 10000,
           theme: buildXtermTheme(),
@@ -566,7 +566,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: 'var(--t-bg-subtle)',
+        background: '#ffffff',
       }}>
         {/* Header bar — single-line global operator chrome */}
         <div style={{
@@ -575,10 +575,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
           gap: 10,
           height: 36,
           flexShrink: 0,
-          background: 'var(--t-panel-translucent)',
-          backdropFilter: 'blur(20px) saturate(1.6)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-          borderBottom: '1px solid var(--t-divider)',
+          background: '#f8f9fb',
+          borderBottom: '1px solid #e5e7eb',
           paddingLeft: 8,
           paddingRight: 8,
           position: 'relative',
