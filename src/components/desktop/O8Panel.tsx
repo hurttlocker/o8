@@ -425,8 +425,8 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         gap: 2,
       }}>
         <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'changes'} onClick={() => setActiveTab('changes')} label="Changes" />
-        <O8TabButton icon={(c) => <IconGlobeSimple size={16} color={c} />} active={activeTab === 'browser'} onClick={() => setActiveTab('browser')} label="Browser" />
         <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'files'} onClick={() => setActiveTab('files')} label="Files" />
+        <O8TabButton icon={(c) => <IconGlobeSimple size={16} color={c} />} active={activeTab === 'browser'} onClick={() => setActiveTab('browser')} label="Browser" />
         <div style={{ flex: 1 }} />
         <button
           type="button"
