@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `12d859b` fix: PR count in activity card + dark hover card in browser mode
 - `04a5a76` feat: PR count badge on repo card — click to open O8 PRs list
 - `42b93c4` fix: handle PR author as string or {login} object
 - `5af7280` fix: pass repo slug to O8 PRs tab for PR list fetching
