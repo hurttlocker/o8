@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { O8BrowserPane } from './O8BrowserPane';
+import { O8FilesPane } from './O8FilesPane';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
@@ -461,8 +462,8 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} />
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'files' ? 'flex' : 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', fontSize: 13 }}>
-        Files — coming soon
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'files' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8FilesPane repoPath={repoPath ?? undefined} onOpenFile={onOpenFile} />
       </div>
     </div>
   );
