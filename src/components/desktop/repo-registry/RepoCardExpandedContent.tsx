@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useMemo, useState } from 'react';
+import { GitBranch } from 'lucide-react';
 import {
   FolderOpen,
   THEME_ACCENT,
@@ -198,13 +199,12 @@ function RepoCardExpandedContentBase({
                   cursor: onSelectSession ? 'pointer' : 'default',
                 }}
               >
-                <span
+                <GitBranch
+                  size={13}
+                  strokeWidth={2}
                   style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: statusTone.dot,
                     flexShrink: 0,
+                    color: statusTone.dot,
                   }}
                 />
                 <span
