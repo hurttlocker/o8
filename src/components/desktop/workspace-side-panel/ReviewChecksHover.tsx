@@ -83,7 +83,7 @@ export const ReviewChecksHover = memo(function ReviewChecksHover({
       )}
     >
       {!runDetail || detailLoading ? (
-        <div style={{ fontSize: 12, color: 'rgba(15, 23, 42, 0.62)' }}>Loading run details...</div>
+        <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Loading run details...</div>
       ) : (
         <>
           {hoveredGroup ? (
@@ -101,14 +101,14 @@ export const ReviewChecksHover = memo(function ReviewChecksHover({
                       gap: 8,
                       padding: '6px 8px',
                       borderRadius: 10,
-                      background: 'rgba(255,255,255,0.28)',
+                      background: 'var(--t-panel-hover)',
                     }}
                   >
                     <span style={{ color: tone.color, fontWeight: 700 }}>
                       {tone.label === 'Passing' ? '\u2713' : tone.label === 'Pending' ? '\u25CB' : '\u2717'}
                     </span>
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15, 23, 42, 0.82)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text)' }}>
                         {run.workflowName || 'CI'}
                       </div>
                       <div style={{ marginTop: 2, fontSize: 10, color: tone.color }}>{tone.label}</div>
@@ -147,7 +147,7 @@ export const ReviewChecksHover = memo(function ReviewChecksHover({
           ) : null}
           {runDetail.jobs && runDetail.jobs.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(15, 23, 42, 0.52)' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-muted)' }}>
                 Jobs
               </div>
               {runDetail.jobs.slice(0, 5).map((job) => {
@@ -158,9 +158,9 @@ export const ReviewChecksHover = memo(function ReviewChecksHover({
                     style={{
                       padding: '6px 8px',
                       borderRadius: 10,
-                      background: 'rgba(255,255,255,0.28)',
+                      background: 'var(--t-panel-hover)',
                       fontSize: 11,
-                      color: 'rgba(15, 23, 42, 0.78)',
+                      color: 'var(--t-text-secondary)',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -178,10 +178,10 @@ export const ReviewChecksHover = memo(function ReviewChecksHover({
               style={{
                 fontSize: 11,
                 lineHeight: 1.5,
-                color: 'rgba(15, 23, 42, 0.74)',
+                color: 'var(--t-text-secondary)',
                 padding: '7px 8px',
                 borderRadius: 10,
-                background: 'rgba(255,255,255,0.28)',
+                background: 'var(--t-panel-hover)',
               }}
             >
               {runDetail.annotations[0]?.path}

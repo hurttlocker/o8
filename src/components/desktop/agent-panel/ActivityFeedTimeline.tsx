@@ -410,7 +410,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <BlueGlassMetricPill label="State" value={mergeRisk?.label ?? 'reviewing'} color={mergeRisk?.color ?? '#64748b'} />
                           <BlueGlassMetricPill label="Checks" value={`${item.checkSummary?.failed ?? 0} fail · ${item.checkSummary?.pending ?? 0} pending`} color={item.checkSummary?.failed ? '#dc2626' : item.checkSummary?.pending ? '#d97706' : '#1d4ed8'} />
-                          <BlueGlassMetricPill label="Files" value={String(item.changedFiles)} color="rgba(15,23,42,0.78)" />
+                          <BlueGlassMetricPill label="Files" value={String(item.changedFiles)} color="var(--t-text)" />
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                           {onLaunchTask ? (
@@ -445,7 +445,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                       <>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <BlueGlassMetricPill label="Result" value={item.conclusion || item.status} color={item.conclusion === 'success' ? '#16a34a' : item.conclusion === 'failure' ? '#dc2626' : '#d97706'} />
-                          <BlueGlassMetricPill label="Age" value={item.age} color="rgba(15,23,42,0.78)" />
+                          <BlueGlassMetricPill label="Age" value={item.age} color="var(--t-text)" />
                         </div>
                         <BlueGlassActionButton
                           icon={<ExternalLink size={12} strokeWidth={2} />}
@@ -457,7 +457,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                       <>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <BlueGlassMetricPill label="Hash" value={item.hash} color="#1d4ed8" />
-                          <BlueGlassMetricPill label="Age" value={item.age} color="rgba(15,23,42,0.78)" />
+                          <BlueGlassMetricPill label="Age" value={item.age} color="var(--t-text)" />
                         </div>
                         {onSelectCommit ? (
                           <BlueGlassActionButton
@@ -471,8 +471,8 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                       <>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <BlueGlassMetricPill label="Comments" value={String(item.comments)} color="#1d4ed8" />
-                          <BlueGlassMetricPill label="Owner" value={item.assignees[0] ?? 'unassigned'} color={item.assignees[0] ? 'rgba(15,23,42,0.78)' : '#d97706'} />
-                          <BlueGlassMetricPill label="Age" value={item.age} color="rgba(15,23,42,0.78)" />
+                          <BlueGlassMetricPill label="Owner" value={item.assignees[0] ?? 'unassigned'} color={item.assignees[0] ? 'var(--t-text)' : '#d97706'} />
+                          <BlueGlassMetricPill label="Age" value={item.age} color="var(--t-text)" />
                         </div>
                         <BlueGlassActionButton
                           icon={<PlayCircle size={12} strokeWidth={2} />}
@@ -487,7 +487,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                       </>
                     ) : (
                       <>
-                        <div style={{ fontSize: 11, color: 'rgba(15, 23, 42, 0.62)' }}>{item.data.severity}</div>
+                        <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{item.data.severity}</div>
                         {agentForEvent?.sessionKey && onSelectSession ? (
                           <BlueGlassActionButton
                             icon={<MessageSquare size={12} strokeWidth={2} />}
@@ -500,7 +500,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                   >
                     {item.kind === 'event' ? (
                       <>
-                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.76)' }}>
+                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
                           {item.data.detail}
                         </div>
                         <BlueGlassSparklineLane
@@ -541,20 +541,20 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                             style={{
                               fontSize: 12,
                               lineHeight: 1.55,
-                              color: 'rgba(15, 23, 42, 0.76)',
+                              color: 'var(--t-text-secondary)',
                               padding: '8px 10px',
                               borderRadius: 12,
-                              background: 'rgba(255,255,255,0.28)',
+                              background: 'var(--t-panel-hover)',
                             }}
                           >
                             {item.body.length > 180 ? `${item.body.slice(0, 177).trimEnd()}...` : item.body}
                           </div>
                         ) : (
-                          <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.62)' }}>
+                          <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-muted)' }}>
                             No description yet. The thread context is still mostly in labels, assignment, and comments.
                           </div>
                         )}
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'rgba(15, 23, 42, 0.66)' }}>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--t-text-muted)' }}>
                           <span>Assignee: {item.assignees.length ? item.assignees.join(', ') : 'Unassigned'}</span>
                           <span>{item.comments} comment{item.comments === 1 ? '' : 's'}</span>
                         </div>
@@ -564,7 +564,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                       </>
                     ) : item.kind === 'ci' ? (
                       <>
-                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.76)' }}>
+                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
                           {item.workflow} on <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{item.branch}</span>
                         </div>
                         {ciDetail?.failingJobs?.length ? (
@@ -578,14 +578,14 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                                 style={{
                                   padding: '6px 8px',
                                   borderRadius: 10,
-                                  background: 'rgba(255,255,255,0.28)',
+                                  background: 'var(--t-panel-hover)',
                                   fontSize: 11,
-                                  color: 'rgba(15, 23, 42, 0.78)',
+                                  color: 'var(--t-text-secondary)',
                                 }}
                               >
                                 <div style={{ fontWeight: 700 }}>{job.name}</div>
                                 {job.failingStep ? (
-                                  <div style={{ marginTop: 2, color: 'rgba(15, 23, 42, 0.62)' }}>
+                                  <div style={{ marginTop: 2, color: 'var(--t-text-muted)' }}>
                                     {job.failingStep}
                                   </div>
                                 ) : null}
@@ -598,10 +598,10 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                             style={{
                               fontSize: 11,
                               lineHeight: 1.5,
-                              color: 'rgba(15, 23, 42, 0.74)',
+                              color: 'var(--t-text-secondary)',
                               padding: '7px 8px',
                               borderRadius: 10,
-                              background: 'rgba(255,255,255,0.28)',
+                              background: 'var(--t-panel-hover)',
                             }}
                           >
                             {ciDetail.summaryLine}
@@ -628,21 +628,21 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                             {item.failingChecks.map((check) => (
                               <div
                                 key={check}
-                                style={{
-                                  fontSize: 11,
-                                  lineHeight: 1.45,
-                                  color: 'rgba(15, 23, 42, 0.76)',
-                                  padding: '6px 8px',
-                                  borderRadius: 10,
-                                  background: 'rgba(255,255,255,0.28)',
-                                }}
-                              >
-                                {check}
-                              </div>
+                            style={{
+                              fontSize: 11,
+                              lineHeight: 1.45,
+                              color: 'var(--t-text-secondary)',
+                              padding: '6px 8px',
+                              borderRadius: 10,
+                              background: 'var(--t-panel-hover)',
+                            }}
+                          >
+                            {check}
+                          </div>
                             ))}
                           </div>
                         ) : null}
-                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.76)' }}>
+                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
                           Branch <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{item.branch}</span> has an active merge path.
                         </div>
                         {prDetail?.files?.length ? (
@@ -659,11 +659,11 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                                   gap: 8,
                                   padding: '6px 8px',
                                   borderRadius: 10,
-                                  background: 'rgba(255,255,255,0.28)',
+                                  background: 'var(--t-panel-hover)',
                                   fontSize: 11,
                                 }}
                               >
-                                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(15,23,42,0.78)' }}>
+                                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text)' }}>
                                   {file.path}
                                 </span>
                                 <span style={{ color: '#16a34a', fontWeight: 700 }}>+{file.additions}</span>
@@ -694,11 +694,11 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                                 gap: 8,
                                 padding: '6px 8px',
                                 borderRadius: 10,
-                                background: commit.hash === item.hash ? 'rgba(255,255,255,0.42)' : 'rgba(255,255,255,0.18)',
+                                background: commit.hash === item.hash ? 'var(--t-panel-active)' : 'var(--t-panel-hover)',
                               }}
                             >
                               <span style={{ fontSize: 10, fontFamily: '"SF Mono", ui-monospace, monospace', color: '#1d4ed8', fontWeight: 700 }}>{commit.hash}</span>
-                              <span style={{ fontSize: 11, color: 'rgba(15, 23, 42, 0.76)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {commit.message}
                               </span>
                             </div>
