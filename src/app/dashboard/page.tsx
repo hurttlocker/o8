@@ -5,6 +5,7 @@ import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } fro
 import { isTauri, initMcpPlugin } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
+import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
@@ -167,9 +168,11 @@ export default function DashboardPage() {
   return (
     <ThemeProvider>
       <AlertProvider>
-        <DesktopWebSocketProvider>
-          <DashboardInner />
-        </DesktopWebSocketProvider>
+        <ReactiveQueryProvider>
+          <DesktopWebSocketProvider>
+            <DashboardInner />
+          </DesktopWebSocketProvider>
+        </ReactiveQueryProvider>
       </AlertProvider>
     </ThemeProvider>
   );
