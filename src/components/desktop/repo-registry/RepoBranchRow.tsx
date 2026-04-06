@@ -31,6 +31,8 @@ import {
   type OrchestratorPacket,
   type RepoRegistryEntry,
   type WorktreeInfo,
+  CodexIcon,
+  ClaudeIcon,
 } from './shared';
 
 interface RepoBranchRowProps {
@@ -427,13 +429,12 @@ function RepoBranchRowBase({
                         background: runtimeTone.background,
                         border: `1px solid ${runtimeTone.border}`,
                         color: runtimeTone.color,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: '-0.01em',
                         flexShrink: 0,
                       }}
                     >
-                      {runtimeTone.shortLabel}
+                      {packet.runtime === 'claude-code'
+                        ? <ClaudeIcon size={18} color={runtimeTone.color} />
+                        : <CodexIcon size={18} color={runtimeTone.color} />}
                     </span>
                   </button>
                 );
