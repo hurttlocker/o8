@@ -132,17 +132,9 @@ function formatRelativeTime(value?: string): string {
 
 function RuntimeBadgeIcon({ runtime, size = 16 }: { runtime?: string; size?: number }) {
   if (runtime === 'claude-code') {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <path d="M16.29 2.5L12 10.07 7.71 2.5 5.21 3.93 10.15 12 5.21 20.07l2.5 1.43L12 13.93l4.29 7.57 2.5-1.43L13.85 12l4.94-8.07-2.5-1.43z" fill="currentColor" />
-      </svg>
-    );
+    return <img src="/logos/claude.png" alt="Claude" width={size} height={size} style={{ display: 'block', objectFit: 'contain' }} />;
   }
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <path d="M12 2L3 7v10l9 5 9-5V7l-9-5zm0 2.18L18.39 7.5 12 10.82 5.61 7.5 12 4.18zM5 9.06l6 3.33v6.56l-6-3.33V9.06zm14 0v6.56l-6 3.33v-6.56l6-3.33z" fill="currentColor" />
-    </svg>
-  );
+  return <img src="/logos/codex.webp" alt="Codex" width={size} height={size} style={{ display: 'block', objectFit: 'contain' }} />;
 }
 
 function statusDotColor(session: SessionSummary): string {

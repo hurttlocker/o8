@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { CLI_AGENTS, THEME_ACCENT, THEME_ACCENT_SOFT, THEME_PANEL_GLASS } from '@/components/desktop/workspace-terminal/constants';
 import { AgentDot, PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
+import { CodexIcon, ClaudeIcon } from '@/components/desktop/repo-registry/shared';
 import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/types';
 
 interface WorkspaceLaunchPickerProps {
@@ -261,7 +262,9 @@ function WorkspaceLaunchPickerBase({
                   onMouseLeave={hoverOff}
                 >
                   <span style={iconSlotStyle}>
-                    <AgentDot color={runtime.color} size={10} />
+                    {runtime.id === 'claude-code'
+                      ? <ClaudeIcon size={18} />
+                      : <CodexIcon size={18} />}
                   </span>
                   <div>
                     <div style={{ fontWeight: 500 }}>{runtime.label}</div>
