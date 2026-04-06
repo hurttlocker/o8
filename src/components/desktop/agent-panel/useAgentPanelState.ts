@@ -5,6 +5,7 @@ import { useSharedDesktopWs } from '../hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '../hooks/useDesktopWebSocket';
 import { isTauri } from '@/lib/tauri/bridge';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
+import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
@@ -87,7 +88,7 @@ export function useAgentPanelState({
       return;
     }
 
-    const response = await fetch('/api/panel/repos');
+    const response = await fetchOnce('/api/panel/repos');
     const data = await response.json() as {
       repos?: Array<{
         id: string;
@@ -168,7 +169,7 @@ export function useAgentPanelState({
         const [inventoryResponse, workspacesResponse, reposResponse] = await Promise.all([
           fetch(`/api/runtime/inventory?fleetMode=${typeof window !== 'undefined' ? localStorage.getItem('cortex-ide-fleet-mode') ?? 'smart' : 'smart'}`).catch(() => null),
           fetch('/api/panel/workspaces').catch(() => null),
-          fetch('/api/panel/repos').catch(() => null),
+          fetchOnce('/api/panel/repos').catch(() => null),
         ]);
 
         let nextAgents: AgentDetail[] = [];
@@ -394,7 +395,7 @@ export function useAgentPanelState({
       setRepoLocalPath(null);
       return;
     }
-    fetch('/api/panel/repos')
+    fetchOnce('/api/panel/repos')
       .then((response) => response.json())
       .then((data) => {
         const match = (data.repos ?? []).find((repo: { remoteUrl?: string }) => {
