@@ -1,11 +1,12 @@
 'use client';
 
+import { memo } from 'react';
 import { RepoCardExpandedContent } from './RepoCardExpandedContent';
 import { RepoCardHeader } from './RepoCardHeader';
 import { RepoCardSettings } from './RepoCardSettings';
 import { useRepoCardModel, type RepoCardProps } from './useRepoCardModel';
 
-export function RepoCard(props: RepoCardProps) {
+function RepoCardBase(props: RepoCardProps) {
   const model = useRepoCardModel(props);
   const { cardRef, ...renderModel } = model;
 
@@ -60,3 +61,5 @@ export function RepoCard(props: RepoCardProps) {
     </div>
   );
 }
+
+export const RepoCard = memo(RepoCardBase);

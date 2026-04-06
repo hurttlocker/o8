@@ -331,8 +331,15 @@ export const ActivityFeed = memo(function ActivityFeed({
     }
 
     void fetchExtras();
-    const id = setInterval(fetchExtras, 300_000);
-    return () => clearInterval(id);
+    // WS-driven: refresh on agent/lane events instead of 5min-only polling
+    const handler = () => { void fetchExtras(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchExtras, 300_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [allRepos, isAllRepos, refreshKey, repo]);
 
   const fallbackCommitItems = useMemo<ActivityItem[]>(() => {

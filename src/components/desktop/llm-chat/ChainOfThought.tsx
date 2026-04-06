@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Brain, Check, ChevronRight, Eye, FileText, Search, Zap } from 'lucide-react';
 
 import { THEME_ACCENT, THEME_ACCENT_BORDER, THEME_ACCENT_SOFT, THEME_BG_CARD, type ThinkingStep, type ToolCallInfo } from './shared';
 
-export function ChainOfThought({
+function ChainOfThoughtBase({
   steps,
   thinking,
   durationMs,
@@ -109,6 +109,8 @@ export function ChainOfThought({
   );
 }
 
+export const ChainOfThought = memo(ChainOfThoughtBase);
+
 function ThinkingText({ text }: { text: string }) {
   const [showRaw, setShowRaw] = useState(false);
 
@@ -141,7 +143,7 @@ export function StreamingIndicator() {
   );
 }
 
-export function LiveToolCalls({ toolCalls }: { toolCalls: ToolCallInfo[] }) {
+function LiveToolCallsBase({ toolCalls }: { toolCalls: ToolCallInfo[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '90%' }}>
       {toolCalls.map((toolCall, index) => (
@@ -160,3 +162,5 @@ export function LiveToolCalls({ toolCalls }: { toolCalls: ToolCallInfo[] }) {
     </div>
   );
 }
+
+export const LiveToolCalls = memo(LiveToolCallsBase);

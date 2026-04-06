@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type React from 'react';
 import { AlertCircle, ArrowUp, Eye, GitPullRequest, Globe, Lightbulb, Pencil, Plus, Search, Sparkles, Square, Terminal, Trash2, Wrench, X } from 'lucide-react';
 
@@ -19,7 +20,7 @@ function renderSlashCommandIcon(icon: SlashCommandOption['icon']) {
   return <Terminal size={16} />;
 }
 
-export function Composer({
+function ComposerBase({
   applyFileIndex,
   applyFileSuggestions,
   applyModal,
@@ -238,3 +239,5 @@ export function Composer({
     </>
   );
 }
+
+export const Composer = memo(ComposerBase);

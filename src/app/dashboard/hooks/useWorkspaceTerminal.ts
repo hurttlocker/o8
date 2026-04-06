@@ -595,8 +595,16 @@ export function useWorkspaceTerminal({
     }
 
     const initTimer = setTimeout(pollLanes, 2_000);
-    const id = setInterval(pollLanes, 15_000);
-    return () => { clearTimeout(initTimer); clearInterval(id); };
+    // WS-driven: instant refresh on lane events instead of 15s polling
+    const handler = () => { void pollLanes(); };
+    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(pollLanes, 300_000);
+    return () => {
+      clearTimeout(initTimer);
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [openWorkspaceTabForLane]);
 
   const collectOrchestratorLaneSnapshots = useCallback((): OrchestratorLaneSnapshot[] => (

@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import {
   AlertCircle,
   FolderOpen,
@@ -43,7 +44,7 @@ interface RepoRegistryListProps {
   activeWorkspacePath?: string | null;
 }
 
-export function RepoRegistryList({
+function RepoRegistryListBase({
   hideHeader,
   reposOpen,
   loading,
@@ -272,3 +273,5 @@ export function RepoRegistryList({
     </>
   );
 }
+
+export const RepoRegistryList = memo(RepoRegistryListBase);

@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, lazy, type CSSProperties } from 'react';
+import { Suspense, lazy, memo, type CSSProperties } from 'react';
 import {
   AlertCircle,
   ArrowDown,
@@ -52,7 +52,7 @@ function PromptGlyph({ icon }: { icon: string }) {
   return <FileText size={16} />;
 }
 
-export function WorkspaceChatPane({
+function WorkspaceChatPaneBase({
   tab,
   active,
   onUpdateMessages,
@@ -727,3 +727,5 @@ export function WorkspaceChatPane({
     </div>
   );
 }
+
+export const WorkspaceChatPane = memo(WorkspaceChatPaneBase);

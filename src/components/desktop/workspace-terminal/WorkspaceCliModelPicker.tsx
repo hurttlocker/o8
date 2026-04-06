@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import {
   THEME_ACCENT_SOFT,
@@ -16,7 +16,7 @@ interface WorkspaceCliModelPickerProps {
   onSelect: (modelId: string) => void;
 }
 
-export function WorkspaceCliModelPicker({
+function WorkspaceCliModelPickerBase({
   selected,
   models,
   disabled,
@@ -144,3 +144,5 @@ export function WorkspaceCliModelPicker({
     </div>
   );
 }
+
+export const WorkspaceCliModelPicker = memo(WorkspaceCliModelPickerBase);

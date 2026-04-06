@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowDown, History, Loader2, RotateCcw, Sparkles } from 'lucide-react';
@@ -12,7 +13,7 @@ function PromptIcon({ d, size = 18, color = 'currentColor' }: { d: string; size?
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill={color} viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d={d} /></svg>;
 }
 
-export function ChatSurface({
+function ChatSurfaceBase({
   activeThinking,
   activeToolCalls,
   followUps,
@@ -234,3 +235,5 @@ export function ChatSurface({
     </>
   );
 }
+
+export const ChatSurface = memo(ChatSurfaceBase);

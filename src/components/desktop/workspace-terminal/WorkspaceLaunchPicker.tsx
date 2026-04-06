@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   ChevronRight,
   FolderOpen,
@@ -21,7 +21,7 @@ interface WorkspaceLaunchPickerProps {
   onNewLLMChatTab: (repo?: RegisteredRepo) => void;
 }
 
-export function WorkspaceLaunchPicker({
+function WorkspaceLaunchPickerBase({
   launchRequestKey,
   scopedRepo,
   onRegisterRepo,
@@ -379,6 +379,8 @@ export function WorkspaceLaunchPicker({
     </div>
   );
 }
+
+export const WorkspaceLaunchPicker = memo(WorkspaceLaunchPickerBase);
 
 const menuButtonStyle = {
   display: 'flex',

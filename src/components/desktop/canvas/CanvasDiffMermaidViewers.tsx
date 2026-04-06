@@ -1,6 +1,6 @@
 'use client';
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Clipboard, RotateCcw, Trash2 } from 'lucide-react';
 import { DiffStatusIcon, renderDiffLines } from '@/components/desktop/diff-utils';
 interface ChangedFile {
@@ -20,7 +20,7 @@ interface FileDetail {
   commitAuthor?: string;
   commitAge?: string;
 }
-export function MermaidViewer({ code }: { code: string }) {
+function MermaidViewerBase({ code }: { code: string }) {
   const [svgHtml, setSvgHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(2);
@@ -253,6 +253,9 @@ export function MermaidViewer({ code }: { code: string }) {
     </div>
   );
 }
+
+export const MermaidViewer = memo(MermaidViewerBase);
+
 export function DiffViewer() {
   const [files, setFiles] = useState<ChangedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);

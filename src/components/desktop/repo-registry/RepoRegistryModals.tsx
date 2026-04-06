@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import {
   AlertCircle,
@@ -57,7 +58,7 @@ interface RepoRegistryModalsProps {
   handleRemoveRepo: () => Promise<void>;
 }
 
-export function RepoRegistryModals({
+function RepoRegistryModalsBase({
   addOpen,
   resetAddModal,
   repoPathInput,
@@ -753,3 +754,5 @@ export function RepoRegistryModals({
     </>
   );
 }
+
+export const RepoRegistryModals = memo(RepoRegistryModalsBase);
