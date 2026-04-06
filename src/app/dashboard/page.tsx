@@ -206,7 +206,7 @@ function DashboardInner() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
   const [chatVisible, setChatVisible] = useState(true);
-  const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('review');
+  const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('o8');
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>('changes');
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);

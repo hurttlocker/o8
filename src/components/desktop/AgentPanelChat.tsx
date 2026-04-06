@@ -81,6 +81,91 @@ const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
 const EMPTY_STATE_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
 
+// ── Performance: snapshot fingerprint (replaces JSON.stringify equality) ──
+function snapshotFp(data: MobileInboxSnapshot | null): string {
+  if (!data) return '';
+  const sessions = data.sessions ?? [];
+  return `${sessions.length}|${sessions.map((s) => `${s.sessionKey}:${s.status}`).join(',')}`;
+}
+
+function sessionsFp(sessions: SessionSummary[]): string {
+  return `${sessions.length}|${sessions.map((s) => `${s.sessionKey}:${s.status}`).join(',')}`;
+}
+
+// ── Performance: targeted transcript entry update (replaces full .map() scan) ──
+function updateTranscriptEntry(
+  prev: MobileTranscriptEntry[],
+  targetId: string,
+  patch: Partial<MobileTranscriptEntry>,
+): MobileTranscriptEntry[] {
+  // Scan from the end — the entry being updated during SSE is always the last one
+  for (let i = prev.length - 1; i >= 0; i--) {
+    if (prev[i].id === targetId) {
+      const updated = { ...prev[i], ...patch };
+      const next = prev.slice();
+      next[i] = updated;
+      return next;
+    }
+  }
+  return prev;
+}
+
+// ── Performance: hoisted static inline styles for .map() loops ──
+const CHANGED_FILE_STYLE = {
+  fontSize: 11,
+  color: 'var(--t-text-secondary)',
+  fontFamily: '"SF Mono", ui-monospace, monospace',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+} as React.CSSProperties;
+
+const OPERATOR_DETAIL_STYLE = {
+  fontSize: 11,
+  color: 'var(--t-text-muted)',
+  lineHeight: 1.45,
+} as React.CSSProperties;
+
+const TABLE_HEADER_CELL_STYLE = {
+  textAlign: 'left' as const,
+  padding: '10px 14px',
+  fontSize: '0.8rem',
+  fontWeight: 600,
+  color: 'var(--t-text-secondary)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+  borderBottom: '2px solid var(--t-divider)',
+  whiteSpace: 'nowrap',
+} as React.CSSProperties;
+
+const TABLE_BODY_CELL_STYLE = {
+  textAlign: 'left' as const,
+  padding: '10px 14px',
+  fontSize: '0.85rem',
+  color: 'var(--t-text)',
+  borderBottom: '1px solid var(--t-divider-subtle)',
+} as React.CSSProperties;
+
+const SOURCE_LINK_STYLE = {
+  display: 'block',
+  padding: '8px 10px',
+  borderRadius: 10,
+  background: 'rgba(248,250,252,0.92)',
+  border: '1px solid rgba(226, 232, 240, 0.95)',
+  color: '#2563eb',
+  textDecoration: 'none',
+  fontSize: 11,
+  lineHeight: 1.4,
+  wordBreak: 'break-word',
+} as React.CSSProperties;
+
+const SOURCE_CARD_SUMMARY_STYLE = {
+  fontSize: 11,
+  color: 'var(--t-text-secondary)',
+  fontWeight: 600,
+  lineHeight: 1.35,
+} as React.CSSProperties;
+
 const O_PLACEHOLDERS = [
   'Orchestrate something...',
   'Operate on this repo...',
@@ -1216,14 +1301,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
                   {displayChangedFiles.map((filePath) => (
                     <div
                       key={filePath}
-                      style={{
-                        fontSize: 11,
-                        color: 'var(--t-text-secondary)',
-                        fontFamily: '"SF Mono", ui-monospace, monospace',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
+                      style={CHANGED_FILE_STYLE}
                     >
                       {filePath}
                     </div>
@@ -1380,11 +1458,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
               {collapsedOperator.details.map((detail) => (
                 <div
                   key={detail}
-                  style={{
-                    fontSize: 11,
-                    color: 'var(--t-text-muted)',
-                    lineHeight: 1.45,
-                  }}
+                  style={OPERATOR_DETAIL_STYLE}
                 >
                   {detail}
                 </div>
@@ -1612,17 +1686,7 @@ function renderMarkdownBlocks(text: string, onOpenMermaid?: (code: string) => vo
                 <thead>
                   <tr>
                     {headerCells.map((cell, ci) => (
-                      <th key={ci} style={{
-                        textAlign: 'left',
-                        padding: '10px 14px',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        color: 'var(--t-text-secondary)',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        borderBottom: '2px solid var(--t-divider)',
-                        whiteSpace: 'nowrap',
-                      }}>
+                      <th key={ci} style={TABLE_HEADER_CELL_STYLE}>
                         {renderInline(cell)}
                       </th>
                     ))}
@@ -1636,13 +1700,7 @@ function renderMarkdownBlocks(text: string, onOpenMermaid?: (code: string) => vo
                         backgroundColor: ri % 2 === 0 ? 'var(--t-panel)' : 'var(--t-bg)',
                       }}>
                         {cells.map((cell, ci) => (
-                          <td key={ci} style={{
-                            textAlign: 'left',
-                            padding: '10px 14px',
-                            fontSize: '0.85rem',
-                            color: 'var(--t-text)',
-                            borderBottom: '1px solid var(--t-divider-subtle)',
-                          }}>
+                          <td key={ci} style={TABLE_BODY_CELL_STYLE}>
                             {renderInline(cell)}
                           </td>
                         ))}
@@ -2635,12 +2693,7 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                     }}>
                       {card.label}
                     </span>
-                    <span style={{
-                      fontSize: 11,
-                      color: 'var(--t-text-secondary)',
-                      fontWeight: 600,
-                      lineHeight: 1.35,
-                    }}>
+                    <span style={SOURCE_CARD_SUMMARY_STYLE}>
                       {card.summary}
                     </span>
                   </button>
@@ -2683,18 +2736,7 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                             href={link.href}
                             target="_blank"
                             rel="noopener noreferrer"
-                            style={{
-                              display: 'block',
-                              padding: '8px 10px',
-                              borderRadius: 10,
-                              background: 'rgba(248,250,252,0.92)',
-                              border: '1px solid rgba(226, 232, 240, 0.95)',
-                              color: '#2563eb',
-                              textDecoration: 'none',
-                              fontSize: 11,
-                              lineHeight: 1.4,
-                              wordBreak: 'break-word',
-                            }}
+                            style={SOURCE_LINK_STYLE}
                           >
                             {link.label}
                           </a>
@@ -4277,8 +4319,8 @@ export function AgentPanelChat({
       const res = await fetch('/api/mobile/inbox');
       if (!res.ok) return;
       const data = (await res.json()) as MobileInboxSnapshot;
-      setSnapshot(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
-      setSessions(prev => JSON.stringify(prev) === JSON.stringify(data.sessions) ? prev : data.sessions);
+      setSnapshot(prev => snapshotFp(prev) === snapshotFp(data) ? prev : data);
+      setSessions(prev => sessionsFp(prev) === sessionsFp(data.sessions ?? []) ? prev : (data.sessions ?? []));
       initialInboxReadyRef.current = true;
       const selectedStillExists = data.sessions.some((session) => session.sessionKey === selectedKey);
       if ((!selectedKey || !selectedStillExists) && data.sessions.length > 0) {
@@ -4502,9 +4544,7 @@ export function AgentPanelChat({
       });
 
       if (!res.ok || !res.body) {
-        setTranscript(prev => prev.map(e =>
-          e.id === assistantId ? { ...e, text: `Error: ${res.statusText}` } : e
-        ));
+        setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: `Error: ${res.statusText}` }));
         return;
       }
 
@@ -4534,9 +4574,7 @@ export function AgentPanelChat({
 
             if (event.type === 'delta' && event.text) {
               accumulated += event.text;
-              setTranscript(prev => prev.map(e =>
-                e.id === assistantId ? { ...e, text: accumulated } : e
-              ));
+              setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: accumulated }));
               scrollToBottom(false);
             }
 
@@ -4544,18 +4582,14 @@ export function AgentPanelChat({
               const nextTools = advanceToolStack(liveToolCallsRef.current, event.name);
               liveToolCallsRef.current = nextTools;
               setActiveToolCalls(nextTools);
-              setTranscript(prev => prev.map(e =>
-                e.id === assistantId ? { ...e, text: accumulated, toolCalls: nextTools } : e
-              ));
+              setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: accumulated, toolCalls: nextTools }));
             }
 
             if (event.type === 'done' || event.type === 'close') {
               const settledTools = liveToolCallsRef.current.map((tool) => ({ ...tool, status: 'done' as const }));
               if (settledTools.length > 0) {
                 liveToolCallsRef.current = settledTools;
-                setTranscript(prev => prev.map(e =>
-                  e.id === assistantId ? { ...e, toolCalls: settledTools } : e
-                ));
+                setTranscript(prev => updateTranscriptEntry(prev, assistantId, { toolCalls: settledTools }));
               }
               if (event.sessionId) {
                 claudeSessionIdRef.current = event.sessionId;
@@ -4563,25 +4597,19 @@ export function AgentPanelChat({
               // Use the final text if close provided it and we have nothing
               if (event.type === 'close' && event.text && !accumulated) {
                 accumulated = event.text;
-                setTranscript(prev => prev.map(e =>
-                  e.id === assistantId ? { ...e, text: accumulated } : e
-                ));
+                setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: accumulated }));
               }
             }
 
             if (event.type === 'error' && event.text) {
               accumulated += `\n⚠️ ${event.text}`;
-              setTranscript(prev => prev.map(e =>
-                e.id === assistantId ? { ...e, text: accumulated } : e
-              ));
+              setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: accumulated }));
             }
           } catch { /* skip malformed SSE lines */ }
         }
       }
     } catch (err) {
-      setTranscript(prev => prev.map(e =>
-        e.id === assistantId ? { ...e, text: `Error: ${err instanceof Error ? err.message : 'unknown'}` } : e
-      ));
+      setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: `Error: ${err instanceof Error ? err.message : 'unknown'}` }));
     } finally {
       setAgentRunning(false);
       liveToolCallsRef.current = [];
@@ -4617,9 +4645,7 @@ export function AgentPanelChat({
       });
 
       if (!res.ok || !res.body) {
-        setTranscript(prev => prev.map(e =>
-          e.id === assistantId ? { ...e, text: `Error: ${res.statusText}` } : e
-        ));
+        setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: `Error: ${res.statusText}` }));
         return;
       }
 
@@ -4652,9 +4678,7 @@ export function AgentPanelChat({
 
             if (event.type === 'delta' && event.text) {
               accumulated += event.text;
-              setTranscript(prev => prev.map(e =>
-                e.id === assistantId ? { ...e, text: accumulated } : e
-              ));
+              setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: accumulated }));
               scrollToBottom(false);
             }
 
@@ -4662,9 +4686,7 @@ export function AgentPanelChat({
               const nextTools = advanceToolStack(liveToolCallsRef.current, event.name);
               liveToolCallsRef.current = nextTools;
               setActiveToolCalls(nextTools);
-              setTranscript(prev => prev.map(e =>
-                e.id === assistantId ? { ...e, text: accumulated, toolCalls: nextTools } : e
-              ));
+              setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: accumulated, toolCalls: nextTools }));
             }
 
             if ((event.type === 'done' || event.type === 'close') && event.threadId) {
@@ -4675,25 +4697,19 @@ export function AgentPanelChat({
               const settledTools = liveToolCallsRef.current.map((tool) => ({ ...tool, status: 'done' as const }));
               if (settledTools.length > 0) {
                 liveToolCallsRef.current = settledTools;
-                setTranscript(prev => prev.map(e =>
-                  e.id === assistantId ? { ...e, toolCalls: settledTools } : e
-                ));
+                setTranscript(prev => updateTranscriptEntry(prev, assistantId, { toolCalls: settledTools }));
               }
             }
 
             if (event.type === 'error' && event.text) {
               accumulated += `\n⚠️ ${event.text}`;
-              setTranscript(prev => prev.map(e =>
-                e.id === assistantId ? { ...e, text: accumulated } : e
-              ));
+              setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: accumulated }));
             }
           } catch { /* skip */ }
         }
       }
     } catch (err) {
-      setTranscript(prev => prev.map(e =>
-        e.id === assistantId ? { ...e, text: `Error: ${err instanceof Error ? err.message : 'unknown'}` } : e
-      ));
+      setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: `Error: ${err instanceof Error ? err.message : 'unknown'}` }));
     } finally {
       setAgentRunning(false);
       liveToolCallsRef.current = [];
@@ -4823,9 +4839,15 @@ export function AgentPanelChat({
       } catch { /* silent */ }
     }
     void fetchDiffStats();
-    const ms = wsConnected ? 120_000 : 30_000; // 2min when WS connected, 30s fallback
-    const id = setInterval(fetchDiffStats, ms);
-    return () => clearInterval(id);
+    // WS-driven: instant refresh on agent/lane events, long fallback poll
+    const handler = () => { void fetchDiffStats(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchDiffStats, wsConnected ? 300_000 : 30_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [wsConnected]);
 
   // ── External session key (from Agent Panel click) ──
@@ -4910,9 +4932,15 @@ export function AgentPanelChat({
   useEffect(() => { void fetchSessions(); }, [fetchSessions]);
 
   useEffect(() => {
-    const ms = wsConnected ? 20_000 : 8_000;
-    const id = setInterval(() => void fetchSessions(), ms);
-    return () => clearInterval(id);
+    // WS-driven: instant refresh on inbox/agent events, long fallback poll
+    const handler = () => { void fetchSessions(); };
+    const wsEvents = ['o8:inbox', 'o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(() => void fetchSessions(), wsConnected ? 120_000 : 8_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [fetchSessions, wsConnected]);
 
   useEffect(() => {
@@ -4926,12 +4954,17 @@ export function AgentPanelChat({
     }
   }, [selectedKey, fetchTranscript]);
 
-  // Safety-net poll: 30s when WS connected, 5s when disconnected
+  // WS-driven transcript refresh: instant on agent events, long fallback poll
   useEffect(() => {
     if (!selectedKey) return;
-    const ms = wsConnected ? 30_000 : 15_000;
-    const interval = setInterval(() => void fetchTranscript(selectedKey), ms);
-    return () => clearInterval(interval);
+    const handler = () => { void fetchTranscript(selectedKey); };
+    const wsEvents = ['o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(() => void fetchTranscript(selectedKey), wsConnected ? 120_000 : 15_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [selectedKey, fetchTranscript, wsConnected]);
 
   useEffect(() => {
@@ -4953,8 +4986,13 @@ export function AgentPanelChat({
     }
 
     void pollApprovals();
-    approvalPollRef.current = setInterval(pollApprovals, 12_000);
+    // WS-driven: instant refresh on inbox/realtime events instead of 12s polling
+    const handler = () => { void pollApprovals(); };
+    const wsEvents = ['o8:inbox', 'o8:realtime'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    approvalPollRef.current = setInterval(pollApprovals, 120_000); // 2min resilience fallback
     return () => {
+      for (const e of wsEvents) window.removeEventListener(e, handler);
       if (approvalPollRef.current) clearInterval(approvalPollRef.current);
     };
   }, [selectedKey]);
