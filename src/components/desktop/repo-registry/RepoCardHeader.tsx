@@ -61,6 +61,7 @@ function RepoCardHeaderBase({
     hoverPreviewRect,
     prPreviewLoading,
     prPreview,
+    prPreviewLoaded,
     prPreviewDetail,
     previewCheckCounts,
     previewFailingChecks,
@@ -288,6 +289,18 @@ function RepoCardHeaderBase({
       {repoAgents.length} live
     </span>
   ) : null;
+
+  /* --- Compact activity badges (PR count + CI dot) --- */
+  const openPrCount = prPreviewLoaded ? prPreview.length : 0;
+  const ciTotal = previewCheckCounts.passed + previewCheckCounts.failed + previewCheckCounts.pending;
+  const ciDotColor = previewCheckCounts.failed > 0
+    ? '#ef4444'
+    : previewCheckCounts.pending > 0
+      ? '#f59e0b'
+      : previewCheckCounts.passed > 0
+        ? '#22c55e'
+        : null;
+
   const headerMetaBadges = [
     currentBadge,
     readinessBadge,
@@ -392,6 +405,58 @@ function RepoCardHeaderBase({
                   {repo.name}
                 </span>
                 {isActive ? currentBadge : null}
+                {openPrCount > 0 ? (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      paddingTop: 1,
+                      paddingBottom: 1,
+                      paddingLeft: 5,
+                      paddingRight: 5,
+                      borderRadius: 999,
+                      background: 'rgba(139, 92, 246, 0.08)',
+                      color: '#8b5cf6',
+                      fontSize: 9,
+                      fontWeight: 600,
+                      letterSpacing: '0.02em',
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                      flexShrink: 0,
+                      opacity: hoveringHeader ? 1 : 0.7,
+                      transition: 'opacity 140ms ease',
+                    }}
+                  >
+                    {openPrCount}PR
+                  </span>
+                ) : null}
+                {ciDotColor && ciTotal > 0 ? (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      opacity: hoveringHeader ? 1 : 0.7,
+                      transition: 'opacity 140ms ease',
+                    }}
+                    title={
+                      previewCheckCounts.failed > 0
+                        ? `${previewCheckCounts.failed} failing`
+                        : previewCheckCounts.pending > 0
+                          ? `${previewCheckCounts.pending} pending`
+                          : `${previewCheckCounts.passed} passing`
+                    }
+                  >
+                    <span
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        background: ciDotColor,
+                      }}
+                    />
+                  </span>
+                ) : null}
               </div>
               <div
                 style={{
