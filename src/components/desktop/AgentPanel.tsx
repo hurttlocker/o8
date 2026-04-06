@@ -6,8 +6,6 @@ import { AnimatePresence } from 'framer-motion';
 import { Clock, Plus } from 'lucide-react';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import {
-  ActivityDock,
-  ActivityFeed,
   AgentPanelEmptyState,
   SidebarSection,
   THEME_ACCENT,
@@ -39,20 +37,12 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     gatewayReachable,
     gatewayWarming,
     fleetMeta,
-    commits,
-    activityOpen,
-    setActivityOpen,
     reposOpen,
     setReposOpen,
-    activityRefreshKey,
     repoRegistryState,
     setRepoRegistryState,
     effectiveScopedRepo,
     currentLaunchRepoPath,
-    visibleActivityEvents,
-    activityItemCount,
-    activityDockTitle,
-    activitySummary,
     workspacesSummary,
     addRepoIntent,
     titlebarSpacerHeight,
@@ -221,44 +211,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           ) : null}
         </AnimatePresence>
 
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            marginTop: 0,
-            paddingLeft: 0,
-            paddingRight: 0,
-            paddingBottom: 0,
-          }}
-        >
-          <ActivityDock
-            title={activityDockTitle}
-            count={activityItemCount}
-            summary={activitySummary}
-            open={activityOpen}
-            onToggle={() => setActivityOpen((current) => !current)}
-          >
-            <ActivityFeed
-              events={visibleActivityEvents}
-              commits={commits}
-              agents={agents}
-              onSelectSession={onSelectSession}
-              onSelectIssue={onSelectIssue}
-              onSelectCommit={onSelectCommit}
-              onSelectPR={onSelectPR}
-              onReviewPR={onReviewPR}
-              onLaunchTask={(request) => {
-                void launchRepoTask(request).catch((error) => {
-                  window.alert(error instanceof Error ? error.message : 'Unable to launch repo task.');
-                });
-              }}
-              activeRepo={effectiveScopedRepo}
-              refreshKey={activityRefreshKey}
-            />
-          </ActivityDock>
-        </div>
       </div>
     </div>
   );
