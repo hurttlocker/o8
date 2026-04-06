@@ -10,6 +10,15 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 #[cfg(target_os = "windows")]
 use window_vibrancy::apply_blur;
 
+// ── Data directory resolution ──
+
+fn cortex_data_dir() -> String {
+    std::env::var("CORTEX_IDE_DATA_DIR").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{}/.cortex-ide", home)
+    })
+}
+
 /// Desktop info exposed to the React frontend via invoke
 #[derive(Serialize)]
 pub struct DesktopInfo {
@@ -84,6 +93,145 @@ fn get_app_data_dir(app: tauri::AppHandle) -> Option<String> {
         .map(|p| p.to_string_lossy().to_string())
 }
 
+// ── IPC-accelerated data commands ──
+// These bypass HTTP, serving data directly via Tauri IPC (~0.5ms vs ~5-10ms).
+
+/// Read the repo registry from disk. Returns { repos: [...] }.
+/// Equivalent to GET /api/panel/repos but without readiness enrichment.
+#[tauri::command]
+fn read_repos() -> Result<serde_json::Value, String> {
+    let repos_path = format!("{}/repos.json", cortex_data_dir());
+    let content = std::fs::read_to_string(&repos_path)
+        .map_err(|e| format!("Failed to read repos.json: {}", e))?;
+    let store: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse repos.json: {}", e))?;
+    // repos.json has { repos: [...], ... } — return the whole store
+    Ok(store)
+}
+
+/// Read recent git commits for a local repo path.
+/// Equivalent to GET /api/panel/commits?workspace=<path>&limit=<n>
+#[tauri::command]
+fn read_local_commits(repo: String, limit: Option<u32>) -> Result<serde_json::Value, String> {
+    let limit = limit.unwrap_or(10).min(50);
+    let output = Command::new("git")
+        .args([
+            "log",
+            &format!("--max-count={}", limit),
+            "--date=iso-strict",
+            "--format=%H\x1f%an\x1f%aI\x1f%s",
+        ])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git log failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git log error: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let commits: Vec<serde_json::Value> = stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|line| {
+            let parts: Vec<&str> = line.splitn(4, '\x1f').collect();
+            serde_json::json!({
+                "hash": parts.first().unwrap_or(&""),
+                "author": parts.get(1).unwrap_or(&""),
+                "date": parts.get(2).unwrap_or(&""),
+                "message": parts.get(3).unwrap_or(&""),
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "commits": commits, "workspace": repo }))
+}
+
+/// Read git worktrees for a local repo path.
+/// Equivalent to GET /api/worktrees?repo=<path>
+#[tauri::command]
+fn read_worktrees(repo: String) -> Result<serde_json::Value, String> {
+    let output = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git worktree list failed: {}", e))?;
+
+    if !output.status.success() {
+        return Ok(serde_json::json!({ "worktrees": [] }));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut worktrees: Vec<serde_json::Value> = Vec::new();
+    let mut path = String::new();
+    let mut head = String::new();
+    let mut branch = String::new();
+    let mut is_bare = false;
+
+    for line in stdout.lines() {
+        if line.starts_with("worktree ") {
+            // Flush previous entry
+            if !path.is_empty() {
+                worktrees.push(serde_json::json!({
+                    "path": path,
+                    "head": head,
+                    "branch": branch,
+                    "bare": is_bare,
+                }));
+            }
+            path = line[9..].to_string();
+            head.clear();
+            branch.clear();
+            is_bare = false;
+        } else if line.starts_with("HEAD ") {
+            head = line[5..].to_string();
+        } else if line.starts_with("branch ") {
+            branch = line[7..].trim_start_matches("refs/heads/").to_string();
+        } else if line == "bare" {
+            is_bare = true;
+        }
+    }
+    // Flush last entry
+    if !path.is_empty() {
+        worktrees.push(serde_json::json!({
+            "path": path,
+            "head": head,
+            "branch": branch,
+            "bare": is_bare,
+        }));
+    }
+
+    Ok(serde_json::json!({ "worktrees": worktrees }))
+}
+
+/// Read the current git branch for a repo.
+#[tauri::command]
+fn read_current_branch(repo: String) -> Result<serde_json::Value, String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git rev-parse failed: {}", e))?;
+
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(serde_json::json!({ "branch": branch }))
+}
+
+/// Read git status (changed files count) for a repo.
+#[tauri::command]
+fn read_git_status(repo: String) -> Result<serde_json::Value, String> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git status failed: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let changed_files: usize = stdout.lines().filter(|l| !l.is_empty()).count();
+    Ok(serde_json::json!({ "changedFiles": changed_files, "clean": changed_files == 0 }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
@@ -114,6 +262,11 @@ pub fn run() {
             start_ws_server,
             cortex_available,
             get_app_data_dir,
+            read_repos,
+            read_local_commits,
+            read_worktrees,
+            read_current_branch,
+            read_git_status,
         ])
         .setup(|app| {
             // ── System Tray ──

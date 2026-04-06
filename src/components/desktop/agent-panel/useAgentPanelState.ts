@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSharedDesktopWs } from '../hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '../hooks/useDesktopWebSocket';
 import { isTauri } from '@/lib/tauri/bridge';
+import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
@@ -321,7 +322,7 @@ export function useAgentPanelState({
 
     async function fetchCommits() {
       try {
-        const response = await fetch(`/api/panel/commits?repo=${encodeURIComponent(scopedRepo)}&limit=10`);
+        const response = await ipcFetch(`/api/panel/commits?repo=${encodeURIComponent(scopedRepo)}&limit=10`);
         if (!response.ok) return;
         const data = await response.json();
         const nextCommits = (data.commits ?? []).map((commit: { hash?: string; message?: string; date?: string }) => ({
