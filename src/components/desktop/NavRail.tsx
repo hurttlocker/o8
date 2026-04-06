@@ -100,7 +100,11 @@ const NEO_DARK = {
 };
 
 function getNeoPreset(useTauri: boolean) {
-  return useTauri ? NEO_LIGHT : NEO_DARK;
+  if (!useTauri) return NEO_DARK;
+  // In Tauri, respect the active theme — vibrancy + dark theme needs dark containers
+  const isDark = typeof document !== 'undefined'
+    && document.documentElement.getAttribute('data-theme') === 'dark';
+  return isDark ? NEO_DARK : NEO_LIGHT;
 }
 
 function neoIconStyle(active: boolean, useTauri = true): React.CSSProperties {
