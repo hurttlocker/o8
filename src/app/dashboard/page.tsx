@@ -6,6 +6,7 @@ import { isTauri, initMcpPlugin } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { ReactiveQueryProvider } from '@/lib/query/provider';
+import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
@@ -760,33 +761,23 @@ function DashboardInner() {
     updateAgents,
   } = useAlerts();
 
-  // ── Approval count for NavRail badge ──
-  const [approvalCount, setApprovalCount] = useState(0);
-  const [resolvedApprovalCount, setResolvedApprovalCount] = useState(0);
+  // ── Approval count — reactive query, invalidated by WS inbox/realtime events ──
+  const { data: approvalData } = useReactiveQuery<{ approvals?: ApprovalRecord[] }>({
+    queryKey: ['approvals', 'all'],
+    queryFn: async () => {
+      const res = await fetchOnce('/api/panel/approvals?status=all');
+      if (!res.ok) return { approvals: [] };
+      return await res.json() as { approvals?: ApprovalRecord[] };
+    },
+    wsEvents: ['inbox', 'realtime', 'lane-lifecycle'],
+    staleTime: 5_000,
+  });
+  const approvalCount = useMemo(() => (approvalData?.approvals ?? []).filter((a) => a.status === 'pending').length, [approvalData]);
+  const resolvedApprovalCount = useMemo(() => (approvalData?.approvals ?? []).filter((a) => a.status !== 'pending').length, [approvalData]);
   useEffect(() => {
-    let cancelled = false;
-
-    const fetchCount = () => {
-      fetchOnce('/api/panel/approvals?status=all')
-        .then((r) => r.json())
-        .then((data) => {
-          if (cancelled) return;
-          const approvals = (data.approvals ?? []) as ApprovalRecord[];
-          setApprovalCount(approvals.filter((approval) => approval.status === 'pending').length);
-          setResolvedApprovalCount(approvals.filter((approval) => approval.status !== 'pending').length);
-        })
-        .catch(() => {});
-    };
-
-    approvalRefreshRef.current = fetchCount;
-    // Keep a slower fallback poll in place; WS push handles the fast path.
-    const initTimer = setTimeout(() => { approvalRefreshRef.current(); }, 1_500);
-    const id = setInterval(() => { approvalRefreshRef.current(); }, 30_000);
-    return () => {
-      cancelled = true;
-      approvalRefreshRef.current = () => {};
-      clearTimeout(initTimer);
-      clearInterval(id);
+    approvalRefreshRef.current = () => {
+      // No-op — TanStack Query handles refetching via WS events now.
+      // Kept for compatibility with components that call approvalRefreshRef.current() directly.
     };
   }, []);
 
@@ -1763,26 +1754,22 @@ function DashboardInner() {
     resolvedApprovalCount,
   ]);
 
-  // ── Domain lane polling for reconciliation (deferred — not needed for first paint) ──
-  const [domainLanes, setDomainLanes] = useState<DomainLaneSummary[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await fetchOnce('/api/lanes?active=true');
-        if (!res.ok || cancelled) return;
-        const data = await res.json() as { lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null }> };
-        const summaries: DomainLaneSummary[] = (data.lanes ?? [])
-          .filter((l): l is typeof l & { packetId: string } => Boolean(l.packetId))
-          .map((l) => ({ laneId: l.id, packetId: l.packetId, status: l.status, sessionKey: l.sessionKey }));
-        if (!cancelled) setDomainLanes(summaries);
-      } catch { /* silent */ }
-    };
-    // Defer initial fetch — lane tab-sync poll covers the first few seconds
-    const initTimer = setTimeout(poll, 5_000);
-    const interval = setInterval(poll, 30_000);
-    return () => { cancelled = true; clearTimeout(initTimer); clearInterval(interval); };
-  }, []);
+  // ── Domain lanes — reactive query, invalidated by WS lane-lifecycle events ──
+  const { data: domainLanesRaw } = useReactiveQuery<{ lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null }> }>({
+    queryKey: ['lanes', 'active'],
+    queryFn: async () => {
+      const res = await fetchOnce('/api/lanes?active=true');
+      if (!res.ok) return { lanes: [] };
+      return await res.json() as { lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null }> };
+    },
+    wsEvents: ['lane-lifecycle', 'agent-lifecycle'],
+    staleTime: 10_000,
+  });
+  const domainLanes = useMemo<DomainLaneSummary[]>(() => {
+    return (domainLanesRaw?.lanes ?? [])
+      .filter((l): l is typeof l & { packetId: string } => Boolean(l.packetId))
+      .map((l) => ({ laneId: l.id, packetId: l.packetId, status: l.status, sessionKey: l.sessionKey }));
+  }, [domainLanesRaw]);
 
   useEffect(() => {
     if (!tileLayoutHydrated) return;
