@@ -205,6 +205,14 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
       const eventType = msg.event as string;
       const data = msg.data as Record<string, unknown> | undefined;
 
+      // Bridge WS events to window CustomEvents for TanStack Query invalidation.
+      // Any useReactiveQuery({ wsEvents: ['lane-lifecycle'] }) will hear this.
+      if (channel && channel !== 'system' && channel !== 'pong') {
+        window.dispatchEvent(new CustomEvent(`o8:${channel}`, {
+          detail: { channel, event: eventType, data },
+        }));
+      }
+
       switch (channel) {
         case 'system':
           if (eventType === 'connected') {
