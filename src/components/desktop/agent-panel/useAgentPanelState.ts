@@ -168,7 +168,7 @@ export function useAgentPanelState({
       try {
         const [inventoryResponse, workspacesResponse, reposResponse] = await Promise.all([
           fetch(`/api/runtime/inventory?fleetMode=${typeof window !== 'undefined' ? localStorage.getItem('cortex-ide-fleet-mode') ?? 'smart' : 'smart'}`).catch(() => null),
-          fetch('/api/panel/workspaces').catch(() => null),
+          fetchOnce('/api/panel/workspaces').catch(() => null),
           fetchOnce('/api/panel/repos').catch(() => null),
         ]);
 
