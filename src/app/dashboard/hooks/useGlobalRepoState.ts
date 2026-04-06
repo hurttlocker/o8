@@ -3,6 +3,7 @@ import type { NavSection } from '@/components/desktop/NavRail';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type {
@@ -110,7 +111,7 @@ export function useGlobalRepoState({
     }
     setSelectedRepoWorktreesLoading(true);
     try {
-      const response = await fetch(`/api/worktrees?repo=${encodeURIComponent(globalRepoEntry.localPath)}`);
+      const response = await ipcFetch(`/api/worktrees?repo=${encodeURIComponent(globalRepoEntry.localPath)}`);
       const data = await response.json() as RepoWorktreeSummary & { error?: string };
       if (!response.ok) {
         throw new Error(data.error || 'Unable to load worktree summary.');
@@ -257,7 +258,7 @@ export function useGlobalRepoState({
     async function fetchAllRepoWorktrees() {
       const entries = await Promise.all(globalRepoEntries.map(async (repo) => {
         try {
-          const response = await fetch(`/api/worktrees?repo=${encodeURIComponent(repo.localPath)}`);
+          const response = await ipcFetch(`/api/worktrees?repo=${encodeURIComponent(repo.localPath)}`);
           const data = await response.json() as RepoWorktreeSummary & { error?: string };
           return [repo.localPath, Array.isArray(data.worktrees) ? data.worktrees : []] as const;
         } catch {
