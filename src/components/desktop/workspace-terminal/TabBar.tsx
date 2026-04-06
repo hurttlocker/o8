@@ -140,8 +140,11 @@ export const TabBar = memo(function TabBar({
         >
           {tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
-            const primaryLabel = workspaceTabPrimaryLabel(tab);
+            const rawLabel = workspaceTabPrimaryLabel(tab);
             const chatTabMeta = describeWorkspaceChatTab(tab);
+            const primaryLabel = rawLabel === 'Chat' && chatTabMeta?.summary
+              ? chatTabMeta.summary
+              : rawLabel;
             const tabDetail = tab.orchestrationPacket
               ? (chatTabMeta?.detail ?? tab.orchestrationPacket.branchTarget ?? null)
               : (chatTabMeta?.summary ?? chatTabMeta?.detail ?? null);
