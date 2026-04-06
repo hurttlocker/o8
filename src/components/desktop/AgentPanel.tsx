@@ -78,6 +78,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       } as CSSProperties}
     >
       <div
+        suppressHydrationWarning
         style={{
           height: titlebarSpacerHeight,
           flexShrink: 0,
@@ -86,6 +87,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       />
 
       <div
+        suppressHydrationWarning
         style={{
           flex: 1,
           overflowY: 'auto',

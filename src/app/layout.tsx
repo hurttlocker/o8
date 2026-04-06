@@ -25,8 +25,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     ?? 'dev';
 
   return (
-    <html lang="en" style={{ background: '#1C1C1E' }}>
-      <body style={{ background: '#1C1C1E', margin: 0 }}>
+    <html lang="en" style={{ background: '#1C1C1E' }} suppressHydrationWarning>
+      <body style={{ background: '#1C1C1E', margin: 0 }} suppressHydrationWarning>
         <script
           dangerouslySetInnerHTML={{
             __html: `

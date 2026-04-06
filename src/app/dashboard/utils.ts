@@ -385,7 +385,7 @@ export function repoWorktreeDetail(summary: RepoWorktreeSummary | null) {
     `${activeCount} active`,
   ];
   if (staleCount > 0) parts.push(`${staleCount} stale`);
-  if (summary.conflicts.count > 0) parts.push(`${summary.conflicts.count} conflict${summary.conflicts.count === 1 ? '' : 's'}`);
+  if (summary.conflicts?.count > 0) parts.push(`${summary.conflicts.count} conflict${summary.conflicts.count === 1 ? '' : 's'}`);
   if (summary.totalDiskUsage > 0) parts.push(formatBytes(summary.totalDiskUsage));
   return parts.join(' · ');
 }

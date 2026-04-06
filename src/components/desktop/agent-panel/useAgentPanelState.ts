@@ -453,7 +453,8 @@ export function useAgentPanelState({
       : 'Commits, PRs, and CI runs stream here once a repo is attached.');
   const activitySummary = compactActivitySummaryLabel(latestEventSummary);
   const addRepoIntent = addRepoIntentNonce > 0 ? { nonce: addRepoIntentNonce } : null;
-  const titlebarSpacerHeight = isTauri() ? 38 : 10;
+  const [titlebarSpacerHeight, setTitlebarSpacerHeight] = useState(10);
+  useEffect(() => { if (isTauri()) setTitlebarSpacerHeight(38); }, []);
   const currentLaunchRepoPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : repoLocalPath;
 
   useEffect(() => {

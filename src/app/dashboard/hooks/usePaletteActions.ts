@@ -317,10 +317,10 @@ export function usePaletteActions({
         detail: selectedRepoWorktreesLoading
           ? `Checking worktree health for ${globalRepoEntry.name}…`
           : repoWorktreeDetail(selectedRepoWorktrees),
-        stateLabel: globalRepoEntry.readiness?.label ?? (selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe ? 'Blocked' : 'Ready'),
+        stateLabel: globalRepoEntry.readiness?.label ?? (selectedRepoWorktrees && !selectedRepoWorktrees.conflicts?.safe ? 'Blocked' : 'Ready'),
         stateTone: globalRepoEntry.readiness
           ? readinessTone(globalRepoEntry.readiness.state)
-          : selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe
+          : selectedRepoWorktrees && !selectedRepoWorktrees.conflicts?.safe
             ? 'red'
             : 'blue',
         keywords: ['create worktree', 'new workspace', 'workspace branch', globalRepoEntry.name],
@@ -328,12 +328,12 @@ export function usePaletteActions({
         run: () => openRepoWorkspaceModal(globalRepoEntry),
       });
 
-      if (selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe) {
+      if (selectedRepoWorktrees && !selectedRepoWorktrees.conflicts?.safe) {
         actions.push({
           id: 'workspace:review-worktree-conflicts',
           category: 'attention',
           title: `Blocked: ${globalRepoEntry.name} worktree conflicts`,
-          detail: `${selectedRepoWorktrees.conflicts.count} overlapping worktree file${selectedRepoWorktrees.conflicts.count === 1 ? '' : 's'} need operator attention before stacking more work.`,
+          detail: `${selectedRepoWorktrees.conflicts?.count} overlapping worktree file${selectedRepoWorktrees.conflicts?.count === 1 ? '' : 's'} need operator attention before stacking more work.`,
           stateLabel: 'Blocked',
           stateTone: 'red',
           keywords: ['worktree conflict', 'overlap', 'blocked', globalRepoEntry.name],
@@ -453,8 +453,8 @@ export function usePaletteActions({
           category: 'recovery',
           title: `Prune stale worktrees in ${globalRepoEntry.name}`,
           detail: `${staleSelectedRepoWorktrees.length} stale worktree${staleSelectedRepoWorktrees.length === 1 ? '' : 's'} will be removed. ${repoWorktreeDetail(selectedRepoWorktrees)}`,
-          stateLabel: selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe ? 'Blocked' : 'Ready',
-          stateTone: selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe ? 'red' : 'blue',
+          stateLabel: selectedRepoWorktrees && !selectedRepoWorktrees.conflicts?.safe ? 'Blocked' : 'Ready',
+          stateTone: selectedRepoWorktrees && !selectedRepoWorktrees.conflicts?.safe ? 'red' : 'blue',
           keywords: ['prune stale worktrees', 'cleanup worktrees', 'stale worktree', globalRepoEntry.name],
           priority: 345,
           run: async () => {

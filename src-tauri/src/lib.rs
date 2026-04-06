@@ -335,11 +335,15 @@ pub fn run() {
             }
 
             // ── Start bundled Next.js server ──
+            // Skip if port 3001 is already bound (beforeDevCommand started dev servers)
             let resource_dir = app.path().resource_dir().expect("failed to resolve resource dir");
             let server_dir = resource_dir.join("server");
             let server_js = server_dir.join("server.js");
+            let dev_server_running = std::net::TcpStream::connect("127.0.0.1:3001").is_ok();
 
-            if server_js.exists() {
+            if dev_server_running {
+                log::info!("Dev server already running on :3001 — skipping bundled servers");
+            } else if server_js.exists() {
                 // Use system Node.js (prerequisite)
                 let node_bin = "node".to_string();
 
@@ -374,7 +378,7 @@ pub fn run() {
 
             // ── Start WebSocket server (terminals, chat, git watcher) ──
             let ws_server = server_dir.join("ws-server.mjs");
-            if ws_server.exists() {
+            if !dev_server_running && ws_server.exists() {
                 let ws_node = "node".to_string();
                 log::info!("Starting WS server: {} {:?}", ws_node, ws_server);
                 match Command::new(&ws_node)
