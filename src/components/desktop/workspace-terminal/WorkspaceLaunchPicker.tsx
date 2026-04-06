@@ -122,13 +122,13 @@ function WorkspaceLaunchPickerBase({
             zIndex: 9000,
             marginTop: 4,
             minWidth: 220,
-            background: 'var(--t-panel-solid, var(--t-panel-translucent))',
-            backdropFilter: 'blur(24px) saturate(1.6)',
-            WebkitBackdropFilter: 'blur(24px) saturate(1.6)',
-            border: '1px solid var(--t-panel-border)',
+            background: 'var(--t-panel-solid, #1e2028)',
+            backdropFilter: 'blur(32px) saturate(1.3)',
+            WebkitBackdropFilter: 'blur(32px) saturate(1.3)',
+            border: '1px solid var(--t-panel-border, rgba(255, 255, 255, 0.1))',
             borderRadius: 10,
             overflow: 'hidden',
-            boxShadow: 'var(--t-panel-shadow)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.15)',
           } as CSSProperties}
         >
           {pickerStep === 'main' ? (
@@ -223,6 +223,10 @@ function WorkspaceLaunchPickerBase({
                   <span style={iconSlotStyle}>
                     {agent.id === 'shell' ? (
                       <TerminalIcon size={14} style={{ color: 'var(--t-text-muted)' }} />
+                    ) : agent.id === 'claude' ? (
+                      <ClaudeIcon size={18} />
+                    ) : agent.id === 'codex' ? (
+                      <CodexIcon size={18} />
                     ) : (
                       <AgentDot color={agent.color} size={10} />
                     )}
