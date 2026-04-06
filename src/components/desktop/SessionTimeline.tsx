@@ -12,13 +12,13 @@
  * For the product surface, do not fall back to mock activity.
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { lazy, Suspense, useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import { CortexTaskBoard } from './CortexTaskBoard';
+const CortexTaskBoard = lazy(() => import('./CortexTaskBoard').then(m => ({ default: m.CortexTaskBoard })));
 import type { FirstMergeCelebrationState } from '@/lib/ftux/first-merge';
 
 // ── Types ──
@@ -1529,10 +1529,12 @@ export function SessionTimeline({
               flex: 1,
               minHeight: 0,
             }}>
-              <CortexTaskBoard
-                repoPath={repoPath}
-                repoName={repoName}
-              />
+              <Suspense fallback={null}>
+                <CortexTaskBoard
+                  repoPath={repoPath}
+                  repoName={repoName}
+                />
+              </Suspense>
             </div>
           </div>
           {/* ── SVG Connector Line ── */}

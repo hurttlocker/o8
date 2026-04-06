@@ -30,12 +30,12 @@ import {
   Terminal,
   X,
 } from 'lucide-react';
-import { AuditLogPanel } from '@/components/desktop/AuditLogPanel';
-import { CommitViewer } from '@/components/desktop/CommitViewer';
-import { FileViewer } from '@/components/desktop/FileViewer';
-import { IssueCreator } from '@/components/desktop/IssueCreator';
-import { IssueViewer } from '@/components/desktop/IssueViewer';
-import { PRViewer } from '@/components/desktop/PRViewer';
+const AuditLogPanel = lazy(() => import('@/components/desktop/AuditLogPanel').then(m => ({ default: m.AuditLogPanel })));
+const CommitViewer = lazy(() => import('@/components/desktop/CommitViewer').then(m => ({ default: m.CommitViewer })));
+const FileViewer = lazy(() => import('@/components/desktop/FileViewer').then(m => ({ default: m.FileViewer })));
+const IssueCreator = lazy(() => import('@/components/desktop/IssueCreator').then(m => ({ default: m.IssueCreator })));
+const IssueViewer = lazy(() => import('@/components/desktop/IssueViewer').then(m => ({ default: m.IssueViewer })));
+const PRViewer = lazy(() => import('@/components/desktop/PRViewer').then(m => ({ default: m.PRViewer })));
 import {
   CanvasEmpty,
   CIViewer,
@@ -384,54 +384,56 @@ const TabContent = memo(function TabContent({
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
 }) {
-  switch (tab.kind) {
-    case 'issue':
-      return (
-        <IssueViewer
-          issueNumber={parseInt(tab.resourceId, 10)}
-          repo={tab.meta?.repo ?? selectedRepo ?? undefined}
-          onLaunchWorkspaceTask={onLaunchWorkspaceTask}
-        />
-      );
-    case 'transcript':
-      return <TranscriptViewer sessionKey={tab.resourceId} />;
-    case 'file':
-      return <FileViewer filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
-    case 'diff':
-      return <DiffViewer />;
-    case 'commit':
-      return <CommitViewer commitHash={tab.resourceId} workspace={tab.meta?.workspace} />;
-    case 'pr':
-      return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} onInjectChatContext={onInjectChatContext} />;
-    case 'readme':
-      return <ReadmeViewer workspace={tab.resourceId} />;
-    case 'ci':
-      return <CIViewer repo={tab.meta?.repo} initialRunId={tab.meta?.selectedRun ? parseInt(tab.meta.selectedRun, 10) : undefined} />;
-    case 'new-issue':
-      return <IssueCreator repo={tab.meta?.repo} />;
-    case 'git-log':
-      return <GitLogViewer workspace={tab.resourceId} onSelectCommit={onSelectCommit} />;
-    case 'image':
-      return <ImagePreview filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
-    case 'deploy':
-      return <DeployViewer project={tab.meta?.project} />;
-    case 'memory':
-      return (
-        <Suspense fallback={null}>
-          <LazyGraphExplorer3D />
-        </Suspense>
-      );
-    case 'welcome':
-      return <CanvasEmpty selectedRepo={selectedRepo} mode="welcome" />;
-    case 'timeline':
-      return <TimelineExpanded />;
-    case 'audit-log':
-      return <AuditLogPanel />;
-    case 'mermaid':
-      return <MermaidViewer code={tab.resourceId} />;
-    case 'preview':
-      return <PortPreview url={tab.resourceId} port={parseInt(tab.meta?.port ?? '0', 10)} repo={tab.meta?.repo} />;
-    default:
-      return <CanvasEmpty selectedRepo={selectedRepo} mode="idle" />;
-  }
+  return (
+    <Suspense fallback={null}>
+      {(() => {
+        switch (tab.kind) {
+          case 'issue':
+            return (
+              <IssueViewer
+                issueNumber={parseInt(tab.resourceId, 10)}
+                repo={tab.meta?.repo ?? selectedRepo ?? undefined}
+                onLaunchWorkspaceTask={onLaunchWorkspaceTask}
+              />
+            );
+          case 'transcript':
+            return <TranscriptViewer sessionKey={tab.resourceId} />;
+          case 'file':
+            return <FileViewer filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
+          case 'diff':
+            return <DiffViewer />;
+          case 'commit':
+            return <CommitViewer commitHash={tab.resourceId} workspace={tab.meta?.workspace} />;
+          case 'pr':
+            return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} onInjectChatContext={onInjectChatContext} />;
+          case 'readme':
+            return <ReadmeViewer workspace={tab.resourceId} />;
+          case 'ci':
+            return <CIViewer repo={tab.meta?.repo} initialRunId={tab.meta?.selectedRun ? parseInt(tab.meta.selectedRun, 10) : undefined} />;
+          case 'new-issue':
+            return <IssueCreator repo={tab.meta?.repo} />;
+          case 'git-log':
+            return <GitLogViewer workspace={tab.resourceId} onSelectCommit={onSelectCommit} />;
+          case 'image':
+            return <ImagePreview filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
+          case 'deploy':
+            return <DeployViewer project={tab.meta?.project} />;
+          case 'memory':
+            return <LazyGraphExplorer3D />;
+          case 'welcome':
+            return <CanvasEmpty selectedRepo={selectedRepo} mode="welcome" />;
+          case 'timeline':
+            return <TimelineExpanded />;
+          case 'audit-log':
+            return <AuditLogPanel />;
+          case 'mermaid':
+            return <MermaidViewer code={tab.resourceId} />;
+          case 'preview':
+            return <PortPreview url={tab.resourceId} port={parseInt(tab.meta?.port ?? '0', 10)} repo={tab.meta?.repo} />;
+          default:
+            return <CanvasEmpty selectedRepo={selectedRepo} mode="idle" />;
+        }
+      })()}
+    </Suspense>
+  );
 });
