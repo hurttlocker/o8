@@ -28,3 +28,4 @@ tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
 tauri-plugin-mcp = { path = "/Users/marquisehurtt/tauri-plugin-mcp" }
 window-vibrancy = "0.6"
+rusqlite = { version = "0.31", features = ["bundled"] }
