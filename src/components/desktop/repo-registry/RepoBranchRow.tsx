@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronRight, ExternalLink, PlayCircle } from 'lucide-react';
 import {
@@ -59,7 +60,7 @@ interface RepoBranchRowProps {
   setBranchDeleteConfirm: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
-export function RepoBranchRow({
+function RepoBranchRowBase({
   repo,
   branch,
   branchAgents,
@@ -784,3 +785,5 @@ export function RepoBranchRow({
     </div>
   );
 }
+
+export const RepoBranchRow = memo(RepoBranchRowBase);

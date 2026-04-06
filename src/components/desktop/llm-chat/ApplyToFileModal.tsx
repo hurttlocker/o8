@@ -1,4 +1,6 @@
-export function ApplyToFileModal({
+import { memo } from 'react';
+
+function ApplyToFileModalBase({
   applyFileIndex,
   applyFileSuggestions,
   applyModal,
@@ -89,3 +91,5 @@ export function ApplyToFileModal({
     </div>
   );
 }
+
+export const ApplyToFileModal = memo(ApplyToFileModalBase);

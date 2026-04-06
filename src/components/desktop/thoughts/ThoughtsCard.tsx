@@ -172,13 +172,17 @@ export function ThoughtsCard({
       }
     };
 
-    // Fetch immediately on open AND on WS reconnect (not just every 15s)
+    // Fetch immediately on open AND on WS reconnect
     pollApprovals();
-    if (approvalPollRef.current) clearInterval(approvalPollRef.current);
-    approvalPollRef.current = setInterval(pollApprovals, 15_000);
+    // WS-driven: instant refresh on inbox/realtime events instead of 15s polling
+    const handler = () => { pollApprovals(); };
+    const wsEvents = ['o8:inbox', 'o8:realtime', 'o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(pollApprovals, 120_000);
 
     return () => {
-      if (approvalPollRef.current) clearInterval(approvalPollRef.current);
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
     };
   }, [open, wsConnected]);
 

@@ -213,10 +213,13 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
     // Initial fetch
     void fetchIssues(false);
 
-    // Re-poll every 30s with fresh=1 so new issues appear automatically
-    const pollTimer = setInterval(() => { void fetchIssues(true); }, 30_000);
+    // WS-driven: instant refresh on lane events instead of 30s polling
+    const handler = () => { void fetchIssues(true); };
+    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(handler, 300_000);
 
-    return () => { cancelled = true; clearInterval(pollTimer); };
+    return () => { cancelled = true; clearInterval(fallbackId); for (const e of wsEvents) window.removeEventListener(e, handler); };
   }, [open, visible, workspaceTargets]);
 
   useEffect(() => {
@@ -263,14 +266,17 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
     };
 
     void fetchMissionCost();
-    const pollTimer = window.setInterval(() => {
-      void fetchMissionCost();
-    }, 30_000);
+    // WS-driven: refresh cost on lane events instead of 30s polling
+    const handler = () => { void fetchMissionCost(); };
+    const wsEvents = ['o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(handler, 300_000);
 
     return () => {
       cancelled = true;
       currentController?.abort();
-      window.clearInterval(pollTimer);
+      window.clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
     };
   }, [missionCostRefreshKey, missionState.packets.length, open, visible]);
 

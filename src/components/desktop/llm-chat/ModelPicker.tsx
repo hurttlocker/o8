@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
 import { MODELS, THEME_ACCENT, THEME_ACCENT_SOFT, THEME_PANEL_GLASS, type ModelOption } from './shared';
 
-export function ModelPicker({
+function ModelPickerBase({
   disabled,
   onSelect,
   selected,
@@ -87,3 +87,5 @@ export function ModelPicker({
     </div>
   );
 }
+
+export const ModelPicker = memo(ModelPickerBase);

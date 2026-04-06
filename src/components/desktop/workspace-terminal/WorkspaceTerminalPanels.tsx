@@ -1,6 +1,6 @@
 'use client';
 
-import { MutableRefObject, Suspense, lazy } from 'react';
+import { MutableRefObject, Suspense, lazy, memo } from 'react';
 import { Terminal as TerminalIcon } from 'lucide-react';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
@@ -44,7 +44,7 @@ interface WorkspaceTerminalPanelsProps {
   onLaunchWorkspaceTask?: (request: import('@/components/desktop/Canvas').CanvasRepoTaskLaunchRequest) => Promise<void>;
 }
 
-export function WorkspaceTerminalPanels({
+function WorkspaceTerminalPanelsBase({
   visibleTabs,
   effectiveActiveTabId,
   termWsConnected,
@@ -211,6 +211,8 @@ export function WorkspaceTerminalPanels({
     </div>
   );
 }
+
+export const WorkspaceTerminalPanels = memo(WorkspaceTerminalPanelsBase);
 
 function CanvasPanel({
   tab,

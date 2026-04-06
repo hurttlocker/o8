@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/set-state-in-effect, @next/next/no-img-element -- preserved from legacy Canvas.tsx extraction */
 
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { FileText, GitCommit, Globe } from 'lucide-react';
 import { MarkdownBody } from '@/components/desktop/MarkdownBody';
 import { formatAge } from '@/components/desktop/canvas-utils';
@@ -16,7 +16,7 @@ interface GitLogCommit {
   refs: { type: string; name: string }[];
 }
 
-export function GitLogViewer({
+function GitLogViewerBase({
   workspace,
   onSelectCommit,
 }: {
@@ -207,7 +207,9 @@ export function GitLogViewer({
   );
 }
 
-export function ImagePreview({ filePath, workspace }: { filePath: string; workspace?: string }) {
+export const GitLogViewer = memo(GitLogViewerBase);
+
+function ImagePreviewBase({ filePath, workspace }: { filePath: string; workspace?: string }) {
   const [imageData, setImageData] = useState<{
     type: string;
     dataUrl?: string;
@@ -320,6 +322,8 @@ export function ImagePreview({ filePath, workspace }: { filePath: string; worksp
   );
 }
 
+export const ImagePreview = memo(ImagePreviewBase);
+
 interface VercelDeploy {
   uid: string;
   name: string;
@@ -372,7 +376,7 @@ function deployIcon(state: string): string {
   }
 }
 
-export function DeployViewer({ project }: { project?: string }) {
+function DeployViewerBase({ project }: { project?: string }) {
   const [deploys, setDeploys] = useState<VercelDeploy[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -574,7 +578,9 @@ export function DeployViewer({ project }: { project?: string }) {
   );
 }
 
-export function ReadmeViewer({ workspace }: { workspace: string }) {
+export const DeployViewer = memo(DeployViewerBase);
+
+function ReadmeViewerBase({ workspace }: { workspace: string }) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -611,3 +617,5 @@ export function ReadmeViewer({ workspace }: { workspace: string }) {
     </div>
   );
 }
+
+export const ReadmeViewer = memo(ReadmeViewerBase);

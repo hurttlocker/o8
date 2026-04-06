@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FOCUS_REPO_SETUP_EVENT,
   OPEN_REPO_WORKSPACE_EVENT,
@@ -24,7 +24,7 @@ import {
 import { RepoRegistryList } from './RepoRegistryList';
 import { RepoRegistryModals } from './RepoRegistryModals';
 
-export function RepoRegistrySection({
+function RepoRegistrySectionBase({
   onSelectSession,
   onSelectPR,
   onReviewPR,
@@ -260,8 +260,15 @@ export function RepoRegistrySection({
         .catch(() => {});
     }
     fetchAgentBranches();
-    const id = setInterval(fetchAgentBranches, 30_000);
-    return () => clearInterval(id);
+    // WS-driven: instant refresh on agent events instead of 30s polling
+    const handler = () => { fetchAgentBranches(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchAgentBranches, 300_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [ideWorkspaceSessions]);
 
   // ── Port data for running indicators (#170) ──
@@ -281,8 +288,15 @@ export function RepoRegistrySection({
         .catch(() => {});
     }
     fetchPorts();
-    const id = setInterval(fetchPorts, 10_000);
-    return () => clearInterval(id);
+    // WS-driven: refresh on agent events instead of 10s polling
+    const handler = () => { fetchPorts(); };
+    const wsEvents = ['o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchPorts, 120_000); // 2min fallback
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, []);
 
   const resetAddModal = useCallback(() => {
@@ -728,3 +742,5 @@ export function RepoRegistrySection({
     </>
   );
 }
+
+export const RepoRegistrySection = memo(RepoRegistrySectionBase);

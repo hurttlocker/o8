@@ -1,6 +1,6 @@
 'use client';
 
-import type { CSSProperties, ReactNode } from 'react';
+import { memo, type CSSProperties, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, ChevronDown, Folder, GitCommit, GitPullRequest, Globe, Zap } from 'lucide-react';
 import { THEME_ACCENT, THEME_ACCENT_SOFT, shortRepoLabel } from './shared';
 import type { FeedFilter } from './types';
@@ -31,7 +31,7 @@ interface ActivityFeedControlsProps {
   onOpenPrs: (repo: string) => void;
 }
 
-export function ActivityFeedControls({
+function ActivityFeedControlsBase({
   repoLabel,
   repoPickerOpen,
   onToggleRepoPicker,
@@ -335,3 +335,5 @@ export function ActivityFeedControls({
     </div>
   );
 }
+
+export const ActivityFeedControls = memo(ActivityFeedControlsBase);

@@ -291,10 +291,14 @@ export function useAgentPanelState({
     };
 
     void fetchAll();
-    const intervalMs = wsConnected ? 120_000 : 60_000;
-    const id = setInterval(fetchAll, intervalMs);
+    // WS-driven: instant refresh on agent/lane events instead of 60-120s polling
+    const handler = () => { fetchNowRef.current?.(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchAll, 300_000); // 5min resilience fallback
     return () => {
-      clearInterval(id);
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [onAgentsUpdate, wsConnected]);
@@ -332,8 +336,15 @@ export function useAgentPanelState({
     }
 
     void fetchCommits();
-    const id = setInterval(fetchCommits, 120_000);
-    return () => clearInterval(id);
+    // WS-driven: refresh on agent events (agents produce commits)
+    const handler = () => { void fetchCommits(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchCommits, 300_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [effectiveScopedRepo]);
 
   useEffect(() => {
@@ -362,8 +373,15 @@ export function useAgentPanelState({
     }
 
     void fetchGitHub();
-    const id = setInterval(fetchGitHub, 300_000);
-    return () => clearInterval(id);
+    // WS-driven: refresh on lane events (lanes create PRs/issues)
+    const handler = () => { void fetchGitHub(); };
+    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchGitHub, 300_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [effectiveScopedRepo]);
 
   useEffect(() => {

@@ -1,10 +1,11 @@
+import { memo } from 'react';
 import { MessageSquare, PanelLeftClose, Star, Trash2 } from 'lucide-react';
 
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 
 import { THEME_ACCENT_SOFT, THEME_BG_CARD, type HistoryConversationItem } from './shared';
 
-export function HistorySidebar({
+function HistorySidebarBase({
   groupedHistory,
   historyItems,
   historyLoading,
@@ -111,3 +112,5 @@ export function HistorySidebar({
     </div>
   );
 }
+
+export const HistorySidebar = memo(HistorySidebarBase);

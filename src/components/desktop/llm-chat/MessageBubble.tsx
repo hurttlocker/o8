@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Bookmark, Brain, Check, ChevronRight, Copy, FileText, GitBranch, Loader2, Pencil, RefreshCw, Square, ThumbsDown, ThumbsUp, Trash2, Volume2, VolumeOff } from 'lucide-react';
 
 import { renderLLMMarkdown } from '../LLMMarkdown';
@@ -98,7 +98,7 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
   );
 }
 
-export function MessageBubble({
+function MessageBubbleBase({
   message,
   isLast,
   onRetry,
@@ -322,3 +322,5 @@ export function MessageBubble({
     </div>
   );
 }
+
+export const MessageBubble = memo(MessageBubbleBase);

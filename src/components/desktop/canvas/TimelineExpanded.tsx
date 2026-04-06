@@ -124,10 +124,15 @@ export function TimelineExpanded() {
       }
     };
     void fetchReplay();
-    const interval = setInterval(fetchReplay, 30_000);
+    // WS-driven: refresh on agent events instead of 30s polling
+    const handler = () => { void fetchReplay(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchReplay, 300_000);
     return () => {
       active = false;
-      clearInterval(interval);
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
     };
   }, []);
 

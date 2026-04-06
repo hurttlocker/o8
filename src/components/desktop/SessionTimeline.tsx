@@ -247,8 +247,15 @@ function useTimelineData() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 60_000); // refresh every 60s
-    return () => clearInterval(interval);
+    // WS-driven: instant refresh on agent events instead of 60s polling
+    const handler = () => { fetchData(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchData, 300_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [fetchData]);
 
   return { segments, windowMinutes, loading };
@@ -270,8 +277,15 @@ function useTimelineSessions() {
 
   useEffect(() => {
     void fetchSessions();
-    const interval = setInterval(fetchSessions, 30_000);
-    return () => clearInterval(interval);
+    // WS-driven: instant refresh on inbox/agent events instead of 30s polling
+    const handler = () => { void fetchSessions(); };
+    const wsEvents = ['o8:inbox', 'o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchSessions, 300_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [fetchSessions]);
 
   return sessions;

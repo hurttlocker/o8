@@ -242,7 +242,7 @@ export const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: {
   );
 });
 
-export function PortPreview({ url, port, repo }: { url: string; port: number; repo?: string }) {
+function PortPreviewBase({ url, port, repo }: { url: string; port: number; repo?: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -373,7 +373,9 @@ export function PortPreview({ url, port, repo }: { url: string; port: number; re
   );
 }
 
-export function CanvasEmpty({
+export const PortPreview = memo(PortPreviewBase);
+
+function CanvasEmptyBase({
   selectedRepo,
   mode = 'idle',
 }: {
@@ -730,3 +732,5 @@ export function CanvasEmpty({
     </div>
   );
 }
+
+export const CanvasEmpty = memo(CanvasEmptyBase);
