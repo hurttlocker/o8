@@ -1,6 +1,7 @@
 'use client';
 
-import React, { memo, useMemo, useState } from 'react';
+import React, { memo, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown, FolderOpen, SlidersHorizontal } from 'lucide-react';
 import { DesktopToolCallStack } from '../DesktopAgentMessage';
 import {
@@ -561,10 +562,30 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
     || Boolean(activityHeadline),
   );
 
+  // Virtualize the transcript list — only render visible groups + overscan buffer
+  const scrollElementRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: groupedTranscript.length,
+    getScrollElement: () => scrollElementRef.current,
+    estimateSize: () => 80,
+    overscan: 6,
+    getItemKey: (index) => groupedTranscript[index]?.id ?? String(index),
+  });
+
+  // Merge the external scrollRef with our internal ref
+  const setScrollRef = (el: HTMLDivElement | null) => {
+    scrollElementRef.current = el;
+    if (scrollRef && 'current' in scrollRef) {
+      (scrollRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+    }
+  };
+
+  const shouldVirtualize = groupedTranscript.length > 20;
+
   return (
     <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div
-        ref={scrollRef}
+        ref={setScrollRef}
         onScroll={handleScroll}
         className="remodex-message-stack"
         style={{
@@ -595,6 +616,56 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
             }}
           >
             This lane appears here as it starts working. Send the first note below and the panel will fill itself in.
+          </div>
+        ) : shouldVirtualize ? (
+          <div style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+            {virtualizer.getVirtualItems().map((virtualItem) => {
+              const group = groupedTranscript[virtualItem.index];
+              return (
+                <div
+                  key={virtualItem.key}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualItem.index}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  {group.kind !== 'agent' ? (
+                    group.entries.map((entry) => {
+                      const entryIndex = normalizedTranscript.findIndex((c) => c.id === entry.id);
+                      return (
+                        <Bubble
+                          key={entry.id}
+                          entry={entry}
+                          previousEntry={entryIndex > 0 ? normalizedTranscript[entryIndex - 1] : null}
+                          agentName={currentAgentName}
+                          isNew={getIsNewEntry(entry.id)}
+                          onOpenMermaid={onOpenMermaid}
+                          onRunInTerminal={onRunInTerminal}
+                        />
+                      );
+                    })
+                  ) : (
+                    <AgentTurnGroup
+                      group={group}
+                      previousGroup={virtualItem.index > 0 ? groupedTranscript[virtualItem.index - 1] : null}
+                      transcript={normalizedTranscript}
+                      currentAgentName={currentAgentName}
+                      getIsNewEntry={getIsNewEntry}
+                      onOpenMermaid={onOpenMermaid}
+                      onRunInTerminal={onRunInTerminal}
+                      onOpenDiff={onOpenDiff}
+                      onOpenFile={onOpenFile}
+                      currentWorkspace={currentWorkspace}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
           groupedTranscript.map((group, groupIndex) => {
