@@ -1,3 +1,4 @@
+use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::process::Command;
 use tauri::{
@@ -232,6 +233,211 @@ fn read_git_status(repo: String) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "changedFiles": changed_files, "clean": changed_files == 0 }))
 }
 
+// ── SQLite helper (read-only, WAL mode) ──
+
+fn open_cortex_db() -> Result<Connection, String> {
+    let db_path = format!("{}/cortex-ide.db", cortex_data_dir());
+    if !std::path::Path::new(&db_path).exists() {
+        return Err("db_not_found".to_string());
+    }
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = Connection::open_with_flags(&db_path, flags)
+        .map_err(|e| format!("Failed to open DB: {}", e))?;
+    conn.pragma_update(None, "journal_mode", "wal")
+        .map_err(|e| format!("Failed to set WAL: {}", e))?;
+    Ok(conn)
+}
+
+/// Read pending approvals from SQLite. Returns { approvals: [...] }.
+/// Equivalent to GET /api/panel/approvals (pending only, no session filter).
+#[tauri::command]
+fn read_approvals(status: Option<String>) -> Result<serde_json::Value, String> {
+    let conn = match open_cortex_db() {
+        Ok(c) => c,
+        Err(e) if e == "db_not_found" => {
+            return Ok(serde_json::json!({ "approvals": [] }));
+        }
+        Err(e) => return Err(e),
+    };
+
+    let filter_status = status.unwrap_or_else(|| "pending".to_string());
+    let use_filter = filter_status != "all";
+
+    let approvals: Vec<serde_json::Value> = if use_filter {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, source, runtime, agent, session_key, title, description, summary,
+                        tool_name, args_json, command, editable, diff_json, risk,
+                        metadata_json, packet_id, lane_id, policy_rule_id,
+                        status, created_at, updated_at, resolved_at,
+                        resolution_json, audit_json, fingerprint, continuation_json
+                 FROM approvals
+                 WHERE status = ?1
+                 ORDER BY created_at DESC",
+            )
+            .map_err(|e| format!("SQL prepare failed: {}", e))?;
+        let result: Vec<serde_json::Value> = stmt
+            .query_map(rusqlite::params![filter_status], |row| {
+                Ok(map_approval_row(row))
+            })
+            .map_err(|e| format!("Query failed: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    } else {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, source, runtime, agent, session_key, title, description, summary,
+                        tool_name, args_json, command, editable, diff_json, risk,
+                        metadata_json, packet_id, lane_id, policy_rule_id,
+                        status, created_at, updated_at, resolved_at,
+                        resolution_json, audit_json, fingerprint, continuation_json
+                 FROM approvals
+                 ORDER BY created_at DESC",
+            )
+            .map_err(|e| format!("SQL prepare failed: {}", e))?;
+        let result: Vec<serde_json::Value> = stmt
+            .query_map([], |row| Ok(map_approval_row(row)))
+            .map_err(|e| format!("Query failed: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+
+    Ok(serde_json::json!({ "approvals": approvals }))
+}
+
+fn map_approval_row(row: &rusqlite::Row) -> serde_json::Value {
+    let id: String = row.get(0).unwrap_or_default();
+    let source: String = row.get(1).unwrap_or_default();
+    let runtime: String = row.get(2).unwrap_or_default();
+    let agent: String = row.get(3).unwrap_or_default();
+    let session_key: String = row.get(4).unwrap_or_default();
+    let title: String = row.get(5).unwrap_or_default();
+    let description: String = row.get(6).unwrap_or_default();
+    let summary: String = row.get(7).unwrap_or_default();
+    let tool_name: Option<String> = row.get(8).ok();
+    let args_json: Option<String> = row.get(9).ok();
+    let command: Option<String> = row.get(10).ok();
+    let editable: Option<bool> = row.get(11).ok();
+    let diff_json: Option<String> = row.get(12).ok();
+    let risk: String = row.get(13).unwrap_or_default();
+    let metadata_json: Option<String> = row.get(14).ok();
+    let _packet_id: Option<String> = row.get::<_, Option<String>>(15).ok().flatten();
+    let _lane_id: Option<String> = row.get::<_, Option<String>>(16).ok().flatten();
+    let policy_rule_id: Option<String> = row.get(17).ok();
+    let status: String = row.get(18).unwrap_or_default();
+    let created_at: i64 = row.get(19).unwrap_or(0);
+    let updated_at: i64 = row.get(20).unwrap_or(0);
+    let resolved_at: Option<i64> = row.get(21).ok();
+    let resolution_json: Option<String> = row.get(22).ok();
+    let audit_json: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
+    let fingerprint: String = row.get(24).unwrap_or_default();
+    let continuation_json: Option<String> = row.get(25).ok();
+
+    let args = args_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    let diff = diff_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    let metadata = metadata_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    let resolution = resolution_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    let audit: serde_json::Value =
+        serde_json::from_str(&audit_json).unwrap_or(serde_json::json!([]));
+    let continuation = continuation_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+
+    serde_json::json!({
+        "id": id,
+        "source": source,
+        "runtime": runtime,
+        "agent": agent,
+        "sessionKey": session_key,
+        "title": title,
+        "description": description,
+        "summary": summary,
+        "toolName": tool_name,
+        "args": args,
+        "command": command,
+        "editable": editable,
+        "diff": diff,
+        "risk": risk,
+        "metadata": metadata,
+        "policyRuleId": policy_rule_id,
+        "status": status,
+        "createdAt": created_at,
+        "updatedAt": updated_at,
+        "resolvedAt": resolved_at,
+        "resolution": resolution,
+        "audit": audit,
+        "fingerprint": fingerprint,
+        "continuation": continuation,
+    })
+}
+
+/// Read watched agents from SQLite. Returns { workspaces: [...] }.
+/// Lightweight IPC snapshot of durable supervisor state.
+#[tauri::command]
+fn read_workspaces() -> Result<serde_json::Value, String> {
+    let conn = match open_cortex_db() {
+        Ok(c) => c,
+        Err(e) if e == "db_not_found" => {
+            return Ok(serde_json::json!({ "workspaces": [] }));
+        }
+        Err(e) => return Err(e),
+    };
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT surface_id, repo_path, name, prompt, registered_at,
+                    last_status, retry_count, steer_count,
+                    completion_reported, last_event_at, last_activity_at
+             FROM watched_agents
+             ORDER BY last_activity_at DESC",
+        )
+        .map_err(|e| format!("SQL prepare failed: {}", e))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            let surface_id: String = row.get(0).unwrap_or_default();
+            let repo_path: String = row.get(1).unwrap_or_default();
+            let name: String = row.get(2).unwrap_or_default();
+            let prompt: String = row.get(3).unwrap_or_default();
+            let registered_at: i64 = row.get(4).unwrap_or(0);
+            let last_status: String = row.get(5).unwrap_or_default();
+            let retry_count: i64 = row.get(6).unwrap_or(0);
+            let steer_count: i64 = row.get(7).unwrap_or(0);
+            let completion_reported: bool = row.get(8).unwrap_or(false);
+            let last_event_at: i64 = row.get(9).unwrap_or(0);
+            let last_activity_at: i64 = row.get(10).unwrap_or(0);
+
+            Ok(serde_json::json!({
+                "surfaceId": surface_id,
+                "repoPath": repo_path,
+                "name": name,
+                "prompt": prompt,
+                "registeredAt": registered_at,
+                "lastStatus": last_status,
+                "retryCount": retry_count,
+                "steerCount": steer_count,
+                "completionReported": completion_reported,
+                "lastEventAt": last_event_at,
+                "lastActivityAt": last_activity_at,
+            }))
+        })
+        .map_err(|e| format!("Query failed: {}", e))?;
+
+    let workspaces: Vec<serde_json::Value> = rows.filter_map(|r| r.ok()).collect();
+
+    Ok(serde_json::json!({ "workspaces": workspaces }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
@@ -267,6 +473,8 @@ pub fn run() {
             read_worktrees,
             read_current_branch,
             read_git_status,
+            read_approvals,
+            read_workspaces,
         ])
         .setup(|app| {
             // ── System Tray ──
