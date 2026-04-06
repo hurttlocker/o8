@@ -1179,8 +1179,15 @@ const ChangesTab = memo(function ChangesTab({
 
   useEffect(() => {
     void refreshFiles();
-    const id = window.setInterval(() => { void refreshFiles(); }, 20_000);
-    return () => window.clearInterval(id);
+    // WS-driven: instant refresh on agent/lane events instead of 20s polling
+    const handler = () => { void refreshFiles(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(() => { void refreshFiles(); }, 300_000);
+    return () => {
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.clearInterval(fallbackId);
+    };
   }, [refreshFiles]);
 
   useEffect(() => {
@@ -1379,10 +1386,15 @@ const FilesTab = memo(function FilesTab({
       }
     }
     void fetchTree();
-    const id = window.setInterval(() => { void fetchTree(); }, 30_000);
+    // WS-driven: instant refresh on agent/lane events instead of 30s polling
+    const handler = () => { void fetchTree(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(() => { void fetchTree(); }, 300_000);
     return () => {
       active = false;
-      window.clearInterval(id);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.clearInterval(fallbackId);
     };
   }, [workspaceQuery]);
 
@@ -1454,10 +1466,15 @@ const GitLogTab = memo(function GitLogTab({
     }
 
     void fetchLog();
-    const id = window.setInterval(() => { void fetchLog(); }, 45_000);
+    // WS-driven: instant refresh on agent/lane events instead of 45s polling
+    const handler = () => { void fetchLog(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(() => { void fetchLog(); }, 300_000);
     return () => {
       active = false;
-      window.clearInterval(id);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.clearInterval(fallbackId);
     };
   }, [repo?.localPath]);
 
@@ -1687,10 +1704,15 @@ const ReviewTab = memo(function ReviewTab({
       }
     }
     void fetchReview();
-    const id = window.setInterval(() => { void fetchReview(); }, 120_000); // 2 min — conserve GitHub rate limit
+    // WS-driven: instant refresh on lane/review events, 5min fallback (conserve GitHub rate limit)
+    const handler = () => { void fetchReview(); };
+    const wsEvents = ['o8:lane-lifecycle', 'o8:review'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(() => { void fetchReview(); }, 300_000);
     return () => {
       active = false;
-      window.clearInterval(id);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.clearInterval(fallbackId);
     };
   }, [reviewQuery, reviewReloadNonce]);
 
@@ -1728,10 +1750,15 @@ const ReviewTab = memo(function ReviewTab({
       }
     }
     void fetchChecks();
-    const id = window.setInterval(() => { void fetchChecks(); }, 45_000);
+    // WS-driven: instant refresh on lane events instead of 45s polling
+    const handler = () => { void fetchChecks(); };
+    const wsEvents = ['o8:lane-lifecycle', 'o8:review'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(() => { void fetchChecks(); }, 300_000);
     return () => {
       active = false;
-      window.clearInterval(id);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.clearInterval(fallbackId);
     };
   }, [repoSlug]);
 
@@ -1802,10 +1829,15 @@ const ReviewTab = memo(function ReviewTab({
       }
     }
     void fetchDeploys();
-    const id = window.setInterval(() => { void fetchDeploys(); }, 60_000);
+    // WS-driven: instant refresh on lane events instead of 60s polling
+    const handler = () => { void fetchDeploys(); };
+    const wsEvents = ['o8:lane-lifecycle', 'o8:review'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(() => { void fetchDeploys(); }, 300_000);
     return () => {
       active = false;
-      window.clearInterval(id);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.clearInterval(fallbackId);
     };
   }, [repo?.name, repoSlug]);
 
@@ -1890,10 +1922,15 @@ const ReviewTab = memo(function ReviewTab({
       }
     }
     void fetchPullRequestDetail();
-    const id = window.setInterval(() => { void fetchPullRequestDetail(); }, 45_000);
+    // WS-driven: instant refresh on lane/review events instead of 45s polling
+    const handler = () => { void fetchPullRequestDetail(); };
+    const wsEvents = ['o8:lane-lifecycle', 'o8:review'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(() => { void fetchPullRequestDetail(); }, 300_000);
     return () => {
       active = false;
-      window.clearInterval(id);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.clearInterval(fallbackId);
     };
   }, [currentPullRequest?.number, repoSlug, reviewReloadNonce]);
 
