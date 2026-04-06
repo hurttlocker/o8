@@ -13,6 +13,8 @@ import {
   type BranchAgent,
   type OrchestratorPacket,
   type RepoRegistryEntry,
+  CodexIcon,
+  ClaudeIcon,
 } from './shared';
 import { RepoBranchRow } from './RepoBranchRow';
 import type { RepoCardModel } from './useRepoCardModel';
@@ -221,15 +223,18 @@ function RepoCardExpandedContentBase({
                   {packet.title}
                 </span>
                 <span
+                  title={runtimeTone.label}
                   style={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: runtimeTone.color,
-                    letterSpacing: '-0.01em',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     flexShrink: 0,
+                    color: runtimeTone.color,
                   }}
                 >
-                  {runtimeTone.shortLabel}
+                  {packet.runtime === 'claude-code'
+                    ? <ClaudeIcon size={14} color={runtimeTone.color} />
+                    : <CodexIcon size={14} color={runtimeTone.color} />}
                 </span>
               </div>
             );
