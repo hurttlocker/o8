@@ -574,6 +574,20 @@ function RepoBranchRowBase({
                         >
                           {statusTone.label}
                         </span>
+                        <span
+                          title={agent.runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                            color: agent.runtime === 'claude-code' ? '#8b5cf6' : '#10b981',
+                          }}
+                        >
+                          {agent.runtime === 'claude-code'
+                            ? <ClaudeIcon size={16} color="#8b5cf6" />
+                            : <CodexIcon size={16} color="#10b981" />}
+                        </span>
                       </button>
                     );
                   })}
@@ -657,15 +671,9 @@ function RepoBranchRowBase({
                     padding: '4px 8px',
                   }}
                 >
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      background: agent.color,
-                      boxShadow: `0 0 10px ${agent.color}55`,
-                    }}
-                  />
+                  {agent.runtime === 'claude-code'
+                    ? <ClaudeIcon size={12} color={agent.color} />
+                    : <CodexIcon size={12} color={agent.color} />}
                   {agent.name}
                 </span>
               ))}
