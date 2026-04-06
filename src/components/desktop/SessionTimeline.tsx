@@ -15,6 +15,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
+import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { CortexTaskBoard } from './CortexTaskBoard';
@@ -266,7 +267,7 @@ function useTimelineSessions() {
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch('/api/mobile/inbox');
+      const res = await fetchOnce('/api/mobile/inbox');
       if (!res.ok) return;
       const data = await res.json() as MobileInboxSnapshot;
       setSessions(data.sessions ?? []);
