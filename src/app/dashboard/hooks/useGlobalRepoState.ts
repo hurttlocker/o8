@@ -236,10 +236,16 @@ export function useGlobalRepoState({
     if (!globalRepoEntry?.localPath) {
       return () => clearTimeout(initTimer);
     }
-    const intervalId = window.setInterval(() => {
-      void refreshSelectedRepoWorktrees();
-    }, 30_000);
-    return () => { clearTimeout(initTimer); window.clearInterval(intervalId); };
+    // WS-driven: instant refresh on lifecycle events instead of 30s polling
+    const handler = () => { void refreshSelectedRepoWorktrees(); };
+    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(handler, 300_000);
+    return () => {
+      clearTimeout(initTimer);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.clearInterval(fallbackId);
+    };
   }, [globalRepoEntry?.localPath, refreshSelectedRepoWorktrees, selectedRepoWorktreeRefreshNonce]);
 
   useEffect(() => {
@@ -263,11 +269,16 @@ export function useGlobalRepoState({
     }
     // Defer all-repo worktree scan — heavy operation, not needed for first paint
     const initTimer = setTimeout(() => { void fetchAllRepoWorktrees(); }, 4_000);
-    const intervalId = window.setInterval(() => { void fetchAllRepoWorktrees(); }, 60_000);
+    // WS-driven: instant refresh on lifecycle events instead of 60s polling
+    const handler = () => { void fetchAllRepoWorktrees(); };
+    const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = window.setInterval(handler, 300_000);
     return () => {
       active = false;
       clearTimeout(initTimer);
-      window.clearInterval(intervalId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.clearInterval(fallbackId);
     };
   }, [globalRepoEntries]);
 

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { AlertCircle, Eye, GitPullRequest, Pencil, Plus, Terminal, Trash2 } from 'lucide-react';
 
 import type { LLMMessage } from './shared';
@@ -13,7 +14,7 @@ function approvalVisual(toolName: string) {
   return { icon: <Eye size={14} />, title: 'Approval Required' };
 }
 
-export function ApprovalBanner({
+function ApprovalBannerBase({
   editedCommand,
   onApprovePending,
   onDenyPending,
@@ -99,3 +100,5 @@ export function ApprovalBanner({
     </div>
   );
 }
+
+export const ApprovalBanner = memo(ApprovalBannerBase);

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type React from 'react';
 
 import { IssueLinkPickerModal, type LinkedIssueRef } from '../IssueLinkPicker';
@@ -7,7 +8,7 @@ import { HistorySidebar } from './HistorySidebar';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import type { PreferredRepoContext } from './shared';
 
-export function LLMChatLayout(props: React.ComponentProps<typeof HistorySidebar> & React.ComponentProps<typeof ChatSurface> & React.ComponentProps<typeof Composer> & {
+function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & React.ComponentProps<typeof ChatSurface> & React.ComponentProps<typeof Composer> & {
   issuePickerOpen: boolean;
   linkedIssue?: LinkedIssueRef | null;
   onIssuePickerClose: () => void;
@@ -160,3 +161,5 @@ export function LLMChatLayout(props: React.ComponentProps<typeof HistorySidebar>
     </div>
   );
 }
+
+export const LLMChatLayout = memo(LLMChatLayoutBase);

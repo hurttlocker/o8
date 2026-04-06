@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { AlertCircle, SetupModeButton, type RepoRegistryEntry } from './shared';
 import type { RepoCardModel } from './useRepoCardModel';
 
@@ -8,7 +9,7 @@ interface RepoCardSettingsProps {
   model: Omit<RepoCardModel, 'cardRef'>;
 }
 
-export function RepoCardSettings({ repo, model }: RepoCardSettingsProps) {
+function RepoCardSettingsBase({ repo, model }: RepoCardSettingsProps) {
   const {
     settingsOpen,
     draftSetup,
@@ -291,3 +292,5 @@ export function RepoCardSettings({ repo, model }: RepoCardSettingsProps) {
     </div>
   );
 }
+
+export const RepoCardSettings = memo(RepoCardSettingsBase);

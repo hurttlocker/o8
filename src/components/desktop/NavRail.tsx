@@ -371,8 +371,15 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
         .catch(() => {});
     }
     fetchPorts();
-    const id = setInterval(fetchPorts, 10_000);
-    return () => clearInterval(id);
+    // WS-driven: refresh on agent events instead of 10s polling
+    const handler = () => { fetchPorts(); };
+    const wsEvents = ['o8:agent-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(fetchPorts, 120_000);
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, []);
 
   const showPopover = () => {

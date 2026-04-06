@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { ArrowRight, ExternalLink } from 'lucide-react';
 import {
   AlertCircle,
@@ -41,7 +41,7 @@ interface RepoCardHeaderProps {
   model: Omit<RepoCardModel, 'cardRef'>;
 }
 
-export function RepoCardHeader({
+function RepoCardHeaderBase({
   repo,
   agentsByBranch,
   activePorts,
@@ -658,3 +658,5 @@ export function RepoCardHeader({
     </>
   );
 }
+
+export const RepoCardHeader = memo(RepoCardHeaderBase);

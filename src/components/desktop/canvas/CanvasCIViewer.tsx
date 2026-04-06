@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/set-state-in-effect -- preserved from legacy Canvas.tsx extraction */
 
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { ExternalLink, GitPullRequest } from 'lucide-react';
 import { MarkdownBody } from '@/components/desktop/MarkdownBody';
 import { formatAge } from '@/components/desktop/canvas-utils';
@@ -79,7 +79,7 @@ function ciIcon(conclusion: string, status: string): string {
   return '○';
 }
 
-export function CIViewer({ repo, initialRunId }: { repo?: string; initialRunId?: number }) {
+function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: number }) {
   const [runs, setRuns] = useState<CIRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRun, setSelectedRun] = useState<number | null>(null);
@@ -537,3 +537,5 @@ export function CIViewer({ repo, initialRunId }: { repo?: string; initialRunId?:
     </div>
   );
 }
+
+export const CIViewer = memo(CIViewerBase);

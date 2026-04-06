@@ -220,8 +220,15 @@ export function AgentsTab() {
   useEffect(() => subscribeOrchestratorRuntimePreference(setOrchestratorRuntime), []);
 
   useEffect(() => {
-    const timer = setInterval(() => { void fetchFleet(); }, 30_000);
-    return () => clearInterval(timer);
+    // WS-driven: instant refresh on agent events instead of 30s polling
+    const handler = () => { void fetchFleet(); };
+    const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
+    for (const e of wsEvents) window.addEventListener(e, handler);
+    const fallbackId = setInterval(handler, 120_000); // 2min fallback
+    return () => {
+      clearInterval(fallbackId);
+      for (const e of wsEvents) window.removeEventListener(e, handler);
+    };
   }, [fetchFleet]);
 
   const handleInterrupt = useCallback(async (agent: FleetAgent) => {

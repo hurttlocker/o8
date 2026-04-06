@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   FolderOpen,
   THEME_ACCENT,
@@ -27,7 +27,7 @@ interface RepoCardExpandedContentProps {
   model: Omit<RepoCardModel, 'cardRef'>;
 }
 
-export function RepoCardExpandedContent({
+function RepoCardExpandedContentBase({
   repo,
   agentsByBranch,
   orchestratorPackets = [],
@@ -554,3 +554,5 @@ export function RepoCardExpandedContent({
     </div>
   );
 }
+
+export const RepoCardExpandedContent = memo(RepoCardExpandedContentBase);
