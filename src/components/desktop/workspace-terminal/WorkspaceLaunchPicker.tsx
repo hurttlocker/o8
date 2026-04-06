@@ -8,7 +8,7 @@ import {
   Radio,
   Terminal as TerminalIcon,
 } from 'lucide-react';
-import { CLI_AGENTS, THEME_ACCENT, THEME_ACCENT_SOFT, THEME_PANEL_GLASS } from '@/components/desktop/workspace-terminal/constants';
+import { CLI_AGENTS, THEME_ACCENT, THEME_ACCENT_SOFT } from '@/components/desktop/workspace-terminal/constants';
 import { AgentDot, PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
 import { CodexIcon, ClaudeIcon } from '@/components/desktop/repo-registry/shared';
 import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/types';
@@ -122,7 +122,7 @@ function WorkspaceLaunchPickerBase({
             zIndex: 9000,
             marginTop: 4,
             minWidth: 220,
-            background: THEME_PANEL_GLASS,
+            background: 'var(--t-panel-solid, var(--t-panel-translucent))',
             backdropFilter: 'blur(24px) saturate(1.6)',
             WebkitBackdropFilter: 'blur(24px) saturate(1.6)',
             border: '1px solid var(--t-panel-border)',

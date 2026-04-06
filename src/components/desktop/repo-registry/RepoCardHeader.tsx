@@ -27,6 +27,7 @@ import {
   type RepoRegistryEntry,
 } from './shared';
 import type { RepoCardModel } from './useRepoCardModel';
+import { useTheme } from '@/lib/theme/context';
 
 interface RepoCardHeaderProps {
   repo: RepoRegistryEntry;
@@ -53,6 +54,7 @@ function RepoCardHeaderBase({
   onReviewPR,
   model,
 }: RepoCardHeaderProps) {
+  const { themeId } = useTheme();
   const {
     cardWidth,
     hoveringHeader,
@@ -86,6 +88,12 @@ function RepoCardHeaderBase({
   const rowStatusLabel = activeWorktreeTone?.label ?? readinessDisplayLabel ?? null;
   const rowStatusColor = activeWorktreeTone?.color ?? readinessPalette?.color ?? 'var(--t-text-faint)';
   const rowStatusExplanation = activeWorktreeExplanation ?? readinessExplanation;
+  const darkHoverCardStyle = themeId === 'dark'
+    ? {
+        background: 'linear-gradient(180deg, rgba(68, 75, 85, 0.96) 0%, rgba(54, 60, 69, 0.94) 100%)',
+        boxShadow: '0 22px 56px rgba(0, 0, 0, 0.28), 0 8px 24px rgba(15, 23, 42, 0.12)',
+      }
+    : undefined;
   const showStatusInfo = Boolean(
     rowStatusLabel
     && rowStatusExplanation
@@ -461,12 +469,13 @@ function RepoCardHeaderBase({
             interactive
             onMouseEnter={holdPreviewHover}
             onMouseLeave={closePreviewHover}
+            style={darkHoverCardStyle}
             footer={prPreviewLoading ? null : (
               <>
                 {prPreview.length > 0 ? (
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <BlueGlassMetricPill label="Review" value={primaryPreview?.reviewDecision || 'pending'} color="#1d4ed8" />
-                    <BlueGlassMetricPill label="Files" value={String(primaryPreview?.changedFiles ?? 0)} color="rgba(15,23,42,0.78)" />
+                    <BlueGlassMetricPill label="Files" value={String(primaryPreview?.changedFiles ?? 0)} color="var(--t-text)" />
                     <BlueGlassMetricPill label="Risk" value={mergeRisk.label} color={mergeRisk.color} />
                   </div>
                 ) : null}
@@ -506,7 +515,7 @@ function RepoCardHeaderBase({
                   </div>
                 ) : null}
                 {repo.readiness?.summary ? (
-                  <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.76)' }}>
+                  <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
                     {repo.readiness.summary}
                   </div>
                 ) : null}
@@ -526,13 +535,13 @@ function RepoCardHeaderBase({
                         justifyContent: 'space-between',
                         gap: 8,
                         fontSize: 11,
-                        color: 'rgba(15, 23, 42, 0.7)',
+                        color: 'var(--t-text-muted)',
                       }}
                     >
                       <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{primaryPreview?.headRefName}</span>
                       <span>{primaryPreview ? formatRelativeTime(primaryPreview.createdAt) : null}</span>
                     </div>
-                    <div style={{ fontSize: 12, lineHeight: 1.5, color: 'rgba(15, 23, 42, 0.76)' }}>
+                    <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
                       {primaryPreview?.title}
                     </div>
                     {previewFailingChecks.length > 0 ? (
@@ -546,10 +555,10 @@ function RepoCardHeaderBase({
                             style={{
                               fontSize: 11,
                               lineHeight: 1.45,
-                              color: 'rgba(15, 23, 42, 0.76)',
+                              color: 'var(--t-text-secondary)',
                               padding: '6px 8px',
                               borderRadius: 10,
-                              background: 'rgba(255,255,255,0.28)',
+                              background: 'var(--t-panel-hover)',
                             }}
                           >
                             {check}
@@ -585,7 +594,7 @@ function RepoCardHeaderBase({
                       </div>
                     ) : null}
                     {prPreview.length > 1 ? (
-                      <div style={{ fontSize: 11, color: 'rgba(15, 23, 42, 0.62)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
                         {prPreview.length - 1} more open PR{prPreview.length - 1 === 1 ? '' : 's'} on this repo.
                       </div>
                     ) : null}
