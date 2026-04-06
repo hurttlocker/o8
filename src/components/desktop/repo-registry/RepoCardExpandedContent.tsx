@@ -233,8 +233,8 @@ function RepoCardExpandedContentBase({
                   }}
                 >
                   {packet.runtime === 'claude-code'
-                    ? <ClaudeIcon size={14} color={runtimeTone.color} />
-                    : <CodexIcon size={14} color={runtimeTone.color} />}
+                    ? <ClaudeIcon size={18} color={runtimeTone.color} />
+                    : <CodexIcon size={18} color={runtimeTone.color} />}
                 </span>
               </div>
             );
