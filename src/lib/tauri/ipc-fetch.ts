@@ -40,6 +40,15 @@ const IPC_ROUTES: Record<string, IpcRoute> = {
       repo: url.searchParams.get('repo') || '',
     }),
   },
+  '/api/panel/approvals': {
+    cmd: 'read_approvals',
+    parseArgs: (url) => ({
+      status: url.searchParams.get('status') || 'pending',
+    }),
+  },
+  '/api/panel/workspaces': {
+    cmd: 'read_workspaces',
+  },
 };
 
 // ── Typed invoke helper ──
