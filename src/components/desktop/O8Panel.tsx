@@ -8,6 +8,7 @@
  */
 
 import { useState } from 'react';
+import { O8ActivityPane } from './O8ActivityPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8ChangesPane } from './O8ChangesPane';
 import { O8FilesPane } from './O8FilesPane';
@@ -58,7 +59,15 @@ function IconGitPullRequest({ size = 16, color = '#e2e8f0' }: { size?: number; c
   );
 }
 
-export type O8Tab = 'changes' | 'browser' | 'files' | 'prs';
+function IconActivity({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  );
+}
+
+export type O8Tab = 'changes' | 'browser' | 'files' | 'prs' | 'activity';
 
 interface O8PanelProps {
   onClose: () => void;
@@ -73,6 +82,9 @@ interface O8PanelProps {
   browserUrl?: string | null;
   onActiveTabChange?: (tab: O8Tab) => void;
   commitSha?: string | null;
+  onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
+  onSelectPR?: (prNumber: number, repo?: string) => void;
+  onSelectIssue?: (issueNumber: number, repo?: string) => void;
 }
 
 // ── Tab Button ──
@@ -113,7 +125,7 @@ function O8TabButton({ icon, active, onClick, label }: {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl, onActiveTabChange, commitSha }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl, onActiveTabChange, commitSha, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
   const [internalActiveTab, setInternalActiveTab] = useState<O8Tab>('changes');
   const activeTab = externalTab ?? internalActiveTab;
 
@@ -148,6 +160,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'files'} onClick={() => handleTabChange('files')} label="Files" />
         <O8TabButton icon={(c) => <IconGitPullRequest size={16} color={c} />} active={activeTab === 'prs'} onClick={() => handleTabChange('prs')} label="PRs" />
         <O8TabButton icon={(c) => <IconGlobeSimple size={16} color={c} />} active={activeTab === 'browser'} onClick={() => handleTabChange('browser')} label="Browser" />
+        <O8TabButton icon={(c) => <IconActivity size={16} color={c} />} active={activeTab === 'activity'} onClick={() => handleTabChange('activity')} label="Activity" />
         <div style={{ flex: 1 }} />
         <button
           type="button"
@@ -188,6 +201,9 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8PRPane prNumber={prNumber} repo={prRepo ?? repoSlug} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'activity' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8ActivityPane repoSlug={repoSlug} onSelectCommit={onSelectCommit} onSelectPR={onSelectPR} onSelectIssue={onSelectIssue} />
       </div>
     </div>
   );
