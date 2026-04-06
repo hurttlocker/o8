@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-05
 
+- `312262c` perf: WS-driven invalidation for 18 polling loops + React.memo on 31 components (,)
 - `babfed3` perf: replace 2 polling loops with useReactiveQuery
 - `ce00a34` feat: TanStack Query + WS event bridge for reactive data layer
 - `fc0e122` refactor: decompose RepoRegistrySection.tsx into modules
