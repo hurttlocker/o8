@@ -315,12 +315,13 @@ export function FilesTabDropdown({
           minWidth: 120,
           padding: '4px',
           borderRadius: 10,
-          border: '1px solid var(--t-panel-border)',
-          background: 'rgba(255, 255, 255, 0.96)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(0,0,0,0.06)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          background: '#1e2028',
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.28), 0 1px 3px rgba(0,0,0,0.15)',
           zIndex: 100,
+          color: '#e2e8f0',
         } as React.CSSProperties}>
           {FILES_TAB_OPTIONS.map((option) => (
             <button
@@ -335,8 +336,8 @@ export function FilesTabDropdown({
                 padding: '6px 10px',
                 borderRadius: 6,
                 border: 'none',
-                background: activeTab === option.id ? 'var(--t-hover)' : 'transparent',
-                color: activeTab === option.id ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                background: activeTab === option.id ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                color: activeTab === option.id ? '#e2e8f0' : '#94a3b8',
                 fontSize: 11,
                 fontWeight: activeTab === option.id ? 600 : 500,
                 cursor: 'pointer',
@@ -504,11 +505,11 @@ export function ChatTargetSelector({
             maxWidth: 280,
             padding: 6,
             borderRadius: 12,
-            border: '1px solid var(--t-divider)',
-            background: THEME_PANEL_GLASS,
-            boxShadow: '0 14px 32px rgba(15, 23, 42, 0.18)',
-            backdropFilter: 'blur(18px)',
-            WebkitBackdropFilter: 'blur(18px)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            background: '#1e2028',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.28), 0 1px 3px rgba(0,0,0,0.15)',
+            backdropFilter: 'none',
+            WebkitBackdropFilter: 'none',
             zIndex: 30,
             display: 'flex',
             flexDirection: 'column',
@@ -533,17 +534,17 @@ export function ChatTargetSelector({
                   padding: '7px 8px',
                   borderRadius: 9,
                   border: 'none',
-                  background: selected ? 'var(--t-hover)' : 'transparent',
-                  color: 'var(--t-text)',
+                  background: selected ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                  color: '#e2e8f0',
                   cursor: 'pointer',
                   textAlign: 'left',
                 }}
               >
                 <MessageSquare size={12} strokeWidth={2} style={{ color: selected ? THEME_ACCENT : 'var(--t-text-faint)', marginTop: 1, flexShrink: 0 }} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text)' }}>{option.label}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#e2e8f0' }}>{option.label}</div>
                   {option.detail ? (
-                    <div style={{ marginTop: 2, fontSize: 10, color: 'var(--t-text-muted)' }}>
+                    <div style={{ marginTop: 2, fontSize: 10, color: '#94a3b8' }}>
                       {option.detail}
                     </div>
                   ) : null}
