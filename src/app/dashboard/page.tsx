@@ -4,7 +4,7 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isTauri, initMcpPlugin } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
-import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
+import { DesktopWebSocketProvider } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
@@ -14,17 +14,14 @@ import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
 // GraphExplorer3D lazy-loaded below
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
-import type { ApprovalRecord } from '@/lib/approvals/types';
 import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 import { ThemeProvider } from '@/lib/theme/context';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
-import { NavRail, type NavSection } from '@/components/desktop/NavRail';
+import { NavRail } from '@/components/desktop/NavRail';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
-import { readTimelineVisible, subscribeTimelineVisible } from '@/lib/appearance/timeline';
-import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
@@ -46,7 +43,6 @@ import {
   updateOrchestratorMissionState,
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
-import type { RealtimeEventEnvelope } from '@/lib/realtime/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import type {
   CanvasTileState,
@@ -84,8 +80,10 @@ import { useFtuxMilestones } from './hooks/useFtuxMilestones';
 import { useGlobalRepoState } from './hooks/useGlobalRepoState';
 import { useOrchestratorMission } from './hooks/useOrchestratorMission';
 import { usePaletteActions } from './hooks/usePaletteActions';
+import { useSessionState } from './hooks/useSessionState';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useTileLayout } from './hooks/useTileLayout';
+import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
 import { createTileRegistry } from './tileRegistry';
 
@@ -122,48 +120,10 @@ import {
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
 const DEFAULT_LEFT_PANEL_WIDTH = 240;
-const DEFAULT_RIGHT_PANEL_WIDTH = 280;
 const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
-const DEFAULT_O8_PANEL_WIDTH = 700;
 const MIN_O8_PANEL_WIDTH = 400;
 const MAX_O8_PANEL_WIDTH = 1200;
-
-function approvalInboxFingerprint(snapshot: MobileInboxSnapshot | null | undefined): string | null {
-  if (!snapshot) return null;
-
-  const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
-  const items = Array.isArray(snapshot.items) ? snapshot.items : [];
-  const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
-  const summaryApprovals = typeof snapshot.summary?.approvals === 'number' ? snapshot.summary.approvals : 0;
-
-  const pendingApprovals = approvals
-    .map((approval) => `${approval.id}:${approval.sessionKey}:${approval.createdAt}`)
-    .join('|');
-  const approvalItems = items
-    .filter((item) => item.kind === 'approval' || Boolean(item.approvalId))
-    .map((item) => `${item.id}:${item.approvalId ?? ''}:${item.sessionKey ?? ''}`)
-    .join('|');
-  const pendingSessions = sessions
-    .filter((session) => session.approvalStatus === 'pending')
-    .map((session) => `${session.sessionKey}:${session.lastEventAt ?? ''}`)
-    .join('|');
-
-  return `${summaryApprovals}:${pendingApprovals}:${approvalItems}:${pendingSessions}`;
-}
-
-function reviewPayloadTouchesApprovals(data: Record<string, unknown>): boolean {
-  const event = typeof data.event === 'string' ? data.event.toLowerCase() : '';
-  const kind = typeof data.kind === 'string' ? data.kind.toLowerCase() : '';
-  const title = typeof data.title === 'string' ? data.title.toLowerCase() : '';
-
-  return event.includes('approval')
-    || kind.includes('approval')
-    || title.includes('approval')
-    || typeof data.approvalId === 'string'
-    || typeof data.approvalStatus === 'string'
-    || typeof data.policyRuleId === 'string';
-}
 
 export default function DashboardPage() {
   return (
@@ -184,29 +144,53 @@ function DashboardInner() {
   useEffect(() => { setInTauri(isTauri()); initMcpPlugin(); }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
 
+  // ── Grouped state hooks ──
+  const uiChrome = useUIChrome();
+  const {
+    activeNavSection, setActiveNavSection,
+    settingsInitialTab,
+    showMemoryView, setShowMemoryView,
+    sidebarVisible, setSidebarVisible,
+    timelineVisible, setTimelineVisible,
+    alertTrayOpen, setAlertTrayOpen,
+    thoughtsOpen, setThoughtsOpen,
+    desktopDraftInjection, setDesktopDraftInjection,
+    thoughtsDraftInjection, setThoughtsDraftInjection,
+    mobileRemoteHref,
+    handleOpenSettingsTab,
+  } = uiChrome;
+
+  const session = useSessionState();
+  const {
+    activeSessionKey, setActiveSessionKey,
+    agentsJson, setAgentsJson,
+    activeWorkspace, setActiveWorkspace,
+    wsStatus,
+    approvalCount,
+    resolvedApprovalCount,
+    parsedAgents,
+    orchestratorRuntimeTruth,
+  } = session;
+
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
-  const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
-  const [o8Width, setO8Width] = useState(DEFAULT_O8_PANEL_WIDTH);
-  const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
-  const [liveOutputCollapsed, setLiveOutputCollapsed] = useState(false);
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
-  const [agentsJson, setAgentsJson] = useState('[]');
-  const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [workspaceLifecycleRecords, setWorkspaceLifecycleRecords] = useState<WorkspaceLifecycleRecordView[]>([]);
   const [workspaceLifecycleSummary, setWorkspaceLifecycleSummary] = useState<WorkspaceLifecycleSummaryView>({
     unreadCount: 0,
     archivedCount: 0,
     nextAttentionWorkspaceId: null,
   });
-  const [showMemoryView, setShowMemoryView] = useState(false);
-  const [alertTrayOpen, setAlertTrayOpen] = useState(false);
-  const [activeNavSection, setActiveNavSection] = useState<NavSection>('agents');
-  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('connectors');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
+  const {
+    handleThoughtsMissionStateChange,
+    scheduleThoughtsMissionPersist,
+    setThoughtsMissionState,
+    thoughtsMissionState,
+  } = useOrchestratorMission();
+  // ── Right panel + workspace side panel state (tightly coupled to callbacks, kept inline) ──
   const [chatVisible, setChatVisible] = useState(true);
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('review');
+  const [rightWidth, setRightWidth] = useState(280);
+  const [o8Width, setO8Width] = useState(700);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>('changes');
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
@@ -223,57 +207,11 @@ function DashboardInner() {
   const [workspaceSidePanelCompactReview, setWorkspaceSidePanelCompactReview] = useState(false);
   const [workspaceSidePanelActivationKey, setWorkspaceSidePanelActivationKey] = useState(0);
   const [workspaceChatTargetKeyByRepoPath, setWorkspaceChatTargetKeyByRepoPath] = useState<Record<string, string>>({});
-  const [thoughtsOpen, setThoughtsOpen] = useState(false);
-  const {
-    handleThoughtsMissionStateChange,
-    scheduleThoughtsMissionPersist,
-    setThoughtsMissionState,
-    thoughtsMissionState,
-  } = useOrchestratorMission();
+  const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
+
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
-  const [mobileRemoteHref, setMobileRemoteHref] = useState('/mobile');
-  const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
   const lastMarkedWorkspaceReadRef = useRef<string>('');
-  const approvalRefreshRef = useRef<() => void>(() => {});
-  const lastApprovalInboxFingerprintRef = useRef<string | null>(null);
-
-  const triggerApprovalRefreshFromInbox = useCallback((snapshot: MobileInboxSnapshot | null | undefined) => {
-    const nextFingerprint = approvalInboxFingerprint(snapshot);
-    if (nextFingerprint === null) return;
-    if (lastApprovalInboxFingerprintRef.current === null) {
-      lastApprovalInboxFingerprintRef.current = nextFingerprint;
-      return;
-    }
-    if (lastApprovalInboxFingerprintRef.current === nextFingerprint) return;
-    lastApprovalInboxFingerprintRef.current = nextFingerprint;
-    approvalRefreshRef.current();
-  }, []);
-
-  const approvalWsCallbacks = useMemo(() => ({
-    onInboxUpdate: (data: Record<string, unknown>) => {
-      triggerApprovalRefreshFromInbox(data as unknown as MobileInboxSnapshot);
-    },
-    onReviewUpdate: (data: Record<string, unknown>) => {
-      if (reviewPayloadTouchesApprovals(data)) {
-        approvalRefreshRef.current();
-      }
-    },
-    onRealtimeEvent: (event: RealtimeEventEnvelope) => {
-      if (event.channel !== 'mobile' || event.event !== 'mobile.inbox.snapshot') return;
-      const payload = event.data as { inbox?: MobileInboxSnapshot };
-      triggerApprovalRefreshFromInbox(payload.inbox);
-    },
-  }), [triggerApprovalRefreshFromInbox]);
-
-  const { connectionState: wsStatus } = useSharedDesktopWs(undefined, approvalWsCallbacks);
-
-  useEffect(() => subscribeTimelineVisible(setTimelineVisible), []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    setMobileRemoteHref(`${window.location.origin}/mobile`);
-  }, []);
 
   const {
     activeFtuxMilestone,
@@ -748,14 +686,6 @@ function DashboardInner() {
     void refreshWorkspaceLifecycle();
   }, [refreshWorkspaceLifecycle, wsStatus]);
 
-  const handleOpenSettingsTab = useCallback((tab: SettingsTab) => {
-    setShowMemoryView(false);
-    setSettingsInitialTab(tab);
-    setActiveNavSection('settings');
-  }, []);
-  const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
-  const [thoughtsDraftInjection, setThoughtsDraftInjection] = useState<{ id: string; text: string } | null>(null);
-
   // ── Alert system ──
   const {
     alerts: activeAlerts,
@@ -766,47 +696,6 @@ function DashboardInner() {
     dismissAll,
     updateAgents,
   } = useAlerts();
-
-  // ── Approval count — reactive query, invalidated by WS inbox/realtime events ──
-  const { data: approvalData } = useReactiveQuery<{ approvals?: ApprovalRecord[] }>({
-    queryKey: ['approvals', 'all'],
-    queryFn: async () => {
-      const res = await fetchOnce('/api/panel/approvals?status=all');
-      if (!res.ok) return { approvals: [] };
-      return await res.json() as { approvals?: ApprovalRecord[] };
-    },
-    wsEvents: ['inbox', 'realtime', 'lane-lifecycle'],
-    staleTime: 5_000,
-  });
-  const approvalCount = useMemo(() => (approvalData?.approvals ?? []).filter((a) => a.status === 'pending').length, [approvalData]);
-  const resolvedApprovalCount = useMemo(() => (approvalData?.approvals ?? []).filter((a) => a.status !== 'pending').length, [approvalData]);
-  useEffect(() => {
-    approvalRefreshRef.current = () => {
-      // No-op — TanStack Query handles refetching via WS events now.
-      // Kept for compatibility with components that call approvalRefreshRef.current() directly.
-    };
-  }, []);
-
-  // ── Cmd+J to toggle Thoughts Card ──
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isEditable = Boolean(
-        target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]'),
-      );
-      if (isEditable) return;
-
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
-        e.preventDefault();
-        setThoughtsOpen(v => !v);
-      }
-      if (e.key === 'Escape') {
-        setThoughtsOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
 
   const launchOrchestrationPacket = useCallback(async (packet: OrchestratorPacket): Promise<OrchestratorLaneBinding | null> => {
     if (packet.lane) {
@@ -1638,13 +1527,6 @@ function DashboardInner() {
     document.addEventListener('mouseup', onUp);
   }, [o8Width]);
 
-  const parsedAgents = useMemo(() => {
-    try {
-      return JSON.parse(agentsJson) as PaletteAgentSummary[];
-    } catch {
-      return [] as PaletteAgentSummary[];
-    }
-  }, [agentsJson]);
   const firstFileChangeCandidate = useMemo(() => {
     const source = parsedAgents.find((agent) => (
       Boolean(agent.activity?.filePath)
@@ -1667,20 +1549,6 @@ function DashboardInner() {
     () => Array.from(lifecycleEvents.values()).some((entry) => entry.state === 'completed'),
     [lifecycleEvents],
   );
-  const orchestratorRuntimeTruth = useMemo<OrchestratorRuntimeTruth[]>(
-    () => parsedAgents
-      .filter((agent) => agent.sessionKey && (agent.runtime === 'codex' || agent.runtime === 'claude-code'))
-      .map((agent) => ({
-        sessionKey: agent.sessionKey!,
-        runtime: agent.runtime === 'claude-code' ? 'claude-code' : 'codex',
-        status: agent.status ?? 'idle',
-        currentTask: agent.currentTask ?? null,
-        lastEventAt: agent.lastEventAt ?? null,
-        workflowStageLabel: null,
-      })),
-    [parsedAgents],
-  );
-
   useEffect(() => {
     if (
       ftuxDormant
