@@ -1,0 +1,160 @@
+'use client';
+
+import { useState } from 'react';
+import { X } from 'lucide-react';
+import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
+import type { WorkspacePanelTabId, WorkspaceSidePanelRepo, WorkspaceSidePanelView, WorkspaceChatTargetOption } from './types';
+import { shortenPath, PanelTab, FilesTabDropdown } from './shared';
+import { ChangesTab } from './ChangesTab';
+import { FilesTab } from './FilesTab';
+import { GitLogTab } from './GitLogTab';
+import { ReviewTab } from './ReviewTab';
+
+export function WorkspaceSidePanel({
+  view,
+  repo,
+  onClearView,
+  onOpenFile,
+  preferredPullRequestNumber,
+  compactReview,
+  chatTargetLabel,
+  chatTargets,
+  selectedChatTargetKey,
+  onSelectChatTarget,
+  onInjectChatContext,
+  onOpenPullRequest,
+  onDeepReviewPullRequest,
+  onExpandReviewRail,
+  onSelectCommit,
+}: {
+  view: WorkspaceSidePanelView;
+  repo: WorkspaceSidePanelRepo | null;
+  onClearView: () => void;
+  onOpenFile: (path: string, repo: WorkspaceSidePanelRepo | null) => void;
+  preferredPullRequestNumber?: number | null;
+  compactReview?: boolean;
+  chatTargetLabel?: string | null;
+  chatTargets?: WorkspaceChatTargetOption[];
+  selectedChatTargetKey?: string | null;
+  onSelectChatTarget?: (sessionKey: string) => void;
+  onInjectChatContext?: (payload: AgentPanelChatInjectionPayload, repo: WorkspaceSidePanelRepo | null) => void;
+  onOpenPullRequest?: (prNumber: number, repo?: string) => void;
+  onDeepReviewPullRequest?: (prNumber: number, repo?: string) => void;
+  onExpandReviewRail?: () => void;
+  onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<WorkspacePanelTabId>(() => (
+    view === 'review'
+      ? 'review'
+      : view === 'git-log'
+        ? 'git-log'
+        : 'changes'
+  ));
+
+  if (view === 'blank') {
+    return (
+      <div
+        aria-label="Workspace side panel"
+        style={{
+          flex: 1,
+          background: 'var(--t-bg-gradient)',
+        }}
+      />
+    );
+  }
+
+  const headerScopeSubtitle = repo
+    ? [
+        repo.branch ? (repo.isWorktree ? `${repo.branch} \u00B7 worktree` : repo.branch) : null,
+        shortenPath(repo.localPath),
+      ].filter((value): value is string => Boolean(value)).join(' \u00B7 ')
+    : 'Workspace side panel';
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'transparent',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 12px',
+          borderBottom: '0.5px solid rgba(0, 0, 0, 0.04)',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{repo?.name ?? 'Workspace'}</div>
+          <div style={{ marginTop: 2, fontSize: 11, color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {headerScopeSubtitle}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClearView}
+          title="Clear workspace panel"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 26,
+            height: 26,
+            borderRadius: 8,
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--t-text-secondary)',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <X size={12} />
+        </button>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '8px 10px',
+          borderBottom: '1px solid var(--t-divider-subtle)',
+          flexShrink: 0,
+        }}
+      >
+        <FilesTabDropdown
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+        />
+        <PanelTab active={activeTab === 'review'} label="Review" onClick={() => setActiveTab('review')} />
+        <PanelTab active={activeTab === 'git-log'} label="Git Log" onClick={() => setActiveTab('git-log')} />
+      </div>
+
+      {activeTab === 'changes' ? <ChangesTab repo={repo} onOpenFile={onOpenFile} /> : null}
+      {activeTab === 'files' ? <FilesTab repo={repo} mode="all" onOpenFile={onOpenFile} /> : null}
+      {activeTab === 'env' ? <FilesTab repo={repo} mode="env" onOpenFile={onOpenFile} /> : null}
+      {activeTab === 'review' ? (
+        <ReviewTab
+          repo={repo}
+          preferredPullRequestNumber={preferredPullRequestNumber}
+          compactReview={compactReview}
+          chatTargetLabel={chatTargetLabel}
+          chatTargets={chatTargets}
+          selectedChatTargetKey={selectedChatTargetKey}
+          onSelectChatTarget={onSelectChatTarget}
+          onInjectChatContext={onInjectChatContext}
+          onOpenPullRequest={onOpenPullRequest}
+          onDeepReviewPullRequest={onDeepReviewPullRequest}
+          onExpandReviewRail={onExpandReviewRail}
+        />
+      ) : null}
+      {activeTab === 'git-log' ? <GitLogTab repo={repo} onSelectCommit={onSelectCommit} /> : null}
+    </div>
+  );
+}
