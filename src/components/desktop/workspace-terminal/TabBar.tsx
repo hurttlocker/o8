@@ -12,6 +12,7 @@ import {
 } from '@/components/desktop/workspace-terminal/icons';
 import { WorkspaceLaunchPicker } from '@/components/desktop/workspace-terminal/WorkspaceLaunchPicker';
 import { describeWorkspaceChatTab, workspaceTabPrimaryLabel } from '@/components/desktop/workspace-terminal/utils';
+import { CodexIcon, ClaudeIcon } from '@/components/desktop/repo-registry/shared';
 
 interface TabBarProps {
   tabs: TerminalTab[];
@@ -181,6 +182,11 @@ export const TabBar = memo(function TabBar({
               >
                 {tab.unseen ? (
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#2563eb', flexShrink: 0 }} />
+                ) : null}
+                {tab.chatRuntime === 'claude-code' ? (
+                  <ClaudeIcon size={14} />
+                ) : tab.chatRuntime === 'codex' ? (
+                  <CodexIcon size={14} />
                 ) : null}
                 <span
                   style={{
