@@ -5,8 +5,11 @@
  * The UI and API layer talk to the registry, never to a specific runtime.
  */
 
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import type { AgentRuntime, RuntimeId, RuntimeSession } from './types';
+
+const execAsync = promisify(exec);
 
 const runtimes = new Map<RuntimeId, AgentRuntime>();
 
@@ -65,23 +68,27 @@ export async function discoverAllSessions(): Promise<RuntimeSession[]> {
     .flatMap((r) => r.value);
 
   // Auto-clean: hide completed/idle sessions whose branch was merged/deleted (#503)
-  return sessions.filter((session) => {
-    if (session.status !== 'completed' && session.status !== 'idle') return true;
-    if (!session.branch || session.branch === 'main' || session.branch === 'master') return true;
-    if (session.ownership === 'owned') return true; // keep user-started sessions
-    if (!session.cwd) return true;
-    try {
-      const branches = execSync('git branch --list', { cwd: session.cwd, timeout: 2000, encoding: 'utf-8' });
-      const branchExists = branches.split('\n').some((line) => line.trim().replace(/^\* /, '') === session.branch);
-      if (!branchExists) {
-        console.log(`[runtime-registry] Auto-cleaning session ${session.sessionKey} — branch "${session.branch}" no longer exists`);
-        return false;
+  // Use async exec to avoid blocking the event loop with git subprocess calls
+  const keepFlags = await Promise.all(
+    sessions.map(async (session) => {
+      if (session.status !== 'completed' && session.status !== 'idle') return true;
+      if (!session.branch || session.branch === 'main' || session.branch === 'master') return true;
+      if (session.ownership === 'owned') return true;
+      if (!session.cwd) return true;
+      try {
+        const { stdout } = await execAsync('git branch --list', { cwd: session.cwd, timeout: 2000 });
+        const branchExists = stdout.split('\n').some((line) => line.trim().replace(/^\* /, '') === session.branch);
+        if (!branchExists) {
+          console.log(`[runtime-registry] Auto-cleaning session ${session.sessionKey} — branch "${session.branch}" no longer exists`);
+          return false;
+        }
+      } catch {
+        // git failed — keep the session rather than hiding it
       }
-    } catch {
-      // git failed — keep the session rather than hiding it
-    }
-    return true;
-  });
+      return true;
+    }),
+  );
+  return sessions.filter((_, i) => keepFlags[i]);
 }
 
 /**

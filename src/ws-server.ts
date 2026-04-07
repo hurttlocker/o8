@@ -1173,6 +1173,14 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
     }
 
     broadcastRealtimeEvents(events);
+
+    // #476 — Prune stale history fingerprint entries for sessions no longer in fleet
+    if (lastRealtimeFingerprint.history.size > 50) {
+      const liveKeys = new Set(snapshot.fleet.agents.map((a: { sessionKey: string }) => a.sessionKey));
+      for (const key of lastRealtimeFingerprint.history.keys()) {
+        if (!liveKeys.has(key)) lastRealtimeFingerprint.history.delete(key);
+      }
+    }
   } catch (error) {
     console.error('[ws-server] realtime global snapshot failed:', error instanceof Error ? error.message : 'unknown');
   }
@@ -2873,7 +2881,9 @@ async function bootstrapWsServer() {
     // ── Start Agent Supervisor ──
     const supervisorCallbacks: SupervisorCallbacks = {
       async fetchFleetStatus() {
-        const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+        // #476 — Use cached inventory (15s TTL) instead of forcing fresh discovery every 5s.
+        // The supervisor only needs to detect status changes, not millisecond-fresh data.
+        const snapshot = await getRuntimeInventorySnapshot();
         return (snapshot.agents ?? [])
           .filter((agent) => agent.runtime === 'codex' || agent.runtime === 'claude-code')
           .map((a) => ({
