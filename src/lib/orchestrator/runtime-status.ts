@@ -21,8 +21,11 @@ export function normalizeRuntimeStatusToOrchestratorStatus(
   if (normalized === 'reviewing') {
     return 'awaiting_review';
   }
-  if (normalized === 'blocked' || normalized === 'failed' || normalized === 'error') {
+  if (normalized === 'blocked' || normalized === 'error') {
     return 'blocked';
+  }
+  if (normalized === 'failed') {
+    return 'failed';
   }
   if (normalized === 'queued') {
     return 'queued';
