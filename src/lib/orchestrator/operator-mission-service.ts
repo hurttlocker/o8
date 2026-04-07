@@ -96,6 +96,11 @@ function slugify(value: string, maxLength = 48) {
   return slug.slice(0, maxLength) || 'work';
 }
 
+/** Inline/ad-hoc issues use synthetic numbers starting at 90001 and have no URL. */
+function isInlineIssue(issue: LoadedIssue) {
+  return !issue.url && issue.number >= 90001;
+}
+
 function ensureRepoPath(repoPath: string) {
   const normalized = repoPath.trim();
   if (!normalized) {
@@ -146,11 +151,16 @@ function extractIssueDependencies(body: string, availableIssueNumbers: Set<numbe
 
 function buildMissionPrompt(issues: LoadedIssue[], repoPath: string, constraints: string) {
   const repoName = basename(repoPath);
+  const hasInline = issues.some(isInlineIssue);
   return [
     `Sprint mission for ${repoName}.`,
     '',
-    'Issues:',
-    ...issues.map((issue) => `- #${issue.number}: ${issue.title}`),
+    hasInline ? 'Tasks:' : 'Issues:',
+    ...issues.map((issue, index) =>
+      isInlineIssue(issue)
+        ? `- inline-${index + 1}: ${issue.title}`
+        : `- #${issue.number}: ${issue.title}`,
+    ),
     constraints ? '' : null,
     constraints ? `Constraints: ${constraints}` : null,
   ].filter((value): value is string => Boolean(value)).join('\n');
@@ -158,13 +168,18 @@ function buildMissionPrompt(issues: LoadedIssue[], repoPath: string, constraints
 
 function buildMissionSummary(issues: LoadedIssue[], repoPath: string) {
   const repoName = basename(repoPath);
-  return `Sprint mission for ${repoName} with ${issues.length} issue${issues.length === 1 ? '' : 's'}.`;
+  const hasInline = issues.some(isInlineIssue);
+  const noun = hasInline ? 'task' : 'issue';
+  return `Sprint mission for ${repoName} with ${issues.length} ${noun}${issues.length === 1 ? '' : 's'}.`;
 }
 
-function buildPacketSummary(issue: LoadedIssue, constraints: string) {
+function buildPacketSummary(issue: LoadedIssue, constraints: string, inlineLabel?: string) {
+  const header = isInlineIssue(issue)
+    ? `Task${inlineLabel ? ` ${inlineLabel}` : ''}: ${issue.title}`
+    : `GitHub issue #${issue.number}: ${issue.title}`;
   return [
-    `GitHub issue #${issue.number}: ${issue.title}`,
-    issue.body.trim() || 'No issue body provided.',
+    header,
+    issue.body.trim() || (isInlineIssue(issue) ? 'No description provided.' : 'No issue body provided.'),
     constraints ? `Constraints: ${constraints}` : null,
   ].filter((value): value is string => Boolean(value)).join('\n\n');
 }
@@ -488,7 +503,11 @@ export async function createMission(input: CreateMissionInput) {
 
   const missionId = buildMissionId();
   const packetIds = loadedIssues.map(() => buildPacketId());
-  const referenceLabels = loadedIssues.map((_, index) => `P${index + 1}`);
+  // #453 — Use "inline-N" labels for ad-hoc tasks, "P{N}" for GitHub issues
+  const hasInlineIssues = loadedIssues.some(isInlineIssue);
+  const referenceLabels = loadedIssues.map((issue, index) =>
+    isInlineIssue(issue) ? `inline-${index + 1}` : `P${index + 1}`,
+  );
   const packetIdByIssueNumber = new Map(loadedIssues.map((issue, index) => [issue.number, packetIds[index] as string]));
   const referenceLabelByIssueNumber = new Map(loadedIssues.map((issue, index) => [issue.number, referenceLabels[index] as string]));
 
@@ -499,13 +518,19 @@ export async function createMission(input: CreateMissionInput) {
         ? [loadedIssues[index - 1]!.number]
         : [];
 
+    // #453 — Inline tasks get "inline/{slug}" branches, not "issue/{number}-{slug}"
+    const branchTarget = isInlineIssue(issue)
+      ? `inline/${slugify(issue.title)}`
+      : `issue/${issue.number}-${slugify(issue.title)}`;
+    const inlineLabel = hasInlineIssues ? referenceLabels[index] : undefined;
+
     return {
       id: packetIds[index]!,
       referenceLabel: referenceLabels[index]!,
       title: issue.title,
-      summary: buildPacketSummary(issue, input.constraints),
+      summary: buildPacketSummary(issue, input.constraints, inlineLabel),
       workspaceTargetPath: repoPath,
-      branchTarget: `issue/${issue.number}-${slugify(issue.title)}`,
+      branchTarget,
       runtime: input.runtime,
       dependencyLabels: dependencyNumbers.map((dependency) => referenceLabelByIssueNumber.get(dependency) ?? `#${dependency}`),
       dependencyPacketIds: dependencyNumbers.map((dependency) => packetIdByIssueNumber.get(dependency) ?? '').filter(Boolean),

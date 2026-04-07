@@ -338,7 +338,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'create_mission',
     description:
-      'Create a sprint mission from GitHub issues and dispatch agents. By default, all packets run in parallel and dispatch immediately. Use `issues` with GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks. Examples: create_mission({issues: [495, 496, 497], repoPath: "/path/to/repo"}) creates and dispatches 3 parallel agents. create_mission({issues: [100, 101], repoPath: "/path", sequential: true, dispatch: false}) creates a sequential plan without dispatching.',
+      'Create a sprint mission from GitHub issues or ad-hoc inline tasks, then dispatch agents. By default, all packets run in parallel and dispatch immediately. Use `issues` with GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -352,13 +352,12 @@ const TOOLS: McpTool[] = [
           items: {
             type: 'object',
             properties: {
-              number: { type: 'number', description: 'Issue number (can be synthetic).' },
-              title: { type: 'string', description: 'Issue title / task summary.' },
-              body: { type: 'string', description: 'Issue body / detailed description.' },
+              title: { type: 'string', description: 'Task summary / issue title.' },
+              body: { type: 'string', description: 'Detailed description (optional).' },
             },
-            required: ['number', 'title'],
+            required: ['title'],
           },
-          description: 'Inline issue objects — bypasses GitHub API. Use when rate-limited or for ad-hoc tasks.',
+          description: 'Ad-hoc inline tasks — no GitHub issue required. Each becomes its own agent packet.',
         },
         repoPath: {
           type: 'string',
@@ -712,14 +711,14 @@ async function handleCreateMission(args: Record<string, unknown>): Promise<McpTo
     const sequential = args.sequential === true;
 
     if (inlineIssues) {
-      const parsed = inlineIssues.map((entry) => {
+      // #453 — Auto-assign synthetic numbers starting at 90001 when not provided
+      const parsed = inlineIssues.map((entry, index) => {
         if (typeof entry !== 'object' || entry === null) throw new Error('Each inline issue must be an object.');
         const e = entry as Record<string, unknown>;
-        const num = typeof e.number === 'number' ? e.number : Number(e.number);
-        if (!Number.isFinite(num) || num < 1) throw new Error('Each inline issue must have a positive number.');
         const title = typeof e.title === 'string' ? e.title.trim() : '';
         if (!title) throw new Error('Each inline issue must have a title.');
-        return { number: num, title, body: typeof e.body === 'string' ? e.body : '' };
+        const syntheticNumber = 90001 + index;
+        return { number: syntheticNumber, title, body: typeof e.body === 'string' ? e.body : '' };
       });
       const createResult = await createMissionInline({
         issues_inline: parsed,
