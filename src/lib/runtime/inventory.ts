@@ -390,7 +390,25 @@ export async function getRuntimeInventorySnapshot(
           status: agent.status,
         }));
       if (sessionSummaries.length > 0) {
-        reconcileLanesWithSessions(sessionSummaries);
+        const pendingReviewCommits = reconcileLanesWithSessions(sessionSummaries);
+
+        // #454 — Auto-commit dirty worktrees for lanes that just transitioned to reviewing.
+        // This runs after the synchronous DB transaction so git operations don't block it.
+        if (pendingReviewCommits.length > 0) {
+          const { autoCommitCompletionWorktree } = await import('@/lib/supervisor/completion-verification');
+          await Promise.allSettled(
+            pendingReviewCommits.map(async ({ laneId, worktreePath }) => {
+              try {
+                const committed = await autoCommitCompletionWorktree(worktreePath);
+                if (committed) {
+                  console.log(`[lane-review] Auto-committed dirty worktree for lane ${laneId} at ${worktreePath}`);
+                }
+              } catch (err) {
+                console.warn(`[lane-review] Auto-commit failed for lane ${laneId}:`, err);
+              }
+            }),
+          );
+        }
       }
     } catch {
       // Lane reconciliation is non-critical
