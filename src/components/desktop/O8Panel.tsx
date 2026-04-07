@@ -82,6 +82,7 @@ interface O8PanelProps {
   browserUrl?: string | null;
   onActiveTabChange?: (tab: O8Tab) => void;
   commitSha?: string | null;
+  onClearCommit?: () => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
@@ -125,7 +126,7 @@ function O8TabButton({ icon, active, onClick, label }: {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl, onActiveTabChange, commitSha, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl, onActiveTabChange, commitSha, onClearCommit, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
   const [internalActiveTab, setInternalActiveTab] = useState<O8Tab>('changes');
   const activeTab = externalTab ?? internalActiveTab;
 
@@ -191,7 +192,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
 
       {/* Tab content — all tabs stay mounted to preserve state */}
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'changes' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8ChangesPane repoPath={repoPath} initialCommitSha={commitSha} repoSlug={repoSlug} />
+        <O8ChangesPane repoPath={repoPath} initialCommitSha={commitSha} repoSlug={repoSlug} onClearCommit={onClearCommit} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} />
