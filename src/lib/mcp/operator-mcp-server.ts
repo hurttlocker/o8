@@ -485,6 +485,33 @@ const TOOLS: McpTool[] = [
           type: 'string',
           description: 'Optional reason for the reset (e.g., "worktree lost", "agent failed").',
         },
+        clearWorktree: {
+          type: 'boolean',
+          description: 'Also prune the old worktree directory after resetting.',
+        },
+      },
+      required: ['packetId'],
+    },
+  },
+  {
+    name: 'retry_packet',
+    description:
+      'Alias for reset_packet. Reset a stuck or failed packet back to queued state so it can be re-dispatched. Use when a lane is stuck in session_lost, failed, or recovering. Call dispatch_mission() after to re-launch. Example: retry_packet({packetId: "pkt-abc", reason: "session_lost"})',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'The packet ID to retry.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Optional reason for the retry (e.g., "worktree lost", "agent failed").',
+        },
+        clearWorktree: {
+          type: 'boolean',
+          description: 'Also prune the old worktree directory after resetting.',
+        },
       },
       required: ['packetId'],
     },
@@ -788,6 +815,7 @@ async function handleResetPacket(args: Record<string, unknown>): Promise<McpTool
     const result = await resetPacket({
       packetId: requiredString(args, 'packetId'),
       reason: optionalString(args, 'reason') || undefined,
+      clearWorktree: args.clearWorktree === true,
     });
     return jsonResult(result);
   } catch (error) {
@@ -808,6 +836,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   submit_review: handleSubmitReview,
   approve_and_merge: handleApproveAndMerge,
   reset_packet: handleResetPacket,
+  retry_packet: handleResetPacket,
 };
 
 // ── JSON-RPC Server ──

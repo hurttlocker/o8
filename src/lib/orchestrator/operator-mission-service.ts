@@ -69,6 +69,7 @@ export interface ApproveAndMergeInput {
 export interface ResetPacketInput {
   packetId: string;
   reason?: string;
+  clearWorktree?: boolean;
 }
 
 function log(message: string, details?: unknown) {
@@ -776,15 +777,35 @@ export async function resetPacket(input: ResetPacketInput) {
 
   // Archive the old lane and clear its packet binding so the reconciler
   // doesn't re-attach it to this packet
+  let worktreePath: string | null = null;
   if (packet.lane?.laneId) {
     try {
-      const { archiveLane, updateLane } = await import('@/lib/lane/registry');
+      const { archiveLane, findLaneByPacket: findLane, updateLane } = await import('@/lib/lane/registry');
+      const lane = findLane(packet.id);
+      worktreePath = lane?.worktreePath ?? null;
       // Clear packetId first so reconciler won't find this lane
       updateLane(packet.lane.laneId, { packetId: '' });
       archiveLane(packet.lane.laneId, 'user');
       log(`Archived stale lane ${packet.lane.laneId} for packet ${packet.referenceLabel}`);
     } catch {
       log(`Could not archive lane ${packet.lane.laneId} — may already be gone`);
+    }
+  }
+
+  // If clearWorktree requested, prune the old worktree directory
+  let worktreePruned = false;
+  if (input.clearWorktree && worktreePath && state.repoPath) {
+    try {
+      const manager = await getWorktreeManager(state.repoPath);
+      const worktrees = await manager.list();
+      const match = worktrees.find((wt) => worktreePath!.includes(wt.id));
+      if (match) {
+        await manager.cleanup(match.id, { force: true, deleteBranch: true });
+        worktreePruned = true;
+        log(`[lane-reset] Pruned worktree ${match.id} for packet ${packet.referenceLabel}`);
+      }
+    } catch {
+      log(`[lane-reset] Could not prune worktree at ${worktreePath} — may already be gone`);
     }
   }
 
@@ -813,6 +834,7 @@ export async function resetPacket(input: ResetPacketInput) {
     reset: true,
     packetId: input.packetId,
     referenceLabel: packet.referenceLabel,
-    note: `Packet ${packet.referenceLabel} reset to queued/draft. Old lane archived. Ready for re-dispatch.`,
+    worktreePruned,
+    note: `Packet ${packet.referenceLabel} reset to queued/draft. Old lane archived.${worktreePruned ? ' Worktree pruned.' : ''} Ready for re-dispatch.`,
   };
 }
