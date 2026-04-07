@@ -252,6 +252,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
   }, [step]);
 
   // ── GitHub auth ──
+  const csrfTokenRef = useRef<string | null>(null);
   const startGithubFlow = useCallback(async () => {
     setGithubFlow({ stage: 'waiting' });
     try {
@@ -267,12 +268,13 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
       }
       const d = await res.json();
       flowIdRef.current = d.flowId;
+      csrfTokenRef.current = d.csrfToken ?? null;
       setGithubFlow({ stage: 'polling', userCode: d.userCode, verificationUrl: d.verificationUriComplete || d.verificationUri });
       if (d.verificationUriComplete || d.verificationUri) window.open(d.verificationUriComplete || d.verificationUri, '_blank');
       pollTimerRef.current = setInterval(async () => {
         if (!flowIdRef.current) return;
         try {
-          const pr = await fetch('/api/panel/github-device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'poll', flowId: flowIdRef.current }) });
+          const pr = await fetch('/api/panel/github-device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'poll', flowId: flowIdRef.current, csrfToken: csrfTokenRef.current }) });
           if (!pr.ok) return;
           const pd = await pr.json();
           if (pd.status === 'complete') {

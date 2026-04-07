@@ -1,13 +1,14 @@
 /**
  * useAuth — Client-side auth hook for Cortex IDE
  *
- * Manages JWT token storage and provides auth state to components.
- * Token is stored in localStorage (for API calls) AND httpOnly cookie (for SSR).
+ * Auth uses httpOnly cookie only (set by server on login).
+ * localStorage stores user profile for fast hydration — NOT the JWT token.
+ * The cookie is auto-sent with every same-origin request.
  */
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 // ── Types ──
 
@@ -27,9 +28,7 @@ export interface AuthState {
   isLoading: boolean;
   /** The authenticated user (null if not signed in) */
   user: AuthUser | null;
-  /** JWT token (null if not signed in) */
-  token: string | null;
-  /** Sign in with a token (called after device flow completes) */
+  /** Sign in — stores user profile (token is in httpOnly cookie, set by server) */
   signIn: (token: string, user: AuthUser) => void;
   /** Sign out */
   signOut: () => Promise<void>;
@@ -39,62 +38,74 @@ export interface AuthState {
 
 // ── Constants ──
 
-const TOKEN_KEY = 'cortex-ide-token';
 const USER_KEY = 'cortex-ide-user';
 
 // ── Hook ──
 
 export function useAuth(): AuthState {
-  const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const verifiedRef = useRef(false);
 
-  // Load saved auth on mount
+  // Load cached user profile for fast hydration, then verify with server
   useEffect(() => {
+    // Fast hydration from localStorage (user profile only, never the token)
     try {
-      const savedToken = localStorage.getItem(TOKEN_KEY);
       const savedUser = localStorage.getItem(USER_KEY);
-
-      if (savedToken && savedUser) {
-        setToken(savedToken);
+      if (savedUser) {
         setUser(JSON.parse(savedUser));
       }
     } catch {
-      // Corrupted localStorage — clear it
-      localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
     }
     setIsLoading(false);
+
+    // Verify auth cookie is still valid on mount (non-blocking)
+    if (!verifiedRef.current) {
+      verifiedRef.current = true;
+      fetch('/api/v2/auth/session', { credentials: 'same-origin' })
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            if (data.user) {
+              setUser(data.user);
+              localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+            }
+          } else if (res.status === 401) {
+            // Cookie expired or invalid — clear cached user
+            setUser(null);
+            localStorage.removeItem(USER_KEY);
+          }
+        })
+        .catch(() => { /* network error — keep cached state */ });
+    }
   }, []);
 
-  const signIn = useCallback((newToken: string, newUser: AuthUser) => {
-    setToken(newToken);
+  const signIn = useCallback((_token: string, newUser: AuthUser) => {
+    // Token is already set as httpOnly cookie by the server response.
+    // We only store user profile for UI hydration.
     setUser(newUser);
-    localStorage.setItem(TOKEN_KEY, newToken);
     localStorage.setItem(USER_KEY, JSON.stringify(newUser));
+    // Migrate: remove any legacy token from localStorage
+    localStorage.removeItem('cortex-ide-token');
   }, []);
 
   const signOut = useCallback(async () => {
-    setToken(null);
     setUser(null);
-    localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem('cortex-ide-token'); // clean up legacy
 
-    // Clear server-side cookie
+    // Clear server-side cookie + session
     try {
-      await fetch('/api/v2/auth/logout', { method: 'POST' });
+      await fetch('/api/v2/auth/logout', { method: 'POST', credentials: 'same-origin' });
     } catch {
       // Ignore — cookie may already be gone
     }
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!token) return;
-
     try {
-      const res = await fetch('/api/v2/auth/session', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch('/api/v2/auth/session', { credentials: 'same-origin' });
 
       if (res.ok) {
         const data = await res.json();
@@ -104,31 +115,20 @@ export function useAuth(): AuthState {
         }
       } else if (res.status === 401) {
         // Token expired — sign out
-        await signOut();
+        setUser(null);
+        localStorage.removeItem(USER_KEY);
       }
     } catch {
       // Network error — keep current state
     }
-  }, [token, signOut]);
+  }, []);
 
   return {
-    isAuthenticated: !!token && !!user,
+    isAuthenticated: !!user,
     isLoading,
     user,
-    token,
     signIn,
     signOut,
     refresh,
   };
-}
-
-/**
- * Get auth headers for API calls.
- * Use this in fetch() calls to v2 API routes.
- */
-export function getAuthHeaders(): Record<string, string> {
-  if (typeof window === 'undefined') return {};
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (!token) return {};
-  return { Authorization: `Bearer ${token}` };
 }

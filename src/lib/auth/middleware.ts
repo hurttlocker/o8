@@ -14,6 +14,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifyToken, type UserTokenPayload } from './jwt';
 import { findUserById } from '@/lib/db/users';
+import { hashToken, findSessionByTokenHash } from '@/lib/db/sessions';
 
 // ── Types ──
 
@@ -64,6 +65,15 @@ export function withAuth(handler: AuthHandler) {
       );
     }
 
+    // Check session hasn't been revoked (logout deletes the row)
+    const session = findSessionByTokenHash(hashToken(token));
+    if (!session) {
+      return NextResponse.json(
+        { error: 'Session revoked. Please sign in again.' },
+        { status: 401 },
+      );
+    }
+
     // Look up user in database
     const user = findUserById(payload.uid);
     if (!user) {
@@ -100,6 +110,12 @@ export function withOptionalAuth(
 
     const payload = await verifyToken(token);
     if (!payload) {
+      return handler(request, null);
+    }
+
+    // Check session not revoked (soft — optional auth doesn't block)
+    const session = findSessionByTokenHash(hashToken(token));
+    if (!session) {
       return handler(request, null);
     }
 
