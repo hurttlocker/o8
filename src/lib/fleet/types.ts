@@ -6,7 +6,8 @@ export type AgentStatus =
   | 'blocked'
   | 'waiting'
   | 'reviewing'
-  | 'failed';
+  | 'failed'
+  | 'completed';
 
 export type SquadStatus = 'healthy' | 'watching' | 'degraded' | 'blocked';
 

@@ -445,6 +445,8 @@ export function sessionStatusTone(status?: string | null) {
     case 'blocked':
     case 'failed':
       return { label: 'Blocked', color: '#dc2626', glow: 'rgba(239, 68, 68, 0.18)' };
+    case 'completed':
+      return { label: 'Done', color: '#10b981', glow: 'rgba(16, 185, 129, 0.18)' };
     default:
       return { label: 'Idle', color: 'var(--t-text-muted)', glow: 'rgba(148, 163, 184, 0.18)' };
   }
