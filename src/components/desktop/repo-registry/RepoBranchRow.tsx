@@ -123,13 +123,15 @@ function RepoBranchRowBase({
     <div>
       <div
         onClick={() => {
+          // For any branch (worktree or not), try to open the agent transcript first
+          const packetSession = branchPackets.find((packet) => packet.lane?.sessionKey)?.lane?.sessionKey;
+          const agentSession = branchAgents[0]?.sessionKey;
+
           if (branch.isWorktree) {
             const wtPath = branch.worktreePath ?? worktree?.path;
-            const packetSession = branchPackets.find((packet) => packet.lane?.sessionKey)?.lane?.sessionKey;
             const pathMatchedPacket = !packetSession && wtPath
               ? orchestratorPackets.find((packet) => packet.lane?.sessionKey && packet.lane.worktreePath === wtPath)
               : null;
-            const agentSession = branchAgents[0]?.sessionKey;
             const sessionKey = packetSession ?? pathMatchedPacket?.lane?.sessionKey ?? agentSession;
             if (sessionKey && onSelectSession) {
               onSelectSession(sessionKey);
@@ -145,7 +147,15 @@ function RepoBranchRowBase({
                 .catch(() => {});
               return;
             }
+          } else {
+            // Non-worktree branch: open agent transcript if one exists
+            const sessionKey = packetSession ?? agentSession;
+            if (sessionKey && onSelectSession) {
+              onSelectSession(sessionKey);
+              return;
+            }
           }
+
           if (!branch.current && !checkoutBusy) {
             void handleCheckout(branch.name);
           }
