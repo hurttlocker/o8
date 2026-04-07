@@ -31,7 +31,7 @@ type ApprovalInsert = typeof approvalsTable.$inferInsert;
 
 const APPROVAL_CONTEXT_LOOKUP_LIMIT = 100;
 const APPROVAL_CONTEXT_LOOKBACK_MS = 1000 * 60 * 60 * 24 * 90;
-const STALE_APPROVAL_TTL_MS = 1000 * 60 * 60;
+const STALE_APPROVAL_TTL_MS = 1000 * 60 * 30;
 
 function getApprovalDb() {
   const db = getDb();
@@ -268,6 +268,16 @@ export function expireStaleApprovals() {
 
 export function listApprovals(options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string } = {}) {
   const { status = 'pending', sessionKey } = options;
+
+  // Auto-expire stale pending approvals before querying
+  if (status === 'pending' || status === 'all') {
+    try {
+      expireStaleApprovals();
+    } catch {
+      // Non-fatal — proceed with the query even if expiry fails
+    }
+  }
+
   const db = getApprovalDb();
 
   if (status === 'all' && sessionKey) {
