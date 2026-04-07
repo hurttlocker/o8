@@ -40,7 +40,7 @@ export interface RuntimeCapabilities {
 
 // ── Session ──
 
-export type RuntimeSessionStatus = 'running' | 'idle' | 'waiting' | 'reviewing' | 'failed';
+export type RuntimeSessionStatus = 'running' | 'idle' | 'waiting' | 'reviewing' | 'failed' | 'completed';
 export type RuntimeSessionOwnership = 'discovered' | 'owned' | 'provider';
 
 /**

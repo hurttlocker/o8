@@ -47,9 +47,15 @@ function mapAgentToSession(
 ): RuntimeSession {
   const surface = agent.runtimeSurface;
   const ownership = (surface?.ownership ?? 'discovered') as RuntimeSession['ownership'];
-  const status = (['running', 'idle', 'waiting', 'reviewing', 'failed'].includes(agent.status)
-    ? agent.status
-    : 'idle') as RuntimeSession['status'];
+  const rawStatus = agent.status;
+  const status: RuntimeSession['status'] =
+    rawStatus === 'completed' || rawStatus === 'finished' ? 'completed'
+    : rawStatus === 'running' || rawStatus === 'launched' ? 'running'
+    : rawStatus === 'waiting' || rawStatus === 'blocked' || rawStatus === 'awaiting_input' ? 'waiting'
+    : rawStatus === 'reviewing' || rawStatus === 'review_ready' ? 'reviewing'
+    : rawStatus === 'failed' || rawStatus === 'error' ? 'failed'
+    : rawStatus === 'idle' ? 'idle'
+    : 'idle';
   const lifecycleTime = surface?.lifecycle?.lastRunFinishedAt ?? surface?.lifecycle?.lastRunStartedAt;
   const parsedLastActivity = lifecycleTime ? new Date(lifecycleTime) : new Date(agent.lastEventAt);
   const lastActivityAt = Number.isNaN(parsedLastActivity.getTime()) ? new Date() : parsedLastActivity;

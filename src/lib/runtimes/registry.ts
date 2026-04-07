@@ -5,6 +5,7 @@
  * The UI and API layer talk to the registry, never to a specific runtime.
  */
 
+import { execSync } from 'child_process';
 import type { AgentRuntime, RuntimeId, RuntimeSession } from './types';
 
 const runtimes = new Map<RuntimeId, AgentRuntime>();
@@ -59,9 +60,28 @@ export async function discoverAllSessions(): Promise<RuntimeSession[]> {
     }),
   );
 
-  return results
+  const sessions = results
     .filter((r): r is PromiseFulfilledResult<RuntimeSession[]> => r.status === 'fulfilled')
     .flatMap((r) => r.value);
+
+  // Auto-clean: hide completed/idle sessions whose branch was merged/deleted (#503)
+  return sessions.filter((session) => {
+    if (session.status !== 'completed' && session.status !== 'idle') return true;
+    if (!session.branch || session.branch === 'main' || session.branch === 'master') return true;
+    if (session.ownership === 'owned') return true; // keep user-started sessions
+    if (!session.cwd) return true;
+    try {
+      const branches = execSync('git branch --list', { cwd: session.cwd, timeout: 2000, encoding: 'utf-8' });
+      const branchExists = branches.split('\n').some((line) => line.trim().replace(/^\* /, '') === session.branch);
+      if (!branchExists) {
+        console.log(`[runtime-registry] Auto-cleaning session ${session.sessionKey} — branch "${session.branch}" no longer exists`);
+        return false;
+      }
+    } catch {
+      // git failed — keep the session rather than hiding it
+    }
+    return true;
+  });
 }
 
 /**
