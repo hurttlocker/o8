@@ -800,6 +800,9 @@ export async function resetPacket(input: ResetPacketInput) {
   packet.review = null;
   packet.lastEventAt = null;
   packet.lastEventLabel = null;
+  // #455 — Clear recovery counter so a manual reset gives fresh retry budget
+  packet.recoveryCount = 0;
+  packet.lastRecoveryAt = null;
 
   // Persist
   const { updateOrchestratorMissionState } = await import('@/lib/orchestrator/store');

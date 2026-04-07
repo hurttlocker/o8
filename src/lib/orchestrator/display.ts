@@ -93,6 +93,15 @@ export function orchestratorStatusTone(status?: OrchestratorPacketStatus | null)
         border: 'rgba(124, 58, 237, 0.2)',
         dot: '#8b5cf6',
       };
+    case 'failed':
+      return {
+        label: 'Failed',
+        shortLabel: 'Fail',
+        color: '#991b1b',
+        background: 'rgba(153, 27, 27, 0.12)',
+        border: 'rgba(153, 27, 27, 0.2)',
+        dot: '#dc2626',
+      };
     case 'released':
       return {
         label: 'Completed',

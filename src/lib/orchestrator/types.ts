@@ -11,6 +11,7 @@ export type OrchestratorPacketStatus =
   | 'running'
   | 'awaiting_review'
   | 'recovering'
+  | 'failed'
   | 'blocked'
   | 'released'
   | 'archived';
@@ -72,6 +73,8 @@ export interface OrchestratorPacket {
   status: OrchestratorPacketStatus;
   attemptCount?: number;
   maxAttempts?: number;
+  recoveryCount?: number;
+  lastRecoveryAt?: string | null;
   blockedReason?: string | null;
   lastEventAt?: string | null;
   lastEventLabel?: string | null;
