@@ -1479,6 +1479,12 @@ function DashboardInner() {
     setChatVisible(true);
   }, [globalRepoEntries, globalRepoEntry]);
 
+  const handleClearCommit = useCallback(() => {
+    setO8CommitSha(null);
+    setO8CommitRepoPath(null);
+    setO8CommitRepoSlug(null);
+  }, []);
+
   // ── Left drag handle ──
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -2450,6 +2456,7 @@ function DashboardInner() {
                       repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
                       browserUrl={o8BrowserUrl}
                       commitSha={o8CommitSha}
+                      onClearCommit={handleClearCommit}
                       onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
                       onOpenFile={(filePath) => {
                         const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
