@@ -344,6 +344,7 @@ export async function resetPacket(input: ResetPacketInput) {
         body: JSON.stringify({
           packetId: input.packetId,
           reason: input.reason,
+          clearWorktree: input.clearWorktree,
         } satisfies ResetPacketInput),
       },
     );

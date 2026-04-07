@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
     const result = await resetPacket({
       packetId,
       reason: typeof record.reason === 'string' ? record.reason.trim() : undefined,
+      clearWorktree: record.clearWorktree === true,
     });
     return operatorSuccess(result);
   } catch (error) {
