@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionButton,
   CheckIcon,
@@ -48,10 +48,11 @@ interface O8ChangesPaneProps {
   repoPath?: string | null;
   repoSlug?: string | null;
   initialCommitSha?: string | null;
+  onClearCommit?: () => void;
 }
 
 
-export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8ChangesPaneProps) {
+export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, initialCommitSha, onClearCommit }: O8ChangesPaneProps) {
   const [files, setFiles] = useState<GitChangedFile[]>([]);
   const [commits, setCommits] = useState<RecentCommitSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -211,6 +212,12 @@ export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8Change
     if (!resolvedSha || !repoSlug) return;
     window.open(`https://github.com/${repoSlug}/commit/${resolvedSha}`, '_blank', 'noopener,noreferrer');
   }, [repoSlug, resolveCommitSha]);
+
+  const handleBackToWorkingTree = useCallback(() => {
+    setFilter('uncommitted');
+    setExpandedCommitSha(null);
+    onClearCommit?.();
+  }, [onClearCommit]);
 
   useEffect(() => {
     void fetchChanges();
@@ -382,6 +389,77 @@ export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8Change
           </svg>
         </button>
       </div>
+
+      {/* Commit viewing banner — shows when navigated here from Activity tab or Git Log */}
+      {initialCommitSha ? (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            paddingTop: 8,
+            paddingRight: 12,
+            paddingBottom: 8,
+            paddingLeft: 12,
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(59,130,246,0.08)',
+            flexShrink: 0,
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+            <circle cx="12" cy="12" r="3" />
+            <line x1="12" y1="3" x2="12" y2="6" />
+            <line x1="12" y1="18" x2="12" y2="21" />
+          </svg>
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 11,
+              fontWeight: 600,
+              color: '#93c5fd',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            Viewing commit {initialCommitSha.slice(0, 7)}
+          </span>
+          <button
+            type="button"
+            onClick={handleBackToWorkingTree}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              height: 26,
+              paddingTop: 0,
+              paddingRight: 10,
+              paddingBottom: 0,
+              paddingLeft: 8,
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.06)',
+              color: '#e2e8f0',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              transition: 'background 120ms ease',
+              flexShrink: 0,
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Working tree
+          </button>
+        </div>
+      ) : null}
 
       <div style={{ flex: 1, overflow: 'auto' }}>
         {loading ? (
@@ -690,4 +768,4 @@ export function O8ChangesPane({ repoPath, repoSlug, initialCommitSha }: O8Change
       </div>
     </div>
   );
-}
+});
