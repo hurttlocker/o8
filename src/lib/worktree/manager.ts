@@ -432,6 +432,7 @@ export class WorktreeManager {
 
   /**
    * Remove a worktree and optionally its branch.
+   * Checks for uncommitted changes first and auto-commits to preserve agent work.
    */
   async cleanup(worktreeId: string, opts?: CleanupOptions): Promise<void> {
     const meta = await this.loadAllMeta();
@@ -444,6 +445,12 @@ export class WorktreeManager {
     }
 
     const worktreePath = path.join(this.worktreeBase, worktreeId);
+
+    // Safety: preserve uncommitted agent work before removing
+    if (await this.pathExists(worktreePath)) {
+      const preserved = await this.preserveUncommittedWork(worktreePath, worktreeId);
+      if (preserved === 'skip') return; // Could not save work — abort prune
+    }
 
     // Remove the git worktree
     const args = ['worktree', 'remove', worktreePath];
@@ -533,6 +540,45 @@ export class WorktreeManager {
   }
 
   // ── Private Helpers ──
+
+  /**
+   * Check for uncommitted changes in a worktree and auto-commit them.
+   * Returns 'committed' if work was saved, 'clean' if nothing to save,
+   * or 'skip' if we couldn't save and should abort the prune.
+   */
+  private async preserveUncommittedWork(
+    worktreePath: string,
+    worktreeId: string,
+  ): Promise<'committed' | 'clean' | 'skip'> {
+    try {
+      const { stdout: status } = await execFileAsync(
+        'git', ['status', '--porcelain'],
+        { cwd: worktreePath, timeout: 5000 },
+      );
+      if (!status.trim()) return 'clean';
+
+      console.log(`[worktree-prune] ${worktreeId} has uncommitted changes — preserving work`);
+
+      try {
+        await execFileAsync(
+          'git', ['add', '-A'],
+          { cwd: worktreePath, timeout: 10_000 },
+        );
+        await execFileAsync(
+          'git', ['commit', '-m', 'chore: preserve agent work before worktree cleanup'],
+          { cwd: worktreePath, timeout: 10_000 },
+        );
+        console.log(`[worktree-prune] Auto-committed changes in ${worktreeId}`);
+        return 'committed';
+      } catch {
+        console.log(`[worktree-prune] Auto-commit failed for ${worktreeId}, skipping prune to preserve work`);
+        return 'skip';
+      }
+    } catch {
+      // git status failed — worktree might already be gone, safe to proceed
+      return 'clean';
+    }
+  }
 
   private async getCurrentBranch(): Promise<string> {
     try {
