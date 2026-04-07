@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import type { Lane } from './types';
@@ -7,6 +8,44 @@ const execFileAsync = promisify(execFile);
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Check for uncommitted changes and auto-commit before cleanup.
+ * Returns true if safe to proceed, false if prune should be skipped.
+ */
+async function preserveUncommittedWork(worktreePath: string, laneId: string): Promise<boolean> {
+  try {
+    await access(worktreePath);
+  } catch {
+    return true; // Directory gone, safe to proceed
+  }
+
+  try {
+    const { stdout: status } = await execFileAsync(
+      'git', ['status', '--porcelain'],
+      { cwd: worktreePath, timeout: 5000 },
+    );
+    if (!status.trim()) return true; // Clean, safe to proceed
+
+    console.log(`[worktree-prune] Lane ${laneId} has uncommitted changes — preserving work`);
+
+    try {
+      await execFileAsync('git', ['add', '-A'], { cwd: worktreePath, timeout: 10_000 });
+      await execFileAsync(
+        'git', ['commit', '-m', 'chore: preserve agent work before worktree cleanup'],
+        { cwd: worktreePath, timeout: 10_000 },
+      );
+      console.log(`[worktree-prune] Auto-committed changes for lane ${laneId}`);
+      return true;
+    } catch {
+      console.log(`[worktree-prune] Auto-commit failed for lane ${laneId}, skipping prune to preserve work`);
+      return false;
+    }
+  } catch {
+    // git status failed — worktree might be corrupt, safe to proceed
+    return true;
+  }
 }
 
 export async function cleanupLaneWorktree(
@@ -21,12 +60,17 @@ export async function cleanupLaneWorktree(
     const manager = getWorktreeManager(lane.repoPath);
     const worktree = (await manager.list()).find((candidate) => candidate.path === worktreePath);
     if (worktree) {
+      // manager.cleanup already calls preserveUncommittedWork internally
       await manager.cleanup(worktree.id, { force: true, deleteBranch: true });
       return true;
     }
   } catch (error) {
     console.warn(`[lane-worktree] Manager cleanup failed for ${lane.id}: ${formatError(error)}`);
   }
+
+  // Fallback: direct git worktree remove — also needs safety check
+  const safeToRemove = await preserveUncommittedWork(worktreePath, lane.id);
+  if (!safeToRemove) return false;
 
   try {
     await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
