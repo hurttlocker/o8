@@ -74,14 +74,6 @@ const PROVIDERS: ProviderKeyConfig[] = [
     docsUrl: 'https://console.x.ai',
     validateUrl: 'https://api.x.ai/v1/models',
   },
-  {
-    id: 'github',
-    label: 'GitHub',
-    envVar: 'GH_TOKEN',
-    placeholder: 'ghp_...',
-    docsUrl: 'https://github.com/settings/tokens',
-    validateUrl: 'https://api.github.com/user',
-  },
 ];
 
 function parseEnvFromPath(path: string): Map<string, string> {
