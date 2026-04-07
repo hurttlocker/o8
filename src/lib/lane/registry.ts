@@ -399,10 +399,16 @@ export function getAllEvents(limit = 200): LaneEvent[] {
     .reverse();
 }
 
+export interface ReviewTransitionEntry {
+  laneId: string;
+  worktreePath: string;
+}
+
 export function reconcileLanesWithSessions(
   activeSessions: Array<{ sessionKey: string; runtimeId: string; cwd: string; branch?: string; status: string }>,
-) {
+): ReviewTransitionEntry[] {
   const db = getSqlite();
+  const pendingReviewCommits: ReviewTransitionEntry[] = [];
 
   db.transaction(() => {
     expireStaleApprovals();
@@ -471,6 +477,12 @@ export function reconcileLanesWithSessions(
           nextValues.lastEventAt = now;
           nextValues.lastEventLabel = 'review_ready';
           lifecycleTimestamp = now;
+          // #454 — Collect lanes transitioning to reviewing so the caller can
+          // auto-commit any dirty worktrees after this synchronous transaction.
+          const commitCwd = lane.worktreePath ?? lane.repoPath;
+          if (commitCwd) {
+            pendingReviewCommits.push({ laneId: lane.id, worktreePath: commitCwd });
+          }
         }
 
         // #8 / #467 — Safety net: if a lane has been 'running' for 2+ hours with no
@@ -547,6 +559,8 @@ export function reconcileLanesWithSessions(
       }
     }
   })();
+
+  return pendingReviewCommits;
 }
 
 export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lane | null {
