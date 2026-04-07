@@ -15,6 +15,8 @@ export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
 export const ORCHESTRATOR_STATE_API_PATH = '/api/orchestrator/state';
 const LEGACY_THOUGHTS_STORAGE_KEY = 'cortex-ide:thoughts:mission-control-v1';
 const STALE_LANE_REASON = 'Previously bound workspace lane is missing. Re-launch to reattach.';
+const MAX_RECOVERY_ATTEMPTS = 2;
+const RECOVERY_COOLDOWN_MS = 60_000;
 let orchestratorMissionCache = createEmptyOrchestratorMissionState();
 
 function nowIso() {
@@ -151,6 +153,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       || packet.status === 'queued'
       || packet.status === 'idle'
       || packet.status === 'recovering'
+      || packet.status === 'failed'
       || packet.status === 'released'
       || packet.status === 'archived'
       ? packet.status
@@ -159,6 +162,8 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
         : 'draft',
     attemptCount: normalizeAttemptCount(packet.attemptCount),
     maxAttempts: normalizeMaxAttempts(packet.maxAttempts),
+    recoveryCount: normalizeAttemptCount(packet.recoveryCount),
+    lastRecoveryAt: typeof packet.lastRecoveryAt === 'string' ? packet.lastRecoveryAt : null,
     blockedReason: typeof packet.blockedReason === 'string' ? packet.blockedReason : null,
     lastEventAt: typeof packet.lastEventAt === 'string' ? packet.lastEventAt : null,
     lastEventLabel: typeof packet.lastEventLabel === 'string' ? packet.lastEventLabel : null,
@@ -421,7 +426,22 @@ export function reconcileOrchestratorMissionState(
       if (ds === 'launching') { next.status = 'launching'; return next; }
       if (ds === 'awaiting_input') { next.status = 'blocked'; next.blockedReason = 'Awaiting operator input'; return next; }
       if (ds === 'paused' && domainLane.sessionKey) { next.status = 'idle'; return next; }
-      if (ds === 'paused' && !domainLane.sessionKey) { next.status = 'recovering'; next.blockedReason = 'Session lost — re-launch to reattach.'; return next; }
+      if (ds === 'paused' && !domainLane.sessionKey) {
+        if ((packet.recoveryCount ?? 0) >= MAX_RECOVERY_ATTEMPTS) {
+          next.status = 'failed';
+          next.blockedReason = `Recovery failed after ${packet.recoveryCount} attempts. Manual reset required.`;
+          return next;
+        }
+        const lastRecovery = packet.lastRecoveryAt ? Date.now() - new Date(packet.lastRecoveryAt).getTime() : Infinity;
+        if (lastRecovery < RECOVERY_COOLDOWN_MS) {
+          next.status = 'recovering';
+          next.blockedReason = 'Recovery cooldown — waiting before next attempt.';
+          return next;
+        }
+        next.status = 'recovering';
+        next.blockedReason = 'Session lost — re-launch to reattach.';
+        return next;
+      }
     }
 
     if (laneMatch) {
@@ -455,8 +475,13 @@ export function reconcileOrchestratorMissionState(
         const lastActivity = packet.lane?.lastHeartbeatAt ?? packet.lastEventAt ?? null;
         const launchAge = lastActivity ? Date.now() - new Date(lastActivity).getTime() : 0;
         if (launchAge > 90_000) {
-          next.status = 'recovering';
-          next.blockedReason = 'Launch timed out — session never attached. Re-launch to retry.';
+          if ((packet.recoveryCount ?? 0) >= MAX_RECOVERY_ATTEMPTS) {
+            next.status = 'failed';
+            next.blockedReason = `Launch recovery failed after ${packet.recoveryCount} attempts. Manual reset required.`;
+          } else {
+            next.status = 'recovering';
+            next.blockedReason = 'Launch timed out — session never attached. Re-launch to retry.';
+          }
         } else {
           next.status = 'launching';
         }
@@ -468,6 +493,11 @@ export function reconcileOrchestratorMissionState(
     // A blank laneId means resetPacket cleared the binding but the lane object
     // hasn't been nulled yet (defensive against partial resets).
     if (packet.lane && packet.lane.laneId && !laneMatch && !domainLane) {
+      if ((packet.recoveryCount ?? 0) >= MAX_RECOVERY_ATTEMPTS) {
+        next.status = 'failed';
+        next.blockedReason = `Recovery failed after ${packet.recoveryCount} attempts. Manual reset required.`;
+        return { ...next, lane: null };
+      }
       next.status = 'recovering';
       next.blockedReason = STALE_LANE_REASON;
       return {
@@ -477,6 +507,11 @@ export function reconcileOrchestratorMissionState(
     }
 
     if (!packet.lane && packet.blockedReason === STALE_LANE_REASON) {
+      if ((packet.recoveryCount ?? 0) >= MAX_RECOVERY_ATTEMPTS) {
+        next.status = 'failed';
+        next.blockedReason = `Recovery failed after ${packet.recoveryCount} attempts. Manual reset required.`;
+        return next;
+      }
       next.status = 'recovering';
       next.blockedReason = STALE_LANE_REASON;
       return next;

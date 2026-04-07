@@ -13,6 +13,8 @@ import type { OrchestratorLaneBinding, OrchestratorMissionState, OrchestratorPac
 import { truncateText } from '@/lib/util/text';
 
 export const MAX_PARALLEL_DISPATCHES = 4;
+export const MAX_RECOVERY_DISPATCHES = 2;
+const RECOVERY_COOLDOWN_MS = 60_000;
 export const FILE_SIZE_BLOCK_THRESHOLD_LINES = 800;
 const FILE_SIZE_WARNING_BUFFER_LINES = 100;
 const FILE_SIZE_WARNING_THRESHOLD_LINES = FILE_SIZE_BLOCK_THRESHOLD_LINES - FILE_SIZE_WARNING_BUFFER_LINES;
@@ -585,8 +587,15 @@ export function getDispatchBlocker(
   if (candidate.queueState !== 'queued') {
     return 'Not queued';
   }
+  if (candidate.status === 'failed') {
+    return 'Failed — max recovery attempts exceeded';
+  }
   if (!isDispatchReadyStatus(candidate)) {
     return `Status is ${candidate.status}`;
+  }
+  // #455 — Block dispatch if recovery limit exceeded
+  if (candidate.status === 'recovering' && (candidate.recoveryCount ?? 0) >= MAX_RECOVERY_DISPATCHES) {
+    return `Recovery limit exceeded (${candidate.recoveryCount}/${MAX_RECOVERY_DISPATCHES})`;
   }
   const dependency = packetReleaseBlockedBy(candidate, allPackets);
   if (dependency) {
@@ -632,7 +641,20 @@ export async function runDispatchTick(
       packet,
       recoveryContext: recoveryContextByPacketId.get(packet.id) ?? null,
     }))
-    .filter(({ packet }) => getDispatchBlocker(packet, nextState.packets) === null);
+    .filter(({ packet }) => {
+      if (getDispatchBlocker(packet, nextState.packets) !== null) {
+        return false;
+      }
+      // #455 — Recovery cooldown: skip packets that were recovered too recently
+      if (packet.status === 'recovering' || recoveryContextByPacketId.has(packet.id)) {
+        const lastRecovery = packet.lastRecoveryAt ? Date.now() - new Date(packet.lastRecoveryAt).getTime() : Infinity;
+        if (lastRecovery < RECOVERY_COOLDOWN_MS) {
+          console.log(`[recovery] Packet ${packet.id} skipped — recovery cooldown (${Math.round(lastRecovery / 1000)}s < ${RECOVERY_COOLDOWN_MS / 1000}s)`);
+          return false;
+        }
+      }
+      return true;
+    });
 
   if (dispatchablePackets.length === 0) {
     return nextState;
@@ -653,11 +675,22 @@ export async function runDispatchTick(
           return candidate;
         }
 
+        const wasRecovering = recoveryContextByPacketId.has(candidate.id);
+        const recoveryCount = (candidate.recoveryCount ?? 0) + (wasRecovering ? 1 : 0);
+        const recoveryFields = wasRecovering
+          ? { recoveryCount, lastRecoveryAt: new Date().toISOString() }
+          : {};
+
+        if (wasRecovering) {
+          console.log(`[recovery] Packet ${candidate.id} recovery attempt ${recoveryCount}/${MAX_RECOVERY_DISPATCHES}`);
+        }
+
         const result = results[batchIndex];
         if (result.status === 'fulfilled') {
           if (result.value.kind === 'awaiting_review') {
             return {
               ...candidate,
+              ...recoveryFields,
               status: 'awaiting_review',
               blockedReason: null,
               lastEventAt: new Date().toISOString(),
@@ -691,6 +724,7 @@ export async function runDispatchTick(
           });
           return {
             ...candidate,
+            ...recoveryFields,
             status: 'launching',
             blockedReason: null,
             lane: createLaneBinding(candidate, result.value.laneId!, result.value.sessionKey),
@@ -701,6 +735,7 @@ export async function runDispatchTick(
         console.error(`[dag-scheduler] Failed to dispatch packet ${candidate.id}: ${reason}`);
         return {
           ...candidate,
+          ...recoveryFields,
           status: 'blocked',
           blockedReason: reason,
         };
