@@ -785,21 +785,28 @@ async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
       const match = line.trim().match(/^(\d+)/);
       if (match) pids.push(Number(match[1]));
     }
+    if (pids.length === 0) return [];
 
-    const processes: LiveClaudeProcess[] = [];
-    for (const pid of pids) {
-      try {
-        // Use lsof -a -p PID -d cwd to get ONLY the working directory
-        // -a = AND mode (without it, -p and -d are OR'd, dumping all processes)
-        const { stdout: cwdOut } = await execFileAsync(
-          'lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'],
-          { timeout: 2000 },
-        );
-        const cwdLine = cwdOut.split('\n').find((l) => l.startsWith('n/'));
-        processes.push({ pid, cwd: cwdLine?.slice(1) });
-      } catch {
-        processes.push({ pid });
+    // #476 — Batch all PIDs into a single lsof call instead of O(N) sequential calls.
+    // lsof accepts comma-separated PIDs with -p and OR's them by default.
+    const processes: LiveClaudeProcess[] = pids.map((pid) => ({ pid }));
+    try {
+      const { stdout: cwdOut } = await execFileAsync(
+        'lsof', ['-a', '-p', pids.join(','), '-d', 'cwd', '-Fn'],
+        { timeout: 4000 },
+      );
+      // lsof output: "p<PID>\nn<path>\n" blocks per process
+      let currentPid: number | null = null;
+      for (const line of cwdOut.split('\n')) {
+        if (line.startsWith('p')) {
+          currentPid = Number(line.slice(1));
+        } else if (line.startsWith('n/') && currentPid !== null) {
+          const proc = processes.find((p) => p.pid === currentPid);
+          if (proc) proc.cwd = line.slice(1);
+        }
       }
+    } catch {
+      // lsof failed — processes returned without CWD info (status detection still works)
     }
     return processes;
   } catch {
