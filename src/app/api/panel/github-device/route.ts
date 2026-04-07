@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { fetchGitHubUser, fetchGitHubEmail } from '@/lib/auth/github';
 import { findOrCreateByGithub } from '@/lib/db/users';
 import { signToken } from '@/lib/auth/jwt';
+import { createSession } from '@/lib/db/sessions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,8 @@ type DeviceFlowRecord = {
   intervalMs: number;
   expiresAt: number;
   nextPollAt: number;
+  /** CSRF: random token bound to the client that started the flow */
+  csrfToken: string;
 };
 
 type DeviceStartPayload = {
@@ -115,6 +118,7 @@ export async function POST(request: Request) {
     const payload = await request.json().catch(() => null) as {
       action?: DeviceAction;
       flowId?: string;
+      csrfToken?: string;
     } | null;
 
     const action = payload?.action;
@@ -149,6 +153,7 @@ export async function POST(request: Request) {
 
       const intervalMs = Math.max(DEFAULT_INTERVAL_MS, (startPayload.interval ?? 5) * 1000);
       const flowId = randomUUID();
+      const csrfToken = randomUUID();
       const flow: DeviceFlowRecord = {
         flowId,
         deviceCode: startPayload.device_code,
@@ -158,6 +163,7 @@ export async function POST(request: Request) {
         intervalMs,
         expiresAt: Date.now() + startPayload.expires_in * 1000,
         nextPollAt: Date.now() + intervalMs,
+        csrfToken,
       };
       flows.set(flowId, flow);
 
@@ -165,6 +171,7 @@ export async function POST(request: Request) {
         ok: true,
         status: 'pending',
         flowId,
+        csrfToken,
         userCode: flow.userCode,
         verificationUri: flow.verificationUri,
         verificationUriComplete: flow.verificationUriComplete,
@@ -194,6 +201,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'GitHub device flow not found. Start a new device login.' }, { status: 404 });
     }
 
+    // CSRF check — client must send back the token it received on start
+    if (flow.csrfToken && flow.csrfToken !== payload?.csrfToken) {
+      return NextResponse.json({ error: 'Invalid CSRF token. Start a new device login.' }, { status: 403 });
+    }
+
     if (Date.now() >= flow.expiresAt) {
       flows.delete(flowId);
       return NextResponse.json({ ok: false, status: 'expired', note: 'The GitHub device code expired. Start a new login.' });
@@ -218,7 +230,8 @@ export async function POST(request: Request) {
       execGhWithToken(pollPayload.access_token);
 
       // 2. Create/update user in our database + sign JWT (new: #216)
-      let authResult: { token?: string; user?: Record<string, unknown> } = {};
+      let authUser: Record<string, unknown> | undefined;
+      let jwt: string | undefined;
       try {
         const ghUser = await fetchGitHubUser(pollPayload.access_token);
         if (ghUser) {
@@ -231,22 +244,26 @@ export async function POST(request: Request) {
             avatarUrl: ghUser.avatar_url,
           });
 
-          const jwt = await signToken({
+          jwt = await signToken({
             uid: user.id,
             ghUser: ghUser.login,
             plan: user.plan,
           });
 
-          authResult = {
+          // Track session for revocation
+          createSession({
+            userId: user.id,
             token: jwt,
-            user: {
-              id: user.id,
-              name: user.name,
-              email: user.email,
-              avatarUrl: user.avatarUrl,
-              plan: user.plan,
-              githubUsername: ghUser.login,
-            },
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          });
+
+          authUser = {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            avatarUrl: user.avatarUrl,
+            plan: user.plan,
+            githubUsername: ghUser.login,
           };
         }
       } catch (authErr) {
@@ -258,12 +275,12 @@ export async function POST(request: Request) {
         ok: true,
         status: 'complete',
         note: 'GitHub connected locally through device flow. Refreshing account state now.',
-        ...authResult,
+        user: authUser,
       });
 
-      // Set auth cookie if we got a token
-      if (authResult.token) {
-        response.cookies.set('cortex-ide-token', authResult.token, {
+      // Set auth cookie (token never exposed in response body)
+      if (jwt) {
+        response.cookies.set('cortex-ide-token', jwt, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
           sameSite: 'lax',

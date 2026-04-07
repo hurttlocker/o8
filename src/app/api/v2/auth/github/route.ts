@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { fetchGitHubUser, fetchGitHubEmail } from '@/lib/auth/github';
 import { findOrCreateByGithub } from '@/lib/db/users';
 import { signToken } from '@/lib/auth/jwt';
+import { createSession } from '@/lib/db/sessions';
 
 /**
  * POST /api/v2/auth/github
@@ -55,10 +56,17 @@ export async function POST(request: Request) {
       plan: user.plan,
     });
 
-    // Set cookie + return token
+    // Track session for revocation
+    createSession({
+      userId: user.id,
+      token,
+      userAgent: request.headers.get('user-agent') ?? undefined,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+
+    // Set cookie — token NOT included in response body (httpOnly cookie only)
     const response = NextResponse.json({
       ok: true,
-      token,
       user: {
         id: user.id,
         name: user.name,
