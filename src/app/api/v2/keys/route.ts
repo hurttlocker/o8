@@ -30,6 +30,7 @@ interface ProviderKeyConfig {
   envVar: string;
   placeholder: string;
   docsUrl: string;
+  validateUrl?: string;
 }
 
 const PROVIDERS: ProviderKeyConfig[] = [
@@ -39,6 +40,7 @@ const PROVIDERS: ProviderKeyConfig[] = [
     envVar: 'ANTHROPIC_API_KEY',
     placeholder: 'sk-ant-...',
     docsUrl: 'https://console.anthropic.com/settings/keys',
+    validateUrl: 'https://api.anthropic.com/v1/messages',
   },
   {
     id: 'openai',
@@ -46,6 +48,7 @@ const PROVIDERS: ProviderKeyConfig[] = [
     envVar: 'OPENAI_API_KEY',
     placeholder: 'sk-...',
     docsUrl: 'https://platform.openai.com/api-keys',
+    validateUrl: 'https://api.openai.com/v1/models',
   },
   {
     id: 'google',
@@ -53,6 +56,23 @@ const PROVIDERS: ProviderKeyConfig[] = [
     envVar: 'GOOGLE_AI_API_KEY',
     placeholder: 'AIza...',
     docsUrl: 'https://aistudio.google.com/apikey',
+    validateUrl: 'https://generativelanguage.googleapis.com/v1beta/models',
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    envVar: 'OPENROUTER_API_KEY',
+    placeholder: 'sk-or-...',
+    docsUrl: 'https://openrouter.ai/keys',
+    validateUrl: 'https://openrouter.ai/api/v1/models',
+  },
+  {
+    id: 'xai',
+    label: 'xAI (Grok)',
+    envVar: 'XAI_API_KEY',
+    placeholder: 'xai-...',
+    docsUrl: 'https://console.x.ai',
+    validateUrl: 'https://api.x.ai/v1/models',
   },
   {
     id: 'github',
@@ -60,6 +80,7 @@ const PROVIDERS: ProviderKeyConfig[] = [
     envVar: 'GH_TOKEN',
     placeholder: 'ghp_...',
     docsUrl: 'https://github.com/settings/tokens',
+    validateUrl: 'https://api.github.com/user',
   },
 ];
 
@@ -126,6 +147,55 @@ function writeEnvFile(vars: Map<string, string>) {
   writeFileSync(ENV_FILE, updated.join('\n'));
 }
 
+async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ valid: boolean; error?: string }> {
+  if (!config.validateUrl) return { valid: true };
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const headers: Record<string, string> = {};
+
+    if (config.id === 'anthropic') {
+      headers['x-api-key'] = key;
+      headers['anthropic-version'] = '2023-06-01';
+      headers['content-type'] = 'application/json';
+      // Anthropic requires a POST to /messages — use a minimal request that will 400 but proves auth works
+      const res = await fetch(config.validateUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      // 200 or 400 (bad request) means the key authenticated — only 401/403 means invalid
+      if (res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
+      return { valid: true };
+    }
+
+    if (config.id === 'google') {
+      // Google AI uses query param for key
+      const url = `${config.validateUrl}?key=${key}`;
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.status === 400 || res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
+      return { valid: true };
+    }
+
+    if (config.id === 'github') {
+      headers['Authorization'] = `token ${key}`;
+    } else {
+      headers['Authorization'] = `Bearer ${key}`;
+    }
+
+    const res = await fetch(config.validateUrl, { headers, signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
+    return { valid: true };
+  } catch {
+    // Network error — don't block saving, just warn
+    return { valid: true, error: 'Could not validate (network error) — key saved anyway' };
+  }
+}
+
 function maskKey(key: string): string {
   if (key.length <= 8) return '••••••••';
   return key.slice(0, 4) + '••••' + key.slice(-4);
@@ -174,6 +244,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Key cannot be empty' }, { status: 400 });
   }
 
+  // Validate key against provider API before saving
+  const validation = await validateKey(config, key);
+  if (!validation.valid) {
+    return NextResponse.json({ error: validation.error || 'Invalid API key' }, { status: 400 });
+  }
+
   // Write to .env.local
   const envVars = parseEnvFile();
   envVars.set(config.envVar, key);
@@ -186,6 +262,7 @@ export async function POST(request: NextRequest) {
     success: true,
     provider: config.id,
     maskedKey: maskKey(key),
+    warning: validation.error || undefined,
   });
 }
 
