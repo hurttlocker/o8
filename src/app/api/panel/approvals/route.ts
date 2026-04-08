@@ -202,11 +202,17 @@ export async function POST(request: NextRequest) {
       nextApproval = decision.nextApproval;
     } else if (continuation?.kind === 'lane' && action === 'approve') {
       // Lane continuation — re-dispatch the lane command
+      // Accept optional merge strategy from the operator's approval action
+      const strategy = typeof body.strategy === 'string'
+        && (body.strategy === 'ours' || body.strategy === 'theirs' || body.strategy === 'manual')
+        ? body.strategy
+        : continuation.strategy;
       const { dispatch } = await import('@/lib/lane/commands');
       const result = await dispatch({
         verb: continuation.verb,
         laneId: continuation.laneId,
         commitMessage: continuation.commitMessage,
+        strategy,
         actor: 'user',
       } as Parameters<typeof dispatch>[0]);
       decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);

@@ -143,6 +143,8 @@ export type LaneCommand =
       reviewSummary?: string;
       /** Set true when the orchestrator has already reviewed and approved the packet */
       orchestratorReviewed?: boolean;
+      /** Conflict resolution strategy from operator approval */
+      strategy?: 'ours' | 'theirs' | 'manual';
       actor?: LaneEventActor;
     }
   | {

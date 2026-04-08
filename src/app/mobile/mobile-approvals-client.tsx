@@ -230,13 +230,15 @@ export function MobileApprovalsClient({
     };
   }, [refresh]);
 
-  const handleResolve = useCallback(async (id: string, action: 'approve' | 'reject') => {
+  const handleResolve = useCallback(async (id: string, action: 'approve' | 'reject', strategy?: string) => {
     setResolving({ id, action });
     try {
+      const payload: Record<string, string> = { action, id };
+      if (strategy) payload.strategy = strategy;
       const response = await fetch('/api/panel/approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, id }),
+        body: JSON.stringify(payload),
       });
 
       if (response.ok) {
