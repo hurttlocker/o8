@@ -23,6 +23,8 @@ import {
   itemKey,
   itemSubline,
   itemTitle,
+  renderExpandedDetail,
+  useExpandDetails,
   type O8FeedFilter,
   type RepoActivityData,
 } from './o8-activity-helpers';
@@ -48,6 +50,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [registeredRepos, setRegisteredRepos] = useState<string[]>([]);
   const [repoOverride, setRepoOverride] = useState<string | null>(null);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
   const mountedRef = useRef(true);
 
   // Fetch registered repos
@@ -443,75 +447,93 @@ export const O8ActivityPane = memo(function O8ActivityPane({
               {group.items.map((item) => {
                 const icon = feedIconForItem(item);
                 const key = itemKey(item);
+                const isExpanded = expandedKey === key;
                 return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => handleItemClick(item)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 8,
-                      width: '100%',
-                      paddingTop: 7,
-                      paddingRight: 14,
-                      paddingBottom: 7,
-                      paddingLeft: 14,
-                      border: 'none',
-                      background: 'transparent',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'background 100ms ease',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(37,99,235,0.04)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    {/* Status dot */}
-                    <div style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: '50%',
-                      background: icon.bg,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                      marginTop: 1,
-                      color: icon.color,
-                    }}>
-                      {icon.icon}
-                    </div>
-
-                    {/* Content */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        fontSize: 12,
-                        color: 'var(--t-text)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        lineHeight: 1.4,
-                        fontWeight: 500,
-                      }}>
-                        {itemTitle(item)}
-                      </div>
-                      <div style={{
+                  <div key={key}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isExpanded) {
+                          setExpandedKey(null);
+                        } else {
+                          setExpandedKey(key);
+                          fetchForItem(item, key);
+                        }
+                      }}
+                      onDoubleClick={() => handleItemClick(item)}
+                      style={{
                         display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        marginTop: 1,
-                        fontSize: 10,
-                        color: 'var(--t-text-muted)',
-                        fontFamily: '"SF Mono", ui-monospace, monospace',
-                        lineHeight: 1.4,
+                        alignItems: 'flex-start',
+                        gap: 8,
+                        width: '100%',
+                        paddingTop: 7,
+                        paddingRight: 14,
+                        paddingBottom: 7,
+                        paddingLeft: 14,
+                        border: 'none',
+                        background: isExpanded ? 'rgba(37,99,235,0.06)' : 'transparent',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background 100ms ease',
+                      }}
+                      onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'rgba(37,99,235,0.04)'; }}
+                      onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      {/* Expand indicator */}
+                      <div style={{
+                        width: 10, height: 20,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, color: 'var(--t-text-faint)', fontSize: 10,
+                        transition: 'transform 150ms ease',
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
                       }}>
-                        {itemSubline(item)}
+                        <svg width="7" height="7" viewBox="0 0 7 7" fill="currentColor"><path d="M1.5 0.5L5.5 3.5L1.5 6.5Z" /></svg>
                       </div>
-                    </div>
 
-                    {/* Trailing badge */}
-                    {itemBadge(item)}
-                  </button>
+                      {/* Status dot */}
+                      <div style={{
+                        width: 20, height: 20, borderRadius: '50%',
+                        background: icon.bg,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, marginTop: 1, color: icon.color,
+                      }}>
+                        {icon.icon}
+                      </div>
+
+                      {/* Content */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontSize: 12, color: 'var(--t-text)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          lineHeight: 1.4, fontWeight: 500,
+                        }}>
+                          {itemTitle(item)}
+                        </div>
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          marginTop: 1, fontSize: 10,
+                          color: 'var(--t-text-muted)',
+                          fontFamily: '"SF Mono", ui-monospace, monospace',
+                          lineHeight: 1.4,
+                        }}>
+                          {itemSubline(item)}
+                        </div>
+                      </div>
+
+                      {/* Trailing badge */}
+                      {itemBadge(item)}
+                    </button>
+
+                    {/* Expanded detail */}
+                    {isExpanded ? (
+                      <div style={{
+                        paddingTop: 6, paddingRight: 14, paddingBottom: 10, paddingLeft: 52,
+                        borderBottom: '1px solid var(--t-panel-border, rgba(0,0,0,0.06))',
+                      }}>
+                        {renderExpandedDetail(item, prDetails, ciDetails, key)}
+                      </div>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>

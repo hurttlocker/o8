@@ -5,6 +5,8 @@
  * Extracted to keep the main component under 800 lines.
  */
 
+import type React from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActivityItem, FeedFilter } from './agent-panel/types';
 import { relativeAge } from './agent-panel/shared';
 
@@ -311,6 +313,218 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
       </>
     );
   }
+  return null;
+}
+
+// ── Expanded detail types + fetching ──
+
+interface PRExpandDetail {
+  mergeable: boolean;
+  checksStatus: string;
+  reviewDecision: string | null;
+  files: { path: string; additions: number; deletions: number }[];
+}
+
+interface CIExpandDetail {
+  failingJobs: { name: string; failingStep: string | null }[];
+  summaryLine: string | null;
+}
+
+export type ExpandDetails = {
+  pr: Record<string, PRExpandDetail>;
+  ci: Record<string, CIExpandDetail>;
+};
+
+export function useExpandDetails() {
+  const [prDetails, setPrDetails] = useState<Record<string, PRExpandDetail>>({});
+  const [ciDetails, setCiDetails] = useState<Record<string, CIExpandDetail>>({});
+
+  const fetchForItem = useCallback((item: ActivityItem, key: string) => {
+    if (item.kind === 'pr' && !prDetails[key]) {
+      fetch(`/api/panel/pr?repo=${encodeURIComponent(item.repo)}&number=${item.number}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d?.error) return;
+          setPrDetails((prev) => ({ ...prev, [key]: {
+            mergeable: Boolean(d.mergeable),
+            checksStatus: d.checksStatus ?? 'unknown',
+            reviewDecision: d.reviewDecision ?? null,
+            files: (d.files ?? []).slice(0, 6),
+          }}));
+        })
+        .catch(() => {});
+    }
+    if (item.kind === 'ci' && !ciDetails[key]) {
+      fetch(`/api/panel/ci/${item.id}?repo=${encodeURIComponent(item.repo)}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d?.error) return;
+          const jobs = (d.run?.jobs ?? []) as { name: string; conclusion: string; steps?: { name: string; conclusion: string }[] }[];
+          const failingJobs = jobs
+            .filter((j) => j.conclusion?.toLowerCase() === 'failure')
+            .map((j) => ({ name: j.name, failingStep: j.steps?.find((s) => s.conclusion?.toLowerCase() === 'failure')?.name ?? null }))
+            .slice(0, 3);
+          const summaryLine = String(d.logs ?? '')
+            .split('\n')
+            .find((l: string) => l.includes('##[error]') || l.toLowerCase().includes('error ts') || l.toLowerCase().includes('failed'))
+            ?.replace(/^.*##\[error\]/, '')
+            .trim() ?? null;
+          setCiDetails((prev) => ({ ...prev, [key]: { failingJobs, summaryLine } }));
+        })
+        .catch(() => {});
+    }
+  }, [prDetails, ciDetails]);
+
+  return { prDetails, ciDetails, fetchForItem };
+}
+
+// ── Expanded row detail content ──
+
+const DETAIL_LABEL_STYLE: React.CSSProperties = {
+  fontSize: 9,
+  fontWeight: 700,
+  color: 'var(--t-text-faint)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  marginBottom: 4,
+};
+
+const DETAIL_ROW_STYLE: React.CSSProperties = {
+  fontSize: 11,
+  color: 'var(--t-text-muted)',
+  lineHeight: 1.6,
+  fontFamily: '"SF Mono", ui-monospace, monospace',
+};
+
+function DetailPill({ label, color }: { label: string; color: string }) {
+  return (
+    <span style={{
+      paddingTop: 1, paddingRight: 6, paddingBottom: 1, paddingLeft: 6,
+      borderRadius: 6, fontSize: 9, fontWeight: 700,
+      background: `${color}14`, color,
+    }}>
+      {label}
+    </span>
+  );
+}
+
+export function renderExpandedDetail(
+  item: ActivityItem,
+  prDetails: Record<string, PRExpandDetail>,
+  ciDetails: Record<string, CIExpandDetail>,
+  key: string,
+): React.ReactNode {
+  if (item.kind === 'commit') {
+    return (
+      <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={DETAIL_LABEL_STYLE}>Commit</div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ color: 'var(--t-text-secondary)', fontWeight: 600 }}>{item.hash}</span>
+          <span style={{ color: 'var(--t-text-faint)' }}>{item.age}</span>
+        </div>
+        <div style={{ color: 'var(--t-text)', fontSize: 12, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+          {item.message}
+        </div>
+      </div>
+    );
+  }
+
+  if (item.kind === 'pr') {
+    const detail = prDetails[key];
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <DetailPill label={item.state} color={item.state === 'merged' ? '#8b5cf6' : item.state === 'open' ? '#22c55e' : '#ef4444'} />
+          <DetailPill label={`+${item.additions} -${item.deletions}`} color={item.additions > item.deletions ? '#22c55e' : '#ef4444'} />
+          <DetailPill label={`${item.changedFiles} file${item.changedFiles === 1 ? '' : 's'}`} color='var(--t-text-muted)' />
+          {item.reviewDecision ? <DetailPill label={item.reviewDecision.replace('_', ' ').toLowerCase()} color={item.reviewDecision === 'APPROVED' ? '#22c55e' : '#f59e0b'} /> : null}
+        </div>
+        {item.checkSummary ? (
+          <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8 }}>
+            {item.checkSummary.passed > 0 ? <span style={{ color: '#22c55e' }}>{item.checkSummary.passed} passed</span> : null}
+            {item.checkSummary.failed > 0 ? <span style={{ color: '#ef4444' }}>{item.checkSummary.failed} failed</span> : null}
+            {item.checkSummary.pending > 0 ? <span style={{ color: '#f59e0b' }}>{item.checkSummary.pending} pending</span> : null}
+          </div>
+        ) : null}
+        {detail?.files && detail.files.length > 0 ? (
+          <div>
+            <div style={DETAIL_LABEL_STYLE}>Changed files</div>
+            {detail.files.map((f) => (
+              <div key={f.path} style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8 }}>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.path}</span>
+                <span style={{ color: '#22c55e', flexShrink: 0 }}>+{f.additions}</span>
+                <span style={{ color: '#ef4444', flexShrink: 0 }}>-{f.deletions}</span>
+              </div>
+            ))}
+          </div>
+        ) : detail === undefined ? (
+          <div style={{ ...DETAIL_ROW_STYLE, color: 'var(--t-text-faint)' }}>Loading...</div>
+        ) : null}
+        <div style={{ ...DETAIL_ROW_STYLE, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+          <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{item.author}</span>
+          <span style={{ color: 'var(--t-text-faint)' }}> on </span>
+          <span style={{ color: 'var(--t-text-secondary)' }}>{item.branch}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (item.kind === 'ci') {
+    const detail = ciDetails[key];
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <DetailPill label={item.conclusion || item.status} color={item.conclusion === 'success' ? '#22c55e' : item.conclusion === 'failure' ? '#ef4444' : '#f59e0b'} />
+          <span style={{ ...DETAIL_ROW_STYLE }}>
+            {item.workflow} on {item.branch}
+          </span>
+        </div>
+        {detail?.failingJobs && detail.failingJobs.length > 0 ? (
+          <div>
+            <div style={DETAIL_LABEL_STYLE}>Failing jobs</div>
+            {detail.failingJobs.map((j) => (
+              <div key={j.name} style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 6, alignItems: 'center' }}>
+                <IconXCircle size={10} color="#ef4444" />
+                <span>{j.name}</span>
+                {j.failingStep ? <span style={{ color: 'var(--t-text-faint)' }}>{j.failingStep}</span> : null}
+              </div>
+            ))}
+          </div>
+        ) : detail === undefined && item.conclusion === 'failure' ? (
+          <div style={{ ...DETAIL_ROW_STYLE, color: 'var(--t-text-faint)' }}>Loading...</div>
+        ) : null}
+        {detail?.summaryLine ? (
+          <div style={{ ...DETAIL_ROW_STYLE, color: '#ef4444', fontWeight: 500 }}>
+            {detail.summaryLine.slice(0, 200)}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (item.kind === 'issue') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <DetailPill label={item.state} color={item.state === 'open' ? '#22c55e' : '#8b5cf6'} />
+          {item.labels.slice(0, 4).map((l) => (
+            <DetailPill key={l.name} label={l.name} color={`#${l.color}`} />
+          ))}
+        </div>
+        {item.body ? (
+          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.6, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+            {item.body.slice(0, 200)}{item.body.length > 200 ? '...' : ''}
+          </div>
+        ) : null}
+        <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+          {item.author ? <span><span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{item.author}</span></span> : null}
+          {item.assignees.length > 0 ? <span style={{ color: 'var(--t-text-faint)' }}>{item.assignees.join(', ')}</span> : null}
+          {item.comments > 0 ? <span>{item.comments} comment{item.comments === 1 ? '' : 's'}</span> : null}
+        </div>
+      </div>
+    );
+  }
+
   return null;
 }
 
