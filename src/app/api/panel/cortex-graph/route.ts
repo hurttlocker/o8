@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { getCortexClient } from '@/lib/cortex/client';
+import { getSqlite } from '@/lib/db';
 
 interface ClusterData {
   label: string;
@@ -9,38 +9,63 @@ interface ClusterData {
   factCount: number;
   avgConfidence: number;
   color: string;
-  facts: { text: string; confidence: number; source: string }[];
 }
 
-const TYPE_MAP: Record<string, { label: string; color: string }> = {
-  state: { label: 'State', color: '#ef4444' },
-  kv: { label: 'Key-Value', color: '#f59e0b' },
-  relationship: { label: 'Relationships', color: '#3b82f6' },
-  temporal: { label: 'Temporal', color: '#06b6d4' },
-  decision: { label: 'Decisions', color: '#8b5cf6' },
-  identity: { label: 'Identity', color: '#ec4899' },
-  config: { label: 'Config', color: '#22c55e' },
-  preference: { label: 'Preferences', color: '#f97316' },
-  location: { label: 'Locations', color: '#14b8a6' },
-};
+interface OutcomeRow {
+  repo_path: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  partial: number;
+  interrupted: number;
+  total_cost: number;
+  total_tokens: number;
+}
 
-function detectFactType(f: Record<string, unknown>): string {
-  const pred = String(f.predicate ?? '').toLowerCase();
-  const subj = String(f.subject ?? '').toLowerCase();
-  const obj = String(f.object ?? '').toLowerCase();
-  const all = `${subj} ${pred} ${obj}`;
+interface SearchRow {
+  summary: string;
+  outcome: string;
+  repo_path: string;
+  runtime: string;
+  completed_at: string;
+}
 
-  if (pred.includes('prefer') || pred.includes('like') || pred.includes('want') || pred.includes('favorite')) return 'preference';
-  if (pred.includes('decide') || pred.includes('chose') || pred.includes('select') || pred.includes('decision')) return 'decision';
-  if (pred.includes('name') || pred.includes('role') || pred.includes('pronouns') || pred.includes('is a') || pred.includes('identity')) return 'identity';
-  if (pred.includes('located') || pred.includes('address') || pred.includes('city') || pred.includes('lives') || all.includes('location')) return 'location';
-  if (pred.includes('config') || pred.includes('set to') || pred.includes('port') || pred.includes('path') || pred.includes('version')) return 'config';
-  if (pred.includes('knows') || pred.includes('works with') || pred.includes('married') || pred.includes('friend') || pred.includes('co-founder')) return 'relationship';
-  if (pred.includes('scheduled') || pred.includes('date') || pred.includes('since') || pred.includes('started') || pred.includes('deadline')) return 'temporal';
-  if (pred === '=' || pred === 'is' || pred === 'equals' || pred.includes('value') || pred.includes('key')) return 'kv';
-  if (pred.includes('uses') || pred.includes('runs') || pred.includes('has')) return 'state';
+interface TotalsRow {
+  total_sessions: number;
+  total_succeeded: number;
+  total_cost: number;
+  total_tokens: number;
+}
 
-  return 'state';
+function ensureTable(db: ReturnType<typeof getSqlite>): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_outcomes (
+      id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      branch TEXT,
+      runtime TEXT NOT NULL,
+      session_key TEXT,
+      lane_id TEXT,
+      packet_id TEXT,
+      outcome TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 1,
+      retry_history_json TEXT NOT NULL DEFAULT '[]',
+      duration_ms INTEGER,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      model TEXT,
+      patterns_json TEXT NOT NULL DEFAULT '[]',
+      conflict_zones_json TEXT NOT NULL DEFAULT '[]',
+      changed_files_json TEXT NOT NULL DEFAULT '[]',
+      review_approved INTEGER,
+      review_findings_count INTEGER NOT NULL DEFAULT 0,
+      transcript_path TEXT,
+      started_at TEXT NOT NULL,
+      completed_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
 }
 
 export async function GET(request: Request) {
@@ -48,157 +73,94 @@ export async function GET(request: Request) {
   const query = searchParams.get('q') || '';
 
   try {
-    const client = getCortexClient();
+    const db = getSqlite();
+    ensureTable(db);
 
-    // Get stats with type breakdown
-    const stats = await client.stats();
-    const factsByType: Record<string, number> = stats?.facts_by_type ?? {};
-    const totalMemories = stats?.memories ?? 0;
+    // Clusters: group by repo_path
+    const repoRows = db.prepare(`
+      SELECT
+        repo_path,
+        COUNT(*) as total,
+        SUM(CASE WHEN outcome = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
+        SUM(CASE WHEN outcome = 'failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN outcome = 'partial' THEN 1 ELSE 0 END) as partial,
+        SUM(CASE WHEN outcome = 'interrupted' THEN 1 ELSE 0 END) as interrupted,
+        SUM(cost_usd) as total_cost,
+        SUM(total_tokens) as total_tokens
+      FROM session_outcomes
+      GROUP BY repo_path
+      ORDER BY total DESC
+    `).all() as OutcomeRow[];
 
-    // Get REAL active/retired/superseded counts from beliefs
-    let activeFacts = 0;
-    let retiredFacts = 0;
-    let supersededFacts = 0;
-    let totalFacts = 0;
-    try {
-      const beliefsData = await client.beliefs();
-      if (beliefsData) {
-        const states = beliefsData.states ?? {};
-        activeFacts = states.active ?? 0;
-        retiredFacts = states.retired ?? 0;
-        supersededFacts = states.superseded ?? 0;
-        totalFacts = beliefsData.total ?? (activeFacts + retiredFacts + supersededFacts);
-      } else {
-        totalFacts = stats?.facts ?? 0;
-        activeFacts = stats?.confidence_distribution?.high ?? totalFacts;
-      }
-    } catch {
-      totalFacts = stats?.facts ?? 0;
-      activeFacts = stats?.confidence_distribution?.high ?? totalFacts;
-    }
+    const clusters: ClusterData[] = repoRows.map((row) => {
+      const successRate = row.total > 0 ? row.succeeded / row.total : 0;
+      const mostCommon = [
+        { outcome: 'succeeded', count: row.succeeded },
+        { outcome: 'failed', count: row.failed },
+        { outcome: 'partial', count: row.partial },
+        { outcome: 'interrupted', count: row.interrupted },
+      ].sort((a, b) => b.count - a.count)[0];
 
-    // Scale cluster fact counts proportionally to active-only
-    const totalInTypes = Object.values(factsByType).reduce((s: number, c) => s + (c as number), 0);
-    const activeRatio = totalInTypes > 0 ? activeFacts / totalInTypes : 1;
+      const type = mostCommon.outcome === 'succeeded' ? 'state' : 'decision';
+      const color = successRate > 0.7 ? '#34c759' : successRate >= 0.4 ? '#ff9f0a' : '#ff3b30';
+      const repoBasename = row.repo_path.split('/').pop() || row.repo_path;
 
-    const clusters: ClusterData[] = [];
-    for (const [type, rawCount] of Object.entries(factsByType)) {
-      const meta = TYPE_MAP[type] ?? { label: type, color: '#94a3b8' };
-      const activeCount = Math.round((rawCount as number) * activeRatio);
-      clusters.push({
-        label: meta.label,
+      return {
+        label: repoBasename,
         type,
-        factCount: activeCount,
-        avgConfidence: stats?.avg_confidence ? stats.avg_confidence * 100 : 80,
-        color: meta.color,
-        facts: [],
-      });
-    }
-
-    clusters.sort((a, b) => b.factCount - a.factCount);
-
-    // Search — two-pass: memory search for relevance + beliefs for structured facts
-    let searchResults: { text: string; confidence: number; source: string; type: string; factId?: number; subject?: string; predicate?: string; object?: string }[] = [];
-    if (query) {
-      // Pass 1: Memory search (BM25 + semantic)
-      try {
-        const results = await client.search(query, 30);
-
-        // Get fact_ids from memory results
-        const factIds = new Set<number>();
-        for (const r of results) {
-          if (Array.isArray(r.fact_ids)) {
-            for (const id of r.fact_ids) factIds.add(id);
-          }
-        }
-
-        // Pass 2: Get structured facts
-        const factMap = new Map<number, Record<string, unknown>>();
-        if (factIds.size > 0) {
-          try {
-            const allFacts = await client.beliefsInspect({ state: 'active', limit: 500 });
-            for (const f of allFacts) {
-              factMap.set(f.fact_id as number, f);
-            }
-          } catch { /* beliefs unavailable */ }
-        }
-
-        // Term matching on facts
-        if (factMap.size > 0) {
-          const qLower = query.toLowerCase();
-          const qTerms = qLower.split(/\s+/).filter(t => t.length > 1);
-          const termMatched: Record<string, unknown>[] = [];
-
-          for (const [, f] of factMap) {
-            const haystack = `${f.subject} ${f.predicate} ${f.object}`.toLowerCase();
-            if (qTerms.some(term => haystack.includes(term))) {
-              termMatched.push(f);
-            }
-          }
-
-          for (const f of termMatched.slice(0, 20)) {
-            const type = detectFactType(f);
-            searchResults.push({
-              text: `${f.subject} → ${f.predicate} → ${f.object}`,
-              confidence: typeof f.confidence === 'number' ? f.confidence * 100 : 50,
-              source: `${f.source_count ?? 1} sources`,
-              type,
-              factId: f.fact_id as number,
-              subject: String(f.subject ?? ''),
-              predicate: String(f.predicate ?? ''),
-              object: String(f.object ?? ''),
-            });
-          }
-        }
-
-        // Add memory search results
-        for (const r of results.slice(0, 15)) {
-          const memClass = String(r.class ?? '').toLowerCase();
-          let type = 'state';
-          if (memClass === 'identity') type = 'identity';
-          else if (memClass === 'rule' || memClass === 'config') type = 'config';
-          else if (memClass === 'preference') type = 'preference';
-          else if (memClass === 'decision') type = 'decision';
-          else if (memClass === 'temporal' || memClass === 'event') type = 'temporal';
-          else if (memClass === 'relationship') type = 'relationship';
-
-          searchResults.push({
-            text: (r.snippet || r.content || '').slice(0, 140),
-            confidence: typeof r.score === 'number' ? r.score * 100 : 50,
-            source: r.source_section || r.source_file?.split('/').pop() || 'cortex',
-            type,
-          });
-        }
-
-        // Deduplicate
-        const seen = new Set<string>();
-        searchResults = searchResults.filter(r => {
-          const key = r.text.slice(0, 60).toLowerCase();
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-      } catch { /* search failed */ }
-    }
-
-    return NextResponse.json({
-      clusters,
-      searchResults,
-      stats: {
-        activeFacts,
-        retiredFacts,
-        supersededFacts,
-        totalFacts,
-        totalMemories,
-        sources: stats?.sources ?? 0,
-        avgConfidence: stats?.avg_confidence ? (stats.avg_confidence * 100).toFixed(1) : '0',
-      },
+        factCount: row.total,
+        avgConfidence: Math.round(successRate * 100),
+        color,
+      };
     });
+
+    // Stats: totals
+    const totals = db.prepare(`
+      SELECT
+        COUNT(*) as total_sessions,
+        SUM(CASE WHEN outcome = 'succeeded' THEN 1 ELSE 0 END) as total_succeeded,
+        COALESCE(SUM(cost_usd), 0) as total_cost,
+        COALESCE(SUM(total_tokens), 0) as total_tokens
+      FROM session_outcomes
+    `).get() as TotalsRow;
+
+    const successRate = totals.total_sessions > 0
+      ? ((totals.total_succeeded / totals.total_sessions) * 100).toFixed(1)
+      : '0';
+
+    const stats = {
+      totalSessions: totals.total_sessions,
+      successRate,
+      totalCost: totals.total_cost,
+      totalTokens: totals.total_tokens,
+    };
+
+    // Search: when ?q= provided
+    let searchResults: { text: string; confidence: number; source: string; type: string }[] = [];
+    if (query) {
+      const matchingRows = db.prepare(`
+        SELECT summary, outcome, repo_path, runtime, completed_at
+        FROM session_outcomes
+        WHERE summary LIKE ?
+        ORDER BY completed_at DESC
+        LIMIT 30
+      `).all(`%${query}%`) as SearchRow[];
+
+      searchResults = matchingRows.map((row) => ({
+        text: row.summary.slice(0, 140),
+        confidence: row.outcome === 'succeeded' ? 90 : row.outcome === 'partial' ? 60 : 30,
+        source: row.repo_path.split('/').pop() || row.repo_path,
+        type: row.outcome === 'succeeded' ? 'state' : 'decision',
+      }));
+    }
+
+    return NextResponse.json({ clusters, searchResults, stats });
   } catch (err) {
+    console.error('[cortex-graph] error:', err);
     return NextResponse.json({
       clusters: [],
       searchResults: [],
-      stats: { activeFacts: 0, retiredFacts: 0, supersededFacts: 0, totalFacts: 0, totalMemories: 0, sources: 0, avgConfidence: '0' },
+      stats: { totalSessions: 0, successRate: '0', totalCost: 0, totalTokens: 0 },
       error: err instanceof Error ? err.message : 'Unknown error',
     });
   }

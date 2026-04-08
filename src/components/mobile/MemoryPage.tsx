@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { RecallCard } from '@/lib/cortex/types';
+import type { Directive } from '@/lib/cortex/directives-types';
 import { useTheme } from './ThemeContext';
 
 type ThemeColors = ReturnType<typeof useTheme>['colors'];
@@ -294,7 +295,9 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
   const [results, setResults] = useState<RecallCard[]>([]);
   const [stats, setStats] = useState<MemoryStats | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'search' | 'recent' | 'health'>('recent');
+  const [activeTab, setActiveTab] = useState<'search' | 'recent' | 'health' | 'directives'>('recent');
+  const [directives, setDirectives] = useState<Directive[]>([]);
+  const [directivesLoading, setDirectivesLoading] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -326,6 +329,18 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
     return () => window.clearTimeout(timer);
   }, [loadRecent]);
 
+  useEffect(() => {
+    if (activeTab !== 'directives') return;
+    setDirectivesLoading(true);
+    fetch('/api/directives')
+      .then((response) => response.json())
+      .then((data) => {
+        setDirectives(data.directives ?? []);
+        setDirectivesLoading(false);
+      })
+      .catch(() => setDirectivesLoading(false));
+  }, [activeTab]);
+
   const doSearch = useCallback((value: string) => {
     if (!value.trim()) return;
     setLoading(true);
@@ -352,10 +367,11 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
     [doSearch]
   );
 
-  const tabs: { key: 'recent' | 'search' | 'health'; label: string }[] = [
+  const tabs: { key: 'recent' | 'search' | 'health' | 'directives'; label: string }[] = [
     { key: 'recent', label: 'Recent' },
     { key: 'search', label: 'Search' },
     { key: 'health', label: 'Health' },
+    { key: 'directives', label: 'Directives' },
   ];
 
   return (
@@ -489,7 +505,7 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
         })}
       </div>
 
-      {activeTab !== 'health' ? (
+      {activeTab === 'recent' || activeTab === 'search' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {results.length === 0 && !loading ? (
             <div
@@ -510,7 +526,9 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
             <FactRow key={`${fact.factId}-${index}`} fact={fact} onInject={onInjectText} />
           ))}
         </div>
-      ) : (
+      ) : null}
+
+      {activeTab === 'health' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <span style={sectionHeaderStyle(colors)}>Health</span>
           {stats ? (
@@ -536,7 +554,109 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
             </div>
           )}
         </div>
-      )}
+      ) : null}
+
+      {activeTab === 'directives' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <span style={sectionHeaderStyle(colors)}>Operator Directives</span>
+          {directivesLoading ? (
+            <div
+              style={{
+                padding: '32px 20px',
+                textAlign: 'center',
+                color: colors.textSecondary,
+                fontSize: 14,
+                borderRadius: 14,
+                background: colors.cardBg,
+                border: `1px solid ${colors.cardBorder}`,
+              }}
+            >
+              Loading directives...
+            </div>
+          ) : directives.length === 0 ? (
+            <div
+              style={{
+                padding: '32px 20px',
+                textAlign: 'center',
+                color: colors.textSecondary,
+                fontSize: 14,
+                borderRadius: 14,
+                background: colors.cardBg,
+                border: `1px solid ${colors.cardBorder}`,
+              }}
+            >
+              No directives configured
+            </div>
+          ) : (
+            directives.map((d) => {
+              const contentLines = d.content.split('\n');
+              const preview = contentLines.slice(0, 2).join(' ');
+              const truncated = preview.length > 120 ? preview.slice(0, 120) + '...' : preview;
+
+              return (
+                <div
+                  key={d.id}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 14,
+                    background: colors.cardBg,
+                    border: `1px solid ${colors.cardBorder}`,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                    <span
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: colors.text,
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      {d.title}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: d.scope === 'global' ? '#0a84ff' : '#30d158',
+                        background: d.scope === 'global' ? 'rgba(10,132,255,0.12)' : 'rgba(48,209,88,0.12)',
+                        border: d.scope === 'global' ? '1px solid rgba(10,132,255,0.16)' : '1px solid rgba(48,209,88,0.16)',
+                        borderRadius: 999,
+                        paddingTop: 2,
+                        paddingBottom: 2,
+                        paddingLeft: 6,
+                        paddingRight: 6,
+                      }}
+                    >
+                      {d.scope === 'global' ? 'Global' : d.repoName ?? 'Repo'}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: colors.textSecondary,
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        marginLeft: 'auto',
+                      }}
+                    >
+                      P{d.priority}
+                    </span>
+                  </div>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      color: colors.textSecondary,
+                    }}
+                  >
+                    {truncated}
+                  </p>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

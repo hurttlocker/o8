@@ -1,6 +1,7 @@
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getCortexClient } from '@/lib/cortex/client';
+import { writeSessionOutcome } from '@/lib/cortex/ledger';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
@@ -572,5 +573,39 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   };
 
   await storePacketContext(context);
+
+  // Cortex v2: write session outcome to the ledger
+  try {
+    const startedAt = agent?.runtimeSurface?.lifecycle?.lastRunStartedAt ?? context.completedAt;
+    const durationMs = startedAt ? Date.parse(context.completedAt) - Date.parse(startedAt) : null;
+    const outcome = context.selfReview?.passed === false ? 'failed'
+      : context.review?.approved === false ? 'failed'
+      : 'succeeded';
+    writeSessionOutcome({
+      repoPath: lane?.repoPath ?? '',
+      branch: lane?.branch ?? null,
+      runtime: 'codex',
+      sessionKey: normalizedSessionKey,
+      laneId: lane?.id ?? null,
+      packetId: normalizedPacketId,
+      outcome,
+      summary: context.summary,
+      attempts: 1,
+      durationMs: durationMs && durationMs > 0 ? durationMs : null,
+      totalTokens: telemetry?.totalTokens ?? 0,
+      costUsd: telemetry?.estimatedCostUsd ?? 0,
+      model: context.model,
+      patterns: context.patterns ?? [],
+      conflictZones: context.conflictZones ?? [],
+      changedFiles: context.changedFiles,
+      reviewApproved: context.review ? context.review.approved : null,
+      reviewFindingsCount: context.reviewFindings?.length ?? context.review?.findings?.length ?? 0,
+      startedAt,
+      completedAt: context.completedAt,
+    });
+  } catch (ledgerError) {
+    console.error('[context-relay] Failed to write session outcome:', ledgerError);
+  }
+
   return context;
 }
