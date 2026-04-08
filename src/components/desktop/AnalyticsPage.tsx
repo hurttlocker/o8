@@ -423,7 +423,7 @@ const TopSessionsCard = memo(function TopSessionsCard({ sessions }: { sessions: 
       padding: '16px 18px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <TrendingUp size={14} strokeWidth={2} color="#ef4444" />
+        <TrendingUp size={14} strokeWidth={2} color="var(--t-accent)" />
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
           Top Sessions by Spend
         </span>
@@ -538,7 +538,7 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
         marginBottom: 20,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Activity size={18} strokeWidth={2} color="#ef4444" />
+          <Activity size={18} strokeWidth={2} color="var(--t-accent)" />
           <span style={{
             fontSize: 20, fontWeight: 800, color: 'var(--t-text)',
             letterSpacing: '-0.03em',
@@ -563,7 +563,7 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
                 padding: '4px 10px',
                 borderRadius: 6,
                 border: 'none',
-                background: selectedRange === r.hours ? '#ef4444' : 'transparent',
+                background: selectedRange === r.hours ? 'var(--t-accent)' : 'transparent',
                 color: selectedRange === r.hours ? '#fff' : 'var(--t-text-muted)',
                 fontSize: 11,
                 fontWeight: 600,
@@ -625,7 +625,7 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
               label="Input Tokens"
               value={formatTokens(data.totals.inputTokens)}
               sub={`${formatTokens(data.totals.cacheWriteTokens)} cache writes`}
-              color="#ef4444"
+              color="#f59e0b"
             />
             <MetricCard
               icon={TrendingUp}
