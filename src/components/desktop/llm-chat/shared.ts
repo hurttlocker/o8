@@ -184,7 +184,6 @@ export const CLI_RUNTIME_MODELS: Record<string, ModelOption[]> = {
   ],
   codex: [
     { id: 'cli:codex:gpt-5.4', label: 'GPT-5.4', provider: 'openai', color: '#10a37f', description: 'Latest flagship', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
-    { id: 'cli:codex:o3', label: 'o3', provider: 'openai', color: '#10a37f', description: 'Deep reasoning', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
     { id: 'cli:codex:o4-mini', label: 'o4-mini', provider: 'openai', color: '#10a37f', description: 'Fast reasoning', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
   ],
   gemini: [

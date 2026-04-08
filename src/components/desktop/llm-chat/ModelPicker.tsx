@@ -4,10 +4,10 @@ import { createPortal } from 'react-dom';
 
 import { THEME_ACCENT, THEME_ACCENT_SOFT, THEME_PANEL_GLASS, type ModelOption } from './shared';
 
-const RUNTIME_LABELS: Record<string, string> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  gemini: 'Gemini CLI',
+const RUNTIME_META: Record<string, { label: string; logo?: string; color: string }> = {
+  'claude-code': { label: 'Claude Code', logo: '/logos/claude.png', color: '#e07a3a' },
+  codex: { label: 'Codex', logo: '/logos/codex.webp', color: '#10a37f' },
+  gemini: { label: 'Gemini CLI', color: '#4285f4' },
 };
 
 const SECTION_HEADER = { paddingTop: 8, paddingRight: 12, paddingBottom: 4, paddingLeft: 12, fontSize: 10, fontWeight: 600, color: 'var(--t-text-faint)', textTransform: 'uppercase' as const, letterSpacing: '0.06em' };
@@ -52,12 +52,12 @@ function ModelPickerBase({
   const apiModels = models.filter((m) => m.backend === 'api');
 
   // Group CLI models by runtime
-  const runtimeGroups: { runtime: string; label: string; models: ModelOption[] }[] = [];
+  const runtimeGroups: { runtime: string; meta: typeof RUNTIME_META[string]; models: ModelOption[] }[] = [];
   for (const m of cliModels) {
     const rt = m.cliRuntime ?? 'unknown';
     let group = runtimeGroups.find((g) => g.runtime === rt);
     if (!group) {
-      group = { runtime: rt, label: RUNTIME_LABELS[rt] ?? rt, models: [] };
+      group = { runtime: rt, meta: RUNTIME_META[rt] ?? { label: rt, color: '#888' }, models: [] };
       runtimeGroups.push(group);
     }
     group.models.push(m);
@@ -93,8 +93,13 @@ function ModelPickerBase({
         <div ref={dropRef} style={{ position: 'fixed', bottom: dropPos.bottom, right: dropPos.right, zIndex: 9999, minWidth: 260, maxHeight: 420, overflowY: 'auto', background: THEME_PANEL_GLASS, border: '1px solid var(--t-panel-border)', borderRadius: 12, boxShadow: 'var(--t-panel-shadow)', animation: 'llmFadeIn 100ms ease-out' }}>
           {runtimeGroups.map((group, gi) => (
             <div key={group.runtime}>
-              <div style={{ ...SECTION_HEADER, paddingTop: gi === 0 ? 6 : 8, ...(gi > 0 ? { borderTop: '1px solid var(--t-divider-subtle)', marginTop: 2 } : {}) }}>
-                {group.label}
+              <div style={{ ...SECTION_HEADER, display: 'flex', alignItems: 'center', gap: 5, paddingTop: gi === 0 ? 6 : 8, ...(gi > 0 ? { borderTop: '1px solid var(--t-divider-subtle)', marginTop: 2 } : {}) }}>
+                {group.meta.logo ? (
+                  <img src={group.meta.logo} alt="" width={12} height={12} style={{ display: 'block', objectFit: 'contain', flexShrink: 0, borderRadius: 2 }} />
+                ) : (
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: group.meta.color, flexShrink: 0 }} />
+                )}
+                {group.meta.label}
               </div>
               {group.models.map((model) => (
                 <ModelRow key={model.id} model={model} selected={selected} onSelect={select} />
