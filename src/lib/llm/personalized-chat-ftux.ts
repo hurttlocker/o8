@@ -3,7 +3,7 @@ import 'server-only';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { cortexRecall } from '@/lib/cortex/client';
+// Old Cortex Go binary removed — cortexRecall no longer available
 import { enrichRepoReadinessList } from '@/lib/repos/readiness';
 import { listRepos } from '@/lib/repos/registry';
 
@@ -183,20 +183,8 @@ function scoreTopics(corpus: string[]) {
 }
 
 async function inferTopicsFromCortex() {
-  try {
-    const recall = await cortexRecall(
-      'user interests favorite technologies frameworks languages active projects prior imported chats',
-      { limit: 12 },
-    );
-    const corpus = recall.items
-      .map((item) => `${item.text}\n${item.reasons.join(' ')}`)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    if (corpus.length === 0) return [];
-    return scoreTopics(corpus);
-  } catch {
-    return [];
-  }
+  // Old Cortex Go binary removed — topic inference disabled until v2 migration
+  return [];
 }
 
 async function detectRuntimeNames() {

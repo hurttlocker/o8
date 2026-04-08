@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { AuthContext } from '@/lib/auth/middleware';
 import { logUsage } from '@/lib/db/usage';
 import { parseInlineMarkdownDataImages } from '@/lib/llm/inline-images';
-import { extractAndStoreFacts } from '@/lib/llm/memory';
 import { computeCost, type Message } from './provider-config';
 import { executeNativeTool, extractFilePath } from './google-native-execution';
 
@@ -133,7 +132,6 @@ interface GoogleStreamOptions {
   lastUserContent?: string;
   messages: Message[];
   model: string;
-  recallInfo?: { factCount: number; queryMs: number } | null;
   scopedRepoRoot: string | null;
   tabId: string;
 }
@@ -376,14 +374,6 @@ export async function createGoogleToolResponseStream(options: GoogleStreamOption
             reason: initialFetch.fallbackUsed.reason,
           });
         }
-        if (options.recallInfo) {
-          enqueue({
-            type: 'memory_recall',
-            factCount: options.recallInfo.factCount,
-            queryMs: options.recallInfo.queryMs,
-          });
-        }
-
         let currentResponse = initialFetch.response;
         let step = 0;
 
@@ -485,14 +475,6 @@ export async function createGoogleToolResponseStream(options: GoogleStreamOption
           }
         }
 
-        // Cortex v2: session outcome replaces fact extraction
-        // TODO: wire writeSessionOutcome() here when chat conversation tracking is ready
-        // if (options.lastUserContent && fullResponseText.length > 50) {
-        //   extractAndStoreFacts(options.lastUserContent, fullResponseText, options.tabId || undefined)
-        //     .catch((error) => {
-        //       console.error('[memory-extract] Phase B failed:', error);
-        //     });
-        // }
       } catch (error) {
         enqueue({
           type: 'error',

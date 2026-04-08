@@ -3,7 +3,6 @@ import { readdir, readFile, stat } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
-import { capturePreCompactionSnapshotFromEntries } from '@/lib/cortex/compaction-snapshot';
 import { detectCompactionEvents } from '@/lib/runtimes/compaction-detector';
 
 export const runtime = 'nodejs';
@@ -175,9 +174,6 @@ export async function GET(req: NextRequest) {
     }
 
     const compactionEvents = detectCompactionEvents(parsedEntries);
-    for (const event of compactionEvents) {
-      await capturePreCompactionSnapshotFromEntries(sessionKey, event, parsedEntries);
-    }
 
     const skippedEntryIds = new Set(
       compactionEvents.flatMap((event) => [
