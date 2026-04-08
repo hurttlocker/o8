@@ -81,6 +81,8 @@ export interface OrchestratorPacket {
   archivedAt?: string | null;
   review?: OrchestratorPacketReview | null;
   lane?: OrchestratorLaneBinding | null;
+  /** Files predicted to be touched, computed from packet scope vs skeleton cache */
+  predictedFiles?: string[];
 }
 
 export interface OrchestratorMissionState {
