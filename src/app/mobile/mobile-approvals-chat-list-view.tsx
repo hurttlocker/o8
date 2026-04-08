@@ -13,6 +13,7 @@ import {
   truncateText,
   type ChatHistoryRecord,
   type MobilePalette,
+  getModelOption,
 } from './mobile-approvals-shared';
 import {
   MobileGlassPanel,
@@ -388,7 +389,7 @@ export function ChatListView({
                       {chatTimeAgo(conversation.updatedAt)}
                       {conversation.model ? (
                         <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: palette.subduedText }}>
-                            {truncateText(conversation.model, 24)}
+                            {getModelOption(conversation.model)?.label ?? truncateText(conversation.model, 24)}
                           </span>
                         ) : null}
                       </div>
