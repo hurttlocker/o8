@@ -6,6 +6,11 @@ import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/a
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
+import {
+  PRESERVATION_ADD_BUDGET_RATIO,
+  PRESERVATION_DELETE_BUDGET_RATIO,
+  PRESERVATION_MIN_DELETE_BUDGET,
+} from '@/lib/lane/merge-gate';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { getAllCached, type FileSkeleton } from '@/lib/skeleton';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
@@ -269,9 +274,6 @@ export function checkFileSizeThresholds(packet: OrchestratorPacket): string[] {
 }
 
 const PRESERVATION_MAX_EXPORTS = 12;
-const PRESERVATION_DELETE_BUDGET_RATIO = 0.1;  // max 10% of existing lines deletable
-const PRESERVATION_ADD_BUDGET_RATIO = 0.2;     // max 20% of existing lines addable
-const PRESERVATION_MIN_DELETE_BUDGET = 5;
 
 function formatExportList(symbols: FileSkeleton['symbols']): string {
   const exported = symbols.filter((s) => s.exported);
