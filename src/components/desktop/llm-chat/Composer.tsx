@@ -36,6 +36,7 @@ function ComposerBase({
   isStreaming,
   linkedIssue,
   model,
+  models,
   pendingApproval,
   queuedContextCards,
   showFilePicker,
@@ -105,6 +106,7 @@ function ComposerBase({
   onInputPaste: (event: React.ClipboardEvent) => void;
   onIssuePickerOpen: () => void;
   onLinkIssueClear: () => void;
+  models: ModelOption[];
   onModelSelect: (model: ModelOption) => void;
   onQueuedContextRemove: (id: string) => void;
   onSend: () => void;
@@ -209,7 +211,7 @@ function ComposerBase({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ModelPicker selected={model} onSelect={onModelSelect} disabled={isStreaming} />
+              <ModelPicker selected={model} models={models} onSelect={onModelSelect} disabled={isStreaming} />
               {isStreaming ? (
                 <button type="button" onClick={onStop} title="Stop generating (Esc)" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, border: 'none', borderRadius: 10, background: '#ef4444', color: '#ffffff', cursor: 'pointer', flexShrink: 0, transition: 'background 150ms' }} onMouseEnter={(event) => { event.currentTarget.style.background = '#dc2626'; }} onMouseLeave={(event) => { event.currentTarget.style.background = '#ef4444'; }}>
                   <Square size={14} />

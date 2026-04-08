@@ -163,11 +163,11 @@ export const ReviewTab = memo(function ReviewTab({
     }
     setReviewActionResult({
       type: 'success',
-      message: `Added to ${chatTargetLabel?.trim() || 'Chat'}.`,
+      message: `Added to ${chatTargetLabel?.trim() || 'Assistant'}.`,
     });
     contextResultTimerRef.current = window.setTimeout(() => {
       setReviewActionResult((current) => (
-        current?.message === `Added to ${chatTargetLabel?.trim() || 'Chat'}.`
+        current?.message === `Added to ${chatTargetLabel?.trim() || 'Assistant'}.`
           ? null
           : current
       ));

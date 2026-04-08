@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { LLMChatLayout } from './LLMChatLayout';
 import {
-  buildRepoRequestHeaders, MODELS, SLASH_COMMANDS,
+  API_MODELS, buildRepoRequestHeaders, CLI_RUNTIME_MODELS, SLASH_COMMANDS,
   type ActiveThinkingState, type AttachedImage, type FileSuggestion, type LLMChatProps, type LLMMessage, type ModelOption, type PendingApprovalState, type QueuedContextCard, type ToolCallInfo,
 } from './shared';
 import { generateFollowUps, streamAssistantResponse } from './streaming';
@@ -13,7 +13,10 @@ import { useLLMChatLifecycle } from './useLLMChatLifecycle';
 import { compactConversation, shouldCompact, type LLMMessage as CompactMessage } from '@/lib/chat/compaction';
 
 export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, draftInjection, onSummaryChange, onConsumeDraftInjection, onLinkedIssueChange, onOpenInCanvas, onRunInTerminal, onOpenHistoryChat }: LLMChatProps) {
-  const [messages, setMessages] = useState<LLMMessage[]>([]), [input, setInput] = useState(''), [model, setModel] = useState<ModelOption>(MODELS[0]), [isStreaming, setIsStreaming] = useState(false), [streamContent, setStreamContent] = useState(''), [modelResolved, setModelResolved] = useState(false);
+  const [cliModels, setCliModels] = useState<ModelOption[]>([]);
+  const allModels = cliModels.length > 0 ? [...cliModels, ...API_MODELS] : API_MODELS;
+
+  const [messages, setMessages] = useState<LLMMessage[]>([]), [input, setInput] = useState(''), [model, setModel] = useState<ModelOption>(API_MODELS[0]), [isStreaming, setIsStreaming] = useState(false), [streamContent, setStreamContent] = useState(''), [modelResolved, setModelResolved] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]), [showFilePicker, setShowFilePicker] = useState(false), [attachedFiles, setAttachedFiles] = useState<string[]>([]), [filePickerIndex, setFilePickerIndex] = useState(0);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]), [activeToolCalls, setActiveToolCalls] = useState<ToolCallInfo[]>([]), [activeThinking, setActiveThinking] = useState<ActiveThinkingState | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]), [followUpsLoading, setFollowUpsLoading] = useState(false), [showSlashPicker, setShowSlashPicker] = useState(false), [slashIndex, setSlashIndex] = useState(0);
@@ -22,6 +25,24 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
   const [applyPath, setApplyPath] = useState(''), [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'done' | 'error'>('idle'), [applyFileSuggestions, setApplyFileSuggestions] = useState<Array<{ path: string }>>([]), [applyFileIndex, setApplyFileIndex] = useState(0), [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
 
   const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), handledDraftInjectionRef = useRef<string | null>(null), scrollRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null), abortRef = useRef<AbortController | null>(null), fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Detect installed CLI runtimes and build CLI model entries
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/setup/detect');
+        if (!res.ok) return;
+        const data = await res.json();
+        const detected: ModelOption[] = [];
+        for (const tool of data.tools ?? []) {
+          if (tool.detected && CLI_RUNTIME_MODELS[tool.id as string]) {
+            detected.push(...CLI_RUNTIME_MODELS[tool.id as string]);
+          }
+        }
+        if (detected.length > 0) setCliModels(detected);
+      } catch { /* non-critical */ }
+    })();
+  }, []);
 
   const handleApplyToFile = useCallback((code: string, language: string) => {
     setApplyModal({ code, language });
@@ -634,6 +655,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
   }, [pendingApproval]);
 
   useLLMChatLifecycle({
+    allModels,
     buildPersistedMessages,
     abortRef,
     draftInjection,
@@ -703,6 +725,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
       messages={messages}
       missionCard={missionCard}
       model={model}
+      models={allModels}
       onApply={doApply}
       onApplyFileIndexChange={setApplyFileIndex}
       onApplyModalClose={() => setApplyModal(null)}

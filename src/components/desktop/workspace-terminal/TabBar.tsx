@@ -142,7 +142,7 @@ export const TabBar = memo(function TabBar({
             const isActive = tab.id === activeTabId;
             const rawLabel = workspaceTabPrimaryLabel(tab);
             const chatTabMeta = describeWorkspaceChatTab(tab);
-            const primaryLabel = rawLabel === 'Chat' && chatTabMeta?.summary
+            const primaryLabel = (rawLabel === 'Assistant' || rawLabel === 'Chat') && chatTabMeta?.summary
               ? chatTabMeta.summary
               : rawLabel;
             const tabDetail = tab.orchestrationPacket

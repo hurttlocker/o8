@@ -2,9 +2,10 @@ import { useEffect } from 'react';
 
 import { saveChatHistory, loadChatHistory, type SavedChatRepoContext } from '@/lib/llm/chat-history';
 
-import { buildConversationSummary, buildQueuedContextCard, HISTORY_DELETED_EVENT, MODELS, type AttachedImage, type LLMMessage, type ModelOption, type PendingApprovalState, type PreferredRepoContext, type QueuedContextCard, type ToolCallInfo } from './shared';
+import { buildConversationSummary, buildQueuedContextCard, HISTORY_DELETED_EVENT, API_MODELS, type AttachedImage, type LLMMessage, type ModelOption, type PendingApprovalState, type PreferredRepoContext, type QueuedContextCard, type ToolCallInfo } from './shared';
 
 export function useLLMChatLifecycle({
+  allModels,
   buildPersistedMessages,
   abortRef,
   draftInjection,
@@ -40,6 +41,7 @@ export function useLLMChatLifecycle({
   streamContent,
   tabId,
 }: {
+  allModels: ModelOption[];
   buildPersistedMessages: (baseMessages?: LLMMessage[], partialContent?: string) => LLMMessage[];
   abortRef: React.RefObject<AbortController | null>;
   draftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string } | null;
@@ -127,7 +129,7 @@ export function useLLMChatLifecycle({
       if (saved?.messages?.length) {
         setMessages(saved.messages);
         if (saved.model) {
-          const savedModel = MODELS.find((entry) => entry.id === saved.model);
+          const savedModel = allModels.find((entry) => entry.id === saved.model);
           if (savedModel) {
             setModel(savedModel);
             setModelResolved(true);
@@ -135,18 +137,25 @@ export function useLLMChatLifecycle({
           }
         }
       }
+      // Prefer CLI models (installed, no key needed), then API models with configured keys
+      const cliDefault = allModels.find((entry) => entry.backend === 'cli');
+      if (cliDefault) {
+        setModel(cliDefault);
+        setModelResolved(true);
+        return;
+      }
       try {
         const response = await fetch('/api/v2/keys');
         if (response.ok) {
           const data = await response.json();
           const configured = new Set((data.providers ?? []).filter((provider: { configured: boolean }) => provider.configured).map((provider: { id: string }) => provider.id));
-          const match = MODELS.find((entry) => configured.has(entry.provider));
+          const match = API_MODELS.find((entry) => configured.has(entry.provider));
           if (match) setModel(match);
         }
       } catch {}
       setModelResolved(true);
     })();
-  }, [modelResolved, setMessages, setModel, setModelResolved, tabId]);
+  }, [allModels, modelResolved, setMessages, setModel, setModelResolved, tabId]);
 
   useEffect(() => {
     if (!modelResolved) return;
