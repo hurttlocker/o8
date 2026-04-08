@@ -271,6 +271,8 @@ export const approvals = sqliteTable('approvals', {
   command: text('command'),
   editable: integer('editable', { mode: 'boolean' }),
   diffJson: text('diff_json'),
+  gateResultJson: text('gate_result_json'),
+  conflictReportJson: text('conflict_report_json'),
   risk: text('risk', { enum: ['low', 'medium', 'high'] }).notNull(),
   metadataJson: text('metadata_json'),
   packetId: text('packet_id'),
