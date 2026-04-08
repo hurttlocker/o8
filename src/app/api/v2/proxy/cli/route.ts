@@ -20,6 +20,7 @@ interface CliRequestBody {
   model: string;       // e.g. 'cli:claude-code:opus' → extract 'opus' or 'haiku'
   messages: { role: string; content: string }[];
   effort?: CliEffort;
+  repoPath?: string;
 }
 
 /** Map CLI model id suffix to the --model flag value */
@@ -81,11 +82,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'runtime, model, and messages are required' }, { status: 400 });
     }
 
-    const { runtime, model, messages, effort } = body;
+    const { runtime, model, messages, effort, repoPath } = body;
     const modelKey = extractModelKey(model);
     const prompt = buildPrompt(messages);
     if (!prompt) {
       return NextResponse.json({ error: 'No user message found' }, { status: 400 });
+    }
+
+    // Resolve repo path for cwd — validate against registry to prevent directory traversal
+    let cwd = process.cwd();
+    if (repoPath?.trim()) {
+      const { resolveRepoPathFromRegistry } = await import('@/lib/repos/repo-path-registry');
+      const resolved = await resolveRepoPathFromRegistry(repoPath.trim());
+      if (resolved.ok) {
+        cwd = resolved.repoRoot;
+      }
     }
 
     let cmd: string;
@@ -122,7 +133,7 @@ export async function POST(request: Request) {
       start(controller) {
         const encoder = new TextEncoder();
         const child = spawn(cmd, args, {
-          cwd: process.cwd(),
+          cwd,
           stdio: ['ignore', 'pipe', 'pipe'],
           env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
         });

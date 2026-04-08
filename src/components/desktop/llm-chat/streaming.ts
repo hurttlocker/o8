@@ -78,12 +78,14 @@ export async function streamAssistantResponse({
   // Route CLI models to CLI proxy, API models to provider proxy
   const isCli = model.backend === 'cli' && model.cliRuntime;
   const endpoint = isCli ? '/api/v2/proxy/cli' : '/api/v2/proxy/llm';
+  const repoPath = preferredRepo?.localPath;
   const requestBody = isCli
     ? JSON.stringify({
         runtime: model.cliRuntime,
         model: model.id,
         messages: [...recentMessages, { role: 'user', content: [buildLinkedIssueContext(linkedIssue), messageForModel].filter(Boolean).join('\n\n') }],
         ...(model.defaultEffort ? { effort: model.defaultEffort } : {}),
+        ...(repoPath ? { repoPath } : {}),
       })
     : JSON.stringify({
         model: model.id,
