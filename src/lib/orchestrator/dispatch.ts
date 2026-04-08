@@ -155,6 +155,86 @@ function buildAttemptLearningSections(learnings: AttemptLearning[]): string[] {
     });
 }
 
+// ── Pre-dispatch file overlap gate (#380) ──
+
+/**
+ * Predict which files a packet will touch using the skeleton heuristic.
+ * Same matching logic as the preservation envelope — file-level only,
+ * no directory-level matches to avoid over-serialization.
+ */
+export function computePredictedFiles(packet: OrchestratorPacket): string[] {
+  const repoPath = packet.workspaceTargetPath;
+  if (!repoPath) return [];
+
+  const scopeText = buildPacketScopeText(packet);
+  if (!scopeText) return [];
+
+  return getAllCached(repoPath)
+    .filter((file) => {
+      // File-level matches only — skip directory-level to avoid false overlap
+      const normalizedPath = file.relativePath.toLowerCase();
+      return includesPathToken(scopeText, normalizedPath);
+    })
+    .map((file) => file.relativePath);
+}
+
+/**
+ * Filter a list of dispatchable packets to avoid parallel dispatch of packets
+ * that touch the same files. Returns one packet per overlapping cluster.
+ * Non-overlapping packets all pass through.
+ */
+export function filterOverlappingPackets(
+  packets: OrchestratorPacket[],
+  activePackets: OrchestratorPacket[],
+): OrchestratorPacket[] {
+  if (packets.length <= 1) return packets;
+
+  // Compute predicted files for each candidate and active packet
+  const predictions = new Map<string, Set<string>>();
+  for (const p of [...packets, ...activePackets]) {
+    const files = p.predictedFiles ?? computePredictedFiles(p);
+    predictions.set(p.id, new Set(files));
+  }
+
+  // Files already claimed by active (running) packets
+  const claimedFiles = new Set<string>();
+  for (const p of activePackets) {
+    const files = predictions.get(p.id);
+    if (files) files.forEach((f) => claimedFiles.add(f));
+  }
+
+  const result: OrchestratorPacket[] = [];
+  const newlyClaimed = new Set<string>();
+
+  for (const packet of packets) {
+    const files = predictions.get(packet.id) ?? new Set<string>();
+    if (files.size === 0) {
+      // No predicted files — safe to dispatch
+      result.push(packet);
+      continue;
+    }
+
+    // Check overlap with active packets and already-selected candidates
+    let hasOverlap = false;
+    for (const f of files) {
+      if (claimedFiles.has(f) || newlyClaimed.has(f)) {
+        hasOverlap = true;
+        break;
+      }
+    }
+
+    if (hasOverlap) {
+      console.log(`[overlap-gate] Holding packet ${packet.id} — file overlap with active/queued work`);
+      continue;
+    }
+
+    result.push(packet);
+    files.forEach((f) => newlyClaimed.add(f));
+  }
+
+  return result;
+}
+
 function buildPacketScopeText(packet: OrchestratorPacket): string {
   return [packet.title, packet.summary]
     .map((value) => value.trim())
@@ -638,7 +718,22 @@ export async function runDispatchTick(
     )),
   );
 
-  const dispatchablePackets = getDispatchableWave(nextState.packets)
+  // Compute predicted files for all packets (used by overlap gate + dashboard)
+  nextState = {
+    ...nextState,
+    packets: nextState.packets.map((packet) => {
+      if (packet.predictedFiles) return packet;
+      const files = computePredictedFiles(packet);
+      return files.length > 0 ? { ...packet, predictedFiles: files } : packet;
+    }),
+  };
+
+  // #380 — Filter out packets that overlap with active work on the same files
+  const activePackets = nextState.packets.filter((p) => p.status === 'running' || p.status === 'launching');
+  const wavePackets = getDispatchableWave(nextState.packets);
+  const overlapFiltered = filterOverlappingPackets(wavePackets, activePackets);
+
+  const dispatchablePackets = overlapFiltered
     .map((packet) => ({
       packet,
       recoveryContext: recoveryContextByPacketId.get(packet.id) ?? null,
