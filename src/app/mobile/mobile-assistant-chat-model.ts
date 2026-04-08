@@ -311,6 +311,7 @@ export function createMobileChatModel(selectedModel: ModelOption, repoPath: stri
               model: selectedModel.id,
               messages: toProxyMessages(messages),
               ...(effort ? { effort } : {}),
+              ...(repoPath ? { repoPath } : {}),
             }
           : {
               model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL,
