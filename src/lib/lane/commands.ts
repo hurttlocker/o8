@@ -28,6 +28,7 @@ import { isLaneAutoReviewActive } from '@/lib/lane/auto-review';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES, FILE_SIZE_WAIVERS } from '@/lib/orchestrator/dispatch';
+import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -608,6 +609,25 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             note: `Approval required: ${fileSizePolicy.reason}`,
           });
         }
+      }
+
+      // ── Merge gate enforcement ──
+      // Runs security, budget, and integrity checks. Block-level violations
+      // force human approval regardless of auto-review status.
+      const gateResult = runMergeGate(lane);
+      if (!gateResult.passed && actor !== 'user') {
+        const blockCount = gateResult.violations.filter((v) => v.severity === 'block').length;
+        return createLaneActionApproval(lane, actor, {
+          verb: 'merge',
+          commitMessage: command.commitMessage,
+          reviewSummary: command.reviewSummary,
+          title: `Merge gate: ${blockCount} violation${blockCount === 1 ? '' : 's'}`,
+          description: formatMergeGateViolations(gateResult.violations),
+          summary: `Merge blocked: ${lane.branch} → ${lane.baseBranch}`,
+          risk: 'high',
+          policyRuleId: 'merge-gate-violation',
+          note: 'Merge gate enforcement: human review required.',
+        });
       }
 
       // Policy gate — require approval for merge

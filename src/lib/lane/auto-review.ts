@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
+import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
 import type { Lane } from './types';
 
 const MAX_REVIEW_ATTEMPTS = 5;
@@ -404,10 +405,13 @@ function buildReviewPrompt(
   selfReview: PacketSelfReview | undefined,
   depth: ReviewDepth,
   mechanicalChecksSummary?: string,
+  mergeGateResult?: MergeGateResult,
 ): string {
   const depthGuidance = depth === 'deep-dive'
     ? 'This lane has low-confidence or missing self-review context. Perform a deep-dive review and challenge assumptions, edge cases, and missing validation.'
     : 'This lane reports medium-confidence self-review. Do a normal review with independent verification of the claimed changes.';
+
+  const mergeGateSection = mergeGateResult ? formatMergeGateForReview(mergeGateResult) : null;
 
   return [
     `An agent has completed work on lane "${lane.label}" (branch: ${lane.branch}).`,
@@ -418,6 +422,8 @@ function buildReviewPrompt(
     `to the operator on their approval card — they don't read code, so your summary`,
     `IS their understanding of what happened.`,
     ``,
+    mergeGateSection,
+    mergeGateSection ? `` : null,
     mechanicalChecksSummary ? mechanicalChecksSummary : null,
     mechanicalChecksSummary ? `` : null,
     formatSelfReview(selfReview, depth),
@@ -428,8 +434,9 @@ function buildReviewPrompt(
     `1. What was changed (1-2 sentences)`,
     `2. Whether it looks correct and matches the original task intent`,
     `3. Any concerns (regressions, missing tests, style violations)`,
-    mechanicalChecksSummary ? `4. Address each mechanical check finding above — confirm or dismiss` : null,
-    `${mechanicalChecksSummary ? '5' : '4'}. Your recommendation: approve or request changes`,
+    mergeGateSection ? `4. Address each merge gate violation — these are enforcement-level findings` : null,
+    mechanicalChecksSummary ? `${mergeGateSection ? '5' : '4'}. Address each mechanical check finding — confirm or dismiss` : null,
+    `${mergeGateSection && mechanicalChecksSummary ? '6' : mergeGateSection || mechanicalChecksSummary ? '5' : '4'}. Your recommendation: approve or request changes`,
     ``,
     `After reviewing, create an approval for the operator by calling the lane_command`,
     `tool with verb "create_pr" or "merge" for lane "${lane.id}". The policy engine`,
@@ -463,8 +470,9 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
 
   const depth = deriveReviewDepth(completionContext?.selfReview);
   const mechanicalChecks = runMechanicalChecks(lane);
+  const mergeGateResult = runMergeGate(lane, completionContext?.selfReview);
   const diffSummary = getDiffSummary(lane, depth);
-  const reviewPrompt = buildReviewPrompt(lane, diffSummary, completionContext?.selfReview, depth, mechanicalChecks.summary || undefined);
+  const reviewPrompt = buildReviewPrompt(lane, diffSummary, completionContext?.selfReview, depth, mechanicalChecks.summary || undefined, mergeGateResult);
 
   const { ensureOrchestratorSession, sendToOrchestrator } = await import('./orchestrator-session');
   const session = ensureOrchestratorSession(lane.repoPath);
