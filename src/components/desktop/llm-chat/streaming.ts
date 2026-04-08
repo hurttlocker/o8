@@ -74,18 +74,28 @@ export async function streamAssistantResponse({
 }): Promise<{ assistantMessage: LLMMessage; fullContent: string }> {
   const cleanMessages = messages.filter((message) => !message.isError && !message.isPartial && !message.content.startsWith('Error: ') && !message.content.startsWith('Action cancelled:') && Boolean(message.content.trim())).map((message) => ({ role: message.role, content: message.content }));
   const recentMessages = cleanMessages.length > 40 ? cleanMessages.slice(-40) : cleanMessages;
-  const requestBody = JSON.stringify({
-    model: model.id,
-    provider: model.provider,
-    messages: [...recentMessages, { role: 'user', content: [buildLinkedIssueContext(linkedIssue), messageForModel].filter(Boolean).join('\n\n') }],
-    approvedTools: [...approvedToolsSet],
-  });
+
+  // Route CLI models to CLI proxy, API models to provider proxy
+  const isCli = model.backend === 'cli' && model.cliRuntime;
+  const endpoint = isCli ? '/api/v2/proxy/cli' : '/api/v2/proxy/llm';
+  const requestBody = isCli
+    ? JSON.stringify({
+        runtime: model.cliRuntime,
+        model: model.id,
+        messages: [...recentMessages, { role: 'user', content: [buildLinkedIssueContext(linkedIssue), messageForModel].filter(Boolean).join('\n\n') }],
+      })
+    : JSON.stringify({
+        model: model.id,
+        provider: model.provider,
+        messages: [...recentMessages, { role: 'user', content: [buildLinkedIssueContext(linkedIssue), messageForModel].filter(Boolean).join('\n\n') }],
+        approvedTools: [...approvedToolsSet],
+      });
 
   let response: Response | null = null;
   const retryDelays = [800, 1800];
   for (let attempt = 0; attempt < retryDelays.length + 1; attempt += 1) {
     try {
-      response = await fetch('/api/v2/proxy/llm', {
+      response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId, ...buildRepoRequestHeaders(preferredRepo ?? null) },
         body: requestBody,
