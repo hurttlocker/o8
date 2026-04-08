@@ -250,12 +250,12 @@ export const PROMPT_ICONS = {
 } as const;
 
 export const SUGGESTED_PROMPTS = [
-  { iconKey: 'tree' as const, text: 'Explain this codebase architecture', description: 'High-level structure and key patterns' },
-  { iconKey: 'search' as const, text: 'Find all TODO comments in the code', description: 'Surface technical debt and pending work' },
-  { iconKey: 'file' as const, text: 'Write a README for this project', description: 'Generate documentation from source' },
-  { iconKey: 'diff' as const, text: 'Review the most recent changes', description: 'Analyze recent commits for issues' },
-  { iconKey: 'search' as const, text: 'Suggest tests for the auth module', description: 'Generate test cases for critical paths' },
-  { iconKey: 'rocket' as const, text: 'What could be optimized here?', description: 'Identify performance improvements' },
+  { iconKey: 'diff' as const, text: 'Review pending agent changes', description: 'Check diffs waiting for approval' },
+  { iconKey: 'search' as const, text: 'What did agents ship today?', description: 'Summarize merged work and activity' },
+  { iconKey: 'tree' as const, text: 'Audit today\'s token spend', description: 'Cost breakdown by agent and model' },
+  { iconKey: 'rocket' as const, text: 'Dispatch a task to Codex', description: 'Route a scoped task to the workhorse' },
+  { iconKey: 'file' as const, text: 'Review the most recent changes', description: 'Analyze recent commits for issues' },
+  { iconKey: 'search' as const, text: 'What needs my attention?', description: 'Surface blockers, failures, and stale work' },
 ];
 
 export function buildQueuedContextCard(injection: { id: string; text: string; reason?: string }): QueuedContextCard {
