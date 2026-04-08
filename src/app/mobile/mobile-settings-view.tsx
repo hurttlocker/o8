@@ -1,7 +1,8 @@
 'use client';
 
 import {
-  AVAILABLE_MODELS,
+  CLI_MODELS,
+  API_MODELS,
   MOBILE_BODY_TRACKING,
   MOBILE_CARD_RADIUS,
   MOBILE_HEADING_TRACKING,
@@ -113,48 +114,53 @@ export function SettingsView({
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 12 }}>
             Model
           </div>
-          {AVAILABLE_MODELS.map((model, index) => {
-            const active = selectedModel.id === model.id;
-            const providerColors: Record<string, string> = { google: '#4285f4', anthropic: '#d97706', openai: '#10a37f' };
-            return (
-              <button
-                key={model.id}
-                type="button"
-                onClick={() => onModelChange(model.id)}
-                style={{
-                  width: '100%',
-                  height: MOBILE_TOUCH_TARGET,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '0 12px',
-                  borderRadius: 10,
-                  border: 'none',
-                  background: active ? palette.accentSoft : 'transparent',
-                  cursor: 'pointer',
-                  fontFamily: mobileFontFamily(),
-                  marginBottom: index < AVAILABLE_MODELS.length - 1 ? 2 : 0,
-                }}
-              >
-                <div
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 999,
-                    border: active ? 'none' : `1.5px solid ${palette.mutedText}`,
-                    backgroundColor: active ? palette.accent : 'transparent',
-                    flexShrink: 0,
-                  }}
-                />
-                <div style={{ flex: 1, fontSize: 14, fontWeight: active ? 700 : 500, color: active ? palette.rootText : palette.mutedText, textAlign: 'left', letterSpacing: MOBILE_BODY_TRACKING }}>
-                  {model.label}
+
+          {/* CLI models — grouped by runtime */}
+          {(() => {
+            const runtimeOrder = ['claude-code', 'codex', 'gemini'] as const;
+            const runtimeLabels: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' };
+            const runtimeColors: Record<string, string> = { 'claude-code': '#d97706', codex: '#10a37f', gemini: '#4285f4' };
+            return runtimeOrder.map((rt) => {
+              const models = CLI_MODELS.filter((m) => m.cliRuntime === rt);
+              if (models.length === 0) return null;
+              return (
+                <div key={rt} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: runtimeColors[rt] ?? palette.subduedText, marginBottom: 4, paddingLeft: 12 }}>
+                    {runtimeLabels[rt] ?? rt}
+                  </div>
+                  {models.map((model) => {
+                    const active = selectedModel.id === model.id;
+                    return (
+                      <button key={model.id} type="button" onClick={() => onModelChange(model.id)} style={{ width: '100%', height: MOBILE_TOUCH_TARGET, display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px', borderRadius: 10, border: 'none', background: active ? palette.accentSoft : 'transparent', cursor: 'pointer', fontFamily: mobileFontFamily(), marginBottom: 2 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 999, border: active ? 'none' : `1.5px solid ${palette.mutedText}`, backgroundColor: active ? palette.accent : 'transparent', flexShrink: 0 }} />
+                        <div style={{ flex: 1, fontSize: 14, fontWeight: active ? 700 : 500, color: active ? palette.rootText : palette.mutedText, textAlign: 'left', letterSpacing: MOBILE_BODY_TRACKING }}>{model.label}</div>
+                      </button>
+                    );
+                  })}
                 </div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: providerColors[model.provider] ?? palette.subduedText, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                  {model.provider}
-                </div>
-              </button>
-            );
-          })}
+              );
+            });
+          })()}
+
+          {/* API models */}
+          {API_MODELS.length > 0 ? (
+            <div style={{ marginTop: 4, paddingTop: 8, borderTop: `1px solid ${palette.cardBorder}` }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 4, paddingLeft: 12 }}>
+                API Keys
+              </div>
+              {API_MODELS.map((model) => {
+                const active = selectedModel.id === model.id;
+                const providerColors: Record<string, string> = { google: '#4285f4', anthropic: '#d97706', openai: '#10a37f' };
+                return (
+                  <button key={model.id} type="button" onClick={() => onModelChange(model.id)} style={{ width: '100%', height: MOBILE_TOUCH_TARGET, display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px', borderRadius: 10, border: 'none', background: active ? palette.accentSoft : 'transparent', cursor: 'pointer', fontFamily: mobileFontFamily(), marginBottom: 2 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: 999, border: active ? 'none' : `1.5px solid ${palette.mutedText}`, backgroundColor: active ? palette.accent : 'transparent', flexShrink: 0 }} />
+                    <div style={{ flex: 1, fontSize: 14, fontWeight: active ? 700 : 500, color: active ? palette.rootText : palette.mutedText, textAlign: 'left', letterSpacing: MOBILE_BODY_TRACKING }}>{model.label}</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: providerColors[model.provider] ?? palette.subduedText, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{model.provider}</div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </MobileGlassPanel>
 
         <MobileGlassPanel palette={palette} style={{ padding: 18, marginBottom: 14 }}>
