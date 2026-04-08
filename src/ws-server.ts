@@ -2092,10 +2092,11 @@ function isAuthorizedInternalRequest(req: import('http').IncomingMessage) {
 // ── Server startup ──
 
 const httpServer = createServer((req, res) => {
-  // CORS headers — restrict to localhost + Tauri custom protocol origins
+  // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const allowedOrigins = ['http://localhost:3001', 'http://127.0.0.1:3001', 'tauri://localhost'];
   const origin = req.headers.origin ?? '';
-  if (allowedOrigins.includes(origin)) {
+  const isPrivateOrigin = /^https?:\/\/(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(origin);
+  if (allowedOrigins.includes(origin) || isPrivateOrigin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
