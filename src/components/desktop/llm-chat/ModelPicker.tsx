@@ -2,14 +2,24 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
-import { MODELS, THEME_ACCENT, THEME_ACCENT_SOFT, THEME_PANEL_GLASS, type ModelOption } from './shared';
+import { THEME_ACCENT, THEME_ACCENT_SOFT, THEME_PANEL_GLASS, type ModelOption } from './shared';
+
+const RUNTIME_LABELS: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  gemini: 'Gemini CLI',
+};
+
+const SECTION_HEADER = { paddingTop: 8, paddingRight: 12, paddingBottom: 4, paddingLeft: 12, fontSize: 10, fontWeight: 600, color: 'var(--t-text-faint)', textTransform: 'uppercase' as const, letterSpacing: '0.06em' };
 
 function ModelPickerBase({
   disabled,
+  models,
   onSelect,
   selected,
 }: {
   disabled: boolean;
+  models: ModelOption[];
   onSelect: (model: ModelOption) => void;
   selected: ModelOption;
 }) {
@@ -38,6 +48,23 @@ function ModelPickerBase({
     });
   }, [open]);
 
+  const cliModels = models.filter((m) => m.backend === 'cli');
+  const apiModels = models.filter((m) => m.backend === 'api');
+
+  // Group CLI models by runtime
+  const runtimeGroups: { runtime: string; label: string; models: ModelOption[] }[] = [];
+  for (const m of cliModels) {
+    const rt = m.cliRuntime ?? 'unknown';
+    let group = runtimeGroups.find((g) => g.runtime === rt);
+    if (!group) {
+      group = { runtime: rt, label: RUNTIME_LABELS[rt] ?? rt, models: [] };
+      runtimeGroups.push(group);
+    }
+    group.models.push(m);
+  }
+
+  const select = (m: ModelOption) => { onSelect(m); setOpen(false); };
+
   return (
     <div style={{ position: 'relative' }}>
       <button
@@ -63,28 +90,50 @@ function ModelPickerBase({
       </button>
 
       {open ? createPortal(
-        <div ref={dropRef} style={{ position: 'fixed', bottom: dropPos.bottom, right: dropPos.right, zIndex: 9999, minWidth: 260, background: THEME_PANEL_GLASS, border: '1px solid var(--t-panel-border)', borderRadius: 12, overflow: 'hidden', boxShadow: 'var(--t-panel-shadow)', animation: 'llmFadeIn 100ms ease-out' }}>
-          {MODELS.map((model) => (
-            <button
-              key={model.id}
-              type="button"
-              onClick={() => { onSelect(model); setOpen(false); }}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, border: 'none', background: model.id === selected.id ? THEME_ACCENT_SOFT : 'transparent', color: 'var(--t-text)', fontSize: 13, fontFamily: '-apple-system, system-ui, sans-serif', cursor: 'pointer', textAlign: 'left', transition: 'background 100ms' }}
-              onMouseEnter={(event) => { event.currentTarget.style.background = THEME_ACCENT_SOFT; }}
-              onMouseLeave={(event) => { event.currentTarget.style.background = model.id === selected.id ? THEME_ACCENT_SOFT : 'transparent'; }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: model.color, flexShrink: 0 }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 500 }}>{model.label}</div>
-                <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{model.description}</div>
+        <div ref={dropRef} style={{ position: 'fixed', bottom: dropPos.bottom, right: dropPos.right, zIndex: 9999, minWidth: 260, maxHeight: 420, overflowY: 'auto', background: THEME_PANEL_GLASS, border: '1px solid var(--t-panel-border)', borderRadius: 12, boxShadow: 'var(--t-panel-shadow)', animation: 'llmFadeIn 100ms ease-out' }}>
+          {runtimeGroups.map((group, gi) => (
+            <div key={group.runtime}>
+              <div style={{ ...SECTION_HEADER, paddingTop: gi === 0 ? 6 : 8, ...(gi > 0 ? { borderTop: '1px solid var(--t-divider-subtle)', marginTop: 2 } : {}) }}>
+                {group.label}
               </div>
-              {model.id === selected.id ? <Check size={14} style={{ color: THEME_ACCENT }} /> : null}
-            </button>
+              {group.models.map((model) => (
+                <ModelRow key={model.id} model={model} selected={selected} onSelect={select} />
+              ))}
+            </div>
           ))}
+          {apiModels.length > 0 ? (
+            <>
+              <div style={{ ...SECTION_HEADER, paddingTop: runtimeGroups.length > 0 ? 8 : 6, ...(runtimeGroups.length > 0 ? { borderTop: '1px solid var(--t-divider-subtle)', marginTop: 2 } : {}) }}>
+                API Keys
+              </div>
+              {apiModels.map((model) => (
+                <ModelRow key={model.id} model={model} selected={selected} onSelect={select} />
+              ))}
+            </>
+          ) : null}
         </div>,
         document.body,
       ) : null}
     </div>
+  );
+}
+
+function ModelRow({ model, onSelect, selected }: { model: ModelOption; onSelect: (m: ModelOption) => void; selected: ModelOption }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(model)}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', paddingTop: 7, paddingRight: 12, paddingBottom: 7, paddingLeft: 16, border: 'none', background: model.id === selected.id ? THEME_ACCENT_SOFT : 'transparent', color: 'var(--t-text)', fontSize: 13, fontFamily: '-apple-system, system-ui, sans-serif', cursor: 'pointer', textAlign: 'left', transition: 'background 100ms' }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = THEME_ACCENT_SOFT; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = model.id === selected.id ? THEME_ACCENT_SOFT : 'transparent'; }}
+    >
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: model.color, flexShrink: 0 }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 500 }}>{model.label}</div>
+        <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{model.description}</div>
+      </div>
+      {model.id === selected.id ? <Check size={14} style={{ color: THEME_ACCENT }} /> : null}
+    </button>
   );
 }
 

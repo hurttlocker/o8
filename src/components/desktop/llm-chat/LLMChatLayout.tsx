@@ -111,6 +111,7 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
     onInputPaste: rest.onInputPaste,
     onIssuePickerOpen: rest.onIssuePickerOpen,
     onLinkIssueClear: rest.onLinkIssueClear,
+    models: rest.models,
     onModelSelect: rest.onModelSelect,
     onQueuedContextRemove: rest.onQueuedContextRemove,
     onSend: rest.onSend,
