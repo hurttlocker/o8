@@ -783,10 +783,12 @@ export function AgentPanelChat({
     return () => { for (const e of wsEvents) window.removeEventListener(e, handler); if (approvalPollRef.current) clearInterval(approvalPollRef.current); };
   }, [selectedKey]);
 
-  const handleApprovalResolve = useCallback(async (id: string, action: 'approve' | 'reject') => {
+  const handleApprovalResolve = useCallback(async (id: string, action: 'approve' | 'reject', strategy?: string) => {
     setResolvingApprovalId(id);
     try {
-      const res = await fetch('/api/panel/approvals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action }) });
+      const payload: Record<string, string> = { id, action };
+      if (strategy) payload.strategy = strategy;
+      const res = await fetch('/api/panel/approvals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) setApprovals((prev) => prev.filter((approval) => approval.id !== id));
     } catch { /* silent */ }
     finally { setResolvingApprovalId(null); }

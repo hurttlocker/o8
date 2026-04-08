@@ -39,6 +39,25 @@ export interface ApprovalDiffPreview {
   }>;
 }
 
+/** Structured merge gate result attached to lane-merge approval cards */
+export interface ApprovalGateResult {
+  passed: boolean;
+  violations: Array<{
+    category: 'security' | 'budget' | 'integrity';
+    severity: 'block' | 'warn';
+    label: string;
+    detail: string;
+    file?: string;
+  }>;
+}
+
+/** Conflict data attached to merge-conflict approval cards */
+export interface ApprovalConflictReport {
+  files: string[];
+  strategy?: MergeStrategy;
+  mergeError?: string;
+}
+
 export interface OrchestratorReviewFinding {
   file: string;
   line?: number;
@@ -84,11 +103,15 @@ export interface RuntimeApprovalContinuation {
   cwd?: string;
 }
 
+export type MergeStrategy = 'ours' | 'theirs' | 'manual';
+
 export interface LaneApprovalContinuation {
   kind: 'lane';
   laneId: string;
   verb: 'resume' | 'merge' | 'create_pr';
   commitMessage?: string;
+  /** Conflict resolution strategy — set by operator on conflict approval cards */
+  strategy?: MergeStrategy;
 }
 
 export interface PlanApprovalContinuation {
@@ -118,6 +141,8 @@ export interface ApprovalRecord {
   command?: string;
   editable?: boolean;
   diff?: ApprovalDiffPreview;
+  gateResult?: ApprovalGateResult;
+  conflictReport?: ApprovalConflictReport;
   risk: ApprovalRisk;
   metadata?: Record<string, string>;
   /** Policy rule that triggered this approval */
@@ -149,6 +174,8 @@ export interface CreateApprovalInput {
   command?: string;
   editable?: boolean;
   diff?: ApprovalDiffPreview;
+  gateResult?: ApprovalGateResult;
+  conflictReport?: ApprovalConflictReport;
   risk: ApprovalRisk;
   metadata?: Record<string, string>;
   /** Policy rule that triggered this approval (from evaluatePolicy) */
@@ -164,6 +191,8 @@ export interface MobileApprovalCard {
   title: string;
   description: string;
   metadata?: Record<string, string>;
+  gateResult?: ApprovalGateResult;
+  conflictReport?: ApprovalConflictReport;
   actions: {
     approve: { label: string };
     reject: { label: string };

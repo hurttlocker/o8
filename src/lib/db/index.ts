@@ -431,6 +431,12 @@ function ensureApprovalContextColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'approvals', 'lane_id')) {
     sqlite.exec('ALTER TABLE approvals ADD COLUMN lane_id TEXT');
   }
+  if (!tableColumnExists(sqlite, 'approvals', 'gate_result_json')) {
+    sqlite.exec('ALTER TABLE approvals ADD COLUMN gate_result_json TEXT');
+  }
+  if (!tableColumnExists(sqlite, 'approvals', 'conflict_report_json')) {
+    sqlite.exec('ALTER TABLE approvals ADD COLUMN conflict_report_json TEXT');
+  }
 }
 
 function ensureWatchedAgentColumns(sqlite: Database.Database): void {

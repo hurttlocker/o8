@@ -33,6 +33,14 @@ export const ICON_PATHS = {
 
 export type MobileView = 'approvals' | 'chat' | 'settings';
 
+export interface ApprovalGateViolation {
+  category: 'security' | 'budget' | 'integrity';
+  severity: 'block' | 'warn';
+  label: string;
+  detail: string;
+  file?: string;
+}
+
 export interface ApprovalItem {
   id: string;
   title: string;
@@ -46,6 +54,8 @@ export interface ApprovalItem {
   createdAt: number;
   metadata?: Record<string, string>;
   continuation?: { kind: 'llm-chat' | 'runtime' | 'lane' };
+  gateResult?: { passed: boolean; violations: ApprovalGateViolation[] };
+  conflictReport?: { files: string[]; mergeError?: string };
 }
 
 export type MobileChatToolStatus = 'calling' | 'running' | 'done' | 'blocked' | 'error';

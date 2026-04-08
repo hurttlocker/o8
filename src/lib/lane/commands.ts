@@ -190,6 +190,9 @@ async function createLaneActionApproval(
     policyRuleId: string;
     metadata?: Record<string, string>;
     note: string;
+    gateResult?: import('@/lib/approvals/types').ApprovalGateResult;
+    conflictReport?: import('@/lib/approvals/types').ApprovalConflictReport;
+    strategy?: import('@/lib/approvals/types').MergeStrategy;
   },
 ): Promise<LaneCommandResult> {
   const rawDiff = await getDiffForLane(lane);
@@ -207,6 +210,8 @@ async function createLaneActionApproval(
       after: rawDiff || undefined,
       files,
     },
+    gateResult: input.gateResult,
+    conflictReport: input.conflictReport,
     risk: input.risk,
     policyRuleId: input.policyRuleId,
     metadata: {
@@ -222,6 +227,7 @@ async function createLaneActionApproval(
       laneId: lane.id,
       verb: input.verb,
       commitMessage: input.commitMessage,
+      strategy: input.strategy,
     },
   });
   await recordReviewLessonsForApproval(approval.id, lane, input.reviewSummary, files);
@@ -627,6 +633,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           risk: 'high',
           policyRuleId: 'merge-gate-violation',
           note: 'Merge gate enforcement: human review required.',
+          gateResult: { passed: gateResult.passed, violations: gateResult.violations },
         });
       }
 
@@ -723,12 +730,23 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           }
         }
 
+        // Manual strategy — operator chose to fix conflicts in terminal
+        if (command.strategy === 'manual') {
+          setLaneStatus(command.laneId, 'awaiting_input', actor, 'manual_resolution');
+          return { ok: true, laneId: command.laneId, note: 'Lane parked for manual conflict resolution.' };
+        }
+
         // Perform merge using the actual branch ref
         const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: lane.repoPath })).stdout.trim();
         await execFileAsync('git', ['checkout', lane.baseBranch], { cwd: lane.repoPath });
 
         try {
-          await execFileAsync('git', ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${actualBranch})`, actualBranch], { cwd: lane.repoPath });
+          const mergeArgs = ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${actualBranch})`];
+          if (command.strategy === 'ours' || command.strategy === 'theirs') {
+            mergeArgs.push('-X', command.strategy);
+          }
+          mergeArgs.push(actualBranch);
+          await execFileAsync('git', mergeArgs, { cwd: lane.repoPath });
         } catch (mergeErr) {
           // #459 — Real conflict: rollback and escalate via approval card
           // Extract conflict file list before aborting
@@ -755,7 +773,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             commitMessage: command.commitMessage,
             reviewSummary: command.reviewSummary,
             title: `Merge conflict: ${lane.label}`,
-            description: `${conflictDetail}${conflictFileList}\n\nResolve the conflicts manually, or re-dispatch the packet with conflict context.`,
+            description: `${conflictDetail}${conflictFileList}\n\nPick a resolution strategy: Ours (keep base), Theirs (keep branch), or Manual (park for terminal fix).`,
             summary: `Merge conflict on ${lane.branch} → ${lane.baseBranch}. ${conflictFiles.length} file${conflictFiles.length === 1 ? '' : 's'} conflicting.`,
             risk: 'high' as ApprovalRisk,
             policyRuleId: 'merge_conflict_escalation',
@@ -763,6 +781,11 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
               ConflictFiles: conflictFiles.join(', ') || 'unknown',
             },
             note: `Merge conflict escalated to operator. ${conflictFiles.length} conflicting file${conflictFiles.length === 1 ? '' : 's'}.`,
+            gateResult: { passed: gateResult.passed, violations: gateResult.violations },
+            conflictReport: {
+              files: conflictFiles,
+              mergeError: conflictMessage,
+            },
           });
         }
 

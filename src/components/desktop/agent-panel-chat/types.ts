@@ -117,7 +117,7 @@ export interface DesktopTranscriptPaneProps {
   runtimeCapabilities: SidebarRuntimeCapabilities;
   approvals: SidebarApproval[];
   resolvingApprovalId: string | null;
-  onResolveApproval: (id: string, action: 'approve' | 'reject') => void;
+  onResolveApproval: (id: string, action: 'approve' | 'reject', strategy?: string) => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   handleScroll: () => void;
   showScrollPill: boolean;
@@ -180,7 +180,7 @@ export interface ActiveTurnCardProps {
 export interface SidebarApprovalCardProps {
   approvals: SidebarApproval[];
   resolvingId: string | null;
-  onResolve: (id: string, action: 'approve' | 'reject') => void;
+  onResolve: (id: string, action: 'approve' | 'reject', strategy?: string) => void;
 }
 
 export interface ThinkingXrayProps {
