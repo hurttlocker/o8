@@ -8,7 +8,6 @@ import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
-import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
 // Cortex v2: directives + ledger replace vector search
 import path from 'node:path';
 import { buildDirectiveBlock } from '@/lib/cortex/directives-store';
@@ -127,20 +126,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   if (directiveBlock.text) systemPrompt += '\n\n' + directiveBlock.text;
   if (ledgerBlock.text) systemPrompt += '\n\n' + ledgerBlock.text;
 
-  // Legacy vector recall — commented out, kept for rollback
-  let recallInfo: { factCount: number; queryMs: number } | null = null;
   const lastUserMsg = [...nonSystemMessages].reverse().find((message) => message.role === 'user');
-  // if (lastUserMsg?.content) {
-  //   try {
-  //     const recall = await recallMemories(lastUserMsg.content);
-  //     if (recall && recall.factCount > 0) {
-  //       systemPrompt += `\n\n${recall.text}`;
-  //       recallInfo = { factCount: recall.factCount, queryMs: recall.queryMs };
-  //     }
-  //   } catch (error) {
-  //     console.error('[memory-recall] Failed:', error);
-  //   }
-  // }
 
   if (isFreshChatTurn) {
     try {
@@ -184,7 +170,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       lastUserContent: lastUserMsg?.content,
       messages,
       model,
-      recallInfo,
       scopedRepoRoot: effectiveRepoRoot,
       tabId,
     });
@@ -219,15 +204,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       const enqueue = (data: string) => {
         controller.enqueue(encoder.encode(`data: ${data}\n\n`));
       };
-
-      // Cortex v2: recall disabled — directive/ledger injected above
-      // if (recallInfo) {
-      //   enqueue(JSON.stringify({
-      //     type: 'memory_recall',
-      //     factCount: recallInfo.factCount,
-      //     queryMs: recallInfo.queryMs,
-      //   }));
-      // }
 
       async function processStream(response: globalThis.Response): Promise<{
         toolCalls: Array<{ name: string; id: string; args: Record<string, unknown> }>;
@@ -466,15 +442,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           const followResult = await processStream(followResponse);
           toolCalls = followResult.toolCalls;
         }
-
-        // Cortex v2: session outcome replaces fact extraction
-        // TODO: wire writeSessionOutcome() here when chat conversation tracking is ready
-        // if (lastUserMsg?.content && fullResponseText.length > 50) {
-        //   extractAndStoreFacts(lastUserMsg.content, fullResponseText, tabId || undefined)
-        //     .catch((error) => {
-        //       console.error('[memory-extract] Phase B failed:', error);
-        //     });
-        // }
 
         const seen = new Set<string>();
         const sources = allSources.filter((source) => {

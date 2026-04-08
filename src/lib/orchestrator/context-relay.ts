@@ -1,7 +1,6 @@
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
-import { getCortexClient } from '@/lib/cortex/client';
-import { writeSessionOutcome } from '@/lib/cortex/ledger';
+import { queryPacketOutcome, writeSessionOutcome } from '@/lib/cortex/ledger';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
@@ -17,11 +16,6 @@ import { getRuntime } from '@/lib/runtimes/registry';
 import type { RuntimeId, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
 import { truncateText } from '@/lib/util/text';
 
-const PACKET_CONTEXT_SOURCE_PREFIX = 'orchestrator-packet-context';
-const PACKET_CONTEXT_KIND = 'orchestrator packet context';
-const PACKET_CONTEXT_JSON_START = '<context-pass-json>';
-const PACKET_CONTEXT_JSON_END = '</context-pass-json>';
-const PACKET_CONTEXT_SEARCH_LIMIT = 8;
 const TRANSCRIPT_CAPTURE_LIMIT = 80;
 const SUMMARY_LIMIT = 1_200;
 const NOTE_LIMIT = 320;
@@ -205,102 +199,9 @@ function buildPacketSummary(input: {
   return sections.join('\n\n');
 }
 
-function serializePacketContext(context: PacketContext): string {
-  return JSON.stringify({
-    kind: PACKET_CONTEXT_KIND,
-    purpose: 'dependency handoff',
-    version: 1,
-    ...context,
-  });
-}
-
-function isPacketContext(value: unknown): value is PacketContext {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.packetId === 'string'
-    && typeof candidate.sessionKey === 'string'
-    && typeof candidate.summary === 'string'
-    && Array.isArray(candidate.changedFiles)
-    && candidate.changedFiles.every((entry) => typeof entry === 'string')
-    && (candidate.attemptLearnings === undefined || isStringArray(candidate.attemptLearnings))
-    && (candidate.selfReview === undefined || isPacketSelfReview(candidate.selfReview))
-    && (candidate.reviewFindings === undefined || (Array.isArray(candidate.reviewFindings) && candidate.reviewFindings.every(isReviewFinding)))
-    && (candidate.patterns === undefined || isStringArray(candidate.patterns))
-    && (candidate.conflictZones === undefined || isStringArray(candidate.conflictZones))
-    && typeof candidate.completedAt === 'string'
-    && typeof candidate.model === 'string'
-    && (candidate.review === undefined || isPacketReviewContext(candidate.review));
-}
-
-function parseStoredPacketContext(value: unknown): PacketContext | null {
-  if (isPacketContext(value)) {
-    return value;
-  }
-
-  if (
-    value
-    && typeof value === 'object'
-    && 'context' in value
-    && isPacketContext((value as { context?: unknown }).context)
-  ) {
-    return (value as { context: PacketContext }).context;
-  }
-
-  return null;
-}
-
-function parsePacketContext(content: string): PacketContext | null {
-  try {
-    const parsed = JSON.parse(content) as unknown;
-    const context = parseStoredPacketContext(parsed);
-    if (context) {
-      return context;
-    }
-  } catch {
-    // Fall back to the legacy dual-format wrapper below.
-  }
-
-  const match = content.match(
-    new RegExp(`${PACKET_CONTEXT_JSON_START}\\s*([\\s\\S]*?)\\s*${PACKET_CONTEXT_JSON_END}`),
-  );
-  if (!match?.[1]) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(match[1]) as unknown;
-    return parseStoredPacketContext(parsed);
-  } catch {
-    return null;
-  }
-}
-
 async function findAgentSummary(sessionKey: string): Promise<AgentSummary | null> {
   const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
   return snapshot.agents.find((agent) => agent.sessionKey === sessionKey) ?? null;
-}
-
-async function storePacketContext(context: PacketContext): Promise<void> {
-  const client = getCortexClient();
-  if (!(await client.isAvailable())) {
-    console.warn(`[context-relay] Cortex unavailable; skipped packet context store for ${context.packetId}`);
-    return;
-  }
-
-  const result = await client.store(
-    serializePacketContext(context),
-    `${PACKET_CONTEXT_SOURCE_PREFIX}-${context.packetId}`,
-  );
-
-  if (!result.ok) {
-    console.error(`[context-relay] Failed to store packet context for ${context.packetId}`);
-    return;
-  }
-
-  console.log(`[context-relay] Stored packet context for ${context.packetId}`);
 }
 
 function isReviewFinding(value: unknown): value is OrchestratorReviewFinding {
@@ -454,22 +355,33 @@ export async function readPacketCompletionContext(packetId: string): Promise<Pac
     return null;
   }
 
-  const client = getCortexClient();
-  if (!(await client.isAvailable())) {
+  const row = queryPacketOutcome(normalizedPacketId);
+  if (!row) {
     return null;
   }
 
-  const results = await client.search(
-    `${PACKET_CONTEXT_KIND} dependency handoff ${normalizedPacketId}`,
-    PACKET_CONTEXT_SEARCH_LIMIT,
-  );
+  let patterns: string[] = [];
+  try {
+    const parsed = JSON.parse(row.patterns_json ?? '[]');
+    if (Array.isArray(parsed)) {
+      patterns = parsed.filter((v: unknown): v is string => typeof v === 'string');
+    }
+  } catch { /* ignore malformed JSON */ }
 
-  const matches = results
-    .map((result) => parsePacketContext(result.content))
-    .filter((context): context is PacketContext => context !== null && context.packetId === normalizedPacketId)
-    .sort((left, right) => new Date(right.completedAt).getTime() - new Date(left.completedAt).getTime());
-
-  return matches[0] ?? null;
+  return {
+    packetId: normalizedPacketId,
+    sessionKey: `ledger:${row.id}`,
+    summary: row.summary ?? '',
+    changedFiles: [],
+    completedAt: row.completed_at ?? new Date().toISOString(),
+    model: row.model ?? 'unknown',
+    patterns: patterns.length > 0 ? patterns : undefined,
+    reviewFindings: undefined,
+    conflictZones: undefined,
+    review: row.review_approved != null
+      ? { approved: Boolean(row.review_approved), findings: [], reviewedAt: row.completed_at ?? new Date().toISOString() }
+      : undefined,
+  };
 }
 
 export async function recordPacketReviewContext(
@@ -515,7 +427,6 @@ export async function recordPacketReviewContext(
         review: reviewContext,
       };
 
-  await storePacketContext(nextContext);
   return nextContext;
 }
 
@@ -571,8 +482,6 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
       || 'unknown',
     ...approvalReviewContext,
   };
-
-  await storePacketContext(context);
 
   // Cortex v2: write session outcome to the ledger
   try {
