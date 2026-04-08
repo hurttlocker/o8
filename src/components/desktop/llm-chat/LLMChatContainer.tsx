@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFileDrop } from '@/lib/hooks/use-file-drop';
 
 import { LLMChatLayout } from './LLMChatLayout';
 import {
@@ -23,6 +24,8 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
   const [approvedToolsSet, setApprovedToolsSet] = useState<Set<string>>(new Set()), [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null), [editedCommand, setEditedCommand] = useState(''), [historyOpen, setHistoryOpen] = useState(false);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false), [showTypingIndicator, setShowTypingIndicator] = useState(false), [issuePickerOpen, setIssuePickerOpen] = useState(false), [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
   const [applyPath, setApplyPath] = useState(''), [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'done' | 'error'>('idle'), [applyFileSuggestions, setApplyFileSuggestions] = useState<Array<{ path: string }>>([]), [applyFileIndex, setApplyFileIndex] = useState(0), [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
+
+  const { pendingFiles: droppedFiles, dragOver, processFiles: processDroppedFiles, removePendingFile: removeDroppedFile, clearPendingFiles: clearDroppedFiles, dragHandlers } = useFileDrop({ enablePaste: false });
 
   const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), handledDraftInjectionRef = useRef<string | null>(null), scrollRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null), abortRef = useRef<AbortController | null>(null), fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -122,6 +125,22 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
     return stableMessages;
   }, [isStreaming, messages, model.label, streamContent, tabId]);
 
+  // Sync dropped files into attachedImages / attachedFiles
+  useEffect(() => {
+    if (droppedFiles.length === 0) return;
+    for (const f of droppedFiles) {
+      if (f.mimeType.startsWith('image/')) {
+        setAttachedImages((prev) => {
+          if (prev.length >= 4) return prev;
+          return [...prev, { name: f.name, dataUri: `data:${f.mimeType};base64,${f.content}`, mimeType: f.mimeType }];
+        });
+      } else {
+        setAttachedFiles((prev) => [...new Set([...prev, f.name])]);
+      }
+    }
+    clearDroppedFiles();
+  }, [droppedFiles, clearDroppedFiles]);
+
   const handleImageFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
     if (attachedImages.length >= 4) return;
@@ -192,17 +211,12 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
   }, [handleImageFile]);
 
   const handleDrop = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    const files = event.dataTransfer?.files;
-    if (!files) return;
-    for (let index = 0; index < files.length; index += 1) {
-      handleImageFile(files[index]);
-    }
-  }, [handleImageFile]);
+    dragHandlers.onDrop(event);
+  }, [dragHandlers]);
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-  }, []);
+    dragHandlers.onDragOver(event);
+  }, [dragHandlers]);
 
   const handleFileSelect = useCallback((filePath: string) => {
     const cursorPos = inputRef.current?.selectionStart ?? input.length;
@@ -694,6 +708,10 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
 
   return (
     <LLMChatLayout
+      dragOver={dragOver}
+      onContainerDragOver={dragHandlers.onDragOver}
+      onContainerDragLeave={dragHandlers.onDragLeave}
+      onContainerDrop={dragHandlers.onDrop}
       activeThinking={activeThinking}
       activeToolCalls={activeToolCalls}
       applyFileIndex={applyFileIndex}

@@ -14,6 +14,10 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
   onIssuePickerClose: () => void;
   onLinkedIssueChange?: (issue: LinkedIssueRef | null) => void;
   preferredRepo?: PreferredRepoContext | null;
+  dragOver?: boolean;
+  onContainerDragOver?: (e: React.DragEvent) => void;
+  onContainerDragLeave?: (e: React.DragEvent) => void;
+  onContainerDrop?: (e: React.DragEvent) => void;
 }) {
   const {
     issuePickerOpen,
@@ -21,6 +25,10 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
     onIssuePickerClose,
     onLinkedIssueChange,
     preferredRepo,
+    dragOver,
+    onContainerDragOver,
+    onContainerDragLeave,
+    onContainerDrop,
     ...rest
   } = props;
 
@@ -123,6 +131,9 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
 
   return (
     <div
+      onDragOver={onContainerDragOver}
+      onDragLeave={onContainerDragLeave}
+      onDrop={onContainerDrop}
       style={{
         display: 'flex',
         flexDirection: 'row',
@@ -130,6 +141,9 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
         background: '#ffffff',
         fontFamily: '-apple-system, system-ui, sans-serif',
         overflow: 'hidden',
+        position: 'relative',
+        outline: dragOver ? '2px solid #3b82f6' : 'none',
+        outlineOffset: -2,
         '--t-text': '#111827',
         '--t-text-strong': '#1e293b',
         '--t-text-secondary': '#6b7280',
@@ -146,6 +160,13 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
         '--t-input-border': 'rgba(0, 0, 0, 0.1)',
       } as React.CSSProperties}
     >
+      {dragOver ? (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(59, 130, 246, 0.08)', backdropFilter: 'blur(4px)', pointerEvents: 'none' }}>
+          <div style={{ paddingTop: 16, paddingRight: 32, paddingBottom: 16, paddingLeft: 32, borderRadius: 16, background: 'rgba(255, 255, 255, 0.86)', border: '2px dashed #3b82f6', fontSize: 15, fontWeight: 600, color: '#3b82f6' }}>
+            Drop files here
+          </div>
+        </div>
+      ) : null}
       <HistorySidebar {...historySidebarProps} />
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, height: '100%', position: 'relative' }}>
         <ChatSurface {...chatSurfaceProps} />
