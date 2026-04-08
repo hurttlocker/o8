@@ -485,12 +485,14 @@ export async function createGoogleToolResponseStream(options: GoogleStreamOption
           }
         }
 
-        if (options.lastUserContent && fullResponseText.length > 50) {
-          extractAndStoreFacts(options.lastUserContent, fullResponseText, options.tabId || undefined)
-            .catch((error) => {
-              console.error('[memory-extract] Phase B failed:', error);
-            });
-        }
+        // Cortex v2: session outcome replaces fact extraction
+        // TODO: wire writeSessionOutcome() here when chat conversation tracking is ready
+        // if (options.lastUserContent && fullResponseText.length > 50) {
+        //   extractAndStoreFacts(options.lastUserContent, fullResponseText, options.tabId || undefined)
+        //     .catch((error) => {
+        //       console.error('[memory-extract] Phase B failed:', error);
+        //     });
+        // }
       } catch (error) {
         enqueue({
           type: 'error',
