@@ -407,35 +407,9 @@ export function ComposerBar({
   const repoPathRef = useRef(repoPath);
   repoPathRef.current = repoPath;
 
-  // Find the textarea via DOM query — ComposerPrimitive.Input doesn't
-  // reliably forward refs, and swallows React onChange.
-  useEffect(() => {
-    const wrapper = composerWrapperRef.current;
-    if (!wrapper) return undefined;
-
-    // MutationObserver to catch late-rendered textarea
-    const attach = () => {
-      const ta = wrapper.querySelector('textarea');
-      if (!ta || ta === inputRef.current) return;
-      inputRef.current = ta;
-      ta.addEventListener('input', onInputNative);
-    };
-
-    attach();
-    const observer = new MutationObserver(attach);
-    observer.observe(wrapper, { childList: true, subtree: true });
-
-    return () => {
-      observer.disconnect();
-      if (inputRef.current) {
-        inputRef.current.removeEventListener('input', onInputNative);
-        inputRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function onInputNative() {
+  // Stable handler ref — avoids stale closure in the DOM listener
+  const onInputRef = useRef<() => void>(() => {});
+  onInputRef.current = () => {
     const el = inputRef.current;
     if (!el) return;
     const value = el.value;
@@ -467,7 +441,35 @@ export function ComposerBar({
       setFileSuggestions([]);
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
     }
-  }
+  };
+
+  // Find the textarea via DOM query — ComposerPrimitive.Input doesn't
+  // reliably forward refs, and swallows React onChange.
+  useEffect(() => {
+    const wrapper = composerWrapperRef.current;
+    if (!wrapper) return undefined;
+
+    const handler = () => onInputRef.current();
+
+    const attach = () => {
+      const ta = wrapper.querySelector('textarea');
+      if (!ta || ta === inputRef.current) return;
+      inputRef.current = ta;
+      ta.addEventListener('input', handler);
+    };
+
+    attach();
+    const observer = new MutationObserver(attach);
+    observer.observe(wrapper, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+      if (inputRef.current) {
+        inputRef.current.removeEventListener('input', handler);
+        inputRef.current = null;
+      }
+    };
+  }, []);
 
   const handleFileSelect = useCallback((filePath: string) => {
     const el = inputRef.current;
