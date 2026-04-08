@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- transcript media here intentionally renders raw URLs from mixed runtimes */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFileDrop } from '@/lib/hooks/use-file-drop';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useSharedDesktopWs } from '../hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '../hooks/useDesktopWebSocket';
@@ -78,8 +79,7 @@ export function AgentPanelChat({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<{ name: string; mimeType: string; content: string; preview?: string }[]>([]);
-  const [dragOver, setDragOver] = useState(false);
+  const { pendingFiles, dragOver, processFiles, removePendingFile, dragHandlers, clearPendingFiles } = useFileDrop();
   const [agentRunning, setAgentRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [streamingText, setStreamingText] = useState('');
@@ -527,44 +527,7 @@ export function AgentPanelChat({
     }
   }, [scrollToBottom]);
 
-  // ── File handling ──
-  const processFiles = useCallback((files: FileList | File[]) => {
-    Array.from(files).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
-        setPendingFiles(prev => [...prev, { name: file.name, mimeType: file.type || 'application/octet-stream', content: base64, preview }]);
-      };
-      reader.readAsDataURL(file);
-    });
-  }, []);
-
-  const removePendingFile = useCallback((idx: number) => {
-    setPendingFiles(prev => {
-      const f = prev[idx];
-      if (f?.preview) URL.revokeObjectURL(f.preview);
-      return prev.filter((_, i) => i !== idx);
-    });
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); }, []);
-  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); }, []);
-  const handleDrop = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); if (e.dataTransfer.files.length > 0) processFiles(e.dataTransfer.files); }, [processFiles]);
-
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      const files: File[] = [];
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].kind === 'file') { const file = items[i].getAsFile(); if (file) files.push(file); }
-      }
-      if (files.length > 0) processFiles(files);
-    };
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [processFiles]);
+  // ── File handling (shared hook) ──
 
   const playSendSound = useCallback(() => {
     try {
@@ -643,7 +606,7 @@ export function AgentPanelChat({
     if ((!draft.trim() && pendingFiles.length === 0) || !selectedKey || sending || !selectedSession?.runtimeSurface?.capabilities.sendInput) return;
     const text = draft.trim(); const files = [...pendingFiles];
     const relaySlashToTerminal = Boolean(text && files.length === 0 && isSlashCommandText(text) && supportsSlashTerminalRelay && selectedSession?.tmuxSession);
-    setDraft(''); setPendingFiles([]); setSending(true); liveToolCallsRef.current = []; setActiveToolCalls([]); playSendSound();
+    setDraft(''); clearPendingFiles(); setSending(true); liveToolCallsRef.current = []; setActiveToolCalls([]); playSendSound();
     const optimisticText = files.length > 0 ? `${text}${text ? '\n' : ''}${files.map(f => f.name).join(', ')}` : text;
     const optimistic: MobileTranscriptEntry = { id: `local-${Date.now()}`, role: 'user', text: optimisticText, timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
     setTranscript(prev => [...prev, optimistic]); scrollToBottom(true);
@@ -826,9 +789,9 @@ export function AgentPanelChat({
   return (
     <div
       className="remodex-desktop-chat"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      onDragOver={dragHandlers.onDragOver}
+      onDragLeave={dragHandlers.onDragLeave}
+      onDrop={dragHandlers.onDrop}
       style={{
         display: 'flex',
         flexDirection: 'column',
