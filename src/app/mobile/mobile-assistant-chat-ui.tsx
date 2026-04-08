@@ -2,7 +2,7 @@
 
 import { ComposerPrimitive, MessagePrimitive, useAuiState, type MessageState } from '@assistant-ui/react';
 import { useEffect, useState, type CSSProperties } from 'react';
-import { MobileMarkdown, codeTheme, highlightCode } from './mobile-markdown';
+import { MobileMarkdown } from './mobile-markdown';
 import { getMessageTextContent, getMessageThinkingBlocks, getMessageToolCalls } from './mobile-assistant-chat-runtime';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
 import { playSendClick } from '@/lib/mobile/sounds';
@@ -19,6 +19,7 @@ import {
   mobileFontFamily,
   type ModelOption,
 } from './mobile-approvals-shared';
+import { renderToolPart } from './mobile-tool-cards';
 
 function StreamingDot({ palette }: { palette: MobilePalette }) {
   const [expanded, setExpanded] = useState(false);
@@ -119,53 +120,7 @@ function ThinkingBlock({
   );
 }
 
-
-function ToolOutputBlock({ code, light, palette }: { code: string; light: boolean; palette: MobilePalette }) {
-  const t = codeTheme(light);
-  const lines = highlightCode(code);
-  return (
-    <pre
-      style={{
-        margin: 0,
-        marginTop: 4,
-        padding: '10px 12px',
-        borderRadius: 10,
-        border: `1px solid ${palette.cardBorder}`,
-        background: t.bg,
-        color: t.text,
-        fontSize: 12,
-        lineHeight: 1.55,
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        fontFamily: '"SF Mono", Menlo, monospace',
-        overflowX: 'auto',
-        maxHeight: 280,
-        overflowY: 'auto',
-      }}
-    >
-      {lines.map((line, i) => (
-        <span key={i}>
-          {line.tokens.map((token, j) => (
-            <span
-              key={j}
-              style={{
-                color: token.type === 'keyword' ? t.keyword
-                  : token.type === 'string' ? t.string
-                  : token.type === 'number' ? t.number
-                  : token.type === 'comment' ? t.comment
-                  : token.type === 'function' ? t.fn
-                  : t.text,
-              }}
-            >
-              {token.value}
-            </span>
-          ))}
-          {i < lines.length - 1 ? '\n' : null}
-        </span>
-      ))}
-    </pre>
-  );
-}
+/* ── Tool call card — delegates to specialized renderers in mobile-tool-cards ─ */
 
 function ToolCallCard({
   toolCall,
@@ -174,61 +129,22 @@ function ToolCallCard({
   toolCall: MobileChatToolCall;
   palette: MobilePalette;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const light = palette.rootBackground !== '#111111';
   const status = toolCall.result?.status ?? toolCall.status ?? (toolCall.result ? 'done' : 'running');
-  const isDone = status === 'done';
-  const isError = status === 'error' || status === 'blocked';
-  const statusColor = isError ? palette.danger : isDone ? palette.success : palette.accent;
-  const outputText = toolCall.result?.output?.trim() ?? '';
-  const lineCount = outputText ? outputText.split('\n').length : 0;
-  const displayLabel = toolCall.filePath
-    ? toolCall.filePath.split('/').pop() ?? toolCall.toolName
-    : toolCall.toolName.replace(/_/g, ' ');
+  const isPending = status === 'calling' || status === 'running';
+  const isError = status === 'error' || status === 'blocked' || toolCall.isError;
 
   return (
     <div style={{ marginBottom: 8 }}>
-      <button
-        type="button"
-        onClick={() => { if (outputText) setExpanded((v) => !v); }}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 12px',
-          borderRadius: 10,
-          border: `1px solid ${palette.cardBorder}`,
-          background: palette.panelElevated,
-          cursor: outputText ? 'pointer' : 'default',
-          fontFamily: '"SF Mono", Menlo, monospace',
-          fontSize: 12,
-          color: palette.rootText,
-          textAlign: 'left',
-        }}
-      >
-        <div style={{ width: 6, height: 6, borderRadius: 999, backgroundColor: statusColor, flexShrink: 0 }} />
-        <span style={{ fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {displayLabel}
-        </span>
-        {toolCall.filePath ? (
-          <span style={{ fontSize: 10, color: palette.subduedText, flexShrink: 0 }}>
-            {toolCall.toolName}
-          </span>
-        ) : null}
-        {outputText ? (
-          <>
-            <span style={{ fontSize: 10, color: palette.subduedText }}>{lineCount} lines</span>
-            <IconCaretDown fill={palette.subduedText} style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.2s ease', flexShrink: 0 } as React.CSSProperties} />
-          </>
-        ) : (
-          <span style={{ fontSize: 10, color: statusColor, fontWeight: 700 }}>
-            {isDone ? 'done' : isError ? 'error' : 'running...'}
-          </span>
-        )}
-      </button>
-      {expanded && outputText ? (
-        <ToolOutputBlock code={outputText} light={!palette.isDark} palette={palette} />
-      ) : null}
+      {renderToolPart(toolCall.toolName, {
+        toolCallId: toolCall.toolCallId,
+        args: toolCall.arguments,
+        result: toolCall.result?.output ?? toolCall.result,
+        isError: isError || undefined,
+        pending: isPending || undefined,
+        light,
+        palette,
+      })}
     </div>
   );
 }

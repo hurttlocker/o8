@@ -551,11 +551,35 @@ export function renderToolPart(toolName: string, input: ToolRenderInput) {
       />
     );
   }
-  if (toolName === 'run_terminal_command' || toolName === 'exec_command') {
+  if (toolName === 'run_terminal_command' || toolName === 'exec_command' || toolName === 'bash') {
     const command = readStringArg(args, 'command', 'cmd') || toolName;
     return (
       <ShellCard
         command={command}
+        output={preview}
+        palette={input.palette}
+        light={input.light}
+        status={status}
+      />
+    );
+  }
+  if (toolName === 'list_files') {
+    const path = readStringArg(args, 'path', 'directory', 'dir') || 'Directory listing';
+    return (
+      <ReadFileCard
+        path={path}
+        content={preview}
+        palette={input.palette}
+        light={input.light}
+        status={status}
+      />
+    );
+  }
+  if (toolName === 'search_code' || toolName === 'search_files' || toolName === 'grep' || toolName === 'find_files') {
+    const query = readStringArg(args, 'query', 'pattern', 'search') || toolName;
+    return (
+      <ShellCard
+        command={query}
         output={preview}
         palette={input.palette}
         light={input.light}
