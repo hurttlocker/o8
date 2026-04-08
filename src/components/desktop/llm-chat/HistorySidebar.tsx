@@ -31,7 +31,7 @@ function HistorySidebarBase({
   deleteHistory: (tabId: string) => void;
 }) {
   return (
-    <div style={{ width: historyOpen ? 260 : 0, minWidth: historyOpen ? 260 : 0, borderRight: historyOpen ? '1px solid var(--t-divider)' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'width 200ms ease, min-width 200ms ease', background: '#ffffff' }}>
+    <div style={{ width: historyOpen ? 260 : 0, minWidth: historyOpen ? 260 : 0, borderRight: historyOpen ? '1px solid var(--t-divider)' : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'width 200ms ease, min-width 200ms ease', background: 'var(--t-chat-surface-bg, #ffffff)' }}>
       {historyOpen ? (
         <>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, paddingRight: 10, paddingBottom: 12, paddingLeft: 14, borderBottom: '1px solid var(--t-divider)' }}>

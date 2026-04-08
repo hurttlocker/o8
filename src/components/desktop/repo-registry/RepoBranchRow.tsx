@@ -24,6 +24,7 @@ import {
   packetMatchesBranch,
   resolveFloatingPanelPosition,
   sessionStatusTone,
+  AgentSpinner,
   shortenPath,
   worktreeStageTone,
   type BranchAgent,
@@ -534,16 +535,7 @@ function RepoBranchRowBase({
                           opacity: onSelectSession ? 1 : 0.78,
                         }}
                       >
-                        <span
-                          style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: '50%',
-                            background: statusTone.color,
-                            boxShadow: `0 0 6px ${statusTone.glow}`,
-                            flexShrink: 0,
-                          }}
-                        />
+                        <AgentSpinner status={agent.status} size={6} />
                         <span style={{ flex: 1, minWidth: 0 }}>
                           <span
                             style={{

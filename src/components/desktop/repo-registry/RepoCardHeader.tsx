@@ -23,6 +23,7 @@ import {
   shortenPath,
   worktreeStageTone,
   worktreeStatusExplanation,
+  AgentSpinner,
   type BranchAgent,
   type RepoRegistryEntry,
 } from './shared';
@@ -277,15 +278,7 @@ function RepoCardHeaderBase({
         flexShrink: 0,
       }}
     >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          background: '#34c759',
-          boxShadow: '0 0 8px rgba(52, 199, 89, 0.32)',
-        }}
-      />
+      <AgentSpinner status={repoAgents.some(a => a.status === 'running') ? 'running' : 'completed'} size={5} />
       {repoAgents.length} live
     </span>
   ) : null;
@@ -508,7 +501,8 @@ function RepoCardHeaderBase({
                 appearance: 'none',
                 WebkitAppearance: 'none',
                 marginRight: -2,
-                transition: 'background 140ms ease, color 140ms ease',
+                opacity: hoveringHeader ? 1 : 0,
+                transition: 'opacity 140ms ease, background 140ms ease, color 140ms ease',
               } as React.CSSProperties}
               onMouseEnter={(event) => {
                 event.currentTarget.style.color = '#ef4444';

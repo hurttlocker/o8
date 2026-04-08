@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertCircle, FolderOpen, GitBranch, GitPullRequest, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { BlueGlassActionButton, BlueGlassHoverCard, BlueGlassMetricPill, BlueGlassSparklineLane } from '@/components/desktop/BlueGlassHoverCard';
@@ -435,21 +435,86 @@ export function runtimeBadgeTone(runtime?: string | null) {
 }
 
 export function sessionStatusTone(status?: string | null) {
+  // Apple traffic-light system: green (active), amber (waiting), red (error), gray (idle)
   switch (status) {
     case 'running':
-      return { label: 'Working', color: '#16a34a', glow: 'rgba(22, 163, 74, 0.18)' };
+      return { label: 'Working', color: '#34c759', glow: 'rgba(52, 199, 89, 0.22)' };
     case 'reviewing':
-      return { label: 'Reviewing', color: '#7c3aed', glow: 'rgba(124, 58, 237, 0.18)' };
+      return { label: 'Reviewing', color: '#34c759', glow: 'rgba(52, 199, 89, 0.22)' };
     case 'waiting':
-      return { label: 'Waiting', color: '#d97706', glow: 'rgba(245, 158, 11, 0.18)' };
+      return { label: 'Waiting', color: '#ff9f0a', glow: 'rgba(255, 159, 10, 0.22)' };
     case 'blocked':
     case 'failed':
-      return { label: 'Blocked', color: '#dc2626', glow: 'rgba(239, 68, 68, 0.18)' };
+      return { label: 'Blocked', color: '#ff3b30', glow: 'rgba(255, 59, 48, 0.22)' };
     case 'completed':
-      return { label: 'Done', color: '#10b981', glow: 'rgba(16, 185, 129, 0.18)' };
+      return { label: 'Done', color: '#34c759', glow: 'rgba(52, 199, 89, 0.22)' };
     default:
-      return { label: 'Idle', color: 'var(--t-text-muted)', glow: 'rgba(148, 163, 184, 0.18)' };
+      return { label: 'Idle', color: '#8e8e93', glow: 'rgba(142, 142, 147, 0.18)' };
   }
+}
+
+// ── Braille spinner for working agents ──
+// Braille dot pattern from the viral CLI spinners tweet.
+// Classic rotating dot — compact, elegant, unmistakable "alive" signal.
+const BRAILLE_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+export function AgentSpinner({
+  status,
+  size = 6,
+}: {
+  status?: string | null;
+  size?: number;
+}) {
+  const [frame, setFrame] = useState(0);
+  const isActive = status === 'running' || status === 'reviewing';
+  const tone = sessionStatusTone(status);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const timer = window.setInterval(() => {
+      setFrame((f) => (f + 1) % BRAILLE_FRAMES.length);
+    }, 80);
+    return () => window.clearInterval(timer);
+  }, [isActive]);
+
+  if (!isActive) {
+    return (
+      <span
+        style={{
+          width: size,
+          height: size,
+          borderRadius: '50%',
+          background: tone.color,
+          boxShadow: `0 0 6px ${tone.glow}`,
+          flexShrink: 0,
+          display: 'inline-block',
+        }}
+      />
+    );
+  }
+
+  const fontSize = Math.max(size + 4, 10);
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: fontSize,
+        height: fontSize,
+        fontSize,
+        lineHeight: 1,
+        color: tone.color,
+        textShadow: `0 0 8px ${tone.glow}`,
+        flexShrink: 0,
+        fontFamily: 'monospace',
+        letterSpacing: 0,
+      }}
+    >
+      {BRAILLE_FRAMES[frame]}
+    </span>
+  );
 }
 
 export function sessionSortValue(status?: string | null) {

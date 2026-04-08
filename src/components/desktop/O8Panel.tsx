@@ -112,14 +112,27 @@ function O8TabButton({ icon, active, onClick, label }: {
         height: 32,
         border: 'none',
         borderRadius: 8,
-        background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+        background: active ? 'rgba(255,255,255,0.14)' : 'transparent',
         cursor: 'pointer',
         transition: 'background 120ms ease',
+        position: 'relative',
       }}
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
     >
       {icon(active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE)}
+      {active ? (
+        <span style={{
+          position: 'absolute',
+          bottom: 2,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 12,
+          height: 2,
+          borderRadius: 1,
+          background: '#8fb4ff',
+        }} />
+      ) : null}
     </button>
   );
 }
