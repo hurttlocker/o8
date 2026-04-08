@@ -302,17 +302,27 @@ export function createMobileChatModel(selectedModel: ModelOption, repoPath: stri
   return {
     run: async function* ({ messages, abortSignal }: ChatModelRunOptions) {
       try {
-        const response = await fetch('/api/v2/proxy/llm', {
+        const isCli = selectedModel.backend === 'cli' && selectedModel.cliRuntime;
+        const endpoint = isCli ? '/api/v2/proxy/cli' : '/api/v2/proxy/llm';
+        const body = isCli
+          ? {
+              runtime: selectedModel.cliRuntime,
+              model: selectedModel.id,
+              messages: toProxyMessages(messages),
+            }
+          : {
+              model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL,
+              provider: selectedModel.provider,
+              messages: toProxyMessages(messages),
+              stream: true,
+              repoPath,
+            };
+
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: abortSignal,
-          body: JSON.stringify({
-            model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL,
-            provider: selectedModel.provider,
-            messages: toProxyMessages(messages),
-            stream: true,
-            repoPath,
-          }),
+          body: JSON.stringify(body),
         });
 
         if (!response.ok || !response.body) {

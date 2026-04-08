@@ -84,6 +84,8 @@ export interface ModelOption {
   label: string;
   provider: 'google' | 'anthropic' | 'openai';
   description: string;
+  backend?: 'cli' | 'api';
+  cliRuntime?: 'claude-code' | 'codex' | 'gemini';
 }
 
 export interface MobilePalette {
@@ -133,13 +135,27 @@ export const RISK_COLORS: Record<string, string> = {
   low: '#22c55e',
 };
 
-export const AVAILABLE_MODELS: ModelOption[] = [
-  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', provider: 'google', description: 'Latest flagship' },
-  { id: 'gpt-5.4-chat-xhigh', label: 'GPT-5.4 Chat', provider: 'openai', description: 'xhigh reasoning' },
-  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'anthropic', description: 'High reasoning' },
+/** CLI-backed models — use installed runtimes, no API key needed */
+export const CLI_MODELS: ModelOption[] = [
+  { id: 'cli:claude-code:opus', label: 'Opus 4.6', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code' },
+  { id: 'cli:claude-code:sonnet', label: 'Sonnet 4.6', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code' },
+  { id: 'cli:claude-code:haiku', label: 'Haiku 4.5', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code' },
+  { id: 'cli:codex:gpt-5.4', label: 'GPT-5.4', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
+  { id: 'cli:codex:o4-mini', label: 'o4-mini', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
+  { id: 'cli:gemini:gemini-3.1-pro', label: 'Gemini 3.1 Pro', provider: 'google', description: 'Gemini CLI', backend: 'cli', cliRuntime: 'gemini' },
+  { id: 'cli:gemini:gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', description: 'Gemini CLI', backend: 'cli', cliRuntime: 'gemini' },
 ];
 
-export const DEFAULT_MOBILE_CHAT_MODEL = 'gemini-3.1-pro-preview';
+/** API-backed models — require BYOK key */
+export const API_MODELS: ModelOption[] = [
+  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', provider: 'google', description: 'Via API key', backend: 'api' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'anthropic', description: 'Via API key', backend: 'api' },
+  { id: 'gpt-5.4', label: 'GPT-5.4', provider: 'openai', description: 'Via API key', backend: 'api' },
+];
+
+export const AVAILABLE_MODELS: ModelOption[] = [...CLI_MODELS, ...API_MODELS];
+
+export const DEFAULT_MOBILE_CHAT_MODEL = 'cli:claude-code:sonnet';
 export const MOBILE_CHAT_STORAGE_KEY = 'o8-mobile-chat-tab';
 export const MOBILE_CHAT_MODEL_STORAGE_KEY = 'o8-mobile-chat-model';
 export const POLL_INTERVAL = 5_000;

@@ -6,8 +6,10 @@ import {
 import {
   buildLlmRequestMessages,
   cleanProxyContent,
+  cliRuntimeForModel,
   defaultMobileLlmModel,
   ensurePersistedMobileLlmChatSession,
+  isCliModel,
   providerForLlmModel,
 } from '@/lib/llm/mobile-chat-session';
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
@@ -133,18 +135,28 @@ export async function POST(request: NextRequest) {
   });
   invalidateInboxCache();
 
-  const proxyRes = await fetch(new URL('/api/v2/proxy/llm', request.url), {
+  const useCli = isCliModel(model);
+  const proxyEndpoint = useCli ? '/api/v2/proxy/cli' : '/api/v2/proxy/llm';
+  const proxyBody = useCli
+    ? {
+        runtime: cliRuntimeForModel(model),
+        model,
+        messages: buildLlmRequestMessages(existing, message),
+      }
+    : {
+        model,
+        provider,
+        messages: buildLlmRequestMessages(existing, message),
+        approvedTools: [],
+      };
+
+  const proxyRes = await fetch(new URL(proxyEndpoint, request.url), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-tab-id': tabId,
     },
-    body: JSON.stringify({
-      model,
-      provider,
-      messages: buildLlmRequestMessages(existing, message),
-      approvedTools: [],
-    }),
+    body: JSON.stringify(proxyBody),
     cache: 'no-store',
   });
 

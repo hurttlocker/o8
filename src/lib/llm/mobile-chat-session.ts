@@ -8,16 +8,16 @@ import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
 
 const DEFAULT_MOBILE_GEMINI_MODEL = 'gemini-2.5-flash';
 const DEFAULT_MOBILE_OPENAI_MODEL = 'gpt-5.4';
-const DEFAULT_MOBILE_CHAT_TITLE = 'Chat';
+const DEFAULT_MOBILE_CLI_MODEL = 'cli:claude-code:sonnet';
+const DEFAULT_MOBILE_CHAT_TITLE = 'Assistant';
 
 export function createMobileLlmTabId() {
   return `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function defaultMobileLlmModel() {
-  return process.env.GOOGLE_AI_API_KEY?.trim()
-    ? DEFAULT_MOBILE_GEMINI_MODEL
-    : DEFAULT_MOBILE_OPENAI_MODEL;
+  // Prefer CLI model (no API key needed) — the server will run the CLI
+  return DEFAULT_MOBILE_CLI_MODEL;
 }
 
 export function providerForLlmModel(model?: string): 'openai' | 'anthropic' | 'google' {
@@ -25,9 +25,25 @@ export function providerForLlmModel(model?: string): 'openai' | 'anthropic' | 'g
   if (!normalized) {
     return process.env.GOOGLE_AI_API_KEY?.trim() ? 'google' : 'openai';
   }
+  // CLI model IDs: cli:claude-code:opus, cli:codex:gpt-5.4, cli:gemini:gemini-3.1-pro
+  if (normalized.startsWith('cli:claude-code:')) return 'anthropic';
+  if (normalized.startsWith('cli:codex:')) return 'openai';
+  if (normalized.startsWith('cli:gemini:')) return 'google';
   if (normalized.startsWith('claude-')) return 'anthropic';
   if (normalized.startsWith('gemini-')) return 'google';
   return 'openai';
+}
+
+/** Check if a model ID is CLI-backed */
+export function isCliModel(model?: string): boolean {
+  return !!model?.startsWith('cli:');
+}
+
+/** Extract CLI runtime from model ID: cli:claude-code:opus → claude-code */
+export function cliRuntimeForModel(model: string): string | null {
+  if (!model.startsWith('cli:')) return null;
+  const parts = model.split(':');
+  return parts[1] ?? null;
 }
 
 function resolveMobileChatRepoContext() {
