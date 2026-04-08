@@ -49,10 +49,15 @@ function getWsBridgeUrl(token: string) {
   if (typeof window === 'undefined') return null;
 
   const isTauri = window.location.protocol === 'tauri:' || Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
-  const host = isTauri ? '127.0.0.1' : window.location.hostname || '127.0.0.1';
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  if (isTauri) {
+    return `ws://127.0.0.1:3002/ws?token=${encodeURIComponent(token)}`;
+  }
 
-  return `${protocol}//${host}:3002/ws?token=${encodeURIComponent(token)}`;
+  // Use the same host:port as the page — Next.js rewrites /ws → ws-server:3002.
+  // This avoids cross-port issues over Tailscale / remote networks.
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const hostPort = window.location.host; // includes port if non-default
+  return `${protocol}//${hostPort}/ws?token=${encodeURIComponent(token)}`;
 }
 
 const WS_RECONNECT_BASE_DELAY_MS = 1_000;
