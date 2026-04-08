@@ -22,6 +22,7 @@ interface MobileChatSendBody {
   sessionKey?: string;
   message?: string;
   model?: string;
+  effort?: string;
 }
 
 function persistStreamResult(
@@ -136,12 +137,14 @@ export async function POST(request: NextRequest) {
   invalidateInboxCache();
 
   const useCli = isCliModel(model);
+  const effort = body?.effort?.trim();
   const proxyEndpoint = useCli ? '/api/v2/proxy/cli' : '/api/v2/proxy/llm';
   const proxyBody = useCli
     ? {
         runtime: cliRuntimeForModel(model),
         model,
         messages: buildLlmRequestMessages(existing, message),
+        ...(effort ? { effort } : {}),
       }
     : {
         model,

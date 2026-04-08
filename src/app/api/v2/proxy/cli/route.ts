@@ -13,10 +13,13 @@ import { NextResponse } from 'next/server';
 
 type CliRuntime = 'claude-code' | 'codex' | 'gemini';
 
+type CliEffort = 'low' | 'medium' | 'high' | 'max';
+
 interface CliRequestBody {
   runtime: CliRuntime;
   model: string;       // e.g. 'cli:claude-code:opus' → extract 'opus' or 'haiku'
   messages: { role: string; content: string }[];
+  effort?: CliEffort;
 }
 
 /** Map CLI model id suffix to the --model flag value */
@@ -36,6 +39,8 @@ const GEMINI_MODEL_MAP: Record<string, string> = {
   'gemini-2.5-pro': 'gemini-2.5-pro',
   'gemini-2.5-flash': 'gemini-2.5-flash',
 };
+
+const VALID_EFFORTS = new Set<string>(['low', 'medium', 'high', 'max']);
 
 function extractModelKey(cliModelId: string): string {
   // cli:claude-code:opus → opus
@@ -76,7 +81,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'runtime, model, and messages are required' }, { status: 400 });
     }
 
-    const { runtime, model, messages } = body;
+    const { runtime, model, messages, effort } = body;
     const modelKey = extractModelKey(model);
     const prompt = buildPrompt(messages);
     if (!prompt) {
@@ -90,7 +95,11 @@ export async function POST(request: Request) {
       case 'claude-code': {
         const cliModel = CLAUDE_MODEL_MAP[modelKey] ?? 'sonnet';
         cmd = 'claude';
-        args = ['--print', '--output-format', 'stream-json', '--verbose', '--model', cliModel, prompt];
+        args = ['--print', '--output-format', 'stream-json', '--verbose', '--model', cliModel];
+        if (effort && VALID_EFFORTS.has(effort)) {
+          args.push('--effort', effort);
+        }
+        args.push(prompt);
         break;
       }
       case 'codex': {

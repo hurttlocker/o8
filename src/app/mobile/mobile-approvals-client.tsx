@@ -20,12 +20,15 @@ import {
   generateChatTabId,
   getMobilePalette,
   getModelOption,
+  getStoredEffort,
+  storeEffort,
   glassButtonStyle,
   mobileFontFamily,
   normalizeHistoryList,
   readStoredMobileModel,
   type ApprovalItem,
   type ChatHistoryRecord,
+  type CliEffort,
   type MobileView,
 } from './mobile-approvals-shared';
 import { SettingsView } from './mobile-settings-view';
@@ -80,6 +83,7 @@ export function MobileApprovalsClient({
   const [repoOptions, setRepoOptions] = useState<MobileRepoOption[]>([]);
   const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(readStoredMobileRepoPath);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
+  const [effortLevel, setEffortLevel] = useState<CliEffort | null>(getStoredEffort);
   const reconnectAttemptRef = useRef(0);
 
   const selectedModel = useMemo(
@@ -262,6 +266,11 @@ export function MobileApprovalsClient({
     } catch {
       // Ignore local storage failures on constrained browsers.
     }
+  }, []);
+
+  const handleEffortChange = useCallback((effort: CliEffort | null) => {
+    setEffortLevel(effort);
+    storeEffort(effort);
   }, []);
 
   const handleRepoChange = useCallback((repoPath: string | null) => {
@@ -474,6 +483,8 @@ export function MobileApprovalsClient({
               onThemeChange={handleThemeChange}
               selectedModel={selectedModel}
               onModelChange={handleModelChange}
+              effortLevel={effortLevel}
+              onEffortChange={handleEffortChange}
               connectionStatus={connectionStatus}
               appVersion={appVersion}
               palette={palette}

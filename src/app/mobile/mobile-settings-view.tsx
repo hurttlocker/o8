@@ -3,6 +3,7 @@
 import {
   CLI_MODELS,
   API_MODELS,
+  EFFORT_LEVELS,
   MOBILE_BODY_TRACKING,
   MOBILE_CARD_RADIUS,
   MOBILE_HEADING_TRACKING,
@@ -11,6 +12,7 @@ import {
   formatAboutVersion,
   mobileFontFamily,
   renderConnectionLabel,
+  type CliEffort,
   type MobilePalette,
   type ModelOption,
 } from './mobile-approvals-shared';
@@ -29,6 +31,8 @@ interface SettingsViewProps {
   onThemeChange: (theme: 'light' | 'dark') => void;
   selectedModel: ModelOption;
   onModelChange: (modelId: string) => void;
+  effortLevel: CliEffort | null;
+  onEffortChange: (effort: CliEffort | null) => void;
   connectionStatus: 'connected' | 'disconnected';
   appVersion: string;
   palette: MobilePalette;
@@ -39,6 +43,8 @@ export function SettingsView({
   onThemeChange,
   selectedModel,
   onModelChange,
+  effortLevel,
+  onEffortChange,
   connectionStatus,
   appVersion,
   palette,
@@ -162,6 +168,51 @@ export function SettingsView({
             </div>
           ) : null}
         </MobileGlassPanel>
+
+        {selectedModel.cliRuntime === 'claude-code' ? (
+          <MobileGlassPanel palette={palette} style={{ padding: 18, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 12 }}>
+              Thinking Effort
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {EFFORT_LEVELS.map((level) => {
+                const activeEffort = effortLevel ?? selectedModel.defaultEffort ?? 'high';
+                const active = activeEffort === level.value;
+                return (
+                  <button
+                    key={level.value}
+                    type="button"
+                    onClick={() => onEffortChange(level.value)}
+                    style={{
+                      flex: 1,
+                      minHeight: 38,
+                      borderRadius: 10,
+                      border: `1px solid ${active ? palette.accentBorder : palette.cardBorder}`,
+                      background: active ? palette.accentSoft : palette.panelBackground,
+                      color: active ? palette.accent : palette.mutedText,
+                      fontSize: 12,
+                      fontWeight: active ? 700 : 500,
+                      letterSpacing: MOBILE_BODY_TRACKING,
+                      fontFamily: mobileFontFamily(),
+                      cursor: 'pointer',
+                      padding: '6px 4px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 2,
+                    }}
+                  >
+                    <span>{level.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: palette.subduedText, marginTop: 8, letterSpacing: MOBILE_BODY_TRACKING }}>
+              {EFFORT_LEVELS.find((l) => l.value === (effortLevel ?? selectedModel.defaultEffort ?? 'high'))?.description ?? ''}
+            </div>
+          </MobileGlassPanel>
+        ) : null}
 
         <MobileGlassPanel palette={palette} style={{ padding: 18, marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.subduedText, marginBottom: 14 }}>
