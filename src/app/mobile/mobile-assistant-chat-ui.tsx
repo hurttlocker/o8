@@ -400,23 +400,59 @@ export function ComposerBar({
   const isLoading = useAuiState((state) => state.thread.isLoading);
   const isComposerEmpty = useAuiState((state) => state.thread.composer.isEmpty);
 
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composerWrapperRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repoPathRef = useRef(repoPath);
+  repoPathRef.current = repoPath;
 
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    const cursor = e.target.selectionStart ?? value.length;
+  // Find the textarea via DOM query — ComposerPrimitive.Input doesn't
+  // reliably forward refs, and swallows React onChange.
+  useEffect(() => {
+    const wrapper = composerWrapperRef.current;
+    if (!wrapper) return undefined;
+
+    // MutationObserver to catch late-rendered textarea
+    const attach = () => {
+      const ta = wrapper.querySelector('textarea');
+      if (!ta || ta === inputRef.current) return;
+      inputRef.current = ta;
+      ta.addEventListener('input', onInputNative);
+    };
+
+    attach();
+    const observer = new MutationObserver(attach);
+    observer.observe(wrapper, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+      if (inputRef.current) {
+        inputRef.current.removeEventListener('input', onInputNative);
+        inputRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function onInputNative() {
+    const el = inputRef.current;
+    if (!el) return;
+    const value = el.value;
+    const cursor = el.selectionStart ?? value.length;
     const textBefore = value.slice(0, cursor);
     const atMatch = textBefore.match(/@([\w./\-]*)$/);
+    const repo = repoPathRef.current;
 
-    if (atMatch && atMatch[1].length >= 1 && repoPath) {
+    if (atMatch && atMatch[1].length >= 1) {
       const query = atMatch[1];
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
       searchTimeout.current = setTimeout(async () => {
         try {
+          const headers: Record<string, string> = {};
+          if (repo) headers['x-cortex-repo-path'] = repo;
           const res = await fetch(`/api/v2/context/files?q=${encodeURIComponent(query)}`, {
-            headers: { 'x-cortex-repo-path': repoPath },
+            headers,
             cache: 'no-store',
           });
           if (res.ok) {
@@ -431,7 +467,7 @@ export function ComposerBar({
       setFileSuggestions([]);
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
     }
-  }, [repoPath]);
+  }
 
   const handleFileSelect = useCallback((filePath: string) => {
     const el = inputRef.current;
@@ -459,7 +495,7 @@ export function ComposerBar({
   }, []);
 
   return (
-    <div>
+    <div ref={composerWrapperRef}>
       <MentionStrip suggestions={fileSuggestions} onSelect={handleFileSelect} palette={palette} />
       <ComposerPrimitive.Root
         onSubmit={() => {
@@ -494,13 +530,11 @@ export function ComposerBar({
           }}
         >
           <ComposerPrimitive.Input
-            ref={inputRef}
             placeholder={`Message ${selectedModel.label}...`}
             submitMode="enter"
             minRows={1}
             maxRows={5}
             disabled={isLoading}
-            onChange={handleInputChange}
             style={{
               flex: 1,
               border: 'none',
