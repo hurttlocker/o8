@@ -174,7 +174,7 @@ function ComposerBase({
           </div>
         ) : null}
 
-        <div style={{ maxWidth: 720, marginLeft: 'auto', marginRight: 'auto', border: '1px solid var(--t-panel-border)', borderRadius: 18, background: '#ffffff', transition: 'border-color 200ms, box-shadow 200ms', overflow: 'hidden' }} onFocus={(event) => { event.currentTarget.style.borderColor = THEME_ACCENT; event.currentTarget.style.boxShadow = `0 0 0 3px ${THEME_ACCENT_RING}`; }} onBlur={(event) => { event.currentTarget.style.borderColor = 'var(--t-panel-border)'; event.currentTarget.style.boxShadow = 'none'; }}>
+        <div style={{ maxWidth: 720, marginLeft: 'auto', marginRight: 'auto', border: '1px solid var(--t-panel-border)', borderRadius: 18, background: 'var(--t-chat-surface-bg, #ffffff)', transition: 'border-color 200ms, box-shadow 200ms', overflow: 'hidden' }} onFocus={(event) => { event.currentTarget.style.borderColor = THEME_ACCENT; event.currentTarget.style.boxShadow = `0 0 0 3px ${THEME_ACCENT_RING}`; }} onBlur={(event) => { event.currentTarget.style.borderColor = 'var(--t-panel-border)'; event.currentTarget.style.boxShadow = 'none'; }}>
           {queuedContextCards.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 14, paddingRight: 14, paddingBottom: 0, paddingLeft: 14, borderBottom: '1px solid var(--t-divider-subtle)' }}>
               {queuedContextCards.map((card) => (
