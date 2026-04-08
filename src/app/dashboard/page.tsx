@@ -1985,18 +1985,14 @@ function DashboardInner() {
 
       {/* ── Title Bar ── */}
       <TitleBar
-        selectedRepoEntry={globalRepoEntry}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible(v => !v)}
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
-        chatVisible={false}
-        onToggleChat={handleToggleWorkspacePanel}
         workspacePanelVisible={chatVisible && rightPanelKind === 'review'}
         onToggleWorkspacePanel={handleToggleWorkspacePanel}
         o8PanelVisible={chatVisible && rightPanelKind === 'o8'}
         onToggleO8Panel={handleToggleO8Panel}
-        wsStatus={wsStatus}
         renderSearch={(onClose) => (
           <UniversalSearch
             variant="desktop"

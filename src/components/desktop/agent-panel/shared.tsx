@@ -449,7 +449,7 @@ export function AgentPanelEmptyState() {
         fontFamily: 'system-ui, sans-serif',
       }}
     >
-      No active agents. Start one from the chat.
+      No active agents
     </motion.div>
   );
 }
