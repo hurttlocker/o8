@@ -267,7 +267,7 @@ export function useWorkspaceTerminalController(
   }), []);
 
   const createDefaultChatTab = useCallback((): TerminalTab => ({
-    id: generateLlmChatTabId(), label: 'Chat', kind: 'llm-chat',
+    id: generateLlmChatTabId(), label: 'Assistant', kind: 'llm-chat',
     tmuxSession: null, repo: preferredRepoRef.current ?? undefined,
     linkedIssue: null, createdAt: Date.now(), lastActivity: Date.now(),
   }), []);

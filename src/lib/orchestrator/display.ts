@@ -137,7 +137,7 @@ export function orchestratorStatusTone(status?: OrchestratorPacketStatus | null)
 export function adHocLaneTitle(kind?: 'chat' | 'llm-chat' | 'terminal' | 'canvas') {
   if (kind === 'terminal') return 'Terminal';
   if (kind === 'canvas') return 'Inspector';
-  return 'Chat';
+  return 'Assistant';
 }
 
 export function laneDisplayTitle(

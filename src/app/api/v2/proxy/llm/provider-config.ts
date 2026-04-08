@@ -34,12 +34,23 @@ const PRICING: Record<string, { input: number; output: number }> = {
   'gemini-2.5-flash': { input: 0.15, output: 0.60 },
   'gemini-2.5-flash-lite': { input: 0.04, output: 0.15 },
   'claude-opus-4-6': { input: 15, output: 75 },
+  'claude-sonnet-4-6': { input: 3, output: 15 },
   'claude-sonnet-4-5': { input: 3, output: 15 },
   'claude-haiku-4-5': { input: 0.80, output: 4 },
   'gpt-5.4': { input: 2.50, output: 10 },
-  'gpt-4o': { input: 2.50, output: 10 },
   o3: { input: 10, output: 40 },
+  'o4-mini': { input: 1.10, output: 4.40 },
 };
+
+/** Models that support thinking/reasoning output */
+const THINKING_MODELS = new Set([
+  // Anthropic — opus and sonnet 4+ support extended thinking
+  'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-5',
+  // OpenAI — o-series are reasoning models
+  'o3', 'o4-mini', 'o3-mini',
+  // Google — 2.5+ support thinking
+  'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-3-pro-preview', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview',
+]);
 
 export const GOOGLE_PROVIDER_ENV_KEY = 'GOOGLE_AI_API_KEY';
 
@@ -53,7 +64,7 @@ export const PROVIDERS: Record<Exclude<Provider, 'google'>, ProviderConfig> = {
       'content-type': 'application/json',
     }),
     buildBody: (model, messages) => {
-      const isThinkingModel = /opus|sonnet-4/.test(model);
+      const isThinkingModel = THINKING_MODELS.has(model);
       const maxTokens = isThinkingModel ? 16384 : 4096;
 
       return {
@@ -145,7 +156,7 @@ export const PROVIDERS: Record<Exclude<Provider, 'google'>, ProviderConfig> = {
       'content-type': 'application/json',
     }),
     buildBody: (model, messages) => {
-      const isReasoningModel = /^o[1-9]|^o3/.test(model);
+      const isReasoningModel = THINKING_MODELS.has(model);
 
       return {
         model,

@@ -366,7 +366,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
           <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--t-text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' as const }}>
             {step === 'welcome' ? 'Governance for autonomous teams'
               : step === 'repos' ? 'Choose your repositories'
-              : step === 'runtimes' ? 'Detecting your tools'
+              : step === 'runtimes' ? 'Your assistant engine'
               : step === 'import' ? 'Make o8 yours'
               : 'You\'re all set'}
           </div>
@@ -559,7 +559,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
         {step === 'runtimes' && (
           <div style={{ maxWidth: 520, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5, textAlign: 'center' }}>
-              o8 works with any AI coding agent. Here&apos;s what we found on your machine.
+              These power your assistant and agent sessions. No extra API keys needed.
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -569,7 +569,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
                 </div>
               ) : runtimes.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
-                  No CLI tools detected. You can install them later.
+                  No agent runtimes detected. Install Claude Code or Codex to get started, or add API keys in Settings.
                 </div>
               ) : (
                 runtimes.map((rt) => (
@@ -586,7 +586,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>{rt.name}</div>
                       <div style={{ fontSize: 11, color: rt.detected ? '#22c55e' : 'var(--t-text-faint)', marginTop: 1 }}>
-                        {rt.detected ? (rt.version ? `v${rt.version}` : 'Installed') : 'Not found'}
+                        {rt.detected ? (rt.version ? `v${rt.version} — ready` : 'Ready') : 'Not installed'}
                       </div>
                     </div>
                     {rt.detected && (

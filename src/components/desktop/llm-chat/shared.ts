@@ -111,9 +111,15 @@ export interface MissionCardData {
 export interface ModelOption {
   id: string;
   label: string;
-  provider: 'anthropic' | 'openai' | 'google';
+  provider: 'anthropic' | 'openai' | 'google' | 'openrouter' | 'local';
   color: string;
   description: string;
+  /** 'cli' = routed through installed CLI runtime, 'api' = direct API via BYOK key */
+  backend: 'cli' | 'api';
+  /** Which CLI runtime powers this model (only when backend === 'cli') */
+  cliRuntime?: 'claude-code' | 'codex' | 'gemini';
+  /** Whether this model supports thinking/reasoning output */
+  supportsThinking?: boolean;
 }
 
 export interface PreferredRepoContext {
@@ -169,19 +175,37 @@ export interface SlashCommandOption {
   prefix: string;
 }
 
-export const MODELS: ModelOption[] = [
-  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', provider: 'google', color: '#4285f4', description: 'Latest flagship' },
-  { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro', provider: 'google', color: '#4285f4', description: 'Previous gen flagship' },
-  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', provider: 'google', color: '#4285f4', description: 'Fast + capable' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', color: '#4285f4', description: 'Stable, GA' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', color: '#4285f4', description: 'Fast + cheap' },
-  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', provider: 'google', color: '#4285f4', description: 'Cheapest' },
-  { id: 'claude-opus-4-6', label: 'Claude Opus', provider: 'anthropic', color: '#e07a3a', description: 'Most capable' },
-  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet', provider: 'anthropic', color: '#e07a3a', description: 'Fast + smart' },
-  { id: 'claude-haiku-4-5', label: 'Claude Haiku', provider: 'anthropic', color: '#e07a3a', description: 'Instant' },
-  { id: 'gpt-5.4', label: 'GPT-5.4', provider: 'openai', color: '#10a37f', description: 'Latest OpenAI' },
-  { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai', color: '#10a37f', description: 'Multimodal' },
+/** Models available per CLI runtime — the actual models each CLI supports */
+export const CLI_RUNTIME_MODELS: Record<string, ModelOption[]> = {
+  'claude-code': [
+    { id: 'cli:claude-code:opus', label: 'Opus 4.6', provider: 'anthropic', color: '#e07a3a', description: 'Most capable', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: true },
+    { id: 'cli:claude-code:sonnet', label: 'Sonnet 4.6', provider: 'anthropic', color: '#e07a3a', description: 'Fast + smart', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: true },
+    { id: 'cli:claude-code:haiku', label: 'Haiku 4.5', provider: 'anthropic', color: '#e07a3a', description: 'Instant', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: false },
+  ],
+  codex: [
+    { id: 'cli:codex:gpt-5.4', label: 'GPT-5.4', provider: 'openai', color: '#10a37f', description: 'Latest flagship', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
+    { id: 'cli:codex:o3', label: 'o3', provider: 'openai', color: '#10a37f', description: 'Deep reasoning', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
+    { id: 'cli:codex:o4-mini', label: 'o4-mini', provider: 'openai', color: '#10a37f', description: 'Fast reasoning', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
+  ],
+  gemini: [
+    { id: 'cli:gemini:gemini-3.1-pro', label: 'Gemini 3.1 Pro', provider: 'google', color: '#4285f4', description: 'Latest flagship', backend: 'cli', cliRuntime: 'gemini', supportsThinking: true },
+    { id: 'cli:gemini:gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', color: '#4285f4', description: 'Stable, GA', backend: 'cli', cliRuntime: 'gemini', supportsThinking: true },
+    { id: 'cli:gemini:gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', color: '#4285f4', description: 'Fast + cheap', backend: 'cli', cliRuntime: 'gemini', supportsThinking: true },
+  ],
+};
+
+/** API-backed models — OpenRouter, local, and direct provider keys */
+export const API_MODELS: ModelOption[] = [
+  // Direct provider API (BYOK)
+  { id: 'claude-opus-4-6', label: 'Claude Opus', provider: 'anthropic', color: '#e07a3a', description: 'Via API key', backend: 'api', supportsThinking: true },
+  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet', provider: 'anthropic', color: '#e07a3a', description: 'Via API key', backend: 'api', supportsThinking: true },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', color: '#4285f4', description: 'Via API key', backend: 'api', supportsThinking: true },
+  { id: 'gpt-5.4', label: 'GPT-5.4', provider: 'openai', color: '#10a37f', description: 'Via API key', backend: 'api', supportsThinking: true },
+  { id: 'o3', label: 'o3', provider: 'openai', color: '#10a37f', description: 'Via API key', backend: 'api', supportsThinking: true },
 ];
+
+/** Backward compat — streaming.ts uses this for fallback label resolution */
+export const MODELS: ModelOption[] = API_MODELS;
 
 export const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 export const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';

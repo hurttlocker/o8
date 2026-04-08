@@ -254,7 +254,7 @@ Subagents are defined in `.claude/agents/` (project) and `~/.claude/agents/` (gl
 | Post-change review for bugs and rule violations | **reviewer** (Sonnet) |
 | Session discovery, gateway, adapter debugging | **runtime-debugger** (Sonnet) |
 
-**Multi-turn brainstorming pattern:** When using the brainstormer agent, always do 2-3 turns via SendMessage before presenting results. Turn 1: explore + challenge. Turn 2: refine based on pushback. Turn 3: lock recommendation. Present the final synthesis to the user, not the raw back-and-forth.
+**Brainstormer pattern:** The brainstormer does all 3 turns internally (explore, self-challenge, lock) in a single invocation. It returns a structured response with Turn 1/2/3 headers. Present only the final locked recommendation to the user. If you want to push back on the result, spawn a new brainstormer with the prior recommendation as context.
 
 Using subagents saves main context and runs cheaper models on tasks that don't need Opus.
 
