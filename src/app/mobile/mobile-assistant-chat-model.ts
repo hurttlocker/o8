@@ -298,17 +298,19 @@ function buildAssistantSnapshot(
   return content;
 }
 
-export function createMobileChatModel(selectedModel: ModelOption, repoPath: string | null): ChatModelAdapter {
+export function createMobileChatModel(selectedModel: ModelOption, repoPath: string | null, effortOverride?: string): ChatModelAdapter {
   return {
     run: async function* ({ messages, abortSignal }: ChatModelRunOptions) {
       try {
         const isCli = selectedModel.backend === 'cli' && selectedModel.cliRuntime;
         const endpoint = isCli ? '/api/v2/proxy/cli' : '/api/v2/proxy/llm';
+        const effort = effortOverride || selectedModel.defaultEffort;
         const body = isCli
           ? {
               runtime: selectedModel.cliRuntime,
               model: selectedModel.id,
               messages: toProxyMessages(messages),
+              ...(effort ? { effort } : {}),
             }
           : {
               model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL,

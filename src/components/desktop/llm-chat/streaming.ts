@@ -83,6 +83,7 @@ export async function streamAssistantResponse({
         runtime: model.cliRuntime,
         model: model.id,
         messages: [...recentMessages, { role: 'user', content: [buildLinkedIssueContext(linkedIssue), messageForModel].filter(Boolean).join('\n\n') }],
+        ...(model.defaultEffort ? { effort: model.defaultEffort } : {}),
       })
     : JSON.stringify({
         model: model.id,

@@ -82,6 +82,8 @@ export interface ChatHistoryRecord {
   starred?: boolean;
 }
 
+export type CliEffort = 'low' | 'medium' | 'high' | 'max';
+
 export interface ModelOption {
   id: string;
   label: string;
@@ -89,6 +91,7 @@ export interface ModelOption {
   description: string;
   backend?: 'cli' | 'api';
   cliRuntime?: 'claude-code' | 'codex' | 'gemini';
+  defaultEffort?: CliEffort;
 }
 
 export interface MobilePalette {
@@ -140,8 +143,8 @@ export const RISK_COLORS: Record<string, string> = {
 
 /** CLI-backed models — use installed runtimes, no API key needed */
 export const CLI_MODELS: ModelOption[] = [
-  { id: 'cli:claude-code:opus', label: 'Opus 4.6', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code' },
-  { id: 'cli:claude-code:sonnet', label: 'Sonnet 4.6', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code' },
+  { id: 'cli:claude-code:opus', label: 'Opus 4.6', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code', defaultEffort: 'max' },
+  { id: 'cli:claude-code:sonnet', label: 'Sonnet 4.6', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code', defaultEffort: 'high' },
   { id: 'cli:claude-code:haiku', label: 'Haiku 4.5', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code' },
   { id: 'cli:codex:gpt-5.4', label: 'GPT-5.4', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
   { id: 'cli:codex:o4-mini', label: 'o4-mini', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
@@ -161,6 +164,34 @@ export const AVAILABLE_MODELS: ModelOption[] = [...CLI_MODELS, ...API_MODELS];
 export const DEFAULT_MOBILE_CHAT_MODEL = 'cli:claude-code:sonnet';
 export const MOBILE_CHAT_STORAGE_KEY = 'o8-mobile-chat-tab';
 export const MOBILE_CHAT_MODEL_STORAGE_KEY = 'o8-mobile-chat-model';
+export const MOBILE_EFFORT_STORAGE_KEY = 'o8-mobile-effort';
+
+export const EFFORT_LEVELS: { value: CliEffort; label: string; description: string }[] = [
+  { value: 'low', label: 'Low', description: 'Quick, minimal thinking' },
+  { value: 'medium', label: 'Medium', description: 'Balanced speed and depth' },
+  { value: 'high', label: 'High', description: 'Deep thinking, thorough' },
+  { value: 'max', label: 'Max', description: 'Maximum reasoning depth' },
+];
+
+export function getStoredEffort(): CliEffort | null {
+  try {
+    const stored = window.localStorage.getItem(MOBILE_EFFORT_STORAGE_KEY);
+    if (stored && ['low', 'medium', 'high', 'max'].includes(stored)) return stored as CliEffort;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function storeEffort(effort: CliEffort | null) {
+  try {
+    if (effort) {
+      window.localStorage.setItem(MOBILE_EFFORT_STORAGE_KEY, effort);
+    } else {
+      window.localStorage.removeItem(MOBILE_EFFORT_STORAGE_KEY);
+    }
+  } catch { /* ignore */ }
+}
 export const POLL_INTERVAL = 5_000;
 export const SIDEBAR_WIDTH = 280;
 export const MAX_RECENT_CONVERSATIONS = 10;

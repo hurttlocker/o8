@@ -120,6 +120,8 @@ export interface ModelOption {
   cliRuntime?: 'claude-code' | 'codex' | 'gemini';
   /** Whether this model supports thinking/reasoning output */
   supportsThinking?: boolean;
+  /** Default effort level for CLI models (Claude: low/medium/high/max) */
+  defaultEffort?: 'low' | 'medium' | 'high' | 'max';
 }
 
 export interface PreferredRepoContext {
@@ -178,8 +180,8 @@ export interface SlashCommandOption {
 /** Models available per CLI runtime — the actual models each CLI supports */
 export const CLI_RUNTIME_MODELS: Record<string, ModelOption[]> = {
   'claude-code': [
-    { id: 'cli:claude-code:opus', label: 'Opus 4.6', provider: 'anthropic', color: '#e07a3a', description: 'Most capable', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: true },
-    { id: 'cli:claude-code:sonnet', label: 'Sonnet 4.6', provider: 'anthropic', color: '#e07a3a', description: 'Fast + smart', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: true },
+    { id: 'cli:claude-code:opus', label: 'Opus 4.6', provider: 'anthropic', color: '#e07a3a', description: 'Most capable', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: true, defaultEffort: 'max' },
+    { id: 'cli:claude-code:sonnet', label: 'Sonnet 4.6', provider: 'anthropic', color: '#e07a3a', description: 'Fast + smart', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: true, defaultEffort: 'high' },
     { id: 'cli:claude-code:haiku', label: 'Haiku 4.5', provider: 'anthropic', color: '#e07a3a', description: 'Instant', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: false },
   ],
   codex: [
