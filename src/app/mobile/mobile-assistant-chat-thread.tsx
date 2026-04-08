@@ -153,7 +153,7 @@ function MobileAssistantThreadSurface({
       </ThreadPrimitive.Viewport>
 
       <div style={{ marginTop: 12 }}>
-        <ComposerBar palette={palette} selectedModel={selectedModel} repoPath={repoPath} />
+        <ComposerBar palette={palette} selectedModel={selectedModel} />
       </div>
 
       <ThreadPrimitive.ScrollToBottom

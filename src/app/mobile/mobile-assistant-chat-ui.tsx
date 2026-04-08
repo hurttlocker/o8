@@ -1,7 +1,7 @@
 'use client';
 
 import { ComposerPrimitive, MessagePrimitive, useAuiState, type MessageState } from '@assistant-ui/react';
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { MobileMarkdown } from './mobile-markdown';
 import { getMessageTextContent, getMessageThinkingBlocks, getMessageToolCalls } from './mobile-assistant-chat-runtime';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
@@ -299,300 +299,110 @@ export function EmptyState({
   );
 }
 
-// ── File Mention Suggestion Strip ──
-
-interface FileSuggestion {
-  path: string;
-  name?: string;
-}
-
-function MentionStrip({
-  suggestions,
-  onSelect,
-  palette,
-}: {
-  suggestions: FileSuggestion[];
-  onSelect: (path: string) => void;
-  palette: MobilePalette;
-}) {
-  if (suggestions.length === 0) return null;
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 6,
-        overflowX: 'auto',
-        paddingTop: 6,
-        paddingBottom: 6,
-        paddingLeft: 4,
-        paddingRight: 4,
-        WebkitOverflowScrolling: 'touch',
-        scrollbarWidth: 'none',
-      } as CSSProperties}
-    >
-      {suggestions.map((file) => {
-        const parts = file.path.split('/');
-        const fileName = parts.pop() ?? file.path;
-        const dirHint = parts.length > 0 ? `${parts.slice(-2).join('/')}/` : '';
-
-        return (
-          <button
-            key={file.path}
-            type="button"
-            onClick={() => onSelect(file.path)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              paddingTop: 6,
-              paddingBottom: 6,
-              paddingLeft: 10,
-              paddingRight: 10,
-              borderRadius: 14,
-              border: `1px solid ${palette.cardBorder}`,
-              background: palette.cardBackground,
-              cursor: 'pointer',
-              flexShrink: 0,
-              maxWidth: 200,
-            }}
-          >
-            {dirHint ? (
-              <span style={{
-                fontSize: 11,
-                fontFamily: 'SF Mono, Menlo, monospace',
-                color: palette.subduedText,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
-                {dirHint}
-              </span>
-            ) : null}
-            <span style={{
-              fontSize: 12,
-              fontWeight: 600,
-              fontFamily: 'SF Mono, Menlo, monospace',
-              color: palette.rootText,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>
-              {fileName}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 export function ComposerBar({
   palette,
   selectedModel,
-  repoPath,
 }: {
   palette: MobilePalette;
   selectedModel: ModelOption;
-  repoPath?: string | null;
 }) {
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const isLoading = useAuiState((state) => state.thread.isLoading);
   const isComposerEmpty = useAuiState((state) => state.thread.composer.isEmpty);
 
-  const composerWrapperRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]);
-  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const repoPathRef = useRef(repoPath);
-  repoPathRef.current = repoPath;
-
-  // Stable handler ref — avoids stale closure in the DOM listener
-  const onInputRef = useRef<() => void>(() => {});
-  onInputRef.current = () => {
-    const el = inputRef.current;
-    if (!el) return;
-    const value = el.value;
-    const cursor = el.selectionStart ?? value.length;
-    const textBefore = value.slice(0, cursor);
-    const atMatch = textBefore.match(/@([\w./\-]*)$/);
-    const repo = repoPathRef.current;
-
-    if (atMatch && atMatch[1].length >= 1) {
-      const query = atMatch[1];
-      if (searchTimeout.current) clearTimeout(searchTimeout.current);
-      searchTimeout.current = setTimeout(async () => {
-        try {
-          const headers: Record<string, string> = {};
-          if (repo) headers['x-cortex-repo-path'] = repo;
-          const res = await fetch(`/api/v2/context/files?q=${encodeURIComponent(query)}`, {
-            headers,
-            cache: 'no-store',
-          });
-          if (res.ok) {
-            const data = await res.json() as { files?: FileSuggestion[] };
-            setFileSuggestions(data.files ?? []);
-          }
-        } catch {
-          setFileSuggestions([]);
-        }
-      }, 150);
-    } else {
-      setFileSuggestions([]);
-      if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    }
-  };
-
-  // Find the textarea via DOM query — ComposerPrimitive.Input doesn't
-  // reliably forward refs, and swallows React onChange.
-  useEffect(() => {
-    const wrapper = composerWrapperRef.current;
-    if (!wrapper) return undefined;
-
-    const handler = () => onInputRef.current();
-
-    const attach = () => {
-      const ta = wrapper.querySelector('textarea');
-      if (!ta || ta === inputRef.current) return;
-      inputRef.current = ta;
-      ta.addEventListener('input', handler);
-    };
-
-    attach();
-    const observer = new MutationObserver(attach);
-    observer.observe(wrapper, { childList: true, subtree: true });
-
-    return () => {
-      observer.disconnect();
-      if (inputRef.current) {
-        inputRef.current.removeEventListener('input', handler);
-        inputRef.current = null;
-      }
-    };
-  }, []);
-
-  const handleFileSelect = useCallback((filePath: string) => {
-    const el = inputRef.current;
-    if (!el) return;
-
-    const value = el.value;
-    const cursor = el.selectionStart ?? value.length;
-    const textBefore = value.slice(0, cursor);
-    const atMatch = textBefore.match(/@([\w./\-]*)$/);
-
-    if (atMatch) {
-      const start = cursor - atMatch[0].length;
-      const newValue = value.slice(0, start) + `@${filePath} ` + value.slice(cursor);
-
-      // Update the textarea via native setter to work with ComposerPrimitive
-      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      if (nativeSetter) {
-        nativeSetter.call(el, newValue);
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-
-      setFileSuggestions([]);
-      el.focus();
-    }
-  }, []);
-
   return (
-    <div ref={composerWrapperRef}>
-      <MentionStrip suggestions={fileSuggestions} onSelect={handleFileSelect} palette={palette} />
-      <ComposerPrimitive.Root
-        onSubmit={() => {
-          if (!isRunning && !isComposerEmpty) {
-            playSendClick();
-          }
-          setFileSuggestions([]);
-        }}
+    <ComposerPrimitive.Root
+      onSubmit={() => {
+        if (!isRunning && !isComposerEmpty) {
+          playSendClick();
+        }
+      }}
+      style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        gap: 10,
+        paddingTop: 10,
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)',
+        paddingLeft: 4,
+        paddingRight: 4,
+      }}
+    >
+      <div
         style={{
+          flex: 1,
+          minHeight: 36,
+          borderRadius: 18,
+          border: `1px solid ${palette.inputBorder}`,
+          background: palette.inputBackground,
           display: 'flex',
-          alignItems: 'flex-end',
-          gap: 10,
-          paddingTop: fileSuggestions.length > 0 ? 0 : 10,
-          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)',
-          paddingLeft: 4,
-          paddingRight: 4,
+          alignItems: 'center',
+          paddingLeft: 16,
+          paddingRight: 12,
+          paddingTop: 6,
+          paddingBottom: 6,
         }}
       >
-        <div
+        <ComposerPrimitive.Input
+          placeholder={`Message ${selectedModel.label}...`}
+          submitMode="enter"
+          minRows={1}
+          maxRows={5}
+          disabled={isLoading}
           style={{
             flex: 1,
-            minHeight: 36,
+            border: 'none',
+            backgroundColor: 'transparent',
+            color: palette.rootText,
+            fontSize: 16,
+            outline: 'none',
+            fontFamily: mobileFontFamily(),
+            lineHeight: 1.45,
+            resize: 'none',
+            padding: 0,
+          }}
+        />
+      </div>
+      {isRunning ? (
+        <ComposerPrimitive.Cancel
+          style={{
+            width: 36,
+            height: 36,
             borderRadius: 18,
-            border: `1px solid ${palette.inputBorder}`,
-            background: palette.inputBackground,
-            display: 'flex',
+            border: 'none',
+            backgroundColor: palette.dangerSoft,
+            color: palette.rootText,
+            cursor: 'pointer',
+            flexShrink: 0,
+            display: 'inline-flex',
             alignItems: 'center',
-            paddingLeft: 16,
-            paddingRight: 12,
-            paddingTop: 6,
-            paddingBottom: 6,
+            justifyContent: 'center',
           }}
         >
-          <ComposerPrimitive.Input
-            placeholder={`Message ${selectedModel.label}...`}
-            submitMode="enter"
-            minRows={1}
-            maxRows={5}
-            disabled={isLoading}
-            style={{
-              flex: 1,
-              border: 'none',
-              backgroundColor: 'transparent',
-              color: palette.rootText,
-              fontSize: 16,
-              outline: 'none',
-              fontFamily: mobileFontFamily(),
-              lineHeight: 1.45,
-              resize: 'none',
-              padding: 0,
-            }}
-          />
-        </div>
-        {isRunning ? (
-          <ComposerPrimitive.Cancel
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              border: 'none',
-              backgroundColor: palette.dangerSoft,
-              color: palette.rootText,
-              cursor: 'pointer',
-              flexShrink: 0,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <IconStop fill={palette.iconFill} size={16} />
-          </ComposerPrimitive.Cancel>
-        ) : (
-          <button
-            type="submit"
-            disabled={isComposerEmpty || isLoading}
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              border: 'none',
-              backgroundColor: !isComposerEmpty && !isLoading ? palette.accent : palette.cardBackground,
-              color: palette.rootText,
-              cursor: !isComposerEmpty && !isLoading ? 'pointer' : 'default',
-              opacity: !isComposerEmpty && !isLoading ? 1 : 0.58,
-              flexShrink: 0,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <IconSend fill={palette.iconFill} />
-          </button>
-        )}
-      </ComposerPrimitive.Root>
-    </div>
+          <IconStop fill={palette.iconFill} size={16} />
+        </ComposerPrimitive.Cancel>
+      ) : (
+        <button
+          type="submit"
+          disabled={isComposerEmpty || isLoading}
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            border: 'none',
+            backgroundColor: !isComposerEmpty && !isLoading ? palette.accent : palette.cardBackground,
+            color: palette.rootText,
+            cursor: !isComposerEmpty && !isLoading ? 'pointer' : 'default',
+            opacity: !isComposerEmpty && !isLoading ? 1 : 0.58,
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <IconSend fill={palette.iconFill} />
+        </button>
+      )}
+    </ComposerPrimitive.Root>
   );
 }
 
