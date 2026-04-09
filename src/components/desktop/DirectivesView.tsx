@@ -102,7 +102,7 @@ export function DirectivesView(): React.ReactElement {
 
   // ── Select / deselect ──
 
-  const selectDirective = useCallback((d: Directive) => {
+  const loadDirectiveIntoEditor = useCallback((d: Directive) => {
     setSelectedId(d.id);
     setEditTitle(d.title);
     setEditScope(d.scope);
@@ -115,10 +115,27 @@ export function DirectivesView(): React.ReactElement {
     });
   }, []);
 
+  const selectDirective = useCallback((d: Directive) => {
+    // Finding #15: confirm discard when switching away from unsaved edits.
+    if (dirty && selectedId && selectedId !== d.id) {
+      const proceed = typeof window !== 'undefined'
+        ? window.confirm('You have unsaved changes. Discard them and switch directives?')
+        : true;
+      if (!proceed) return;
+    }
+    loadDirectiveIntoEditor(d);
+  }, [dirty, selectedId, loadDirectiveIntoEditor]);
+
   const deselectDirective = useCallback(() => {
+    if (dirty) {
+      const proceed = typeof window !== 'undefined'
+        ? window.confirm('You have unsaved changes. Discard them and close the editor?')
+        : true;
+      if (!proceed) return;
+    }
     setSelectedId(null);
     setDirty(false);
-  }, []);
+  }, [dirty]);
 
   // ── Create ──
 
@@ -140,13 +157,13 @@ export function DirectivesView(): React.ReactElement {
       const data = await res.json();
       const created = data.directive as Directive;
       setDirectives((prev) => [...prev, created]);
-      selectDirective(created);
+      loadDirectiveIntoEditor(created);
     } catch (e) {
       console.error('[directives] create error:', e);
     } finally {
       setSaving(false);
     }
-  }, [selectDirective]);
+  }, [loadDirectiveIntoEditor]);
 
   // ── Save ──
 

@@ -6,6 +6,7 @@ import {
   MOBILE_CARD_RADIUS,
   MOBILE_HEADING_TRACKING,
   MOBILE_TOUCH_TARGET,
+  IconBrain,
   IconChat,
   IconGear,
   IconShield,
@@ -64,6 +65,12 @@ export function Sidebar({
       description: 'Operator actions that need a fast, explicit decision.',
       badge: approvalCount > 0 ? approvalCount : undefined,
       icon: <IconShield fill={palette.iconFill} />,
+    },
+    {
+      id: 'memory',
+      label: 'Memory',
+      description: 'Directives and session ledger that steer every agent run.',
+      icon: <IconBrain fill={palette.iconFill} />,
     },
     {
       id: 'settings',

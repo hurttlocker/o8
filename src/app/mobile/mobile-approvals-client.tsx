@@ -32,6 +32,7 @@ import {
   type MobileView,
 } from './mobile-approvals-shared';
 import { SettingsView } from './mobile-settings-view';
+import { MobileMemoryView } from './mobile-memory-view';
 import {
   getMobileRepoLabel,
   normalizeMobileRepoList,
@@ -70,14 +71,16 @@ function getReconnectDelayMs(attempt: number) {
 export function MobileApprovalsClient({
   initialApprovals,
   appVersion,
+  initialView = 'chat',
 }: {
   initialApprovals: ApprovalItem[];
   appVersion: string;
+  initialView?: MobileView;
 }) {
   const { themeId, setTheme } = useTheme();
   const palette = useMemo(() => getMobilePalette(themeId), [themeId]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeView, setActiveView] = useState<MobileView>('chat');
+  const [activeView, setActiveView] = useState<MobileView>(initialView);
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals);
   const [resolving, setResolving] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -298,9 +301,11 @@ export function MobileApprovalsClient({
     ? 'Settings'
     : activeView === 'approvals'
       ? 'Approvals'
-      : inConversation
-        ? recentConversations.find((conversation) => conversation.tabId === currentTabId)?.title ?? 'Chat'
-        : 'Chats';
+      : activeView === 'memory'
+        ? 'Memory'
+        : inConversation
+          ? recentConversations.find((conversation) => conversation.tabId === currentTabId)?.title ?? 'Chat'
+          : 'Chats';
 
   return (
     <div
@@ -496,6 +501,10 @@ export function MobileApprovalsClient({
               appVersion={appVersion}
               palette={palette}
             />
+          ) : null}
+
+          {activeView === 'memory' ? (
+            <MobileMemoryView palette={palette} />
           ) : null}
         </div>
       </div>

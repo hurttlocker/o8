@@ -101,6 +101,8 @@ export const DirectiveEditor = forwardRef<HTMLDivElement, DirectiveEditorProps>(
     }, [onDelete]);
 
     const showRepoInput = scope === 'repo' && !repoNames.includes(repoName);
+    const titleIsEmpty = title.trim() === '';
+    const canSave = dirty && !saving && !titleIsEmpty;
 
     return (
       <div
@@ -311,24 +313,25 @@ export const DirectiveEditor = forwardRef<HTMLDivElement, DirectiveEditorProps>(
             {/* Save */}
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); onSave(); }}
-              disabled={saving || !dirty}
+              onClick={(e) => { e.stopPropagation(); if (canSave) onSave(); }}
+              disabled={!canSave}
+              title={titleIsEmpty ? 'Title is required' : undefined}
               style={{
                 display: 'flex', alignItems: 'center', gap: 4,
                 paddingTop: 5, paddingRight: 12, paddingBottom: 5, paddingLeft: 10,
                 borderRadius: 8,
-                border: dirty ? '1px solid var(--t-accent-border)' : '1px solid var(--t-input-border)',
-                background: dirty ? 'var(--t-accent)' : 'transparent',
-                color: dirty ? '#ffffff' : 'var(--t-text-faint)',
+                border: canSave ? '1px solid var(--t-accent-border)' : '1px solid var(--t-input-border)',
+                background: canSave ? 'var(--t-accent)' : 'transparent',
+                color: canSave ? '#ffffff' : 'var(--t-text-faint)',
                 fontSize: 12, fontWeight: 500,
-                cursor: saving || !dirty ? 'default' : 'pointer',
+                cursor: canSave ? 'pointer' : 'default',
                 opacity: saving ? 0.6 : 1,
                 fontFamily: 'system-ui, sans-serif',
                 minHeight: 30,
                 transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
               }}
             >
-              <FloppyIcon size={13} color={dirty ? '#ffffff' : 'var(--t-text-faint)'} />
+              <FloppyIcon size={13} color={canSave ? '#ffffff' : 'var(--t-text-faint)'} />
               Save
             </button>
           </div>
