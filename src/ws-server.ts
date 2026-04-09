@@ -3196,7 +3196,27 @@ async function bootstrapWsServer() {
                   console.error(`[context-relay] Failed to capture completion context for packet ${packetId}:`, error);
                 }
               } else {
-                console.warn(`[context-relay] Skipped completion context capture for lane ${lane.id}; packetId missing`);
+                // Cortex v2: write a minimal session outcome even for non-packet lanes.
+                // This captures ad-hoc dispatches (no orchestrator mission) into the ledger.
+                try {
+                  const { writeSessionOutcome } = await import('@/lib/cortex/ledger');
+                  writeSessionOutcome({
+                    repoPath: updated.repoPath ?? lane.repoPath ?? '',
+                    branch: updated.branch ?? lane.branch ?? null,
+                    runtime: (updated.runtime ?? lane.runtime ?? 'codex') as 'codex' | 'claude-code',
+                    sessionKey,
+                    laneId: updated.id,
+                    packetId: null,
+                    outcome: 'succeeded',
+                    summary: updated.label ?? lane.label ?? 'Ad-hoc session',
+                    attempts: 1,
+                    startedAt: lane.createdAt ?? new Date().toISOString(),
+                    completedAt: new Date().toISOString(),
+                  });
+                  console.log(`[context-relay] Wrote ad-hoc session outcome for lane ${lane.id}`);
+                } catch (error) {
+                  console.error(`[context-relay] Failed to write ad-hoc session outcome for lane ${lane.id}:`, error);
+                }
               }
               const { triggerAutoReview } = await import('@/lib/lane/auto-review');
               triggerAutoReview(updated);

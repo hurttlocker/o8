@@ -10,12 +10,24 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { buildDirectiveBlock } from '@/lib/cortex/directives-store';
 import { buildLedgerBlock } from '@/lib/cortex/ledger';
+import { listRepos } from '@/lib/repos/registry';
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const repoName = url.searchParams.get('repoName');
-    const repoPath = url.searchParams.get('repoPath') ?? '';
+    let repoPath = url.searchParams.get('repoPath') ?? '';
+
+    // Auto-resolve repoPath from repoName via the registry if not explicitly provided.
+    if (!repoPath && repoName) {
+      try {
+        const repos = await listRepos();
+        const match = repos.find((r) => r.name === repoName);
+        if (match?.localPath) repoPath = match.localPath;
+      } catch {
+        // registry unavailable — proceed with empty repoPath
+      }
+    }
 
     const directives = buildDirectiveBlock(repoName);
     const ledger = buildLedgerBlock(repoPath);
