@@ -46,7 +46,7 @@ const SettingsView = lazy(async () => ({ default: (await import('./mobile/Settin
 const MemoryPage = lazy(() => import('./mobile/MemoryPage'));
 const IssuesPage = lazy(() => import('./mobile/IssuesPage'));
 
-const BETA_ENABLED_VIEWS = new Set(['fleet', 'activity', 'settings']);
+const BETA_ENABLED_VIEWS = new Set(['fleet', 'activity', 'settings', 'memory']);
 const MOBILE_SESSION_LIST_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MOBILE_SESSION_LIST_LIMIT = 20;
 const MOBILE_INITIAL_INBOX_LIMIT = 15;

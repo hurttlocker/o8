@@ -18,12 +18,12 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { title, scope, repoName, priority, content } = body;
 
-    if (!title) {
+    if (typeof title !== 'string' || title.trim() === '') {
       return NextResponse.json({ error: 'title is required' }, { status: 400 });
     }
 
     const directive = createDirective({
-      title,
+      title: title.trim(),
       scope: scope || 'global',
       repoName: repoName || null,
       priority: priority ?? 50,

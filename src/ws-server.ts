@@ -2974,6 +2974,36 @@ async function bootstrapWsServer() {
           const { findLaneBySession, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
           const lane = findLaneBySession(surfaceId);
           if (!lane) {
+            // Cortex v2 (#9): CLI Sessions never create a lane, so the lane-path
+            // ledger write below never fires. Fall back to a minimal write here so
+            // the implicit memory layer captures ALL agent runs, not just packet
+            // dispatches. Without this, session_outcomes stays permanently empty.
+            try {
+              const watched = getWatchedAgents().find((a) => a.surfaceId === surfaceId);
+              if (watched && watched.repoPath) {
+                const { writeSessionOutcome } = await import('@/lib/cortex/ledger');
+                const startedAt = new Date(watched.registeredAt).toISOString();
+                const completedAt = new Date().toISOString();
+                const durationMs = Math.max(0, Date.now() - watched.registeredAt);
+                const summary = (watched.prompt || watched.name || 'CLI Session').slice(0, 1200);
+                writeSessionOutcome({
+                  repoPath: watched.repoPath,
+                  runtime: 'codex',
+                  sessionKey: surfaceId,
+                  laneId: null,
+                  packetId: null,
+                  outcome: outcome === 'completed' ? 'succeeded' : 'failed',
+                  summary,
+                  attempts: 1,
+                  durationMs,
+                  startedAt,
+                  completedAt,
+                });
+                console.log(`[ledger] Wrote CLI Session outcome for ${surfaceId} (${outcome})`);
+              }
+            } catch (error) {
+              console.error(`[ledger] Failed to write CLI Session outcome for ${surfaceId}:`, error);
+            }
             return;
           }
 
