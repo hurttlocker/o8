@@ -18,8 +18,8 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { title, scope, repoName, priority, content } = body;
 
-    if (!title || !content) {
-      return NextResponse.json({ error: 'title and content are required' }, { status: 400 });
+    if (!title) {
+      return NextResponse.json({ error: 'title is required' }, { status: 400 });
     }
 
     const directive = createDirective({
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       scope: scope || 'global',
       repoName: repoName || null,
       priority: priority ?? 50,
-      content,
+      content: content ?? '',
     });
 
     return NextResponse.json({ directive }, { status: 201 });
