@@ -879,39 +879,73 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
               flexShrink: 0,
             }}
           >
-            <button
-              type="button"
-              onClick={() => setExpandedPacketId(isExpanded ? null : packet.id)}
+            <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
                 width: '100%',
                 padding: '7px 12px',
-                border: 'none',
-                background: 'transparent',
-                cursor: 'pointer',
-                textAlign: 'left',
                 minHeight: 40,
               }}
             >
-              {/* Status dot — matches session rows */}
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusMeta.color, boxShadow: `0 0 6px ${statusMeta.border}`, flexShrink: 0 }} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 600, lineHeight: 1.35, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
-                  {packet.title}
+              <button
+                type="button"
+                onClick={() => setExpandedPacketId(isExpanded ? null : packet.id)}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  padding: 0,
+                }}
+              >
+                {/* Status dot — matches session rows */}
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusMeta.color, boxShadow: `0 0 6px ${statusMeta.border}`, flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 11, fontWeight: 600, lineHeight: 1.35, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
+                    {packet.title}
+                  </span>
+                  <span style={{ display: 'block', marginTop: 1, fontSize: 9, lineHeight: 1.3, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {packet.runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
+                  </span>
                 </span>
-                <span style={{ display: 'block', marginTop: 1, fontSize: 9, lineHeight: 1.3, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {packet.runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
+                <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 600, color: statusMeta.color, letterSpacing: '-0.01em' }}>
+                  {statusMeta.label}
                 </span>
-              </span>
-              <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 600, color: statusMeta.color, letterSpacing: '-0.01em' }}>
-                {statusMeta.label}
-              </span>
-              <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" style={{ flexShrink: 0, transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 150ms ease' }}>
-                <path d="M2.5 3.5L5 6L7.5 3.5" />
-              </svg>
-            </button>
+                <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" style={{ flexShrink: 0, transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 150ms ease' }}>
+                  <path d="M2.5 3.5L5 6L7.5 3.5" />
+                </svg>
+              </button>
+              {/* BUG #5 fix: inline Launch so users don't have to expand the card to dispatch.
+                  Shown only when the packet is ready to launch (not yet dispatched). */}
+              {canLaunch && !packet.lane ? (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); void handleLaunchPacket(packet); }}
+                  title="Dispatch this packet"
+                  style={{
+                    flexShrink: 0,
+                    border: 'none',
+                    background: '#2563eb',
+                    color: '#fff',
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    letterSpacing: '-0.01em',
+                  }}
+                >
+                  Launch
+                </button>
+              ) : null}
+            </div>
 
             {isExpanded ? (
               <div style={{ padding: '0 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--t-divider-subtle)' }}>

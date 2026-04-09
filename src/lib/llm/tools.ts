@@ -117,7 +117,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'write_file',
-    description: 'Create a new file or overwrite an existing file in the workspace. REQUIRES USER APPROVAL with full content preview. Use when creating new files, writing configs, generating code, or overwriting content.',
+    description: 'Create a new file or overwrite an existing file in the workspace. REQUIRES USER APPROVAL with full content preview. Use for small, targeted writes (configs, single-file helpers). **For multi-step coding work, refactors, feature implementation, or when the user says "dispatch" / "hand off to Codex" / "assign to an agent", use `dispatch_codex_task` instead** — the orchestrator model is Claude plans, Codex executes in an isolated worktree.',
     parameters: {
       type: 'object',
       properties: {
@@ -129,7 +129,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'edit_file',
-    description: 'Make a surgical edit to an existing file by replacing exact text. REQUIRES USER APPROVAL with diff preview showing exactly what changes. Use for modifying code, fixing bugs, updating configs — any targeted change.',
+    description: 'Make a surgical edit to an existing file by replacing exact text. REQUIRES USER APPROVAL with diff preview. Use for small in-place fixes. **For multi-step changes, refactors, or when the user says "dispatch" / "hand off to Codex", use `dispatch_codex_task` instead** — the orchestrator model is Claude plans, Codex executes.',
     parameters: {
       type: 'object',
       properties: {
@@ -138,6 +138,20 @@ export const TOOLS: ToolDef[] = [
         newText: { type: 'string', description: 'New text to replace it with' },
       },
       required: ['path', 'oldText', 'newText'],
+    },
+  },
+  {
+    name: 'dispatch_codex_task',
+    description: 'Delegate a coding task to a Codex agent running in an isolated worktree. USE THIS when the user says "dispatch", "hand off to Codex", "assign to an agent", "have Codex do X", or asks you to run a multi-step coding task. The orchestrator model: Claude (this chat) plans and reviews, Codex executes in the background. Creates a new lane, spawns Codex, sends the task, and returns the lane ID. REQUIRES USER APPROVAL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        repoPath: { type: 'string', description: 'Absolute path to the target repository (e.g. "/Users/me/projects/my-repo")' },
+        branch: { type: 'string', description: 'Branch name for the worktree (e.g. "main" or a feature branch)' },
+        label: { type: 'string', description: 'Short human-readable task label (e.g. "Add formatTokens helper")' },
+        task: { type: 'string', description: 'The full task description for Codex. Be specific about files to create/edit, constraints, and success criteria.' },
+      },
+      required: ['repoPath', 'task'],
     },
   },
   {
@@ -196,6 +210,7 @@ export const APPROVAL_REQUIRED_TOOLS = new Set([
   'edit_file',
   'delete_file',
   'lane_command', // dynamic — some verbs are read-only (send_turn), others mutate (merge, create_pr)
+  'dispatch_codex_task', // spawns a new Codex process
   // run_terminal_command uses dynamic approval — see classifyCommand()
 ]);
 
@@ -310,6 +325,7 @@ export async function executeTool(name: string, args: Record<string, unknown>, r
     case 'run_terminal_command': return runTerminalCommand(args.command as string, args.cwd as string | undefined, repoRoot);
     case 'list_lanes': return await executeListLanes();
     case 'lane_command': return await executeLaneCommand(args);
+    case 'dispatch_codex_task': return await executeDispatchCodexTask(args);
     default: return { content: `Unknown tool: ${name}` };
   }
 }
@@ -352,6 +368,62 @@ async function executeLaneCommand(args: Record<string, unknown>): Promise<ToolRe
     return { content: `${result.ok ? 'Success' : 'Failed'}: ${result.note}${laneInfo}` };
   } catch (err) {
     return { content: `Error executing lane command: ${err instanceof Error ? err.message : 'unknown'}` };
+  }
+}
+
+/**
+ * Dispatch a coding task to a new Codex agent.
+ *
+ * Wraps open_lane + launch_session so the Assistant chat can hand off work
+ * to Codex in one tool call, enforcing the orchestrator model (Claude
+ * plans, Codex executes). See BUG #4 — without this, the Assistant tends
+ * to write files directly instead of delegating.
+ */
+async function executeDispatchCodexTask(args: Record<string, unknown>): Promise<ToolResult> {
+  const repoPath = args.repoPath as string;
+  const task = args.task as string;
+  const branch = (args.branch as string) || 'main';
+  const label = (args.label as string) || task.slice(0, 60);
+
+  if (!repoPath) return { content: 'Error: repoPath is required.' };
+  if (!task) return { content: 'Error: task is required.' };
+
+  try {
+    const { dispatch } = await import('@/lib/lane/commands');
+
+    // Step 1: open the lane
+    const openResult = await dispatch({
+      verb: 'open_lane',
+      repoPath,
+      branch,
+      runtime: 'codex',
+      label,
+      actor: 'orchestrator',
+    });
+
+    if (!openResult.ok || !openResult.lane) {
+      return { content: `Failed to open lane for Codex dispatch: ${openResult.note}` };
+    }
+
+    const laneId = openResult.lane.id;
+
+    // Step 2: launch the Codex session with the task as its prompt
+    const launchResult = await dispatch({
+      verb: 'launch_session',
+      laneId,
+      prompt: task,
+      actor: 'orchestrator',
+    });
+
+    if (!launchResult.ok) {
+      return { content: `Lane ${laneId} opened but Codex launch failed: ${launchResult.note}` };
+    }
+
+    return {
+      content: `Dispatched to Codex. Lane ${laneId} is executing "${label}" in ${repoPath} on branch ${branch}. Track progress in the Agents panel.`,
+    };
+  } catch (err) {
+    return { content: `Error dispatching Codex task: ${err instanceof Error ? err.message : 'unknown'}` };
   }
 }
 

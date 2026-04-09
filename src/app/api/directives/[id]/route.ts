@@ -23,8 +23,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const body = await request.json();
     const { title, scope, repoName, priority, content } = body;
 
+    // Title is optional in PATCH (partial update), but if provided it must be non-empty.
+    if (title !== undefined && (typeof title !== 'string' || title.trim() === '')) {
+      return NextResponse.json({ error: 'title must be a non-empty string' }, { status: 400 });
+    }
+
     const updated = updateDirective(id, {
-      title,
+      title: title !== undefined ? title.trim() : undefined,
       scope,
       repoName,
       priority,
