@@ -78,3 +78,55 @@ export function FolderIcon({ size = 12, color = 'currentColor' }: IconProps) {
     </svg>
   );
 }
+
+export function ListIcon({ size = 12, color = 'currentColor' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 256 256" fill="none">
+      <path
+        d="M88 64h128M88 128h128M88 192h128"
+        stroke={color} strokeWidth="16" strokeLinecap="round" strokeLinejoin="round"
+      />
+      <circle cx="44" cy="64" r="10" fill={color} />
+      <circle cx="44" cy="128" r="10" fill={color} />
+      <circle cx="44" cy="192" r="10" fill={color} />
+    </svg>
+  );
+}
+
+export function EyeIcon({ size = 12, color = 'currentColor' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 256 256" fill="none">
+      <path
+        d="M128 56C48 56 16 128 16 128s32 72 112 72 112-72 112-72-32-72-112-72z"
+        stroke={color} strokeWidth="16" strokeLinecap="round" strokeLinejoin="round"
+      />
+      <circle cx="128" cy="128" r="32" stroke={color} strokeWidth="16" />
+    </svg>
+  );
+}
+
+export function ChevronRightIcon({ size = 12, color = 'currentColor' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 256 256" fill="none">
+      <path
+        d="M96 48l80 80-80 80"
+        stroke={color} strokeWidth="20" strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function RefreshIcon({ size = 12, color = 'currentColor' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 256 256" fill="none">
+      <path
+        d="M176 104h48V56M80 152H32v48"
+        stroke={color} strokeWidth="16" strokeLinecap="round" strokeLinejoin="round"
+      />
+      <path
+        d="M191.06 72.94A88 88 0 0044 104M65 183.1A88 88 0 00212 152"
+        stroke={color} strokeWidth="16" strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
