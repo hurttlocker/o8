@@ -24,6 +24,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type { MobileTranscriptMedia } from '@/lib/mobile/types';
+import { formatTokens } from '@/lib/util/format-tokens';
 import { mediaHref } from './utils';
 
 // ── Types ──
@@ -152,14 +153,6 @@ function ContextBar({ percent }: { percent: number }) {
       }} />
     </div>
   );
-}
-
-// ── Formatters ──
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }
 
 function contextLabel(percent: number): string {
