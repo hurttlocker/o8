@@ -15,6 +15,7 @@ import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWe
 import { shouldRetainCurrentCommandCenterSnapshot } from '@/lib/render/client-merge';
 import { RealtimeEntityStore } from '@/lib/realtime/store';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
+import { formatTokens } from '@/lib/util/format-tokens';
 
 const WorkflowReviewPanel = dynamic(
   () => import('@/components/workflow-review-panel').then((module) => module.WorkflowReviewPanel),
@@ -62,8 +63,6 @@ const SessionOperatorPanel = dynamic(
   },
 );
 
-const compactNumber = new Intl.NumberFormat('en-US', { notation: 'compact' });
-
 const karpathyGuardrails = [
   'Primary object stays the agent / run / squad, not the file tree.',
   'Idle / blocked / reviewing visibility must stay obvious at a glance.',
@@ -82,9 +81,9 @@ function formatPercent(value?: number | null) {
   return `${value}%`;
 }
 
-function formatTokens(value?: number | null) {
+function formatTokenUsage(value?: number | null) {
   if (value == null) return '—';
-  return compactNumber.format(value);
+  return formatTokens(value);
 }
 
 function formatIssueStack(snapshot?: WorkflowReviewSnapshot | null) {
@@ -943,7 +942,7 @@ export function CommandCenterShell({
   );
 
   const inspectorTokenLabel = selectedAgent?.tokenUsage?.totalTokens
-    ? `${formatTokens(selectedAgent.tokenUsage.totalTokens)} used`
+    ? `${formatTokenUsage(selectedAgent.tokenUsage.totalTokens)} used`
     : '—';
 
   const beginOptimisticMutation = useCallback((mutation: Omit<RealtimeMutationRecord, 'createdAt'>) => {
