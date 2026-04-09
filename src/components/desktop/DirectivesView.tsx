@@ -13,10 +13,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Directive, DirectiveScope } from '@/lib/cortex/directives-types';
-import { PlusIcon, FileTextIcon, GlobeIcon, FolderIcon } from '@/components/desktop/directives-icons';
+import {
+  PlusIcon,
+  FileTextIcon,
+  GlobeIcon,
+  FolderIcon,
+  ListIcon,
+  EyeIcon,
+} from '@/components/desktop/directives-icons';
 import { DirectiveEditor } from '@/components/desktop/DirectiveEditor';
+import { LedgerView } from '@/components/desktop/LedgerView';
+import { PreviewView } from '@/components/desktop/PreviewView';
 
 const MONO_FONT = '"SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
+
+type ActiveTab = 'directives' | 'ledger' | 'preview';
 
 // ── Helpers ──
 
@@ -53,6 +64,7 @@ function groupDirectives(directives: Directive[]): Map<string, Directive[]> {
 // ── Main Component ──
 
 export function DirectivesView(): React.ReactElement {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('directives');
   const [directives, setDirectives] = useState<Directive[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -260,9 +272,10 @@ export function DirectivesView(): React.ReactElement {
           <button
             type="button"
             onClick={handleCreate}
-            disabled={saving}
+            disabled={saving || activeTab !== 'directives'}
             style={{
-              display: 'flex', alignItems: 'center', gap: 4,
+              display: activeTab === 'directives' ? 'flex' : 'none',
+              alignItems: 'center', gap: 4,
               paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 8,
               borderRadius: 8,
               border: '1px solid var(--t-accent-border)',
@@ -282,79 +295,87 @@ export function DirectivesView(): React.ReactElement {
         </div>
       </div>
 
-      {/* ── Scrollable list + editor ── */}
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-        {directives.length === 0 && (
-          <div style={{
-            display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center',
-            paddingTop: 48, paddingBottom: 48,
-            color: 'var(--t-text-muted)', fontSize: 13, gap: 8,
-          }}>
-            <FileTextIcon size={24} color="var(--t-text-faint)" />
-            <span>No directives yet</span>
-            <span style={{ fontSize: 12, color: 'var(--t-text-faint)' }}>
-              Create one to inject rules into agent sessions
-            </span>
-          </div>
-        )}
+      {/* ── Tab Bar ── */}
+      <TabBar activeTab={activeTab} onChange={setActiveTab} />
 
-        {[...grouped.entries()].map(([groupName, items]) => (
-          <div key={groupName}>
-            {/* Group header */}
+      {/* ── Scrollable content (tab-switched) ── */}
+      {activeTab === 'directives' && (
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+          {directives.length === 0 && (
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              paddingTop: 12, paddingRight: 16, paddingBottom: 6, paddingLeft: 16,
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              paddingTop: 48, paddingBottom: 48,
+              color: 'var(--t-text-muted)', fontSize: 13, gap: 8,
             }}>
-              {groupName === 'Global'
-                ? <GlobeIcon size={11} color="var(--t-text-faint)" />
-                : <FolderIcon size={11} color="var(--t-text-faint)" />}
-              <span style={{
-                fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)',
-                textTransform: 'uppercase', letterSpacing: '0.05em',
-              }}>
-                {groupName}
+              <FileTextIcon size={24} color="var(--t-text-faint)" />
+              <span>No directives yet</span>
+              <span style={{ fontSize: 12, color: 'var(--t-text-faint)' }}>
+                Create one to inject rules into agent sessions
               </span>
             </div>
+          )}
 
-            {/* Directive cards */}
-            <div style={{ paddingRight: 12, paddingLeft: 12 }}>
-              {items.sort((a, b) => a.priority - b.priority).map((d) => {
-                const isSelected = selectedId === d.id;
-                return (
-                  <DirectiveCard
-                    key={d.id}
-                    directive={d}
-                    isSelected={isSelected}
-                    onSelect={() => isSelected ? deselectDirective() : selectDirective(d)}
-                  />
-                );
-              })}
+          {[...grouped.entries()].map(([groupName, items]) => (
+            <div key={groupName}>
+              {/* Group header */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                paddingTop: 12, paddingRight: 16, paddingBottom: 6, paddingLeft: 16,
+              }}>
+                {groupName === 'Global'
+                  ? <GlobeIcon size={11} color="var(--t-text-faint)" />
+                  : <FolderIcon size={11} color="var(--t-text-faint)" />}
+                <span style={{
+                  fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                }}>
+                  {groupName}
+                </span>
+              </div>
+
+              {/* Directive cards */}
+              <div style={{ paddingRight: 12, paddingLeft: 12 }}>
+                {items.sort((a, b) => a.priority - b.priority).map((d) => {
+                  const isSelected = selectedId === d.id;
+                  return (
+                    <DirectiveCard
+                      key={d.id}
+                      directive={d}
+                      isSelected={isSelected}
+                      onSelect={() => isSelected ? deselectDirective() : selectDirective(d)}
+                    />
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
 
-        {/* ── Inline Editor ── */}
-        {selectedId && (
-          <DirectiveEditor
-            ref={editorRef}
-            title={editTitle}
-            scope={editScope}
-            repoName={editRepoName}
-            priority={editPriority}
-            content={editContent}
-            repoNames={repoNames}
-            saving={saving}
-            dirty={dirty}
-            onTitleChange={handleTitleChange}
-            onScopeChange={handleScopeChange}
-            onPriorityChange={handlePriorityChange}
-            onContentChange={handleContentChange}
-            onSave={handleSave}
-            onDelete={handleDelete}
-          />
-        )}
-      </div>
+          {/* ── Inline Editor ── */}
+          {selectedId && (
+            <DirectiveEditor
+              ref={editorRef}
+              title={editTitle}
+              scope={editScope}
+              repoName={editRepoName}
+              priority={editPriority}
+              content={editContent}
+              repoNames={repoNames}
+              saving={saving}
+              dirty={dirty}
+              onTitleChange={handleTitleChange}
+              onScopeChange={handleScopeChange}
+              onPriorityChange={handlePriorityChange}
+              onContentChange={handleContentChange}
+              onSave={handleSave}
+              onDelete={handleDelete}
+            />
+          )}
+        </div>
+      )}
+
+      {activeTab === 'ledger' && <LedgerView active={activeTab === 'ledger'} />}
+      {activeTab === 'preview' && <PreviewView active={activeTab === 'preview'} />}
     </div>
   );
 }
@@ -427,3 +448,57 @@ function DirectiveCard({
     </div>
   );
 }
+
+// ── Tab Bar ──
+
+function TabBar({
+  activeTab,
+  onChange,
+}: {
+  activeTab: ActiveTab;
+  onChange: (tab: ActiveTab) => void;
+}) {
+  const tabs: Array<{ id: ActiveTab; label: string; icon: React.ReactElement }> = [
+    { id: 'directives', label: 'Directives', icon: <FileTextIcon size={12} color="currentColor" /> },
+    { id: 'ledger', label: 'Ledger', icon: <ListIcon size={12} color="currentColor" /> },
+    { id: 'preview', label: 'Preview', icon: <EyeIcon size={12} color="currentColor" /> },
+  ];
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'stretch',
+      paddingLeft: 12, paddingRight: 12,
+      borderBottom: '1px solid var(--t-divider)',
+      flexShrink: 0,
+      gap: 2,
+    }}>
+      {tabs.map((t) => {
+        const isActive = activeTab === t.id;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onChange(t.id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12,
+              background: 'transparent',
+              border: 'none',
+              borderBottom: isActive ? '2px solid var(--t-accent)' : '2px solid transparent',
+              color: isActive ? 'var(--t-accent)' : 'var(--t-text-muted)',
+              fontSize: 12, fontWeight: 500,
+              fontFamily: 'system-ui, sans-serif',
+              letterSpacing: '-0.01em',
+              cursor: 'pointer',
+              minHeight: 36,
+              marginBottom: -1,
+            }}
+          >
+            {t.icon}
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
