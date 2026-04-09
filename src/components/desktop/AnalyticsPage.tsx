@@ -14,6 +14,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, BarChart3, Clock, Cpu, DollarSign, Layers, TrendingUp, Zap } from 'lucide-react';
+import { formatTokens } from '@/lib/util/format-tokens';
 interface Totals {
   cost: number;
   messages: number;
@@ -71,13 +72,6 @@ function formatCost(n: number): string {
   if (n >= 1) return `$${n.toFixed(2)}`;
   if (n >= 0.01) return `$${n.toFixed(3)}`;
   return `$${n.toFixed(4)}`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }
 
 const AGENT_COLORS: Record<string, string> = {
