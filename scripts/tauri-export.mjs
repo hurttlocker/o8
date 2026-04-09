@@ -159,6 +159,30 @@ try {
   console.warn('⚠️  WS server compilation failed:', e.message);
 }
 
+// ── Compile MCP servers ──
+// Ships alongside the bundled Next.js backend so the packaged Tauri app
+// can expose MCP tools to Claude Desktop/Code without requiring `tsx` or
+// a source checkout. See docs/cortex-v2-dogfood-report-2026-04-09.md.
+try {
+  execSync(
+    `npx esbuild src/lib/mcp/operator-mcp-server.ts --bundle --platform=node --format=esm --outfile=out/server/operator-mcp-server.mjs --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url);'`,
+    { cwd: root, stdio: 'inherit' },
+  );
+  console.log('📦 Compiled operator-mcp-server.mjs');
+} catch (e) {
+  console.warn('⚠️  operator-mcp-server compilation failed:', e.message);
+}
+
+try {
+  execSync(
+    `npx esbuild src/lib/mcp/cortex-mcp-server.ts --bundle --platform=node --format=esm --outfile=out/server/cortex-mcp-server.mjs --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url);'`,
+    { cwd: root, stdio: 'inherit' },
+  );
+  console.log('📦 Compiled cortex-mcp-server.mjs');
+} catch (e) {
+  console.warn('⚠️  cortex-mcp-server compilation failed:', e.message);
+}
+
 const size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\\t')[0];
 console.log('\\n✅ Export complete');
 console.log(`   frontend/ → loader HTML`);

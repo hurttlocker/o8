@@ -31,6 +31,7 @@ import { GitHubTab } from './settings/GitHubTab';
 import { AgentsTab } from './settings/AgentsTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { CortexMemoryTab } from './settings/CortexMemoryTab';
+import { MCPTab } from './settings/MCPTab';
 import { AppearanceTab } from './settings/AppearanceTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
@@ -259,6 +260,7 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         <TabButton label="Agents" icon={<UsersIcon />} active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />
         <TabButton label="Memory" icon={<BrainIcon />} active={activeTab === 'memory'} onClick={() => setActiveTab('memory')} />
+        <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
         <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
@@ -296,6 +298,9 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         )}
         {activeTab === 'memory' && (
           <CortexMemoryTab />
+        )}
+        {activeTab === 'mcp' && (
+          <MCPTab />
         )}
         {activeTab === 'appearance' && (
           <AppearanceTab />

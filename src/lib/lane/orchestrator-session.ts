@@ -43,7 +43,27 @@ export type OrchestratorEvent =
 // ── Constants ──
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
-const MCP_SERVER_PATH = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/cortex-mcp-server.ts');
+
+/**
+ * Resolve the Cortex MCP server entry point.
+ *
+ * In a packaged Tauri app the TS source isn't shipped — only the esbuild
+ * output in `resource_dir/server/cortex-mcp-server.mjs`. The Rust sidecar
+ * sets `O8_BUNDLED_MCP_DIR` to the resource/server directory before spawning
+ * Next, so we prefer the bundled .mjs when it exists.
+ *
+ * Dev checkout falls back to the TS source run under `tsx`.
+ */
+function resolveCortexMcpServerPath(): { command: string; path: string } {
+  const bundledDir = process.env.O8_BUNDLED_MCP_DIR;
+  if (bundledDir) {
+    const bundled = join(bundledDir, 'cortex-mcp-server.mjs');
+    if (existsSync(bundled)) return { command: 'node', path: bundled };
+  }
+  const devSource = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/cortex-mcp-server.ts');
+  return { command: 'npx', path: devSource };
+}
+
 const MCP_CONFIG_DIR = join(homedir(), '.cortex-ide', 'mcp');
 const LOG_PREFIX = '[orchestrator-rehydrate]';
 /** #457 — Kill the claude process if it doesn't finish within this window */
@@ -199,12 +219,17 @@ function ensureMcpConfig(repoPath: string): string {
   const repoSlug = detectRepoSlug(repoPath);
   const apiBase = `http://localhost:${process.env.PORT || '3001'}`;
 
-  // Use npx tsx to run the TS server directly in dev; in prod this would be compiled
+  // Dev: `npx tsx <ts source>`. Packaged app: `node <bundled .mjs>`.
+  const mcpServer = resolveCortexMcpServerPath();
+  const args = mcpServer.command === 'npx'
+    ? ['tsx', mcpServer.path]
+    : [mcpServer.path];
+
   const config = {
     mcpServers: {
       cortex: {
-        command: 'npx',
-        args: ['tsx', MCP_SERVER_PATH],
+        command: mcpServer.command,
+        args,
         env: {
           CORTEX_API_BASE: apiBase,
           CORTEX_REPO_PATH: repoPath,
