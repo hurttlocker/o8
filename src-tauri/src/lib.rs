@@ -562,13 +562,28 @@ pub fn run() {
                     log::info!("Bundled cortex binary at {:?}", cortex_bin);
                 }
 
+                // Tell the Next server where the bundled MCP scripts live so
+                // `/api/setup/mcp-config` and `orchestrator-session.ts` can
+                // emit `node <bundled>.mjs` commands instead of dev `tsx` paths.
+                let bundled_operator_mcp = server_dir.join("operator-mcp-server.mjs");
+                let has_bundled_mcp = bundled_operator_mcp.exists();
+                if has_bundled_mcp {
+                    log::info!("Bundled MCP scripts at {:?}", server_dir);
+                }
+
                 log::info!("Starting server: {} {:?}", node_bin, server_js);
-                match Command::new(&node_bin)
+                let mut server_cmd = Command::new(&node_bin);
+                server_cmd
                     .arg(&server_js)
                     .current_dir(&server_dir)
                     .env("PORT", "3001")
                     .env("HOSTNAME", "127.0.0.1")
-                    .env("NODE_ENV", "production")
+                    .env("NODE_ENV", "production");
+                if has_bundled_mcp {
+                    server_cmd.env("O8_BUNDLED_MCP_DIR", &server_dir);
+                    server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
+                }
+                match server_cmd
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::piped())
                     .spawn()

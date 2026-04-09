@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { sanitizeErrorMessage } from '@/lib/api/error-format';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
@@ -65,6 +66,46 @@ function log(message: string, details?: unknown) {
   console.log(`${LOG_PREFIX} ${message}`, details);
 }
 
+interface RegisteredRepo {
+  localPath?: string;
+  path?: string;
+}
+
+let _cachedRegistry: { mtimeMs: number; paths: Set<string> } | null = null;
+
+function loadRegisteredRepoPaths(): Set<string> {
+  const registryPath = join(
+    process.env.CORTEX_IDE_DATA_DIR || join(process.env.HOME || '', '.cortex-ide'),
+    'repos.json',
+  );
+
+  if (!existsSync(registryPath)) {
+    return new Set();
+  }
+
+  try {
+    const stat = statSync(registryPath);
+    if (_cachedRegistry && _cachedRegistry.mtimeMs === stat.mtimeMs) {
+      return _cachedRegistry.paths;
+    }
+
+    const raw = readFileSync(registryPath, 'utf-8');
+    const data = JSON.parse(raw) as { repos?: RegisteredRepo[] } | RegisteredRepo[];
+    const list: RegisteredRepo[] = Array.isArray(data) ? data : (data.repos ?? []);
+    const paths = new Set<string>();
+    for (const r of list) {
+      const p = r.localPath || r.path;
+      if (typeof p === 'string' && p.trim()) {
+        paths.add(resolve(p));
+      }
+    }
+    _cachedRegistry = { mtimeMs: stat.mtimeMs, paths };
+    return paths;
+  } catch {
+    return new Set();
+  }
+}
+
 function ensureRepoPath(repoPath: string) {
   const normalized = repoPath.trim();
   if (!normalized) {
@@ -73,6 +114,23 @@ function ensureRepoPath(repoPath: string) {
   if (!existsSync(normalized) || !statSync(normalized).isDirectory()) {
     throw new Error(`Repository path not found: ${normalized}`);
   }
+
+  // Security: reject paths not registered in ~/.cortex-ide/repos.json.
+  // An MCP client could otherwise point gh/Codex at any directory on disk.
+  // If the registry is empty (fresh install), fall through — the user has
+  // no registered repos yet and first-run flows need to work.
+  const registered = loadRegisteredRepoPaths();
+  if (registered.size > 0) {
+    const absolute = resolve(normalized);
+    if (!registered.has(absolute)) {
+      throw new Error(
+        `repoPath ${normalized} is not in the registered repository list. ` +
+        `Add it via the o8 desktop app (Workspaces → Add repository) or edit ` +
+        `~/.cortex-ide/repos.json before dispatching.`,
+      );
+    }
+  }
+
   return normalized;
 }
 
@@ -181,7 +239,11 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response) {
-    throw new Error(`o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. Is the dev server running on ${API_BASE}?`);
+    throw new Error(
+      `o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. ` +
+      `Expected the o8 backend at ${API_BASE}. ` +
+      `Open the o8 desktop app or run \`npm run desktop:dev\` from the cortex-ide repo.`,
+    );
   }
 
   const payload = await response.json().catch(() => null) as ApiResponse<T> | Record<string, unknown> | null;

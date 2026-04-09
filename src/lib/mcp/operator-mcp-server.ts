@@ -11,6 +11,7 @@
  */
 
 import { createInterface } from 'node:readline';
+import { execSync } from 'node:child_process';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import {
   approveAndMergePacket,
@@ -22,6 +23,36 @@ import {
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+
+// ── Pre-flight diagnostics (run once at startup) ──
+// Verifies that the binaries the MCP tools depend on are actually
+// installed. Missing binaries don't crash the server — users can still
+// call tools that don't need them — but the warnings surface in stderr
+// so a broken install fails loudly rather than silently.
+function checkBinary(name: string): boolean {
+  try {
+    execSync(`command -v ${name} 2>/dev/null`, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runPreflightDiagnostics(): void {
+  const missing: string[] = [];
+  // codex is required for dispatch_mission / create_mission to actually spawn an agent.
+  if (!checkBinary('codex')) missing.push('codex');
+  // gh is required for create_mission when loading real GitHub issues.
+  if (!checkBinary('gh')) missing.push('gh');
+
+  if (missing.length > 0) {
+    console.error(
+      `[o8-operator] Pre-flight warning: missing binaries on PATH: ${missing.join(', ')}. ` +
+      `Tools that depend on them will fail with a clear error. ` +
+      `Install with: \`npm i -g @openai/codex-cli\` / \`brew install gh\`.`,
+    );
+  }
+}
 
 // ── Types ──
 
@@ -115,7 +146,11 @@ async function apiFetch(path: string, init?: RequestInit): Promise<unknown> {
     }
   }
 
-  throw new Error(`o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. Is the dev server running on ${API_BASE}?`);
+  throw new Error(
+    `o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. ` +
+    `Expected the o8 backend at ${API_BASE}. ` +
+    `Open the o8 desktop app (it launches the backend automatically) or run \`npm run desktop:dev\` from the cortex-ide repo.`,
+  );
 }
 
 function textResult(text: string, isError = false): McpToolResult {
@@ -911,6 +946,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // ── Main Loop ──
+
+runPreflightDiagnostics();
 
 const rl = createInterface({ input: process.stdin, terminal: false });
 
