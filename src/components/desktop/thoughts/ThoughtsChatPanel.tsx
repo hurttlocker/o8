@@ -28,6 +28,13 @@ export interface ThoughtsChatPanelHandle {
   focusInput: () => void;
   reset: () => void;
   loadThread: (tabId: string) => void;
+  /**
+   * Append a system-role message to the chat stream without going
+   * through the orchestrator. Used for in-app echoes like mission
+   * dispatch notifications — Phase 5 cross-tile bus wires this to
+   * postSystemMessageToChat.
+   */
+  appendSystemMessage: (text: string) => void;
 }
 
 export interface ThoughtsChatPanelChromeState {
@@ -89,6 +96,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [enhancing, setEnhancing] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<MobileTranscriptEntry[]>([]);
+  const [injectedSystemMessages, setInjectedSystemMessages] = useState<MobileTranscriptEntry[]>([]);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [targetAgentKey, setTargetAgentKey] = useState<string>('__claude__');
   const pollRef = useRef<number | null>(null);
@@ -731,10 +739,18 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const targetAgentContext = isOrchestratorMode ? undefined : targetAgentState?.context?.usedPercent;
   const targetAgentTask = isOrchestratorMode ? null : (targetAgentState?.activity?.headline ?? targetAgentState?.currentTask);
   // Derive display state: orchestrator prefers live stream, falls back to chatMessages
-  // (chatMessages holds loaded historical threads via handleLoadThread)
-  const displayMessages = isOrchestratorMode
-    ? (orchStream.messages.length > 0 ? orchStream.messages : chatMessages)
-    : chatMessages;
+  // (chatMessages holds loaded historical threads via handleLoadThread). Injected
+  // system messages (mission dispatch echoes, etc.) are merged in by timestamp
+  // regardless of which base list is active.
+  const displayMessages = useMemo(() => {
+    const base = isOrchestratorMode
+      ? (orchStream.messages.length > 0 ? orchStream.messages : chatMessages)
+      : chatMessages;
+    if (injectedSystemMessages.length === 0) return base;
+    const merged = [...base, ...injectedSystemMessages];
+    merged.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+    return merged;
+  }, [chatMessages, injectedSystemMessages, isOrchestratorMode, orchStream.messages]);
   const displayWaiting = isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
   const activeTargetLabel = isOrchestratorMode ? 'Claude Code' : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
@@ -750,13 +766,27 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     });
   }, [activeTargetLabel, displayMessages.length, displayWaiting, onChromeChange, threadId]);
 
+  const appendSystemMessage = useCallback((text: string) => {
+    if (!text || !text.trim()) return;
+    const now = Date.now();
+    const entry: MobileTranscriptEntry = {
+      id: `sys-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      role: 'system',
+      text,
+      timestamp: now,
+      timestampLabel: new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setInjectedSystemMessages((current) => [...current, entry]);
+  }, []);
+
   useImperativeHandle(ref, () => ({
     focusInput() {
       inputRef.current?.focus();
     },
     reset: handleReset,
     loadThread: handleLoadThread,
-  }), [handleReset, handleLoadThread]);
+    appendSystemMessage,
+  }), [appendSystemMessage, handleReset, handleLoadThread]);
 
   return (
     <>
