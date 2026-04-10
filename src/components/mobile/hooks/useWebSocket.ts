@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type {
   MobileInboxSnapshot,
@@ -74,9 +75,9 @@ function getWsUrl(): string {
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
 
   if (isLocal) {
-    return `ws://${hostname}:3002/ws?token=${encodeURIComponent(token)}`;
+    return `ws://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
   }
-  // Remote: connect through the same host:port as the page (Next.js proxies /ws → 3002)
+  // Remote: connect through the same host:port as the page (Next.js proxies /ws → ws-server)
   const wsPort = port ? `:${port}` : '';
   return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
 }

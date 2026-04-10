@@ -10,11 +10,12 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-interface GatewayStatus {
+interface BackendStatus {
   connected: boolean;
-  url: string;
-  version: string;
-  agents: number;
+  host: string | null;
+  platform: string;
+  nodeVersion: string;
+  runtime: string;
 }
 
 interface GitHubStatus {
@@ -295,7 +296,7 @@ function StatusDot({ connected }: { connected: boolean }) {
 
 export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewProps) {
   const { colors } = useTheme();
-  const [gateway, setGateway] = useState<GatewayStatus | null>(null);
+  const [backend, setBackend] = useState<BackendStatus | null>(null);
   const [github, setGitHub] = useState<GitHubStatus | null>(null);
   const [notifications, setNotifications] = useState(true);
   const [sounds, setSounds] = useState(() => {
@@ -312,15 +313,22 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
     fetch('/api/panel/status')
       .then((response) => response.json())
       .then((data) => {
-        setGateway({
-          connected: data.connected ?? true,
-          url: data.gatewayUrl || 'localhost:18789',
-          version: data.version || 'unknown',
-          agents: data.agentCount ?? 0,
+        setBackend({
+          connected: true,
+          host: typeof window !== 'undefined' ? window.location.host : null,
+          platform: data.platform ?? 'unknown',
+          nodeVersion: data.nodeVersion ?? 'unknown',
+          runtime: data.runtime ?? 'codex+claude-code',
         });
       })
       .catch(() =>
-        setGateway({ connected: false, url: 'unknown', version: 'unknown', agents: 0 })
+        setBackend({
+          connected: false,
+          host: null,
+          platform: 'unknown',
+          nodeVersion: 'unknown',
+          runtime: 'unknown',
+        })
       );
 
     fetch('/api/panel/github-status')
@@ -384,19 +392,19 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
 
       <SettingsGroup label="Connection">
         <SettingsRow
-          label="Gateway"
-          value={gateway ? (gateway.connected ? 'Connected' : 'Offline') : '...'}
-          detail={gateway ? `${gateway.url} · v${gateway.version}` : undefined}
+          label="Backend"
+          value={backend ? (backend.connected ? 'Connected' : 'Offline') : '...'}
+          detail={backend?.host ?? undefined}
         />
         <SettingsRow
-          label="Agents"
-          value={gateway ? `${gateway.agents}` : '...'}
-          detail="Connected to gateway"
+          label="Runtime"
+          value={backend?.runtime ?? '...'}
+          detail={backend ? `${backend.platform} · node ${backend.nodeVersion}` : undefined}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px' }}>
-          <StatusDot connected={gateway?.connected ?? false} />
+          <StatusDot connected={backend?.connected ?? false} />
           <span style={{ fontSize: 12, color: colors.textSecondary, fontWeight: 500 }}>
-            {gateway?.connected ? 'Desktop runtime bridge available' : 'Not connected'}
+            {backend?.connected ? 'Desktop runtime bridge available' : 'Not connected'}
           </span>
         </div>
       </SettingsGroup>

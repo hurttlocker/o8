@@ -12,6 +12,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import type { LaneLifecycleEventPayload, RealtimeEventEnvelope, RealtimeSubscription } from '@/lib/realtime/types';
+import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -60,7 +61,7 @@ function getWsUrl(): string {
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
 
   if (isLocal) {
-    return `ws://${hostname}:3002/ws?token=${encodeURIComponent(token)}`;
+    return `ws://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
   }
   const wsPort = port ? `:${port}` : '';
   return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
