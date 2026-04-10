@@ -524,6 +524,48 @@ export function useTileLayout({
     });
   }, [ensureTileKind, setActiveTileId, tileLayout]);
 
+  const toggleMissionControlTile = useCallback(() => {
+    const existingLeaf = findLeafByContentKind(tileLayout.root, 'mission-control');
+    if (existingLeaf) {
+      if (countLeaves(tileLayout.root) > 1) {
+        handleCloseTile(existingLeaf.id);
+      } else {
+        setActiveTileId(existingLeaf.id);
+      }
+      return;
+    }
+    ensureTileKind('mission-control', {
+      direction: 'horizontal',
+      ratio: 0.58,
+    });
+  }, [ensureTileKind, handleCloseTile, setActiveTileId, tileLayout]);
+
+  const toggleOrchestratorHistoryTile = useCallback(() => {
+    const existingLeaf = findLeafByContentKind(tileLayout.root, 'orchestrator-history');
+    if (existingLeaf) {
+      if (countLeaves(tileLayout.root) > 1) {
+        handleCloseTile(existingLeaf.id);
+      } else {
+        setActiveTileId(existingLeaf.id);
+      }
+      return;
+    }
+    ensureTileKind('orchestrator-history', {
+      direction: 'horizontal',
+      ratio: 0.58,
+    });
+  }, [ensureTileKind, handleCloseTile, setActiveTileId, tileLayout]);
+
+  const hasMissionControlTile = useMemo(
+    () => Boolean(findLeafByContentKind(tileLayout.root, 'mission-control')),
+    [tileLayout.root],
+  );
+
+  const hasOrchestratorHistoryTile = useMemo(
+    () => Boolean(findLeafByContentKind(tileLayout.root, 'orchestrator-history')),
+    [tileLayout.root],
+  );
+
   const handlePreviewDetected = useCallback((preview: DetectedLocalhostPreview) => {
     setWorkspacePreviews((current) => {
       if (current.some((existing) => existing.port === preview.port)) {
@@ -766,6 +808,8 @@ export function useTileLayout({
     handleSelectPreviewTile,
     handleSplitTile,
     hasThoughtsTile,
+    hasMissionControlTile,
+    hasOrchestratorHistoryTile,
     openCanvasTab,
     registerContextualPanelHandle,
     selectCanvasTab,
@@ -776,6 +820,8 @@ export function useTileLayout({
     toggleContextualPanelTile,
     toggleThoughtsTile,
     ensureThoughtsTile,
+    toggleMissionControlTile,
+    toggleOrchestratorHistoryTile,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
     workspacePreviews,
