@@ -25,11 +25,6 @@ export interface SetupWarmState {
 
 export interface SetupConfig {
   setupComplete: boolean;
-  gateway?: {
-    url: string;
-    token: string;
-    autoConnect: boolean;
-  };
   cortex?: {
     binaryPath: string;
     detected: boolean;

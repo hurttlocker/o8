@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
@@ -23,7 +24,7 @@ function getWsUrl(): string {
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
 
   if (isLocal) {
-    return `ws://${hostname}:3002/ws?token=${encodeURIComponent(token)}`;
+    return `ws://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
   }
 
   const wsPort = port ? `:${port}` : '';

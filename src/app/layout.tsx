@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 
 export const metadata: Metadata = {
   title: 'o8',
@@ -24,12 +25,19 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     ?? process.env.GIT_COMMIT_SHA
     ?? 'dev';
 
+  // Resolve the ws-server port on the server so we can inject it into the
+  // page before any client code runs. This lets browser hooks read
+  // window.__O8_WS_PORT__ instead of hardcoding 3002. See
+  // src/lib/panel/ws-port-client.ts for the reader.
+  const { wsPort } = resolvePortInfo();
+
   return (
     <html lang="en" style={{ background: '#1C1C1E' }} suppressHydrationWarning>
       <body style={{ background: '#1C1C1E', margin: 0 }} suppressHydrationWarning>
         <script
           dangerouslySetInnerHTML={{
             __html: `
+              window.__O8_WS_PORT__ = ${JSON.stringify(wsPort)};
               if (window.__TAURI_INTERNALS__) {
                 document.documentElement.dataset.tauri = 'true';
                 if (document.body) {
