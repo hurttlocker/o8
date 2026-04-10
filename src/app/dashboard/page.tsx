@@ -26,6 +26,10 @@ import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
 import { O8Panel, type O8Tab } from '@/components/desktop/O8Panel';
+import {
+  publishO8PanelToast,
+  subscribeO8PanelFocus,
+} from '@/lib/events/o8-panel-focus';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -94,6 +98,7 @@ const LazyGraphExplorer3D = lazy(() => import('@/components/desktop/GraphExplore
 const LazyDirectivesView = lazy(() => import('@/components/desktop/DirectivesView').then(m => ({ default: m.DirectivesView })));
 const LazySetupWizard = lazy(() => import('@/components/desktop/SetupWizard').then(m => ({ default: m.SetupWizard })));
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
+import { OrchestratorTileBusProvider } from '@/components/desktop/orchestrator-tile-bus';
 import { TileContainer } from '@/components/desktop/TileContainer';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import {
@@ -449,6 +454,7 @@ function DashboardInner() {
     tileLayoutHydrated,
     toggleContextualPanelTile,
     toggleThoughtsTile,
+    ensureThoughtsTile,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
     workspacePreviews,
@@ -528,6 +534,27 @@ function DashboardInner() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [toggleThoughtsTile]);
+
+  // O8 panel focus bus — when a write-class tool call in the orchestrator
+  // chat emits a pivot request, swap the right panel's active tab to the
+  // requested tab *only if the panel is already open*. If it's closed,
+  // surface a toast the chat tile can render inline. Auto-opening the
+  // panel would feel intrusive mid-conversation.
+  useEffect(() => {
+    const unsubscribe = subscribeO8PanelFocus((request) => {
+      const panelOpen = chatVisible && rightPanelKind === 'o8';
+      if (!panelOpen) {
+        publishO8PanelToast({
+          message: 'Open the right panel to view this change.',
+        });
+        return;
+      }
+      if (request.tab === 'browser' || request.tab === 'changes' || request.tab === 'files' || request.tab === 'prs' || request.tab === 'activity') {
+        setO8ActiveTab(request.tab);
+      }
+    });
+    return unsubscribe;
+  }, [chatVisible, rightPanelKind]);
 
   const handleRepoRemoved = useCallback((removedRepo: RepoRegistryEntry) => {
     const removedRepoPath = removedRepo.localPath;
@@ -2373,15 +2400,17 @@ function DashboardInner() {
         )}
 
         {!showMemoryView && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
-          <TileContainer
-            layout={tileLayout}
-            activeTileId={activeTileId}
-            registry={tileRegistry}
-            onActivateTile={setActiveTileId}
-            onCloseTile={handleCloseTile}
-            onResizeSplit={handleResizeSplit}
-            onSplitTile={handleSplitTile}
-          />
+          <OrchestratorTileBusProvider ensureChatTile={ensureThoughtsTile}>
+            <TileContainer
+              layout={tileLayout}
+              activeTileId={activeTileId}
+              registry={tileRegistry}
+              onActivateTile={setActiveTileId}
+              onCloseTile={handleCloseTile}
+              onResizeSplit={handleResizeSplit}
+              onSplitTile={handleSplitTile}
+            />
+          </OrchestratorTileBusProvider>
         )}
       </div>
 
