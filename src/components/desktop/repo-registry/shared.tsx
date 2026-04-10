@@ -832,7 +832,7 @@ export function SetupModeButton({
         paddingLeft: 10,
         borderRadius: 10,
         border: selected ? '1px solid rgba(37, 99, 235, 0.2)' : '1px solid var(--t-btn-secondary-border)',
-        background: selected ? 'rgba(37, 99, 235, 0.08)' : 'rgba(255, 255, 255, 0.55)',
+        background: selected ? 'var(--t-accent-soft)' : 'var(--t-bg-card)',
         color: selected ? 'var(--t-text)' : 'var(--t-text-muted)',
         fontSize: 11,
         fontWeight: 600,
