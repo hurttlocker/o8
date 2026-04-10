@@ -38,7 +38,9 @@ import {
 
 const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
 const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then(m => ({ default: m.Canvas })));
-const LazyThoughtsCard = lazy(() => import('@/components/desktop/ThoughtsCard').then(m => ({ default: m.ThoughtsCard })));
+const LazyOrchestratorChatTile = lazy(() => import('@/components/desktop/OrchestratorChatTile').then(m => ({ default: m.OrchestratorChatTile })));
+const LazyMissionControlTile = lazy(() => import('@/components/desktop/MissionControlTile').then(m => ({ default: m.MissionControlTile })));
+const LazyOrchestratorHistoryTile = lazy(() => import('@/components/desktop/OrchestratorHistoryTile').then(m => ({ default: m.OrchestratorHistoryTile })));
 
 const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
 
@@ -112,7 +114,6 @@ export interface TileRegistryDeps {
   termWsConnected: boolean;
   thoughtsDraftInjection: { id: string; text: string } | null;
   thoughtsMissionState: OrchestratorMissionState;
-  thoughtsOpen: boolean;
   tileLayout: TileLayout;
   workspacePreviews: DetectedLocalhostPreview[];
   workspaceScopeEntries: WorkspaceScopeEntry[];
@@ -166,7 +167,6 @@ export function createTileRegistry({
   termWsConnected,
   thoughtsDraftInjection,
   thoughtsMissionState,
-  thoughtsOpen,
   tileLayout,
   workspacePreviews,
   workspaceScopeEntries,
@@ -429,23 +429,56 @@ export function createTileRegistry({
       },
     },
     thoughts: {
-      label: 'Thoughts',
-      description: 'Docked command surface for tasks, approvals, and fast agent chat.',
+      label: 'Orchestrator',
+      description: 'Chat with the Claude orchestrator for this repo — dispatch, review, and govern agent work.',
       singleton: true,
       render: ({ tileId }) => (
         <Suspense fallback={null}>
-        <LazyThoughtsCard
-          open
-          docked
-          onClose={() => handleCloseTile(tileId)}
-          agents={parsedAgents}
-          draftInjection={!thoughtsOpen ? thoughtsDraftInjection : null}
-          missionState={thoughtsMissionState}
-          workspaceTargets={orchestratorWorkspaceTargets}
-          onMissionStateChange={handleThoughtsMissionStateChange}
-          onLaunchPacket={launchOrchestrationPacket}
-          onFocusPacket={focusOrchestrationPacketLane}
-        />
+          <LazyOrchestratorChatTile
+            tileId={tileId}
+            onClose={() => handleCloseTile(tileId)}
+            agents={parsedAgents}
+            draftInjection={thoughtsDraftInjection}
+            missionState={thoughtsMissionState}
+            workspaceTargets={orchestratorWorkspaceTargets}
+            onMissionStateChange={handleThoughtsMissionStateChange}
+            onLaunchPacket={launchOrchestrationPacket}
+          />
+        </Suspense>
+      ),
+    },
+    'mission-control': {
+      label: 'Mission Control',
+      description: 'Plan and dispatch agent missions. Splittable alongside the orchestrator chat.',
+      singleton: true,
+      render: ({ tileId }) => (
+        <Suspense fallback={null}>
+          <LazyMissionControlTile
+            onClose={() => handleCloseTile(tileId)}
+            agents={parsedAgents}
+            missionState={thoughtsMissionState}
+            workspaceTargets={orchestratorWorkspaceTargets}
+            onMissionStateChange={handleThoughtsMissionStateChange}
+            onLaunchPacket={launchOrchestrationPacket}
+            onFocusPacket={focusOrchestrationPacketLane}
+          />
+        </Suspense>
+      ),
+    },
+    'orchestrator-history': {
+      label: 'Orchestrator History',
+      description: 'Searchable history of past orchestrator conversations. Click a thread to load it in the chat tile.',
+      singleton: true,
+      render: ({ tileId }) => (
+        <Suspense fallback={null}>
+          <LazyOrchestratorHistoryTile
+            onClose={() => handleCloseTile(tileId)}
+            onSelectThread={() => {
+              // Phase 5 will wire this through the OrchestratorTileBus to
+              // call the chat tile's loadThread handle. For now the history
+              // tile is functional as a read-only browser.
+            }}
+          />
         </Suspense>
       ),
     },

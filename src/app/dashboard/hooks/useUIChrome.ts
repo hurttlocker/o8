@@ -16,7 +16,6 @@ export function useUIChrome() {
   // ── Overlay state ──
   const [alertTrayOpen, setAlertTrayOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [thoughtsOpen, setThoughtsOpen] = useState(false);
 
   // ── Draft injections ──
   const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
@@ -36,26 +35,8 @@ export function useUIChrome() {
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // ── Cmd+J to toggle Thoughts Card ──
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isEditable = Boolean(
-        target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]'),
-      );
-      if (isEditable) return;
-
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
-        e.preventDefault();
-        setThoughtsOpen(v => !v);
-      }
-      if (e.key === 'Escape') {
-        setThoughtsOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+  // Cmd+J to toggle the orchestrator tile lives in page.tsx now — it needs
+  // access to toggleThoughtsTile from the tile-layout hook.
 
   // ── Settings tab opener ──
   const handleOpenSettingsTab = useCallback((tab: SettingsTab) => {
@@ -85,8 +66,6 @@ export function useUIChrome() {
     setAlertTrayOpen,
     searchOpen,
     setSearchOpen,
-    thoughtsOpen,
-    setThoughtsOpen,
 
     // Draft injections
     desktopDraftInjection,

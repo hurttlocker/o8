@@ -487,6 +487,24 @@ export function useTileLayout({
     });
   }, [ensureTileKind, handleCloseTile, tileLayout]);
 
+  const toggleThoughtsTile = useCallback(() => {
+    const existingLeaf = findLeafByContentKind(tileLayout.root, 'thoughts');
+    if (existingLeaf) {
+      if (countLeaves(tileLayout.root) > 1) {
+        handleCloseTile(existingLeaf.id);
+      } else {
+        // If the orchestrator tile is the only tile, activate it instead
+        // of closing (never leave the user with an empty layout).
+        setActiveTileId(existingLeaf.id);
+      }
+      return;
+    }
+    ensureTileKind('thoughts', {
+      direction: 'horizontal',
+      ratio: 0.55,
+    });
+  }, [ensureTileKind, handleCloseTile, setActiveTileId, tileLayout]);
+
   const handlePreviewDetected = useCallback((preview: DetectedLocalhostPreview) => {
     setWorkspacePreviews((current) => {
       if (current.some((existing) => existing.port === preview.port)) {
@@ -737,6 +755,7 @@ export function useTileLayout({
     setWorkspacePreviews,
     tileLayoutHydrated,
     toggleContextualPanelTile,
+    toggleThoughtsTile,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
     workspacePreviews,

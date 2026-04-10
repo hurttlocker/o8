@@ -37,6 +37,8 @@ export interface ThoughtsChatPanelChromeState {
   threadId: string | null;
 }
 
+export type ThoughtsChatPermissionMode = 'full' | 'plan';
+
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   open: boolean;
   draftInjection?: { id: string; text: string } | null;
@@ -51,6 +53,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsElevatedBorder: string;
   thoughtsElevatedShadow: string;
   thoughtsMutedGlass: string;
+  /**
+   * Per-message permission mode passed to the orchestrator. 'full' keeps
+   * the legacy --dangerously-skip-permissions behavior; 'plan' swaps in
+   * --permission-mode plan so writes must be user-approved. Defaults to
+   * 'full' to match legacy callers that don't pass the prop.
+   */
+  permissionMode?: ThoughtsChatPermissionMode;
   onMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
@@ -70,6 +79,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsElevatedBorder,
   thoughtsElevatedShadow,
   thoughtsMutedGlass,
+  permissionMode = 'full',
   onMissionStateChange,
   onLaunchPacket,
   onChromeChange,
@@ -461,7 +471,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     // Orchestrator mode: always route through WebSocket stream
     // The WS handler spawns the session if needed — no polling fallback
     if (isOrchestratorMode) {
-      orchStream.send(msg);
+      orchStream.send(msg, { permissionMode });
       return;
     }
 
@@ -1164,7 +1174,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
                     type="button"
                     onClick={() => {
                       if (useStream) {
-                        orchStream.send(c.cmd);
+                        orchStream.send(c.cmd, { permissionMode });
                         setInput('');
                       } else {
                         setInput(c.cmd);
