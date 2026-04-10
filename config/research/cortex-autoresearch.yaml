@@ -6,7 +6,9 @@ session:
   stop_on_cost_cap: true
 
 target:
-  repo_path: /Users/marquisehurtt/clawd/repos/cortex
+  # Override at runtime: `npm run research:session -- --repo-path /abs/path`
+  # or set CORTEX_AUTORESEARCH_REPO_PATH in your env.
+  repo_path: ${CORTEX_AUTORESEARCH_REPO_PATH:-}
   target_ref: main
   allow_dirty_override: false
   candidate_refs:

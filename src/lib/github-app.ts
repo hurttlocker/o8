@@ -12,8 +12,11 @@ import { createSign } from 'crypto';
 const CONFIG_DIR = join(homedir(), '.cortex-ide');
 const PEM_PATH = join(CONFIG_DIR, 'github-app.pem');
 
-const APP_ID = process.env.GITHUB_APP_ID || '3167857';
-const INSTALLATION_ID = process.env.GITHUB_APP_INSTALLATION_ID || '118508031';
+// NOTE: no fallback values. A fresh clone without GITHUB_APP_ID set returns
+// null from this module so callers know to fall through to the unauth /
+// device-flow path instead of silently hitting some other account's app.
+const APP_ID = process.env.GITHUB_APP_ID?.trim() || null;
+const INSTALLATION_ID = process.env.GITHUB_APP_INSTALLATION_ID?.trim() || null;
 
 // Cache the installation token (valid for 1 hour, refresh at 50min)
 let _token: string | null = null;
@@ -21,6 +24,7 @@ let _tokenExpiresAt = 0;
 
 /** Create a JWT signed with the app's private key */
 function createJWT(): string | null {
+  if (!APP_ID) return null;
   if (!existsSync(PEM_PATH)) return null;
 
   const pem = readFileSync(PEM_PATH, 'utf-8');
@@ -42,6 +46,8 @@ function createJWT(): string | null {
 
 /** Get a fresh installation access token (cached for ~50min) */
 export async function getInstallationToken(): Promise<string | null> {
+  if (!APP_ID || !INSTALLATION_ID) return null;
+
   // Return cached token if still valid
   if (_token && Date.now() < _tokenExpiresAt) {
     return _token;
@@ -79,7 +85,7 @@ export async function getInstallationToken(): Promise<string | null> {
   }
 }
 
-/** Check if GitHub App is configured */
+/** Check if GitHub App is configured (env + pem file present) */
 export function isGitHubAppConfigured(): boolean {
-  return existsSync(PEM_PATH);
+  return Boolean(APP_ID && INSTALLATION_ID && existsSync(PEM_PATH));
 }

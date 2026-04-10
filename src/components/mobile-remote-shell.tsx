@@ -99,7 +99,7 @@ function buildOptimisticMobileChatSession(args: {
     primaryModel: 'Workspace Chat',
     status: 'idle',
     currentTask: 'Start a conversation.',
-    workspace: args.workspace || '~/clawd',
+    workspace: args.workspace || '~',
     branch: args.branch || 'workspace',
     sessionKey: args.sessionKey,
     approvalStatus: 'none',

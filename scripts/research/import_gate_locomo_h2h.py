@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import signal
 import sqlite3
@@ -14,7 +15,9 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path("/Users/marquisehurtt/clawd/repos/cortex-ide")
+# Resolve ROOT from env (CORTEX_IDE_REPO_ROOT) or the script's own location
+# so the script works from any clone without hardcoding a personal path.
+ROOT = Path(os.environ.get("CORTEX_IDE_REPO_ROOT") or Path(__file__).resolve().parents[2])
 
 
 def parse_args() -> argparse.Namespace:

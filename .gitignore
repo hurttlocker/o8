@@ -5,6 +5,8 @@ build/
 .next/
 .env
 .env.*
+# But DO track the example — devs need it as a reference on clone.
+!.env.example
 coverage/
 *.log
 *.tsbuildinfo
