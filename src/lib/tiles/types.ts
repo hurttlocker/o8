@@ -5,6 +5,8 @@ export type TileContentKind =
   | 'terminal'
   | 'preview'
   | 'thoughts'
+  | 'mission-control'
+  | 'orchestrator-history'
   | 'contextual-panel'
   // Legacy — migrated on deserialization but kept for type compat
   | 'canvas';
@@ -33,6 +35,14 @@ export interface ThoughtsTileContent {
   kind: 'thoughts';
 }
 
+export interface MissionControlTileContent {
+  kind: 'mission-control';
+}
+
+export interface OrchestratorHistoryTileContent {
+  kind: 'orchestrator-history';
+}
+
 export interface BottomTerminalTileContent {
   kind: 'contextual-panel';
 }
@@ -43,6 +53,8 @@ export type TileContent =
   | PreviewTileContent
   | CanvasTileContent
   | ThoughtsTileContent
+  | MissionControlTileContent
+  | OrchestratorHistoryTileContent
   | BottomTerminalTileContent;
 
 export interface TileLeafNode {

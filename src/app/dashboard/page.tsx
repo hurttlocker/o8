@@ -92,7 +92,6 @@ const LazySettingsPage = lazy(() => import('@/components/desktop/SettingsPage').
 const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage').then(m => ({ default: m.AnalyticsPage })));
 const LazyGraphExplorer3D = lazy(() => import('@/components/desktop/GraphExplorer3D').then(m => ({ default: m.GraphExplorer3D })));
 const LazyDirectivesView = lazy(() => import('@/components/desktop/DirectivesView').then(m => ({ default: m.DirectivesView })));
-const LazyThoughtsCard = lazy(() => import('@/components/desktop/ThoughtsCard').then(m => ({ default: m.ThoughtsCard })));
 const LazySetupWizard = lazy(() => import('@/components/desktop/SetupWizard').then(m => ({ default: m.SetupWizard })));
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
 import { TileContainer } from '@/components/desktop/TileContainer';
@@ -154,7 +153,6 @@ function DashboardInner() {
     sidebarVisible, setSidebarVisible,
     timelineVisible, setTimelineVisible,
     alertTrayOpen, setAlertTrayOpen,
-    thoughtsOpen, setThoughtsOpen,
     desktopDraftInjection, setDesktopDraftInjection,
     thoughtsDraftInjection, setThoughtsDraftInjection,
     mobileRemoteHref,
@@ -236,14 +234,14 @@ function DashboardInner() {
       const timer = setTimeout(() => {
         import('@/components/desktop/WorkspaceTerminal');
         import('@/components/desktop/Canvas');
-        import('@/components/desktop/ThoughtsCard');
+        import('@/components/desktop/OrchestratorChatTile');
       }, 100);
       return () => clearTimeout(timer);
     }
     const id = requestIdleCallback(() => {
       import('@/components/desktop/WorkspaceTerminal');
       import('@/components/desktop/Canvas');
-      import('@/components/desktop/ThoughtsCard');
+      import('@/components/desktop/OrchestratorChatTile');
     });
     return () => cancelIdleCallback(id);
   }, []);
@@ -450,6 +448,7 @@ function DashboardInner() {
     setWorkspacePreviews,
     tileLayoutHydrated,
     toggleContextualPanelTile,
+    toggleThoughtsTile,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
     workspacePreviews,
@@ -511,6 +510,24 @@ function DashboardInner() {
       lastWorkspacePanelViewRef.current = workspaceSidePanelView;
     }
   }, [workspaceSidePanelView]);
+
+  // Cmd/Ctrl+J toggles the orchestrator chat tile. Global shortcut,
+  // ignored while the user is typing in an input.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isEditable = Boolean(
+        target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]'),
+      );
+      if (isEditable) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        toggleThoughtsTile();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [toggleThoughtsTile]);
 
   const handleRepoRemoved = useCallback((removedRepo: RepoRegistryEntry) => {
     const removedRepoPath = removedRepo.localPath;
@@ -1099,10 +1116,6 @@ function DashboardInner() {
       id: `${payload.reason}-${Date.now()}`,
       text: payload.text,
     };
-    if (thoughtsOpen) {
-      setThoughtsDraftInjection(nextInjection);
-      return;
-    }
     if (hasThoughtsTile) {
       setThoughtsDraftInjection(nextInjection);
       return;
@@ -1142,7 +1155,7 @@ function DashboardInner() {
       setRightPanelMode('chat');
       setDesktopDraftInjection(nextInjection);
     })();
-  }, [activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, hasThoughtsTile, thoughtsOpen, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets]);
+  }, [activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, hasThoughtsTile, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets]);
 
   const handleAgentPanelChatInjection = useCallback((payload: AgentPanelChatInjectionPayload) => {
     injectPayloadIntoRepoChat(payload, null);
@@ -1882,7 +1895,6 @@ function DashboardInner() {
     termWsConnected,
     thoughtsDraftInjection,
     thoughtsMissionState,
-    thoughtsOpen,
     tileLayout,
     workspacePreviews,
     workspaceScopeEntries,
@@ -1933,7 +1945,6 @@ function DashboardInner() {
     tileLayout,
     thoughtsDraftInjection,
     thoughtsMissionState,
-    thoughtsOpen,
     activeTileId,
     orchestratorWorkspaceTargets,
     launchOrchestrationPacket,
@@ -2153,8 +2164,6 @@ function DashboardInner() {
       {sidebarVisible && <NavRail
         activeSection={activeNavSection}
         onSectionChange={(section) => {
-          // Dismiss ThoughtsCard when switching nav sections
-          setThoughtsOpen(false);
           if (section === 'approvals') {
             openApprovalsDiscoverySurface();
             return;
@@ -2195,8 +2204,8 @@ function DashboardInner() {
             variant="desktop"
           />
         )}
-        thoughtsOpen={thoughtsOpen}
-        onThoughtsToggle={() => setThoughtsOpen(v => !v)}
+        thoughtsOpen={hasThoughtsTile}
+        onThoughtsToggle={toggleThoughtsTile}
         onPortPreview={(_port, url) => {
           setO8BrowserUrl(url);
           setO8ActiveTab('browser');
@@ -2518,20 +2527,10 @@ function DashboardInner() {
         maxWidth={340}
       />
 
-      {/* ── Thoughts Card (floating overlay — sits on top of everything) ── */}
-      <Suspense fallback={null}>
-      <LazyThoughtsCard
-        open={thoughtsOpen}
-        onClose={() => setThoughtsOpen(false)}
-        agents={parsedAgents}
-        draftInjection={thoughtsOpen ? thoughtsDraftInjection : null}
-        missionState={thoughtsMissionState}
-        workspaceTargets={orchestratorWorkspaceTargets}
-        onMissionStateChange={handleThoughtsMissionStateChange}
-        onLaunchPacket={launchOrchestrationPacket}
-        onFocusPacket={focusOrchestrationPacketLane}
-      />
-      </Suspense>
+      {/* Orchestrator chat lives entirely inside the tile system now —
+          open it via the tile picker or the dedicated NavRail button.
+          The floating ThoughtsCard overlay was removed in the
+          thoughts→workspace merge. */}
 
       {/* ── First Launch Onboarding ── */}
       {setupWizardOpen && (

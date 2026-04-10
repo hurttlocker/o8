@@ -277,6 +277,8 @@ function isTileContent(value: unknown): value is TileContent {
     || kind === 'terminal'
     || kind === 'preview'
     || kind === 'thoughts'
+    || kind === 'mission-control'
+    || kind === 'orchestrator-history'
     || kind === 'contextual-panel'
     // Legacy kinds — accepted for deserialization, migrated later
     || kind === 'canvas'

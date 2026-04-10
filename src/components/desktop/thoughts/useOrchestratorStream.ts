@@ -6,10 +6,12 @@ import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
+export type OrchestratorPermissionMode = 'full' | 'plan';
+
 interface OrchestratorStreamResult {
   messages: MobileTranscriptEntry[];
   status: OrchestratorStreamStatus;
-  send: (message: string) => void;
+  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode }) => void;
   reset: () => void;
   connected: boolean;
 }
@@ -298,8 +300,10 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
     };
   }, [repoPath, connect]);
 
-  const send = useCallback((message: string) => {
+  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode }) => {
     if (!repoPathRef.current) return;
+
+    const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
 
     // Add user message to local state immediately
     const userEntry: MobileTranscriptEntry = {
@@ -315,14 +319,17 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
     currentAssistantRef.current = null;
     setStatus('busy');
 
+    const payload = JSON.stringify({
+      type: 'orchestrator-send',
+      repoPath: repoPathRef.current,
+      message,
+      permissionMode,
+    });
+
     // Send via WebSocket
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'orchestrator-send',
-        repoPath: repoPathRef.current,
-        message,
-      }));
+      ws.send(payload);
     } else {
       // Fallback: try to reconnect and send
       console.warn('[orchestrator-stream] WS not open, attempting reconnect...');
@@ -332,11 +339,7 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
         const currentWs = wsRef.current;
         if (currentWs?.readyState === WebSocket.OPEN) {
           clearInterval(waitAndSend);
-          currentWs.send(JSON.stringify({
-            type: 'orchestrator-send',
-            repoPath: repoPathRef.current,
-            message,
-          }));
+          currentWs.send(payload);
         }
       }, 200);
       // Give up after 5s
