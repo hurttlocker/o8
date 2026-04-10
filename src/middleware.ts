@@ -60,9 +60,14 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 /**
  * Paths that are allowed to pass through the middleware without auth.
  * Keep this list MINIMAL. These must be safe to expose unauthenticated.
+ *
+ * IMPORTANT: `/api/setup/*` is ONLY allowlisted for read methods (GET/HEAD).
+ * Writes (POST/PATCH/DELETE) still go through the loopback gate so a
+ * cross-origin POST can't silently write to the user's Claude config or
+ * flip setupComplete before the desktop app is ready.
  */
-const ALLOWLIST_PATHS: RegExp[] = [
-  // Setup wizard — needs to run before any token is known.
+const ALLOWLIST_READ_ONLY: RegExp[] = [
+  // Setup wizard reads — needs to run before any token is known.
   /^\/api\/setup(\/|$)/,
   // GitHub device flow login — must be reachable without prior auth.
   /^\/api\/panel\/github-device(\/|$)/,
@@ -70,6 +75,13 @@ const ALLOWLIST_PATHS: RegExp[] = [
   // Health check for the Tauri shell to know the bundled server is up.
   /^\/api\/panel\/status(\/|$)/,
   // v2 auth endpoints (login, callback) must be reachable.
+  /^\/api\/v2\/auth(\/|$)/,
+];
+
+const ALLOWLIST_ANY_METHOD: RegExp[] = [
+  // github-device and v2/auth both need POST for the handshake.
+  /^\/api\/panel\/github-device(\/|$)/,
+  /^\/api\/panel\/github-auth(\/|$)/,
   /^\/api\/v2\/auth(\/|$)/,
 ];
 
@@ -91,6 +103,10 @@ const GATED_PREFIXES = [
   '/api/claude-code/',
   '/api/codex/',
   '/api/operator/',
+  // Setup routes are gated too — GET is allowlisted above, POST needs loopback
+  // or a token (so an evil cross-origin page can't POST to /api/setup/claude-desktop
+  // and silently write to the user's Claude config).
+  '/api/setup/',
 ];
 
 function isLoopbackHost(hostname?: string | null): boolean {
@@ -135,8 +151,13 @@ function isTrustedLocalRequest(req: NextRequest): boolean {
   return false;
 }
 
-function isAllowlisted(pathname: string): boolean {
-  return ALLOWLIST_PATHS.some((pattern) => pattern.test(pathname));
+function isAllowlisted(pathname: string, method: string): boolean {
+  // Any-method allowlist (OAuth handshakes).
+  if (ALLOWLIST_ANY_METHOD.some((p) => p.test(pathname))) return true;
+  // Read-only allowlist — only GET/HEAD pass without auth.
+  const isRead = method === 'GET' || method === 'HEAD';
+  if (isRead && ALLOWLIST_READ_ONLY.some((p) => p.test(pathname))) return true;
+  return false;
 }
 
 function needsGate(pathname: string): boolean {
@@ -145,9 +166,10 @@ function needsGate(pathname: string): boolean {
 
 export function middleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
+  const method = req.method.toUpperCase();
 
   // Short-circuit: non-API requests and allowlisted paths always pass.
-  if (!needsGate(pathname) || isAllowlisted(pathname)) {
+  if (!needsGate(pathname) || isAllowlisted(pathname, method)) {
     return NextResponse.next();
   }
 
