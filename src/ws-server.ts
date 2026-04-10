@@ -1456,6 +1456,11 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
 
+  // Permission mode travels with the user message. Defaults to 'full' to
+  // match legacy behavior for clients that haven't been updated yet.
+  const permissionMode: 'full' | 'plan' =
+    msg.permissionMode === 'plan' ? 'plan' : 'full';
+
   try {
     let session = getOrchestratorSession(repoPath);
     if (!session || session.status === 'dead') {
@@ -1543,7 +1548,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           if (c) sendRaw(c, wsMsg);
         }
       }
-    });
+    }, { permissionMode });
 
     // After user message completes, drain any queued supervisor escalations
     void drainOrchestratorAutoQueue();
