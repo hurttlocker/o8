@@ -473,11 +473,6 @@ export function createTileRegistry({
         <Suspense fallback={null}>
           <LazyOrchestratorHistoryTile
             onClose={() => handleCloseTile(tileId)}
-            onSelectThread={() => {
-              // Phase 5 will wire this through the OrchestratorTileBus to
-              // call the chat tile's loadThread handle. For now the history
-              // tile is functional as a read-only browser.
-            }}
           />
         </Suspense>
       ),

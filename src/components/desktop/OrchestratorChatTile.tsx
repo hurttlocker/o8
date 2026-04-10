@@ -1,12 +1,14 @@
 'use client';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { subscribeO8PanelToast } from '@/lib/events/o8-panel-focus';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import {
   readOrchestratorRuntimePreference,
   subscribeOrchestratorRuntimePreference,
 } from '@/lib/orchestrator/preferences';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { useOrchestratorTileBus } from './orchestrator-tile-bus';
 import {
   ThoughtsChatPanel,
   type ThoughtsChatPanelChromeState,
@@ -103,9 +105,35 @@ function OrchestratorChatTileBase({
   const [recentsOpen, setRecentsOpen] = useState(false);
   const [recents, setRecents] = useState<RecentThread[]>([]);
   const [recentsLoading, setRecentsLoading] = useState(false);
+  const [pivotToast, setPivotToast] = useState<string | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
+  const orchestratorBus = useOrchestratorTileBus();
 
   useEffect(() => subscribeOrchestratorRuntimePreference(setPreferredRuntime), []);
+
+  // Publish this tile's chat handle on the orchestrator bus so sibling
+  // tiles (history, mission) can drive the chat without prop-drilling.
+  const registerChatHandle = orchestratorBus.registerChatHandle;
+  useEffect(() => {
+    registerChatHandle(chatPanelRef.current);
+    return () => registerChatHandle(null);
+  }, [registerChatHandle]);
+
+  // Tool-call write cards publish a pivot request when the user clicks
+  // "View in Changes". If the right O8 panel is closed, the dashboard
+  // emits a toast for us to render inline. 3.5-second auto-dismiss.
+  useEffect(() => {
+    const unsubscribe = subscribeO8PanelToast((toast) => {
+      setPivotToast(toast.message);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (!pivotToast) return;
+    const timer = window.setTimeout(() => setPivotToast(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [pivotToast]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => chatPanelRef.current?.focusInput(), 60);
@@ -382,7 +410,37 @@ function OrchestratorChatTileBase({
       </div>
 
       {/* Chat body */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        {pivotToast ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: 8,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 5,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              paddingTop: 7,
+              paddingRight: 14,
+              paddingBottom: 7,
+              paddingLeft: 14,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-divider-subtle)',
+              background: 'var(--t-panel-raised)',
+              boxShadow: 'var(--t-glass-shadow)',
+              color: 'var(--t-text-secondary)',
+              fontSize: 11,
+              fontWeight: 600,
+            }}
+          >
+            <span style={{ color: 'var(--t-text-faint)' }}>→</span>
+            {pivotToast}
+          </div>
+        ) : null}
         <ThoughtsChatPanel
           ref={chatPanelRef}
           open

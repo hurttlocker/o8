@@ -104,11 +104,30 @@ export interface MobileTranscriptMedia {
   mimeType?: string;
 }
 
+/**
+ * Tool-call rendering class. The orchestrator chat tile picks a visual
+ * weight per tool based on what that tool actually does to the world:
+ *
+ *   - `read`  — inspection only (Read, Grep, list_* MCP queries, read-only
+ *               shell). Renders as a single-line chip, dim color. REPL vibe.
+ *   - `write` — mutates state (Edit/Write, dispatch_mission, approve_*,
+ *               side-effecting Bash). Renders as a bordered card with an
+ *               amber left-accent and, when targeting a file, a
+ *               "View in Changes" affordance that pivots the O8 panel.
+ *   - `meta`  — ambient status pings (fleet status, health checks). One-line
+ *               collapsed summary, even dimmer than reads.
+ *
+ * When unset, the chat falls back to the legacy unified card rendering.
+ * See `src/components/desktop/thoughts/toolClassifier.ts`.
+ */
+export type ToolSideEffectClass = 'read' | 'write' | 'meta';
+
 export interface MobileTranscriptToolCall {
   name: string;
   args?: Record<string, unknown>;
   status?: 'calling' | 'running' | 'done';
   preview?: string;
+  sideEffectClass?: ToolSideEffectClass;
 }
 
 export interface MobileTranscriptSource {
