@@ -22,7 +22,7 @@ interface PortGroup {
 }
 
 // Well-known system ports to ignore
-const IGNORE_PORTS = new Set([22, 53, 80, 443, 631, 5000, 5353, 7000, 18789]);
+const IGNORE_PORTS = new Set([22, 53, 80, 443, 631, 5000, 5353, 7000]);
 const IGNORE_PROCESSES = new Set([
   'rapportd', 'mDNSResponder', 'systemd', 'launchd', 'loginwindow', 'WindowServer',
   'Google Drive', 'CinemaGradeHelper', 'sharingd', 'replicatord', 'identityservicesd',

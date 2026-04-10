@@ -40,6 +40,7 @@ import {
   writeStoredMobileRepoPath,
   type MobileRepoOption,
 } from './mobile-chat-repos';
+import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 
 function getWsToken() {
   if (typeof document === 'undefined') return null;
@@ -51,10 +52,10 @@ function getWsBridgeUrl(token: string) {
 
   const isTauri = window.location.protocol === 'tauri:' || Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
   if (isTauri) {
-    return `ws://127.0.0.1:3002/ws?token=${encodeURIComponent(token)}`;
+    return `ws://127.0.0.1:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
   }
 
-  // Use the same host:port as the page — Next.js rewrites /ws → ws-server:3002.
+  // Use the same host:port as the page — Next.js rewrites /ws → ws-server.
   // This avoids cross-port issues over Tailscale / remote networks.
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const hostPort = window.location.host; // includes port if non-default

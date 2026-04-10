@@ -338,9 +338,6 @@ const WELL_KNOWN_PORTS: Record<number, string> = {
   3001: 'Dev server',
   3002: 'WebSocket',
   8080: 'Dev server',
-  18789: 'Gateway',
-  18790: 'Gateway',
-  18791: 'Gateway',
 };
 
 function portLabel(port: number): string {

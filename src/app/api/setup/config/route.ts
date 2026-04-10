@@ -14,11 +14,6 @@ const CONFIG_PATH = join(CONFIG_DIR, 'setup.json');
 function getDefaultConfig(): SetupConfig {
   return {
     setupComplete: false,
-    gateway: {
-      url: 'http://127.0.0.1:18789',
-      token: '',
-      autoConnect: false,
-    },
     cortex: {
       binaryPath: join(homedir(), 'bin', 'cortex'),
       detected: false,
@@ -51,10 +46,6 @@ function mergeConfig(current: SetupConfig, patch: Partial<SetupConfig>): SetupCo
   return {
     ...current,
     ...patch,
-    gateway: patch.gateway ? {
-      ...current.gateway,
-      ...patch.gateway,
-    } : current.gateway,
     cortex: patch.cortex ? {
       ...current.cortex,
       ...patch.cortex,
