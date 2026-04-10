@@ -141,7 +141,7 @@ function mapRuntimeSessionToAgent(
 }
 
 function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): AgentSummary {
-  const workspace = shortenHomePath(session.repoPath ?? '~/clawd');
+  const workspace = shortenHomePath(session.repoPath ?? '~');
   const runtimeName = defaultRuntimeDisplayName(session.runtimeId);
   const currentTask = session.liveSessionKey
     ? 'Reconnecting\u2026'

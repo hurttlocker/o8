@@ -15,6 +15,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
 
+[features]
+default = []
+# Dev-only: exposes the Tauri webview to AI agents (screenshot + click + eval)
+# via an MCP server on a Unix socket. Requires a local checkout of
+# tauri-plugin-mcp at `../tauri-plugin-mcp` (sibling of this repo).
+# Enable with: `cargo tauri dev --features dev-mcp-plugin`.
+# Not needed for normal dev or production.
+dev-mcp-plugin = ["dep:tauri-plugin-mcp"]
+
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -26,6 +35,8 @@ tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
-tauri-plugin-mcp = { path = "/Users/marquisehurtt/tauri-plugin-mcp" }
+# Optional: see [features].dev-mcp-plugin above. Relative path so clones can
+# opt in by placing the plugin repo next to cortex-ide.
+tauri-plugin-mcp = { path = "../../tauri-plugin-mcp", optional = true }
 window-vibrancy = "0.6"
 rusqlite = { version = "0.31", features = ["bundled"] }

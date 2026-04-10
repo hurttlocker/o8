@@ -57,7 +57,13 @@ function sectionHeaderStyle(colors: ThemeColors) {
 }
 
 function normalizeRepoPath(repoPath: string): string {
-  return repoPath.replace(/^\//, '').replace(/^Users\/.*?\/clawd\/repos\//, 'hurttlocker/');
+  // Drop leading `/` and collapse any `/Users/<me>/<workspace>/repos/<repo>`
+  // into just `<repo>` for display. Previously this hardcoded `hurttlocker/`
+  // as the owner prefix which leaked a personal GitHub handle to every UI.
+  const trimmed = repoPath.replace(/^\//, '');
+  const reposMatch = trimmed.match(/^Users\/[^/]+\/[^/]+\/repos\/(.+)$/);
+  if (reposMatch) return reposMatch[1];
+  return trimmed;
 }
 
 function checksStatusColor(status: string): string {

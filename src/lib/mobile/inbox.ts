@@ -237,7 +237,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
       primaryModel: chat.model || 'Workspace Chat',
       status: chat.isCurrentSession ? 'running' : 'idle',
       currentTask,
-      workspace: chat.repoPath || '~/clawd',
+      workspace: chat.repoPath || '~',
       branch: 'workspace',
       sessionKey: chat.sessionKey,
       approvalStatus: 'none',

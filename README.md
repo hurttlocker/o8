@@ -2,6 +2,45 @@
 
 Private working repository for **o8**, an AI-native desktop app product.
 
+## Quickstart
+
+Prerequisites:
+- **Node.js 22+** — `node --version` (install from [nodejs.org](https://nodejs.org))
+- **Rust stable** — for the Tauri build (`rustup install stable`)
+- **Xcode Command Line Tools** (macOS) or **build-essential + python3** (Linux) — needed by `better-sqlite3` / `node-pty` during `npm install`
+- **Codex CLI** (optional, required for mission dispatch) — `npm i -g @openai/codex-cli`
+- **`gh` CLI** (optional, required for `create_mission` from GitHub issues)
+
+Clone and run:
+
+```bash
+git clone https://github.com/hurttlocker/cortex-ide.git
+cd cortex-ide
+cp .env.example .env.local   # fill in optional API keys
+npm install
+npm run desktop:dev          # starts Next.js on 3001 + WS server on 3002
+```
+
+Open `http://localhost:3001/dashboard` in a browser, or run `cargo tauri dev` from `src-tauri/` for the native shell.
+
+### Native build
+
+```bash
+npm run build                # Next.js production build + bundled server export
+cargo tauri build            # native installer (dmg/msi/deb)
+```
+
+If you're forking and plan to ship your own releases, replace the `plugins.updater.endpoints` and `pubkey` in `src-tauri/tauri.conf.json` with your own release channel and minisign public key. Otherwise the packaged app will check for updates against the upstream o8 release feed.
+
+### Connect Claude to o8
+
+1. Open the desktop app and go to **Settings → MCP**.
+2. Click **Install** next to "Claude Desktop" (or "Claude Code").
+3. Restart Claude Desktop (or run `/mcp reload` in Claude Code).
+4. Claude now has access to o8 tools: `o8_status`, `o8_send`, `create_mission`, `dispatch_mission`, `approve_and_merge`, etc.
+
+See `.env.example` for the complete list of environment variables and which features each one unlocks.
+
 ## What this is
 
 o8 is a thesis for an **agent-native development environment**:

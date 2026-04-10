@@ -624,6 +624,7 @@ fn read_workspaces() -> Result<serde_json::Value, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[allow(unused_mut)] // `mut` is needed only when `dev-mcp-plugin` feature is enabled
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default()
             .level(log::LevelFilter::Info)
@@ -634,14 +635,20 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build());
 
-    // MCP plugin: exposes app to AI agents (screenshots, DOM, input simulation)
-    // Only enabled in debug builds — strip from production
-    #[cfg(debug_assertions)]
+    // MCP plugin: exposes app to AI agents (screenshots, DOM, input simulation).
+    // Optional dev-only feature. Requires a sibling checkout of tauri-plugin-mcp.
+    // Enable with: `cargo tauri dev --features dev-mcp-plugin`.
+    #[cfg(feature = "dev-mcp-plugin")]
     {
+        // Namespace the socket per-user so two devs on a shared machine don't clash.
+        let socket_path = std::env::var("O8_TAURI_MCP_SOCKET").unwrap_or_else(|_| {
+            let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
+            format!("/tmp/tauri-mcp-o8-{}.sock", user)
+        });
         builder = builder.plugin(tauri_plugin_mcp::init_with_config(
             tauri_plugin_mcp::PluginConfig::new("o8".to_string())
                 .start_socket_server(true)
-                .socket_path("/tmp/tauri-mcp-o8.sock".into()),
+                .socket_path(socket_path.into()),
         ));
     }
 

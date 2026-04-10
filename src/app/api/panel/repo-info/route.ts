@@ -5,8 +5,8 @@ import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 
 /**
- * GET /api/panel/repo-info?workspace=~/clawd/repos/cortex-ide
- * 
+ * GET /api/panel/repo-info?workspace=<absolute-path>
+ *
  * Returns the GitHub owner/repo for a given workspace path.
  */
 export async function GET(request: Request) {
