@@ -451,9 +451,9 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
 
   // Pretext: pre-calculate user message height (plain text, pre-wrap).
-  // ThoughtsCard is absolutely positioned z-9999 — reflows are extra expensive
-  // because the browser recalculates the stacking context. Width ~100% of panel
-  // minus padding (16px × 2 + 12px × 2 = 56px).
+  // The orchestrator chat tile is render-hot during streaming — avoiding
+  // reflows on every token matters. Width ~100% of panel minus padding
+  // (16px × 2 + 12px × 2 = 56px).
   const userTextHeight = usePretextHeight(
     isUser ? displayText : '',
     'small', // 13px matches user bubble fontSize

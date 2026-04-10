@@ -4,8 +4,8 @@
  * ApprovalQueuePanel — First-class governance surface.
  *
  * Shows pending approvals prominently with policy context, risk badges,
- * diff previews, and approve/deny actions. This replaces ThoughtsCard
- * as the primary approval destination.
+ * diff previews, and approve/deny actions. Primary approval destination
+ * for the dashboard — the orchestrator chat tile links here inline.
  *
  * Apple HIG: clean cards, minimal color, 14px radii, 44px touch targets.
  */
