@@ -272,7 +272,7 @@ function buildOrchestratorSystemPrompt(repoPath: string): string {
     `Context:`,
     `- This conversation persists across messages via --resume. You have full conversation history.`,
     `- The user may reference "lanes" (durable agent work units), "packets" (planned work items), or "runtimes" (Claude Code and Codex sessions). Stay focused on the active CLI runtimes.`,
-    `- You are running with --dangerously-skip-permissions so you can act autonomously. Use good judgment.`,
+    `- Each message you receive may be sent in "Full access" or "Read-only" mode. Full access lets you edit files and run side-effecting commands; read-only limits you to inspection tools and MCP queries, with writes gated by user approval. Respect the mode you're in on each turn.`,
     `- Prefer editing existing files over creating new ones. Follow the repo's existing patterns.`,
     `- Run \`npx tsc --noEmit\` to verify TypeScript changes before reporting completion.`,
     `- ALWAYS use cortex_list_issues / cortex_list_prs / cortex_ci_status for GitHub data. NEVER use the gh CLI — it uses a personal token that hits rate limits. The MCP tools use a GitHub App with separate quota.`,
@@ -390,6 +390,24 @@ export function ensureOrchestratorSession(repoPath: string): OrchestratorSession
 // ── Send message (spawn process, stream JSON) ──
 
 /**
+ * Permission mode passed to Claude Code when spawning the orchestrator.
+ *
+ * - `'full'`: current behavior — spawns with `--dangerously-skip-permissions`
+ *   so Claude can act autonomously on files, run commands, and drive MCP
+ *   tools without prompting. Used by automated paths (intake, auto-review)
+ *   and by user messages sent with the "Full access" chip armed.
+ * - `'plan'`: spawns with `--permission-mode plan` so Claude can read and
+ *   call MCP tools freely but any write (Edit / Write / Bash side-effects)
+ *   must be explicitly approved by the user. Used when the chat's permission
+ *   chip is toggled to "Read-only" — the safe-mode orchestrator.
+ */
+export type OrchestratorPermissionMode = 'full' | 'plan';
+
+export interface SendToOrchestratorOptions {
+  permissionMode?: OrchestratorPermissionMode;
+}
+
+/**
  * Sends a message to the orchestrator. Spawns a claude process that outputs
  * stream-json. Calls `onEvent` for each parsed event. Returns when the
  * process exits.
@@ -398,7 +416,10 @@ export async function sendToOrchestrator(
   session: OrchestratorSession,
   message: string,
   onEvent: (event: OrchestratorEvent) => void,
+  options: SendToOrchestratorOptions = {},
 ): Promise<void> {
+  const permissionMode: OrchestratorPermissionMode = options.permissionMode ?? 'full';
+
   // #457 — Auto-recover dead sessions by creating a fresh one
   if (session.status === 'dead') {
     console.log(`[orchestrator-session] Auto-recovering dead session ${session.sessionName}`);
@@ -418,7 +439,9 @@ export async function sendToOrchestrator(
   const args: string[] = [
     '-p', message,
     '--output-format', 'stream-json',
-    '--dangerously-skip-permissions',
+    ...(permissionMode === 'plan'
+      ? ['--permission-mode', 'plan']
+      : ['--dangerously-skip-permissions']),
     '--verbose',
     '--mcp-config', mcpConfigPath,
   ];
