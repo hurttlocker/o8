@@ -505,6 +505,25 @@ export function useTileLayout({
     });
   }, [ensureTileKind, handleCloseTile, setActiveTileId, tileLayout]);
 
+  /**
+   * Open-or-focus helper for the orchestrator chat tile. Unlike the
+   * toggle, this never closes an existing tile — it just guarantees a
+   * chat tile is mounted and activates it. Used by the orchestrator
+   * tile bus so siblings (history, mission) can drive the chat without
+   * accidentally closing it.
+   */
+  const ensureThoughtsTile = useCallback(() => {
+    const existingLeaf = findLeafByContentKind(tileLayout.root, 'thoughts');
+    if (existingLeaf) {
+      setActiveTileId(existingLeaf.id);
+      return;
+    }
+    ensureTileKind('thoughts', {
+      direction: 'horizontal',
+      ratio: 0.55,
+    });
+  }, [ensureTileKind, setActiveTileId, tileLayout]);
+
   const handlePreviewDetected = useCallback((preview: DetectedLocalhostPreview) => {
     setWorkspacePreviews((current) => {
       if (current.some((existing) => existing.port === preview.port)) {
@@ -756,6 +775,7 @@ export function useTileLayout({
     tileLayoutHydrated,
     toggleContextualPanelTile,
     toggleThoughtsTile,
+    ensureThoughtsTile,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
     workspacePreviews,

@@ -1,6 +1,6 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import {
   Check,
   FileCode2,
@@ -17,10 +17,16 @@ import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
   MobileTranscriptToolCall,
+  ToolSideEffectClass,
 } from '@/lib/mobile/types';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
+import {
+  classifyToolCall,
+  writeTargetsFile,
+} from './thoughts/toolClassifier';
+import { publishO8PanelFocus } from '@/lib/events/o8-panel-focus';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -212,103 +218,280 @@ function ToolIcon({ tool }: { tool: MobileTranscriptToolCall }) {
   return <Wrench size={14} strokeWidth={2} />;
 }
 
+/**
+ * Resolve the side-effect class for a tool call. If the orchestrator
+ * stream already tagged it, trust that; otherwise fall back to the
+ * static classifier.
+ */
+function resolveSideEffectClass(tool: MobileTranscriptToolCall): ToolSideEffectClass {
+  return tool.sideEffectClass ?? classifyToolCall(tool.name, tool.args);
+}
+
+function ToolStatusBadge({ status, tone }: { status: MobileTranscriptToolCall['status']; tone: string }) {
+  const done = status === 'done' || !status;
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      fontSize: 10,
+      fontWeight: 700,
+      color: done ? '#10b981' : tone,
+      textTransform: 'uppercase',
+      letterSpacing: '0.04em',
+      flexShrink: 0,
+    }}>
+      {done ? (
+        <Check size={12} strokeWidth={2.3} />
+      ) : (
+        <span style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: tone,
+          opacity: 0.85,
+        }} />
+      )}
+      {toolStatusLabel(status)}
+    </span>
+  );
+}
+
+function ReadToolChip({ tool }: { tool: MobileTranscriptToolCall }) {
+  const [expanded, setExpanded] = useState(false);
+  const detail = toolDetail(tool);
+  const label = toolLabel(tool);
+  return (
+    <div style={{ width: '100%', maxWidth: '92%' }}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        title={`${label} · ${detail}`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          width: '100%',
+          minHeight: 26,
+          paddingTop: 4,
+          paddingRight: 10,
+          paddingBottom: 4,
+          paddingLeft: 10,
+          borderWidth: 0,
+          borderRadius: 8,
+          background: 'transparent',
+          color: 'var(--t-text-muted)',
+          fontSize: 11,
+          fontFamily: '"SF Mono", ui-monospace, monospace',
+          textAlign: 'left',
+          cursor: 'pointer',
+        }}
+      >
+        <span style={{ color: 'var(--t-text-faint)', flexShrink: 0 }}>$</span>
+        <span style={{ flexShrink: 0, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+          {tool.name}
+        </span>
+        <span style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          color: 'var(--t-text-muted)',
+        }}>
+          {detail ? `→ ${detail}` : ''}
+        </span>
+        <ToolStatusBadge status={tool.status} tone="var(--t-text-faint)" />
+      </button>
+      {expanded && detail ? (
+        <div style={{
+          marginLeft: 22,
+          marginTop: 4,
+          paddingTop: 8,
+          paddingRight: 10,
+          paddingBottom: 8,
+          paddingLeft: 10,
+          borderRadius: 8,
+          background: 'var(--t-code-bg)',
+          color: 'var(--t-text-secondary)',
+          fontSize: 11,
+          fontFamily: '"SF Mono", ui-monospace, monospace',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}>
+          {detail}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function WriteToolCard({ tool }: { tool: MobileTranscriptToolCall }) {
+  const label = toolLabel(tool);
+  const detail = toolDetail(tool);
+  const targetFile = writeTargetsFile(tool.name, tool.args);
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        paddingTop: 10,
+        paddingRight: 12,
+        paddingBottom: 10,
+        paddingLeft: 14,
+        background: THEME_PANEL_GLASS,
+        borderTopWidth: 1,
+        borderRightWidth: 1,
+        borderBottomWidth: 1,
+        borderLeftWidth: 3,
+        borderTopStyle: 'solid',
+        borderRightStyle: 'solid',
+        borderBottomStyle: 'solid',
+        borderLeftStyle: 'solid',
+        borderTopColor: 'var(--t-panel-border)',
+        borderRightColor: 'var(--t-panel-border)',
+        borderBottomColor: 'var(--t-panel-border)',
+        borderLeftColor: 'rgba(245, 158, 11, 0.7)',
+        borderRadius: 12,
+        boxShadow: 'var(--t-panel-shadow)',
+        width: '100%',
+        maxWidth: '92%',
+      }}
+    >
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          borderRadius: 8,
+          background: 'rgba(245, 158, 11, 0.12)',
+          color: '#b45309',
+          flexShrink: 0,
+        }}>
+          <ToolIcon tool={tool} />
+        </span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: 'var(--t-text)',
+            letterSpacing: '-0.01em',
+          }}>
+            {label}
+          </div>
+          <div style={{
+            fontSize: 10,
+            color: 'var(--t-text-muted)',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+            textTransform: 'lowercase',
+          }}>
+            {tool.name}
+          </div>
+        </div>
+        <ToolStatusBadge status={tool.status} tone="#b45309" />
+      </div>
+      <div
+        title={detail}
+        style={{
+          fontSize: 12,
+          lineHeight: 1.55,
+          color: 'var(--t-text-secondary)',
+          wordBreak: 'break-word',
+        }}
+      >
+        {truncate(detail, 180)}
+      </div>
+      {targetFile ? (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={() => {
+              publishO8PanelFocus({ tab: 'changes', artifactId: targetFile });
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              height: 24,
+              paddingTop: 0,
+              paddingRight: 10,
+              paddingBottom: 0,
+              paddingLeft: 10,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'rgba(245, 158, 11, 0.28)',
+              background: 'rgba(245, 158, 11, 0.10)',
+              color: '#b45309',
+              fontSize: 10.5,
+              fontWeight: 700,
+              letterSpacing: '0.02em',
+              cursor: 'pointer',
+            }}
+          >
+            View in Changes
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12h14" />
+              <polyline points="12 5 19 12 12 19" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MetaToolLine({ tool }: { tool: MobileTranscriptToolCall }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        width: '100%',
+        maxWidth: '92%',
+        paddingTop: 2,
+        paddingRight: 10,
+        paddingBottom: 2,
+        paddingLeft: 10,
+        fontSize: 10.5,
+        color: 'var(--t-text-faint)',
+        fontFamily: '"SF Mono", ui-monospace, monospace',
+      }}
+      title={`${tool.name} · meta`}
+    >
+      <span style={{ opacity: 0.6 }}>∙</span>
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {tool.name}
+      </span>
+    </div>
+  );
+}
+
 export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscriptToolCall[] }) {
   return (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      gap: 8,
+      gap: 6,
       width: '100%',
-      maxWidth: '92%',
+      maxWidth: '100%',
     }}>
-      {toolCalls.map((tool, index) => (
-        <div
-          key={`${tool.name}-${index}`}
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-            padding: '10px 12px',
-            background: THEME_PANEL_GLASS,
-            border: '1px solid var(--t-panel-border)',
-            borderRadius: 12,
-            boxShadow: 'var(--t-panel-shadow)',
-          }}
-        >
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 24,
-              height: 24,
-              borderRadius: 8,
-              background: THEME_ACCENT_SOFT,
-              color: THEME_ACCENT,
-              flexShrink: 0,
-            }}>
-              <ToolIcon tool={tool} />
-            </span>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: 'var(--t-text)',
-                letterSpacing: '-0.01em',
-              }}>
-                {toolLabel(tool)}
-              </div>
-              <div style={{
-                fontSize: 10,
-                color: 'var(--t-text-muted)',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                textTransform: 'lowercase',
-              }}>
-                {tool.name}
-              </div>
-            </div>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontSize: 10,
-              fontWeight: 700,
-              color: tool.status === 'done' || !tool.status ? '#10b981' : THEME_ACCENT,
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-              flexShrink: 0,
-            }}>
-              {tool.status === 'done' || !tool.status ? (
-                <Check size={12} strokeWidth={2.3} />
-              ) : (
-                <span style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: THEME_ACCENT,
-                  opacity: 0.85,
-                }} />
-              )}
-              {toolStatusLabel(tool.status)}
-            </span>
-          </div>
-          <div
-            title={toolDetail(tool)}
-            style={{
-              fontSize: 12,
-              lineHeight: 1.55,
-              color: 'var(--t-text-secondary)',
-              wordBreak: 'break-word',
-            }}
-          >
-            {truncate(toolDetail(tool), 180)}
-          </div>
-        </div>
-      ))}
+      {toolCalls.map((tool, index) => {
+        const cls = resolveSideEffectClass(tool);
+        const key = `${tool.name}-${index}`;
+        if (cls === 'read') return <ReadToolChip key={key} tool={tool} />;
+        if (cls === 'meta') return <MetaToolLine key={key} tool={tool} />;
+        return <WriteToolCard key={key} tool={tool} />;
+      })}
     </div>
   );
 }

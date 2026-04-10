@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useRef } from 'react';
+import { useOrchestratorTileBus } from './orchestrator-tile-bus';
 import {
   ThoughtsHistoryPanel,
   type ThoughtsHistoryPanelHandle,
@@ -9,31 +10,28 @@ import {
 /**
  * Tile-native wrapper around ThoughtsHistoryPanel. Rich searchable view
  * of all orchestrator conversations across repos. Clicking a thread
- * routes back to the orchestrator chat tile via onSelectThread, which
- * the dashboard wires through the orchestrator tile bus in Phase 5.
- *
- * For now, onSelectThread is a prop — callers (the dashboard tile
- * registry entry) handle the actual chat-tile lookup.
+ * routes back to the orchestrator chat tile via the orchestrator tile
+ * bus — if the chat tile isn't mounted yet, the bus opens one and
+ * replays the thread load once the chat registers.
  */
 
 interface OrchestratorHistoryTileProps {
   onClose: () => void;
-  onSelectThread: (tabId: string) => void;
   activeThreadId?: string | null;
 }
 
 function OrchestratorHistoryTileBase({
   onClose,
-  onSelectThread,
   activeThreadId = null,
 }: OrchestratorHistoryTileProps) {
   const panelRef = useRef<ThoughtsHistoryPanelHandle>(null);
+  const orchestratorBus = useOrchestratorTileBus();
 
   const handleSelect = useCallback(
     (tabId: string) => {
-      onSelectThread(tabId);
+      orchestratorBus.loadThreadInChat(tabId);
     },
-    [onSelectThread],
+    [orchestratorBus],
   );
 
   const thoughtsBodyBackground = 'linear-gradient(180deg, var(--t-glass-muted) 0%, rgba(0, 0, 0, 0) 100%)';
