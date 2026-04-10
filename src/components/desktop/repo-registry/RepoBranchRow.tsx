@@ -345,11 +345,18 @@ function RepoBranchRowBase({
                       width: '100%',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 10,
-                      padding: '8px 10px',
-                      borderRadius: 12,
-                      border: isSelectedPacket ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-                      background: isSelectedPacket ? THEME_ACCENT_SOFT : 'rgba(255, 255, 255, 0.56)',
+                      gap: 8,
+                      paddingTop: 6,
+                      paddingRight: 8,
+                      paddingBottom: 6,
+                      paddingLeft: 8,
+                      borderRadius: 10,
+                      border: isSelectedPacket
+                        ? `1px solid ${THEME_ACCENT_BORDER}`
+                        : '1px solid var(--t-panel-border)',
+                      // Theme-aware surface — hardcoded `rgba(255, 255, 255, 0.56)`
+                      // rendered as a huge light-gray blob in the midnight theme.
+                      background: isSelectedPacket ? THEME_ACCENT_SOFT : 'var(--t-bg-card)',
                       color: 'var(--t-text)',
                       cursor: packet.lane?.sessionKey && onSelectSession ? 'pointer' : 'default',
                       fontFamily: '-apple-system, system-ui, sans-serif',
@@ -361,25 +368,28 @@ function RepoBranchRowBase({
                   >
                     <span
                       style={{
-                        width: 8,
-                        height: 8,
+                        width: 6,
+                        height: 6,
                         borderRadius: '50%',
                         background: statusTone.dot,
-                        boxShadow: `0 0 12px ${statusTone.dot}44`,
+                        boxShadow: `0 0 8px ${statusTone.dot}44`,
                         flexShrink: 0,
                       }}
                     />
                     <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
                         <span
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
-                            padding: '2px 6px',
+                            paddingTop: 1,
+                            paddingRight: 5,
+                            paddingBottom: 1,
+                            paddingLeft: 5,
                             borderRadius: 999,
                             background: 'var(--t-divider-subtle)',
                             color: 'var(--t-text-secondary)',
-                            fontSize: 9,
+                            fontSize: 8.5,
                             fontWeight: 800,
                             letterSpacing: '0.04em',
                             textTransform: 'uppercase',
@@ -394,9 +404,10 @@ function RepoBranchRowBase({
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
-                            fontSize: 11.5,
-                            fontWeight: 640,
+                            fontSize: 11,
+                            fontWeight: 620,
                             color: 'var(--t-text)',
+                            letterSpacing: '-0.01em',
                           }}
                         >
                           {packet.title}
@@ -406,13 +417,13 @@ function RepoBranchRowBase({
                         style={{
                           display: 'flex',
                           alignItems: 'center',
-                          gap: 6,
-                          marginTop: 2,
+                          gap: 5,
+                          marginTop: 1,
                           minWidth: 0,
                           overflow: 'hidden',
                           whiteSpace: 'nowrap',
                           textOverflow: 'ellipsis',
-                          fontSize: 10,
+                          fontSize: 9.5,
                           lineHeight: 1.3,
                           color: 'var(--t-text-faint)',
                         }}
@@ -434,8 +445,8 @@ function RepoBranchRowBase({
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        width: 28,
-                        height: 28,
+                        width: 22,
+                        height: 22,
                         borderRadius: 999,
                         background: runtimeTone.background,
                         border: `1px solid ${runtimeTone.border}`,
@@ -444,8 +455,8 @@ function RepoBranchRowBase({
                       }}
                     >
                       {packet.runtime === 'claude-code'
-                        ? <ClaudeIcon size={18} color={runtimeTone.color} />
-                        : <CodexIcon size={18} color={runtimeTone.color} />}
+                        ? <ClaudeIcon size={14} color={runtimeTone.color} />
+                        : <CodexIcon size={14} color={runtimeTone.color} />}
                     </span>
                   </button>
                 );

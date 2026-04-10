@@ -87,7 +87,7 @@ function RepoCardSettingsBase({ repo, model }: RepoCardSettingsProps) {
             padding: '9px 11px',
             borderRadius: 10,
             border: '1px solid var(--t-btn-secondary-border)',
-            background: 'rgba(255, 255, 255, 0.55)',
+            background: 'var(--t-input-bg)',
             color: 'var(--t-text)',
             fontSize: 12,
             fontFamily: '"SF Mono", ui-monospace, monospace',
