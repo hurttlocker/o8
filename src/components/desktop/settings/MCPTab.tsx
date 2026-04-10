@@ -40,6 +40,18 @@ interface McpConfigResponse {
   };
 }
 
+type Target = 'claude-desktop' | 'claude-code';
+
+interface ClaudeTargetStatus {
+  target: Target;
+  path: string;
+  fileExists: boolean;
+  alreadyRegistered: boolean;
+  alreadyUpToDate: boolean;
+  otherServers: string[];
+  size: number;
+}
+
 const MONO_FONT = '"SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
 function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -104,6 +116,10 @@ export function MCPTab() {
   const [data, setData] = useState<McpConfigResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [desktopStatus, setDesktopStatus] = useState<ClaudeTargetStatus | null>(null);
+  const [codeStatus, setCodeStatus] = useState<ClaudeTargetStatus | null>(null);
+  const [installing, setInstalling] = useState<Target | null>(null);
+  const [installNote, setInstallNote] = useState<{ target: Target; message: string; ok: boolean } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -117,7 +133,68 @@ export function MCPTab() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  const loadClaudeStatus = useCallback(async () => {
+    try {
+      const [desktop, code] = await Promise.all([
+        fetch('/api/setup/claude-desktop?target=claude-desktop').then((r) => r.json() as Promise<ClaudeTargetStatus>),
+        fetch('/api/setup/claude-desktop?target=claude-code').then((r) => r.json() as Promise<ClaudeTargetStatus>),
+      ]);
+      setDesktopStatus(desktop);
+      setCodeStatus(code);
+    } catch {
+      // Silent — the status cards just don't render.
+    }
+  }, []);
+
+  useEffect(() => { void load(); void loadClaudeStatus(); }, [load, loadClaudeStatus]);
+
+  const installToClaude = useCallback(async (target: Target) => {
+    setInstalling(target);
+    setInstallNote(null);
+    try {
+      const res = await fetch('/api/setup/claude-desktop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      });
+      const body = await res.json() as { ok: boolean; detail?: string; error?: string };
+      if (res.ok && body.ok) {
+        setInstallNote({ target, message: body.detail || 'Installed.', ok: true });
+        await loadClaudeStatus();
+      } else {
+        setInstallNote({ target, message: body.error || body.detail || 'Failed to install.', ok: false });
+      }
+    } catch (e) {
+      setInstallNote({
+        target,
+        message: e instanceof Error ? e.message : 'Request failed.',
+        ok: false,
+      });
+    } finally {
+      setInstalling(null);
+    }
+  }, [loadClaudeStatus]);
+
+  const removeFromClaude = useCallback(async (target: Target) => {
+    setInstalling(target);
+    setInstallNote(null);
+    try {
+      const res = await fetch('/api/setup/claude-desktop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, remove: true }),
+      });
+      const body = await res.json() as { ok: boolean; detail?: string; error?: string };
+      if (res.ok && body.ok) {
+        setInstallNote({ target, message: body.detail || 'Removed.', ok: true });
+        await loadClaudeStatus();
+      } else {
+        setInstallNote({ target, message: body.error || body.detail || 'Failed.', ok: false });
+      }
+    } finally {
+      setInstalling(null);
+    }
+  }, [loadClaudeStatus]);
 
   const copyToClipboard = useCallback(async () => {
     if (!data) return;
@@ -181,23 +258,96 @@ export function MCPTab() {
           <StatusRow label="GitHub CLI" ok={d.ghInstalled} detail={d.ghBin} />
           <StatusRow label="Database" ok={d.dbExists} detail={d.dbExists ? `${(d.dbSize / 1024 / 1024).toFixed(1)} MB` : 'not initialized'} />
         </div>
-        {(!d.nodeInstalled || !d.codexInstalled) ? (
+        {!d.nodeInstalled ? (
           <div style={{
             marginTop: 10,
-            padding: 10,
+            padding: 12,
             borderRadius: 10,
             background: 'rgba(239, 68, 68, 0.08)',
-            border: '1px solid rgba(239, 68, 68, 0.2)',
+            border: '1px solid rgba(239, 68, 68, 0.22)',
             fontSize: 12,
             color: 'var(--t-text)',
-            lineHeight: 1.5,
+            lineHeight: 1.55,
           }}>
-            {!d.nodeInstalled ? (
-              <div>Install Node.js from <span style={{ color: 'var(--t-accent)' }}>nodejs.org</span> (required for the MCP server).</div>
-            ) : null}
-            {!d.codexInstalled ? (
-              <div>Install Codex CLI: <code style={{ fontFamily: MONO_FONT }}>npm i -g @openai/codex-cli</code></div>
-            ) : null}
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Node.js is required.</div>
+            <div>
+              Install the latest LTS from{' '}
+              <a
+                href="https://nodejs.org"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--t-accent)', textDecoration: 'underline' }}
+              >
+                nodejs.org
+              </a>
+              {' '}(v22+), then restart o8. Without Node, the MCP server can&apos;t run and Claude has no way to reach the o8 tools.
+            </div>
+          </div>
+        ) : null}
+        {d.nodeInstalled && !d.codexInstalled ? (
+          <div style={{
+            marginTop: 10,
+            padding: 12,
+            borderRadius: 10,
+            background: 'rgba(245, 158, 11, 0.1)',
+            border: '1px solid rgba(245, 158, 11, 0.28)',
+            fontSize: 12,
+            color: 'var(--t-text)',
+            lineHeight: 1.55,
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Codex CLI not found.</div>
+            <div>
+              Install with{' '}
+              <code style={{
+                fontFamily: MONO_FONT,
+                background: 'var(--t-input-bg)',
+                padding: '1px 6px',
+                borderRadius: 4,
+                fontSize: 11,
+              }}>
+                npm i -g @openai/codex-cli
+              </code>
+              {' '}and sign in with your ChatGPT Plus account or an{' '}
+              <code style={{
+                fontFamily: MONO_FONT,
+                background: 'var(--t-input-bg)',
+                padding: '1px 6px',
+                borderRadius: 4,
+                fontSize: 11,
+              }}>
+                OPENAI_API_KEY
+              </code>
+              {' '}env var. Without Codex, mission dispatch, create_mission, and approve_and_merge will fail — but o8_status, directives, and the desktop UI still work.
+            </div>
+          </div>
+        ) : null}
+        {d.nodeInstalled && d.codexInstalled && !d.ghInstalled ? (
+          <div style={{
+            marginTop: 10,
+            padding: 12,
+            borderRadius: 10,
+            background: 'rgba(148, 163, 184, 0.1)',
+            border: '1px solid rgba(148, 163, 184, 0.22)',
+            fontSize: 12,
+            color: 'var(--t-text-muted)',
+            lineHeight: 1.55,
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--t-text)' }}>
+              GitHub CLI not found (optional).
+            </div>
+            <div>
+              Install with{' '}
+              <code style={{
+                fontFamily: MONO_FONT,
+                background: 'var(--t-input-bg)',
+                padding: '1px 6px',
+                borderRadius: 4,
+                fontSize: 11,
+              }}>
+                brew install gh
+              </code>
+              {' '}to enable create_mission from GitHub issues. Without it, inline packets and the desktop UI still work.
+            </div>
           </div>
         ) : null}
       </div>
@@ -253,52 +403,182 @@ export function MCPTab() {
         </div>
       </div>
 
-      {/* Instructions */}
+      {/* One-click install */}
       <div>
-        <SectionHeader title="Setup instructions" />
+        <SectionHeader
+          title="One-click install"
+          subtitle="Writes the config directly into Claude's settings file. Your other MCP servers are preserved; we only touch the o8 entry."
+        />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{
-            padding: 14,
-            borderRadius: 12,
-            background: 'var(--t-panel)',
-            border: '1px solid var(--t-panel-border)',
-          }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', marginBottom: 6 }}>
-              Claude Desktop
-            </div>
-            <pre style={{
-              margin: 0,
-              fontSize: 12,
-              color: 'var(--t-text-muted)',
-              fontFamily: 'system-ui, sans-serif',
-              whiteSpace: 'pre-wrap',
-              lineHeight: 1.6,
-            }}>
-              {data.instructions.claudeDesktop}
-            </pre>
-          </div>
-          <div style={{
-            padding: 14,
-            borderRadius: 12,
-            background: 'var(--t-panel)',
-            border: '1px solid var(--t-panel-border)',
-          }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', marginBottom: 6 }}>
-              Claude Code
-            </div>
-            <pre style={{
-              margin: 0,
-              fontSize: 12,
-              color: 'var(--t-text-muted)',
-              fontFamily: 'system-ui, sans-serif',
-              whiteSpace: 'pre-wrap',
-              lineHeight: 1.6,
-            }}>
-              {data.instructions.claudeCode}
-            </pre>
-          </div>
+          <ClaudeTargetCard
+            label="Claude Desktop"
+            target="claude-desktop"
+            status={desktopStatus}
+            installing={installing === 'claude-desktop'}
+            note={installNote?.target === 'claude-desktop' ? installNote : null}
+            onInstall={() => { void installToClaude('claude-desktop'); }}
+            onRemove={() => { void removeFromClaude('claude-desktop'); }}
+            restartHint="Quit Claude Desktop (⌘Q) and reopen it."
+          />
+          <ClaudeTargetCard
+            label="Claude Code"
+            target="claude-code"
+            status={codeStatus}
+            installing={installing === 'claude-code'}
+            note={installNote?.target === 'claude-code' ? installNote : null}
+            onInstall={() => { void installToClaude('claude-code'); }}
+            onRemove={() => { void removeFromClaude('claude-code'); }}
+            restartHint="Restart Claude Code or run /mcp reload."
+          />
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Claude target card ──
+
+function ClaudeTargetCard({
+  label,
+  target: _target,
+  status,
+  installing,
+  note,
+  onInstall,
+  onRemove,
+  restartHint,
+}: {
+  label: string;
+  target: Target;
+  status: ClaudeTargetStatus | null;
+  installing: boolean;
+  note: { target: Target; message: string; ok: boolean } | null;
+  onInstall: () => void;
+  onRemove: () => void;
+  restartHint: string;
+}) {
+  const primary = status?.alreadyUpToDate
+    ? { label: 'Installed ✓', disabled: true }
+    : status?.alreadyRegistered
+      ? { label: 'Update config', disabled: false }
+      : { label: 'Install', disabled: false };
+
+  return (
+    <div style={{
+      padding: 14,
+      borderRadius: 12,
+      background: 'var(--t-panel)',
+      border: '1px solid var(--t-panel-border)',
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>
+            {label}
+          </div>
+          <div style={{
+            fontSize: 11,
+            color: 'var(--t-text-muted)',
+            fontFamily: MONO_FONT,
+            marginTop: 3,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            maxWidth: 560,
+          }}>
+            {status?.path ?? '…'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {status?.alreadyRegistered ? (
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={installing}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 8,
+                border: '1px solid var(--t-input-border)',
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: installing ? 'default' : 'pointer',
+                opacity: installing ? 0.6 : 1,
+                fontFamily: 'system-ui, sans-serif',
+                minHeight: 30,
+              }}
+            >
+              Remove
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onInstall}
+            disabled={installing || primary.disabled}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 8,
+              border: primary.disabled
+                ? '1px solid var(--t-input-border)'
+                : '1px solid var(--t-accent-border)',
+              background: primary.disabled ? 'transparent' : 'var(--t-accent)',
+              color: primary.disabled ? 'var(--t-text-faint)' : '#ffffff',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: installing || primary.disabled ? 'default' : 'pointer',
+              opacity: installing ? 0.7 : 1,
+              fontFamily: 'system-ui, sans-serif',
+              minHeight: 30,
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {installing ? 'Working…' : primary.label}
+          </button>
+        </div>
+      </div>
+
+      {/* Status row */}
+      <div style={{
+        fontSize: 11,
+        color: 'var(--t-text-muted)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        marginTop: 6,
+      }}>
+        <span>
+          {status
+            ? status.fileExists
+              ? status.alreadyUpToDate
+                ? 'Config is up to date.'
+                : status.alreadyRegistered
+                  ? 'Older o8 entry found — click Update config.'
+                  : `Config exists (${status.otherServers.length} other server${status.otherServers.length === 1 ? '' : 's'}).`
+              : 'No config file yet — one will be created.'
+            : 'Checking…'}
+        </span>
+      </div>
+
+      {/* Install result */}
+      {note ? (
+        <div style={{
+          marginTop: 10,
+          padding: '8px 10px',
+          borderRadius: 8,
+          fontSize: 12,
+          lineHeight: 1.5,
+          background: note.ok ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+          border: `1px solid ${note.ok ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+          color: 'var(--t-text)',
+        }}>
+          {note.ok ? `${note.message} ${restartHint}` : note.message}
+        </div>
+      ) : null}
     </div>
   );
 }
