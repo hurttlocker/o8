@@ -283,8 +283,8 @@ async function collectWorkspaceLifecycle() {
     const repoSlug = agent.runtimeSurface?.reviewContext?.repoSlug?.trim() || null;
     let repoName = repoSlug?.split('/').pop()?.trim()
       || deriveRepoFromWorkspace(workspacePath)
-      || (agent.workspace === 'unknown' ? 'clawd' : '');
-    if (activeRepo && (!repoName || repoName === 'clawd')) {
+      || (agent.workspace === 'unknown' ? 'workspace' : '');
+    if (activeRepo && (!repoName || repoName === 'workspace')) {
       repoName = activeRepo.repo;
     }
     if (repoName) repoSet.add(repoName);
@@ -335,7 +335,7 @@ async function collectWorkspaceLifecycle() {
     if (!repoName) continue;
     const pr = prsByBranch.get(`${repoName}:${branchName}`) || null;
     const status = deriveWorkspaceStatus({ runtimeStatus: agent.status, pr });
-    const localDiff = (!pr && repoName !== 'clawd') ? getLocalDiffStats(workspacePath) : null;
+    const localDiff = (!pr && repoName !== 'workspace') ? getLocalDiffStats(workspacePath) : null;
     const ghRepo = repoSlugByName.get(repoName) ?? fallbackSlugMap[repoName] ?? '';
     const workflowStage = deriveWorkflowStage({
       runtimeStatus: agent.status,

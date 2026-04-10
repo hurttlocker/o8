@@ -74,7 +74,10 @@ export function deriveRepo(workspace: string): string {
 export function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
   const groupMap = new Map<string, AgentDetail[]>();
   for (const agent of agents) {
-    const workspace = agent.workspace || '~/clawd';
+    // Default to the user's home so the UI falls back to something real
+    // on fresh installs. The old `~/clawd` leaked a personal directory
+    // name to every other dev.
+    const workspace = agent.workspace || '~';
     const existing = groupMap.get(workspace) ?? [];
     existing.push(agent);
     groupMap.set(workspace, existing);

@@ -16,7 +16,12 @@ import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 const execFileAsync = promisify(execFile);
 const REVIEW_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const REVIEW_REPO_SLUG = process.env.CORTEX_IDE_REVIEW_REPO || '';
-const FALLBACK_ACTIVE_ISSUE_NUMBER = Number.parseInt(process.env.CORTEX_IDE_ACTIVE_REVIEW_ISSUE || '18', 10);
+// No numeric fallback — the old value `18` was a personal dogfood issue.
+// Callers that need an active review must set CORTEX_IDE_ACTIVE_REVIEW_ISSUE.
+const FALLBACK_ACTIVE_ISSUE_NUMBER_RAW = process.env.CORTEX_IDE_ACTIVE_REVIEW_ISSUE;
+const FALLBACK_ACTIVE_ISSUE_NUMBER = FALLBACK_ACTIVE_ISSUE_NUMBER_RAW
+  ? Number.parseInt(FALLBACK_ACTIVE_ISSUE_NUMBER_RAW, 10)
+  : NaN;
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 
 function shortenPath(path: string) {
@@ -704,11 +709,13 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
   const activeIssue = activeIssues[0];
 
   if (repoSlug && !activeIssues.length) {
-    warnings.push(
-      linkedIssueNumbers.length
-        ? 'Unable to load the linked GitHub issues for the current review lane.'
-        : `Unable to load fallback GitHub issue #${FALLBACK_ACTIVE_ISSUE_NUMBER}.`,
-    );
+    if (linkedIssueNumbers.length) {
+      warnings.push('Unable to load the linked GitHub issues for the current review lane.');
+    } else if (Number.isFinite(FALLBACK_ACTIVE_ISSUE_NUMBER)) {
+      warnings.push(`Unable to load fallback GitHub issue #${FALLBACK_ACTIVE_ISSUE_NUMBER}.`);
+    }
+    // If the env var is unset and no linked issues exist, skip the warning
+    // entirely — the "no active review" state is the correct default.
   }
 
   if (!pullRequests.length) {

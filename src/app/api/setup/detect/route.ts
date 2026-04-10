@@ -223,7 +223,9 @@ async function detectOllama(): Promise<DetectedTool> {
 
 function detectApiKeys(): DetectedTool {
   const home = homedir();
-  const repoRoot = process.env.CORTEX_IDE_REPO_ROOT || join(home, 'clawd', 'repos', 'cortex-ide');
+  // Prefer the explicit env var; otherwise use the current working directory
+  // (the Next server's cwd) which is the repo root in both dev and packaged builds.
+  const repoRoot = process.env.CORTEX_IDE_REPO_ROOT || process.cwd();
   const paths = [
     join(home, '.cortex-ide', '.env.local'),
     join(repoRoot, '.env.local'),

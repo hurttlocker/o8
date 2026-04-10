@@ -871,7 +871,7 @@ export function buildProjectGroups(
   const relevant = snapshot.sessions.filter(isRelevant);
   const groupMap = new Map<string, SessionSummary[]>();
   for (const session of relevant) {
-    const workspace = session.workspace || '~/clawd';
+    const workspace = session.workspace || '~';
     const existing = groupMap.get(workspace) ?? [];
     existing.push(session);
     groupMap.set(workspace, existing);

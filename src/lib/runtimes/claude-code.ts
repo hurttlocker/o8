@@ -58,7 +58,7 @@ const capabilities: RuntimeCapabilities = {
 
 /**
  * Decode Claude Code's project directory name back to a filesystem path.
- * e.g., "-Users-marquisehurtt-clawd" → "/Users/marquisehurtt/clawd"
+ * e.g., "-Users-alice-projects" → "/Users/alice/projects"
  */
 function decodeProjectPath(encodedName: string): string {
   // Replace leading dash with /, then remaining dashes with /
@@ -264,7 +264,7 @@ async function waitForLaunchSessionId(
 
 /**
  * Extract a human-readable project name from the path.
- * e.g., "/Users/marquisehurtt/clawd/repos/cortex-ide" → "cortex-ide"
+ * e.g., "/Users/alice/projects/cortex-ide" → "cortex-ide"
  */
 function projectDisplayName(projectPath: string): string {
   return path.basename(projectPath) || projectPath;
