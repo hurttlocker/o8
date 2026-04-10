@@ -20,6 +20,190 @@ fn cortex_data_dir() -> String {
     })
 }
 
+// ── Dynamic port allocation ──
+//
+// A packaged Tauri app can't assume port 3001 is free — another dev tool,
+// a running o8 dev server, or an unrelated service may already own it.
+// `find_free_port(preferred)` probes from the preferred port upward and
+// returns the first one that binds successfully. The result is persisted
+// to `~/.cortex-ide/api-port` so downstream consumers (the MCP server,
+// `/api/setup/mcp-config`, the orchestrator session config writer) all
+// agree on where the backend actually lives.
+
+const API_PORT_RANGE: std::ops::Range<u16> = 3001..3050;
+const WS_PORT_RANGE: std::ops::Range<u16> = 3002..3100;
+
+/// Returns the first port in the range that can be bound to on 127.0.0.1.
+/// `skip` lets the caller avoid picking the same port for API and WS.
+fn find_free_port(range: std::ops::Range<u16>, skip: Option<u16>) -> Option<u16> {
+    for port in range {
+        if Some(port) == skip {
+            continue;
+        }
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return Some(port);
+        }
+    }
+    None
+}
+
+/// Persist the chosen ports to the data dir so child processes (MCP server,
+/// generators) can read the same values without guessing.
+fn write_port_file(name: &str, port: u16) -> std::io::Result<()> {
+    let dir = cortex_data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let path = format!("{}/{}", dir, name);
+    std::fs::write(path, port.to_string())
+}
+
+// ── Node.js pre-flight ──
+//
+// Finder-launched Tauri apps inherit a minimal PATH (`/usr/bin:/bin`) that
+// does not include `~/.nvm/...`, `~/.fnm/...`, `~/.volta/bin`, etc. A user
+// can have Node perfectly installed in their terminal but the bundled
+// server fails to spawn with a cryptic ENOENT.
+//
+// `resolve_node_via_login_shell()` runs a login shell (zsh → bash → sh) and
+// asks it where `node` lives, yielding the real absolute path a terminal
+// would see. If nothing works, returns None and the caller shows a dialog.
+
+const MIN_NODE_MAJOR: u32 = 22;
+
+fn resolve_node_via_login_shell() -> Option<String> {
+    let shells: [(&str, &[&str]); 3] = [
+        ("zsh", &["-l", "-c", "command -v node"]),
+        ("bash", &["-l", "-c", "command -v node"]),
+        ("sh", &["-l", "-c", "command -v node"]),
+    ];
+    for (shell, args) in shells {
+        if let Ok(out) = Command::new(shell).args(args).output() {
+            if out.status.success() {
+                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !path.is_empty() && std::path::Path::new(&path).exists() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    // Last resort: raw PATH lookup (in case the user really has it in
+    // /usr/local/bin and Finder's PATH is fine).
+    if let Ok(out) = Command::new("which").arg("node").output() {
+        if out.status.success() {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path.is_empty() && std::path::Path::new(&path).exists() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+/// Returns Some((major, raw_version)) on success, None on failure.
+fn check_node_version(node_bin: &str) -> Option<(u32, String)> {
+    let out = Command::new(node_bin).arg("--version").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let trimmed = raw.trim_start_matches('v');
+    let major_str = trimmed.split('.').next()?;
+    let major = major_str.parse::<u32>().ok()?;
+    Some((major, raw))
+}
+
+#[derive(Debug)]
+enum NodePreflightError {
+    Missing,
+    TooOld { raw: String },
+}
+
+/// Full pre-flight: returns the resolved node path on success, or an error
+/// describing what to tell the user.
+fn run_node_preflight() -> Result<String, NodePreflightError> {
+    let node_bin = resolve_node_via_login_shell().ok_or(NodePreflightError::Missing)?;
+    let (major, raw) = check_node_version(&node_bin).ok_or(NodePreflightError::Missing)?;
+    if major < MIN_NODE_MAJOR {
+        return Err(NodePreflightError::TooOld { raw });
+    }
+    log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
+    Ok(node_bin)
+}
+
+/// Show a native error dialog and exit. Uses platform-native tools so we
+/// don't need to pull in tauri-plugin-dialog.
+fn show_node_error_and_exit(err: NodePreflightError) -> ! {
+    let (title, body) = match err {
+        NodePreflightError::Missing => (
+            "Node.js not found",
+            format!(
+                "o8 needs Node.js v{}+ to run its backend.\n\n\
+                 Install the latest LTS from https://nodejs.org and launch o8 again.\n\n\
+                 If Node.js is already installed via nvm, fnm, or Volta, make sure it is\n\
+                 available to a login shell (zsh/bash with -l flag).",
+                MIN_NODE_MAJOR
+            ),
+        ),
+        NodePreflightError::TooOld { raw } => (
+            "Node.js is too old",
+            format!(
+                "o8 needs Node.js v{}+ but found {}.\n\n\
+                 Upgrade from https://nodejs.org and launch o8 again.",
+                MIN_NODE_MAJOR, raw
+            ),
+        ),
+    };
+
+    log::error!("{}: {}", title, body);
+
+    #[cfg(target_os = "macos")]
+    {
+        // osascript is always available on macOS. Escape quotes for AppleScript.
+        let escape = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            r#"display dialog "{}" with title "{}" buttons {{"Download Node.js", "Quit"}} default button "Download Node.js" with icon stop"#,
+            escape(&body),
+            escape(title)
+        );
+        let out = Command::new("osascript").args(["-e", &script]).output();
+        let clicked_download = out
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.contains("Download Node.js"))
+            .unwrap_or(false);
+        if clicked_download {
+            let _ = Command::new("open").arg("https://nodejs.org").spawn();
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // mshta shows a VBScript message box without extra deps.
+        let escape = |s: &str| s.replace('"', "\"\"").replace('\n', " ");
+        let script = format!(
+            r#"javascript:var r=confirm("{}\n\nClick OK to open nodejs.org.");if(r)new ActiveXObject("WScript.Shell").Run("cmd /c start https://nodejs.org",1,false);window.close();"#,
+            escape(&format!("{}: {}", title, body))
+        );
+        let _ = Command::new("mshta").arg(script).spawn();
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        // Linux fallback — try zenity / kdialog, otherwise just stderr.
+        let full = format!("{}\n\n{}", title, body);
+        let _ = Command::new("zenity")
+            .args(["--error", "--title", title, "--text", &full])
+            .status()
+            .or_else(|_| {
+                Command::new("kdialog")
+                    .args(["--error", &full])
+                    .status()
+            });
+        eprintln!("{}: {}", title, body);
+    }
+
+    std::process::exit(1);
+}
+
 /// Desktop info exposed to the React frontend via invoke
 #[derive(Serialize)]
 pub struct DesktopInfo {
@@ -543,17 +727,54 @@ pub fn run() {
             }
 
             // ── Start bundled Next.js server ──
-            // Skip if port 3001 is already bound (beforeDevCommand started dev servers)
             let resource_dir = app.path().resource_dir().expect("failed to resolve resource dir");
             let server_dir = resource_dir.join("server");
             let server_js = server_dir.join("server.js");
+
+            // If a dev server is already running on the default port (e.g. the
+            // user is running `npm run desktop:dev` in a terminal), defer to it
+            // and don't spawn the bundled copy — the dev server is the source
+            // of truth during iteration.
             let dev_server_running = std::net::TcpStream::connect("127.0.0.1:3001").is_ok();
+
+            // Default ports that survived from the legacy 3001/3002 era. If
+            // nothing is on them and the bundled server is about to start,
+            // these become the actual bindings. If they're taken, we probe
+            // upward from the Rust side.
+            let mut api_port: u16 = 3001;
+            let mut ws_port: u16 = 3002;
 
             if dev_server_running {
                 log::info!("Dev server already running on :3001 — skipping bundled servers");
+                // Write the dev ports so MCP servers launched from this
+                // session agree with the dev backend.
+                let _ = write_port_file("api-port", api_port);
+                let _ = write_port_file("ws-port", ws_port);
+                std::env::set_var("O8_API_PORT", api_port.to_string());
+                std::env::set_var("O8_WS_PORT", ws_port.to_string());
             } else if server_js.exists() {
-                // Use system Node.js (prerequisite)
-                let node_bin = "node".to_string();
+                // ── Node.js pre-flight ──
+                // Resolve node via a login shell (handles nvm/fnm/volta),
+                // verify version, and show a native dialog + exit on failure.
+                // Without this the app silently loader-spins forever.
+                let node_bin = match run_node_preflight() {
+                    Ok(path) => path,
+                    Err(err) => show_node_error_and_exit(err),
+                };
+                // Persist for child processes (MCP server, ws-server, etc.)
+                std::env::set_var("O8_NODE_BIN", &node_bin);
+
+                // ── Port allocation ──
+                // Probe for free ports starting at the legacy defaults. If the
+                // user has something else on 3001/3002 (another o8 instance, a
+                // Next dev server, a random service), fall through to 3003+.
+                api_port = find_free_port(API_PORT_RANGE, None).unwrap_or(3001);
+                ws_port = find_free_port(WS_PORT_RANGE, Some(api_port)).unwrap_or(3002);
+                log::info!("Allocated ports: api={} ws={}", api_port, ws_port);
+                let _ = write_port_file("api-port", api_port);
+                let _ = write_port_file("ws-port", ws_port);
+                std::env::set_var("O8_API_PORT", api_port.to_string());
+                std::env::set_var("O8_WS_PORT", ws_port.to_string());
 
                 // Set Cortex binary path if bundled
                 let cortex_bin = server_dir.join("bin").join("cortex");
@@ -571,14 +792,18 @@ pub fn run() {
                     log::info!("Bundled MCP scripts at {:?}", server_dir);
                 }
 
-                log::info!("Starting server: {} {:?}", node_bin, server_js);
+                log::info!("Starting server: {} {:?} on :{}", node_bin, server_js, api_port);
                 let mut server_cmd = Command::new(&node_bin);
                 server_cmd
                     .arg(&server_js)
                     .current_dir(&server_dir)
-                    .env("PORT", "3001")
+                    .env("PORT", api_port.to_string())
                     .env("HOSTNAME", "127.0.0.1")
-                    .env("NODE_ENV", "production");
+                    .env("NODE_ENV", "production")
+                    .env("O8_NODE_BIN", &node_bin)
+                    .env("O8_API_PORT", api_port.to_string())
+                    .env("O8_WS_PORT", ws_port.to_string())
+                    .env("WS_PORT", ws_port.to_string());
                 if has_bundled_mcp {
                     server_cmd.env("O8_BUNDLED_MCP_DIR", &server_dir);
                     server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
@@ -592,33 +817,45 @@ pub fn run() {
                         log::info!("Next.js server started (pid: {})", child.id());
                     }
                     Err(e) => {
-                        log::error!("Failed to start server: {}. Is Node.js installed?", e);
+                        log::error!("Failed to start server: {}", e);
+                        show_node_error_and_exit(NodePreflightError::Missing);
+                    }
+                }
+
+                // ── Start WebSocket server (terminals, chat, git watcher) ──
+                let ws_server_js = server_dir.join("ws-server.mjs");
+                if ws_server_js.exists() {
+                    log::info!("Starting WS server: {} {:?} on :{}", node_bin, ws_server_js, ws_port);
+                    match Command::new(&node_bin)
+                        .arg(&ws_server_js)
+                        .current_dir(&server_dir)
+                        .env("O8_NODE_BIN", &node_bin)
+                        .env("WS_PORT", ws_port.to_string())
+                        .env("NEXT_ORIGIN", format!("http://127.0.0.1:{}", api_port))
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                    {
+                        Ok(child) => {
+                            log::info!("WS server started (pid: {})", child.id());
+                        }
+                        Err(e) => {
+                            log::error!("Failed to start WS server: {}", e);
+                        }
                     }
                 }
             } else {
                 log::warn!("No bundled server found at {:?} — running in dev mode", server_js);
+                let _ = write_port_file("api-port", api_port);
+                let _ = write_port_file("ws-port", ws_port);
+                std::env::set_var("O8_API_PORT", api_port.to_string());
+                std::env::set_var("O8_WS_PORT", ws_port.to_string());
             }
 
-            // ── Start WebSocket server (terminals, chat, git watcher) ──
-            let ws_server = server_dir.join("ws-server.mjs");
-            if !dev_server_running && ws_server.exists() {
-                let ws_node = "node".to_string();
-                log::info!("Starting WS server: {} {:?}", ws_node, ws_server);
-                match Command::new(&ws_node)
-                    .arg(&ws_server)
-                    .current_dir(&server_dir)
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                {
-                    Ok(child) => {
-                        log::info!("WS server started (pid: {})", child.id());
-                    }
-                    Err(e) => {
-                        log::error!("Failed to start WS server: {}", e);
-                    }
-                }
-            }
+            // Expose the resolved ports to the frontend loader HTML so it
+            // knows where to navigate.
+            std::env::set_var("CORTEX_IDE_API_PORT", api_port.to_string());
+            std::env::set_var("CORTEX_IDE_WS_PORT", ws_port.to_string());
 
             log::info!("Cortex IDE desktop shell initialized");
 

@@ -30,7 +30,12 @@ if (!existsSync(standalone)) {
 }
 
 // ── Frontend (loader HTML for Tauri webview) ──
-const PORT = process.env.CORTEX_IDE_PORT || '3001';
+//
+// The loader probes a range of ports because the Rust sidecar may have
+// picked something other than 3001 when 3001 was taken. It reads
+// `window.__O8_PORT_HINT__` first (the sidecar injects this via the
+// `additional_browser_args`/window-state plumbing if available), then falls
+// back to probing 3001-3050. Once a port responds, it navigates there.
 const loaderHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -57,18 +62,43 @@ const loaderHtml = `<!DOCTYPE html>
     p { color: #71717a; font-size: 13px; }
   </style>
   <script>
-    const TARGET = 'http://127.0.0.1:${PORT}/dashboard';
+    // Port candidates — start at the last port the Tauri sidecar allocated
+    // (injected via __O8_PORT_HINT__ when available), then fan out across
+    // the probe range the sidecar uses.
+    const HINT = typeof window.__O8_PORT_HINT__ === 'number' ? window.__O8_PORT_HINT__ : null;
+    const PROBE_RANGE = [];
+    for (let p = 3001; p < 3050; p++) PROBE_RANGE.push(p);
+    const CANDIDATES = HINT ? [HINT, ...PROBE_RANGE.filter(p => p !== HINT)] : PROBE_RANGE;
+
     let attempts = 0;
-    function check() {
-      fetch('http://127.0.0.1:${PORT}/api/panel/status', { mode: 'no-cors' })
-        .then(() => { window.location.href = TARGET; })
-        .catch(() => {
-          attempts++;
-          if (attempts < 30) setTimeout(check, 500);
-          else document.getElementById('status').innerHTML = 'Server failed to start.<br><br><span style="color:#94a3b8;font-size:12px">Make sure Node.js is installed: <a href="https://nodejs.org" style="color:#60a5fa">nodejs.org</a></span>';
-        });
+    let candidateIndex = 0;
+
+    async function probe(port) {
+      try {
+        await fetch('http://127.0.0.1:' + port + '/api/panel/status', { mode: 'no-cors' });
+        window.location.href = 'http://127.0.0.1:' + port + '/dashboard';
+        return true;
+      } catch { return false; }
     }
-    setTimeout(check, 500);
+
+    async function tick() {
+      attempts++;
+      // Walk the candidate list once per tick, stop at the first hit.
+      for (let i = 0; i < CANDIDATES.length; i++) {
+        const port = CANDIDATES[(candidateIndex + i) % CANDIDATES.length];
+        if (await probe(port)) return;
+      }
+      if (attempts < 30) {
+        setTimeout(tick, 500);
+      } else {
+        document.getElementById('status').innerHTML =
+          'Server failed to start.<br><br>' +
+          '<span style="color:#94a3b8;font-size:12px">Make sure Node.js is installed (v22+): ' +
+          '<a href="https://nodejs.org" style="color:#60a5fa">nodejs.org</a></span>';
+      }
+    }
+
+    setTimeout(tick, 500);
   </script>
 </head>
 <body>
@@ -77,7 +107,7 @@ const loaderHtml = `<!DOCTYPE html>
 </body>
 </html>`;
 writeFileSync(join(frontend, 'index.html'), loaderHtml);
-console.log('📦 Created frontend loader');
+console.log('📦 Created frontend loader (port-probing)');
 
 // ── Server bundle ──
 // server.js + package.json

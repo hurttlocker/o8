@@ -26,6 +26,9 @@ interface McpConfigResponse {
   instructions: { claudeDesktop: string; claudeCode: string };
   diagnostics: {
     apiBase: string;
+    apiPort?: number;
+    wsPort?: number;
+    portSource?: 'env' | 'file' | 'default';
     bundled: boolean;
     platform: string;
     nodeInstalled: boolean;
@@ -251,7 +254,11 @@ export function MCPTab() {
           background: 'var(--t-panel)',
           border: '1px solid var(--t-panel-border)',
         }}>
-          <StatusRow label="Backend" ok={true} detail={d.apiBase} />
+          <StatusRow
+            label="Backend"
+            ok={true}
+            detail={`${d.apiBase}${d.portSource ? ` (${d.portSource === 'env' ? 'env var' : d.portSource === 'file' ? 'port file' : 'default'})` : ''}`}
+          />
           <StatusRow label="Install mode" ok={true} detail={d.bundled ? 'Packaged Tauri app' : 'Dev checkout'} />
           <StatusRow label="Node.js" ok={d.nodeInstalled} detail={d.nodeBin} />
           <StatusRow label="Codex CLI" ok={d.codexInstalled} detail={d.codexBin} />
