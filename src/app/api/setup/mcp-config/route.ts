@@ -26,6 +26,7 @@ import { NextResponse } from 'next/server';
 import { existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
+import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
 
 function findCommand(name: string): string | null {
   try {
@@ -36,16 +37,13 @@ function findCommand(name: string): string | null {
   }
 }
 
-function getApiBase(): string {
-  const port = process.env.PORT || process.env.CORTEX_IDE_PORT || '3001';
-  return `http://127.0.0.1:${port}`;
-}
-
 function buildServerConfig(): { command: string; args: string[]; env: Record<string, string> } {
   // Bundled packaged app signals this via env var written by the Tauri Rust sidecar.
   const bundled = process.env.O8_BUNDLED_MCP_PATH;
   if (bundled && existsSync(bundled)) {
-    const nodeBin = findCommand('node') || 'node';
+    // Prefer the node path the Tauri sidecar resolved via login shell
+    // (handles nvm/fnm/volta that Finder's minimal PATH misses).
+    const nodeBin = process.env.O8_NODE_BIN || findCommand('node') || 'node';
     return {
       command: nodeBin,
       args: [bundled],
@@ -112,6 +110,7 @@ export async function GET() {
     const nodeBin = findCommand('node');
     const codexBin = findCommand('codex');
     const ghBin = findCommand('gh');
+    const portInfo = resolvePortInfo();
 
     const dataDir = process.env.CORTEX_IDE_DATA_DIR
       || join(process.env.HOME || '', '.cortex-ide');
@@ -125,6 +124,9 @@ export async function GET() {
       instructions: buildInstructions(),
       diagnostics: {
         apiBase: getApiBase(),
+        apiPort: portInfo.apiPort,
+        wsPort: portInfo.wsPort,
+        portSource: portInfo.source,
         bundled: Boolean(process.env.O8_BUNDLED_MCP_PATH),
         platform: process.platform,
         nodeInstalled: Boolean(nodeBin),
