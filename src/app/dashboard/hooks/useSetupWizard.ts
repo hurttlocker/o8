@@ -15,7 +15,9 @@ export function useSetupWizard() {
         const configRes = await fetch('/api/setup/config');
         if (!configRes.ok) return;
         const config = await configRes.json();
-        if (config.completedAt) return; // Already completed setup
+        // Treat either flag as "done" — some older installs only have
+        // completedAt because of the schema-drift bug fixed 2026-04-09.
+        if (config.setupComplete || config.completedAt) return;
         // Show the onboarding screen immediately — detection runs in background
         setSetupWizardOpen(true);
         try {
@@ -35,7 +37,14 @@ export function useSetupWizard() {
       await fetch('/api/setup/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completedAt: new Date().toISOString() }),
+        // Write BOTH the canonical flag and the display timestamp.
+        // Previously only `completedAt` was written, leaving `setupComplete`
+        // stuck at its default `false` forever and making any code that
+        // gated on the canonical flag think onboarding never finished.
+        body: JSON.stringify({
+          setupComplete: true,
+          completedAt: new Date().toISOString(),
+        }),
       });
     } catch { /* silent */ }
   }, []);
