@@ -409,6 +409,34 @@ function OrchestratorChatTileBase({
         </button>
       </div>
 
+      {/* Plan-mode banner — visually reinforces the permission chip state. */}
+      {!isFullAccess ? (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            paddingTop: 8,
+            paddingRight: 14,
+            paddingBottom: 8,
+            paddingLeft: 14,
+            borderBottomWidth: 1,
+            borderBottomStyle: 'solid',
+            borderBottomColor: 'var(--t-divider-subtle)',
+            background: 'var(--t-panel-hover)',
+            color: 'var(--t-text-secondary)',
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          Read-only mode — Claude will inspect but cannot modify files or run side-effecting commands.
+        </div>
+      ) : null}
+
       {/* Chat body */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
         {pivotToast ? (

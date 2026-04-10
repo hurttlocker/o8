@@ -1,11 +1,12 @@
 'use client';
 
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   readOrchestratorRuntimePreference,
   subscribeOrchestratorRuntimePreference,
 } from '@/lib/orchestrator/preferences';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { useOrchestratorTileBus } from './orchestrator-tile-bus';
 import {
   ThoughtsMissionPanel,
   type ThoughtsMissionPanelHandle,
@@ -45,6 +46,7 @@ function MissionControlTileBase({
     () => readOrchestratorRuntimePreference(),
   );
   const panelRef = useRef<ThoughtsMissionPanelHandle>(null);
+  const orchestratorBus = useOrchestratorTileBus();
 
   useEffect(() => subscribeOrchestratorRuntimePreference(setPreferredRuntime), []);
 
@@ -54,6 +56,25 @@ function MissionControlTileBase({
   }, []);
 
   const sessionTargets = buildAgentTargets(agents, preferredRuntime);
+
+  // Wrap onLaunchPacket so that successful dispatches echo a one-line
+  // system message into the orchestrator chat. If no chat tile is
+  // mounted, the bus silently drops the echo — we don't force one open
+  // just for a notification.
+  const handleLaunchPacket = useCallback(
+    async (packet: Parameters<NonNullable<typeof onLaunchPacket>>[0]) => {
+      if (!onLaunchPacket) return null;
+      const result = await onLaunchPacket(packet);
+      if (result) {
+        const title = packet.title || packet.referenceLabel || 'Mission';
+        orchestratorBus.postSystemMessageToChat(
+          `Dispatched ${title}`,
+        );
+      }
+      return result;
+    },
+    [onLaunchPacket, orchestratorBus],
+  );
 
   const thoughtsBodyBackground = 'linear-gradient(180deg, var(--t-glass-muted) 0%, rgba(0, 0, 0, 0) 100%)';
   const thoughtsElevatedSurface = 'var(--t-glass-elevated)';
@@ -145,7 +166,7 @@ function MissionControlTileBase({
           thoughtsElevatedShadow={thoughtsElevatedShadow}
           thoughtsMutedGlass={thoughtsMutedGlass}
           onMissionStateChange={onMissionStateChange}
-          onLaunchPacket={onLaunchPacket}
+          onLaunchPacket={handleLaunchPacket}
           onFocusPacket={onFocusPacket}
         />
       </div>
