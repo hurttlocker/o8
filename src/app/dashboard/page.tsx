@@ -445,6 +445,8 @@ function DashboardInner() {
     handleSelectPreviewTile,
     handleSplitTile,
     hasThoughtsTile,
+    hasMissionControlTile,
+    hasOrchestratorHistoryTile,
     openCanvasTab,
     registerContextualPanelHandle,
     selectCanvasTab,
@@ -455,6 +457,8 @@ function DashboardInner() {
     toggleContextualPanelTile,
     toggleThoughtsTile,
     ensureThoughtsTile,
+    toggleMissionControlTile,
+    toggleOrchestratorHistoryTile,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
     workspacePreviews,
@@ -2233,6 +2237,10 @@ function DashboardInner() {
         )}
         thoughtsOpen={hasThoughtsTile}
         onThoughtsToggle={toggleThoughtsTile}
+        missionControlOpen={hasMissionControlTile}
+        onMissionControlToggle={toggleMissionControlTile}
+        historyOpen={hasOrchestratorHistoryTile}
+        onHistoryToggle={toggleOrchestratorHistoryTile}
         onPortPreview={(_port, url) => {
           setO8BrowserUrl(url);
           setO8ActiveTab('browser');
