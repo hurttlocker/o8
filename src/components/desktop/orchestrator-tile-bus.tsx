@@ -42,6 +42,13 @@ interface OrchestratorTileBus {
   loadThreadInChat: (tabId: string) => void;
   /** Ensure a chat tile exists in the layout and focus it. */
   ensureChatTile: () => void;
+  /**
+   * Append a system-role message to the chat tile's stream. Used by the
+   * mission tile to echo dispatches into the chat, and by the plan-mode
+   * approval path to surface inline notices. No-op if no chat tile is
+   * mounted (the mission tile does not force one open just for an echo).
+   */
+  postSystemMessageToChat: (text: string) => void;
   /** True when a chat tile is currently mounted and registered. */
   chatTileReady: boolean;
 }
@@ -102,14 +109,21 @@ export function OrchestratorTileBusProvider({
     [ensureChatTile],
   );
 
+  const postSystemMessageToChat = useCallback((text: string) => {
+    const handle = chatHandleRef.current;
+    if (!handle) return;
+    handle.appendSystemMessage(text);
+  }, []);
+
   const value = useMemo<OrchestratorTileBus>(
     () => ({
       registerChatHandle,
       loadThreadInChat,
       ensureChatTile,
+      postSystemMessageToChat,
       chatTileReady,
     }),
-    [chatTileReady, ensureChatTile, loadThreadInChat, registerChatHandle],
+    [chatTileReady, ensureChatTile, loadThreadInChat, postSystemMessageToChat, registerChatHandle],
   );
 
   return (
@@ -129,6 +143,7 @@ export function useOrchestratorTileBus(): OrchestratorTileBus {
       registerChatHandle: () => undefined,
       loadThreadInChat: () => undefined,
       ensureChatTile: () => undefined,
+      postSystemMessageToChat: () => undefined,
       chatTileReady: false,
     };
   }
