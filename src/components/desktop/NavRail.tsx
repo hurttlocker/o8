@@ -20,6 +20,8 @@ import {
   Lightbulb,
   Plugs,
   ShieldCheck,
+  Rocket,
+  ClockCounterClockwise,
 } from '@phosphor-icons/react';
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 
@@ -42,6 +44,10 @@ interface NavRailProps {
   alertTray?: ReactElement<{ desktopAnchorEl?: HTMLElement | null }> | null;
   thoughtsOpen?: boolean;
   onThoughtsToggle?: () => void;
+  missionControlOpen?: boolean;
+  onMissionControlToggle?: () => void;
+  historyOpen?: boolean;
+  onHistoryToggle?: () => void;
   onPortPreview?: (port: number, url: string, repo?: string) => void;
 }
 
@@ -519,6 +525,10 @@ export function NavRail({
   alertTray,
   thoughtsOpen,
   onThoughtsToggle,
+  missionControlOpen,
+  onMissionControlToggle,
+  historyOpen,
+  onHistoryToggle,
   onPortPreview,
 }: NavRailProps) {
   const [inTauri, setInTauri] = useState(false);
@@ -588,9 +598,23 @@ export function NavRail({
 
         <UtilButton
           icon={Lightbulb}
-          label="Thoughts"
+          label="Orchestrator"
           onClick={onThoughtsToggle}
           active={thoughtsOpen}
+          useTauri={inTauri}
+        />
+        <UtilButton
+          icon={Rocket}
+          label="Mission Control"
+          onClick={onMissionControlToggle}
+          active={missionControlOpen}
+          useTauri={inTauri}
+        />
+        <UtilButton
+          icon={ClockCounterClockwise}
+          label="Orchestrator History"
+          onClick={onHistoryToggle}
+          active={historyOpen}
           useTauri={inTauri}
         />
         <div ref={setAlertAnchorEl} style={{ position: 'relative', width: '100%' }}>
