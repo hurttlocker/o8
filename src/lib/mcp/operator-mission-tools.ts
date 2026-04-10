@@ -1,8 +1,33 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { sanitizeErrorMessage } from '@/lib/api/error-format';
+
+/**
+ * Resolve the backend base URL from env, port file, or legacy default.
+ * Kept inline (small dupe with operator-mcp-server.ts) because this file
+ * is also imported from the Next server where getApiBase() is available,
+ * but the MCP-spawn path needs a plain function without Next-specific deps.
+ */
+function resolveApiBase(): string {
+  const envBase = process.env.O8_API_BASE?.trim();
+  if (envBase) return envBase;
+  const envPort = process.env.O8_API_PORT?.trim();
+  if (envPort) return `http://127.0.0.1:${envPort}`;
+  try {
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.cortex-ide');
+    const portFile = join(dataDir, 'api-port');
+    if (existsSync(portFile)) {
+      const n = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
+      if (Number.isInteger(n) && n > 0 && n < 65536) {
+        return `http://127.0.0.1:${n}`;
+      }
+    }
+  } catch { /* fall through */ }
+  return 'http://localhost:3001';
+}
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type {
   ApproveAndMergeInput as ApproveAndMergeRequest,
@@ -18,7 +43,7 @@ import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 const execFileAsync = promisify(execFile);
 const GH_MAX_BUFFER = 10 * 1024 * 1024;
 const LOG_PREFIX = '[mcp-operator]';
-const API_BASE = process.env.O8_API_BASE?.trim() || 'http://localhost:3001';
+const API_BASE = resolveApiBase();
 
 interface CreateMissionInput {
   issues: string[];

@@ -20,6 +20,7 @@ import { NextResponse } from 'next/server';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
+import { getApiBase } from '@/lib/panel/api-port';
 
 // ── Config path resolution ──
 
@@ -54,11 +55,6 @@ function findCommand(name: string): string | null {
   }
 }
 
-function getApiBase(): string {
-  const port = process.env.PORT || process.env.CORTEX_IDE_PORT || '3001';
-  return `http://127.0.0.1:${port}`;
-}
-
 interface McpServerConfig {
   command: string;
   args: string[];
@@ -68,7 +64,9 @@ interface McpServerConfig {
 function buildServerConfig(): McpServerConfig {
   const bundled = process.env.O8_BUNDLED_MCP_PATH;
   if (bundled && existsSync(bundled)) {
-    const nodeBin = findCommand('node') || 'node';
+    // Prefer the node path the Tauri sidecar resolved via login shell
+    // (handles nvm/fnm/volta that Finder's minimal PATH misses).
+    const nodeBin = process.env.O8_NODE_BIN || findCommand('node') || 'node';
     return {
       command: nodeBin,
       args: [bundled],

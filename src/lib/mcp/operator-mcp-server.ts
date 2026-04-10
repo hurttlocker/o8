@@ -12,6 +12,8 @@
 
 import { createInterface } from 'node:readline';
 import { execSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import {
   approveAndMergePacket,
@@ -83,7 +85,38 @@ interface McpToolResult {
 
 // ── Config ──
 
-const API_BASE = process.env.O8_API_BASE || 'http://localhost:3001';
+/**
+ * Resolve the backend base URL. Priority:
+ *   1. O8_API_BASE env var (explicit override)
+ *   2. O8_API_PORT env var (set by Tauri sidecar at spawn time)
+ *   3. ~/.cortex-ide/api-port file (written by Tauri sidecar after probing)
+ *   4. Legacy default http://localhost:3001 (dev workflow)
+ *
+ * This MCP server can be launched long after the Tauri shell picks a port,
+ * and that port may not be 3001 if something else owned it. Reading the
+ * persisted file keeps the MCP tools pointed at the real backend.
+ */
+function resolveApiBase(): string {
+  if (process.env.O8_API_BASE) return process.env.O8_API_BASE;
+  if (process.env.O8_API_PORT) {
+    return `http://127.0.0.1:${process.env.O8_API_PORT}`;
+  }
+  try {
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR
+      || join(process.env.HOME || '', '.cortex-ide');
+    const portFile = join(dataDir, 'api-port');
+    if (existsSync(portFile)) {
+      const raw = readFileSync(portFile, 'utf-8').trim();
+      const n = parseInt(raw, 10);
+      if (Number.isInteger(n) && n > 0 && n < 65536) {
+        return `http://127.0.0.1:${n}`;
+      }
+    }
+  } catch { /* fall through */ }
+  return 'http://localhost:3001';
+}
+
+const API_BASE = resolveApiBase();
 const MAX_RETRIES = 3;
 const RETRY_DELAYS_MS = [500, 1500, 4000];
 const FETCH_TIMEOUT_MS = 15_000;

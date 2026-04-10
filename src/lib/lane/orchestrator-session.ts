@@ -58,7 +58,12 @@ function resolveCortexMcpServerPath(): { command: string; path: string } {
   const bundledDir = process.env.O8_BUNDLED_MCP_DIR;
   if (bundledDir) {
     const bundled = join(bundledDir, 'cortex-mcp-server.mjs');
-    if (existsSync(bundled)) return { command: 'node', path: bundled };
+    if (existsSync(bundled)) {
+      // Prefer the node path the Tauri sidecar resolved via login shell
+      // (handles nvm/fnm/volta that Finder's minimal PATH misses).
+      const nodeBin = process.env.O8_NODE_BIN || 'node';
+      return { command: nodeBin, path: bundled };
+    }
   }
   const devSource = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/cortex-mcp-server.ts');
   return { command: 'npx', path: devSource };
@@ -217,7 +222,11 @@ function ensureMcpConfig(repoPath: string): string {
 
   const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}.json`);
   const repoSlug = detectRepoSlug(repoPath);
-  const apiBase = `http://localhost:${process.env.PORT || '3001'}`;
+  // Use the shared port resolver so MCP children agree with the live backend
+  // (which may be on 3001 in dev but 3002+ in a packaged install with a port
+  // collision — see src/lib/panel/api-port.ts).
+  const { getApiBase } = require('@/lib/panel/api-port') as typeof import('@/lib/panel/api-port');
+  const apiBase = getApiBase();
 
   // Dev: `npx tsx <ts source>`. Packaged app: `node <bundled .mjs>`.
   const mcpServer = resolveCortexMcpServerPath();

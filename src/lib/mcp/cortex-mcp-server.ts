@@ -13,7 +13,32 @@
  */
 
 import { createInterface } from 'node:readline';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { getOrCreateWsToken } from '../ws-auth';
+
+/**
+ * Resolve the backend base URL from env, port file, or legacy default.
+ * The Tauri sidecar writes ~/.cortex-ide/api-port after probing for a free
+ * port, so MCP servers spawned long after the Tauri shell picked a port
+ * still land on the live backend.
+ */
+function resolveApiBase(): string {
+  if (process.env.CORTEX_API_BASE) return process.env.CORTEX_API_BASE;
+  if (process.env.O8_API_PORT) return `http://127.0.0.1:${process.env.O8_API_PORT}`;
+  try {
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.cortex-ide');
+    const portFile = join(dataDir, 'api-port');
+    if (existsSync(portFile)) {
+      const n = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
+      if (Number.isInteger(n) && n > 0 && n < 65536) {
+        return `http://127.0.0.1:${n}`;
+      }
+    }
+  } catch { /* fall through */ }
+  return 'http://localhost:3001';
+}
 
 // ── Types ──
 
@@ -44,7 +69,7 @@ interface McpToolResult {
 
 // ── Config ──
 
-const API_BASE = process.env.CORTEX_API_BASE || 'http://localhost:3001';
+const API_BASE = resolveApiBase();
 const REPO_PATH = process.env.CORTEX_REPO_PATH || '';
 const REPO_SLUG = process.env.CORTEX_REPO_SLUG || '';
 const WS_TOKEN = process.env.WS_TOKEN?.trim() || getOrCreateWsToken();
