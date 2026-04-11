@@ -322,11 +322,6 @@ export function useTileLayout({
     [tileLayout.root],
   );
 
-  const hasThoughtsTile = useMemo(
-    () => Boolean(findLeafByContentKind(tileLayout.root, 'thoughts')),
-    [tileLayout.root],
-  );
-
   const handleCloseTile = useCallback((tileId: string) => {
     // Never close the WorkspaceTerminal tile
     const tile = findTile(tileLayout.root, tileId);
@@ -486,85 +481,6 @@ export function useTileLayout({
       ratio: 0.68,
     });
   }, [ensureTileKind, handleCloseTile, tileLayout]);
-
-  const toggleThoughtsTile = useCallback(() => {
-    const existingLeaf = findLeafByContentKind(tileLayout.root, 'thoughts');
-    if (existingLeaf) {
-      if (countLeaves(tileLayout.root) > 1) {
-        handleCloseTile(existingLeaf.id);
-      } else {
-        // If the orchestrator tile is the only tile, activate it instead
-        // of closing (never leave the user with an empty layout).
-        setActiveTileId(existingLeaf.id);
-      }
-      return;
-    }
-    ensureTileKind('thoughts', {
-      direction: 'horizontal',
-      ratio: 0.55,
-    });
-  }, [ensureTileKind, handleCloseTile, setActiveTileId, tileLayout]);
-
-  /**
-   * Open-or-focus helper for the orchestrator chat tile. Unlike the
-   * toggle, this never closes an existing tile — it just guarantees a
-   * chat tile is mounted and activates it. Used by the orchestrator
-   * tile bus so siblings (history, mission) can drive the chat without
-   * accidentally closing it.
-   */
-  const ensureThoughtsTile = useCallback(() => {
-    const existingLeaf = findLeafByContentKind(tileLayout.root, 'thoughts');
-    if (existingLeaf) {
-      setActiveTileId(existingLeaf.id);
-      return;
-    }
-    ensureTileKind('thoughts', {
-      direction: 'horizontal',
-      ratio: 0.55,
-    });
-  }, [ensureTileKind, setActiveTileId, tileLayout]);
-
-  const toggleMissionControlTile = useCallback(() => {
-    const existingLeaf = findLeafByContentKind(tileLayout.root, 'mission-control');
-    if (existingLeaf) {
-      if (countLeaves(tileLayout.root) > 1) {
-        handleCloseTile(existingLeaf.id);
-      } else {
-        setActiveTileId(existingLeaf.id);
-      }
-      return;
-    }
-    ensureTileKind('mission-control', {
-      direction: 'horizontal',
-      ratio: 0.58,
-    });
-  }, [ensureTileKind, handleCloseTile, setActiveTileId, tileLayout]);
-
-  const toggleOrchestratorHistoryTile = useCallback(() => {
-    const existingLeaf = findLeafByContentKind(tileLayout.root, 'orchestrator-history');
-    if (existingLeaf) {
-      if (countLeaves(tileLayout.root) > 1) {
-        handleCloseTile(existingLeaf.id);
-      } else {
-        setActiveTileId(existingLeaf.id);
-      }
-      return;
-    }
-    ensureTileKind('orchestrator-history', {
-      direction: 'horizontal',
-      ratio: 0.58,
-    });
-  }, [ensureTileKind, handleCloseTile, setActiveTileId, tileLayout]);
-
-  const hasMissionControlTile = useMemo(
-    () => Boolean(findLeafByContentKind(tileLayout.root, 'mission-control')),
-    [tileLayout.root],
-  );
-
-  const hasOrchestratorHistoryTile = useMemo(
-    () => Boolean(findLeafByContentKind(tileLayout.root, 'orchestrator-history')),
-    [tileLayout.root],
-  );
 
   const handlePreviewDetected = useCallback((preview: DetectedLocalhostPreview) => {
     setWorkspacePreviews((current) => {
@@ -807,9 +723,6 @@ export function useTileLayout({
     handleResizeSplit,
     handleSelectPreviewTile,
     handleSplitTile,
-    hasThoughtsTile,
-    hasMissionControlTile,
-    hasOrchestratorHistoryTile,
     openCanvasTab,
     registerContextualPanelHandle,
     selectCanvasTab,
@@ -818,10 +731,6 @@ export function useTileLayout({
     setWorkspacePreviews,
     tileLayoutHydrated,
     toggleContextualPanelTile,
-    toggleThoughtsTile,
-    ensureThoughtsTile,
-    toggleMissionControlTile,
-    toggleOrchestratorHistoryTile,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
     workspacePreviews,

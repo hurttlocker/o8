@@ -272,6 +272,22 @@ export function useWorkspaceTerminalController(
     linkedIssue: null, createdAt: Date.now(), lastActivity: Date.now(),
   }), []);
 
+  const createDefaultOrchestratorTab = useCallback((): TerminalTab => ({
+    id: createWorkspaceTabId('orchestrator'),
+    label: 'Orchestrator',
+    kind: 'orchestrator',
+    tmuxSession: null,
+    repo: preferredRepoRef.current ?? undefined,
+    createdAt: Date.now(),
+    lastActivity: Date.now(),
+  }), []);
+
+  // Default tab set for a fresh LLM-chat workspace: Orchestrator FIRST
+  // (it's the governance surface), Assistant (LLM chat) second.
+  const createDefaultChatTabSet = useCallback((): TerminalTab[] => {
+    return [createDefaultOrchestratorTab(), createDefaultChatTab()];
+  }, [createDefaultOrchestratorTab, createDefaultChatTab]);
+
   const applyPersistedState = useCallback(async (saved: PersistedTabState, cancelled?: () => boolean) => {
     const result = await computeRestoredTabs(saved, {
       preferredRepo: preferredRepoRef.current,
@@ -328,10 +344,11 @@ export function useWorkspaceTerminalController(
           if (cancelled) return;
         } else if (autoCreateDefaultTab) {
           if (defaultTab === 'llm-chat') {
-            const defaultChat = createDefaultChatTab();
-            tabsRef.current = [defaultChat];
-            setTabs([defaultChat]);
-            setActiveTabId(defaultChat.id);
+            const defaultTabs = createDefaultChatTabSet();
+            tabsRef.current = defaultTabs;
+            setTabs(defaultTabs);
+            // Activate the Orchestrator tab first — it's index 0 in the set.
+            setActiveTabId(defaultTabs[0].id);
           } else {
             const defaultShell = createDefaultShellTab();
             tabsRef.current = [defaultShell];
@@ -363,7 +380,7 @@ export function useWorkspaceTerminalController(
       restoreInFlightRef.current = false;
       window.clearTimeout(timer);
     };
-  }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultShellTab, defaultTab, requestTerminalForTab, splitCreated, stateScope]);
+  }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultChatTabSet, createDefaultShellTab, defaultTab, requestTerminalForTab, splitCreated, stateScope]);
 
   useEffect(() => {
     if (!termWsConnected || !restoreSettledRef.current || initialTerminalBootstrapRef.current) return;
@@ -397,10 +414,10 @@ export function useWorkspaceTerminalController(
           return;
         }
         if (defaultTab === 'llm-chat') {
-          const fallbackChat = createDefaultChatTab();
-          tabsRef.current = [fallbackChat];
-          setTabs([fallbackChat]);
-          setActiveTabId(fallbackChat.id);
+          const defaultTabs = createDefaultChatTabSet();
+          tabsRef.current = defaultTabs;
+          setTabs(defaultTabs);
+          setActiveTabId(defaultTabs[0].id);
           return;
         }
         const fallbackShell = createDefaultShellTab();
@@ -413,19 +430,19 @@ export function useWorkspaceTerminalController(
       })();
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultShellTab, defaultTab, preferredRepo?.localPath, primaryRestoreSettled, requestTerminalForTab, splitCreated, stableRepoScope, tabs.length, termWsConnected]);
+  }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultChatTabSet, createDefaultShellTab, defaultTab, preferredRepo?.localPath, primaryRestoreSettled, requestTerminalForTab, splitCreated, stableRepoScope, tabs.length, termWsConnected]);
 
   useEffect(() => {
     if (tabs.length > 0 || defaultTab !== 'llm-chat') return;
     const timer = window.setTimeout(() => {
       if (tabsRef.current.length > 0) return;
-      const fallback = createDefaultChatTab();
-      tabsRef.current = [fallback];
-      setTabs([fallback]);
-      setActiveTabId(fallback.id);
+      const fallbacks = createDefaultChatTabSet();
+      tabsRef.current = fallbacks;
+      setTabs(fallbacks);
+      setActiveTabId(fallbacks[0].id);
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [createDefaultChatTab, defaultTab, tabs.length]);
+  }, [createDefaultChatTabSet, defaultTab, tabs.length]);
 
   useEffect(() => {
     const wasConnected = previousWsConnectedRef.current;
@@ -437,6 +454,21 @@ export function useWorkspaceTerminalController(
       }
     }
   }, [sendTerminalAttach, termWsConnected]);
+
+  // Migration: if restored state is missing an Orchestrator tab, inject one
+  // at the front. Ensures existing users get the new tab automatically and
+  // don't have to manually add it.
+  useEffect(() => {
+    if (defaultTab !== 'llm-chat') return;
+    if (tabs.length === 0) return;
+    const hasOrchestrator = tabs.some((tab) => tab.kind === 'orchestrator');
+    if (hasOrchestrator) return;
+    const orchestratorTab = createDefaultOrchestratorTab();
+    const nextTabs = [orchestratorTab, ...tabs];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
+    // Don't steal focus from whatever the user was on — just inject the tab.
+  }, [createDefaultOrchestratorTab, defaultTab, tabs]);
 
   const handleSessionCreated = useCallback((sessionName: string, requestId?: string) => {
     const directTabId = requestId ? pendingRequestRef.current.get(requestId) : undefined;

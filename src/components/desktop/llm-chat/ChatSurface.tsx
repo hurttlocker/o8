@@ -88,13 +88,17 @@ function ChatSurfaceBase({
         @keyframes ttsWave { 0% { height: 4px; } 100% { height: 16px; } }
       `}</style>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 12, paddingRight: 24, paddingBottom: 12, paddingLeft: 24, borderBottom: '1px solid var(--t-divider)' }}>
-        <button type="button" onClick={onToggleHistory} title="Chat history" style={{ display: 'flex', alignItems: 'center', gap: 5, paddingTop: 6, paddingRight: 8, paddingBottom: 6, paddingLeft: 8, border: 'none', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 12, cursor: 'pointer', fontFamily: '-apple-system, system-ui, sans-serif', transition: 'all 150ms' }} onMouseEnter={(event) => { event.currentTarget.style.background = THEME_BG_CARD; }} onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}>
-          <History size={14} />
-        </button>
-        <div style={{ flex: 1 }} />
-        {messages.length > 0 ? (
-          <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: 'ui-monospace, monospace', display: 'flex', alignItems: 'center', gap: 6 }}>
+      {/* Inner header — only shown when there are messages. The empty state
+          is meant to breathe, so we don't stack a second chrome bar on the
+          tab bar above. History can still be opened via the floating pill
+          in the empty greeting below. */}
+      {!isEmpty ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 5, paddingRight: 14, paddingBottom: 5, paddingLeft: 14, minHeight: 28, borderBottomWidth: '0.5px', borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)' }}>
+          <button type="button" onClick={onToggleHistory} title="Chat history" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderWidth: 0, borderRadius: 6, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', transition: 'background 120ms ease, color 120ms ease' }} onMouseEnter={(event) => { event.currentTarget.style.background = THEME_BG_CARD; event.currentTarget.style.color = 'var(--t-text)'; }} onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-secondary)'; }}>
+            <History size={13} />
+          </button>
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 10.5, color: 'var(--t-text-muted)', fontFamily: 'ui-monospace, monospace', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span>{messages.length} msg{messages.length !== 1 ? 's' : ''}</span>
             {(() => {
               const totalTokens = messages.reduce((sum, message) => sum + (message.tokens?.input ?? 0) + (message.tokens?.output ?? 0), 0);
@@ -108,16 +112,51 @@ function ChatSurfaceBase({
               ) : null;
             })()}
           </span>
-        ) : null}
-        {messages.length > 0 ? (
-          <button type="button" onClick={onNewConversation} title="New conversation" style={{ display: 'flex', alignItems: 'center', gap: 4, paddingTop: 6, paddingRight: 8, paddingBottom: 6, paddingLeft: 8, border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 12, cursor: 'pointer', borderRadius: 6, transition: 'color 150ms' }} onMouseEnter={(event) => { event.currentTarget.style.color = '#64748b'; }} onMouseLeave={(event) => { event.currentTarget.style.color = '#94a3b8'; }}>
-            <RotateCcw size={13} />
+          <button type="button" onClick={onNewConversation} title="New conversation" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, paddingTop: 3, paddingRight: 7, paddingBottom: 3, paddingLeft: 7, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 500, cursor: 'pointer', borderRadius: 6, transition: 'color 150ms, background 150ms' }} onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text-secondary)'; event.currentTarget.style.background = THEME_BG_CARD; }} onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-muted)'; event.currentTarget.style.background = 'transparent'; }}>
+            <RotateCcw size={12} />
             New
           </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', paddingTop: isEmpty ? 0 : 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', paddingTop: isEmpty ? 0 : 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, position: 'relative' }}>
+        {/* Floating history toggle — shown only in the empty state, since
+            the inline meta bar is hidden there. Gives users a discoverable
+            way to browse past conversations without stacking chrome bars. */}
+        {isEmpty ? (
+          <button
+            type="button"
+            onClick={onToggleHistory}
+            title="Chat history"
+            style={{
+              position: 'absolute',
+              top: 10,
+              left: 12,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              height: 24,
+              paddingTop: 0,
+              paddingRight: 9,
+              paddingBottom: 0,
+              paddingLeft: 8,
+              borderRadius: 7,
+              borderWidth: 0,
+              background: 'transparent',
+              color: 'var(--t-text-muted)',
+              fontSize: 11,
+              fontWeight: 500,
+              cursor: 'pointer',
+              transition: 'background 120ms ease, color 120ms ease',
+              zIndex: 2,
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.background = THEME_BG_CARD; event.currentTarget.style.color = 'var(--t-text-secondary)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
+          >
+            <History size={12} />
+            History
+          </button>
+        ) : null}
         {isEmpty ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 32, animation: 'llmFadeIn 400ms ease-out' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>

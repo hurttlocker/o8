@@ -146,6 +146,7 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
   const [issuesCollapsed, setIssuesCollapsed] = useState(false);
   const [issuesShowAll, setIssuesShowAll] = useState(false);
   const [expandedPacketId, setExpandedPacketId] = useState<string | null>(null);
+  const [editingField, setEditingField] = useState<{ packetId: string; field: 'summary' | 'runtime' | 'repo' | 'branch' } | null>(null);
   const [missionCostSummary, setMissionCostSummary] = useState<MissionCostSummary | null>(null);
   const [reviewStateByPacketId, setReviewStateByPacketId] = useState<Record<string, ReviewPanelState>>({});
   const issuesRepoSlugRef = useRef<string | null>(null);
@@ -153,6 +154,28 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
   const missionStateRef = useRef(missionState);
 
   void issuesLoading;
+
+  // Close editing field on Escape or click outside any row in the
+  // expanded packet card.
+  useEffect(() => {
+    if (!editingField) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setEditingField(null);
+    };
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (!target.closest('[data-packet-row]')) {
+        setEditingField(null);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointer);
+    };
+  }, [editingField]);
 
   const missionCostRefreshKey = useMemo(() => missionState.packets.map((packet) => [
     packet.id,
@@ -549,181 +572,248 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
     <div className="thoughts-scroll" style={{
       flex: 1,
       overflowY: 'auto',
-      padding: '12px',
+      paddingTop: 10,
+      paddingRight: 10,
+      paddingBottom: 10,
+      paddingLeft: 10,
       display: 'flex',
       flexDirection: 'column',
-      gap: 12,
+      gap: 6,
       background: thoughtsBodyBackground,
       minHeight: 0,
     }}>
+      {/* Compact mission header — single row with title + metrics, then
+          a roomy input block with Plan Packets inline. Cut the explainer
+          copy and the redundant Mission Summary card — the prompt textarea
+          is the source of truth. */}
       <div style={{
-        padding: '16px 18px',
-        borderRadius: 18,
+        paddingTop: 12,
+        paddingRight: 14,
+        paddingBottom: 12,
+        paddingLeft: 14,
+        borderRadius: 12,
         background: thoughtsElevatedSurface,
         border: thoughtsElevatedBorder,
-        boxShadow: thoughtsElevatedShadow,
         display: 'flex',
         flexDirection: 'column',
-        gap: 12,
+        gap: 10,
       }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
-              Mission Control
-            </div>
-            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5, maxWidth: 420 }}>
-              Thoughts owns planning and routing. Workspace tabs and worktrees stay visible as the execution lanes.
-            </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em', marginRight: 'auto' }}>
+            Mission Control
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <span style={{
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            paddingTop: 2,
+            paddingRight: 7,
+            paddingBottom: 2,
+            paddingLeft: 7,
+            borderRadius: 999,
+            background: thoughtsMutedGlass,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider-subtle)',
+            fontSize: 9,
+            fontWeight: 700,
+            color: orchestratorRuntimeTone(preferredRuntime).color,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}>
+            {orchestratorRuntimeTone(preferredRuntime).label}
+          </span>
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            paddingTop: 2,
+            paddingRight: 7,
+            paddingBottom: 2,
+            paddingLeft: 7,
+            borderRadius: 999,
+            background: thoughtsMutedGlass,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider-subtle)',
+            fontSize: 9,
+            fontWeight: 700,
+            color: 'var(--t-text-muted)',
+          }}>
+            {sessionTargets.length} lane{sessionTargets.length === 1 ? '' : 's'}
+          </span>
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            paddingTop: 2,
+            paddingRight: 7,
+            paddingBottom: 2,
+            paddingLeft: 7,
+            borderRadius: 999,
+            background: missionCostBadgeTone.background,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: missionCostBadgeTone.border,
+            fontSize: 9,
+            fontWeight: 700,
+            color: missionCostBadgeTone.color,
+          }}>
+            {missionCostLabel}
+          </span>
+          <button
+            type="button"
+            onClick={handleAddPacket}
+            title="Add empty packet"
+            style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 6,
-              padding: '5px 9px',
-              borderRadius: 999,
-              background: thoughtsMutedGlass,
-              border: thoughtsElevatedBorder,
-              fontSize: 10,
-              fontWeight: 700,
-              color: 'var(--t-text-secondary)',
-            }}>
-              Default runtime
-              <span style={{ color: orchestratorRuntimeTone(preferredRuntime).color }}>
-                {orchestratorRuntimeTone(preferredRuntime).label}
-              </span>
-            </span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '5px 9px',
-              borderRadius: 999,
-              background: thoughtsMutedGlass,
-              border: thoughtsElevatedBorder,
-              fontSize: 10,
-              fontWeight: 700,
-              color: 'var(--t-text-secondary)',
-            }}>
-              Live lanes
-              <span style={{ color: 'var(--t-text)' }}>{sessionTargets.length}</span>
-            </span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              paddingTop: 5,
-              paddingRight: 9,
-              paddingBottom: 5,
-              paddingLeft: 9,
-              borderRadius: 999,
-              background: missionCostBadgeTone.background,
+              justifyContent: 'center',
+              width: 20,
+              height: 20,
               borderWidth: 1,
               borderStyle: 'solid',
-              borderColor: missionCostBadgeTone.border,
-              fontSize: 10,
-              fontWeight: 700,
-              color: missionCostBadgeTone.color,
-              minHeight: 28,
-            }}>
-              Mission total
-              <span style={{ color: missionCostBadgeTone.color }}>
-                {missionCostLabel}
-              </span>
-            </span>
-          </div>
+              borderColor: 'var(--t-divider-subtle)',
+              borderRadius: 5,
+              background: 'transparent',
+              color: 'var(--t-text-muted)',
+              cursor: 'pointer',
+              fontSize: 13,
+              lineHeight: 1,
+              padding: 0,
+              marginLeft: 2,
+              transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--t-accent-soft)';
+              e.currentTarget.style.color = 'var(--t-accent)';
+              e.currentTarget.style.borderColor = 'var(--t-accent-border)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--t-text-muted)';
+              e.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+            }}
+          >
+            +
+          </button>
         </div>
 
-        <div style={{ position: 'relative' }}>
+        {/* Input block — framed input with Plan Packets as an inline
+            bottom-right action, like a chat composer. Gives the textarea
+            more breathing room and anchors the primary action to the
+            same visual block. */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            borderRadius: 10,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-input-border)',
+            background: 'var(--t-input-bg)',
+            overflow: 'hidden',
+            transition: 'border-color 150ms ease, box-shadow 150ms ease',
+          }}
+          onFocus={(event) => {
+            event.currentTarget.style.borderColor = 'var(--t-accent-border)';
+            event.currentTarget.style.boxShadow = '0 0 0 3px var(--t-accent-ring)';
+          }}
+          onBlur={(event) => {
+            event.currentTarget.style.borderColor = 'var(--t-input-border)';
+            event.currentTarget.style.boxShadow = 'none';
+          }}
+        >
           <textarea
             ref={missionPromptRef}
             value={missionState.prompt}
             onChange={(event) => handleMissionPromptChange(event.target.value)}
-            placeholder="Describe the mission. Thoughts will break it into visible work packets and let you route them into workspace lanes."
+            placeholder="Describe the mission…"
             style={{
               width: '100%',
-              minHeight: 94,
-              padding: '12px 14px',
-              borderRadius: 14,
-              border: '1px solid var(--t-input-border)',
-              background: 'var(--t-input-bg)',
-              fontSize: 13,
+              minHeight: 72,
+              paddingTop: 12,
+              paddingRight: 14,
+              paddingBottom: 8,
+              paddingLeft: 14,
+              borderWidth: 0,
+              background: 'transparent',
+              fontSize: 12,
               color: 'var(--t-text)',
-              resize: 'vertical',
+              resize: 'none',
               outline: 'none',
               fontFamily: 'inherit',
               lineHeight: 1.5,
               boxSizing: 'border-box',
             }}
           />
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>
-            Manual by design for v1. Queue, launch, and focus are explicit. No hidden worker spawning.
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              type="button"
-              onClick={handleAddPacket}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: 6,
+              paddingTop: 6,
+              paddingRight: 8,
+              paddingBottom: 8,
+              paddingLeft: 14,
+            }}
+          >
+            <span
               style={{
-                border: '1px solid var(--t-panel-border)',
-                background: 'var(--t-panel)',
-                color: 'var(--t-text-secondary)',
-                padding: '8px 12px',
-                borderRadius: 12,
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: 'pointer',
+                fontSize: 9,
+                fontWeight: 600,
+                color: 'var(--t-text-faint)',
+                marginRight: 'auto',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
               }}
             >
-              Add Packet
-            </button>
+              {missionState.prompt.trim().length > 0
+                ? `${missionState.prompt.trim().length} chars`
+                : 'Empty'}
+            </span>
             <button
               type="button"
               onClick={handlePlanMission}
               disabled={!missionState.prompt.trim()}
               style={{
-                border: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                borderWidth: 0,
                 background: missionState.prompt.trim() ? '#2563eb' : 'var(--t-divider)',
                 color: missionState.prompt.trim() ? '#fff' : 'var(--t-text-faint)',
-                padding: '8px 12px',
-                borderRadius: 12,
+                paddingTop: 6,
+                paddingRight: 12,
+                paddingBottom: 6,
+                paddingLeft: 12,
+                borderRadius: 7,
                 fontSize: 11,
                 fontWeight: 700,
                 cursor: missionState.prompt.trim() ? 'pointer' : 'default',
+                letterSpacing: '-0.01em',
+                transition: 'background 120ms ease',
               }}
             >
               Plan Packets
+              <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14" />
+                <path d="m12 5 7 7-7 7" />
+              </svg>
             </button>
           </div>
         </div>
       </div>
 
-      {missionState.summary ? (
-        <div style={{
-          padding: '12px 14px',
-          borderRadius: 16,
-          background: 'var(--t-panel)',
-          border: '1px solid var(--t-panel-border)',
-          boxShadow: '0 12px 28px rgba(15, 23, 42, 0.05)',
-        }}>
-          <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--t-text-muted)', marginBottom: 6 }}>
-            Mission Summary
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--t-text)', lineHeight: 1.55 }}>
-            {missionState.summary}
-          </div>
-        </div>
-      ) : null}
-
       {repoIssues.length > 0 ? (
         <div style={{
-          padding: '14px 16px',
-          borderRadius: 16,
+          paddingTop: 9,
+          paddingRight: 12,
+          paddingBottom: 9,
+          paddingLeft: 12,
+          borderRadius: 10,
           background: 'var(--t-panel)',
-          border: '1px solid var(--t-panel-border)',
-          boxShadow: '0 12px 28px rgba(15, 23, 42, 0.04)',
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'var(--t-panel-border)',
         }}>
           <button
             type="button"
@@ -872,21 +962,26 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
           <div
             key={packet.id}
             style={{
-              borderRadius: 14,
+              borderRadius: 10,
               background: 'var(--t-panel)',
-              border: '1px solid var(--t-panel-border)',
-              boxShadow: '0 8px 20px rgba(15, 23, 42, 0.04)',
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-panel-border)',
               flexShrink: 0,
+              overflow: 'hidden',
             }}
           >
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
+                gap: 7,
                 width: '100%',
-                padding: '7px 12px',
-                minHeight: 40,
+                paddingTop: 6,
+                paddingRight: 10,
+                paddingBottom: 6,
+                paddingLeft: 10,
+                minHeight: 34,
               }}
             >
               <button
@@ -948,107 +1043,532 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
             </div>
 
             {isExpanded ? (
-              <div style={{ padding: '0 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--t-divider-subtle)' }}>
-                <div style={{ paddingTop: 10 }}>
-                  <textarea
-                    value={packet.summary}
-                    onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, summary: event.target.value }))}
-                    placeholder="What should this packet accomplish?"
-                    rows={2}
-                    style={{
-                      width: '100%',
-                      padding: '9px 11px',
-                      borderRadius: 10,
-                      border: '1px solid var(--t-input-border)',
-                      background: 'var(--t-input-bg)',
-                      fontSize: 12,
-                      color: 'var(--t-text)',
-                      resize: 'vertical',
-                      outline: 'none',
-                      lineHeight: 1.5,
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider-subtle)' }}>
+                {/* ── Metadata rows — Issues-style density ── */}
+                {(() => {
+                  const isEditingSummary = editingField?.packetId === packet.id && editingField.field === 'summary';
+                  const isEditingRuntime = editingField?.packetId === packet.id && editingField.field === 'runtime';
+                  const isEditingRepo = editingField?.packetId === packet.id && editingField.field === 'repo';
+                  const isEditingBranch = editingField?.packetId === packet.id && editingField.field === 'branch';
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <select
-                    value={packet.runtime}
-                    onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, runtime: event.target.value === 'claude-code' ? 'claude-code' : 'codex' }))}
-                    style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-input-border)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 11 }}
-                  >
-                    <option value="codex">Codex</option>
-                    <option value="claude-code">Claude Code</option>
-                  </select>
-                  <select
-                    value={packet.workspaceTargetPath ?? ''}
-                    onChange={(event) => {
-                      const nextTarget = workspaceTargets.find((target) => target.localPath === event.target.value) ?? null;
-                      patchPacket(packet.id, (current) => ({ ...current, workspaceTargetPath: nextTarget?.localPath ?? null, branchTarget: nextTarget?.branch ?? current.branchTarget }));
-                    }}
-                    style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-input-border)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 11 }}
-                  >
-                    <option value="">No target</option>
-                    {workspaceTargets.map((target) => <option key={target.id} value={target.localPath}>{target.label}</option>)}
-                  </select>
-                  <input
-                    value={packet.branchTarget}
-                    onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, branchTarget: event.target.value }))}
-                    placeholder="branch"
-                    style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-input-border)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 11, outline: 'none', width: 90 }}
-                  />
-                </div>
+                  const workspaceLabel = packet.workspaceTargetPath
+                    ? (workspaceTargets.find((t) => t.localPath === packet.workspaceTargetPath)?.label ?? packet.workspaceTargetPath.split('/').pop() ?? 'target')
+                    : null;
 
+                  const runtimeDisplay = packet.runtime === 'claude-code' ? 'Claude Code' : 'Codex';
+
+                  // Helper for row chrome — matches Issues row density exactly.
+                  const rowChromeStyle: React.CSSProperties = {
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    minHeight: 28,
+                    paddingTop: 5,
+                    paddingRight: 10,
+                    paddingBottom: 5,
+                    paddingLeft: 10,
+                    width: '100%',
+                    borderWidth: 0,
+                    background: 'transparent',
+                    textAlign: 'left' as const,
+                    cursor: 'pointer',
+                    transition: 'background 120ms ease',
+                  };
+                  const rowLabelStyle: React.CSSProperties = {
+                    fontSize: 9,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    color: 'var(--t-text-muted)',
+                    width: 58,
+                    flexShrink: 0,
+                  };
+                  const rowValueStyle: React.CSSProperties = {
+                    flex: 1,
+                    minWidth: 0,
+                    fontSize: 11.5,
+                    color: 'var(--t-text)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap' as const,
+                    letterSpacing: '-0.005em',
+                  };
+                  const chevron = (
+                    <svg width={9} height={9} viewBox="0 0 10 10" fill="none" stroke="var(--t-text-faint)" strokeWidth="1.5" strokeLinecap="round" style={{ flexShrink: 0, opacity: 0.5 }}>
+                      <path d="M2.5 3.5L5 6L7.5 3.5" />
+                    </svg>
+                  );
+
+                  return (
+                    <>
+                      {/* Summary row */}
+                      <div data-packet-row style={{ borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)' }}>
+                        {isEditingSummary ? (
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, paddingTop: 6, paddingRight: 10, paddingBottom: 6, paddingLeft: 10 }}>
+                            <span style={{ ...rowLabelStyle, paddingTop: 4 }}>summary</span>
+                            <textarea
+                              autoFocus
+                              value={packet.summary}
+                              onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, summary: event.target.value }))}
+                              onBlur={() => setEditingField(null)}
+                              placeholder="What should this packet accomplish?"
+                              rows={3}
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                paddingTop: 5,
+                                paddingRight: 8,
+                                paddingBottom: 5,
+                                paddingLeft: 8,
+                                borderRadius: 6,
+                                borderWidth: 1,
+                                borderStyle: 'solid',
+                                borderColor: 'var(--t-accent-border)',
+                                background: 'var(--t-input-bg)',
+                                fontSize: 11.5,
+                                color: 'var(--t-text)',
+                                resize: 'vertical',
+                                outline: 'none',
+                                lineHeight: 1.45,
+                                fontFamily: 'inherit',
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setEditingField({ packetId: packet.id, field: 'summary' })}
+                            style={{ ...rowChromeStyle, alignItems: 'flex-start', minHeight: 32 }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            <span style={{ ...rowLabelStyle, paddingTop: 2 }}>summary</span>
+                            <span
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                fontSize: 11.5,
+                                color: packet.summary ? 'var(--t-text)' : 'var(--t-text-faint)',
+                                lineHeight: 1.45,
+                                display: '-webkit-box',
+                                WebkitBoxOrient: 'vertical',
+                                WebkitLineClamp: 2,
+                                overflow: 'hidden',
+                                letterSpacing: '-0.005em',
+                              } as React.CSSProperties}
+                            >
+                              {packet.summary || 'What should this packet accomplish?'}
+                            </span>
+                            {chevron}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Runtime row */}
+                      <div data-packet-row style={{ position: 'relative', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)' }}>
+                        <button
+                          type="button"
+                          onClick={() => setEditingField(isEditingRuntime ? null : { packetId: packet.id, field: 'runtime' })}
+                          style={rowChromeStyle}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          <span style={rowLabelStyle}>runtime</span>
+                          <span style={{ ...rowValueStyle, color: orchestratorRuntimeTone(packet.runtime).color, fontWeight: 600 }}>
+                            {runtimeDisplay}
+                          </span>
+                          {chevron}
+                        </button>
+                        {isEditingRuntime ? (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 30,
+                              left: 8,
+                              right: 8,
+                              zIndex: 20,
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderStyle: 'solid',
+                              borderColor: 'var(--t-divider-subtle)',
+                              background: 'var(--t-panel-solid)',
+                              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {(['codex', 'claude-code'] as const).map((runtime) => (
+                              <button
+                                key={runtime}
+                                type="button"
+                                onClick={() => {
+                                  patchPacket(packet.id, (current) => ({ ...current, runtime }));
+                                  setEditingField(null);
+                                }}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  width: '100%',
+                                  paddingTop: 7,
+                                  paddingRight: 10,
+                                  paddingBottom: 7,
+                                  paddingLeft: 10,
+                                  borderWidth: 0,
+                                  background: packet.runtime === runtime ? 'var(--t-accent-soft)' : 'transparent',
+                                  color: 'var(--t-text)',
+                                  fontSize: 11.5,
+                                  fontWeight: 500,
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                }}
+                                onMouseEnter={(e) => { if (packet.runtime !== runtime) e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
+                                onMouseLeave={(e) => { if (packet.runtime !== runtime) e.currentTarget.style.background = 'transparent'; }}
+                              >
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: orchestratorRuntimeTone(runtime).color }} />
+                                {runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* Repo row */}
+                      <div data-packet-row style={{ position: 'relative', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)' }}>
+                        <button
+                          type="button"
+                          onClick={() => setEditingField(isEditingRepo ? null : { packetId: packet.id, field: 'repo' })}
+                          style={rowChromeStyle}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          <span style={rowLabelStyle}>repo</span>
+                          <span style={{ ...rowValueStyle, color: workspaceLabel ? 'var(--t-text)' : 'var(--t-text-faint)' }}>
+                            {workspaceLabel ?? 'No target'}
+                          </span>
+                          {chevron}
+                        </button>
+                        {isEditingRepo ? (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 30,
+                              left: 8,
+                              right: 8,
+                              zIndex: 20,
+                              maxHeight: 220,
+                              overflowY: 'auto',
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderStyle: 'solid',
+                              borderColor: 'var(--t-divider-subtle)',
+                              background: 'var(--t-panel-solid)',
+                              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                patchPacket(packet.id, (current) => ({ ...current, workspaceTargetPath: null }));
+                                setEditingField(null);
+                              }}
+                              style={{
+                                display: 'block',
+                                width: '100%',
+                                paddingTop: 7,
+                                paddingRight: 10,
+                                paddingBottom: 7,
+                                paddingLeft: 10,
+                                borderWidth: 0,
+                                background: !packet.workspaceTargetPath ? 'var(--t-accent-soft)' : 'transparent',
+                                color: 'var(--t-text-faint)',
+                                fontSize: 11,
+                                fontStyle: 'italic',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                              }}
+                            >
+                              No target
+                            </button>
+                            {workspaceTargets.map((target) => {
+                              const isSelected = target.localPath === packet.workspaceTargetPath;
+                              return (
+                                <button
+                                  key={target.id}
+                                  type="button"
+                                  onClick={() => {
+                                    patchPacket(packet.id, (current) => ({
+                                      ...current,
+                                      workspaceTargetPath: target.localPath,
+                                      branchTarget: target.branch ?? current.branchTarget,
+                                    }));
+                                    setEditingField(null);
+                                  }}
+                                  style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    paddingTop: 7,
+                                    paddingRight: 10,
+                                    paddingBottom: 7,
+                                    paddingLeft: 10,
+                                    borderWidth: 0,
+                                    background: isSelected ? 'var(--t-accent-soft)' : 'transparent',
+                                    color: 'var(--t-text)',
+                                    fontSize: 11.5,
+                                    fontWeight: 500,
+                                    cursor: 'pointer',
+                                    textAlign: 'left',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
+                                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                                >
+                                  {target.label}
+                                </button>
+                              );
+                            })}
+                            {workspaceTargets.length === 0 ? (
+                              <div style={{ paddingTop: 10, paddingRight: 10, paddingBottom: 10, paddingLeft: 10, fontSize: 11, color: 'var(--t-text-muted)' }}>
+                                No workspaces available
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* Branch row */}
+                      <div data-packet-row>
+                        {isEditingBranch ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10 }}>
+                            <span style={rowLabelStyle}>branch</span>
+                            <input
+                              autoFocus
+                              value={packet.branchTarget}
+                              onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, branchTarget: event.target.value }))}
+                              onBlur={() => setEditingField(null)}
+                              onKeyDown={(event) => { if (event.key === 'Enter') setEditingField(null); }}
+                              placeholder="branch"
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                paddingTop: 4,
+                                paddingRight: 8,
+                                paddingBottom: 4,
+                                paddingLeft: 8,
+                                borderRadius: 6,
+                                borderWidth: 1,
+                                borderStyle: 'solid',
+                                borderColor: 'var(--t-accent-border)',
+                                background: 'var(--t-input-bg)',
+                                fontSize: 11.5,
+                                color: 'var(--t-text)',
+                                outline: 'none',
+                                fontFamily: 'inherit',
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setEditingField({ packetId: packet.id, field: 'branch' })}
+                            style={rowChromeStyle}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            <span style={rowLabelStyle}>branch</span>
+                            <span style={{ ...rowValueStyle, color: packet.branchTarget ? 'var(--t-text)' : 'var(--t-text-faint)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}>
+                              {packet.branchTarget || 'main'}
+                            </span>
+                            {chevron}
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {/* ── Blocker notice (if any) ── */}
                 {(packet.blockedReason || dependencyBlocker) ? (
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#b91c1c', padding: '7px 10px', borderRadius: 8, background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.12)' }}>
+                  <div
+                    style={{
+                      marginTop: 0,
+                      paddingTop: 6,
+                      paddingRight: 10,
+                      paddingBottom: 6,
+                      paddingLeft: 10,
+                      fontSize: 10.5,
+                      fontWeight: 600,
+                      color: '#b91c1c',
+                      background: 'rgba(239, 68, 68, 0.06)',
+                      borderTopWidth: 1,
+                      borderTopStyle: 'solid',
+                      borderTopColor: 'rgba(239, 68, 68, 0.14)',
+                    }}
+                  >
                     {packet.blockedReason ?? `Waiting on ${dependencyBlocker?.referenceLabel}`}
                   </div>
                 ) : null}
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {/* ── Action footer — ghost secondary, bold primary ── */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingTop: 7,
+                    paddingRight: 10,
+                    paddingBottom: 7,
+                    paddingLeft: 10,
+                    borderTopWidth: 1,
+                    borderTopStyle: 'solid',
+                    borderTopColor: 'var(--t-divider-subtle)',
+                  }}
+                >
+                  {packet.queueState !== 'held' && !packet.lane ? (
+                    <button
+                      type="button"
+                      onClick={() => patchPacket(packet.id, (current) => ({ ...current, queueState: 'held', blockedReason: 'Held by operator' }))}
+                      style={{
+                        borderWidth: 0,
+                        background: 'transparent',
+                        color: 'var(--t-text-muted)',
+                        paddingTop: 4,
+                        paddingRight: 8,
+                        paddingBottom: 4,
+                        paddingLeft: 8,
+                        borderRadius: 5,
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; e.currentTarget.style.color = 'var(--t-text)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-muted)'; }}
+                    >
+                      Hold
+                    </button>
+                  ) : packet.queueState === 'held' ? (
+                    <button
+                      type="button"
+                      onClick={() => patchPacket(packet.id, (current) => ({ ...current, queueState: 'queued', blockedReason: null }))}
+                      style={{
+                        borderWidth: 0,
+                        background: 'transparent',
+                        color: '#b91c1c',
+                        paddingTop: 4,
+                        paddingRight: 8,
+                        paddingBottom: 4,
+                        paddingLeft: 8,
+                        borderRadius: 5,
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      Unhold
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => patchPacket(packet.id, (current) => ({ ...current, archivedAt: current.archivedAt ? null : new Date().toISOString() }))}
+                    style={{
+                      borderWidth: 0,
+                      background: 'transparent',
+                      color: 'var(--t-text-muted)',
+                      paddingTop: 4,
+                      paddingRight: 8,
+                      paddingBottom: 4,
+                      paddingLeft: 8,
+                      borderRadius: 5,
+                      fontSize: 10.5,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; e.currentTarget.style.color = 'var(--t-text)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-muted)'; }}
+                  >
+                    {packet.archivedAt ? 'Restore' : 'Archive'}
+                  </button>
+                  <div style={{ flex: 1 }} />
                   {!packet.lane ? (
-                    <button type="button" onClick={() => { void handleLaunchPacket(packet); }} disabled={!canLaunch}
-                      style={{ border: 'none', background: canLaunch ? '#2563eb' : 'var(--t-divider)', color: canLaunch ? '#fff' : 'var(--t-text-faint)', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: canLaunch ? 'pointer' : 'default' }}>
+                    <button
+                      type="button"
+                      onClick={() => { void handleLaunchPacket(packet); }}
+                      disabled={!canLaunch}
+                      style={{
+                        borderWidth: 0,
+                        background: canLaunch ? '#2563eb' : 'var(--t-divider)',
+                        color: canLaunch ? '#fff' : 'var(--t-text-faint)',
+                        paddingTop: 4,
+                        paddingRight: 10,
+                        paddingBottom: 4,
+                        paddingLeft: 10,
+                        borderRadius: 5,
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        cursor: canLaunch ? 'pointer' : 'default',
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
                       Launch
                     </button>
                   ) : (
                     <>
-                      {hasInteractiveLane ? (
-                        <button type="button" onClick={() => handleFocusPacket(packet)}
-                          style={{ border: 'none', background: '#2563eb', color: '#fff', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                          Focus
+                      {packet.lane?.laneId && (packet.status === 'idle' || packet.status === 'awaiting_review' || packet.status === 'recovering') ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            fetch('/api/lanes', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ verb: 'resume', laneId: packet.lane?.laneId, message: 'Continue the previous task.', actor: 'user' }),
+                            }).catch(() => {});
+                          }}
+                          style={{
+                            borderWidth: 0,
+                            background: 'transparent',
+                            color: '#2563eb',
+                            paddingTop: 4,
+                            paddingRight: 8,
+                            paddingBottom: 4,
+                            paddingLeft: 8,
+                            borderRadius: 5,
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.08)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          Resume
                         </button>
                       ) : null}
-                      {packet.lane?.laneId && (packet.status === 'idle' || packet.status === 'awaiting_review' || packet.status === 'recovering') ? (
-                        <button type="button" onClick={() => {
-                          fetch('/api/lanes', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ verb: 'resume', laneId: packet.lane?.laneId, message: 'Continue the previous task.', actor: 'user' }),
-                          }).catch(() => {});
-                        }}
-                          style={{ border: '1px solid rgba(37, 99, 235, 0.2)', background: 'rgba(37, 99, 235, 0.06)', color: '#2563eb', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                          Resume
+                      {hasInteractiveLane ? (
+                        <button
+                          type="button"
+                          onClick={() => handleFocusPacket(packet)}
+                          style={{
+                            borderWidth: 0,
+                            background: '#2563eb',
+                            color: '#fff',
+                            paddingTop: 4,
+                            paddingRight: 10,
+                            paddingBottom: 4,
+                            paddingLeft: 10,
+                            borderRadius: 5,
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            letterSpacing: '-0.01em',
+                          }}
+                        >
+                          Focus
                         </button>
                       ) : null}
                     </>
                   )}
-                  {packet.queueState !== 'held' && !packet.lane ? (
-                    <button type="button" onClick={() => patchPacket(packet.id, (current) => ({ ...current, queueState: 'held', blockedReason: 'Held by operator' }))}
-                      style={{ border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-                      Hold
-                    </button>
-                  ) : packet.queueState === 'held' ? (
-                    <button type="button" onClick={() => patchPacket(packet.id, (current) => ({ ...current, queueState: 'queued', blockedReason: null }))}
-                      style={{ border: '1px solid rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.06)', color: '#b91c1c', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-                      Unhold
-                    </button>
-                  ) : null}
-                  <button type="button"
-                    onClick={() => patchPacket(packet.id, (current) => ({ ...current, archivedAt: current.archivedAt ? null : new Date().toISOString() }))}
-                    style={{ border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-muted)', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer', marginLeft: 'auto' }}>
-                    {packet.archivedAt ? 'Restore' : 'Archive'}
-                  </button>
                 </div>
 
                 {showReviewSection ? (

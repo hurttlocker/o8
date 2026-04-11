@@ -134,15 +134,16 @@ export function orchestratorStatusTone(status?: OrchestratorPacketStatus | null)
   }
 }
 
-export function adHocLaneTitle(kind?: 'chat' | 'llm-chat' | 'terminal' | 'canvas') {
+export function adHocLaneTitle(kind?: 'chat' | 'llm-chat' | 'terminal' | 'canvas' | 'orchestrator') {
   if (kind === 'terminal') return 'Terminal';
   if (kind === 'canvas') return 'Inspector';
+  if (kind === 'orchestrator') return 'Orchestrator';
   return 'Assistant';
 }
 
 export function laneDisplayTitle(
   packet?: Pick<WorkspaceOrchestrationPacketBadge, 'title'> | null,
-  kind?: 'chat' | 'llm-chat' | 'terminal' | 'canvas',
+  kind?: 'chat' | 'llm-chat' | 'terminal' | 'canvas' | 'orchestrator',
 ) {
   const title = packet?.title?.trim();
   return title || adHocLaneTitle(kind);
