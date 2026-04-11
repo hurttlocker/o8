@@ -10,7 +10,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
-  Brain,
   FileText,
   FolderOpen,
   GitPullRequestDraft,
@@ -24,7 +23,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-type ResultKind = 'conversation' | 'agent' | 'memory' | 'issue' | 'file' | 'symbol';
+type ResultKind = 'conversation' | 'agent' | 'issue' | 'file' | 'symbol';
 type CommandPaletteCategory = 'attention' | 'workspace' | 'review' | 'recovery' | 'settings';
 export type CommandPaletteStateTone = 'blue' | 'green' | 'amber' | 'red' | 'slate' | 'purple';
 
@@ -33,7 +32,6 @@ interface SearchTarget {
   issueNumber?: number;
   filePath?: string;
   line?: number;
-  factId?: number;
 }
 
 interface SearchResult {
@@ -69,7 +67,6 @@ interface UniversalSearchProps {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number) => void;
   onSelectFile?: (filePath: string, line?: number) => void;
-  onSelectMemory?: (factId: number) => void;
   onClose?: () => void;
 }
 
@@ -108,7 +105,6 @@ type PaletteItem =
 const KIND_ICON: Record<ResultKind, LucideIcon> = {
   conversation: MessageSquare,
   agent: Monitor,
-  memory: Brain,
   issue: GitPullRequestDraft,
   file: FileText,
   symbol: Sparkles,
@@ -117,7 +113,6 @@ const KIND_ICON: Record<ResultKind, LucideIcon> = {
 const KIND_COLOR: Record<ResultKind, string> = {
   conversation: '#2563eb',
   agent: '#16a34a',
-  memory: '#7c3aed',
   issue: '#f97316',
   file: '#64748b',
   symbol: '#0f766e',
@@ -126,7 +121,6 @@ const KIND_COLOR: Record<ResultKind, string> = {
 const KIND_LABEL: Record<ResultKind, string> = {
   conversation: 'Chat',
   agent: 'Session',
-  memory: 'Memory',
   issue: 'Issue',
   file: 'File',
   symbol: 'Symbol',
@@ -226,7 +220,6 @@ export const UniversalSearch = memo(function UniversalSearch({
   onSelectSession,
   onSelectIssue,
   onSelectFile,
-  onSelectMemory,
   onClose,
 }: UniversalSearchProps) {
   const [query, setQuery] = useState('');
@@ -372,14 +365,12 @@ export const UniversalSearch = memo(function UniversalSearch({
       onSelectIssue(target.issueNumber);
     } else if (target.filePath && onSelectFile) {
       onSelectFile(target.filePath, target.line ?? undefined);
-    } else if (target.factId && onSelectMemory) {
-      onSelectMemory(target.factId);
     }
 
     setQuery('');
     setSearchResults([]);
     if (onClose) onClose();
-  }, [onClose, onSelectFile, onSelectIssue, onSelectMemory, onSelectSession]);
+  }, [onClose, onSelectFile, onSelectIssue, onSelectSession]);
 
   const handleSelect = useCallback(async (item: PaletteItem) => {
     if (item.itemKind === 'action') {
@@ -646,7 +637,7 @@ export const UniversalSearch = memo(function UniversalSearch({
                 color: '#64748b',
               }}
             >
-              Searching sessions, memory, issues, and files…
+              Searching sessions, issues, files, and symbols…
             </div>
           ) : null}
 
