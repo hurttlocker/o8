@@ -3,7 +3,7 @@
 import { useState, memo, type CSSProperties } from 'react';
 import { useTheme } from './ThemeContext';
 
-export type MobileScreen = 'chat' | 'fleet' | 'memory' | 'approvals' | 'costs' | 'settings' | 'issues';
+export type MobileScreen = 'chat' | 'fleet' | 'approvals' | 'costs' | 'settings' | 'issues';
 
 interface SpeedDialProps {
   activeScreen: MobileScreen;
@@ -23,11 +23,6 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
     screen: 'fleet',
     label: 'Agents',
     iconPath: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
-  },
-  {
-    screen: 'memory',
-    label: 'Memory',
-    iconPath: 'M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z M9 21h6',
   },
   {
     screen: 'issues',
@@ -53,7 +48,6 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
 const SCREEN_TO_VIEW: Record<MobileScreen, string> = {
   chat: 'chat',
   fleet: 'fleet',
-  memory: 'memory',
   approvals: 'activity',
   costs: 'costs',
   settings: 'settings',

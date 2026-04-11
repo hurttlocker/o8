@@ -43,19 +43,12 @@ const ActivityFeed = dynamic(() => import('./mobile/ActivityFeed').then((m) => (
 const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) => ({ default: m.PRReviewSheet })), { ssr: false });
 const CostsDashboard = lazy(async () => ({ default: (await import('./mobile/CostsDashboard')).CostsDashboard }));
 const SettingsView = lazy(async () => ({ default: (await import('./mobile/SettingsView')).SettingsView }));
-const MemoryPage = lazy(() => import('./mobile/MemoryPage'));
 const IssuesPage = lazy(() => import('./mobile/IssuesPage'));
 
-const BETA_ENABLED_VIEWS = new Set(['fleet', 'activity', 'settings', 'memory']);
+const BETA_ENABLED_VIEWS = new Set(['fleet', 'activity', 'settings']);
 const MOBILE_SESSION_LIST_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MOBILE_SESSION_LIST_LIMIT = 20;
 const MOBILE_INITIAL_INBOX_LIMIT = 15;
-
-// Cortex memory surfaces (#78-#85) — typed via explicit generic param
-const RecallPanel = dynamic(() => import('./mobile/RecallPanel'), { ssr: false });
-const MemoryHealth = dynamic(() => import('./mobile/MemoryHealth'), { ssr: false });
-const GraphExplorer = dynamic(() => import('./mobile/GraphExplorer'), { ssr: false });
-const CortexStatus = dynamic(() => import('./mobile/CortexStatus'), { ssr: false });
 const SessionPickerSheet = dynamic(() => import('./mobile/SessionPickerSheet').then((m) => ({ default: m.SessionPickerSheet })), { ssr: false });
 
 // Extracted hooks (#43 — hooks extraction)
@@ -282,13 +275,13 @@ function MobileRemoteShellInner({
     enhancing, preEnhanceDraft,
     controlsOpen, alertsOpen, sessionPickerOpen,
     pendingApprovals,
-    surfaceRefreshing, expandedMedia, scrollY,
+    surfaceRefreshing, expandedMedia,
     isScrolling, headerVisible, viewportTopOffset,
     composeFocused, composeHeight, waitingForResponse, hydrated,
     streamingText,
     // Setters
     setSelection, setActiveView, setSurfaceNote,
-    setDraftBySession, setPendingOwnedTurnBySession,
+    setPendingOwnedTurnBySession,
     setControlsOpen, setAlertsOpen, setSessionPickerOpen,
     setPendingApprovals, setResolvedApprovals,
     setExpandedMedia, setComposeHeight, setWaitingForResponse,
@@ -298,10 +291,6 @@ function MobileRemoteShellInner({
     seenMessageIdsRef,
     refreshError, surfaceNote,
     activeView,
-    // Cortex memory
-    cortexRecallOpen, setCortexRecallOpen,
-    cortexHealthOpen, setCortexHealthOpen,
-    cortexGraphOpen, setCortexGraphOpen,
   } = state;
 
   const [launchOpen, setLaunchOpen] = useState(false);
@@ -627,7 +616,7 @@ function MobileRemoteShellInner({
           activeView={activeView}
           compactLine={compactLine}
           enabledViews={BETA_ENABLED_VIEWS}
-          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'memory' ? 'memory' : activeView === 'issues' ? 'issues' : 'chat'}
+          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'issues' ? 'issues' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
               case 'chat':
@@ -635,9 +624,6 @@ function MobileRemoteShellInner({
                 break;
               case 'fleet':
                 setActiveView('fleet');
-                break;
-              case 'memory':
-                setActiveView('memory');
                 break;
               case 'issues':
                 setActiveView('issues');
@@ -675,21 +661,6 @@ function MobileRemoteShellInner({
           {!showBetaPlaceholder && activeView === 'settings' ? (
             <Suspense fallback={null}>
               <SettingsView onBack={returnToHome} />
-            </Suspense>
-          ) : null}
-          {!showBetaPlaceholder && activeView === 'memory' ? (
-            <Suspense fallback={null}>
-              <MemoryPage
-                onBack={returnToHome}
-                onInjectText={(text: string) => {
-                  if (!selectedSessionKey) return;
-                  setDraftBySession((prev) => ({
-                    ...prev,
-                    [selectedSessionKey]: (prev[selectedSessionKey] ?? '') + (prev[selectedSessionKey] ? '\n' : '') + text,
-                  }));
-                  setActiveView('chat');
-                }}
-              />
             </Suspense>
           ) : null}
           {!showBetaPlaceholder && activeView === 'issues' ? (
@@ -913,7 +884,6 @@ function MobileRemoteShellInner({
                 composeRef={composeRef}
                 fileInputRef={fileInputRef}
                 handlers={actions.composeBarHandlers}
-                onOpenRecall={() => setCortexRecallOpen(true)}
                 onModelPillTap={() => setSessionPickerOpen(true)}
                 streamingText={streamingText}
                 agentRunning={waitingForResponse}
@@ -943,13 +913,7 @@ function MobileRemoteShellInner({
         onSessionFocus={actions.handleSessionFocus}
         onSearchSelectSession={(sessionKey) => actions.handleSessionFocus(sessionKey)}
         onSearchSelectIssue={() => { /* issue viewing not wired on mobile yet */ }}
-      >
-        <CortexStatus
-          onRecallOpen={() => { setControlsOpen(false); setCortexRecallOpen(true); }}
-          onMemoryHealthOpen={() => { setControlsOpen(false); setCortexHealthOpen(true); }}
-          onGraphOpen={() => { setControlsOpen(false); setCortexGraphOpen(true); }}
-        />
-      </ControlsSheet>
+      />
       <DiffOverlay
         diffOpen={diffOpen}
         selectedFile={selectedReviewFile}
@@ -964,31 +928,6 @@ function MobileRemoteShellInner({
         onFileSelect={actions.handleReviewFileFocus}
         onLoadFile={loadReviewFile}
         onRefresh={actions.handleDiffRefresh}
-      />
-      {/* Cortex Memory Surfaces */}
-      <RecallPanel
-        currentTask={selectedSession?.currentTask ?? selectedSession?.name}
-        cwd={selectedSession?.runtimeSurface?.cwd}
-        branch={selectedSession?.runtimeSurface?.branch}
-        visible={cortexRecallOpen}
-        onClose={() => setCortexRecallOpen(false)}
-        onInjectText={(text: string) => {
-          if (!selectedSessionKey) return;
-          setDraftBySession((prev) => ({
-            ...prev,
-            [selectedSessionKey]: (prev[selectedSessionKey] ?? '') + (prev[selectedSessionKey] ? '\n' : '') + text,
-          }));
-          setCortexRecallOpen(false);
-        }}
-      />
-      <MemoryHealth
-        visible={cortexHealthOpen}
-        onClose={() => setCortexHealthOpen(false)}
-      />
-      <GraphExplorer
-        visible={cortexGraphOpen}
-        onClose={() => setCortexGraphOpen(false)}
-        initialSubject={selectedSession?.currentTask?.slice(0, 60)}
       />
       <AlertTray
         alerts={activeAlerts}

@@ -54,8 +54,6 @@ function screenTitle(activeView: TopBarProps['activeView']) {
       return '';
     case 'fleet':
       return 'Agents';
-    case 'memory':
-      return 'Memory';
     case 'activity':
       return 'Activity';
     case 'settings':
@@ -82,6 +80,7 @@ export const TopBar = memo(function TopBar({
   onOpenControls,
 }: TopBarProps) {
   const { colors } = useTheme();
+  void compactLine;
 
   if (activeView !== 'squad' && activeView !== 'chat') {
     return null;
@@ -91,11 +90,6 @@ export const TopBar = memo(function TopBar({
   const primaryText = colors.text;
   const chromeBackground = colors.surface;
   const chromeBorder = colors.surfaceBorder;
-  const threadTitle = compactLine(
-    selectedSession?.currentTask ?? selectedSession?.name,
-    selectedSession?.name ?? 'Code',
-    28,
-  );
   const headerStyle: CSSProperties = {
     position: 'fixed',
     top: 'calc(env(safe-area-inset-top, 0px) + 8px)',
