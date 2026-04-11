@@ -38,9 +38,6 @@ import {
 
 const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
 const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then(m => ({ default: m.Canvas })));
-const LazyOrchestratorChatTile = lazy(() => import('@/components/desktop/OrchestratorChatTile').then(m => ({ default: m.OrchestratorChatTile })));
-const LazyMissionControlTile = lazy(() => import('@/components/desktop/MissionControlTile').then(m => ({ default: m.MissionControlTile })));
-const LazyOrchestratorHistoryTile = lazy(() => import('@/components/desktop/OrchestratorHistoryTile').then(m => ({ default: m.OrchestratorHistoryTile })));
 
 const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
 
@@ -427,55 +424,6 @@ export function createTileRegistry({
           </Suspense>
         );
       },
-    },
-    thoughts: {
-      label: 'Orchestrator',
-      description: 'Chat with the Claude orchestrator for this repo — dispatch, review, and govern agent work.',
-      singleton: true,
-      render: ({ tileId }) => (
-        <Suspense fallback={null}>
-          <LazyOrchestratorChatTile
-            tileId={tileId}
-            onClose={() => handleCloseTile(tileId)}
-            agents={parsedAgents}
-            draftInjection={thoughtsDraftInjection}
-            missionState={thoughtsMissionState}
-            workspaceTargets={orchestratorWorkspaceTargets}
-            onMissionStateChange={handleThoughtsMissionStateChange}
-            onLaunchPacket={launchOrchestrationPacket}
-          />
-        </Suspense>
-      ),
-    },
-    'mission-control': {
-      label: 'Mission Control',
-      description: 'Plan and dispatch agent missions. Splittable alongside the orchestrator chat.',
-      singleton: true,
-      render: ({ tileId }) => (
-        <Suspense fallback={null}>
-          <LazyMissionControlTile
-            onClose={() => handleCloseTile(tileId)}
-            agents={parsedAgents}
-            missionState={thoughtsMissionState}
-            workspaceTargets={orchestratorWorkspaceTargets}
-            onMissionStateChange={handleThoughtsMissionStateChange}
-            onLaunchPacket={launchOrchestrationPacket}
-            onFocusPacket={focusOrchestrationPacketLane}
-          />
-        </Suspense>
-      ),
-    },
-    'orchestrator-history': {
-      label: 'Orchestrator History',
-      description: 'Searchable history of past orchestrator conversations. Click a thread to load it in the chat tile.',
-      singleton: true,
-      render: ({ tileId }) => (
-        <Suspense fallback={null}>
-          <LazyOrchestratorHistoryTile
-            onClose={() => handleCloseTile(tileId)}
-          />
-        </Suspense>
-      ),
     },
     'contextual-panel': {
       label: 'Global Terminal',

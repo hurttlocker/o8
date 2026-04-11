@@ -72,9 +72,13 @@ export const TabBar = memo(function TabBar({
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        height: 32,
-        background: 'transparent',
-        borderBottom: '0.5px solid var(--t-divider-subtle)',
+        height: 36,
+        // Match the chat-surface bg so the TabBar blends with the workspace
+        // content below instead of reading as a separate gray strip.
+        background: 'var(--t-chat-surface-bg, #ffffff)',
+        borderBottomWidth: '0.5px',
+        borderBottomStyle: 'solid',
+        borderBottomColor: 'var(--t-divider-subtle)',
         flexShrink: 0,
         overflow: 'visible',
         zIndex: 10,
@@ -96,7 +100,7 @@ export const TabBar = memo(function TabBar({
               justifyContent: 'center',
               zIndex: 3,
               cursor: 'pointer',
-              background: 'linear-gradient(to right, rgba(0, 0, 0, 0.15) 60%, transparent)',
+              background: 'linear-gradient(to right, var(--t-chat-surface-bg, #ffffff) 60%, transparent)',
               color: 'var(--t-text-secondary)',
             }}
           >
@@ -117,7 +121,7 @@ export const TabBar = memo(function TabBar({
               justifyContent: 'center',
               zIndex: 3,
               cursor: 'pointer',
-              background: 'linear-gradient(to left, rgba(0, 0, 0, 0.15) 60%, transparent)',
+              background: 'linear-gradient(to left, var(--t-chat-surface-bg, #ffffff) 60%, transparent)',
               color: 'var(--t-text-secondary)',
             }}
           >
@@ -161,26 +165,26 @@ export const TabBar = memo(function TabBar({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 5,
+                  gap: 6,
                   paddingTop: 0,
                   paddingBottom: 0,
-                  paddingLeft: 12,
-                  paddingRight: 12,
+                  paddingLeft: 14,
+                  paddingRight: 14,
                   height: '100%',
-                  border: 'none',
-                  borderBottom: isActive ? 'none' : '0.5px solid transparent',
-                  background: isActive ? 'var(--t-panel, #fff)' : 'transparent',
-                  color: isActive ? 'var(--t-text, #111827)' : 'var(--t-text-secondary, #5b6475)',
+                  borderWidth: 0,
+                  borderStyle: 'none',
+                  background: isActive ? 'var(--t-accent-soft-strong)' : 'transparent',
+                  color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
                   fontSize: 12,
-                  fontWeight: isActive ? 600 : 400,
+                  fontWeight: isActive ? 600 : 500,
                   fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
                   letterSpacing: '-0.008em',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                   transition: 'color 120ms ease, background 120ms ease',
                   borderRadius: 0,
-                  marginBottom: isActive ? -0.5 : 0,
-                  borderRight: '0.5px solid var(--t-divider-subtle)',
+                  position: 'relative',
+                  boxShadow: isActive ? 'inset 0 -2.5px 0 0 var(--t-accent)' : 'none',
                 }}
               >
                 {tab.unseen ? (
@@ -259,12 +263,10 @@ export const TabBar = memo(function TabBar({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 1,
+            gap: 2,
             paddingRight: 6,
+            paddingLeft: 6,
             flexShrink: 0,
-            borderLeft: '0.5px solid var(--t-divider-subtle)',
-            marginLeft: 2,
-            paddingLeft: 4,
           }}
         >
           {onSplitVertical ? (
@@ -313,24 +315,25 @@ const chromeButtonStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 22,
-  height: 22,
+  alignSelf: 'center',
+  width: 24,
+  height: 24,
   borderRadius: 6,
-  border: 'none',
+  borderWidth: 0,
   background: 'transparent',
-  color: 'var(--t-text-faint)',
+  color: 'var(--t-text-muted)',
   cursor: 'pointer',
   transition: 'background 100ms, color 100ms',
 };
 
 function hoverChromeOn(event: MouseEvent<HTMLButtonElement>) {
   event.currentTarget.style.background = 'var(--t-hover)';
-  event.currentTarget.style.color = 'var(--t-text-secondary)';
+  event.currentTarget.style.color = 'var(--t-text)';
 }
 
 function hoverChromeOff(event: MouseEvent<HTMLButtonElement>) {
   event.currentTarget.style.background = 'transparent';
-  event.currentTarget.style.color = 'var(--t-text-faint)';
+  event.currentTarget.style.color = 'var(--t-text-muted)';
 }
 
 function closeHoverOn(event: MouseEvent<HTMLButtonElement>) {

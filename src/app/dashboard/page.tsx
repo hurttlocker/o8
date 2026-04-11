@@ -98,7 +98,7 @@ const LazyGraphExplorer3D = lazy(() => import('@/components/desktop/GraphExplore
 const LazyDirectivesView = lazy(() => import('@/components/desktop/DirectivesView').then(m => ({ default: m.DirectivesView })));
 const LazySetupWizard = lazy(() => import('@/components/desktop/SetupWizard').then(m => ({ default: m.SetupWizard })));
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
-import { OrchestratorTileBusProvider } from '@/components/desktop/orchestrator-tile-bus';
+import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
 import { TileContainer } from '@/components/desktop/TileContainer';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import {
@@ -239,14 +239,14 @@ function DashboardInner() {
       const timer = setTimeout(() => {
         import('@/components/desktop/WorkspaceTerminal');
         import('@/components/desktop/Canvas');
-        import('@/components/desktop/OrchestratorChatTile');
+        import('@/components/desktop/workspace-terminal/OrchestratorTab');
       }, 100);
       return () => clearTimeout(timer);
     }
     const id = requestIdleCallback(() => {
       import('@/components/desktop/WorkspaceTerminal');
       import('@/components/desktop/Canvas');
-      import('@/components/desktop/OrchestratorChatTile');
+      import('@/components/desktop/workspace-terminal/OrchestratorTab');
     });
     return () => cancelIdleCallback(id);
   }, []);
@@ -444,9 +444,6 @@ function DashboardInner() {
     handleResizeSplit,
     handleSelectPreviewTile,
     handleSplitTile,
-    hasThoughtsTile,
-    hasMissionControlTile,
-    hasOrchestratorHistoryTile,
     openCanvasTab,
     registerContextualPanelHandle,
     selectCanvasTab,
@@ -455,10 +452,6 @@ function DashboardInner() {
     setWorkspacePreviews,
     tileLayoutHydrated,
     toggleContextualPanelTile,
-    toggleThoughtsTile,
-    ensureThoughtsTile,
-    toggleMissionControlTile,
-    toggleOrchestratorHistoryTile,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
     workspacePreviews,
@@ -523,21 +516,9 @@ function DashboardInner() {
 
   // Cmd/Ctrl+J toggles the orchestrator chat tile. Global shortcut,
   // ignored while the user is typing in an input.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isEditable = Boolean(
-        target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]'),
-      );
-      if (isEditable) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
-        e.preventDefault();
-        toggleThoughtsTile();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [toggleThoughtsTile]);
+  // Cmd+J used to toggle the thoughts tile. The Orchestrator is now a tab
+  // inside WorkspaceTerminal, so the shortcut is retired. Can be reintroduced
+  // later by wiring the handler into WorkspaceTerminal's focusTab handle.
 
   // O8 panel focus bus — when a write-class tool call in the orchestrator
   // chat emits a pivot request, swap the right panel's active tab to the
@@ -1147,10 +1128,9 @@ function DashboardInner() {
       id: `${payload.reason}-${Date.now()}`,
       text: payload.text,
     };
-    if (hasThoughtsTile) {
-      setThoughtsDraftInjection(nextInjection);
-      return;
-    }
+    // Previously this short-circuited into the thoughts tile draft; that tile
+    // no longer exists, so we always route injections through the workspace
+    // terminal target path below.
     void (async () => {
       const targetRepo = repoOverride?.localPath ? repoOverride : (globalRepoEntry
         ? {
@@ -1186,7 +1166,7 @@ function DashboardInner() {
       setRightPanelMode('chat');
       setDesktopDraftInjection(nextInjection);
     })();
-  }, [activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, hasThoughtsTile, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets]);
+  }, [activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets]);
 
   const handleAgentPanelChatInjection = useCallback((payload: AgentPanelChatInjectionPayload) => {
     injectPayloadIntoRepoChat(payload, null);
@@ -2235,12 +2215,6 @@ function DashboardInner() {
             variant="desktop"
           />
         )}
-        thoughtsOpen={hasThoughtsTile}
-        onThoughtsToggle={toggleThoughtsTile}
-        missionControlOpen={hasMissionControlTile}
-        onMissionControlToggle={toggleMissionControlTile}
-        historyOpen={hasOrchestratorHistoryTile}
-        onHistoryToggle={toggleOrchestratorHistoryTile}
         onPortPreview={(_port, url) => {
           setO8BrowserUrl(url);
           setO8ActiveTab('browser');
@@ -2408,7 +2382,14 @@ function DashboardInner() {
         )}
 
         {!showMemoryView && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
-          <OrchestratorTileBusProvider ensureChatTile={ensureThoughtsTile}>
+          <OrchestratorDataProvider
+            agents={parsedAgents}
+            missionState={thoughtsMissionState}
+            workspaceTargets={orchestratorWorkspaceTargets}
+            onMissionStateChange={handleThoughtsMissionStateChange}
+            onLaunchPacket={launchOrchestrationPacket}
+            draftInjection={thoughtsDraftInjection}
+          >
             <TileContainer
               layout={tileLayout}
               activeTileId={activeTileId}
@@ -2418,7 +2399,7 @@ function DashboardInner() {
               onResizeSplit={handleResizeSplit}
               onSplitTile={handleSplitTile}
             />
-          </OrchestratorTileBusProvider>
+          </OrchestratorDataProvider>
         )}
       </div>
 

@@ -35,6 +35,18 @@ export interface ThoughtsChatPanelHandle {
    * postSystemMessageToChat.
    */
   appendSystemMessage: (text: string) => void;
+  /**
+   * Replace the current input field contents. Used by parent empty-state
+   * components (e.g. Orchestrator quick-action cards) to prefill the
+   * composer without auto-sending.
+   */
+  fillInput: (text: string) => void;
+  /**
+   * Fire a send with optional pre-fill. If `text` is provided, replaces
+   * the input first then sends. Used by Orchestrator quick-action cards
+   * that click-to-dispatch.
+   */
+  sendNow: (text?: string) => void;
 }
 
 export interface ThoughtsChatPanelChromeState {
@@ -67,6 +79,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
    * 'full' to match legacy callers that don't pass the prop.
    */
   permissionMode?: ThoughtsChatPermissionMode;
+  /**
+   * Optional custom empty-state render. When provided and the chat has
+   * no messages, this replaces the built-in "Claude Code" welcome card.
+   * Use the imperative handle's `fillInput` / `sendNow` to wire quick
+   * actions in the override back into the composer.
+   */
+  emptyStateOverride?: React.ReactNode;
   onMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
@@ -87,6 +106,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsElevatedShadow,
   thoughtsMutedGlass,
   permissionMode = 'full',
+  emptyStateOverride,
   onMissionStateChange,
   onLaunchPacket,
   onChromeChange,
@@ -779,6 +799,38 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInjectedSystemMessages((current) => [...current, entry]);
   }, []);
 
+  // Ref used so sendNow() can flush the latest input value right after
+  // fillInput() without waiting for React to re-render.
+  const latestInputRef = useRef('');
+  useEffect(() => { latestInputRef.current = input; }, [input]);
+
+  const fillInput = useCallback((text: string) => {
+    setInput(text);
+    latestInputRef.current = text;
+    setTimeout(() => inputRef.current?.focus(), 30);
+  }, []);
+
+  // Send programmatically. Bypasses handleTaskSend to avoid a closure-capture
+  // race where a freshly filled input isn't yet visible to the callback.
+  const sendNow = useCallback((text?: string) => {
+    const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
+    if (!msg) return;
+
+    // Orchestrator mode: route through the WebSocket stream directly.
+    if (isOrchestratorMode) {
+      if (orchStream.status === 'busy') return;
+      setInput('');
+      latestInputRef.current = '';
+      orchStream.send(msg, { permissionMode });
+      return;
+    }
+
+    // Non-orchestrator path: push into the input and defer to handleTaskSend.
+    setInput(msg);
+    latestInputRef.current = msg;
+    setTimeout(() => { void handleTaskSend(); }, 0);
+  }, [handleTaskSend, isOrchestratorMode, orchStream, permissionMode]);
+
   useImperativeHandle(ref, () => ({
     focusInput() {
       inputRef.current?.focus();
@@ -786,7 +838,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     reset: handleReset,
     loadThread: handleLoadThread,
     appendSystemMessage,
-  }), [appendSystemMessage, handleReset, handleLoadThread]);
+    fillInput,
+    sendNow,
+  }), [appendSystemMessage, fillInput, handleReset, handleLoadThread, sendNow]);
 
   return (
     <>
@@ -800,7 +854,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         background: thoughtsBodyBackground,
         minHeight: 0,
       }}>
-        {displayMessages.length === 0 && !displayWaiting && (
+        {displayMessages.length === 0 && !displayWaiting && emptyStateOverride ? (
+          <div style={{
+            display: 'flex',
+            flex: 1,
+            minHeight: 0,
+          }}>
+            {emptyStateOverride}
+          </div>
+        ) : null}
+        {displayMessages.length === 0 && !displayWaiting && !emptyStateOverride && (
           <div style={{
             display: 'flex',
             flexDirection: 'column',
