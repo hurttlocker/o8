@@ -9,7 +9,7 @@ import type {
 } from '@/lib/tiles/types';
 import { isTileLeafNode, isTileSplitNode } from '@/lib/tiles/types';
 
-const TILE_LAYOUT_VERSION = 2; // Bumped to force reset of broken layouts
+const TILE_LAYOUT_VERSION = 4; // v4: thoughts/mission/history tile kinds retired; Orchestrator lives as a tab now
 const MIN_SPLIT_RATIO = 0.2;
 const MAX_SPLIT_RATIO = 0.8;
 
@@ -61,6 +61,9 @@ export function createSplit(
 }
 
 export function createDefaultTileLayout(): TileLayout {
+  // Single terminal leaf is the whole workspace. The orchestrator now lives
+  // as a TAB inside WorkspaceTerminal next to "Assistant", not as a split
+  // tile — clicking it takes over the full workspace area.
   return {
     version: TILE_LAYOUT_VERSION,
     root: createLeaf(createTileContent('terminal'), 'tile-root'),
@@ -276,9 +279,6 @@ function isTileContent(value: unknown): value is TileContent {
   return kind === 'workspace'
     || kind === 'terminal'
     || kind === 'preview'
-    || kind === 'thoughts'
-    || kind === 'mission-control'
-    || kind === 'orchestrator-history'
     || kind === 'contextual-panel'
     // Legacy kinds — accepted for deserialization, migrated later
     || kind === 'canvas'
@@ -373,6 +373,12 @@ function migrateNode(node: any): any {
   if (node.type === 'leaf' && node.content) {
     const KIND_MAP: Record<string, string> = {
       'bottom-terminal': 'contextual-panel',
+      // Retired kinds — orchestrator/mission/history are no longer tiles;
+      // they live as the Orchestrator tab inside WorkspaceTerminal. Migrate
+      // any saved layouts using these kinds to a plain terminal leaf.
+      thoughts: 'terminal',
+      'mission-control': 'terminal',
+      'orchestrator-history': 'terminal',
     };
     if (KIND_MAP[node.content.kind]) {
       node.content.kind = KIND_MAP[node.content.kind];

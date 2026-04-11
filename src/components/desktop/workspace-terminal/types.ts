@@ -29,7 +29,7 @@ export interface RegisteredRepo {
 export interface TerminalTab {
   id: string;
   label: string;
-  kind: 'terminal' | 'chat' | 'llm-chat' | 'canvas';
+  kind: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator';
   tmuxSession: string | null;
   cliAgent?: string;
   repo?: RegisteredRepo;

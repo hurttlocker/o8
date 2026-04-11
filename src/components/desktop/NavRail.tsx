@@ -17,11 +17,8 @@ import {
   Brain,
   ChartBar,
   Bell,
-  Lightbulb,
   Plugs,
   ShieldCheck,
-  Rocket,
-  ClockCounterClockwise,
 } from '@phosphor-icons/react';
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 
@@ -42,12 +39,6 @@ interface NavRailProps {
   approvalCount?: number;
   onAlertClick?: () => void;
   alertTray?: ReactElement<{ desktopAnchorEl?: HTMLElement | null }> | null;
-  thoughtsOpen?: boolean;
-  onThoughtsToggle?: () => void;
-  missionControlOpen?: boolean;
-  onMissionControlToggle?: () => void;
-  historyOpen?: boolean;
-  onHistoryToggle?: () => void;
   onPortPreview?: (port: number, url: string, repo?: string) => void;
 }
 
@@ -72,44 +63,49 @@ const NAV_ITEMS: NavItem[] = [
 const BRAND_MARK_BLUE = '#2563eb';
 
 // ── Neomorphic icon container styles ──
-// Tauri uses macOS vibrancy so semi-transparent white works beautifully.
-// Browser has no vibrancy — dark backgrounds need dark neo containers.
+// Containers must provide their OWN local contrast — under Tauri vibrancy the
+// nav background is forced transparent, so OS wallpaper bleeds through. Pure
+// white-tint containers disappear when vibrancy is bright; pure dark-tint
+// containers disappear on a dark wallpaper. The values below are tuned to
+// remain legible in both situations.
 
 const NEO_LIGHT = {
   inactive: {
-    background: 'rgba(255, 255, 255, 0.55)',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
+    background: 'rgba(255, 255, 255, 0.72)',
+    boxShadow: '0 1px 3px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
   },
   active: {
-    background: 'rgba(255, 255, 255, 0.95)',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+    background: 'rgba(255, 255, 255, 0.98)',
+    boxShadow: '0 3px 10px rgba(15, 23, 42, 0.12), 0 1px 2px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95)',
   },
   hover: {
-    background: 'rgba(255, 255, 255, 0.8)',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+    background: 'rgba(255, 255, 255, 0.88)',
+    boxShadow: '0 2px 8px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
   },
 };
 
 const NEO_DARK = {
   inactive: {
-    background: 'rgba(255, 255, 255, 0.08)',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+    background: 'rgba(22, 26, 34, 0.55)',
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.07)',
   },
   active: {
-    background: 'rgba(255, 255, 255, 0.16)',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+    background: 'rgba(32, 38, 50, 0.82)',
+    boxShadow: '0 3px 10px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
   },
   hover: {
-    background: 'rgba(255, 255, 255, 0.12)',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+    background: 'rgba(28, 34, 44, 0.7)',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.32), 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
   },
 };
 
 function getNeoPreset(useTauri: boolean) {
   if (!useTauri) return NEO_DARK;
-  // In Tauri, respect the active theme — vibrancy + dark theme needs dark containers
-  const isDark = typeof document !== 'undefined'
-    && document.documentElement.getAttribute('data-theme') === 'dark';
+  if (typeof document === 'undefined') return NEO_LIGHT;
+  // Midnight is also a dark-scheme theme — treat it like dark so we pick
+  // the dark-tinted containers instead of the light ones.
+  const theme = document.documentElement.getAttribute('data-theme');
+  const isDark = theme === 'dark' || theme === 'midnight';
   return isDark ? NEO_DARK : NEO_LIGHT;
 }
 
@@ -223,8 +219,8 @@ function NavButton({
       <div data-neo="" style={neoIconStyle(active, useTauri)}>
         <IconComponent
           size={18}
-          weight={active ? 'duotone' : 'regular'}
-          color={active ? 'var(--t-text)' : 'var(--t-text-secondary)'}
+          weight={active ? 'fill' : 'bold'}
+          color={active ? 'var(--t-accent)' : 'var(--t-text)'}
         />
       </div>
       {badge != null && badge > 0 ? (
@@ -301,8 +297,8 @@ function UtilButton({
       <div data-neo="" style={neoIconStyle(!!active, useTauri)}>
         <IconComponent
           size={18}
-          weight={active ? 'duotone' : 'regular'}
-          color={active ? activeColor : (tint ?? 'var(--t-text-secondary)')}
+          weight={active ? 'fill' : 'bold'}
+          color={active ? activeColor : (tint ?? 'var(--t-text)')}
         />
       </div>
       {badge && badge > 0 ? (
@@ -523,12 +519,6 @@ export function NavRail({
   approvalCount = 0,
   onAlertClick,
   alertTray,
-  thoughtsOpen,
-  onThoughtsToggle,
-  missionControlOpen,
-  onMissionControlToggle,
-  historyOpen,
-  onHistoryToggle,
   onPortPreview,
 }: NavRailProps) {
   const [inTauri, setInTauri] = useState(false);
@@ -592,31 +582,13 @@ export function NavRail({
         ))}
       </div>
 
-      {/* Bottom — Ports + Thoughts + Alerts + Settings */}
+      {/* Bottom — Ports + Alerts + Settings. Orchestrator, Mission Control,
+          and History used to live here as tile launchers. They now live as
+          a single Orchestrator tab inside WorkspaceTerminal with History
+          and Mission as collapsible sidebars in the tab itself. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', position: 'relative' }}>
         <PortsFooter onPortPreview={onPortPreview} />
 
-        <UtilButton
-          icon={Lightbulb}
-          label="Orchestrator"
-          onClick={onThoughtsToggle}
-          active={thoughtsOpen}
-          useTauri={inTauri}
-        />
-        <UtilButton
-          icon={Rocket}
-          label="Mission Control"
-          onClick={onMissionControlToggle}
-          active={missionControlOpen}
-          useTauri={inTauri}
-        />
-        <UtilButton
-          icon={ClockCounterClockwise}
-          label="Orchestrator History"
-          onClick={onHistoryToggle}
-          active={historyOpen}
-          useTauri={inTauri}
-        />
         <div ref={setAlertAnchorEl} style={{ position: 'relative', width: '100%' }}>
           <UtilButton
             icon={Bell}

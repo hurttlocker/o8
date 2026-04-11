@@ -231,6 +231,7 @@ export function createWorkspaceTabId(kind: TerminalTab['kind']) {
   if (kind === 'llm-chat') return `llm-${uuid}`;
   if (kind === 'canvas') return `canvas-${uuid}`;
   if (kind === 'chat') return `chat-${uuid}`;
+  if (kind === 'orchestrator') return `orchestrator-${uuid}`;
   return `tab-${uuid}`;
 }
 

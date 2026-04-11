@@ -10,6 +10,7 @@ import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspac
 
 const LazyLLMChat = lazy(() => import('@/components/desktop/LLMChat'));
 const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then((module) => ({ default: module.Canvas })));
+const LazyOrchestratorTab = lazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })));
 
 interface WorkspaceTerminalPanelsProps {
   visibleTabs: TerminalTab[];
@@ -74,7 +75,16 @@ function WorkspaceTerminalPanelsBase({
   return (
     <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#ffffff' }}>
       {visibleTabs.map((tab) => (
-        tab.kind === 'llm-chat' ? (
+        tab.kind === 'orchestrator' ? (
+          <Suspense key={tab.id} fallback={null}>
+            <LazyOrchestratorTab
+              tabId={tab.id}
+              active={tab.id === effectiveActiveTabId}
+              repoPath={tab.repo?.localPath ?? null}
+              repoLabel={tab.repo?.name ?? null}
+            />
+          </Suspense>
+        ) : tab.kind === 'llm-chat' ? (
           <div
             key={tab.id}
             style={{
