@@ -38,7 +38,7 @@ export function useMobileState(init: MobileStateInit) {
     sessionKey: initialSession?.sessionKey ?? '',
     fallback: initialSession ?? null,
   }));
-  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory' | 'issues'>('squad');
+  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'issues'>('squad');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
 
@@ -103,12 +103,6 @@ export function useMobileState(init: MobileStateInit) {
   const [waitingForResponse, setWaitingForResponse] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
-
-  // ── Cortex memory surfaces ──
-  const [squadPickerOpen, setSquadPickerOpen] = useState(false);
-  const [cortexRecallOpen, setCortexRecallOpen] = useState(false);
-  const [cortexHealthOpen, setCortexHealthOpen] = useState(false);
-  const [cortexGraphOpen, setCortexGraphOpen] = useState(false);
 
   // ── Streaming ──
   const [streamingText, setStreamingText] = useState('');
@@ -322,13 +316,7 @@ export function useMobileState(init: MobileStateInit) {
     composeHeight, setComposeHeight,
     waitingForResponse, setWaitingForResponse,
     hydrated, setHydrated,
-    squadPickerOpen, setSquadPickerOpen,
     expandedProject, setExpandedProject,
-
-    // Cortex memory
-    cortexRecallOpen, setCortexRecallOpen,
-    cortexHealthOpen, setCortexHealthOpen,
-    cortexGraphOpen, setCortexGraphOpen,
 
     // Streaming
     streamingText, setStreamingText,

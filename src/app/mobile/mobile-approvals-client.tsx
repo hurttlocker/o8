@@ -32,7 +32,6 @@ import {
   type MobileView,
 } from './mobile-approvals-shared';
 import { SettingsView } from './mobile-settings-view';
-import { MobileMemoryView } from './mobile-memory-view';
 import {
   getMobileRepoLabel,
   normalizeMobileRepoList,
@@ -302,11 +301,9 @@ export function MobileApprovalsClient({
     ? 'Settings'
     : activeView === 'approvals'
       ? 'Approvals'
-      : activeView === 'memory'
-        ? 'Memory'
-        : inConversation
-          ? recentConversations.find((conversation) => conversation.tabId === currentTabId)?.title ?? 'Chat'
-          : 'Chats';
+      : inConversation
+        ? recentConversations.find((conversation) => conversation.tabId === currentTabId)?.title ?? 'Chat'
+        : 'Chats';
 
   return (
     <div
@@ -502,10 +499,6 @@ export function MobileApprovalsClient({
               appVersion={appVersion}
               palette={palette}
             />
-          ) : null}
-
-          {activeView === 'memory' ? (
-            <MobileMemoryView palette={palette} />
           ) : null}
         </div>
       </div>
