@@ -6,13 +6,12 @@ import os from 'node:os';
 import { ensureGitHubIssues, resolveRepoSlug } from '@/lib/github-broker';
 
 const HOME = process.env.HOME || os.homedir();
-const CORTEX_BINARY = process.env.CORTEX_BINARY || `${HOME}/bin/cortex`;
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || `process.cwd()`;
 
 // ── Result types ──
 
 interface UniversalResult {
-  kind: 'conversation' | 'agent' | 'memory' | 'issue' | 'file' | 'symbol';
+  kind: 'conversation' | 'agent' | 'issue' | 'file' | 'symbol';
   title: string;
   detail: string;
   /** Navigation target */
@@ -21,7 +20,6 @@ interface UniversalResult {
     issueNumber?: number;
     filePath?: string;
     line?: number;
-    factId?: number;
   };
   score: number;
 }
@@ -46,7 +44,6 @@ function execQuiet(cmd: string, opts?: { cwd?: string; timeout?: number }): stri
 function searchSymbolsProvider(query: string, workspace?: string): UniversalResult[] {
   try {
     // Dynamic import to avoid breaking if skeleton module isn't available
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { searchSymbols } = require('@/lib/skeleton') as typeof import('@/lib/skeleton');
     const root = workspace
       ? (workspace.startsWith('~') ? workspace.replace('~', HOME) : workspace)
@@ -69,37 +66,6 @@ function searchSymbolsProvider(query: string, workspace?: string): UniversalResu
 async function searchConversations(query: string): Promise<UniversalResult[]> {
   void query;
   return [];
-}
-
-function searchMemory(query: string): UniversalResult[] {
-  const raw = execQuiet(
-    `"${CORTEX_BINARY}" search "${query.replace(/"/g, '\\"')}" --limit 5 --json 2>/dev/null`,
-    { timeout: 3000 },
-  );
-  if (!raw) return [];
-  try {
-    const results = JSON.parse(raw);
-    return (Array.isArray(results) ? results : []).slice(0, 5).map((r: {
-      memory_id?: number;
-      fact_ids?: number[];
-      content?: string;
-      snippet?: string;
-      source_section?: string;
-      score?: number;
-    }) => {
-      const title = r.source_section || (r.content ?? '').slice(0, 60);
-      const detail = r.snippet || (r.content ?? '').slice(0, 120);
-      return {
-        kind: 'memory' as const,
-        title: title.length > 60 ? title.slice(0, 57) + '…' : title,
-        detail: detail.length > 120 ? detail.slice(0, 117) + '…' : detail,
-        target: { factId: r.fact_ids?.[0] ?? r.memory_id },
-        score: (r.score ?? 0.5) * 0.8,
-      };
-    });
-  } catch {
-    return [];
-  }
 }
 
 async function searchIssues(query: string, repoLike?: string): Promise<UniversalResult[]> {
@@ -176,18 +142,6 @@ function searchFiles(query: string, workspace?: string): UniversalResult[] {
   return results.slice(0, 10);
 }
 
-// ── Snippet extractor ──
-
-function extractSnippet(text: string, query: string, maxLen: number): string {
-  const lower = text.toLowerCase();
-  const idx = lower.indexOf(query.toLowerCase());
-  if (idx === -1) return text.slice(0, maxLen);
-  const start = Math.max(0, idx - 30);
-  const end = Math.min(text.length, idx + query.length + maxLen - 30);
-  const snippet = text.slice(start, end);
-  return (start > 0 ? '…' : '') + snippet + (end < text.length ? '…' : '');
-}
-
 // ── Main handler ──
 
 export async function GET(request: Request) {
@@ -195,7 +149,8 @@ export async function GET(request: Request) {
   const query = searchParams.get('q')?.trim();
   const workspace = searchParams.get('workspace') ?? undefined;
   const repo = searchParams.get('repo') ?? undefined;
-  const categories = searchParams.get('categories')?.split(',') ?? ['conversation', 'memory', 'issue', 'file', 'symbol'];
+  const categories = searchParams.get('categories')?.split(',').filter((category) => category !== 'memory')
+    ?? ['conversation', 'issue', 'file', 'symbol'];
 
   if (!query || query.length < 2) {
     return NextResponse.json({ results: [], query: query ?? '', categories });
@@ -206,7 +161,6 @@ export async function GET(request: Request) {
     // Agent search is done client-side to avoid oversized URLs (inventory is ~30KB)
     const searches = await Promise.allSettled([
       categories.includes('conversation') ? searchConversations(query) : Promise.resolve([]),
-      categories.includes('memory') ? Promise.resolve(searchMemory(query)) : Promise.resolve([]),
       categories.includes('issue') ? searchIssues(query, repo) : Promise.resolve([]),
       categories.includes('file') ? Promise.resolve(searchFiles(query, workspace)) : Promise.resolve([]),
       categories.includes('symbol') ? Promise.resolve(searchSymbolsProvider(query, workspace)) : Promise.resolve([]),
