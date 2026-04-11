@@ -142,15 +142,51 @@ The Rust shell runs pre-flight checks before spawning any Node process:
 
 `src/lib/cortex/client.ts` wraps the `~/bin/cortex` CLI binary. Three client variants: `LocalCortexClient` (exec), `CloudCortexClient` (HTTPS), `HybridCortexClient`.
 
+### Orchestrator Architecture (April 2026 refactor)
+
+**The Orchestrator is a TAB inside WorkspaceTerminal, not a floating tile.**
+
+There are exactly two tabs in a fresh workspace: `Orchestrator` and `Assistant`. Both render inside `WorkspaceTerminal` via the `kind` field on `TerminalTab` (see `workspace-terminal/types.ts`). Clicking either takes over the full workspace area.
+
+The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a three-pane layout:
+
+```
+┌──────────┬────────────────────┬──────────┐
+│ History  │      Chat          │ Mission  │
+│ (260px)  │  ThoughtsChatPanel │ (340px)  │
+│ (toggle) │                    │ (toggle) │
+└──────────┴────────────────────┴──────────┘
+```
+
+- **Left sidebar**: `OrchestratorHistorySidebar.tsx` — past orchestrator threads grouped by day, hover-reveal trash-icon delete. Collapsed by default, `cortex-ide:orchestrator:history-open` localStorage key.
+- **Center**: `ThoughtsChatPanel` with `emptyStateOverride={<OrchestratorEmptyState/>}` — the empty state shows the greeting + 4 quick-action cards.
+- **Right sidebar**: `ThoughtsMissionPanel` re-used as-is — Mission Control, Open Issues, Packet cards. Collapsed by default, `cortex-ide:orchestrator:mission-open` localStorage key.
+- **Permission chip** (Full access / Read-only) persists per-tab to localStorage `cortex-ide:orchestrator-permission:tab:<tabId>`.
+
+**Retired tile kinds** (do not reintroduce): `thoughts`, `mission-control`, `orchestrator-history`. The old floating tile versions were deleted: `OrchestratorChatTile`, `MissionControlTile`, `OrchestratorHistoryTile`, `orchestrator-tile-bus`.
+
+**TILE_LAYOUT_VERSION is 4.** Any persisted layout with the retired kinds gets migrated to a plain `terminal` leaf via `migrateNode()` in `lib/tiles/operations.ts`. Bump the version if you add another breaking change.
+
+**Data flow** — `OrchestratorDataProvider` (`components/desktop/orchestrator-data-context.tsx`) sits in `dashboard/page.tsx` and exposes `{ agents, missionState, workspaceTargets, onMissionStateChange, onLaunchPacket, draftInjection }`. The OrchestratorTab consumes via `useOrchestratorData()` — this avoids prop-drilling through WorkspaceTerminal.
+
+**NavRail discipline** — the left nav rail no longer carries orchestrator-related launchers. The "small panels" (tile layer) are reserved for the global terminal (`contextual-panel` kind). Do not add a Lightbulb/Rocket/Clock back to the NavRail.
+
+**Packet cards use Issues-style rows.** When a packet is expanded in Mission Control, metadata (Summary / Runtime / Repo / Branch) renders as clickable rows with uppercase labels + values + chevrons. Click to inline-edit (textarea/input) or open a floating popover (runtime/repo). No native `<select>` or `<input>` boxes in the packet card — they read as chunky bubbles against the Issues density.
+
 ### Key Files (largest, most active)
 
 | File | What it does |
 |------|-------------|
-| `src/app/dashboard/page.tsx` | Main layout orchestrator. All panels toggled here. |
+| `src/app/dashboard/page.tsx` | Main layout orchestrator. Wraps TileContainer in `OrchestratorDataProvider`. |
 | `src/components/desktop/AgentPanel.tsx` | Agent fleet view: repo-grouped cards, status groups, activity feed, issues, PRs, CI, deploys. |
-| `src/components/desktop/LLMChat.tsx` | Chat panel with LLM conversation, message rendering, tool calls. |
+| `src/components/desktop/LLMChat.tsx` | Chat panel with LLM conversation (the **Assistant** tab). |
+| `src/components/desktop/workspace-terminal/OrchestratorTab.tsx` | The **Orchestrator** tab — three-pane layout with collapsible History + Mission sidebars. |
+| `src/components/desktop/OrchestratorEmptyState.tsx` | Empty-state greeting + 4 quick-action cards for the Orchestrator. |
+| `src/components/desktop/OrchestratorHistorySidebar.tsx` | Left sidebar — past orchestrator threads with delete. |
+| `src/components/desktop/SessionVisualizer.tsx` | Horizontal strip of active agent sessions, shown inside the Orchestrator tab when agents exist. |
+| `src/components/desktop/thoughts/ThoughtsChatPanel.tsx` | Chat transcript + composer for the orchestrator and CLI lanes. Supports `emptyStateOverride` + `fillInput`/`sendNow` imperative methods. |
+| `src/components/desktop/thoughts/ThoughtsMissionPanel.tsx` | Mission Control — framed input, Open Issues, Issues-style packet cards with inline-edit rows. |
 | `src/components/desktop/Canvas.tsx` | Bottom workspace: issue viewer, transcript viewer, file viewer, timeline. |
-| `src/components/desktop/ThoughtsCard.tsx` | Floating glass overlay — mini chat, approvals, agent picker. z-index 9999. |
 | `src/ws-server.ts` | WebSocket multiplexer for mobile real-time data. |
 
 ### API Routes (`src/app/api/`)
@@ -201,6 +237,9 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 - **Never use CSS shorthand** — use `paddingTop`/`paddingLeft`, not `padding: "8px 16px"` (React 19 warns on mixed shorthand/longhand)
 - **Never throw in API routes** — return structured error responses
 - **Never use `ai` SDK** — direct fetch to `/api/v2/proxy/llm` route
+- **Never reintroduce the retired orchestrator tile kinds** — `thoughts`, `mission-control`, `orchestrator-history` are DELETED. The Orchestrator is a tab inside `WorkspaceTerminal` (`OrchestratorTab.tsx`). History and Mission Control are collapsible sidebars INSIDE that tab, not separate tiles, not NavRail launchers. If you need a new orchestrator surface, extend `OrchestratorTab` — do not create a new tile kind. See the "Orchestrator Architecture" section.
+- **Never add NavRail launchers for orchestrator/mission/history** — the nav rail's bottom section is reserved for ports, alerts, and settings. The "small panels" (tile layer) are reserved for the global terminal (`contextual-panel`).
+- **Never use native `<select>` or `<input>` inside packet cards** — packet metadata rows use Issues-style clickable rows with custom popovers. Native form controls render as chunky bubbles that break the density.
 
 ### ALWAYS
 - **`npx tsc --noEmit` before every commit**
