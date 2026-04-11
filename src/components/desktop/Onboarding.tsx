@@ -120,7 +120,7 @@ function StepIndicator({ steps, current }: { steps: OnboardingStep[]; current: O
 const FEATURES = [
   { title: 'Command your AI agents', subtitle: 'Dispatch tasks to Claude, Codex, or any runtime. Watch them work in real-time.', previewLabel: 'Agent dashboard with live sessions' },
   { title: 'Approve from anywhere', subtitle: 'Review code, approve merges, and steer agents from your phone.', previewLabel: 'Mobile approval surface' },
-  { title: 'Organizational memory', subtitle: 'Your codebase context persists across sessions. Agents never start from zero.', previewLabel: 'Cortex memory graph' },
+  { title: 'Shared workspace context', subtitle: 'Keep repo state, approvals, and live sessions visible across every operator view.', previewLabel: 'Workspace context surface' },
   { title: 'Every runtime, one dashboard', subtitle: 'Claude Code, Codex, Gemini — unified under one governance layer.', previewLabel: 'Multi-runtime workspace' },
 ];
 

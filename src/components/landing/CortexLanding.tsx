@@ -14,8 +14,8 @@ const palette = {
 
 const features = [
   {
-    title: "Memory That Forgets",
-    desc: "Ebbinghaus decay curves. Facts reinforce or fade. Your agents remember what matters and forget what doesn't.",
+    title: "Operational Context",
+    desc: "Keep repo state, approvals, and session history visible while your agents work.",
     color: palette.juneBud,
     icon: "⬡",
   },
@@ -38,8 +38,8 @@ const features = [
     icon: "⚡",
   },
   {
-    title: "Knowledge Graph",
-    desc: "Facts connect to facts. Traverse by subject. Visualize in 2D/3D. See how your agents think.",
+    title: "Realtime Visibility",
+    desc: "Track sessions, diffs, approvals, and repo activity from one shared command surface.",
     color: palette.juneBud,
     icon: "◇",
   },
@@ -52,9 +52,9 @@ const features = [
 ];
 
 const stats = [
-  { label: "Memories", value: "21,170" },
-  { label: "Facts", value: "38,523" },
-  { label: "Sources", value: "3,493" },
+  { label: "Workspaces", value: "21" },
+  { label: "Sessions", value: "38" },
+  { label: "Reviews", value: "349" },
   { label: "Active Agents", value: "5" },
 ];
 
@@ -499,10 +499,10 @@ export default function CortexLanding() {
         <div style={s.heroContent}>
           <p style={s.eyebrow}>The command center for AI agent teams</p>
           <h1 style={s.h1}>
-            Your agents<br />remember everything.
+            Run the fleet.<br />See the work.
           </h1>
           <p style={s.heroSub}>
-            Memory-native control plane for running, supervising, and scaling
+            Local-first control plane for running, supervising, and scaling
             fleets of coding agents. One operator. Many agents. One system.
           </p>
           <div style={s.ctaRow}>
@@ -593,7 +593,7 @@ export default function CortexLanding() {
       <section id="download" style={s.downloadSection}>
         <h2 style={s.downloadTitle}>Start commanding your fleet.</h2>
         <p style={s.downloadSub}>
-          Download Cortex IDE. Import your files. Watch your agents get smarter.
+          Download Cortex IDE. Connect your repos. Watch your agents get to work.
           Zero config. One binary. Local-first forever.
         </p>
         <div style={{ ...s.ctaRow, marginTop: 32 }}>
@@ -602,7 +602,7 @@ export default function CortexLanding() {
           </a>
         </div>
         <p style={s.downloadNote}>
-          Free during early access · MIT licensed memory layer · No data leaves your machine
+          Free during early access · MIT licensed · No data leaves your machine
         </p>
         <p style={{ ...s.downloadNote, marginTop: 8 }}>
           Windows & Linux coming soon
