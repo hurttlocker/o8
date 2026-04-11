@@ -48,14 +48,13 @@ import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
-import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
-import { readRuntimeTranscript } from '@/lib/runtime/transcript';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
 import '@/lib/ws-runtime-env';
 import { WebSocketServer, WebSocket } from 'ws';
+import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
-import { getBrowserInventorySnapshot, getBrowserProvider } from './lib/browser/inventory';
-import { getCommandCenterSnapshotWithOptions } from './lib/command-center/snapshot';
+import { getBrowserProvider } from './lib/browser/inventory';
+import type { CommandCenterSnapshot } from './lib/command-center/snapshot';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from './lib/mobile/types';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import {
@@ -72,10 +71,6 @@ import {
   type SupervisorCallbacks,
   type AgentUpdateEvent,
 } from './lib/supervisor/agent-supervisor';
-import {
-  runHeadlessSprintTick,
-  startHeadlessSprintLoop,
-} from '@/lib/orchestrator/headless-loop';
 import type {
   LaneLifecycleEventPayload,
   RealtimeBatchMessage,
@@ -121,6 +116,107 @@ const FETCH_TIMEOUT_MS = 8_000;
 const BACKPRESSURE_LIMIT = 64 * 1024; // 64KB — queue durable messages if client buffer exceeds this
 const BACKPRESSURE_QUEUE_LIMIT = 32; // max queued messages per client before oldest are dropped
 const BACKPRESSURE_FLUSH_MS = 50; // check interval to flush queued messages
+
+interface RuntimeTranscriptApiEntry {
+  id: string;
+  role: string;
+  text: string;
+  type?: string;
+  timestamp: number;
+  timestampLabel: string;
+  toolName?: string;
+  filePath?: string;
+}
+
+function buildNextUrl(pathname: string, searchParams?: URLSearchParams) {
+  const query = searchParams && searchParams.size > 0 ? `?${searchParams.toString()}` : '';
+  return `${NEXT_ORIGIN}${pathname}${query}`;
+}
+
+async function fetchNextJson<T>(
+  pathname: string,
+  options: {
+    method?: 'GET' | 'POST';
+    searchParams?: URLSearchParams;
+    body?: unknown;
+    timeoutMs?: number;
+  } = {},
+): Promise<T> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${WS_TOKEN}`,
+  };
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch(buildNextUrl(pathname, options.searchParams), {
+    method: options.method ?? 'GET',
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: AbortSignal.timeout(options.timeoutMs ?? FETCH_TIMEOUT_MS),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = payload && typeof payload === 'object' && 'error' in payload
+      ? String((payload as { error?: string }).error ?? '')
+      : '';
+    throw new Error(error || `${pathname} failed (${response.status})`);
+  }
+
+  return payload as T;
+}
+
+async function fetchCommandCenterSnapshot(fresh = false): Promise<CommandCenterSnapshot> {
+  const searchParams = new URLSearchParams();
+  if (fresh) searchParams.set('fresh', '1');
+  return fetchNextJson<CommandCenterSnapshot>('/api/command-center/snapshot', { searchParams });
+}
+
+async function fetchBrowserInventorySnapshot() {
+  return fetchNextJson<CommandCenterSnapshot['browserInventory']>('/api/browser/inventory');
+}
+
+async function fetchRuntimeInventorySnapshot(fresh = false) {
+  const searchParams = new URLSearchParams();
+  if (fresh) searchParams.set('fresh', '1');
+  return fetchNextJson<CommandCenterSnapshot['fleet']>('/api/runtime/inventory', { searchParams });
+}
+
+async function fetchRuntimeTranscript(sessionKey: string, limit: number) {
+  const searchParams = new URLSearchParams({
+    sessionKey,
+    limit: String(limit),
+  });
+  const payload = await fetchNextJson<{ transcript: RuntimeTranscriptApiEntry[] }>('/api/runtime/transcript', {
+    searchParams,
+  });
+  return payload.transcript ?? [];
+}
+
+async function triggerHeadlessSprintTick(releasePacketIds?: string[]) {
+  return fetchNextJson<{ ok: boolean }>('/api/orchestrator/headless-tick', {
+    method: 'POST',
+    body: releasePacketIds && releasePacketIds.length > 0 ? { releasePacketIds } : {},
+    timeoutMs: 15_000,
+  });
+}
+
+async function ensureReviewDrainStarted() {
+  return fetchNextJson<{ ok: boolean }>('/api/review/auto-review', {
+    method: 'POST',
+    body: { action: 'start' },
+    timeoutMs: 8_000,
+  });
+}
+
+async function enqueueAutoReview(laneId: string) {
+  return fetchNextJson<{ ok: boolean }>('/api/review/auto-review', {
+    method: 'POST',
+    body: { action: 'enqueue', laneId },
+    timeoutMs: 8_000,
+  });
+}
 
 function normalizeOrchestratorRepoPath(repoPath: string | null): string | null {
   const trimmed = repoPath?.trim();
@@ -227,6 +323,7 @@ const terminalAttachments = new Map<string, TerminalAttachment>();
 const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
+const pendingDashSessions = new Map<string, { cols: number; rows: number }>();
 
 // ── Orchestrator channel state ──
 
@@ -701,7 +798,6 @@ const sessionHistoryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
-let stopReviewDrain: (() => void) | null = null;
 
 const lastRealtimeFingerprint = {
   runtime: '',
@@ -873,7 +969,7 @@ async function buildResyncEvents(stream: RealtimeStreamKey) {
   const capturedSeq = realtimeSeq;
   if (stream === 'global') {
     try {
-      const snapshot = await getCommandCenterSnapshotWithOptions({ fresh: true });
+      const snapshot = await fetchCommandCenterSnapshot(true);
       const degradedHealth: RealtimeHealthDescriptor = {
         state: 'degraded',
         reason: 'Replay gap detected; forcing fresh global resync.',
@@ -955,7 +1051,7 @@ async function buildBootstrapEvents(stream: RealtimeStreamKey) {
   const capturedSeq = realtimeSeq;
   if (stream === 'global') {
     try {
-      const snapshot = await getCommandCenterSnapshotWithOptions({ fresh: false });
+      const snapshot = await fetchCommandCenterSnapshot(false);
       const runtimeHealth = deriveRuntimeHealth(snapshot.fleet);
       const events: RealtimeEventEnvelope[] = [
         buildRealtimeEnvelope(
@@ -1046,7 +1142,7 @@ async function buildBootstrapEvents(stream: RealtimeStreamKey) {
   }
 }
 
-function fingerprintRuntimeSnapshot(fleet: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['fleet']) {
+function fingerprintRuntimeSnapshot(fleet: CommandCenterSnapshot['fleet']) {
   // Lightweight string concat instead of JSON.stringify on nested objects.
   // Same change-detection semantics — all discriminating fields are represented.
   const m = fleet.meta;
@@ -1057,7 +1153,7 @@ function fingerprintRuntimeSnapshot(fleet: Awaited<ReturnType<typeof getCommandC
   return fp;
 }
 
-function fingerprintReviewSnapshot(review: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['review']) {
+function fingerprintReviewSnapshot(review: CommandCenterSnapshot['review']) {
   if (!review) return 'no-review';
   let fp = `${review.repoSlug}\x01${review.branch}\x01${review.dirty ? 1 : 0}\x01${review.diffStat}`;
   for (const issue of review.activeIssues) fp += `\x02i${issue.number}`;
@@ -1067,8 +1163,8 @@ function fingerprintReviewSnapshot(review: Awaited<ReturnType<typeof getCommandC
 }
 
 function fingerprintBrowserSnapshot(
-  browserInventory: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['browserInventory'],
-  attachedBrowser: ReturnType<typeof getAttachedBrowserSummary>,
+  browserInventory: CommandCenterSnapshot['browserInventory'],
+  attachedBrowser: BrowserAttachmentSummary | null,
 ) {
   let fp = '';
   for (const s of browserInventory.surfaces) {
@@ -1105,7 +1201,7 @@ function fingerprintHistory(sessionKey: string, entries: Awaited<ReturnType<type
   return fp;
 }
 
-function deriveRuntimeHealth(fleet: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['fleet']): RealtimeHealthDescriptor {
+function deriveRuntimeHealth(fleet: CommandCenterSnapshot['fleet']): RealtimeHealthDescriptor {
   if (fleet.meta.mode !== 'live') {
     return { state: 'degraded', reason: fleet.meta.note ?? 'demo fallback' };
   }
@@ -1120,7 +1216,7 @@ function deriveRuntimeHealth(fleet: Awaited<ReturnType<typeof getCommandCenterSn
 
 async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?: string } = {}) {
   try {
-    const snapshot = await getCommandCenterSnapshotWithOptions({ fresh: options.fresh });
+    const snapshot = await fetchCommandCenterSnapshot(Boolean(options.fresh));
     const runtimeHealth = deriveRuntimeHealth(snapshot.fleet);
     const events: RealtimeEventEnvelope[] = [];
 
@@ -1272,12 +1368,32 @@ function scheduleRealtimeSessionHistoryRefresh(sessionKey: string, fresh = false
   sessionHistoryTimers.set(sessionKey, timer);
 }
 
+function startHeadlessTickBridge(intervalMs: number) {
+  const timer = setInterval(() => {
+    void triggerHeadlessSprintTick().catch((error) => {
+      console.error('[headless] Tick bridge failed:', error instanceof Error ? error.message : String(error));
+    });
+  }, intervalMs);
+
+  if (timer.unref) timer.unref();
+
+  console.log(`[headless] Started sprint loop (${intervalMs}ms interval)`);
+  void triggerHeadlessSprintTick().catch((error) => {
+    console.error('[headless] Tick bridge failed:', error instanceof Error ? error.message : String(error));
+  });
+
+  return () => {
+    clearInterval(timer);
+    console.log('[headless] Stopped sprint loop');
+  };
+}
+
 function startBrowserDiscoveryRealtimeLoop() {
   if (browserDiscoveryTimer) return;
   browserDiscoveryTimer = setInterval(async () => {
     if (clients.size === 0) return;
     try {
-      const browserInventory = await getBrowserInventorySnapshot();
+      const browserInventory = await fetchBrowserInventorySnapshot();
       const attachedBrowser = getAttachedBrowserSummary();
       const fingerprint = fingerprintBrowserSnapshot(browserInventory, attachedBrowser);
       if (fingerprint === lastRealtimeFingerprint.browser) return;
@@ -1302,7 +1418,7 @@ function startBrowserDiscoveryRealtimeLoop() {
   if (browserDiscoveryTimer.unref) browserDiscoveryTimer.unref();
 }
 
-function attachedBrowserFingerprint(summary: ReturnType<typeof getAttachedBrowserSummary>) {
+function attachedBrowserFingerprint(summary: BrowserAttachmentSummary | null) {
   if (!summary) return 'no-attached-browser';
   let fp = `${summary.provider}\x01${summary.surface.id}\x01${summary.surface.status}\x01${summary.surface.url}\x01${summary.surface.title}\x01${summary.browserName}\x01${summary.browserVersion}\x01${summary.attachedAt}\x01${summary.note ?? ''}`;
   for (const page of summary.pages) {
@@ -1729,6 +1845,45 @@ function sendTerminal(client: ClientState, event: string, payload: Record<string
   send(client, { channel: 'terminal', event, data: payload });
 }
 
+function materializePendingDashSession(
+  client: ClientState,
+  sessionName: string,
+  cols?: number,
+  rows?: number,
+) {
+  const pending = pendingDashSessions.get(sessionName);
+  if (!pending) {
+    return undefined;
+  }
+
+  const nextCols = typeof cols === 'number' ? cols : pending.cols;
+  const nextRows = typeof rows === 'number' ? rows : pending.rows;
+  const ptyProcess = spawnDashShellPty(sessionName, nextCols, nextRows);
+  const now = Date.now();
+  const attachment: TerminalAttachment = {
+    id: randomUUID(),
+    sessionName,
+    kind: 'dash-shell',
+    ptyProcess,
+    clientIds: new Set([client.id]),
+    cols: nextCols,
+    rows: nextRows,
+    batchBuffer: '',
+    batchTimer: null,
+    lastOutputAt: now,
+    createdAt: now,
+    orphanTimer: null,
+    scrollbackChunks: [],
+    scrollbackBytes: 0,
+  };
+  terminalAttachments.set(sessionName, attachment);
+  client.terminalSessions.add(sessionName);
+  registerTerminalAttachment(attachment);
+  pendingDashSessions.delete(sessionName);
+  console.log(`[ws-server] Materialized dashboard PTY session: ${sessionName}`);
+  return attachment;
+}
+
 function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>) {
   if (!pty) {
     sendTerminal(client, 'error', { sessionName: '', error: 'Terminal not available (node-pty not installed)' });
@@ -1751,37 +1906,9 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
 
   const shortId = randomUUID().slice(0, 8);
   const sessionName = `cortex-dash-${shortId}`;
-
-  try {
-    const ptyProcess = spawnDashShellPty(sessionName, cols, rows);
-    const now = Date.now();
-    const attachment: TerminalAttachment = {
-      id: randomUUID(),
-      sessionName,
-      kind: 'dash-shell',
-      ptyProcess,
-      clientIds: new Set(),
-      cols,
-      rows,
-      batchBuffer: '',
-      batchTimer: null,
-      lastOutputAt: now,
-      createdAt: now,
-      orphanTimer: null,
-      scrollbackChunks: [],
-      scrollbackBytes: 0,
-    };
-    terminalAttachments.set(sessionName, attachment);
-    registerTerminalAttachment(attachment);
-    console.log(`[ws-server] Created dashboard PTY session: ${sessionName}`);
-
-    sendTerminal(client, 'created', { sessionName, requestId });
-    handleTerminalAttach(client, { sessionName, cols, rows });
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    console.error(`[ws-server] Failed to create terminal session:`, error);
-    sendTerminal(client, 'error', { sessionName: '', error: `Failed to create terminal: ${error}` });
-  }
+  pendingDashSessions.set(sessionName, { cols, rows });
+  console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}`);
+  sendTerminal(client, 'created', { sessionName, requestId });
 }
 
 function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>) {
@@ -1815,6 +1942,22 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       sendTerminalScrollback(client, attachment);
     }
     console.log(`[ws-server] Client ${client.id} attached to existing terminal ${sessionName}`);
+    return;
+  }
+
+  try {
+    attachment = materializePendingDashSession(client, sessionName, cols, rows);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`[ws-server] Failed to materialize dashboard terminal ${sessionName}:`, error);
+    sendTerminal(client, 'error', { sessionName, error: `Failed to create terminal: ${error}` });
+    return;
+  }
+
+  if (attachment) {
+    sendTerminal(client, 'attached', { sessionName });
+    sendTerminalScrollback(client, attachment);
+    console.log(`[ws-server] Client ${client.id} attached to lazily created terminal ${sessionName}`);
     return;
   }
 
@@ -1863,7 +2006,21 @@ function handleTerminalInput(client: ClientState, msg: Record<string, unknown>) 
   const data = msg.data as string;
   if (!sessionName || typeof data !== 'string') return;
 
-  const attachment = terminalAttachments.get(sessionName);
+  let attachment = terminalAttachments.get(sessionName);
+  if (!attachment && isDashTerminalSession(sessionName) && pendingDashSessions.has(sessionName)) {
+    try {
+      attachment = materializePendingDashSession(client, sessionName);
+      if (attachment) {
+        sendTerminal(client, 'attached', { sessionName });
+      }
+    } catch (error) {
+      sendTerminal(client, 'error', {
+        sessionName,
+        error: error instanceof Error ? error.message : 'Failed to create terminal',
+      });
+      return;
+    }
+  }
   if (!attachment || !attachment.clientIds.has(client.id)) return;
 
   try {
@@ -1878,7 +2035,12 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   if (!sessionName || typeof cols !== 'number' || typeof rows !== 'number') return;
 
   const attachment = terminalAttachments.get(sessionName);
-  if (!attachment) return;
+  if (!attachment) {
+    if (isDashTerminalSession(sessionName) && pendingDashSessions.has(sessionName)) {
+      pendingDashSessions.set(sessionName, { cols, rows });
+    }
+    return;
+  }
 
   try {
     attachment.ptyProcess.resize(cols, rows);
@@ -2889,7 +3051,7 @@ async function bootstrapWsServer() {
       async fetchFleetStatus() {
         // #476 — Use cached inventory (15s TTL) instead of forcing fresh discovery every 5s.
         // The supervisor only needs to detect status changes, not millisecond-fresh data.
-        const snapshot = await getRuntimeInventorySnapshot();
+        const snapshot = await fetchRuntimeInventorySnapshot(false);
         return (snapshot.agents ?? [])
           .filter((agent) => agent.runtime === 'codex' || agent.runtime === 'claude-code')
           .map((a) => ({
@@ -2901,13 +3063,13 @@ async function bootstrapWsServer() {
           }));
       },
       async fetchTranscript(sessionKey, limit) {
-        const entries = await readRuntimeTranscript(sessionKey, { limit });
+        const entries = await fetchRuntimeTranscript(sessionKey, limit);
         return entries.map((entry) => ({
           id: entry.id,
           role: entry.role,
           text: entry.text,
-          timestamp: entry.timestamp.getTime(),
-          timestampLabel: entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: entry.timestamp,
+          timestampLabel: entry.timestampLabel,
           toolName: entry.toolName,
         }));
       },
@@ -3141,7 +3303,7 @@ async function bootstrapWsServer() {
                     packet.lane = null;
                   });
                   console.warn(`[ralph-loop] Attempt ${attemptNumber}/${maxAttempts} failed for packet ${packetId}, re-queuing with learnings`);
-                  void runHeadlessSprintTick().catch((error) => {
+                  void triggerHeadlessSprintTick().catch((error) => {
                     console.error(`[ralph-loop] Failed to trigger headless retry dispatch for packet ${packetId}:`, error);
                   });
                   return;
@@ -3253,11 +3415,8 @@ async function bootstrapWsServer() {
                   console.error(`[context-relay] Failed to write ad-hoc session outcome for lane ${lane.id}:`, error);
                 }
               }
-              const { triggerAutoReview } = await import('@/lib/lane/auto-review');
-              triggerAutoReview(updated);
-              await runHeadlessSprintTick({
-                releasePacketIds: packetId ? [packetId] : undefined,
-              });
+              await enqueueAutoReview(updated.id);
+              await triggerHeadlessSprintTick(packetId ? [packetId] : undefined);
             }
             console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
             return;
@@ -3286,13 +3445,10 @@ async function bootstrapWsServer() {
       },
     };
     startSupervisorLoop(supervisorCallbacks);
-    stopHeadlessLoop = startHeadlessSprintLoop(10_000);
+    stopHeadlessLoop = startHeadlessTickBridge(10_000);
 
-    // #456 — Start the durable review queue drain
-    import('@/lib/lane/auto-review').then(({ startReviewQueueDrain }) => {
-      stopReviewDrain = startReviewQueueDrain();
-    }).catch((err) => {
-      console.error('[ws-server] Failed to start review queue drain:', err);
+    void ensureReviewDrainStarted().catch((error) => {
+      console.error('[ws-server] Failed to start review queue drain:', error instanceof Error ? error.message : String(error));
     });
   });
 }
@@ -3308,8 +3464,6 @@ function shutdown(signal: string) {
   stopSupervisorLoop();
   stopHeadlessLoop?.();
   stopHeadlessLoop = null;
-  stopReviewDrain?.();
-  stopReviewDrain = null;
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
   if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);
