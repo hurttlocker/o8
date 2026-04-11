@@ -1,6 +1,7 @@
 import { archiveCompletedLanes, listLanes } from '@/lib/lane/registry';
 import { pruneRepoWorktrees } from '@/lib/lane/worktree-cleanup';
 import {
+  readOrchestratorControlPlaneState,
   reconcileOrchestratorControlPlaneState,
   withLockedState,
   writeOrchestratorControlPlaneState,
@@ -13,6 +14,7 @@ import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 const DEFAULT_INTERVAL_MS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
 const PRUNE_INTERVAL_MS = 10 * 60_000;
+const IDLE_HEARTBEAT_TICKS = 6;
 
 interface HeadlessSprintTickResult {
   launched: number;
@@ -29,6 +31,7 @@ const queuedReleasePacketIds = new Set<string>();
 let lastPruneAt = 0;
 let prunePromise: Promise<void> | null = null;
 let lastCompletedMissionId = '';
+let silentIdleTickCount = 0;
 
 function queueReleasedPackets(packetIds?: string[]) {
   for (const packetId of packetIds ?? []) {
@@ -107,6 +110,51 @@ function countLaunchedPackets(
 
 function countActivePackets(state: OrchestratorMissionState) {
   return state.packets.filter((packet) => packet.status === 'launching' || packet.status === 'running').length;
+}
+
+function hasPendingHeadlessWork(state: OrchestratorMissionState) {
+  return state.packets.some((packet) => {
+    if (packet.archivedAt || packet.releaseState === 'released') {
+      return false;
+    }
+
+    return packet.queueState === 'queued'
+      || packet.status === 'queued'
+      || packet.status === 'launching'
+      || packet.status === 'running'
+      || packet.status === 'recovering';
+  });
+}
+
+function buildIdleTickResult(mission: OrchestratorMissionState): HeadlessSprintTickResult {
+  const dag = buildDagMetadata(mission.packets);
+  return {
+    launched: 0,
+    active: countActivePackets(mission),
+    currentWave: dag.currentWave,
+    totalWaves: dag.totalWaves,
+    mission,
+  };
+}
+
+function maybeShortCircuitIdleTick(): HeadlessSprintTickResult | null {
+  if (queuedReleasePacketIds.size > 0) {
+    return null;
+  }
+
+  const mission = readOrchestratorControlPlaneState();
+  if (hasPendingHeadlessWork(mission)) {
+    silentIdleTickCount = 0;
+    return null;
+  }
+
+  silentIdleTickCount += 1;
+  if (silentIdleTickCount >= IDLE_HEARTBEAT_TICKS) {
+    console.log(`[headless] idle (${silentIdleTickCount} silent ticks)`);
+    silentIdleTickCount = 0;
+  }
+
+  return buildIdleTickResult(mission);
 }
 
 function collectPrunableRepoPaths(state: OrchestratorMissionState) {
@@ -201,11 +249,17 @@ export async function runHeadlessSprintTick(options: { releasePacketIds?: string
     return tickPromise;
   }
 
+  const idleResult = maybeShortCircuitIdleTick();
+  if (idleResult) {
+    return idleResult;
+  }
+
   tickPromise = (async () => {
     let result: HeadlessSprintTickResult;
 
     do {
       rerunRequested = false;
+      silentIdleTickCount = 0;
       result = await executeHeadlessSprintTick();
     } while (rerunRequested || queuedReleasePacketIds.size > 0);
 
