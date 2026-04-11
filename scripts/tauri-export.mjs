@@ -4,8 +4,7 @@
  *   out/frontend/  → Tauri frontendDist (just the loader HTML)
  *   out/server/    → Tauri bundle resource (Next.js server + Node binary)
  */
-import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync, chmodSync } from 'fs';
-import { homedir } from 'os';
+import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -148,21 +147,8 @@ for (const mod of nativeModules) {
   }
 }
 
-// ── Bundle Cortex memory binary ──
-const cortexBin = join(homedir(), 'bin', 'cortex');
-if (existsSync(cortexBin)) {
-  const dest = join(server, 'bin', 'cortex');
-  mkdirSync(join(server, 'bin'), { recursive: true });
-  cpSync(cortexBin, dest);
-  chmodSync(dest, 0o755);
-  console.log('📦 Bundled cortex binary (memory engine)');
-} else {
-  console.warn('⚠️  ~/bin/cortex not found — memory features will be disabled');
-}
-
 // ── Compile WS server ──
 const { execSync } = await import('child_process');
-const { symlinkSync } = await import('fs');
 
 // Turbopack renames externals with hash suffixes — create symlinks
 const chunksDir = join(server, '.next', 'server', 'chunks');
@@ -179,38 +165,76 @@ if (existsSync(chunksDir)) {
     }
   } catch (e) { console.warn('⚠️  Symlink step:', e.message); }
 }
-try {
-  execSync(
-    `npx esbuild src/ws-server.ts --bundle --platform=node --format=esm --outfile=out/server/ws-server.mjs --external:node-pty --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url);'`,
-    { cwd: root, stdio: 'inherit' },
-  );
-  console.log('📦 Compiled ws-server.mjs');
-} catch (e) {
-  console.warn('⚠️  WS server compilation failed:', e.message);
+
+// Shared esbuild args for standalone server bundles (ws-server + MCP).
+//
+// `server-only` is a Next.js marker package — Next resolves it via a webpack
+// alias, but esbuild can't find it on its own. At runtime in a Node process
+// it's a no-op, so we point the import at a bare empty module. This MUST be
+// wired up, otherwise ws-server.ts silently fails to compile and the packaged
+// app ships without a WS server → client spams /ws → error storm → 100% CPU
+// next-server hang. See cortex-ide debugging session 2026-04-11.
+//
+// ESM banner also needs to synthesize `__filename` / `__dirname` / `require`
+// because a handful of CJS deps (e.g. source-map-support) reference them at
+// module level. Without the shim the bundle throws
+// `ReferenceError: __filename is not defined` the moment it loads.
+const SERVER_ONLY_STUB = join(root, 'scripts', 'server-only-stub.js');
+const ESM_BANNER = [
+  'import { createRequire as __o8_createRequire } from "module";',
+  'import { fileURLToPath as __o8_fileURLToPath } from "url";',
+  'import { dirname as __o8_dirname } from "path";',
+  'const require = __o8_createRequire(import.meta.url);',
+  'const __filename = __o8_fileURLToPath(import.meta.url);',
+  'const __dirname = __o8_dirname(__filename);',
+].join(' ');
+const SHARED_ESBUILD_ARGS = [
+  '--bundle',
+  '--platform=node',
+  '--format=esm',
+  `--alias:server-only=${SERVER_ONLY_STUB}`,
+  `--banner:js='${ESM_BANNER}'`,
+].join(' ');
+
+// Standalone server compiles are LOAD-BEARING for the packaged app. If any
+// fail, fail the whole prebuild — don't warn-and-ship a broken bundle.
+function compileServerBundle(label, entry, extraArgs = '') {
+  try {
+    execSync(
+      `npx esbuild ${entry} ${SHARED_ESBUILD_ARGS} --outfile=out/server/${label}.mjs ${extraArgs}`,
+      { cwd: root, stdio: 'inherit' },
+    );
+    console.log(`📦 Compiled ${label}.mjs`);
+  } catch (e) {
+    console.error(`❌ ${label} compilation failed — refusing to ship a broken bundle`);
+    console.error(`   ${e.message}`);
+    process.exit(1);
+  }
 }
+
+// Native modules must be external — esbuild can't bundle .node addons.
+// better-sqlite3 is used by the db layer (imported transitively through
+// repo registry + lane tables) and node-pty is used by the terminal bridge.
+const NATIVE_EXTERNALS = '--external:node-pty --external:better-sqlite3 --external:bindings';
+
+compileServerBundle('ws-server', 'src/ws-server.ts', NATIVE_EXTERNALS);
 
 // ── Compile MCP servers ──
 // Ships alongside the bundled Next.js backend so the packaged Tauri app
 // can expose MCP tools to Claude Desktop/Code without requiring `tsx` or
 // a source checkout. See docs/cortex-v2-dogfood-report-2026-04-09.md.
-try {
-  execSync(
-    `npx esbuild src/lib/mcp/operator-mcp-server.ts --bundle --platform=node --format=esm --outfile=out/server/operator-mcp-server.mjs --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url);'`,
-    { cwd: root, stdio: 'inherit' },
-  );
-  console.log('📦 Compiled operator-mcp-server.mjs');
-} catch (e) {
-  console.warn('⚠️  operator-mcp-server compilation failed:', e.message);
-}
+compileServerBundle('operator-mcp-server', 'src/lib/mcp/operator-mcp-server.ts', NATIVE_EXTERNALS);
+compileServerBundle('cortex-mcp-server', 'src/lib/mcp/cortex-mcp-server.ts', NATIVE_EXTERNALS);
 
-try {
-  execSync(
-    `npx esbuild src/lib/mcp/cortex-mcp-server.ts --bundle --platform=node --format=esm --outfile=out/server/cortex-mcp-server.mjs --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url);'`,
-    { cwd: root, stdio: 'inherit' },
-  );
-  console.log('📦 Compiled cortex-mcp-server.mjs');
-} catch (e) {
-  console.warn('⚠️  cortex-mcp-server compilation failed:', e.message);
+// ── Sanity check: every expected standalone bundle must exist ──
+// Belt-and-braces guard against future compile failures slipping through.
+const REQUIRED_BUNDLES = ['ws-server.mjs', 'operator-mcp-server.mjs', 'cortex-mcp-server.mjs'];
+for (const bundle of REQUIRED_BUNDLES) {
+  const bundlePath = join(server, bundle);
+  if (!existsSync(bundlePath)) {
+    console.error(`❌ Missing required server bundle: ${bundle}`);
+    process.exit(1);
+  }
 }
 
 const size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\\t')[0];
