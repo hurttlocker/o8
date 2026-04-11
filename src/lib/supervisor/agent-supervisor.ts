@@ -1,8 +1,6 @@
 import { access, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
-import { getCodexRolloutPath } from '@/lib/codex/sessions';
 import { getSqlite } from '@/lib/db';
 
 /**
@@ -1025,20 +1023,6 @@ async function resolveTranscriptSourcePaths(surfaceId: string): Promise<string[]
 }
 
 async function resolveTranscriptSourcePathsFresh(surfaceId: string): Promise<string[]> {
-  if (surfaceId.startsWith('codex-owned:')) {
-    const sources = await getOwnedCodexTelemetrySources(surfaceId).catch(() => null);
-    return dedupeStrings(sources?.stdoutPaths ?? []);
-  }
-
-  if (
-    surfaceId.startsWith('codex:')
-    || surfaceId.startsWith('codex-discovered:')
-    || surfaceId.startsWith('codex-live:')
-  ) {
-    const rolloutPath = await getCodexRolloutPath(surfaceId).catch(() => null);
-    return rolloutPath ? [rolloutPath] : [];
-  }
-
   if (surfaceId.startsWith('claude-code:')) {
     const transcriptPath = await findClaudeTranscriptPath(
       surfaceId.replace(/^claude-code:/, ''),

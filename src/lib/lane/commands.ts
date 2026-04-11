@@ -24,7 +24,7 @@ import {
   archiveLane,
 } from '@/lib/lane/registry';
 import { getLanePolicy, isProtectedBranch } from '@/lib/lane/policy';
-import { isLaneAutoReviewActive } from '@/lib/lane/auto-review';
+import { getSqlite } from '@/lib/db';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES, FILE_SIZE_WAIVERS } from '@/lib/orchestrator/dispatch';
@@ -102,7 +102,7 @@ function buildLanePolicyContext(
   // Auto-approve when: (a) headless auto-review is active, or
   // (b) the orchestrator already reviewed and approved the packet.
   const autoReview = actor === 'orchestrator'
-    && (isLaneAutoReviewActive(lane.id) || opts?.orchestratorReviewed === true);
+    && (isLaneAutoReviewInProgress(lane.id) || opts?.orchestratorReviewed === true);
   return buildPolicyContext('lane_command', {
     verb,
     laneId: lane.id,
@@ -111,6 +111,17 @@ function buildLanePolicyContext(
   }, {
     workspacePath: lane.repoPath,
   });
+}
+
+function isLaneAutoReviewInProgress(laneId: string) {
+  try {
+    const row = getSqlite()
+      .prepare(`SELECT 1 FROM review_queue WHERE lane_id = ? AND status = 'in_progress' LIMIT 1`)
+      .get(laneId);
+    return Boolean(row);
+  } catch {
+    return false;
+  }
 }
 
 function formatOversizedFiles(files: Array<{ path: string; lineCount: number }>) {
