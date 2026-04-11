@@ -7,12 +7,10 @@ import {
   ChevronRight,
   Terminal,
   Key,
-  Brain,
   Globe,
   Zap,
   Copy,
   Cpu,
-  Layers,
   MessageSquare,
   Sparkles,
 } from 'lucide-react';
@@ -136,14 +134,6 @@ function buildToolList(detection: DetectionResult): ToolDisplayInfo[] {
       detected: configuredKeys.length > 0,
       detail: configuredKeys.length > 0 ? configuredKeys.map((k) => k.provider).join(', ') : undefined,
       icon: <Key size={16} strokeWidth={2} />,
-    },
-    {
-      id: 'cortex',
-      name: 'Cortex Memory',
-      detected: tools.cortex.detected,
-      version: tools.cortex.version,
-      detail: tools.cortex.memoryCount ? `${tools.cortex.memoryCount} memories` : undefined,
-      icon: <Brain size={16} strokeWidth={2} />,
     },
     {
       id: 'ollama',
@@ -449,16 +439,6 @@ function getMissingActions(detection: DetectionResult): MissingToolAction[] {
     });
   }
 
-  if (!tools.cortex.detected) {
-    actions.push({
-      id: 'cortex',
-      name: 'Cortex Memory',
-      description: 'Persistent AI memory. Your agents remember context across sessions.',
-      command: 'go install github.com/hurttlocker/cortex@latest',
-      icon: <Brain size={16} strokeWidth={2} />,
-    });
-  }
-
   if (!tools.ollama.detected) {
     actions.push({
       id: 'ollama',
@@ -759,7 +739,7 @@ export const SetupWizard = memo(function SetupWizard({
           Welcome to o8
         </div>
         <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
-          {detection.summary}
+          Launch agents, connect providers, and manage your workspace from one control surface.
         </div>
       </div>
 
@@ -1148,7 +1128,7 @@ export const SetupWizard = memo(function SetupWizard({
     }
 
     if (step === 2) {
-      // Optional memory setup
+      // Optional local model setup
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ textAlign: 'center' }}>
@@ -1159,28 +1139,18 @@ export const SetupWizard = memo(function SetupWizard({
               letterSpacing: '-0.02em',
               marginBottom: 4,
             }}>
-              Optional: Persistent Memory
+              Optional: Local Models
             </div>
             <div style={{ fontSize: 12, color: THEME_TEXT_MUTED, lineHeight: 1.5 }}>
-              Give your agents long-term memory and semantic search.
+              Run local models on your machine for search and offline experimentation.
             </div>
           </div>
 
           <MissingToolCard
             action={{
-              id: 'cortex',
-              name: 'Cortex Memory',
-              description: 'A personal knowledge graph. Agents remember context across sessions.',
-              command: 'go install github.com/hurttlocker/cortex@latest',
-              icon: <Brain size={16} strokeWidth={2} />,
-            }}
-            onSkip={() => skipStep('cortex')}
-          />
-          <MissingToolCard
-            action={{
               id: 'ollama',
-              name: 'Ollama (Embeddings)',
-              description: 'Runs embedding models locally for semantic search in Cortex.',
+              name: 'Ollama',
+              description: 'Runs local models for search, experiments, and offline workflows.',
               link: 'https://ollama.com',
               icon: <Cpu size={16} strokeWidth={2} />,
             }}

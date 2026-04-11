@@ -66,14 +66,14 @@ function generateTerrain(): TerrainCell[][] {
 
   // Create multiple gaussian peaks to simulate data clusters
   const peaks = [
-    { cx: 0.45, cz: 0.5, sigma: 0.12, amp: 1.0, cat: "memory", label: "Cortex Memory" },
+    { cx: 0.45, cz: 0.5, sigma: 0.12, amp: 1.0, cat: "command", label: "Command Center" },
     { cx: 0.3, cz: 0.35, sigma: 0.09, amp: 0.75, cat: "agent", label: "Agent Fleet" },
     { cx: 0.65, cz: 0.6, sigma: 0.1, amp: 0.85, cat: "decision", label: "Decisions" },
     { cx: 0.2, cz: 0.65, sigma: 0.08, amp: 0.6, cat: "tool", label: "Tools" },
     { cx: 0.75, cz: 0.3, sigma: 0.07, amp: 0.55, cat: "project", label: "Projects" },
     { cx: 0.55, cz: 0.25, sigma: 0.06, amp: 0.45, cat: "identity", label: "Identity" },
     { cx: 0.15, cz: 0.45, sigma: 0.065, amp: 0.4, cat: "config", label: "Config" },
-    { cx: 0.8, cz: 0.7, sigma: 0.08, amp: 0.5, cat: "knowledge", label: "Knowledge Graph" },
+    { cx: 0.8, cz: 0.7, sigma: 0.08, amp: 0.5, cat: "review", label: "Review Queue" },
   ];
 
   for (let ix = 0; ix < GRID_X; ix++) {
