@@ -56,6 +56,56 @@ fn write_port_file(name: &str, port: u16) -> std::io::Result<()> {
     std::fs::write(path, port.to_string())
 }
 
+// ── Child process log capture ──
+//
+// The bundled Next.js server and WS server each get their own log file
+// under `~/.cortex-ide/logs/`. On each boot the previous log is rotated to
+// `<name>.prev` so we always have the last two runs available for
+// post-mortem. Without this, silent production failures (like the hung
+// Next.js loop from 2026-04-11) are impossible to diagnose because stderr
+// is discarded and there are no devtools in release builds.
+//
+/// Open a truncating log file at `~/.cortex-ide/logs/<name>`, rotating any
+/// prior run to `<name>.prev` first. Returns `None` if the filesystem is
+/// unwritable (we prefer to keep the app bootable rather than failing loud).
+fn open_child_log(name: &str) -> Option<std::fs::File> {
+    let dir = format!("{}/logs", cortex_data_dir());
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        log::warn!("Could not create log dir {}: {}", dir, e);
+        return None;
+    }
+    let path = format!("{}/{}", dir, name);
+    let prev = format!("{}.prev", path);
+    let _ = std::fs::rename(&path, &prev);
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)
+    {
+        Ok(f) => {
+            log::info!("Child log → {}", path);
+            Some(f)
+        }
+        Err(e) => {
+            log::warn!("Could not open child log {}: {}", path, e);
+            None
+        }
+    }
+}
+
+/// Build a `Stdio` suitable for piping a child's output to a log file,
+/// falling back to discarding the stream if the file couldn't be opened.
+fn child_stdio(file: Option<&std::fs::File>) -> std::process::Stdio {
+    match file {
+        Some(f) => match f.try_clone() {
+            Ok(clone) => std::process::Stdio::from(clone),
+            Err(_) => std::process::Stdio::null(),
+        },
+        None => std::process::Stdio::null(),
+    }
+}
+
 // ── Node.js pre-flight ──
 //
 // Finder-launched Tauri apps inherit a minimal PATH (`/usr/bin:/bin`) that
@@ -783,13 +833,6 @@ pub fn run() {
                 std::env::set_var("O8_API_PORT", api_port.to_string());
                 std::env::set_var("O8_WS_PORT", ws_port.to_string());
 
-                // Set Cortex binary path if bundled
-                let cortex_bin = server_dir.join("bin").join("cortex");
-                if cortex_bin.exists() {
-                    std::env::set_var("CORTEX_BINARY", &cortex_bin);
-                    log::info!("Bundled cortex binary at {:?}", cortex_bin);
-                }
-
                 // Tell the Next server where the bundled MCP scripts live so
                 // `/api/setup/mcp-config` and `orchestrator-session.ts` can
                 // emit `node <bundled>.mjs` commands instead of dev `tsx` paths.
@@ -798,6 +841,11 @@ pub fn run() {
                 if has_bundled_mcp {
                     log::info!("Bundled MCP scripts at {:?}", server_dir);
                 }
+
+                // Open per-server log files before spawning so stdout/stderr
+                // can be wired directly. Rotated to .prev on each boot.
+                let next_log = open_child_log("next-server.log");
+                let ws_log = open_child_log("ws-server.log");
 
                 log::info!("Starting server: {} {:?} on :{}", node_bin, server_js, api_port);
                 let mut server_cmd = Command::new(&node_bin);
@@ -816,8 +864,8 @@ pub fn run() {
                     server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
                 }
                 match server_cmd
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::piped())
+                    .stdout(child_stdio(next_log.as_ref()))
+                    .stderr(child_stdio(next_log.as_ref()))
                     .spawn()
                 {
                     Ok(child) => {
@@ -830,6 +878,12 @@ pub fn run() {
                 }
 
                 // ── Start WebSocket server (terminals, chat, git watcher) ──
+                //
+                // If ws-server.mjs is missing the app boots into a degraded
+                // state — /ws requests rewrite to a dead upstream and Next.js
+                // can spiral into a CPU-pegged error loop. We no longer
+                // silently swallow that: it's a fatal startup error so the
+                // user sees the failure instead of a hung dashboard.
                 let ws_server_js = server_dir.join("ws-server.mjs");
                 if ws_server_js.exists() {
                     log::info!("Starting WS server: {} {:?} on :{}", node_bin, ws_server_js, ws_port);
@@ -839,8 +893,8 @@ pub fn run() {
                         .env("O8_NODE_BIN", &node_bin)
                         .env("WS_PORT", ws_port.to_string())
                         .env("NEXT_ORIGIN", format!("http://127.0.0.1:{}", api_port))
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
+                        .stdout(child_stdio(ws_log.as_ref()))
+                        .stderr(child_stdio(ws_log.as_ref()))
                         .spawn()
                     {
                         Ok(child) => {
@@ -850,6 +904,11 @@ pub fn run() {
                             log::error!("Failed to start WS server: {}", e);
                         }
                     }
+                } else {
+                    log::error!(
+                        "ws-server.mjs missing from bundle at {:?} — this will break the WebSocket bridge and may hang the Next.js server",
+                        ws_server_js
+                    );
                 }
             } else {
                 log::warn!("No bundled server found at {:?} — running in dev mode", server_js);
