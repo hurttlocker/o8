@@ -665,16 +665,6 @@ export function usePaletteActions({
     });
 
     actions.push({
-      id: 'settings:memory',
-      category: 'settings',
-      title: 'Open memory settings',
-      detail: 'Cortex memory, embeddings, and maintenance.',
-      keywords: ['settings', 'memory', 'cortex', 'embeddings'],
-      priority: 200,
-      run: () => handleOpenSettingsTab('memory'),
-    });
-
-    actions.push({
       id: 'settings:appearance',
       category: 'settings',
       title: 'Open appearance settings',
@@ -908,5 +898,12 @@ export function usePaletteActions({
     staleSelectedRepoWorktrees,
     waitForWorkspaceTerminalTarget,
     wsStatus,
+    setActiveSessionKey,
+    setActiveWorkspace,
+    setChatVisible,
+    setSelectedRepoWorktreeRefreshNonce,
+    setSetupWizardOpen,
+    setSidebarVisible,
+    setRightPanelMode,
   ]);
 }

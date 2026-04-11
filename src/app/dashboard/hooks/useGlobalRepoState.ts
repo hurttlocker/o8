@@ -18,7 +18,6 @@ import {
 interface UseGlobalRepoStateArgs {
   activeWorkspace: string | undefined;
   setActiveNavSection: Dispatch<SetStateAction<NavSection>>;
-  setShowMemoryView: Dispatch<SetStateAction<boolean>>;
   setSidebarVisible: Dispatch<SetStateAction<boolean>>;
   sidebarVisible: boolean;
 }
@@ -26,7 +25,6 @@ interface UseGlobalRepoStateArgs {
 export function useGlobalRepoState({
   activeWorkspace,
   setActiveNavSection,
-  setShowMemoryView,
   setSidebarVisible,
   sidebarVisible,
 }: UseGlobalRepoStateArgs) {
@@ -337,7 +335,6 @@ export function useGlobalRepoState({
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('cortex-global-repo-id', repoEntry.id);
     }
-    setShowMemoryView(false);
     setSidebarVisible(true);
     setActiveNavSection('agents');
 
@@ -356,7 +353,7 @@ export function useGlobalRepoState({
     }
 
     window.setTimeout(dispatch, 120);
-  }, [setActiveNavSection, setShowMemoryView, setSidebarVisible, sidebarVisible]);
+  }, [setActiveNavSection, setSidebarVisible, sidebarVisible]);
 
   const handleFocusCurrentRepoSetup = useCallback(() => {
     if (!globalRepoEntry) {
@@ -371,7 +368,6 @@ export function useGlobalRepoState({
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('cortex-global-repo-id', repoEntry.id);
     }
-    setShowMemoryView(false);
     setSidebarVisible(true);
     setActiveNavSection('agents');
 
@@ -390,7 +386,7 @@ export function useGlobalRepoState({
     }
 
     window.setTimeout(dispatch, 120);
-  }, [setActiveNavSection, setShowMemoryView, setSidebarVisible, sidebarVisible]);
+  }, [setActiveNavSection, setSidebarVisible, sidebarVisible]);
 
   const handleOpenRepoInDesktop = useCallback(async (editor: 'finder' | 'terminal') => {
     if (!globalRepoEntry?.localPath) {
