@@ -14,10 +14,8 @@ import {
   UsersThree,
   Terminal,
   GearSix,
-  Brain,
   ChartBar,
   Bell,
-  Plugs,
   ShieldCheck,
 } from '@phosphor-icons/react';
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
@@ -28,7 +26,6 @@ export type NavSection =
   | 'agents'
   | 'approvals'
   | 'terminal'
-  | 'memory'
   | 'analytics'
   | 'settings';
 
@@ -56,7 +53,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'agents', label: 'Agents', icon: UsersThree },
   { id: 'approvals', label: 'Approvals', icon: ShieldCheck },
   { id: 'terminal', label: 'Terminal', icon: Terminal },
-  { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'analytics', label: 'Analytics', icon: ChartBar },
 ];
 
@@ -346,14 +342,6 @@ function portLabel(port: number): string {
   return WELL_KNOWN_PORTS[port] ?? `Port ${port}`;
 }
 
-function buildPortTooltip(groups: PortGroup[], total: number): string {
-  const header = `${total} active port${total === 1 ? '' : 's'}`;
-  const lines = groups.flatMap(g =>
-    g.ports.map(p => `${portLabel(p)}: ${p}`),
-  );
-  return [header, ...lines].join('\n');
-}
-
 // ── Ports Footer (collapsed-only) ──
 
 function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: string, repo?: string) => void }) {
@@ -465,7 +453,11 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
               onClick={() => {
                 setHovered(false);
                 const url = `http://localhost:${port}`;
-                onPortPreview ? onPortPreview(port, url, repo) : window.open(url, '_blank');
+                if (onPortPreview) {
+                  onPortPreview(port, url, repo);
+                  return;
+                }
+                window.open(url, '_blank');
               }}
               style={{
                 display: 'flex',

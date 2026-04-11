@@ -7,7 +7,6 @@ export function useUIChrome() {
   // ── Navigation ──
   const [activeNavSection, setActiveNavSection] = useState<NavSection>('agents');
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('connectors');
-  const [showMemoryView, setShowMemoryView] = useState(false);
 
   // ── Sidebar + Timeline ──
   const [sidebarVisible, setSidebarVisible] = useState(true);
@@ -40,7 +39,6 @@ export function useUIChrome() {
 
   // ── Settings tab opener ──
   const handleOpenSettingsTab = useCallback((tab: SettingsTab) => {
-    setShowMemoryView(false);
     setSettingsInitialTab(tab);
     setActiveNavSection('settings');
   }, []);
@@ -51,8 +49,6 @@ export function useUIChrome() {
     setActiveNavSection,
     settingsInitialTab,
     setSettingsInitialTab,
-    showMemoryView,
-    setShowMemoryView,
     handleOpenSettingsTab,
 
     // Sidebar + Timeline

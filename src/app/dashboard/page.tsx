@@ -12,7 +12,6 @@ import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
-// GraphExplorer3D lazy-loaded below
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 import { ThemeProvider } from '@/lib/theme/context';
@@ -94,8 +93,6 @@ import { createTileRegistry } from './tileRegistry';
 /* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
 const LazySettingsPage = lazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage').then(m => ({ default: m.AnalyticsPage })));
-const LazyGraphExplorer3D = lazy(() => import('@/components/desktop/GraphExplorer3D').then(m => ({ default: m.GraphExplorer3D })));
-const LazyDirectivesView = lazy(() => import('@/components/desktop/DirectivesView').then(m => ({ default: m.DirectivesView })));
 const LazySetupWizard = lazy(() => import('@/components/desktop/SetupWizard').then(m => ({ default: m.SetupWizard })));
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
@@ -154,7 +151,6 @@ function DashboardInner() {
   const {
     activeNavSection, setActiveNavSection,
     settingsInitialTab,
-    showMemoryView, setShowMemoryView,
     sidebarVisible, setSidebarVisible,
     timelineVisible, setTimelineVisible,
     alertTrayOpen, setAlertTrayOpen,
@@ -322,7 +318,6 @@ function DashboardInner() {
   } = useGlobalRepoState({
     activeWorkspace,
     setActiveNavSection,
-    setShowMemoryView,
     setSidebarVisible,
     sidebarVisible,
   });
@@ -995,7 +990,6 @@ function DashboardInner() {
 
   const openApprovalsDiscoverySurface = useCallback(() => {
     setActiveNavSection('approvals');
-    setShowMemoryView(false);
     setWorkspaceSidePanelView('review');
     setWorkspaceSidePanelCompactReview(false);
     setWorkspaceSidePanelActivationKey((value) => value + 1);
@@ -1105,10 +1099,6 @@ function DashboardInner() {
       };
     });
   }, [workspaceChatTargetRepoPath]);
-
-  const handleOpenMemory = useCallback(() => {
-    setShowMemoryView(true);
-  }, []);
 
   const handlePreviewSelection = useCallback((selection: PreviewSelectionPayload) => {
     const payload: AgentPanelChatInjectionPayload = {
@@ -2182,15 +2172,12 @@ function DashboardInner() {
           if (section === 'settings') {
             // Settings is a full center-workspace view — don't force chat panel open
             setActiveNavSection('settings');
-            setShowMemoryView(false);
             return;
           }
           setActiveNavSection(section);
           // Always show chat when switching nav sections
           if (!chatVisible) setChatVisible(true);
           setRightPanelMode('chat');
-          if (section === 'memory') setShowMemoryView(true);
-          else setShowMemoryView(false);
           if (section === 'terminal') {
             // Show the contextual panel if not already visible
             const existing = findLeafByContentKind(tileLayout.root, 'contextual-panel');
@@ -2267,7 +2254,6 @@ function DashboardInner() {
             onCreateIssue={handleCreateIssue}
             onOpenGitLog={handleOpenGitLog}
             onOpenDeploy={handleOpenDeploy}
-            onOpenMemory={handleOpenMemory}
             onAgentsUpdate={handleAgentsUpdate}
             onAgentKill={sendAgentKill}
             lifecycleEvents={lifecycleEvents}
@@ -2330,7 +2316,7 @@ function DashboardInner() {
             },
           ] : []}
         />
-        {activeNavSection === 'settings' && !showMemoryView && (
+        {activeNavSection === 'settings' && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings...</div>}>
             <LazySettingsPage initialTab={settingsInitialTab} />
@@ -2338,7 +2324,7 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection === 'analytics' && !showMemoryView && (
+        {activeNavSection === 'analytics' && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading analytics...</div>}>
             <LazyAnalyticsPage />
@@ -2346,42 +2332,7 @@ function DashboardInner() {
           </div>
         )}
 
-        {showMemoryView && (
-          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-            <button
-              type="button"
-              onClick={() => setShowMemoryView(false)}
-              style={{
-                position: 'absolute',
-                bottom: 14,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                zIndex: 100,
-                paddingTop: 6,
-                paddingRight: 14,
-                paddingBottom: 6,
-                paddingLeft: 14,
-                borderRadius: 8,
-                border: '1px solid rgba(148,163,184,0.15)',
-                background: 'rgba(10, 14, 26, 0.85)',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
-                color: '#94a3b8',
-                fontSize: 12,
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-              }}
-            >
-              ← Back to Workspace
-            </button>
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading directives...</div>}>
-            <LazyDirectivesView />
-            </Suspense>
-          </div>
-        )}
-
-        {!showMemoryView && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
+        {activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
           <OrchestratorDataProvider
             agents={parsedAgents}
             missionState={thoughtsMissionState}
