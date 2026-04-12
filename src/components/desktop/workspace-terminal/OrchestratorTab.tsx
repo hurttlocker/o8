@@ -189,9 +189,6 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
   const thoughtsElevatedShadow = 'var(--t-glass-shadow)';
   const thoughtsMutedGlass = 'var(--t-glass-muted-strong)';
 
-  const titleParts = ['Orchestrator', 'claude-code'];
-  if (repoLabel) titleParts.push(repoLabel);
-  const title = titleParts.join(' · ');
 
   const isFullAccess = permissionMode === 'full';
 
@@ -224,68 +221,6 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
         background: 'var(--t-chat-surface-bg, #ffffff)',
       }}
     >
-      {/* Tab content header — title + History + Mission + permission chip */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          paddingTop: 10,
-          paddingRight: 14,
-          paddingBottom: 10,
-          paddingLeft: 14,
-          borderBottomWidth: '0.5px',
-          borderBottomStyle: 'solid',
-          borderBottomColor: 'var(--t-divider-subtle)',
-          flexShrink: 0,
-        }}
-      >
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 12,
-            fontWeight: 700,
-            color: 'var(--t-text)',
-            letterSpacing: '-0.01em',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-          title={title}
-        >
-          {title}
-        </div>
-
-        {/* New conversation — only when there are messages */}
-        {hasMessages ? (
-          <button
-            type="button"
-            onClick={handleNewConversation}
-            title="New conversation"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 26,
-              height: 26,
-              borderRadius: 7,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-btn-secondary-border)',
-              background: 'transparent',
-              color: 'var(--t-text-secondary)',
-              cursor: 'pointer',
-            }}
-          >
-            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
-          </button>
-        ) : null}
-
-      </div>
 
       {/* Plan-mode banner */}
       {!isFullAccess ? (
@@ -394,6 +329,37 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             </svg>
             History
           </button>
+          {hasMessages ? (
+            <button
+              type="button"
+              onClick={handleNewConversation}
+              title="New conversation"
+              style={{
+                position: 'absolute',
+                top: 10,
+                left: historyOpen ? 272 : 90,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 24,
+                height: 24,
+                borderRadius: 7,
+                borderWidth: 0,
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                cursor: 'pointer',
+                transition: 'left 200ms ease, color 120ms ease',
+                zIndex: 2,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text-secondary)'; e.currentTarget.style.background = 'var(--t-bg-card)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; e.currentTarget.style.background = 'transparent'; }}
+            >
+              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
+            </button>
+          ) : null}
           <ThoughtsChatPanel
             ref={chatPanelRef}
             open
