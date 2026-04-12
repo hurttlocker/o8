@@ -165,6 +165,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onSplitHorizontal={props.onSplitHorizontal}
           canCloseTile={props.canCloseTile}
           onCloseTile={props.onCloseTile}
+          onReorderTabs={controller.handleReorderTabs}
         />
 
         <WorkspaceTerminalPanels
