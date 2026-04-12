@@ -4,10 +4,6 @@ import { memo } from 'react';
 import {
   AlertCircle,
   FolderOpen,
-  THEME_ACCENT,
-  THEME_ACCENT_SOFT,
-  THEME_BG_CARD,
-  THEME_PANEL_GLASS,
   type BranchAgent,
   type OrchestratorPacket,
   type RepoRegistryEntry,
@@ -178,59 +174,41 @@ function RepoRegistryListBase({
           ) : null}
 
           {showEmptyState ? (
-            <div style={{ padding: '8px 0 2px' }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                paddingTop: 40,
+                paddingBottom: 12,
+                paddingLeft: 20,
+                paddingRight: 20,
+              }}
+            >
               <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 10,
-                  padding: '9px 12px',
-                  borderRadius: 16,
-                  border: '1px solid var(--t-panel-border)',
-                  background: `linear-gradient(180deg, ${THEME_PANEL_GLASS} 0%, ${THEME_BG_CARD} 100%)`,
-                  boxShadow: '0 10px 24px rgba(4, 8, 14, 0.12), inset 0 1px 0 var(--t-divider-subtle)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'var(--t-text-secondary)',
+                  letterSpacing: '-0.01em',
+                  lineHeight: 1.3,
                 }}
               >
-                <span
-                  style={{
-                    width: 24,
-                    height: 24,
-                    marginTop: 1,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: 999,
-                    background: THEME_ACCENT_SOFT,
-                    color: THEME_ACCENT,
-                    flexShrink: 0,
-                  }}
-                >
-                  <FolderOpen size={13} strokeWidth={2.1} />
-                </span>
-                <span style={{ minWidth: 0 }}>
-                  <span
-                    style={{
-                      display: 'block',
-                      fontSize: 11.5,
-                      fontWeight: 650,
-                      color: 'var(--t-text)',
-                      letterSpacing: '-0.01em',
-                    }}
-                  >
-                    Bring a repo into Cortex
-                  </span>
-                  <span
-                    style={{
-                      display: 'block',
-                      marginTop: 3,
-                      fontSize: 10.5,
-                      lineHeight: 1.45,
-                      color: 'var(--t-text-faint)',
-                    }}
-                  >
-                    Add a local Git repository with + and launch workspace flows from here.
-                  </span>
-                </span>
+                No repos yet
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  maxWidth: 220,
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                  color: 'var(--t-text-faint)',
+                  letterSpacing: '-0.005em',
+                }}
+              >
+                Click <span style={{ color: 'var(--t-text-muted)', fontWeight: 600 }}>+</span> to add a local Git repository.
               </div>
             </div>
           ) : null}
