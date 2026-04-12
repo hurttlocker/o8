@@ -297,18 +297,6 @@ export const TabBar = memo(function TabBar({
               <PhosphorSplitVertical size={14} />
             </button>
           ) : null}
-          {onSplitHorizontal ? (
-            <button
-              type="button"
-              onClick={onSplitHorizontal}
-              aria-label="Split horizontally"
-              style={chromeButtonStyle}
-              onMouseEnter={hoverChromeOn}
-              onMouseLeave={hoverChromeOff}
-            >
-              <PhosphorSplitHorizontal size={14} />
-            </button>
-          ) : null}
           {canCloseTile && onCloseTile ? (
             <button
               type="button"
