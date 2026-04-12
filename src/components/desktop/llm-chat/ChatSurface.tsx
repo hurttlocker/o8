@@ -246,7 +246,7 @@ function ChatSurfaceBase({
             );
           })}
 
-          {showTypingIndicator ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingTop: 12, paddingBottom: 8, paddingLeft: 4, animation: 'llmFadeIn 200ms ease-out' }}>{[0, 1, 2].map((index) => <div key={index} style={{ width: 8, height: 8, borderRadius: '50%', background: '#cbd5e1', animation: `llmDot 1.4s ease-in-out ${index * 0.2}s infinite` }} />)}</div> : null}
+          {showTypingIndicator && !isStreaming ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingTop: 12, paddingBottom: 8, paddingLeft: 4, animation: 'llmFadeIn 200ms ease-out' }}>{[0, 1, 2].map((index) => <div key={index} style={{ width: 8, height: 8, borderRadius: '50%', background: '#cbd5e1', animation: `llmDot 1.4s ease-in-out ${index * 0.2}s infinite` }} />)}</div> : null}
 
           {!isStreaming && (followUps.length > 0 || followUpsLoading) ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, animation: 'llmFadeIn 300ms ease-out' }}>
