@@ -96,6 +96,7 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
   ) => void;
   onLaunchPacket?: (packet: OrchestratorPacket) => Promise<OrchestratorLaneBinding | null> | OrchestratorLaneBinding | null;
   onFocusPacket?: (packet: OrchestratorPacket) => void;
+  focusedRepoId?: string | null;
 }>(function ThoughtsMissionPanel({
   open,
   visible,
@@ -111,6 +112,7 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
   onMissionStateChange,
   onLaunchPacket,
   onFocusPacket,
+  focusedRepoId,
 }, ref) {
   type RepoIssue = { number: number; title: string; url?: string; labels?: string[] };
   type ReviewChangedFile = {
@@ -141,9 +143,12 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
     showAllFiles: boolean;
   };
 
-  const [repoIssues, setRepoIssues] = useState<RepoIssue[]>([]);
+  type RepoIssuesGroup = { repoId: string; repoName: string; slug: string; issues: RepoIssue[] };
+  const [issueGroups, setIssueGroups] = useState<RepoIssuesGroup[]>([]);
   const [issuesLoading, setIssuesLoading] = useState(false);
-  const [issuesCollapsed, setIssuesCollapsed] = useState(false);
+  const [issueGroupCollapsed, setIssueGroupCollapsed] = useState<Record<string, boolean>>({});
+  // Legacy compat — derived flat list for packet linking checks
+  const repoIssues = issueGroups.flatMap((g) => g.issues);
   const [issuesShowAll, setIssuesShowAll] = useState(false);
   const [expandedPacketId, setExpandedPacketId] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<{ packetId: string; field: 'summary' | 'runtime' | 'repo' | 'branch' } | null>(null);
@@ -193,51 +198,58 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
   const missionCostBadgeTone = costTone(missionCostSummary?.totalCostUsd ?? 0, missionHasCostData);
   const missionCostLabel = formatCostLabel(missionCostSummary?.totalCostUsd ?? 0, missionHasCostData);
 
+  // Auto-expand focused repo when it changes
   useEffect(() => {
-    if (!open || !visible || workspaceTargets.length === 0) return;
+    if (focusedRepoId) setIssueGroupCollapsed((prev) => ({ ...prev, [focusedRepoId]: false }));
+  }, [focusedRepoId]);
+
+  useEffect(() => {
+    if (!open || !visible) return;
 
     let cancelled = false;
-    let resolvedSlug: string | null = null;
 
-    const fetchIssues = async (fresh: boolean) => {
+    const fetchAllIssues = async (fresh: boolean) => {
       try {
-        if (!resolvedSlug) {
-          const reposRes = await fetch('/api/panel/repos');
-          if (!reposRes.ok || cancelled) return;
-          const reposData = await reposRes.json() as { repos?: Array<{ localPath: string; remoteUrl?: string }> };
-          const targetPath = workspaceTargets[0]?.localPath;
-          const matched = (reposData.repos ?? []).find((repo) => repo.localPath === targetPath);
-          if (!matched?.remoteUrl || cancelled) return;
-          resolvedSlug = matched.remoteUrl.replace(/\.git$/, '').split('/').slice(-2).join('/');
-        }
-        if (!resolvedSlug) return;
-        issuesRepoSlugRef.current = resolvedSlug;
-
         setIssuesLoading(true);
-        const issuesRes = await fetch(`/api/panel/issues?repo=${encodeURIComponent(resolvedSlug)}${fresh ? '&fresh=1' : ''}`);
-        if (!issuesRes.ok || cancelled) { setIssuesLoading(false); return; }
-        const issuesData = await issuesRes.json() as { issues?: Array<{ number: number; title: string; state: string; url?: string; labels?: Array<{ name: string } | string> }> };
-        const openIssues = (issuesData.issues ?? [])
-          .filter((issue) => issue.state === 'open')
-          .slice(0, 12)
-          .map((issue) => ({
-            number: issue.number,
-            title: issue.title,
-            url: issue.url,
-            labels: (issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name),
-          }));
-        if (!cancelled) setRepoIssues(openIssues);
-      } catch {
-        // silent
-      }
+        const reposRes = await fetch('/api/panel/repos');
+        if (!reposRes.ok || cancelled) { setIssuesLoading(false); return; }
+        const reposData = await reposRes.json() as { repos?: Array<{ id: string; name: string; localPath: string; remoteUrl?: string }> };
+        const repos = reposData.repos ?? [];
+
+        const groups = await Promise.all(repos.map(async (repo) => {
+          if (!repo.remoteUrl) return null;
+          const slug = repo.remoteUrl.replace(/\.git$/, '').split('/').slice(-2).join('/');
+          if (!slug || slug === '/') return null;
+          try {
+            const res = await fetch(`/api/panel/issues?repo=${encodeURIComponent(slug)}${fresh ? '&fresh=1' : ''}`);
+            if (!res.ok) return null;
+            const data = await res.json() as { issues?: Array<{ number: number; title: string; state: string; url?: string; labels?: Array<{ name: string } | string> }> };
+            const openIssues = (data.issues ?? [])
+              .filter((issue) => issue.state === 'open')
+              .slice(0, 12)
+              .map((issue) => ({
+                number: issue.number,
+                title: issue.title,
+                url: issue.url,
+                labels: (issue.labels ?? []).map((l) => typeof l === 'string' ? l : l.name),
+              }));
+            return { repoId: repo.id, repoName: repo.name, slug, issues: openIssues } as RepoIssuesGroup;
+          } catch { return null; }
+        }));
+
+        if (!cancelled) {
+          setIssueGroups(groups.filter((g): g is RepoIssuesGroup => g !== null && g.issues.length > 0));
+          // Set first slug for packet linking compat
+          const firstWithIssues = groups.find((g) => g && g.issues.length > 0);
+          if (firstWithIssues) issuesRepoSlugRef.current = firstWithIssues.slug;
+        }
+      } catch { /* silent */ }
       if (!cancelled) setIssuesLoading(false);
     };
 
-    // Initial fetch
-    void fetchIssues(false);
+    void fetchAllIssues(false);
 
-    // WS-driven: instant refresh on lane events instead of 30s polling
-    const handler = () => { void fetchIssues(true); };
+    const handler = () => { void fetchAllIssues(true); };
     const wsEvents = ['o8:lane-lifecycle', 'o8:agent-lifecycle'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(handler, 300_000);
@@ -803,126 +815,103 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
         </div>
       </div>}
 
-      {repoIssues.length > 0 ? (
-        <div style={{
-          paddingTop: 9,
-          paddingRight: 12,
-          paddingBottom: 9,
-          paddingLeft: 12,
-          borderRadius: 10,
-          background: 'var(--t-panel)',
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-panel-border)',
-        }}>
-          <button
-            type="button"
-            onClick={() => setIssuesCollapsed((value) => !value)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              width: '100%',
-              border: 'none',
-              background: 'transparent',
-              padding: 0,
-              cursor: 'pointer',
-              marginBottom: issuesCollapsed ? 0 : 10,
-            }}
-          >
-            <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--t-text-muted)' }}>
-              Open Issues
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {/* Aggregated issues — grouped by repo with collapsible sections */}
+      {issueGroups.map((group) => {
+        const collapsed = issueGroupCollapsed[group.repoId] ?? (focusedRepoId ? group.repoId !== focusedRepoId : false);
+        const isFocused = group.repoId === focusedRepoId;
+        return (
+          <div key={group.repoId} style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            <button
+              type="button"
+              onClick={() => setIssueGroupCollapsed((prev) => ({ ...prev, [group.repoId]: !collapsed }))}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                height: 28,
+                paddingTop: 0,
+                paddingRight: 8,
+                paddingBottom: 0,
+                paddingLeft: 8,
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                position: 'sticky',
+                top: 0,
+                zIndex: 1,
+              }}
+            >
               <span style={{
-                padding: '2px 7px',
-                borderRadius: 999,
-                background: 'var(--t-divider-subtle)',
-                color: 'var(--t-text-secondary)',
-                fontSize: 10,
-                fontWeight: 700,
+                fontSize: 11,
+                fontWeight: 600,
+                textTransform: 'uppercase' as const,
+                letterSpacing: '0.05em',
+                color: isFocused ? 'var(--t-text)' : 'var(--t-text-muted)',
               }}>
-                {repoIssues.length}
+                {group.repoName}
               </span>
-              <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" style={{ transform: issuesCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 150ms ease' }}>
-                <path d="M2.5 3.5L5 6L7.5 3.5" />
-              </svg>
-            </div>
-          </button>
-          {!issuesCollapsed ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              {(issuesShowAll ? repoIssues : repoIssues.slice(0, 5)).map((issue) => {
-                const alreadyPacketed = missionState.packets.some(
-                  (packet) => packet.summary.includes(`#${issue.number}`) || packet.title === issue.title,
-                );
-                return (
-                  <div
-                    key={issue.number}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '6px 8px',
-                      borderRadius: 10,
-                      transition: 'background 120ms ease',
-                    }}
-                    onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
-                    onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-                  >
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', minWidth: 36, flexShrink: 0 }}>
-                      #{issue.number}
-                    </span>
-                    <span style={{ fontSize: 12, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                      {issue.title}
-                    </span>
-                    {alreadyPacketed ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-                        <button type="button" onClick={() => handleLinkIssueToPacket(issue)} title="Link to current packet"
-                          style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center' }}>
-                          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" style={{ opacity: 0.5 }}>
-                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                          </svg>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{
+                  padding: '1px 6px',
+                  borderRadius: 999,
+                  background: 'var(--t-divider-subtle)',
+                  color: 'var(--t-text-secondary)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}>
+                  {group.issues.length}
+                </span>
+                <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 150ms ease' }}>
+                  <path d="M2.5 3.5L5 6L7.5 3.5" />
+                </svg>
+              </div>
+            </button>
+            {!collapsed ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {group.issues.map((issue) => {
+                  const alreadyPacketed = missionState.packets.some(
+                    (packet) => packet.summary.includes(`#${issue.number}`) || packet.title === issue.title,
+                  );
+                  return (
+                    <div
+                      key={`${group.repoId}-${issue.number}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        height: 34,
+                        paddingTop: 0,
+                        paddingRight: 8,
+                        paddingBottom: 0,
+                        paddingLeft: 8,
+                        transition: 'background 120ms ease',
+                      }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{ width: 42, flexShrink: 0, fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)' }}>
+                        #{issue.number}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                        {issue.title}
+                      </span>
+                      {!alreadyPacketed ? (
+                        <button type="button" onClick={() => handleCreatePacketFromIssue(issue)} title="Create work packet"
+                          style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                          <span style={{ fontSize: 14, color: 'var(--t-text-muted)', opacity: 0.5, lineHeight: 1 }}>+</span>
                         </button>
-                        <button type="button" onClick={() => handleRemovePacketForIssue(issue.number)} title="Remove packet"
-                          style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center' }}>
-                          <span style={{ fontSize: 14, color: 'var(--t-text-muted)', opacity: 0.5, lineHeight: 1 }}>-</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <button type="button" onClick={() => handleCreatePacketFromIssue(issue)} title="Create work packet"
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-                        <span style={{ fontSize: 14, color: 'var(--t-text-muted)', opacity: 0.5, lineHeight: 1 }}>+</span>
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-              {repoIssues.length > 5 ? (
-                <button
-                  type="button"
-                  onClick={() => setIssuesShowAll((value) => !value)}
-                  style={{
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--t-text-muted)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    padding: '6px 8px',
-                    textAlign: 'left',
-                  }}
-                >
-                  {issuesShowAll ? 'Show less' : `Show all ${repoIssues.length} issues`}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
 
       {/* Empty state — no issues and no packets */}
-      {repoIssues.length === 0 && missionState.packets.length === 0 ? (
+      {issueGroups.length === 0 && missionState.packets.length === 0 ? (
         <div style={{
           display: 'flex',
           flexDirection: 'column',
