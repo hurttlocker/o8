@@ -1,10 +1,20 @@
 'use client';
 
 import type React from 'react';
-import { memo, useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { TileHeader } from '@/components/desktop/TileHeader';
-import { countLeaves } from '@/lib/tiles/operations';
-import type { TileContent, TileContentKind, TileLayout, TileLeafNode, TileNode, TileSplitDirection, TileSplitNode } from '@/lib/tiles/types';
+import {
+  collectLeafNodes,
+  computeTileLayout,
+  type TileRect,
+  type TileSplitFrame,
+} from '@/lib/tiles/operations';
+import type {
+  TileContent,
+  TileContentKind,
+  TileLayout,
+  TileSplitDirection,
+} from '@/lib/tiles/types';
 
 export interface TileContentRenderProps<TContent extends TileContent = TileContent> {
   active: boolean;
@@ -37,135 +47,17 @@ interface TileContainerProps {
 
 const HANDLE_SIZE = 8;
 
-function ResizeHandle({
-  direction,
-  onMouseDown,
-}: {
-  direction: TileSplitDirection;
-  onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
-}) {
-  const isVertical = direction === 'vertical';
-
-  return (
-    <div
-      onMouseDown={onMouseDown}
-      onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '1'; }}
-      onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '0'; }}
-      style={{
-        width: isVertical ? HANDLE_SIZE : '100%',
-        height: isVertical ? '100%' : HANDLE_SIZE,
-        cursor: isVertical ? 'col-resize' : 'row-resize',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-        flexGrow: 0,
-        position: 'relative',
-        backgroundColor: 'transparent',
-      }}
-    >
-      <div style={{
-        width: isVertical ? 3 : 42,
-        height: isVertical ? 42 : 3,
-        borderRadius: 999,
-        backgroundColor: 'var(--t-drag-handle)',
-        opacity: 0,
-        transition: 'opacity 150ms ease',
-      }} />
-    </div>
-  );
-}
-
-const SplitView = memo(function SplitView({
-  node,
-  renderNode,
-  onResizeSplit,
-}: {
-  node: TileSplitNode;
-  onResizeSplit: (splitId: string, ratio: number) => void;
-  renderNode: (node: TileNode) => React.ReactNode;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const isVertical = node.direction === 'vertical';
-
-  const handleResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-
-    const container = containerRef.current;
-    if (!container) {
-      return;
-    }
-
-    const rect = container.getBoundingClientRect();
-
-    const handleMove = (moveEvent: MouseEvent) => {
-      const ratio = isVertical
-        ? (moveEvent.clientX - rect.left) / rect.width
-        : (moveEvent.clientY - rect.top) / rect.height;
-      onResizeSplit(node.id, ratio);
-    };
-
-    const handleUp = () => {
-      document.removeEventListener('mousemove', handleMove);
-      document.removeEventListener('mouseup', handleUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-
-    document.body.style.cursor = isVertical ? 'col-resize' : 'row-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', handleMove);
-    document.addEventListener('mouseup', handleUp);
-  }, [isVertical, node.id, onResizeSplit]);
-
-  return (
-    <div
-      ref={containerRef}
-      style={{
-        display: 'flex',
-        flexDirection: isVertical ? 'row' : 'column',
-        flexGrow: 1,
-        flexShrink: 1,
-        flexBasis: '0%',
-        minWidth: 0,
-        minHeight: 0,
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          width: isVertical ? `calc(${node.ratio * 100}% - ${HANDLE_SIZE / 2}px)` : '100%',
-          height: isVertical ? '100%' : `calc(${node.ratio * 100}% - ${HANDLE_SIZE / 2}px)`,
-          minWidth: isVertical ? 220 : 0,
-          minHeight: isVertical ? 0 : 160,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
-        {renderNode(node.children[0])}
-      </div>
-
-      <ResizeHandle direction={node.direction} onMouseDown={handleResizeStart} />
-
-      <div
-        style={{
-          flexGrow: 1,
-          flexShrink: 1,
-          flexBasis: '0%',
-          minWidth: isVertical ? 220 : 0,
-          minHeight: isVertical ? 0 : 160,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
-        {renderNode(node.children[1])}
-      </div>
-    </div>
-  );
-});
-
+/**
+ * TileContainer — flat, absolutely-positioned tile renderer.
+ *
+ * The recursive tile tree is walked ONCE per layout change to produce a flat
+ * list of (leafId → rect) + (splitId → handle frame). Every leaf is then
+ * rendered as a direct sibling of the container, keyed by its leaf.id. When
+ * the tree shape changes (splitting, wrapping, closing a sibling) the leaves
+ * stay in the SAME React tree position — only their rect changes — so React
+ * preserves component state for each leaf. Adding or removing the contextual
+ * panel no longer remounts the workspace terminal above it.
+ */
 export function TileContainer({
   activeTileId,
   layout,
@@ -175,121 +67,194 @@ export function TileContainer({
   onResizeSplit,
   onSplitTile,
 }: TileContainerProps) {
-  const totalLeaves = useMemo(() => countLeaves(layout.root), [layout.root]);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  function renderNode(node: TileNode): React.ReactNode {
-    if (node.type === 'split') {
-      return (
-        <SplitView
-          key={node.id}
-          node={node}
-          onResizeSplit={onResizeSplit}
-          renderNode={renderNode}
-        />
-      );
-    }
+  const { leaves, leafRects, splitFrames } = useMemo(() => {
+    const { leafRects, splitFrames } = computeTileLayout(layout.root);
+    const leaves = collectLeafNodes(layout.root);
+    return { leaves, leafRects, splitFrames };
+  }, [layout.root]);
 
-    return (
-      <TileLeafView
-        key={node.id}
-        active={node.id === activeTileId}
-        canClose={totalLeaves > 1}
-        node={node}
-        registry={registry}
-        onActivateTile={onActivateTile}
-        onCloseTile={onCloseTile}
-        onSplitTile={onSplitTile}
-      />
-    );
-  }
+  const totalLeaves = leaves.length;
+
+  const makeResizeStart = useCallback(
+    (splitId: string, direction: TileSplitDirection, containerRect: TileRect) =>
+      (event: React.MouseEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        const tileContainer = containerRef.current;
+        if (!tileContainer) return;
+        const outerRect = tileContainer.getBoundingClientRect();
+        // Convert the split's percent-space container rect to pixels.
+        // Drag positions are then interpreted as ratios within this pixel rect.
+        const splitPixelRect = {
+          left: outerRect.left + outerRect.width * containerRect.left,
+          top: outerRect.top + outerRect.height * containerRect.top,
+          width: outerRect.width * containerRect.width,
+          height: outerRect.height * containerRect.height,
+        };
+
+        const handleMove = (moveEvent: MouseEvent) => {
+          const ratio = direction === 'vertical'
+            ? (moveEvent.clientX - splitPixelRect.left) / splitPixelRect.width
+            : (moveEvent.clientY - splitPixelRect.top) / splitPixelRect.height;
+          onResizeSplit(splitId, ratio);
+        };
+
+        const handleUp = () => {
+          document.removeEventListener('mousemove', handleMove);
+          document.removeEventListener('mouseup', handleUp);
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+        };
+
+        document.body.style.cursor = direction === 'vertical' ? 'col-resize' : 'row-resize';
+        document.body.style.userSelect = 'none';
+        document.addEventListener('mousemove', handleMove);
+        document.addEventListener('mouseup', handleUp);
+      },
+    [onResizeSplit],
+  );
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      flexGrow: 1,
-      flexShrink: 1,
-      flexBasis: '0%',
-      minWidth: 0,
-      minHeight: 0,
-      overflow: 'hidden',
-      backgroundColor: '#ffffff',
-    }}>
-      {renderNode(layout.root)}
+    <div
+      ref={containerRef}
+      style={{
+        position: 'relative',
+        flexGrow: 1,
+        flexShrink: 1,
+        flexBasis: '0%',
+        minWidth: 0,
+        minHeight: 0,
+        overflow: 'hidden',
+        // Transparent so the dashboard chrome shows through any unclaimed
+        // pixels (e.g. the hair-width handle strip between two leaves).
+        backgroundColor: 'transparent',
+      }}
+    >
+      {leaves.map((leaf) => {
+        const rect = leafRects.get(leaf.id);
+        if (!rect) return null;
+        const definition = registry[leaf.content.kind];
+        const isActive = leaf.id === activeTileId;
+        return (
+          <div
+            key={leaf.id}
+            data-testid={`tile-leaf-${leaf.id}`}
+            data-tile-id={leaf.id}
+            data-tile-kind={leaf.content.kind}
+            data-tile-active={isActive ? 'true' : 'false'}
+            onMouseDown={() => onActivateTile(leaf.id)}
+            style={{
+              position: 'absolute',
+              left: `${rect.left * 100}%`,
+              top: `${rect.top * 100}%`,
+              width: `${rect.width * 100}%`,
+              height: `${rect.height * 100}%`,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              backgroundColor: 'transparent',
+            }}
+          >
+            {!definition?.hideHeader && (
+              <TileHeader
+                label={definition?.label ?? 'Tile'}
+                active={isActive}
+                canClose={totalLeaves > 1}
+                onSplitVertical={() => onSplitTile(leaf.id, 'vertical')}
+                onSplitHorizontal={() => onSplitTile(leaf.id, 'horizontal')}
+                onClose={() => onCloseTile(leaf.id)}
+              />
+            )}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                flexGrow: 1,
+                flexShrink: 1,
+                flexBasis: '0%',
+                minWidth: 0,
+                minHeight: 0,
+                overflow: 'hidden',
+              }}
+            >
+              {definition ? definition.render({
+                active: isActive,
+                content: leaf.content,
+                tileId: leaf.id,
+              }) : null}
+            </div>
+          </div>
+        );
+      })}
+
+      {splitFrames.map((frame) => (
+        <ResizeHandle
+          key={frame.id}
+          frame={frame}
+          onMouseDown={makeResizeStart(frame.id, frame.direction, frame.container)}
+        />
+      ))}
     </div>
   );
 }
 
-function TileLeafView({
-  active,
-  canClose,
-  node,
-  registry,
-  onActivateTile,
-  onCloseTile,
-  onSplitTile,
+function ResizeHandle({
+  frame,
+  onMouseDown,
 }: {
-  active: boolean;
-  canClose: boolean;
-  node: TileLeafNode;
-  registry: TileContentRegistry;
-  onActivateTile: (tileId: string) => void;
-  onCloseTile: (tileId: string) => void;
-  onSplitTile: (tileId: string, direction: TileSplitDirection) => void;
+  frame: TileSplitFrame;
+  onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
-  const definition = registry[node.content.kind];
+  const isVertical = frame.direction === 'vertical';
+  const style: React.CSSProperties = isVertical
+    ? {
+        position: 'absolute',
+        left: `calc(${frame.boundary.left * 100}% - ${HANDLE_SIZE / 2}px)`,
+        top: `${frame.boundary.top * 100}%`,
+        width: HANDLE_SIZE,
+        height: `${frame.boundary.height * 100}%`,
+        cursor: 'col-resize',
+      }
+    : {
+        position: 'absolute',
+        left: `${frame.boundary.left * 100}%`,
+        top: `calc(${frame.boundary.top * 100}% - ${HANDLE_SIZE / 2}px)`,
+        width: `${frame.boundary.width * 100}%`,
+        height: HANDLE_SIZE,
+        cursor: 'row-resize',
+      };
 
   return (
     <div
-      data-testid={`tile-leaf-${node.id}`}
-      data-tile-id={node.id}
-      data-tile-kind={node.content.kind}
-      data-tile-active={active ? 'true' : 'false'}
-      onMouseDown={() => onActivateTile(node.id)}
+      onMouseDown={onMouseDown}
+      onMouseEnter={(e) => {
+        const bar = e.currentTarget.firstElementChild as HTMLElement | null;
+        if (bar) bar.style.opacity = '1';
+      }}
+      onMouseLeave={(e) => {
+        const bar = e.currentTarget.firstElementChild as HTMLElement | null;
+        if (bar) bar.style.opacity = '0';
+      }}
       style={{
+        ...style,
         display: 'flex',
-        flexDirection: 'column',
-        flexGrow: 1,
-        flexShrink: 1,
-        flexBasis: '0%',
-        minWidth: 0,
-        minHeight: 0,
-        overflow: 'hidden',
-        borderWidth: 0,
-        borderStyle: 'none',
-        borderColor: 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
         backgroundColor: 'transparent',
+        zIndex: 10,
       }}
     >
-      {!definition?.hideHeader && (
-        <TileHeader
-          label={definition?.label ?? 'Tile'}
-          active={active}
-          canClose={canClose}
-          onSplitVertical={() => onSplitTile(node.id, 'vertical')}
-          onSplitHorizontal={() => onSplitTile(node.id, 'horizontal')}
-          onClose={() => onCloseTile(node.id)}
-        />
-      )}
-
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        flexGrow: 1,
-        flexShrink: 1,
-        flexBasis: '0%',
-        minWidth: 0,
-        minHeight: 0,
-        overflow: 'hidden',
-      }}>
-        {definition ? (
-          definition.render({
-            active,
-            content: node.content,
-            tileId: node.id,
-          })
-        ) : null}
-      </div>
+      <div
+        style={{
+          width: isVertical ? 3 : 42,
+          height: isVertical ? 42 : 3,
+          borderRadius: 999,
+          backgroundColor: 'var(--t-drag-handle)',
+          opacity: 0,
+          transition: 'opacity 150ms ease',
+        }}
+      />
     </div>
   );
 }
