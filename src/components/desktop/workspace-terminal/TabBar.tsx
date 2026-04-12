@@ -30,6 +30,7 @@ interface TabBarProps {
   onSplitHorizontal?: () => void;
   canCloseTile?: boolean;
   onCloseTile?: () => void;
+  onReorderTabs?: (draggedTabId: string, dropTargetTabId: string) => void;
 }
 
 export const TabBar = memo(function TabBar({
@@ -47,9 +48,12 @@ export const TabBar = memo(function TabBar({
   onSplitHorizontal,
   canCloseTile,
   onCloseTile,
+  onReorderTabs,
 }: TabBarProps) {
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
+  const draggedTabIdRef = useRef<string | null>(null);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
   const syncTabScroll = useCallback(() => {
@@ -163,6 +167,27 @@ export const TabBar = memo(function TabBar({
               <button
                 type="button"
                 key={tab.id}
+                draggable={!isOrchestrator && !!onReorderTabs}
+                onDragStart={(e) => {
+                  draggedTabIdRef.current = tab.id;
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData('text/plain', tab.id);
+                }}
+                onDragOver={(e) => {
+                  if (!draggedTabIdRef.current || draggedTabIdRef.current === tab.id) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDragOverTabId(tab.id);
+                }}
+                onDragLeave={() => { if (dragOverTabId === tab.id) setDragOverTabId(null); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverTabId(null);
+                  const fromId = draggedTabIdRef.current;
+                  draggedTabIdRef.current = null;
+                  if (fromId && fromId !== tab.id) onReorderTabs?.(fromId, tab.id);
+                }}
+                onDragEnd={() => { draggedTabIdRef.current = null; setDragOverTabId(null); }}
                 onClick={() => onSelectTab(tab.id)}
                 title={tabTitle || tab.label}
                 style={{
@@ -180,6 +205,9 @@ export const TabBar = memo(function TabBar({
                   borderWidth: 0,
                   borderStyle: 'none',
                   borderRadius: 9,
+                  borderLeftWidth: dragOverTabId === tab.id ? 2 : 0,
+                  borderLeftStyle: dragOverTabId === tab.id ? 'solid' : 'none',
+                  borderLeftColor: '#2563eb',
                   background: isOrchestrator && isActive
                     ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))'
                     : neoSurface.background,

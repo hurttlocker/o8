@@ -751,6 +751,19 @@ export function useWorkspaceTerminalController(
     onActiveRepoContextChange?.(activeRepoContext);
   }, [activeRepoContext, onActiveRepoContextChange]);
 
+  const handleReorderTabs = useCallback((draggedId: string, dropTargetId: string) => {
+    setTabs((prev) => {
+      const fromIdx = prev.findIndex((t) => t.id === draggedId);
+      const toIdx = prev.findIndex((t) => t.id === dropTargetId);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      tabsRef.current = next;
+      return next;
+    });
+  }, []);
+
   const handleSelectTab = useCallback((id: string) => {
     setActiveTabId(id);
     setTabs((previous) => previous.map((tab) => (
@@ -800,6 +813,7 @@ export function useWorkspaceTerminalController(
     handleNewLLMChatTab,
     handleNewTab,
     handleOpenHistoryChat,
+    handleReorderTabs,
     handleOpenWorkspaceCommitTab,
     handleRegisterRepo,
     handleRestoreLatestCheckpoint,
