@@ -145,6 +145,7 @@ export const TabBar = memo(function TabBar({
         >
           {tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
+            const isOrchestrator = tab.kind === 'orchestrator';
             const rawLabel = workspaceTabPrimaryLabel(tab);
             const chatTabMeta = describeWorkspaceChatTab(tab);
             const primaryLabel = (rawLabel === 'Assistant' || rawLabel === 'Chat') && chatTabMeta?.summary
@@ -179,9 +180,15 @@ export const TabBar = memo(function TabBar({
                   borderWidth: 0,
                   borderStyle: 'none',
                   borderRadius: 9,
-                  background: neoSurface.background,
-                  boxShadow: neoSurface.boxShadow,
-                  color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                  background: isOrchestrator && isActive
+                    ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))'
+                    : neoSurface.background,
+                  boxShadow: isOrchestrator && isActive
+                    ? '0 1px 4px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(37, 99, 235, 0.1)'
+                    : neoSurface.boxShadow,
+                  color: isOrchestrator
+                    ? (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)')
+                    : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)'),
                   fontSize: 12,
                   fontWeight: isActive ? 560 : 460,
                   fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
@@ -221,7 +228,7 @@ export const TabBar = memo(function TabBar({
                 >
                   {primaryLabel}
                 </span>
-                {tabs.length > 1 ? (
+                {tabs.length > 1 && !isOrchestrator ? (
                   <span
                     role="button"
                     tabIndex={0}
