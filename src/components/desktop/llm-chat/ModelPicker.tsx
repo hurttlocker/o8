@@ -90,7 +90,7 @@ function ModelPickerBase({
       </button>
 
       {open ? createPortal(
-        <div ref={dropRef} style={{ position: 'fixed', bottom: dropPos.bottom, right: dropPos.right, zIndex: 9999, minWidth: 260, maxHeight: 420, overflowY: 'auto', background: THEME_PANEL_GLASS, border: '1px solid var(--t-panel-border)', borderRadius: 12, boxShadow: 'var(--t-panel-shadow)', animation: 'llmFadeIn 100ms ease-out' }}>
+        <div ref={dropRef} style={{ position: 'fixed', bottom: dropPos.bottom, right: dropPos.right, zIndex: 9999, minWidth: 260, maxHeight: 420, overflowY: 'auto', background: 'var(--t-panel-solid, #ffffff)', border: '1px solid var(--t-panel-border)', borderRadius: 12, boxShadow: 'var(--t-panel-shadow)', animation: 'llmFadeIn 100ms ease-out' }}>
           {runtimeGroups.map((group, gi) => (
             <div key={group.runtime}>
               <div style={{ ...SECTION_HEADER, display: 'flex', alignItems: 'center', gap: 5, paddingTop: gi === 0 ? 6 : 8, ...(gi > 0 ? { borderTop: '1px solid var(--t-divider-subtle)', marginTop: 2 } : {}) }}>
