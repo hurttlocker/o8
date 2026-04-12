@@ -85,6 +85,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   missionOpen?: boolean;
   /** Toggle the issues/mission sidebar. */
   onToggleMission?: () => void;
+  /** Repo label shown in input toolbar as focus indicator. */
+  repoLabel?: string | null;
   /**
    * Optional custom empty-state render. When provided and the chat has
    * no messages, this replaces the built-in "Claude Code" welcome card.
@@ -115,6 +117,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onTogglePermission,
   missionOpen,
   onToggleMission,
+  repoLabel,
   emptyStateOverride,
   onMissionStateChange,
   onLaunchPacket,
@@ -1433,6 +1436,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
               onTogglePermission={onTogglePermission}
               missionOpen={missionOpen}
               onToggleMission={onToggleMission}
+              repoLabel={isOrchestratorMode ? repoLabel : null}
             />
           </div>
         </div>
