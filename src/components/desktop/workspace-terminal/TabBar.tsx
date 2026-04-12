@@ -13,6 +13,7 @@ import {
 import { WorkspaceLaunchPicker } from '@/components/desktop/workspace-terminal/WorkspaceLaunchPicker';
 import { describeWorkspaceChatTab, workspaceTabPrimaryLabel } from '@/components/desktop/workspace-terminal/utils';
 import { CodexIcon, ClaudeIcon } from '@/components/desktop/repo-registry/shared';
+import { chromeNeoSurface, chromeNeoHoverSurface } from '@/components/desktop/chrome/ChromeButton';
 
 interface TabBarProps {
   tabs: TerminalTab[];
@@ -156,6 +157,7 @@ export const TabBar = memo(function TabBar({
               .filter((value): value is string => Boolean(value))
               .join(' - ');
 
+            const neoSurface = chromeNeoSurface(isActive);
             return (
               <button
                 type="button"
@@ -166,31 +168,45 @@ export const TabBar = memo(function TabBar({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  paddingTop: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 14,
-                  paddingRight: 14,
-                  height: '100%',
+                  paddingTop: 5,
+                  paddingBottom: 5,
+                  paddingLeft: 12,
+                  paddingRight: 10,
+                  marginTop: 4,
+                  marginBottom: 4,
+                  marginLeft: 3,
+                  marginRight: 3,
                   borderWidth: 0,
                   borderStyle: 'none',
-                  background: isActive ? 'var(--t-accent-soft-strong)' : 'transparent',
+                  borderRadius: 9,
+                  background: neoSurface.background,
+                  boxShadow: neoSurface.boxShadow,
                   color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
                   fontSize: 12,
-                  fontWeight: isActive ? 600 : 500,
+                  fontWeight: isActive ? 560 : 460,
                   fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
                   letterSpacing: '-0.008em',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
-                  transition: 'color 120ms ease, background 120ms ease',
-                  borderRadius: 0,
+                  transition: 'background 150ms ease, box-shadow 150ms ease, color 120ms ease',
                   position: 'relative',
-                  boxShadow: isActive ? 'inset 0 -2.5px 0 0 var(--t-accent)' : 'none',
+                }}
+                onMouseEnter={(event) => {
+                  if (isActive) return;
+                  const hover = chromeNeoHoverSurface();
+                  event.currentTarget.style.background = hover.background;
+                  event.currentTarget.style.boxShadow = hover.boxShadow;
+                }}
+                onMouseLeave={(event) => {
+                  if (isActive) return;
+                  event.currentTarget.style.background = neoSurface.background;
+                  event.currentTarget.style.boxShadow = neoSurface.boxShadow;
                 }}
               >
                 {tab.unseen ? (
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#2563eb', flexShrink: 0 }} />
                 ) : null}
-                {tab.chatRuntime === 'claude-code' ? (
+                {tab.kind === 'orchestrator' || tab.chatRuntime === 'claude-code' ? (
                   <ClaudeIcon size={14} />
                 ) : tab.chatRuntime === 'codex' ? (
                   <CodexIcon size={14} />

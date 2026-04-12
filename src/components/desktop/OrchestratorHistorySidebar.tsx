@@ -12,12 +12,22 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { MessageSquare, PanelLeftClose, Trash2 } from 'lucide-react';
+import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 
 interface OrchestratorThread {
   tabId: string;
   title: string;
   modifiedAt: string;
   messageCount?: number;
+  model?: string;
+}
+
+function threadRuntime(model?: string): 'claude-code' | 'codex' | null {
+  if (!model) return null;
+  const lower = model.toLowerCase();
+  if (lower.includes('claude')) return 'claude-code';
+  if (lower.includes('codex') || lower.startsWith('gpt')) return 'codex';
+  return null;
 }
 
 interface OrchestratorHistorySidebarProps {
@@ -71,7 +81,7 @@ function OrchestratorHistorySidebarBase({
       const res = await fetch('/api/v2/chat-history/list');
       if (!res.ok) return;
       const data = await res.json() as {
-        conversations?: Array<{ tabId: string; title?: string; modifiedAt: string; messageCount?: number }>;
+        conversations?: Array<{ tabId: string; title?: string; modifiedAt: string; messageCount?: number; model?: string }>;
       };
       const filtered = (data.conversations ?? [])
         .filter((c) => c.tabId.startsWith('thoughts-'))
@@ -80,6 +90,7 @@ function OrchestratorHistorySidebarBase({
           title: c.title?.trim() || 'Untitled conversation',
           modifiedAt: c.modifiedAt,
           messageCount: c.messageCount,
+          model: c.model,
         }));
       setThreads(filtered);
     } catch {
@@ -240,6 +251,7 @@ function OrchestratorHistorySidebarBase({
                   {group.items.map((thread) => {
                     const isCurrent = thread.tabId === currentThreadId;
                     const isDeleting = deletingId === thread.tabId;
+                    const runtime = threadRuntime(thread.model);
                     return (
                       <div
                         key={thread.tabId}
@@ -302,12 +314,22 @@ function OrchestratorHistorySidebarBase({
                               height: 22,
                               borderRadius: 6,
                               flexShrink: 0,
-                              background: isCurrent ? 'var(--t-accent)' : 'var(--t-bg-card)',
+                              background: runtime
+                                ? 'transparent'
+                                : isCurrent
+                                  ? 'var(--t-accent)'
+                                  : 'var(--t-bg-card)',
                               color: isCurrent ? '#ffffff' : 'var(--t-text-muted)',
                               transition: 'background 120ms ease, color 120ms ease',
                             }}
                           >
-                            <MessageSquare size={12} strokeWidth={2} />
+                            {runtime === 'claude-code' ? (
+                              <ClaudeIcon size={16} />
+                            ) : runtime === 'codex' ? (
+                              <CodexIcon size={16} />
+                            ) : (
+                              <MessageSquare size={12} strokeWidth={2} />
+                            )}
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div

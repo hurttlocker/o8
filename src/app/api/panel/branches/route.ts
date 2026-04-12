@@ -13,12 +13,25 @@ interface BranchInfo {
   worktreePath?: string;
   ahead: number;
   behind: number;
+  additions: number;
+  deletions: number;
   isStale: boolean;
   staleDays?: number;
   diskSize?: string;
 }
 
 const STALE_THRESHOLD_DAYS = 3;
+
+function parseShortstat(raw: string): { additions: number; deletions: number } {
+  // Format: " 5 files changed, 518 insertions(+), 169 deletions(-)"
+  // Either insertions or deletions may be missing when one side is zero.
+  const insMatch = raw.match(/(\d+)\s+insertion/);
+  const delMatch = raw.match(/(\d+)\s+deletion/);
+  return {
+    additions: insMatch ? parseInt(insMatch[1], 10) : 0,
+    deletions: delMatch ? parseInt(delMatch[1], 10) : 0,
+  };
+}
 
 export async function GET(req: NextRequest) {
   const repoPath = req.nextUrl.searchParams.get('path');
@@ -27,6 +40,24 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // Resolve the default branch once so we can diff every branch against it.
+    // Prefer origin/HEAD symbolic ref; fall back to main, then master.
+    let defaultBranch = 'main';
+    try {
+      const symbolic = execSync(
+        `git -C "${repoPath}" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null`,
+        { encoding: 'utf-8', timeout: 2000 },
+      ).trim();
+      if (symbolic.startsWith('origin/')) {
+        defaultBranch = symbolic.slice('origin/'.length);
+      }
+    } catch {
+      try {
+        execSync(`git -C "${repoPath}" rev-parse --verify master 2>/dev/null`, { encoding: 'utf-8', timeout: 2000 });
+        defaultBranch = 'master';
+      } catch { /* keep 'main' */ }
+    }
+
     // Get all local branches with details
     const branchRaw = execSync(
       `git -C "${repoPath}" for-each-ref --sort=-committerdate refs/heads/ --format='%(refname:short)|||%(committerdate:relative)|||%(subject)|||%(HEAD)|||%(committerdate:unix)'`,
@@ -73,6 +104,19 @@ export async function GET(req: NextRequest) {
         behind = b || 0;
       } catch { /* no remote tracking */ }
 
+      // Diff stats vs the default branch. Skipped when the branch IS the
+      // default (a no-op diff) or when the command fails (stale ref etc.).
+      let additions = 0, deletions = 0;
+      if (trimmedName !== defaultBranch) {
+        try {
+          const stats = execSync(
+            `git -C "${repoPath}" diff --shortstat ${defaultBranch}...${trimmedName} 2>/dev/null`,
+            { encoding: 'utf-8', timeout: 3000 },
+          ).trim();
+          if (stats) ({ additions, deletions } = parseShortstat(stats));
+        } catch { /* no merge base / missing ref */ }
+      }
+
       // Disk size for worktrees
       let diskSize: string | undefined;
       if (isWt && worktrees.get(trimmedName)) {
@@ -94,6 +138,8 @@ export async function GET(req: NextRequest) {
         worktreePath: worktrees.get(trimmedName),
         ahead,
         behind,
+        additions,
+        deletions,
         isStale: !isCurrent && daysSinceCommit >= STALE_THRESHOLD_DAYS,
         staleDays: !isCurrent && daysSinceCommit >= STALE_THRESHOLD_DAYS ? daysSinceCommit : undefined,
         diskSize,

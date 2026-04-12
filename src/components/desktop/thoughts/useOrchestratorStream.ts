@@ -11,7 +11,7 @@ export type OrchestratorPermissionMode = 'full' | 'plan';
 interface OrchestratorStreamResult {
   messages: MobileTranscriptEntry[];
   status: OrchestratorStreamStatus;
-  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode }) => void;
+  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max' }) => void;
   reset: () => void;
   connected: boolean;
 }
@@ -300,10 +300,11 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
     };
   }, [repoPath, connect]);
 
-  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode }) => {
+  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max' }) => {
     if (!repoPathRef.current) return;
 
     const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
+    const thinkingEffort = options?.thinkingEffort ?? 'max';
 
     // Add user message to local state immediately
     const userEntry: MobileTranscriptEntry = {
@@ -324,6 +325,7 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
       repoPath: repoPathRef.current,
       message,
       permissionMode,
+      thinkingEffort,
     });
 
     // Send via WebSocket

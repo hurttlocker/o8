@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useState } from 'react';
-import { ArrowRight, ExternalLink } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import {
   AlertCircle,
   BlueGlassActionButton,
@@ -35,6 +35,7 @@ interface RepoCardHeaderProps {
   agentsByBranch?: Map<string, BranchAgent[]>;
   activePorts?: number[];
   isActive: boolean;
+  expanded?: boolean;
   activeWorkspacePath?: string | null;
   onToggle: () => void;
   onRemove: (repo: RepoRegistryEntry) => void;
@@ -48,6 +49,7 @@ function RepoCardHeaderBase({
   agentsByBranch,
   activePorts,
   isActive,
+  expanded = false,
   activeWorkspacePath = null,
   onToggle,
   onRemove,
@@ -106,16 +108,17 @@ function RepoCardHeaderBase({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        padding: compactLayout ? '1px 6px' : '2px 7px',
-        borderRadius: 999,
+        padding: compactLayout ? '1px 5px' : '1px 6px',
+        borderRadius: 5,
         background: 'var(--t-divider-subtle)',
         border: 'none',
-        color: 'var(--t-text-secondary)',
-        fontSize: 9,
-        fontWeight: 600,
-        letterSpacing: '0.02em',
+        color: 'var(--t-text-faint)',
+        fontSize: 8.5,
+        fontWeight: 520,
+        letterSpacing: '0.04em',
         textTransform: 'uppercase',
         flexShrink: 0,
+        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
       }}
     >
       Current
@@ -382,13 +385,14 @@ function RepoCardHeaderBase({
         >
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0 }}>
             <div style={{ flex: 1, minWidth: 0, paddingLeft: repoHeaderLeadingInset }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
                 <span
                   style={{
                     fontSize: 13,
-                    fontWeight: 700,
+                    fontWeight: 540,
                     color: 'var(--t-text)',
-                    letterSpacing: '-0.01em',
+                    letterSpacing: '-0.008em',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
                     minWidth: 0,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -396,6 +400,20 @@ function RepoCardHeaderBase({
                   }}
                 >
                   {repo.name}
+                </span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    color: 'var(--t-text-faint)',
+                    marginTop: 1,
+                  }}
+                >
+                  {expanded
+                    ? <ChevronDown size={13} strokeWidth={1.8} />
+                    : <ChevronRight size={13} strokeWidth={1.8} />}
                 </span>
                 {isActive ? currentBadge : null}
                 {openPrCount > 0 ? (
@@ -453,13 +471,16 @@ function RepoCardHeaderBase({
               </div>
               <div
                 style={{
-                  marginTop: 2,
-                  fontSize: 10,
+                  marginTop: 3,
+                  fontSize: 10.5,
+                  fontWeight: 420,
                   lineHeight: 1.3,
                   color: 'var(--t-text-faint)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
+                  letterSpacing: '-0.005em',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
                 }}
               >
                 {rowMetaSegments.length > 0 ? (

@@ -12,7 +12,6 @@ import { createPortal } from 'react-dom';
 import { isTauri } from '@/lib/tauri/bridge';
 import {
   UsersThree,
-  GearSix,
   ChartBar,
   Bell,
 } from '@phosphor-icons/react';
@@ -519,18 +518,18 @@ export function NavRail({
             onClick={() => onSectionChange(item.id)}
             useTauri={inTauri}
             onPrefetch={
-              item.id === 'settings' ? () => { import('@/components/desktop/SettingsPage'); }
-              : item.id === 'analytics' ? () => { import('@/components/desktop/AnalyticsPage'); }
+              item.id === 'analytics' ? () => { import('@/components/desktop/AnalyticsPage'); }
               : undefined
             }
           />
         ))}
       </div>
 
-      {/* Bottom — Ports + Alerts + Settings. Orchestrator, Mission Control,
-          and History used to live here as tile launchers. They now live as
-          a single Orchestrator tab inside WorkspaceTerminal with History
-          and Mission as collapsible sidebars in the tab itself. */}
+      {/* Bottom — Ports + Alerts. Settings moved to the DesktopStatusBar at
+          the bottom of the dashboard, so the gear no longer lives here.
+          Orchestrator, Mission Control, and History used to live here as
+          tile launchers; they now live inside WorkspaceTerminal's
+          Orchestrator tab. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', position: 'relative' }}>
         <PortsFooter onPortPreview={onPortPreview} />
 
@@ -544,13 +543,6 @@ export function NavRail({
           />
           {alertTrayNode}
         </div>
-        <UtilButton
-          icon={GearSix}
-          label="Settings"
-          onClick={() => onSectionChange('settings')}
-          tint="#ef4444"
-          useTauri={inTauri}
-        />
       </div>
     </nav>
   );

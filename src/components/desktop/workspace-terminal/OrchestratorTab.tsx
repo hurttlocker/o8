@@ -194,10 +194,6 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
   const title = titleParts.join(' · ');
 
   const isFullAccess = permissionMode === 'full';
-  const chipLabel = isFullAccess ? 'Full access' : 'Read-only';
-  const chipTooltip = isFullAccess
-    ? 'Claude can edit code and run commands. Click to switch to read-only.'
-    : 'Claude can inspect but not modify. Click to arm for full access.';
 
   if (!data) {
     return (
@@ -261,44 +257,11 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
           {title}
         </div>
 
-        {/* History toggle */}
-        <button
-          type="button"
-          onClick={handleToggleHistory}
-          title={historyOpen ? 'Hide history' : 'Show history'}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            height: 26,
-            paddingTop: 0,
-            paddingRight: 9,
-            paddingBottom: 0,
-            paddingLeft: 9,
-            borderRadius: 7,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: historyOpen ? 'var(--t-accent-border)' : 'var(--t-btn-secondary-border)',
-            background: historyOpen ? 'var(--t-accent-soft)' : 'transparent',
-            color: historyOpen ? 'var(--t-accent)' : 'var(--t-text-secondary)',
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="9" />
-            <polyline points="12 7 12 12 15 14" />
-          </svg>
-          History
-        </button>
-
-        {/* Mission toggle */}
+        {/* Issues toggle (was "Mission") */}
         <button
           type="button"
           onClick={handleToggleMission}
-          title={missionOpen ? 'Hide mission control' : 'Show mission control'}
+          title={missionOpen ? 'Hide issues' : 'Show issues'}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -326,7 +289,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" />
             <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
           </svg>
-          Mission
+          Issues
         </button>
 
         {/* New conversation — only when there are messages */}
@@ -357,47 +320,6 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
           </button>
         ) : null}
 
-        {/* Permission chip */}
-        <button
-          type="button"
-          onClick={handleTogglePermission}
-          title={chipTooltip}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            height: 26,
-            paddingTop: 0,
-            paddingRight: 10,
-            paddingBottom: 0,
-            paddingLeft: 10,
-            borderRadius: 999,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: isFullAccess
-              ? 'rgba(239, 68, 68, 0.35)'
-              : 'var(--t-btn-secondary-border)',
-            background: isFullAccess
-              ? 'rgba(239, 68, 68, 0.10)'
-              : 'var(--t-panel-hover)',
-            color: isFullAccess ? '#b91c1c' : 'var(--t-text-secondary)',
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            cursor: 'pointer',
-          }}
-        >
-          <span
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: '50%',
-              background: isFullAccess ? '#ef4444' : 'var(--t-text-faint)',
-            }}
-          />
-          {chipLabel}
-        </button>
       </div>
 
       {/* Plan-mode banner */}
@@ -456,8 +378,57 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             minWidth: 0,
             display: 'flex',
             flexDirection: 'column',
+            position: 'relative',
           }}
         >
+          {/* Inline History pill — matches the Assistant tab's floating
+              history link. Positioned at the top-left of the chat area so
+              it's discoverable but doesn't take a header slot. */}
+          <button
+            type="button"
+            onClick={handleToggleHistory}
+            title="Orchestrator history"
+            style={{
+              position: 'absolute',
+              top: 10,
+              left: 12,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              height: 24,
+              paddingTop: 0,
+              paddingRight: 9,
+              paddingBottom: 0,
+              paddingLeft: 8,
+              borderRadius: 7,
+              borderWidth: 0,
+              background: historyOpen ? 'var(--t-accent-soft)' : 'transparent',
+              color: historyOpen ? 'var(--t-accent)' : 'var(--t-text-muted)',
+              fontSize: 11,
+              fontWeight: 500,
+              cursor: 'pointer',
+              transition: 'background 120ms ease, color 120ms ease',
+              zIndex: 2,
+            }}
+            onMouseEnter={(event) => {
+              if (!historyOpen) {
+                event.currentTarget.style.background = 'var(--t-bg-card)';
+                event.currentTarget.style.color = 'var(--t-text-secondary)';
+              }
+            }}
+            onMouseLeave={(event) => {
+              if (!historyOpen) {
+                event.currentTarget.style.background = 'transparent';
+                event.currentTarget.style.color = 'var(--t-text-muted)';
+              }
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+              <circle cx="12" cy="12" r="9" />
+              <polyline points="12 7 12 12 15 14" />
+            </svg>
+            History
+          </button>
           <ThoughtsChatPanel
             ref={chatPanelRef}
             open
@@ -474,6 +445,9 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             thoughtsElevatedShadow={thoughtsElevatedShadow}
             thoughtsMutedGlass={thoughtsMutedGlass}
             permissionMode={permissionMode}
+            onTogglePermission={handleTogglePermission}
+            missionOpen={missionOpen}
+            onToggleMission={handleToggleMission}
             emptyStateOverride={emptyStateNode}
             onMissionStateChange={data.onMissionStateChange}
             onLaunchPacket={data.onLaunchPacket}

@@ -17,10 +17,11 @@ import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 import { ThemeProvider } from '@/lib/theme/context';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
-import { NavRail } from '@/components/desktop/NavRail';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
+import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
+import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
@@ -2001,6 +2002,27 @@ function DashboardInner() {
         onToggleWorkspacePanel={handleToggleWorkspacePanel}
         o8PanelVisible={chatVisible && rightPanelKind === 'o8'}
         onToggleO8Panel={handleToggleO8Panel}
+        isAgentsSectionActive={activeNavSection === 'agents'}
+        onOpenAgents={() => {
+          setActiveNavSection('agents');
+          if (!chatVisible) setChatVisible(true);
+          setRightPanelMode('chat');
+        }}
+        alertCount={unreadCount}
+        onToggleAlerts={() => setAlertTrayOpen(!alertTrayOpen)}
+        alertTray={(
+          <AlertTray
+            alerts={activeAlerts}
+            open={alertTrayOpen}
+            onClose={() => setAlertTrayOpen(false)}
+            onMarkRead={markRead}
+            onMarkAllRead={markAllRead}
+            onDismiss={dismiss}
+            onDismissAll={dismissAll}
+            onAction={handleAlertAction}
+            variant="desktop"
+          />
+        )}
         renderSearch={(onClose) => (
           <UniversalSearch
             variant="desktop"
@@ -2156,42 +2178,10 @@ function DashboardInner() {
         overflow: 'hidden',
         minHeight: 0, // critical: allow flex children to shrink for scroll
       }}>
-      {/* ── Nav Rail + Left Panel ── */}
-      {sidebarVisible && <NavRail
-        activeSection={activeNavSection}
-        onSectionChange={(section) => {
-          if (section === 'settings') {
-            // Settings is a full center-workspace view — don't force chat panel open
-            setActiveNavSection('settings');
-            return;
-          }
-          setActiveNavSection(section);
-          // Always show chat when switching nav sections
-          if (!chatVisible) setChatVisible(true);
-          setRightPanelMode('chat');
-        }}
-        alertCount={unreadCount}
-        onAlertClick={() => setAlertTrayOpen(!alertTrayOpen)}
-        alertTray={(
-          <AlertTray
-            alerts={activeAlerts}
-            open={alertTrayOpen}
-            onClose={() => setAlertTrayOpen(false)}
-            onMarkRead={markRead}
-            onMarkAllRead={markAllRead}
-            onDismiss={dismiss}
-            onDismissAll={dismissAll}
-            onAction={handleAlertAction}
-            variant="desktop"
-          />
-        )}
-        onPortPreview={(_port, url) => {
-          setO8BrowserUrl(url);
-          setO8ActiveTab('browser');
-          setRightPanelKind('o8');
-          setChatVisible(true);
-        }}
-      />}
+      {/* NavRail retired — its Agents / Alerts buttons live in the TitleBar,
+          and Analytics / Settings / Ports / Add-repo live in the
+          DesktopStatusBar at the bottom. The AgentPanel stays docked as the
+          left column below. */}
 
       {/* ── Left: Agent Panel ── */}
       {sidebarVisible && (
@@ -2280,7 +2270,14 @@ function DashboardInner() {
         position: 'relative',
         minWidth: 0,
         background: 'transparent',
-        borderRadius: 0,
+        // Apple squircle corners — the workspace floats inside the dashboard
+        // gradient with a small inset so the curve is visible against the
+        // adjacent NavRail / chat columns and the status strip below.
+        borderRadius: 14,
+        marginTop: 4,
+        marginBottom: 4,
+        marginLeft: 4,
+        marginRight: 4,
       }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
         <GuidedDiscoveryCoachmark
@@ -2459,6 +2456,30 @@ function DashboardInner() {
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
       <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
       </div>{/* end main layout */}
+
+      {/* ── Bottom chrome: transparent status strip with branch + chrome buttons ── */}
+      <DesktopStatusBar
+        branchName={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
+        repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
+        isAnalyticsSectionActive={activeNavSection === 'analytics'}
+        onOpenSettings={() => setActiveNavSection('settings')}
+        onOpenAnalytics={() => {
+          setActiveNavSection('analytics');
+          if (!chatVisible) setChatVisible(true);
+          setRightPanelMode('chat');
+        }}
+        onAddRepo={() => {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent(REQUEST_ADD_REPO_EVENT));
+          }
+        }}
+        onPortPreview={(_port, url) => {
+          setO8BrowserUrl(url);
+          setO8ActiveTab('browser');
+          setRightPanelKind('o8');
+          setChatVisible(true);
+        }}
+      />
 
       <GuidedDiscoveryCoachmark
         visible={showMobileFtux}

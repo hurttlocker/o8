@@ -101,7 +101,8 @@ export const AlertToast = memo(function AlertToast({
     <div
       style={{
         position: 'fixed',
-        bottom: 16,
+        // Nudged above the 28px DesktopStatusBar (16 base + 28 strip + 4 gap).
+        bottom: 48,
         left: 72,
         zIndex: 10000,
         display: 'flex',
