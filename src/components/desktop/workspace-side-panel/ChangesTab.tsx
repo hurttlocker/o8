@@ -91,8 +91,10 @@ export function TreeNode({
           color: isChanged ? 'var(--t-text)' : 'var(--t-text-secondary)',
           cursor: 'pointer',
           textAlign: 'left',
-          fontSize: 12,
+          fontSize: 11.5,
+          fontWeight: 400,
           fontFamily: '"SF Mono", ui-monospace, monospace',
+          letterSpacing: '-0.01em',
         }}
         onMouseEnter={(event) => { event.currentTarget.style.background = THEME_ROW_HOVER; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
@@ -100,13 +102,13 @@ export function TreeNode({
         {mode === 'changes' && changeEntry ? (
           <WorkspaceDiffStatusIcon status={changeEntry.status} />
         ) : (
-          <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: isChanged ? THEME_ACCENT : getFileIconColor(node.name) }} />
+          <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: isChanged ? 'var(--t-text-secondary)' : 'var(--t-text-faint)' }} />
         )}
         <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
         {mode === 'changes' && changeEntry ? (
-          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 700 }}>
-            {(changeEntry.additions ?? 0) > 0 ? <span style={{ color: '#22c55e' }}>+{changeEntry.additions}</span> : null}
-            {(changeEntry.deletions ?? 0) > 0 ? <span style={{ color: '#ef4444' }}>-{changeEntry.deletions}</span> : null}
+          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, flexShrink: 0, fontSize: 10, fontWeight: 500 }}>
+            {(changeEntry.additions ?? 0) > 0 ? <span style={{ color: '#4ea672' }}>+{changeEntry.additions}</span> : null}
+            {(changeEntry.deletions ?? 0) > 0 ? <span style={{ color: '#c97070' }}>-{changeEntry.deletions}</span> : null}
           </span>
         ) : isChanged ? (
           <span style={{ marginLeft: 'auto', width: 6, height: 6, borderRadius: 999, background: THEME_ACCENT, flexShrink: 0 }} />
@@ -129,16 +131,16 @@ export function TreeNode({
           padding: `5px 12px 5px ${12 + depth * 14}px`,
           border: 'none',
           background: 'transparent',
-          color: 'var(--t-text)',
+          color: 'var(--t-text-secondary)',
           cursor: 'pointer',
           textAlign: 'left',
-          fontSize: 12,
-          fontWeight: 600,
+          fontSize: 11.5,
+          fontWeight: 440,
         }}
         onMouseEnter={(event) => { event.currentTarget.style.background = THEME_ROW_HOVER; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
       >
-        {open ? <FolderOpen size={13} strokeWidth={1.6} style={{ color: folderColor, flexShrink: 0 }} /> : <Folder size={13} strokeWidth={1.6} style={{ color: folderColor, flexShrink: 0 }} />}
+        {open ? <FolderOpen size={13} strokeWidth={1.6} style={{ color: 'var(--t-text-faint)', flexShrink: 0 }} /> : <Folder size={13} strokeWidth={1.6} style={{ color: 'var(--t-text-faint)', flexShrink: 0 }} />}
         <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
         {open ? <ChevronDown size={11} style={{ color: 'var(--t-text-faint)', marginLeft: 'auto', flexShrink: 0 }} /> : <ChevronRight size={11} style={{ color: 'var(--t-text-faint)', marginLeft: 'auto', flexShrink: 0 }} />}
         {hasChangedChild && !open ? (
@@ -277,8 +279,8 @@ export const ChangesTab = memo(function ChangesTab({
           flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#22c55e' }}>+{totalAdditions}</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#ef4444' }}>-{totalDeletions}</span>
+        <span style={{ fontSize: 11, fontWeight: 500, color: '#4ea672' }}>+{totalAdditions}</span>
+        <span style={{ fontSize: 11, fontWeight: 500, color: '#c97070' }}>-{totalDeletions}</span>
         <span style={{ fontSize: 11, color: 'var(--t-text-secondary)' }}>
           {files.length} file{files.length === 1 ? '' : 's'}
         </span>
