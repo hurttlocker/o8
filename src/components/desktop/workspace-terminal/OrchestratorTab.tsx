@@ -313,7 +313,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
               cursor: 'pointer',
             }}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
               <path d="M12 5v14" />
               <path d="M5 12h14" />
             </svg>
