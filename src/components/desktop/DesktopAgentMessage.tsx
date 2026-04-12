@@ -668,18 +668,17 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         {hasMedia ? <MediaGrid media={entry.media ?? []} tint="user" /> : null}
         {hasText ? (
           <div style={{
-            maxWidth: '100%',
-            padding: '12px 16px',
-            borderRadius: '18px 18px 6px 18px',
-            background: 'linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)',
-            color: '#ffffff',
-            boxShadow: '0 10px 24px rgba(37, 99, 235, 0.20)',
+            maxWidth: '85%',
+            padding: '8px 14px',
+            borderRadius: '14px 14px 4px 14px',
+            background: 'rgba(99, 138, 255, 0.13)',
+            color: 'var(--t-text)',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
             fontSize: 13,
-            fontWeight: 400,
-            lineHeight: 1.55,
-            letterSpacing: '-0.01em',
+            fontWeight: 380,
+            lineHeight: 1.5,
+            letterSpacing: '-0.005em',
             // Pretext: explicit minHeight eliminates reflow in z-9999 stacking context
             ...(userTextHeight > 0 ? { minHeight: userTextHeight } : {}),
           }}>
@@ -736,7 +735,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
           maxWidth: '100%',
           color: entry.role === 'system' ? 'var(--t-text-secondary)' : 'var(--t-text)',
           fontSize: 13,
-          fontWeight: 380,
+          fontWeight: 360,
           lineHeight: 1.6,
           letterSpacing: '-0.005em',
           wordBreak: 'break-word',

@@ -211,7 +211,7 @@ function MessageBubbleBase({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 4, animation: isLast ? 'llmFadeIn 200ms ease-out' : undefined }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <div style={{ maxWidth: isUser ? '75%' : '90%', paddingTop: isUser ? 10 : 16, paddingRight: isUser ? 16 : 0, paddingBottom: isUser ? 10 : 16, paddingLeft: isUser ? 16 : 0, borderRadius: isUser ? 18 : 0, background: isUser ? 'transparent' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent', color: isUser ? 'var(--t-text-muted)' : message.isError ? '#dc2626' : 'var(--t-text)', fontSize: 14, lineHeight: '1.6', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', wordBreak: 'break-word', ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}) }}>
+      <div style={{ maxWidth: isUser ? '85%' : '90%', paddingTop: isUser ? 8 : 16, paddingRight: isUser ? 14 : 0, paddingBottom: isUser ? 8 : 16, paddingLeft: isUser ? 14 : 0, borderRadius: isUser ? '14px 14px 4px 14px' : 0, background: isUser ? 'rgba(99, 138, 255, 0.13)' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent', color: isUser ? 'var(--t-text)' : message.isError ? '#dc2626' : 'var(--t-text)', fontSize: 13, fontWeight: isUser ? 380 : 360, lineHeight: '1.55', letterSpacing: '-0.005em', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', wordBreak: 'break-word', ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}) }}>
         {isUser ? (
           <>
             {message.content}
