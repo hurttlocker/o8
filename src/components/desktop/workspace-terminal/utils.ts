@@ -483,7 +483,7 @@ export function workspaceTabPrimaryLabel(tab: TerminalTab) {
   if (tab.orchestrationPacket) {
     return laneDisplayTitle(tab.orchestrationPacket, tab.kind);
   }
-  if (tab.label && !/^ad\s*hoc/i.test(tab.label) && !/^chat-/.test(tab.label) && !/^terminal-/.test(tab.label)) {
+  if (tab.label && !/^ad\s*hoc/i.test(tab.label) && !/^chat-/.test(tab.label) && !/^terminal-/.test(tab.label) && tab.label !== 'Assistant') {
     return tab.label;
   }
   if (tab.kind === 'llm-chat') {
