@@ -250,7 +250,7 @@ function ToolCallsSection({ tools }: { tools: ToolCall[] }) {
           background: 'rgba(0,0,0,0.02)',
           cursor: 'pointer', fontSize: 11, fontWeight: 600,
           color: '#64748b',
-          fontFamily: '-apple-system, system-ui, sans-serif',
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         }}
       >
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -344,7 +344,7 @@ export const ChatBubble = memo(function ChatBubble({
         borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
         background: isUser ? '#0f172a' : '#f1f5f9',
         color: isUser ? '#ffffff' : '#0f172a',
-        fontFamily: '-apple-system, system-ui, sans-serif',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         wordBreak: 'break-word',
         minWidth: 0,
       }}>
@@ -399,7 +399,7 @@ export const ChatBubble = memo(function ChatBubble({
               background: 'rgba(0,0,0,0.02)',
               cursor: 'pointer', fontSize: 9,
               color: '#94a3b8',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -403,7 +403,7 @@ const menuButtonStyle = {
   background: 'transparent',
   color: 'var(--t-text)',
   fontSize: 13,
-  fontFamily: '-apple-system, system-ui, sans-serif',
+  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
   cursor: 'pointer',
   textAlign: 'left' as const,
   transition: 'background 100ms',
@@ -424,7 +424,7 @@ const submenuButtonStyle = {
   fontSize: 13,
   cursor: 'pointer',
   textAlign: 'left' as const,
-  fontFamily: '-apple-system, system-ui, sans-serif',
+  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
   transition: 'background 100ms',
 };
 
@@ -443,7 +443,7 @@ const backButtonStyle = {
   color: 'var(--t-text-muted)',
   fontSize: 11,
   cursor: 'pointer',
-  fontFamily: '-apple-system, system-ui, sans-serif',
+  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
 };
 
 const sectionLabelStyle = {

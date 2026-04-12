@@ -212,7 +212,7 @@ export const MessageActions = memo(function MessageActions({
             paddingLeft: 6,
             fontSize: 11,
             fontWeight: 700,
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             color: rate === 1 ? 'var(--t-text-faint)' : THEME_ACCENT,
           }}
         >

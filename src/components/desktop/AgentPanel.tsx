@@ -130,7 +130,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
                   cursor: 'pointer',
                   fontSize: 10,
                   fontWeight: 700,
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   flexShrink: 0,
                 }}
               >
@@ -148,7 +148,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
                 fontWeight: 440,
                 color: 'var(--t-text-faint)',
                 letterSpacing: '-0.005em',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
             >
               Loading workspaces...

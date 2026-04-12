@@ -193,7 +193,7 @@ function ComposerBase({
           ) : null}
 
           <div style={{ paddingTop: 14, paddingRight: 18, paddingBottom: 8, paddingLeft: 18 }}>
-            <textarea name="llmChatMessage" aria-label={`Message ${model.label}`} ref={inputRef} value={input} onChange={(event) => onHandleInputChange(event.target.value)} onKeyDown={onInputKeyDown} onPaste={onInputPaste} onDrop={onInputDrop} onDragOver={onInputDragOver} placeholder={`Message ${model.label}...`} rows={1} style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'var(--t-text)', fontSize: 14, fontFamily: '-apple-system, system-ui, sans-serif', lineHeight: '1.5', resize: 'none', minHeight: 24, maxHeight: 200, boxSizing: 'border-box' }} />
+            <textarea name="llmChatMessage" aria-label={`Message ${model.label}`} ref={inputRef} value={input} onChange={(event) => onHandleInputChange(event.target.value)} onKeyDown={onInputKeyDown} onPaste={onInputPaste} onDrop={onInputDrop} onDragOver={onInputDragOver} placeholder={`Message ${model.label}...`} rows={1} style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'var(--t-text)', fontSize: 14, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', lineHeight: '1.5', resize: 'none', minHeight: 24, maxHeight: 200, boxSizing: 'border-box' }} />
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4, paddingRight: 10, paddingBottom: 10, paddingLeft: 14 }}>
@@ -202,8 +202,8 @@ function ComposerBase({
                 <Plus size={16} />
                 <input name="llmChatAttachments" aria-label="Attach files" type="file" accept="image/*,.txt,.md,.ts,.tsx,.js,.jsx,.py,.json,.yaml,.yml,.toml,.css,.html" multiple style={{ display: 'none' }} onChange={(event) => { const files = event.target.files; if (!files) return; onUploadFiles(files); event.target.value = ''; }} />
               </label>
-              <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '-apple-system, system-ui, sans-serif' }}>@file | /cmds</span>
-              <button type="button" onClick={onIssuePickerOpen} title={linkedIssue ? linkedIssue.title : 'Link a GitHub issue to this chat'} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 28, paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10, borderRadius: 999, border: linkedIssue ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)', background: linkedIssue ? THEME_ACCENT_SOFT : THEME_BG_CARD, color: linkedIssue ? THEME_ACCENT : 'var(--t-text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: '-apple-system, system-ui, sans-serif', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>@file | /cmds</span>
+              <button type="button" onClick={onIssuePickerOpen} title={linkedIssue ? linkedIssue.title : 'Link a GitHub issue to this chat'} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 28, paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10, borderRadius: 999, border: linkedIssue ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)', background: linkedIssue ? THEME_ACCENT_SOFT : THEME_BG_CARD, color: linkedIssue ? THEME_ACCENT : 'var(--t-text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', whiteSpace: 'nowrap' }}>
                 <AlertCircle size={13} />
                 {linkedIssue ? `Issue #${linkedIssue.number}` : 'Link issue'}
               </button>

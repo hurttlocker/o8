@@ -257,7 +257,7 @@ function RepoCardSettingsBase({ repo, model }: RepoCardSettingsProps) {
             fontWeight: 700,
             cursor: saving || !hasUnsavedChanges ? 'not-allowed' : 'pointer',
             opacity: saving || !hasUnsavedChanges ? 0.45 : 1,
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
         >
           {saving ? 'Saving…' : 'Save Profile'}
@@ -283,7 +283,7 @@ function RepoCardSettingsBase({ repo, model }: RepoCardSettingsProps) {
             fontWeight: 600,
             cursor: !hasUnsavedChanges || saving ? 'not-allowed' : 'pointer',
             opacity: !hasUnsavedChanges || saving ? 0.45 : 1,
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
         >
           Reset

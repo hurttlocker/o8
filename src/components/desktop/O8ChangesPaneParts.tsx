@@ -136,7 +136,7 @@ export function ActionButton({
         cursor: disabled ? 'default' : 'pointer',
         fontSize: 11,
         fontWeight: 600,
-        fontFamily: '-apple-system, system-ui, sans-serif',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         transition: 'background 140ms ease, border-color 140ms ease',
       }}
       onMouseEnter={(event) => {

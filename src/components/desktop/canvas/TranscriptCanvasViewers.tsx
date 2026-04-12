@@ -217,7 +217,7 @@ export const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: {
                     paddingLeft: 16,
                     fontSize: 14,
                     lineHeight: 1.6,
-                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                     height: messageHeights[globalIdx] - TX_MARGIN_BOTTOM,
                     boxSizing: 'border-box',
                   }}

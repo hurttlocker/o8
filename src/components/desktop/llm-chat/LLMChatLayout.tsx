@@ -139,7 +139,7 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
         flexDirection: 'row',
         height: '100%',
         background: 'var(--t-chat-surface-bg, #ffffff)',
-        fontFamily: '-apple-system, system-ui, sans-serif',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         overflow: 'hidden',
         position: 'relative',
         outline: dragOver ? '2px solid #3b82f6' : 'none',

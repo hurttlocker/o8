@@ -1170,7 +1170,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
               outline: 'none',
               fontSize: 13,
               color: '#e2e8f0',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           />
           {searchQuery && (
@@ -1402,7 +1402,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
             fontSize: 12,
             fontWeight: 600,
             cursor: 'pointer',
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             boxShadow: `0 4px 20px rgba(0,0,0,0.3), 0 0 20px ${focusedCluster.color}10`,
             display: 'flex',
             alignItems: 'center',
@@ -1510,7 +1510,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
                 borderRadius: 8, border: `1px solid ${action.color}30`,
                 background: `${action.color}10`, color: action.color,
                 fontSize: 11, fontWeight: 500, cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}>
                 <action.icon size={12} />
                 {action.label}

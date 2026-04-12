@@ -150,7 +150,7 @@ function FooterPorts({ onPortPreview }: { onPortPreview?: DesktopStatusBarProps[
             border: '1px solid var(--t-panel-border)',
             boxShadow: '0 8px 24px rgba(0,0,0,0.28)',
             zIndex: 9999,
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
         >
           <div
@@ -197,7 +197,7 @@ function FooterPorts({ onPortPreview }: { onPortPreview?: DesktopStatusBarProps[
                 fontWeight: 500,
                 cursor: 'pointer',
                 textAlign: 'left',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
               onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
               onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
@@ -263,7 +263,7 @@ function DesktopStatusBarBase({
         background: 'transparent',
         // No top border — blends into the panel above.
         borderTopWidth: 0,
-        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}
     >
       <ChromeButton
