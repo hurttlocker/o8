@@ -34,11 +34,11 @@ function IconSearch({ size = 14 }: { size?: number }) {
   );
 }
 
-function IconPanelBottom({ size = 16 }: { size?: number }) {
+function IconTerminal({ size = 16 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <rect width="18" height="18" x="3" y="3" rx="2" />
-      <path d="M3 15h18" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" x2="20" y1="19" y2="19" />
     </svg>
   );
 }
@@ -438,10 +438,10 @@ export function TitleBar({
       }}>
         {/* WS indicator moved to left of Open button */}
 
-        {/* Bottom panel toggle */}
+        {/* Terminal toggle — opens the global terminal in the bottom tray */}
         <TitleBarButton
-          icon={<IconPanelBottom />}
-          label="Toggle bottom panel"
+          icon={<IconTerminal />}
+          label="Toggle terminal"
           onClick={onToggleBottomPanel}
           active={bottomPanelVisible}
         />

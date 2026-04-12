@@ -45,29 +45,40 @@ export function readThemeColor(name: string, fallback: string) {
   return value || fallback;
 }
 
+/**
+ * Build the xterm.js theme object from live CSS tokens on the current document.
+ *
+ * xterm paints its own canvas and cannot inherit theme colors from CSS, so we
+ * resolve the `--t-terminal-*` tokens here and hand xterm concrete strings.
+ * Must be called client-side (reads window.getComputedStyle). Returns a fresh
+ * object every call — pass it to `new Terminal({ theme })` or assign to
+ * `term.options.theme` on theme change to live-update without recreating.
+ *
+ * Fallbacks are the midnight palette, so a missing token never paints white.
+ */
 export function buildXtermTheme() {
   return {
-    background: '#ffffff',
-    foreground: '#111827',
-    cursor: '#2563eb',
-    cursorAccent: '#ffffff',
-    selectionBackground: 'rgba(37, 99, 235, 0.15)',
-    selectionForeground: '#111827',
-    black: '#111827',
-    red: '#dc2626',
-    green: '#16a34a',
-    yellow: '#ca8a04',
-    blue: '#2563eb',
-    magenta: '#9333ea',
-    cyan: '#0891b2',
-    white: '#e5e7eb',
-    brightBlack: '#6b7280',
-    brightRed: '#ef4444',
-    brightGreen: '#22c55e',
-    brightYellow: '#eab308',
-    brightBlue: '#3b82f6',
-    brightMagenta: '#a855f7',
-    brightCyan: '#06b6d4',
-    brightWhite: '#f9fafb',
+    background: readThemeColor('--t-terminal-bg', '#16191e'),
+    foreground: readThemeColor('--t-terminal-fg', '#e8ecf2'),
+    cursor: readThemeColor('--t-terminal-cursor', '#8fb4ff'),
+    cursorAccent: readThemeColor('--t-terminal-cursor-accent', '#0f1216'),
+    selectionBackground: readThemeColor('--t-terminal-selection-bg', 'rgba(143, 180, 255, 0.26)'),
+    selectionForeground: readThemeColor('--t-terminal-selection-fg', '#ffffff'),
+    black: readThemeColor('--t-terminal-ansi-black', '#16191e'),
+    red: readThemeColor('--t-terminal-ansi-red', '#f87171'),
+    green: readThemeColor('--t-terminal-ansi-green', '#86efac'),
+    yellow: readThemeColor('--t-terminal-ansi-yellow', '#fcd34d'),
+    blue: readThemeColor('--t-terminal-ansi-blue', '#93c5fd'),
+    magenta: readThemeColor('--t-terminal-ansi-magenta', '#c4b5fd'),
+    cyan: readThemeColor('--t-terminal-ansi-cyan', '#67e8f9'),
+    white: readThemeColor('--t-terminal-ansi-white', '#d8dfe7'),
+    brightBlack: readThemeColor('--t-terminal-ansi-bright-black', '#5f6b7a'),
+    brightRed: readThemeColor('--t-terminal-ansi-bright-red', '#fca5a5'),
+    brightGreen: readThemeColor('--t-terminal-ansi-bright-green', '#bbf7d0'),
+    brightYellow: readThemeColor('--t-terminal-ansi-bright-yellow', '#fde68a'),
+    brightBlue: readThemeColor('--t-terminal-ansi-bright-blue', '#bfdbfe'),
+    brightMagenta: readThemeColor('--t-terminal-ansi-bright-magenta', '#ddd6fe'),
+    brightCyan: readThemeColor('--t-terminal-ansi-bright-cyan', '#a5f3fc'),
+    brightWhite: readThemeColor('--t-terminal-ansi-bright-white', '#f8fafc'),
   };
 }

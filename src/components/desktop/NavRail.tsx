@@ -12,11 +12,9 @@ import { createPortal } from 'react-dom';
 import { isTauri } from '@/lib/tauri/bridge';
 import {
   UsersThree,
-  Terminal,
   GearSix,
   ChartBar,
   Bell,
-  ShieldCheck,
 } from '@phosphor-icons/react';
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 
@@ -24,8 +22,6 @@ import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 
 export type NavSection =
   | 'agents'
-  | 'approvals'
-  | 'terminal'
   | 'analytics'
   | 'settings';
 
@@ -33,7 +29,6 @@ interface NavRailProps {
   activeSection: NavSection;
   onSectionChange: (section: NavSection) => void;
   alertCount?: number;
-  approvalCount?: number;
   onAlertClick?: () => void;
   alertTray?: ReactElement<{ desktopAnchorEl?: HTMLElement | null }> | null;
   onPortPreview?: (port: number, url: string, repo?: string) => void;
@@ -51,8 +46,6 @@ const RAIL_WIDTH = 44;
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'agents', label: 'Agents', icon: UsersThree },
-  { id: 'approvals', label: 'Approvals', icon: ShieldCheck },
-  { id: 'terminal', label: 'Terminal', icon: Terminal },
   { id: 'analytics', label: 'Analytics', icon: ChartBar },
 ];
 
@@ -138,31 +131,6 @@ function resetNeoHover(el: HTMLElement, active: boolean, useTauri = true) {
   }
 }
 
-// ── Logo ──
-
-function CortexLogo() {
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '2px 0',
-    }}>
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        fill="none"
-        aria-hidden="true"
-        style={{ flexShrink: 0 }}
-      >
-        <circle cx="7" cy="12" r="4.25" stroke={BRAND_MARK_BLUE} strokeWidth="2.25" />
-        <circle cx="16.5" cy="8" r="3.25" stroke={BRAND_MARK_BLUE} strokeWidth="2.25" />
-        <circle cx="16.5" cy="16" r="3.25" stroke={BRAND_MARK_BLUE} strokeWidth="2.25" />
-      </svg>
-    </div>
-  );
-}
 
 // ── Nav Item Button ──
 
@@ -508,7 +476,6 @@ export function NavRail({
   activeSection,
   onSectionChange,
   alertCount = 0,
-  approvalCount = 0,
   onAlertClick,
   alertTray,
   onPortPreview,
@@ -541,21 +508,8 @@ export function NavRail({
         boxSizing: 'border-box',
       }}
     >
-      {/* Top — Logo + Nav Items */}
+      {/* Top — Nav Items */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
-        {/* Logo */}
-        <div style={{ paddingTop: 2, paddingBottom: 8 }}>
-          <CortexLogo />
-        </div>
-
-        {/* Separator */}
-        <div style={{
-          height: 1,
-          width: 24,
-          background: 'var(--t-divider-subtle)',
-          marginBottom: 6,
-        }} />
-
         {/* Main nav */}
         {NAV_ITEMS.map((item) => (
           <NavButton
@@ -563,7 +517,6 @@ export function NavRail({
             item={item}
             active={activeSection === item.id}
             onClick={() => onSectionChange(item.id)}
-            badge={item.id === 'approvals' ? approvalCount : undefined}
             useTauri={inTauri}
             onPrefetch={
               item.id === 'settings' ? () => { import('@/components/desktop/SettingsPage'); }
