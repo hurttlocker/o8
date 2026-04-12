@@ -70,7 +70,7 @@ function WorkspaceLaunchPickerBase({
   }, [pickerOpen]);
 
   return (
-    <div ref={pickerRef} style={{ position: 'relative', flexShrink: 0 }}>
+    <div ref={pickerRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
       <button
         type="button"
         onClick={() => {

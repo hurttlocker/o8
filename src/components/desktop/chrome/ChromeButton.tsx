@@ -155,7 +155,7 @@ export function ChromeButton({
         if (neo) resetNeoHover(neo, active);
       }}
     >
-      <div data-neo="" style={chromeNeoStyle(active, size, radius)}>
+      <div data-neo="" style={{ ...chromeNeoStyle(active, size, radius), color: 'var(--t-text)' }}>
         {icon}
       </div>
       {badge !== undefined && badge > 0 ? (
