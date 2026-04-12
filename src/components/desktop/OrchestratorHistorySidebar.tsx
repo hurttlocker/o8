@@ -11,7 +11,16 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, PanelLeftClose, Trash2 } from 'lucide-react';
+// Raw SVG icons — lucide-react doesn't render in Tauri
+function MessageSquareIcon({ size = 12 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>;
+}
+function PanelLeftCloseIcon({ size = 13 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /><path d="m16 15-3-3 3-3" /></svg>;
+}
+function TrashIcon({ size = 11 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>;
+}
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 
 interface OrchestratorThread {
@@ -78,7 +87,7 @@ function OrchestratorHistorySidebarBase({
   const fetchThreads = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v2/chat-history/list');
+      const res = await fetch('/api/v2/chat-history/list?include=orchestrator');
       if (!res.ok) return;
       const data = await res.json() as {
         conversations?: Array<{ tabId: string; title?: string; modifiedAt: string; messageCount?: number; model?: string }>;
@@ -188,7 +197,7 @@ function OrchestratorHistorySidebarBase({
                 cursor: 'pointer',
               }}
             >
-              <PanelLeftClose size={13} />
+              <PanelLeftCloseIcon size={13} />
             </button>
           </div>
 
@@ -328,7 +337,7 @@ function OrchestratorHistorySidebarBase({
                             ) : runtime === 'codex' ? (
                               <CodexIcon size={16} />
                             ) : (
-                              <MessageSquare size={12} strokeWidth={2} />
+                              <MessageSquareIcon size={12} />
                             )}
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
@@ -394,7 +403,7 @@ function OrchestratorHistorySidebarBase({
                             event.currentTarget.style.color = 'var(--t-text-muted)';
                           }}
                         >
-                          <Trash2 size={11} />
+                          <TrashIcon size={11} />
                         </button>
                       </div>
                     );
