@@ -545,28 +545,32 @@ function RepoBranchRowBase({
                           width: '100%',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: 8,
-                          padding: '5px 6px',
-                          borderRadius: 8,
+                          gap: 9,
+                          padding: '5px 8px',
+                          borderRadius: 7,
                           border: 'none',
                           background: isSelectedSession ? 'var(--t-accent-soft)' : 'transparent',
                           color: 'var(--t-text)',
                           cursor: onSelectSession ? 'pointer' : 'default',
-                          fontFamily: '-apple-system, system-ui, sans-serif',
+                          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
                           textAlign: 'left',
                           transition: 'background 120ms ease',
-                          opacity: onSelectSession ? 1 : 0.78,
                         }}
                       >
-                        <AgentSpinner status={agent.status} size={6} />
-                        <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
+                          <AgentSpinner status={agent.status} size={6} />
+                        </span>
+                        {agent.runtime === 'claude-code'
+                          ? <ClaudeIcon size={12} />
+                          : <CodexIcon size={12} />}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
                           <span
                             style={{
-                              display: 'block',
-                              fontSize: 11,
-                              fontWeight: 600,
-                              lineHeight: 1.35,
+                              fontSize: 12,
+                              fontWeight: 440,
                               color: isSelectedSession ? 'var(--t-accent)' : 'var(--t-text)',
+                              letterSpacing: '-0.005em',
+                              lineHeight: 1.35,
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
@@ -576,43 +580,16 @@ function RepoBranchRowBase({
                           </span>
                           <span
                             style={{
-                              display: 'block',
-                              marginTop: 1,
-                              fontSize: 9,
+                              fontSize: 10,
+                              fontWeight: 400,
+                              color: statusTone.color,
+                              letterSpacing: '-0.005em',
                               lineHeight: 1.3,
-                              color: 'var(--t-text-faint)',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
                             }}
                           >
-                            {agent.runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
+                            {statusTone.label}
                           </span>
-                        </span>
-                        <span
-                          style={{
-                            flexShrink: 0,
-                            fontSize: 9,
-                            fontWeight: 600,
-                            color: statusTone.color,
-                          }}
-                        >
-                          {statusTone.label}
-                        </span>
-                        <span
-                          title={agent.runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            flexShrink: 0,
-                            color: agent.runtime === 'claude-code' ? '#8b5cf6' : '#10b981',
-                          }}
-                        >
-                          {agent.runtime === 'claude-code'
-                            ? <ClaudeIcon size={16} color="#8b5cf6" />
-                            : <CodexIcon size={16} color="#10b981" />}
-                        </span>
+                        </div>
                       </button>
                     );
                   })}
