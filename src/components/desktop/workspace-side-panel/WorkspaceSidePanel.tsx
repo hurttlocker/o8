@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { X } from 'lucide-react';
 import type { WorkspacePanelTabId, WorkspaceSidePanelRepo, WorkspaceSidePanelView } from './types';
 import { shortenPath, PanelTab, FilesTabDropdown } from './shared';
 import { ChangesTab } from './ChangesTab';
@@ -88,7 +87,10 @@ export function WorkspaceSidePanel({
             flexShrink: 0,
           }}
         >
-          <X size={12} />
+          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
         </button>
       </div>
 
