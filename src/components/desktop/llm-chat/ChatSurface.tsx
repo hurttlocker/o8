@@ -1,7 +1,22 @@
 import { memo } from 'react';
 import type React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowDown, History, Loader2, RotateCcw, Sparkles } from 'lucide-react';
+// Raw SVG icons — lucide-react doesn't render in Tauri webview
+function HistoryIcon({ size = 12 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></svg>;
+}
+function RotateCcwIcon({ size = 12 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>;
+}
+function SpinnerIcon({ size = 12 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0, animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>;
+}
+function SparklesIcon({ size = 11 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" /></svg>;
+}
+function ArrowDownIcon({ size = 13 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></svg>;
+}
 
 import { CompactionNode } from '../CompactionNode';
 import { renderLLMMarkdown } from '../LLMMarkdown';
@@ -94,8 +109,9 @@ function ChatSurfaceBase({
           in the empty greeting below. */}
       {!isEmpty ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 5, paddingRight: 14, paddingBottom: 5, paddingLeft: 14, minHeight: 28, borderBottomWidth: '0.5px', borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)' }}>
-          <button type="button" onClick={onToggleHistory} title="Chat history" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderWidth: 0, borderRadius: 6, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', transition: 'background 120ms ease, color 120ms ease' }} onMouseEnter={(event) => { event.currentTarget.style.background = THEME_BG_CARD; event.currentTarget.style.color = 'var(--t-text)'; }} onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-secondary)'; }}>
-            <History size={13} />
+          <button type="button" onClick={onToggleHistory} title="Chat history" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 24, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 8, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 500, cursor: 'pointer', transition: 'background 120ms ease, color 120ms ease' }} onMouseEnter={(event) => { event.currentTarget.style.background = THEME_BG_CARD; event.currentTarget.style.color = 'var(--t-text-secondary)'; }} onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}>
+            <HistoryIcon size={12} />
+            History
           </button>
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 10.5, color: 'var(--t-text-muted)', fontFamily: 'ui-monospace, monospace', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -113,7 +129,7 @@ function ChatSurfaceBase({
             })()}
           </span>
           <button type="button" onClick={onNewConversation} title="New conversation" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, paddingTop: 3, paddingRight: 7, paddingBottom: 3, paddingLeft: 7, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 500, cursor: 'pointer', borderRadius: 6, transition: 'color 150ms, background 150ms' }} onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text-secondary)'; event.currentTarget.style.background = THEME_BG_CARD; }} onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-muted)'; event.currentTarget.style.background = 'transparent'; }}>
-            <RotateCcw size={12} />
+            <RotateCcwIcon size={12} />
             New
           </button>
         </div>
@@ -153,7 +169,7 @@ function ChatSurfaceBase({
             onMouseEnter={(event) => { event.currentTarget.style.background = THEME_BG_CARD; event.currentTarget.style.color = 'var(--t-text-secondary)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
           >
-            <History size={12} />
+            <HistoryIcon size={12} />
             History
           </button>
         ) : null}
@@ -236,12 +252,12 @@ function ChatSurfaceBase({
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, animation: 'llmFadeIn 300ms ease-out' }}>
               {followUpsLoading ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, fontSize: 12, color: '#94a3b8' }}>
-                  <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                  <SpinnerIcon size={12} />
                   Thinking of follow-ups...
                 </div>
               ) : followUps.map((question, index) => (
                 <button key={`${question}-${index}`} type="button" onClick={() => { onFollowUpSelect(question); onClearFollowUps(); setTimeout(() => inputRef.current?.focus(), 50); }} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingRight: 14, paddingBottom: 8, paddingLeft: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 20, fontSize: 12, color: '#475569', cursor: 'pointer', transition: 'all 150ms ease', fontFamily: '-apple-system, system-ui, sans-serif', animation: `llmFadeIn 300ms ease-out ${index * 80}ms both` }} onMouseEnter={(event) => { event.currentTarget.style.borderColor = '#3b82f6'; event.currentTarget.style.background = '#f0f9ff'; event.currentTarget.style.color = '#1e40af'; }} onMouseLeave={(event) => { event.currentTarget.style.borderColor = '#e2e8f0'; event.currentTarget.style.background = '#f8fafc'; event.currentTarget.style.color = '#475569'; }}>
-                  <Sparkles size={11} style={{ opacity: 0.5 }} />
+                  <SparklesIcon size={11} />
                   {question}
                 </button>
               ))}
@@ -266,7 +282,7 @@ function ChatSurfaceBase({
       {isUserScrolledUp && messages.length > 0 ? (
         <div style={{ position: 'absolute', right: 30, bottom: 104, zIndex: 50, animation: 'llmFadeIn 150ms ease-out' }}>
           <button type="button" onClick={onScrollToBottom} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 34, paddingTop: 7, paddingRight: 12, paddingBottom: 7, paddingLeft: 12, background: 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))', border: '1px solid rgba(96, 165, 250, 0.22)', borderRadius: 999, boxShadow: '0 12px 28px rgba(37, 99, 235, 0.16)', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#1d4ed8', fontFamily: '-apple-system, system-ui, sans-serif', transition: 'all 150ms' } as React.CSSProperties}>
-            <ArrowDown size={13} />
+            <ArrowDownIcon size={13} />
             Bottom messages
           </button>
         </div>
