@@ -379,6 +379,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             onTogglePermission={handleTogglePermission}
             missionOpen={missionOpen}
             onToggleMission={handleToggleMission}
+            repoLabel={repoLabel}
             emptyStateOverride={emptyStateNode}
             onMissionStateChange={data.onMissionStateChange}
             onLaunchPacket={data.onLaunchPacket}
