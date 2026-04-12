@@ -16,7 +16,7 @@ function RepoCardBase(props: RepoCardProps) {
       style={{
         position: 'relative',
         borderRadius: 0,
-        background: 'transparent',
+        background: props.isActive ? 'var(--t-panel-hover)' : 'transparent',
         borderTopWidth: 0,
         borderRightWidth: 0,
         borderBottomWidth: 1,
@@ -40,6 +40,7 @@ function RepoCardBase(props: RepoCardProps) {
         expanded={props.expanded}
         activeWorkspacePath={props.activeWorkspacePath}
         onToggle={props.onToggle}
+        onSelectRepo={props.onSelectRepo ?? (() => {})}
         onRemove={props.onRemove}
         onSelectPR={props.onSelectPR}
         onReviewPR={props.onReviewPR}

@@ -38,6 +38,7 @@ interface RepoRegistryListProps {
   setExpandedRepoIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeRepoLocalPath?: string | null;
   activeWorkspacePath?: string | null;
+  onSelectRepo?: (repoId: string) => void;
 }
 
 function RepoRegistryListBase({
@@ -66,6 +67,7 @@ function RepoRegistryListBase({
   setExpandedRepoIds,
   activeRepoLocalPath = null,
   activeWorkspacePath = null,
+  onSelectRepo,
 }: RepoRegistryListProps) {
   return (
     <>
@@ -246,6 +248,7 @@ function RepoRegistryListBase({
                   else next.add(repo.id);
                   return next;
                 })}
+                onSelectRepo={() => onSelectRepo?.(repo.id)}
                 isActive={repo.localPath === activeRepoLocalPath}
                 activeWorkspacePath={activeWorkspacePath}
               />

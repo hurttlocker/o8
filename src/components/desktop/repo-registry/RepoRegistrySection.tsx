@@ -26,6 +26,7 @@ import { RepoRegistryModals } from './RepoRegistryModals';
 
 function RepoRegistrySectionBase({
   onSelectSession,
+  onSelectRepo,
   onSelectPR,
   onReviewPR,
   onRepoRemoved,
@@ -45,6 +46,7 @@ function RepoRegistrySectionBase({
   hideHeader = false,
 }: {
   onSelectSession?: (sessionKey: string) => void;
+  onSelectRepo?: (repoId: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onReviewPR?: (prNumber: number, repo?: string) => void;
   onRepoRemoved?: (repo: RepoRegistryEntry) => void;
@@ -695,6 +697,7 @@ function RepoRegistrySectionBase({
         setExpandedRepoIds={setExpandedRepoIds}
         activeRepoLocalPath={activeRepoLocalPath}
         activeWorkspacePath={activeWorkspacePath}
+        onSelectRepo={onSelectRepo}
       />
 
       <RepoRegistryModals

@@ -158,6 +158,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           <RepoRegistrySection
             onLaunchComplete={refreshNow}
             onSelectSession={onSelectSession}
+            onSelectRepo={props.onSelectRepo}
             onSelectPR={onSelectPR}
             onReviewPR={onReviewPR}
             onRepoRemoved={(repo) => {
