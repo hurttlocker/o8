@@ -464,12 +464,11 @@ export async function sendToOrchestrator(
   // Generate MCP config so Claude Code can use Cortex tools
   const mcpConfigPath = ensureMcpConfig(session.repoPath);
 
-  // Map thinking effort to Claude Code CLI's --thinking-budget flag.
-  // medium = 10k tokens, high = 50k tokens, max = 128k tokens (xhigh).
-  const thinkingBudgetMap: Record<ThinkingEffort, string> = {
-    medium: '10000',
-    high: '50000',
-    max: '128000',
+  // Map thinking effort to Claude Code CLI's --effort flag.
+  const effortMap: Record<ThinkingEffort, string> = {
+    medium: 'medium',
+    high: 'high',
+    max: 'max',
   };
 
   const args: string[] = [
@@ -480,7 +479,7 @@ export async function sendToOrchestrator(
       : ['--dangerously-skip-permissions']),
     '--verbose',
     '--mcp-config', mcpConfigPath,
-    '--thinking-budget', thinkingBudgetMap[thinkingEffort],
+    '--effort', effortMap[thinkingEffort],
   ];
 
   // Resume existing conversation if we have a session ID
