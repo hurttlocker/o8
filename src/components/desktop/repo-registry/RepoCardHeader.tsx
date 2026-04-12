@@ -1,7 +1,19 @@
 'use client';
 
 import { memo, useState } from 'react';
-import { ArrowRight, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+// Raw SVG icons — lucide-react doesn't render in Tauri webview
+function ChevronDownIcon({ size = 13 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="m6 9 6 6 6-6" /></svg>;
+}
+function ChevronRightIcon({ size = 13 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="m9 18 6-6-6-6" /></svg>;
+}
+function ArrowRightIcon({ size = 12 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>;
+}
+function ExternalLinkIcon({ size = 12 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>;
+}
 import {
   AlertCircle,
   BlueGlassActionButton,
@@ -38,6 +50,7 @@ interface RepoCardHeaderProps {
   expanded?: boolean;
   activeWorkspacePath?: string | null;
   onToggle: () => void;
+  onSelectRepo: () => void;
   onRemove: (repo: RepoRegistryEntry) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onReviewPR?: (prNumber: number, repo?: string) => void;
@@ -52,6 +65,7 @@ function RepoCardHeaderBase({
   expanded = false,
   activeWorkspacePath = null,
   onToggle,
+  onSelectRepo,
   onRemove,
   onSelectPR,
   onReviewPR,
@@ -379,7 +393,6 @@ function RepoCardHeaderBase({
             padding: compactLayout ? '9px 14px 8px' : '10px 14px 9px',
             cursor: 'pointer',
           }}
-          onClick={onToggle}
           onMouseEnter={(event) => schedulePreviewHover(event.currentTarget as HTMLDivElement, event.clientX, event.clientY)}
           onMouseLeave={closePreviewHover}
         >
@@ -387,21 +400,33 @@ function RepoCardHeaderBase({
             <div style={{ flex: 1, minWidth: 0, paddingLeft: repoHeaderLeadingInset }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
                 <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); onSelectRepo(); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onSelectRepo(); } }}
                   style={{
                     fontSize: 13,
                     fontWeight: 540,
-                    color: 'var(--t-text)',
+                    color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
                     letterSpacing: '-0.008em',
                     fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
                     minWidth: 0,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
+                    cursor: 'pointer',
+                    background: 'transparent',
+                    borderWidth: 0,
+                    padding: 0,
                   }}
                 >
                   {repo.name}
                 </span>
                 <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); onToggle(); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onToggle(); } }}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -409,13 +434,13 @@ function RepoCardHeaderBase({
                     flexShrink: 0,
                     color: 'var(--t-text-faint)',
                     marginTop: 1,
+                    cursor: 'pointer',
                   }}
                 >
                   {expanded
-                    ? <ChevronDown size={13} strokeWidth={1.8} />
-                    : <ChevronRight size={13} strokeWidth={1.8} />}
+                    ? <ChevronDownIcon size={13} />
+                    : <ChevronRightIcon size={13} />}
                 </span>
-                {isActive ? currentBadge : null}
                 {openPrCount > 0 ? (
                   <span
                     style={{
@@ -569,14 +594,14 @@ function RepoCardHeaderBase({
                   ) : null}
                   {primaryPreview && onSelectPR ? (
                     <BlueGlassActionButton
-                      icon={<ArrowRight size={12} strokeWidth={2} />}
+                      icon={<ArrowRightIcon size={12} />}
                       label="Open full PR"
                       onClick={() => onSelectPR(primaryPreview.number, model.githubSlug ?? undefined)}
                     />
                   ) : null}
                   {primaryPreview?.url ? (
                     <BlueGlassActionButton
-                      icon={<ExternalLink size={12} strokeWidth={2} />}
+                      icon={<ExternalLinkIcon size={12} />}
                       label="Open on GitHub"
                       onClick={() => window.open(primaryPreview.url, '_blank', 'noopener,noreferrer')}
                     />

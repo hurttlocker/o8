@@ -894,6 +894,22 @@ function DashboardInner() {
     workspaceTerminalPreferredRepo,
   ]);
 
+  // ── Repo alignment — click repo name → align whole app ──
+  const handleAlignToRepo = useCallback((repoId: string) => {
+    void handleSelectRegisteredRepo(repoId);
+    const targetRepo = globalRepoEntries.find((r) => r.id === repoId);
+    if (targetRepo) {
+      setWorkspaceSidePanelRepoPath(targetRepo.localPath);
+      setWorkspaceSidePanelRepoContext({
+        name: targetRepo.name,
+        localPath: targetRepo.localPath,
+        branch: targetRepo.readiness?.currentBranch ?? targetRepo.defaultBranch ?? 'main',
+        readiness: targetRepo.readiness ?? null,
+        remoteUrl: targetRepo.remoteUrl ?? undefined,
+      });
+    }
+  }, [globalRepoEntries, handleSelectRegisteredRepo]);
+
   // ── Routing callbacks for AgentPanel ──
   const handleSelectSession = useCallback((sessionKey: string) => {
     // Open the session transcript in a canvas chat tab
@@ -2216,6 +2232,7 @@ function DashboardInner() {
             onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
             onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
             onSelectSession={handleSelectSession}
+            onSelectRepo={handleAlignToRepo}
             onSelectIssue={handleSelectIssue}
             onSelectCommit={handleSelectCommit}
             onSelectPR={handleSelectPR}
