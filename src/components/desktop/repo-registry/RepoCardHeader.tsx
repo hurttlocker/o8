@@ -420,7 +420,7 @@ function RepoCardHeaderBase({
                     padding: 0,
                   }}
                 >
-                  {repo.name}
+                  {repo.name.toLowerCase()}
                 </span>
                 <span
                   role="button"

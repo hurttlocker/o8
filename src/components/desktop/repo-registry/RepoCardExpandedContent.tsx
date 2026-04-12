@@ -292,7 +292,9 @@ function RepoCardExpandedContentBase({
               fontWeight: 440,
               color: 'var(--t-text-faint)',
               paddingTop: 6,
+              paddingRight: 8,
               paddingBottom: 6,
+              paddingLeft: 42,
               letterSpacing: '-0.005em',
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
