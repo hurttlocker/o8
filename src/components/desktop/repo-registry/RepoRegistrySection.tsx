@@ -72,12 +72,16 @@ function RepoRegistrySectionBase({
     if (onSectionOpenChange) onSectionOpenChange(next);
     else setReposOpenInternal(next);
   }, [onSectionOpenChange]);
-  const [expandedRepoId, setExpandedRepoId] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
+  const [expandedRepoIds, setExpandedRepoIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
     try {
-      return sessionStorage.getItem('cortex-repo-expanded-id');
+      const stored = sessionStorage.getItem('cortex-repo-expanded-ids');
+      if (stored) return new Set(JSON.parse(stored) as string[]);
+      // Migrate from old single-id key
+      const old = sessionStorage.getItem('cortex-repo-expanded-id');
+      return old ? new Set([old]) : new Set();
     } catch {
-      return null;
+      return new Set();
     }
   });
 
@@ -118,9 +122,9 @@ function RepoRegistrySectionBase({
       const targetRepo = repos.find((repo) => repo.id === detail.repoId || repo.localPath === detail.repoPath);
       if (!targetRepo) return;
       setReposOpen(true);
-      setExpandedRepoId(targetRepo.id);
+      setExpandedRepoIds((prev) => new Set([...prev, targetRepo.id]));
       try {
-        sessionStorage.setItem('cortex-repo-expanded-id', targetRepo.id);
+        sessionStorage.setItem('cortex-repo-expanded-ids', JSON.stringify([...expandedRepoIds, targetRepo.id]));
       } catch {
         // Ignore session storage failures and still reveal the repo.
       }
@@ -143,10 +147,10 @@ function RepoRegistrySectionBase({
 
   useEffect(() => {
     try {
-      if (expandedRepoId) sessionStorage.setItem('cortex-repo-expanded-id', expandedRepoId);
-      else sessionStorage.removeItem('cortex-repo-expanded-id');
+      if (expandedRepoIds.size > 0) sessionStorage.setItem('cortex-repo-expanded-ids', JSON.stringify([...expandedRepoIds]));
+      else sessionStorage.removeItem('cortex-repo-expanded-ids');
     } catch { /* ignore */ }
-  }, [expandedRepoId]);
+  }, [expandedRepoIds]);
 
   useEffect(() => {
     try {
@@ -525,10 +529,10 @@ function RepoRegistrySectionBase({
       const targetRepo = repos.find((repo) => repo.id === detail.repoId || repo.localPath === detail.repoPath);
       if (!targetRepo) return;
       setReposOpen(true);
-      setExpandedRepoId(targetRepo.id);
+      setExpandedRepoIds((prev) => new Set([...prev, targetRepo.id]));
       openWorkspaceModal(targetRepo);
       try {
-        sessionStorage.setItem('cortex-repo-expanded-id', targetRepo.id);
+        sessionStorage.setItem('cortex-repo-expanded-ids', JSON.stringify([...expandedRepoIds, targetRepo.id]));
       } catch {
         // Ignore session storage failures and still reveal the repo.
       }
@@ -627,7 +631,7 @@ function RepoRegistrySectionBase({
 
   useEffect(() => {
     if (!activeRepoEntry) return;
-    setExpandedRepoId((current) => current ?? activeRepoEntry.id);
+    setExpandedRepoIds((prev) => prev.size > 0 ? prev : new Set([activeRepoEntry.id]));
   }, [activeRepoEntry]);
 
   useEffect(() => {
@@ -637,7 +641,7 @@ function RepoRegistrySectionBase({
     if (!match) return;
     handledLaunchIntentNonceRef.current = launchIntent.nonce;
     setReposOpen(true);
-    setExpandedRepoId(match.id);
+    setExpandedRepoIds((prev) => new Set([...prev, match.id]));
     openLaunchModal(match);
   }, [launchIntent?.nonce, launchIntent?.repoPath, openLaunchModal, repos, setReposOpen]);
 
@@ -648,7 +652,7 @@ function RepoRegistrySectionBase({
     if (!match) return;
     handledWorkspaceIntentNonceRef.current = workspaceIntent.nonce;
     setReposOpen(true);
-    setExpandedRepoId(match.id);
+    setExpandedRepoIds((prev) => new Set([...prev, match.id]));
     openWorkspaceModal(match);
   }, [openWorkspaceModal, repos, setReposOpen, workspaceIntent?.nonce, workspaceIntent?.repoPath]);
 
@@ -687,8 +691,8 @@ function RepoRegistrySectionBase({
         effectiveAgentBranchMap={effectiveAgentBranchMap}
         orchestratorPackets={orchestratorPackets}
         portsByRepo={portsByRepo}
-        expandedRepoId={expandedRepoId}
-        setExpandedRepoId={setExpandedRepoId}
+        expandedRepoIds={expandedRepoIds}
+        setExpandedRepoIds={setExpandedRepoIds}
         activeRepoLocalPath={activeRepoLocalPath}
         activeWorkspacePath={activeWorkspacePath}
       />
