@@ -677,6 +677,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
             fontSize: 13,
+            fontWeight: 400,
             lineHeight: 1.55,
             letterSpacing: '-0.01em',
             // Pretext: explicit minHeight eliminates reflow in z-9999 stacking context
@@ -734,8 +735,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         <div style={{
           maxWidth: '100%',
           color: entry.role === 'system' ? 'var(--t-text-secondary)' : 'var(--t-text)',
-          fontSize: 14,
-          lineHeight: 1.65,
+          fontSize: 13,
+          fontWeight: 380,
+          lineHeight: 1.6,
+          letterSpacing: '-0.005em',
           wordBreak: 'break-word',
           padding: entry.role === 'system' ? '10px 12px' : 0,
           borderRadius: entry.role === 'system' ? 12 : 0,
