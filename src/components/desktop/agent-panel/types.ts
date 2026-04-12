@@ -174,6 +174,7 @@ export interface AgentPanelProps {
   onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   onLaunchWorkspaceTask?: (request: RepoTaskLaunchRequest) => Promise<void>;
   onSelectSession?: (sessionKey: string) => void;
+  onSelectRepo?: (repoId: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;

@@ -43,6 +43,7 @@ export interface RepoCardProps {
   activePorts?: number[];
   expanded: boolean;
   onToggle: () => void;
+  onSelectRepo?: () => void;
   isActive?: boolean;
   activeSessionKey?: string | null;
   activeWorkspacePath?: string | null;
