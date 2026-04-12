@@ -490,6 +490,12 @@ export function workspaceTabPrimaryLabel(tab: TerminalTab) {
     return adHocLaneTitle('llm-chat');
   }
   if (tab.kind === 'chat') {
+    // Show repo + runtime instead of generic "Assistant"
+    const repoName = tab.repo?.name ?? (tab.repo?.localPath ? tab.repo.localPath.split('/').pop() : null);
+    const runtimeShort = tab.chatRuntime === 'claude-code' ? 'Claude' : tab.chatRuntime === 'codex' ? 'Codex' : null;
+    if (repoName && runtimeShort) return `${repoName} (${runtimeShort})`;
+    if (repoName) return repoName;
+    if (runtimeShort) return runtimeShort;
     return adHocLaneTitle('chat');
   }
   if (tab.kind === 'terminal') {
