@@ -10,6 +10,7 @@ import { GitLogTab } from './GitLogTab';
 export function WorkspaceSidePanel({
   view,
   repo,
+  agentContext,
   onClearView,
   onOpenFile,
   onSelectCommit,
@@ -19,6 +20,7 @@ export function WorkspaceSidePanel({
   onClearView: () => void;
   onOpenFile: (path: string, repo: WorkspaceSidePanelRepo | null) => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
+  agentContext?: { branch: string; fileCount: number; agentLabel: string; agentRunning: boolean } | null;
 }) {
   const [activeTab, setActiveTab] = useState<WorkspacePanelTabId>(() => (
     view === 'git-log' ? 'git-log' : 'changes'
@@ -36,12 +38,18 @@ export function WorkspaceSidePanel({
     );
   }
 
-  const headerScopeSubtitle = repo
+  const headerScopeSubtitle = agentContext
     ? [
-        repo.branch ? (repo.isWorktree ? `${repo.branch} \u00B7 worktree` : repo.branch) : null,
-        shortenPath(repo.localPath),
-      ].filter((value): value is string => Boolean(value)).join(' \u00B7 ')
-    : 'Workspace side panel';
+        agentContext.branch,
+        `${agentContext.fileCount} file${agentContext.fileCount !== 1 ? 's' : ''}`,
+        `${agentContext.agentLabel} ${agentContext.agentRunning ? 'running' : 'idle'}`,
+      ].join(' \u00B7 ')
+    : repo
+      ? [
+          repo.branch ? (repo.isWorktree ? `${repo.branch} \u00B7 worktree` : repo.branch) : null,
+          shortenPath(repo.localPath),
+        ].filter((value): value is string => Boolean(value)).join(' \u00B7 ')
+      : 'Workspace side panel';
 
   return (
     <div
