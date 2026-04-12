@@ -138,6 +138,7 @@ export function adHocLaneTitle(kind?: 'chat' | 'llm-chat' | 'terminal' | 'canvas
   if (kind === 'terminal') return 'Terminal';
   if (kind === 'canvas') return 'Inspector';
   if (kind === 'orchestrator') return 'Orchestrator';
+  if (kind === 'chat') return 'Agent';
   return 'Assistant';
 }
 
