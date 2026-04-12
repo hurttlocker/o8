@@ -2,7 +2,7 @@ import type { RepoReadiness } from '@/lib/repos/types';
 import type { ReviewChangedFile, ReviewWorktreeSummary } from '@/lib/fleet/types';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 
-export type WorkspacePanelTabId = 'changes' | 'files' | 'env' | 'review' | 'git-log';
+export type WorkspacePanelTabId = 'changes' | 'files' | 'env' | 'git-log';
 
 export interface WorkspaceSidePanelRepo {
   name: string;
@@ -20,7 +20,7 @@ export interface WorkspaceChatTargetOption {
   detail?: string | null;
 }
 
-export type WorkspaceSidePanelView = 'blank' | 'diff' | 'review' | 'git-log';
+export type WorkspaceSidePanelView = 'blank' | 'diff' | 'git-log';
 
 export interface FileNode {
   name: string;

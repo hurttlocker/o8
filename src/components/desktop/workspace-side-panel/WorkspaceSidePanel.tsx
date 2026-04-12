@@ -2,53 +2,27 @@
 
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
-import type { WorkspacePanelTabId, WorkspaceSidePanelRepo, WorkspaceSidePanelView, WorkspaceChatTargetOption } from './types';
+import type { WorkspacePanelTabId, WorkspaceSidePanelRepo, WorkspaceSidePanelView } from './types';
 import { shortenPath, PanelTab, FilesTabDropdown } from './shared';
 import { ChangesTab } from './ChangesTab';
 import { FilesTab } from './FilesTab';
 import { GitLogTab } from './GitLogTab';
-import { ReviewTab } from './ReviewTab';
 
 export function WorkspaceSidePanel({
   view,
   repo,
   onClearView,
   onOpenFile,
-  preferredPullRequestNumber,
-  compactReview,
-  chatTargetLabel,
-  chatTargets,
-  selectedChatTargetKey,
-  onSelectChatTarget,
-  onInjectChatContext,
-  onOpenPullRequest,
-  onDeepReviewPullRequest,
-  onExpandReviewRail,
   onSelectCommit,
 }: {
   view: WorkspaceSidePanelView;
   repo: WorkspaceSidePanelRepo | null;
   onClearView: () => void;
   onOpenFile: (path: string, repo: WorkspaceSidePanelRepo | null) => void;
-  preferredPullRequestNumber?: number | null;
-  compactReview?: boolean;
-  chatTargetLabel?: string | null;
-  chatTargets?: WorkspaceChatTargetOption[];
-  selectedChatTargetKey?: string | null;
-  onSelectChatTarget?: (sessionKey: string) => void;
-  onInjectChatContext?: (payload: AgentPanelChatInjectionPayload, repo: WorkspaceSidePanelRepo | null) => void;
-  onOpenPullRequest?: (prNumber: number, repo?: string) => void;
-  onDeepReviewPullRequest?: (prNumber: number, repo?: string) => void;
-  onExpandReviewRail?: () => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
 }) {
   const [activeTab, setActiveTab] = useState<WorkspacePanelTabId>(() => (
-    view === 'review'
-      ? 'review'
-      : view === 'git-log'
-        ? 'git-log'
-        : 'changes'
+    view === 'git-log' ? 'git-log' : 'changes'
   ));
 
   if (view === 'blank') {
@@ -132,28 +106,12 @@ export function WorkspaceSidePanel({
           activeTab={activeTab}
           onSelectTab={setActiveTab}
         />
-        <PanelTab active={activeTab === 'review'} label="Review" onClick={() => setActiveTab('review')} />
         <PanelTab active={activeTab === 'git-log'} label="Git Log" onClick={() => setActiveTab('git-log')} />
       </div>
 
       {activeTab === 'changes' ? <ChangesTab repo={repo} onOpenFile={onOpenFile} /> : null}
       {activeTab === 'files' ? <FilesTab repo={repo} mode="all" onOpenFile={onOpenFile} /> : null}
       {activeTab === 'env' ? <FilesTab repo={repo} mode="env" onOpenFile={onOpenFile} /> : null}
-      {activeTab === 'review' ? (
-        <ReviewTab
-          repo={repo}
-          preferredPullRequestNumber={preferredPullRequestNumber}
-          compactReview={compactReview}
-          chatTargetLabel={chatTargetLabel}
-          chatTargets={chatTargets}
-          selectedChatTargetKey={selectedChatTargetKey}
-          onSelectChatTarget={onSelectChatTarget}
-          onInjectChatContext={onInjectChatContext}
-          onOpenPullRequest={onOpenPullRequest}
-          onDeepReviewPullRequest={onDeepReviewPullRequest}
-          onExpandReviewRail={onExpandReviewRail}
-        />
-      ) : null}
       {activeTab === 'git-log' ? <GitLogTab repo={repo} onSelectCommit={onSelectCommit} /> : null}
     </div>
   );

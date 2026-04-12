@@ -203,11 +203,9 @@ function DashboardInner() {
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
   const [workspaceSidePanelRepoPath, setWorkspaceSidePanelRepoPath] = useState<string | null>(null);
   const [workspaceSidePanelRepoContext, setWorkspaceSidePanelRepoContext] = useState<WorkspaceSidePanelRepo | null>(null);
-  const [workspaceSidePanelPullRequestNumber, setWorkspaceSidePanelPullRequestNumber] = useState<number | null>(null);
-  const [workspaceSidePanelCompactReview, setWorkspaceSidePanelCompactReview] = useState(false);
   const [workspaceSidePanelActivationKey, setWorkspaceSidePanelActivationKey] = useState(0);
   const [workspaceChatTargetKeyByRepoPath, setWorkspaceChatTargetKeyByRepoPath] = useState<Record<string, string>>({});
-  const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
+  const lastWorkspacePanelViewRef = useRef<'diff'>('diff');
 
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
@@ -407,7 +405,6 @@ function DashboardInner() {
   const openWorkspaceSidePanel = useCallback((
     view: WorkspaceSidePanelView,
     repo?: WorkspaceSidePanelRepo | null,
-    options?: { pullRequestNumber?: number | null; compactReview?: boolean },
   ) => {
     setChatVisible(true);
     setRightPanelMode('workspace');
@@ -420,8 +417,6 @@ function DashboardInner() {
       readiness: globalRepoEntry.readiness ?? null,
       remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
     } : null));
-    setWorkspaceSidePanelPullRequestNumber(view === 'review' ? options?.pullRequestNumber ?? null : null);
-    setWorkspaceSidePanelCompactReview(view === 'review' ? Boolean(options?.compactReview) : false);
     setWorkspaceSidePanelActivationKey((value) => value + 1);
   }, [globalRepoBranch, globalRepoEntry]);
 
@@ -458,7 +453,6 @@ function DashboardInner() {
     findWorkspaceTarget,
     globalRepoEntries,
     globalRepoEntry,
-    openWorkspaceSidePanel,
     setActiveTileId,
     setTileLayout,
     tileLayout,
@@ -471,40 +465,49 @@ function DashboardInner() {
   });
 
   const workspaceSidePanelRepo = useMemo<WorkspaceSidePanelRepo | null>(() => {
-    if (
-      workspaceSidePanelRepoContext
-      && (!workspaceSidePanelRepoPath || workspaceSidePanelRepoContext.localPath === workspaceSidePanelRepoPath)
-    ) {
-      return workspaceSidePanelRepoContext;
-    }
-    if (!workspaceSidePanelRepoPath) {
+    // Resolve the target path from the explicit path first, then the stored context.
+    const targetPath = workspaceSidePanelRepoPath ?? workspaceSidePanelRepoContext?.localPath ?? null;
+    if (!targetPath) return null;
+
+    // Validate the target path against the LIVE scope + registry before returning
+    // anything. When a repo is removed from the workspace, the stored context may
+    // still point to it — returning that stale context would make the Changes tab
+    // keep rendering the removed repo's diff. Always trust live data first.
+    const scopeMatch = workspaceScopeEntries.find((entry) => entry.localPath === targetPath) ?? null;
+    const globalMatch = globalRepoEntry?.localPath === targetPath ? globalRepoEntry : null;
+    if (!scopeMatch && !globalMatch) {
       return null;
     }
-    const matched = workspaceScopeEntries.find((repo) => repo.localPath === workspaceSidePanelRepoPath) ?? null;
-    if (!matched) {
-      return globalRepoEntry?.localPath === workspaceSidePanelRepoPath
-        ? {
-            name: globalRepoEntry.name,
-            localPath: globalRepoEntry.localPath,
-            branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
-            readiness: globalRepoEntry.readiness ?? null,
-            remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
-          }
-        : null;
+
+    // If the caller passed an explicit context (e.g. a lane-scoped repo with a
+    // custom branch), honour it now that we've confirmed the path is still live.
+    if (workspaceSidePanelRepoContext && workspaceSidePanelRepoContext.localPath === targetPath) {
+      return workspaceSidePanelRepoContext;
     }
+
+    if (scopeMatch) {
+      return {
+        name: scopeMatch.name,
+        localPath: scopeMatch.localPath,
+        branch: scopeMatch.branch ?? scopeMatch.readiness?.currentBranch ?? null,
+        readiness: scopeMatch.readiness ?? null,
+        remoteUrl: scopeMatch.remoteUrl ?? undefined,
+        isWorktree: scopeMatch.isWorktree ?? undefined,
+        worktreeStatus: scopeMatch.worktreeStatus ?? undefined,
+      };
+    }
+
     return {
-      name: matched.name,
-      localPath: matched.localPath,
-      branch: matched.branch ?? matched.readiness?.currentBranch ?? null,
-      readiness: matched.readiness ?? null,
-      remoteUrl: matched.remoteUrl ?? undefined,
-      isWorktree: matched.isWorktree ?? undefined,
-      worktreeStatus: matched.worktreeStatus ?? undefined,
+      name: globalMatch!.name,
+      localPath: globalMatch!.localPath,
+      branch: globalMatch!.readiness?.currentBranch ?? globalRepoBranch,
+      readiness: globalMatch!.readiness ?? null,
+      remoteUrl: globalMatch!.remoteUrl ?? undefined,
     };
   }, [globalRepoBranch, globalRepoEntry, workspaceScopeEntries, workspaceSidePanelRepoContext, workspaceSidePanelRepoPath]);
 
   useEffect(() => {
-    if (workspaceSidePanelView === 'diff' || workspaceSidePanelView === 'review') {
+    if (workspaceSidePanelView === 'diff') {
       lastWorkspacePanelViewRef.current = workspaceSidePanelView;
     }
   }, [workspaceSidePanelView]);
@@ -598,8 +601,6 @@ function DashboardInner() {
       setWorkspaceSidePanelRepoPath(null);
       setWorkspaceSidePanelRepoContext(null);
       setWorkspaceSidePanelView('blank');
-      setWorkspaceSidePanelPullRequestNumber(null);
-      setWorkspaceSidePanelCompactReview(false);
       setWorkspaceSidePanelActivationKey((value) => value + 1);
     }
 
@@ -942,11 +943,8 @@ function DashboardInner() {
 
   const handleDeepReviewPR = useCallback((prNumber: number, repo?: string) => {
     handleSelectPR(prNumber, repo);
-    openWorkspaceSidePanel('review', getWorkspaceSidePanelRepoBySlug(repo), {
-      pullRequestNumber: prNumber,
-      compactReview: true,
-    });
-  }, [getWorkspaceSidePanelRepoBySlug, handleSelectPR, openWorkspaceSidePanel]);
+    handleReviewPR(prNumber, repo);
+  }, [handleReviewPR, handleSelectPR]);
 
   const handleExpandWorkspace = useCallback((workspace: string, repo: string | null) => {
     setActiveWorkspace(workspace);
@@ -989,15 +987,11 @@ function DashboardInner() {
   }, [openCanvasTab, waitForWorkspaceTerminalTarget]);
 
   const openApprovalsDiscoverySurface = useCallback(() => {
-    setActiveNavSection('approvals');
-    setWorkspaceSidePanelView('review');
-    setWorkspaceSidePanelCompactReview(false);
-    setWorkspaceSidePanelActivationKey((value) => value + 1);
-    if (!chatVisible) {
-      setChatVisible(true);
-    }
-    setRightPanelMode('workspace');
-  }, [chatVisible]);
+    // Approvals surface lives on the O8 panel's PRs tab now — no more
+    // dedicated Review tab or NavRail shield button. The only remaining
+    // caller is an onboarding coachmark CTA.
+    handleReviewPR(0);
+  }, [handleReviewPR]);
 
   const handleToggleChatPanel = useCallback(() => {
     // v1: chat panel removed — toggle workspace instead
@@ -1009,11 +1003,9 @@ function DashboardInner() {
   }, [chatVisible]);
 
   const handleToggleWorkspacePanel = useCallback(() => {
-    // Open review panel (first state in the cycle)
+    // Open the narrow workspace side panel (Changes / Git Log).
     setRightPanelKind('review');
-    const nextView = workspaceSidePanelView === 'review' || workspaceSidePanelView === 'diff'
-      ? workspaceSidePanelView
-      : lastWorkspacePanelViewRef.current;
+    const nextView = workspaceSidePanelView === 'diff' ? 'diff' : lastWorkspacePanelViewRef.current;
     openWorkspaceSidePanel(nextView, workspaceSidePanelRepo);
   }, [openWorkspaceSidePanel, workspaceSidePanelRepo, workspaceSidePanelView]);
 
@@ -1034,7 +1026,6 @@ function DashboardInner() {
 
   useEffect(() => {
     if (rightPanelMode !== 'workspace') return;
-    if (workspaceSidePanelPullRequestNumber) return;
     // [workspace-side-panel] Skip auto-sync when panel is in blank/idle state —
     // repo context will be set explicitly when a view is opened via openWorkspaceSidePanel.
     if (workspaceSidePanelView === 'blank') return;
@@ -1083,7 +1074,7 @@ function DashboardInner() {
     globalRepoBranch,
     globalRepoEntry,
     rightPanelMode,
-    workspaceSidePanelPullRequestNumber,
+    workspaceScopeEntries,
     workspaceSidePanelView,
     workspaceTerminalPreferredRepo?.localPath,
   ]);
@@ -1209,8 +1200,12 @@ function DashboardInner() {
   }, [openCanvasTab]);
 
   const handleOpenCI = useCallback((repo: string) => {
-    openWorkspaceSidePanel('review', getWorkspaceSidePanelRepoBySlug(repo));
-  }, [getWorkspaceSidePanelRepoBySlug, openWorkspaceSidePanel]);
+    // CI surface lives on the O8 panel's Activity tab now (filter pill for CI runs).
+    setO8ActiveTab('activity');
+    setO8PrRepo(repo ?? null);
+    setRightPanelKind('o8');
+    setChatVisible(true);
+  }, []);
 
   const handleCreateIssue = useCallback((repo?: string) => {
     openCanvasTab({
@@ -2165,10 +2160,6 @@ function DashboardInner() {
       {sidebarVisible && <NavRail
         activeSection={activeNavSection}
         onSectionChange={(section) => {
-          if (section === 'approvals') {
-            openApprovalsDiscoverySurface();
-            return;
-          }
           if (section === 'settings') {
             // Settings is a full center-workspace view — don't force chat panel open
             setActiveNavSection('settings');
@@ -2178,16 +2169,8 @@ function DashboardInner() {
           // Always show chat when switching nav sections
           if (!chatVisible) setChatVisible(true);
           setRightPanelMode('chat');
-          if (section === 'terminal') {
-            // Show the contextual panel if not already visible
-            const existing = findLeafByContentKind(tileLayout.root, 'contextual-panel');
-            if (!existing) {
-              toggleContextualPanelTile();
-            }
-          }
         }}
         alertCount={unreadCount}
-        approvalCount={approvalCount}
         onAlertClick={() => setAlertTrayOpen(!alertTrayOpen)}
         alertTray={(
           <AlertTray
@@ -2325,7 +2308,7 @@ function DashboardInner() {
         )}
 
         {activeNavSection === 'analytics' && (
-          <div style={{ flex: 1, overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading analytics...</div>}>
             <LazyAnalyticsPage />
             </Suspense>
@@ -2462,16 +2445,6 @@ function DashboardInner() {
                       repo={workspaceSidePanelRepo}
                       onClearView={() => setChatVisible(false)}
                       onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
-                      chatTargetLabel={workspaceChatTargetLabel}
-                      chatTargets={workspaceChatTargets}
-                      selectedChatTargetKey={activeWorkspaceChatTargetKey}
-                      onSelectChatTarget={handleSelectWorkspaceChatTarget}
-                      onInjectChatContext={(payload, repo) => injectPayloadIntoRepoChat(payload, repo)}
-                      preferredPullRequestNumber={workspaceSidePanelPullRequestNumber}
-                      compactReview={workspaceSidePanelCompactReview}
-                      onOpenPullRequest={handleSelectPR}
-                      onDeepReviewPullRequest={handleDeepReviewPR}
-                      onExpandReviewRail={() => setWorkspaceSidePanelCompactReview(false)}
                       onSelectCommit={handleSelectCommit}
                     />
                   </motion.div>

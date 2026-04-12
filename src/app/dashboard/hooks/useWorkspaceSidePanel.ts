@@ -30,10 +30,8 @@ export function useWorkspaceSidePanel({
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
   const [workspaceSidePanelRepoPath, setWorkspaceSidePanelRepoPath] = useState<string | null>(null);
   const [workspaceSidePanelRepoContext, setWorkspaceSidePanelRepoContext] = useState<WorkspaceSidePanelRepo | null>(null);
-  const [workspaceSidePanelPullRequestNumber, setWorkspaceSidePanelPullRequestNumber] = useState<number | null>(null);
-  const [workspaceSidePanelCompactReview, setWorkspaceSidePanelCompactReview] = useState(false);
   const [workspaceSidePanelActivationKey, setWorkspaceSidePanelActivationKey] = useState(0);
-  const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
+  const lastWorkspacePanelViewRef = useRef<'diff'>('diff');
 
   const workspaceSidePanelRepo = useMemo<WorkspaceSidePanelRepo | null>(() => {
     if (
@@ -110,7 +108,6 @@ export function useWorkspaceSidePanel({
   const openWorkspaceSidePanel = useCallback((
     view: WorkspaceSidePanelView,
     repo?: WorkspaceSidePanelRepo | null,
-    options?: { pullRequestNumber?: number | null; compactReview?: boolean },
   ) => {
     setChatVisible(true);
     setRightPanelMode('workspace');
@@ -123,13 +120,11 @@ export function useWorkspaceSidePanel({
       readiness: globalRepoEntry.readiness ?? null,
       remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
     } : null));
-    setWorkspaceSidePanelPullRequestNumber(view === 'review' ? options?.pullRequestNumber ?? null : null);
-    setWorkspaceSidePanelCompactReview(view === 'review' ? Boolean(options?.compactReview) : false);
     setWorkspaceSidePanelActivationKey((value) => value + 1);
   }, [globalRepoBranch, globalRepoEntry]);
 
   useEffect(() => {
-    if (workspaceSidePanelView === 'diff' || workspaceSidePanelView === 'review') {
+    if (workspaceSidePanelView === 'diff') {
       lastWorkspacePanelViewRef.current = workspaceSidePanelView;
     }
   }, [workspaceSidePanelView]);
@@ -148,15 +143,12 @@ export function useWorkspaceSidePanel({
       setChatVisible(false);
       return;
     }
-    const nextView = workspaceSidePanelView === 'review' || workspaceSidePanelView === 'diff'
-      ? workspaceSidePanelView
-      : lastWorkspacePanelViewRef.current;
+    const nextView = workspaceSidePanelView === 'diff' ? 'diff' : lastWorkspacePanelViewRef.current;
     openWorkspaceSidePanel(nextView, workspaceSidePanelRepo);
   }, [chatVisible, openWorkspaceSidePanel, rightPanelMode, workspaceSidePanelRepo, workspaceSidePanelView]);
 
   useEffect(() => {
     if (rightPanelMode !== 'workspace') return;
-    if (workspaceSidePanelPullRequestNumber) return;
     // [workspace-side-panel] Skip auto-sync when panel is in blank/idle state —
     // repo context will be set explicitly when a view is opened via openWorkspaceSidePanel.
     if (workspaceSidePanelView === 'blank') return;
@@ -205,7 +197,6 @@ export function useWorkspaceSidePanel({
     globalRepoBranch,
     globalRepoEntry,
     rightPanelMode,
-    workspaceSidePanelPullRequestNumber,
     workspaceSidePanelView,
     workspaceTerminalPreferredRepo?.localPath,
   ]);
@@ -221,14 +212,10 @@ export function useWorkspaceSidePanel({
     setChatVisible,
     setRightPanelMode,
     setWorkspaceSidePanelActivationKey,
-    setWorkspaceSidePanelCompactReview,
-    setWorkspaceSidePanelPullRequestNumber,
     setWorkspaceSidePanelRepoContext,
     setWorkspaceSidePanelRepoPath,
     setWorkspaceSidePanelView,
     workspaceSidePanelActivationKey,
-    workspaceSidePanelCompactReview,
-    workspaceSidePanelPullRequestNumber,
     workspaceSidePanelRepo,
     workspaceSidePanelRepoContext,
     workspaceSidePanelRepoPath,
