@@ -507,6 +507,20 @@ function DashboardInner() {
     };
   }, [globalRepoBranch, globalRepoEntry, workspaceScopeEntries, workspaceSidePanelRepoContext, workspaceSidePanelRepoPath]);
 
+  const workspaceSidePanelAgentContext = useMemo(() => {
+    if (!workspaceSidePanelRepo?.isWorktree) return null;
+    const agent = parsedAgents.find(
+      (a) => (a.workspace ?? a.runtimeSurface?.cwd) === workspaceSidePanelRepo.localPath,
+    );
+    if (!agent) return null;
+    return {
+      branch: workspaceSidePanelRepo.branch ?? 'unknown',
+      fileCount: agent.localDiff?.changedFiles ?? 0,
+      agentLabel: agent.name ?? agent.sessionKey?.split(':').pop()?.slice(0, 12) ?? 'Agent',
+      agentRunning: agent.status === 'running',
+    };
+  }, [parsedAgents, workspaceSidePanelRepo]);
+
   useEffect(() => {
     if (workspaceSidePanelView === 'diff') {
       lastWorkspacePanelViewRef.current = workspaceSidePanelView;
@@ -916,15 +930,33 @@ function DashboardInner() {
     void (async () => {
       const target = await waitForWorkspaceTerminalTarget({});
       if (!target) return;
-      // Determine runtime from session key prefix
       const runtime = sessionKey.startsWith('claude-code') ? 'claude-code' : 'codex';
       target.handle.openCliChatSession({
         runtime,
         targetSessionKey: sessionKey,
         label: sessionKey.split(':').pop()?.slice(0, 12) ?? 'Session',
       });
+
+      // Scope workspace panel to the agent's worktree/workspace
+      const agent = parsedAgents.find((a) => a.sessionKey === sessionKey);
+      const agentWorkspace = agent?.workspace ?? agent?.runtimeSurface?.cwd ?? null;
+      if (agentWorkspace) {
+        const scopeEntry = workspaceScopeEntries.find((entry) => entry.localPath === agentWorkspace);
+        if (scopeEntry) {
+          setWorkspaceSidePanelRepoPath(scopeEntry.localPath);
+          setWorkspaceSidePanelRepoContext({
+            name: scopeEntry.name ?? scopeEntry.localPath.split('/').pop() ?? scopeEntry.localPath,
+            localPath: scopeEntry.localPath,
+            branch: scopeEntry.branch ?? null,
+            readiness: scopeEntry.readiness ?? null,
+            remoteUrl: scopeEntry.remoteUrl,
+            isWorktree: scopeEntry.isWorktree,
+            worktreeStatus: scopeEntry.worktreeStatus ?? null,
+          });
+        }
+      }
     })();
-  }, [waitForWorkspaceTerminalTarget]);
+  }, [parsedAgents, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     openCanvasTab({
@@ -2461,6 +2493,7 @@ function DashboardInner() {
                     <WorkspaceSidePanel
                       view={workspaceSidePanelView}
                       repo={workspaceSidePanelRepo}
+                      agentContext={workspaceSidePanelAgentContext}
                       onClearView={() => setChatVisible(false)}
                       onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
                       onSelectCommit={handleSelectCommit}
