@@ -219,7 +219,7 @@ function SessionVisualizerBase({ agents, onSelectSession }: SessionVisualizerPro
                   textAlign: 'left',
                   flexShrink: 0,
                   transition: 'border-color 120ms ease, background 120ms ease',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = 'var(--t-accent-border)';

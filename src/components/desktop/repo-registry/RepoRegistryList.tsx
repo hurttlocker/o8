@@ -85,7 +85,7 @@ function RepoRegistryListBase({
               border: 'none',
               background: 'transparent',
               cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             <FolderOpen size={12} strokeWidth={2} color={reposOpen ? '#ef4444' : 'var(--t-text-muted)'} />

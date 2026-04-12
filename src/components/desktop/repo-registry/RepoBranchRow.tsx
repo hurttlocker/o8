@@ -262,7 +262,7 @@ function RepoBranchRowBase({
               fontSize: 12,
               fontWeight: 440,
               color: 'var(--t-text)',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               minWidth: 0,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -325,7 +325,7 @@ function RepoBranchRowBase({
                 gap: 6,
                 fontSize: 10.5,
                 fontWeight: 440,
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 letterSpacing: '-0.005em',
                 flexShrink: 0,
                 marginTop: 1,
@@ -390,7 +390,7 @@ function RepoBranchRowBase({
                       background: isSelectedPacket ? THEME_ACCENT_SOFT : 'transparent',
                       color: 'var(--t-text)',
                       cursor: packet.lane?.sessionKey && onSelectSession ? 'pointer' : 'default',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                       textAlign: 'left',
                       transition: 'background 120ms ease',
                       opacity: packet.lane?.sessionKey && onSelectSession ? 1 : 0.82,
@@ -438,7 +438,7 @@ function RepoBranchRowBase({
                             color: 'var(--t-text)',
                             letterSpacing: '-0.005em',
                             lineHeight: 1.35,
-                            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                           }}
                         >
                           {packet.title}
@@ -502,7 +502,7 @@ function RepoBranchRowBase({
                           background: isSelectedSession ? 'var(--t-accent-soft)' : 'transparent',
                           color: 'var(--t-text)',
                           cursor: onSelectSession ? 'pointer' : 'default',
-                          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                           textAlign: 'left',
                           transition: 'background 120ms ease',
                         }}

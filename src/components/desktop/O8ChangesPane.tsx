@@ -282,7 +282,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             {itemLabel(filter, activeItemsCount)}
@@ -337,7 +337,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                       fontWeight: 500,
                       cursor: 'pointer',
                       textAlign: 'left',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                     }}
                     onMouseEnter={(event) => {
                       if (filter === option) return;
@@ -446,7 +446,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
               fontSize: 11,
               fontWeight: 600,
               cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               transition: 'background 120ms ease',
               flexShrink: 0,
             }}

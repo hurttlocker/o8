@@ -334,7 +334,7 @@ export function CortexMemoryTab() {
       paddingLeft: 40,
       paddingRight: 40,
       maxWidth: 680,
-      fontFamily: '-apple-system, system-ui, sans-serif',
+      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
     }}>
       {/* Header */}
       <div style={{ marginBottom: 32 }}>

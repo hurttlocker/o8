@@ -55,7 +55,7 @@ export function PRViewer({
               fontSize: 12,
               fontWeight: 700,
               cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             <RefreshCw size={12} strokeWidth={2.2} />
@@ -77,7 +77,7 @@ export function PRViewer({
                 fontSize: 12,
                 fontWeight: 700,
                 cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
             >
               <ExternalLink size={12} strokeWidth={2.2} />

@@ -164,7 +164,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               fontWeight: 500,
               color: preview ? '#2563eb' : 'var(--t-text-secondary)',
               cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             {preview ? 'Edit' : 'Preview'}
@@ -191,7 +191,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               display: 'flex',
               alignItems: 'center',
               gap: 5,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               transition: 'all 150ms ease',
             }}
           >
@@ -224,7 +224,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               display: 'flex',
               alignItems: 'center',
               gap: 5,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               transition: 'all 150ms ease',
             }}
           >
@@ -312,7 +312,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
                   fontWeight: 500,
                   color: 'var(--t-text)',
                   outline: 'none',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   boxSizing: 'border-box',
                 }}
               />
@@ -414,7 +414,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
                     fontSize: 12,
                     color: 'var(--t-text)',
                     outline: 'none',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   }}
                 />
               </div>

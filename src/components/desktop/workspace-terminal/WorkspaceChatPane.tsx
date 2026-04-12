@@ -324,7 +324,7 @@ function WorkspaceChatPaneBase({
                       />
                     ))}
                   </div>
-                  <span style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: '-apple-system, system-ui, sans-serif', fontWeight: 500 }}>
+                  <span style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', fontWeight: 500 }}>
                     Agent working...
                   </span>
                   <style>{'@keyframes o8ThinkPulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.1); } }'}</style>
@@ -361,7 +361,7 @@ function WorkspaceChatPaneBase({
               cursor: 'pointer',
               fontSize: 11,
               fontWeight: 700,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             } as CSSProperties}
           >
             <ArrowDown size={13} />
@@ -520,7 +520,7 @@ function WorkspaceChatPaneBase({
                 background: 'transparent',
                 color: 'var(--t-text)',
                 fontSize: 14,
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 lineHeight: 1.5,
                 resize: 'none',
                 minHeight: 24,
@@ -561,7 +561,7 @@ function WorkspaceChatPaneBase({
               >
                 <Plus size={16} />
               </button>
-              <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '-apple-system, system-ui, sans-serif' }}>
+              <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
                 CLI session
               </span>
               <button
@@ -584,7 +584,7 @@ function WorkspaceChatPaneBase({
                   cursor: 'pointer',
                   fontSize: 11,
                   fontWeight: 700,
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -613,7 +613,7 @@ function WorkspaceChatPaneBase({
                   fontSize: 11,
                   fontStyle: 'italic',
                   fontWeight: 700,
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -642,7 +642,7 @@ function WorkspaceChatPaneBase({
                     fontSize: 11,
                     fontStyle: 'italic',
                     fontWeight: 700,
-                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                     whiteSpace: 'nowrap',
                   }}
                 >

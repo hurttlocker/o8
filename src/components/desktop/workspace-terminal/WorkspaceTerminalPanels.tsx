@@ -293,7 +293,7 @@ function PendingTerminalPanel({
         justifyContent: 'center',
         color: 'var(--t-text-muted)',
         fontSize: 13,
-        fontFamily: '-apple-system, system-ui, sans-serif',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         flexDirection: 'column',
         gap: 8,
         textAlign: 'center',

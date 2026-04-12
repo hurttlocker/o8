@@ -180,7 +180,7 @@ function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: nu
                 background: isActive ? 'rgba(37, 99, 235, 0.04)' : 'transparent',
                 cursor: 'pointer',
                 textAlign: 'left',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 borderBottom: '1px solid var(--t-divider-subtle)',
               }}
             >

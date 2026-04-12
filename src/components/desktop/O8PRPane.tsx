@@ -137,7 +137,7 @@ function PRListItem({ pr, active, onClick }: { pr: PRSummary; active: boolean; o
         color: 'var(--t-text)',
         cursor: 'pointer',
         textAlign: 'left',
-        fontFamily: '-apple-system, system-ui, sans-serif',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         transition: 'background 80ms ease',
       }}
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
@@ -363,7 +363,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
             fontSize: 10,
             fontWeight: 600,
             cursor: 'pointer',
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-faint)'; }}
@@ -545,7 +545,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
               borderRadius: 8,
               background: 'rgba(255,255,255,0.04)',
               color: 'var(--t-text)',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               fontSize: 12,
               padding: '6px 10px',
               outline: 'none',

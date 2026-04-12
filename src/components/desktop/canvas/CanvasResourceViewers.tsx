@@ -112,7 +112,7 @@ function GitLogViewerBase({
               background: 'transparent',
               cursor: 'pointer',
               textAlign: 'left',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               transition: 'background 80ms ease',
               position: 'relative',
             }}

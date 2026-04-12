@@ -344,7 +344,7 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
                     background: 'transparent',
                     color: 'var(--t-text-faint)',
                     cursor: 'pointer',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                     fontSize: 10,
                     fontWeight: 700,
                     letterSpacing: '0.03em',

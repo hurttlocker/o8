@@ -253,7 +253,7 @@ export function TileHeader({
             cursor: onOpenPicker ? 'pointer' : 'default',
             transition: 'background-color 150ms ease, color 150ms ease',
             flexShrink: 0,
-            fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             boxShadow: active
               ? '0 1px 3px rgba(0, 0, 0, 0.06), 0 0.5px 1px rgba(0, 0, 0, 0.04)'
               : 'none',
@@ -376,7 +376,7 @@ export function TileHeader({
                   color: item.disabled ? '#9ca3af' : '#111827',
                   cursor: item.disabled ? 'default' : 'pointer',
                   opacity: item.disabled ? 0.5 : 1,
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}
               >
                 <span style={{ color: item.disabled ? '#9ca3af' : '#5b6475', display: 'flex' }}>

@@ -228,7 +228,7 @@ export function createDesktopGlassActionStyle(variant: 'primary' | 'muted' = 'pr
     fontSize: 11,
     fontWeight: 600,
     cursor: 'pointer',
-    fontFamily: '-apple-system, system-ui, sans-serif',
+    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
   } as React.CSSProperties;
 }
 

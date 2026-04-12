@@ -33,7 +33,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 
   return (
     <html lang="en" style={{ background: '#1C1C1E' }} suppressHydrationWarning>
-      <body style={{ background: '#1C1C1E', margin: 0 }} suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200;0,300;0,400;0,500;0,600;0,700;0,800;1,200;1,300;1,400;1,500;1,600;1,700;1,800&display=swap" />
+      </head>
+      <body style={{ background: '#1C1C1E', margin: 0, fontFamily: '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif' }} suppressHydrationWarning>
         <script
           dangerouslySetInnerHTML={{
             __html: `

@@ -373,7 +373,7 @@ export function WorkspacesPanel() {
   return (
     <div style={{
       borderBottom: '1px solid var(--t-divider)',
-      fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, sans-serif',
+      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
     }}>
       {/* Header */}
       <button

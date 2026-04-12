@@ -190,7 +190,7 @@ function RepoCardExpandedContentBase({
                 background: 'transparent',
                 borderWidth: 0,
                 cursor: 'default',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
             >
               <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
@@ -294,7 +294,7 @@ function RepoCardExpandedContentBase({
               paddingTop: 6,
               paddingBottom: 6,
               letterSpacing: '-0.005em',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             Loading branches...
@@ -460,7 +460,7 @@ function RepoCardExpandedContentBase({
                 fontSize: 10.5,
                 fontWeight: 500,
                 cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 borderRadius: 8,
                 transition: 'background 140ms ease, color 140ms ease',
               }}
@@ -503,7 +503,7 @@ function RepoCardExpandedContentBase({
               fontSize: 11,
               fontWeight: 500,
               cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               borderRadius: 8,
               transition: 'background 140ms ease, color 140ms ease',
             }}
@@ -568,7 +568,7 @@ function RepoCardExpandedContentBase({
                 fontSize: 10,
                 fontWeight: 600,
                 cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
             >
               Stash & switch
@@ -588,7 +588,7 @@ function RepoCardExpandedContentBase({
                 fontSize: 10,
                 fontWeight: 600,
                 cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
             >
               Force
@@ -608,7 +608,7 @@ function RepoCardExpandedContentBase({
                 fontSize: 10,
                 fontWeight: 600,
                 cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
             >
               Cancel

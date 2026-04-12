@@ -412,7 +412,7 @@ export function TitleBar({
                 borderRadius: 4,
                 padding: '1px 5px',
                 marginLeft: 8,
-                fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}>
                 ⌘K
               </kbd>

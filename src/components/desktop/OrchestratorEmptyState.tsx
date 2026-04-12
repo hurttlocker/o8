@@ -98,7 +98,7 @@ function OrchestratorEmptyStateBase({
             color: 'var(--t-text-secondary)',
             letterSpacing: '-0.03em',
             lineHeight: 1.2,
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
         >
           {greeting}
@@ -109,7 +109,7 @@ function OrchestratorEmptyStateBase({
             fontWeight: 500,
             color: 'var(--t-text)',
             letterSpacing: '-0.01em',
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
         >
           Command your fleet.
@@ -163,7 +163,7 @@ function OrchestratorEmptyStateBase({
                 cursor: 'pointer',
                 textAlign: 'left',
                 transition: 'border-color 120ms ease, background 120ms ease, transform 120ms ease',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 minHeight: 60,
               }}
               onMouseEnter={(e) => {

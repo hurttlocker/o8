@@ -309,7 +309,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                               color: `#${label.color}`,
                               fontSize: 9,
                               fontWeight: 600,
-                              fontFamily: '-apple-system, system-ui, sans-serif',
+                              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                             }}
                           >
                             {label.name}
@@ -336,7 +336,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                       background: item.state === 'merged' ? 'rgba(139,92,246,0.1)' : item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
                       color: item.state === 'merged' ? '#8b5cf6' : item.state === 'open' ? '#22c55e' : '#ef4444',
                       textTransform: 'uppercase',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                     }}
                   >
                     {item.state}
@@ -389,7 +389,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                       background: item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(139,92,246,0.1)',
                       color: item.state === 'open' ? '#22c55e' : '#8b5cf6',
                       textTransform: 'uppercase',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                     }}
                   >
                     {item.state}

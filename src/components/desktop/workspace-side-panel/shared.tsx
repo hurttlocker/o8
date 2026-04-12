@@ -341,7 +341,7 @@ export function FilesTabDropdown({
                 fontSize: 11,
                 fontWeight: activeTab === option.id ? 600 : 500,
                 cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
             >
               {option.label}

@@ -107,7 +107,7 @@ export const GitLogTab = memo(function GitLogTab({
                 background: 'transparent',
                 textAlign: 'left',
                 cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
               onMouseEnter={(event) => {
                 event.currentTarget.style.background = 'var(--t-hover)';

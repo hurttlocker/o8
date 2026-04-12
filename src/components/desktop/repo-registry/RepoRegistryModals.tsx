@@ -158,7 +158,7 @@ function RepoRegistryModalsBase({
                 fontWeight: 600,
                 cursor: validating || adding ? 'not-allowed' : 'pointer',
                 opacity: validating || adding ? 0.45 : 1,
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 whiteSpace: 'nowrap',
               }}
             >
@@ -249,7 +249,7 @@ function RepoRegistryModalsBase({
               fontWeight: 600,
               cursor: validating || adding ? 'not-allowed' : 'pointer',
               opacity: validating || adding ? 0.45 : 1,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             {validating ? 'Validating…' : 'Validate'}
@@ -271,7 +271,7 @@ function RepoRegistryModalsBase({
               fontWeight: 700,
               cursor: adding || validating ? 'not-allowed' : 'pointer',
               opacity: adding || validating ? 0.45 : 1,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             {adding ? 'Adding…' : 'Add Repository'}
@@ -469,7 +469,7 @@ function RepoRegistryModalsBase({
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             {workspaceResult ? 'Close' : 'Cancel'}
@@ -491,7 +491,7 @@ function RepoRegistryModalsBase({
               fontWeight: 700,
               cursor: workspaceLoading ? 'not-allowed' : 'pointer',
               opacity: workspaceLoading ? 0.45 : 1,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             {workspaceLoading ? 'Creating…' : workspaceResult ? 'Create Another' : 'Create Workspace'}
@@ -523,7 +523,7 @@ function RepoRegistryModalsBase({
               background: 'var(--t-input-bg)',
               color: 'var(--t-text)',
               fontSize: 13,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               outline: 'none',
             }}
           >
@@ -576,7 +576,7 @@ function RepoRegistryModalsBase({
               background: 'var(--t-input-bg)',
               color: 'var(--t-text)',
               fontSize: 13,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               lineHeight: 1.5,
               outline: 'none',
               resize: 'vertical',
@@ -632,7 +632,7 @@ function RepoRegistryModalsBase({
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             Cancel
@@ -654,7 +654,7 @@ function RepoRegistryModalsBase({
               fontWeight: 700,
               cursor: launchLoading ? 'not-allowed' : 'pointer',
               opacity: launchLoading ? 0.45 : 1,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             {launchLoading ? 'Launching…' : 'Launch Agent'}
@@ -722,7 +722,7 @@ function RepoRegistryModalsBase({
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             Cancel
@@ -744,7 +744,7 @@ function RepoRegistryModalsBase({
               fontWeight: 700,
               cursor: removeBusy ? 'not-allowed' : 'pointer',
               opacity: removeBusy ? 0.45 : 1,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             {removeBusy ? 'Removing…' : 'Remove Repository'}
