@@ -3,7 +3,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
-import { buildXtermTheme, THEME_PANEL } from '@/components/desktop/workspace-terminal/constants';
+import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 
 export interface InlineImage {
   id: string;
@@ -129,7 +129,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           lineHeight: 1.35,
           cursorBlink: true,
           cursorStyle: 'block',
-          allowTransparency: true,
+          allowTransparency: false,
           allowProposedApi: true,
           scrollback: 10000,
           theme: buildXtermTheme(),
@@ -202,7 +202,18 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       }
       fitAddonRef.current = null;
     };
-  }, [themeId, tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize]);
+  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize]);
+
+  // Live-update xterm theme on theme switch without recreating the terminal.
+  // The canvas repaints next frame with the new palette, PTY state is preserved.
+  useEffect(() => {
+    if (!termRef.current) return;
+    try {
+      termRef.current.options.theme = buildXtermTheme();
+    } catch {
+      // xterm may throw if the terminal was disposed mid-update; ignore.
+    }
+  }, [themeId]);
 
   if (error) {
     return (
@@ -247,7 +258,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         width: '100%',
         display: visible ? 'flex' : 'none',
         flexDirection: 'column',
-        background: THEME_PANEL,
+        background: 'var(--t-terminal-bg, #16191e)',
         borderRadius: 0,
         overflow: 'hidden',
       }}
@@ -291,7 +302,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         style={{
           flex: 1,
           width: '100%',
-          background: THEME_PANEL,
+          background: 'var(--t-terminal-bg, #16191e)',
           paddingTop: 2,
           paddingLeft: 2,
         }}
