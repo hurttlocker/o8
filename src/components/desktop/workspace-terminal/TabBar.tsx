@@ -280,8 +280,8 @@ export const TabBar = memo(function TabBar({
             display: 'flex',
             alignItems: 'center',
             gap: 2,
-            paddingRight: 6,
-            paddingLeft: 6,
+            paddingRight: 8,
+            paddingLeft: 2,
             flexShrink: 0,
           }}
         >
