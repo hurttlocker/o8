@@ -169,48 +169,40 @@ function RepoCardExpandedContentBase({
         </div>
       ) : null}
 
-      {/* Active workspace tabs — Orchestrator + Assistant shown inline so
-          users can see what's running on this repo at a glance. The braille
-          spinner fires when this repo is the active workspace. */}
+      {/* Orchestrator fleet brain — single brain across all repos.
+          Shows connection status for this repo's relationship to the orchestrator. */}
       {(() => {
         const isActiveRepo = activeWorkspacePath === repo.localPath
           || (activeWorkspacePath && activeWorkspacePath.startsWith(repo.localPath + '/'));
         const spinnerStatus = isActiveRepo ? 'running' : 'idle';
-        const ROW_STYLE: React.CSSProperties = {
-          display: 'flex',
-          alignItems: 'center',
-          gap: 9,
-          padding: '5px 8px',
-          borderRadius: 7,
-          background: 'transparent',
-          borderWidth: 0,
-          cursor: 'default',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
-        };
-        const LABEL_STYLE: React.CSSProperties = {
-          fontSize: 12,
-          fontWeight: 440,
-          color: 'var(--t-text)',
-          letterSpacing: '-0.005em',
-          lineHeight: 1.35,
-        };
-        const SUB_STYLE: React.CSSProperties = {
-          fontSize: 10,
-          fontWeight: 400,
-          color: 'var(--t-text-faint)',
-          letterSpacing: '-0.005em',
-          lineHeight: 1.3,
-        };
+        const statusLabel = isActiveRepo ? 'Focused' : 'Available';
+        const statusColor = isActiveRepo ? '#22c55e' : 'var(--t-text-faint)';
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 4 }}>
-            <div style={ROW_STYLE}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 9,
+                padding: '5px 8px',
+                borderRadius: 7,
+                background: 'transparent',
+                borderWidth: 0,
+                cursor: 'default',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+              }}
+            >
               <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
                 <AgentSpinner status={spinnerStatus} size={6} />
               </span>
               <ClaudeIcon size={12} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-                <span style={LABEL_STYLE}>Orchestrator</span>
-                <span style={SUB_STYLE}>{isActiveRepo ? 'Active' : 'Idle'}</span>
+                <span style={{ fontSize: 12, fontWeight: 440, color: 'var(--t-text)', letterSpacing: '-0.005em', lineHeight: 1.35 }}>
+                  Orchestrator
+                </span>
+                <span style={{ fontSize: 10, fontWeight: 400, color: statusColor, letterSpacing: '-0.005em', lineHeight: 1.3 }}>
+                  {statusLabel}
+                </span>
               </div>
             </div>
           </div>

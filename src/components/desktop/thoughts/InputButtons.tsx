@@ -75,6 +75,7 @@ export function InputButtons({
   onTogglePermission,
   missionOpen,
   onToggleMission,
+  repoLabel,
 }: {
   input: string;
   enhancing: boolean;
@@ -91,6 +92,7 @@ export function InputButtons({
   onTogglePermission?: () => void;
   missionOpen?: boolean;
   onToggleMission?: () => void;
+  repoLabel?: string | null;
 }) {
   const canSubmit = Boolean(input.trim());
 
@@ -129,6 +131,25 @@ export function InputButtons({
           }}
         >
           {modelLabel}
+        </span>
+      ) : null}
+
+      {/* Repo focus label */}
+      {repoLabel ? (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 10,
+            fontWeight: 500,
+            color: 'var(--t-text-faint)',
+            letterSpacing: '-0.005em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+          {repoLabel}
         </span>
       ) : null}
 
