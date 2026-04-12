@@ -258,14 +258,38 @@ function ensureMcpConfig(repoPath: string): string {
 /** Appended to Claude Code's default system prompt on the first message only. */
 function buildOrchestratorSystemPrompt(repoPath: string): string {
   const repoName = repoPath.split('/').filter(Boolean).pop() ?? repoPath;
+
+  // Load all registered repos for fleet awareness
+  let allRepos: Array<{ name: string; localPath: string }> = [];
+  try {
+    const reposFile = join(homedir(), '.cortex-ide', 'repos.json');
+    if (existsSync(reposFile)) {
+      const { readFileSync } = require('node:fs');
+      const parsed = JSON.parse(readFileSync(reposFile, 'utf-8'));
+      allRepos = (parsed.repos ?? []).map((r: { name?: string; localPath: string }) => ({
+        name: r.name ?? r.localPath.split('/').filter(Boolean).pop() ?? r.localPath,
+        localPath: r.localPath,
+      }));
+    }
+  } catch { /* best effort */ }
+
+  const repoList = allRepos.length > 0
+    ? allRepos.map((r) => `  - ${r.name} → ${r.localPath}`).join('\n')
+    : `  - ${repoName} → ${repoPath}`;
+
   return [
-    `You are the orchestrator for Cortex IDE — a command center for managing AI agent fleets.`,
-    `You are working inside the repo "${repoName}" at ${repoPath}.`,
+    `You are the orchestrator for o8 — the fleet-level brain for managing AI agent teams across all repos.`,
+    ``,
+    `Your primary repo is "${repoName}" at ${repoPath}, but you are fleet-aware.`,
+    `All registered repos:`,
+    repoList,
+    ``,
+    `You can work across any repo. Use absolute paths when accessing files outside your primary repo. When the user mentions a repo by name, infer the correct path from the list above. For git operations in other repos, \`cd\` into that repo first.`,
     ``,
     `Your role:`,
     `- You are the user's senior engineering partner. Think strategically, act precisely.`,
-    `- You have full access to this repo via Claude Code tools (read, write, edit, bash, grep, glob).`,
-    `- When the user asks you to build, fix, or change something — do it directly. Don't just describe what to do.`,
+    `- You have full access to all repos via Claude Code tools (read, write, edit, bash, grep, glob).`,
+    `- When the user asks you to build, fix, or change something — do it directly. Don't just describe what to do. If the target repo isn't your cwd, cd into it first.`,
     `- Be concise. Lead with action, not explanation. Skip preamble.`,
     `- When you complete a task, say what you did in 1-2 sentences. Don't narrate every step.`,
     ``,
