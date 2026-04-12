@@ -669,13 +669,22 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }, 800);
   }, [resolvedRepoPath]);
 
-  // Auto-persist on message changes
-  // Mirror displayMessages logic: in orchestrator mode, prefer orchStream.messages
-  // regardless of WS connection state (messages accumulate in the hook state)
+  // Auto-persist on message changes — merge historical + live in orchestrator mode
   useEffect(() => {
-    const msgs = isOrchestratorMode
-      ? (orchStream.messages.length > 0 ? orchStream.messages : chatMessages)
-      : chatMessages;
+    let msgs: typeof chatMessages;
+    if (isOrchestratorMode) {
+      if (orchStream.messages.length > 0 && chatMessages.length > 0) {
+        const seen = new Set(orchStream.messages.map((m) => m.timestamp));
+        const historical = chatMessages.filter((m) => !seen.has(m.timestamp));
+        msgs = [...historical, ...orchStream.messages];
+      } else if (orchStream.messages.length > 0) {
+        msgs = orchStream.messages;
+      } else {
+        msgs = chatMessages;
+      }
+    } else {
+      msgs = chatMessages;
+    }
     if (msgs.length === 0 || !isOrchestratorMode) return;
 
     // Never persist a thread that has no user message yet — the orchestrator
@@ -786,14 +795,25 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     : (targetAgentState?.model ?? (targetAgent ? orchestratorRuntimeTone(targetAgent.runtime).label : orchestratorRuntimeTone(preferredRuntime).label));
   const targetAgentContext = isOrchestratorMode ? undefined : targetAgentState?.context?.usedPercent;
   const targetAgentTask = isOrchestratorMode ? null : (targetAgentState?.activity?.headline ?? targetAgentState?.currentTask);
-  // Derive display state: orchestrator prefers live stream, falls back to chatMessages
-  // (chatMessages holds loaded historical threads via handleLoadThread). Injected
-  // system messages (mission dispatch echoes, etc.) are merged in by timestamp
-  // regardless of which base list is active.
+  // Derive display state: in orchestrator mode, merge historical chatMessages
+  // (loaded via handleLoadThread) with live orchStream.messages, deduplicating
+  // by timestamp so sending a new message doesn't discard history.
   const displayMessages = useMemo(() => {
-    const base = isOrchestratorMode
-      ? (orchStream.messages.length > 0 ? orchStream.messages : chatMessages)
-      : chatMessages;
+    let base: typeof chatMessages;
+    if (isOrchestratorMode) {
+      if (orchStream.messages.length > 0 && chatMessages.length > 0) {
+        // Merge: historical first, then live, deduplicate by timestamp
+        const seen = new Set(orchStream.messages.map((m) => m.timestamp));
+        const historical = chatMessages.filter((m) => !seen.has(m.timestamp));
+        base = [...historical, ...orchStream.messages];
+      } else if (orchStream.messages.length > 0) {
+        base = orchStream.messages;
+      } else {
+        base = chatMessages;
+      }
+    } else {
+      base = chatMessages;
+    }
     if (injectedSystemMessages.length === 0) return base;
     const merged = [...base, ...injectedSystemMessages];
     merged.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
