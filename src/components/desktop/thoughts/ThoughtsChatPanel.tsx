@@ -9,7 +9,7 @@ import type {
   OrchestratorWorkspaceTarget,
 } from '@/lib/orchestrator/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-import { InputButtons } from './InputButtons';
+import { InputButtons, type ThinkingEffort } from './InputButtons';
 import { CheckIcon } from './ThoughtsIcons';
 import type { AgentTarget, FleetAgent } from './types';
 import {
@@ -79,6 +79,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
    * 'full' to match legacy callers that don't pass the prop.
    */
   permissionMode?: ThoughtsChatPermissionMode;
+  /** Callback to toggle permission mode (full ↔ plan). */
+  onTogglePermission?: () => void;
+  /** Whether the issues/mission sidebar is open. */
+  missionOpen?: boolean;
+  /** Toggle the issues/mission sidebar. */
+  onToggleMission?: () => void;
   /**
    * Optional custom empty-state render. When provided and the chat has
    * no messages, this replaces the built-in "Claude Code" welcome card.
@@ -106,6 +112,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsElevatedShadow,
   thoughtsMutedGlass,
   permissionMode = 'full',
+  onTogglePermission,
+  missionOpen,
+  onToggleMission,
   emptyStateOverride,
   onMissionStateChange,
   onLaunchPacket,
@@ -114,6 +123,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
+  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>('max');
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<MobileTranscriptEntry[]>([]);
   const [injectedSystemMessages, setInjectedSystemMessages] = useState<MobileTranscriptEntry[]>([]);
@@ -131,8 +141,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // Managed Claude Code orchestrator session — spawned on first message
   const orchestratorSessionRef = useRef<string | null>(null);
   const [orchestratorSpawning, setOrchestratorSpawning] = useState(false);
-  // Thread persistence — each conversation gets a unique ID for history
+  // Thread persistence — each conversation gets a unique ID for history.
+  // threadIdRef mirrors threadId synchronously so the first-message mint path
+  // can't race setThreadId across rapid streaming effect runs (which was
+  // creating orphan single-assistant-message files).
   const [threadId, setThreadId] = useState<string | null>(null);
+  const threadIdRef = useRef<string | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Resolved repo path for the orchestrator stream
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
@@ -499,7 +513,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     // Orchestrator mode: always route through WebSocket stream
     // The WS handler spawns the session if needed — no polling fallback
     if (isOrchestratorMode) {
-      orchStream.send(msg, { permissionMode });
+      orchStream.send(msg, { permissionMode, thinkingEffort });
       return;
     }
 
@@ -595,7 +609,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     idlePollsRef.current = 0;
     orchestratorHistoryRef.current = [];
     orchStream.reset();
+    threadIdRef.current = null;
     setThreadId(null);
+    if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null; }
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [clearPolling, orchStream]);
@@ -660,17 +676,27 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     const msgs = isOrchestratorMode
       ? (orchStream.messages.length > 0 ? orchStream.messages : chatMessages)
       : chatMessages;
-    if (msgs.length > 0 && isOrchestratorMode) {
-      // Create thread ID on first message if none exists
-      if (!threadId) {
-        const newId = `thoughts-${Date.now()}`;
-        setThreadId(newId);
-        persistThread(msgs, newId);
-      } else {
-        persistThread(msgs, threadId);
-      }
+    if (msgs.length === 0 || !isOrchestratorMode) return;
+
+    // Never persist a thread that has no user message yet — the orchestrator
+    // streams assistant messages in bursts and a bare assistant-only payload
+    // with no threadId would mint a new "Untitled conversation" file every
+    // time the effect re-fires. Real threads always start with a user turn.
+    const hasUserMessage = msgs.some((m) => m.role === 'user');
+    if (!hasUserMessage) return;
+
+    // Create thread ID on first message if none exists. threadIdRef is
+    // checked synchronously so rapid effect re-runs during streaming can't
+    // each mint their own ID before setThreadId commits.
+    if (!threadIdRef.current) {
+      const newId = `thoughts-${Date.now()}`;
+      threadIdRef.current = newId;
+      setThreadId(newId);
+      persistThread(msgs, newId);
+    } else {
+      persistThread(msgs, threadIdRef.current);
     }
-  }, [chatMessages, orchStream.messages, isOrchestratorMode, threadId, persistThread]);
+  }, [chatMessages, orchStream.messages, isOrchestratorMode, persistThread]);
 
   // Auto-restore last orchestrator thread on mount (survives page reload)
   const autoRestoreAttemptedRef = useRef(false);
@@ -705,6 +731,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           }));
           if (msgs.length > 0) {
             setChatMessages(msgs);
+            threadIdRef.current = latest.tabId;
             setThreadId(latest.tabId);
           }
         }
@@ -731,6 +758,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           : '',
       }));
       setChatMessages(msgs);
+      threadIdRef.current = tabId;
       setThreadId(tabId);
       setWaitingForReply(false);
       clearPolling();
@@ -821,7 +849,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       if (orchStream.status === 'busy') return;
       setInput('');
       latestInputRef.current = '';
-      orchStream.send(msg, { permissionMode });
+      orchStream.send(msg, { permissionMode, thinkingEffort });
       return;
     }
 
@@ -1064,7 +1092,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         flexShrink: 0,
         background: thoughtsBodyBackground,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        {/* Runtime picker + status badges removed — the model label in the
+            composer toolbar is sufficient. The orchestrator always uses
+            Claude Code; CLI targets are selected via the workspace tab
+            system, not a picker pill. */}
+        {false && <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <div style={{ position: 'relative' }}>
             <button
               type="button"
@@ -1205,9 +1237,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             }}>
               {targetAgentModel}
             </span>
-            {typeof targetAgentContext === 'number' ? (
-              <span style={{ fontSize: 10, color: targetAgentContext > 85 ? '#b45309' : 'var(--t-text-secondary)', fontWeight: 700 }}>
-                {Math.round(targetAgentContext)}% ctx
+            {typeof targetAgentContext === 'number' && targetAgentContext != null ? (
+              <span style={{ fontSize: 10, color: (targetAgentContext as number) > 85 ? '#b45309' : 'var(--t-text-secondary)', fontWeight: 700 }}>
+                {Math.round(targetAgentContext as number)}% ctx
               </span>
             ) : null}
             {targetAgentTask ? (
@@ -1216,7 +1248,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
               </span>
             ) : null}
           </div>
-        </div>
+        </div>}
 
         <div style={{ position: 'relative' }}>
           {(() => {
@@ -1305,69 +1337,84 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
               </div>
             );
           })()}
-          <textarea
-            ref={inputRef}
-            className={isOrchestratorMode ? 'thoughts-orchestrate-input' : undefined}
-            value={input}
-            onChange={(event) => {
-              setInput(event.target.value);
-              // Auto-grow textarea
-              const el = event.target;
-              el.style.height = 'auto';
-              el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowUp' && !input.trim()) {
-                event.preventDefault();
-                const lastUserMsg = [...chatMessages].reverse().find((message) => message.role === 'user');
-                if (lastUserMsg) setInput(lastUserMsg.text);
-                return;
-              }
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                void handleTaskSend();
-                // Reset height after send
-                if (inputRef.current) {
-                  inputRef.current.style.height = 'auto';
-                }
-              }
-            }}
-            placeholder={displayWaiting ? `${activeTargetLabel} is thinking...` : (isOrchestratorMode ? 'orchestrate' : `Message ${activeTargetLabel}…`)}
-            disabled={displayWaiting || (!isOrchestratorMode && !targetAgent)}
-            rows={2}
+          {/* Composer container — textarea + bottom toolbar in one
+              bordered card, matching the Superconductor reference. */}
+          <div
             style={{
-              width: '100%',
-              minHeight: 64,
-              maxHeight: 200,
-              paddingTop: 11,
-              paddingRight: 150,
-              paddingBottom: 11,
-              paddingLeft: 14,
               borderRadius: 14,
               border: '1px solid var(--t-input-border)',
               background: 'var(--t-input-bg)',
               boxShadow: '0 14px 30px rgba(15, 23, 42, 0.08)',
-              fontSize: 13,
-              color: 'var(--t-text)',
-              resize: 'none',
-              outline: 'none',
-              fontFamily: 'inherit',
-              lineHeight: 1.4,
-              boxSizing: 'border-box',
-              overflow: 'auto',
+              overflow: 'hidden',
               opacity: displayWaiting || (!isOrchestratorMode && !targetAgent) ? 0.6 : 1,
             }}
-          />
-          <InputButtons
-            input={input}
-            enhancing={enhancing}
-            preEnhanceInput={preEnhanceInput}
-            onEnhance={handleEnhance}
-            onUndoEnhance={handleUndoEnhance}
-            onSendAsTask={handleSendAsTask}
-            onSubmit={handleTaskSend}
-            small
-          />
+          >
+            <textarea
+              ref={inputRef}
+              className={isOrchestratorMode ? 'thoughts-orchestrate-input' : undefined}
+              value={input}
+              onChange={(event) => {
+                setInput(event.target.value);
+                // Auto-grow textarea
+                const el = event.target;
+                el.style.height = 'auto';
+                el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowUp' && !input.trim()) {
+                  event.preventDefault();
+                  const lastUserMsg = [...chatMessages].reverse().find((message) => message.role === 'user');
+                  if (lastUserMsg) setInput(lastUserMsg.text);
+                  return;
+                }
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void handleTaskSend();
+                  // Reset height after send
+                  if (inputRef.current) {
+                    inputRef.current.style.height = 'auto';
+                  }
+                }
+              }}
+              placeholder={displayWaiting ? `${activeTargetLabel} is thinking...` : (isOrchestratorMode ? 'Type a message...' : `Message ${activeTargetLabel}…`)}
+              disabled={displayWaiting || (!isOrchestratorMode && !targetAgent)}
+              rows={2}
+              style={{
+                width: '100%',
+                minHeight: 52,
+                maxHeight: 200,
+                paddingTop: 11,
+                paddingRight: 14,
+                paddingBottom: 4,
+                paddingLeft: 14,
+                borderWidth: 0,
+                background: 'transparent',
+                fontSize: 13,
+                color: 'var(--t-text)',
+                resize: 'none',
+                outline: 'none',
+                fontFamily: 'inherit',
+                lineHeight: 1.4,
+                boxSizing: 'border-box',
+                overflow: 'auto',
+              }}
+            />
+            <InputButtons
+              input={input}
+              enhancing={enhancing}
+              preEnhanceInput={preEnhanceInput}
+              onEnhance={handleEnhance}
+              onUndoEnhance={handleUndoEnhance}
+              onSubmit={handleTaskSend}
+              modelLabel={isOrchestratorMode ? 'Opus 4.6 (1M)' : activeTargetLabel}
+              effort={thinkingEffort}
+              onEffortChange={setThinkingEffort}
+              permissionMode={permissionMode}
+              onTogglePermission={onTogglePermission}
+              missionOpen={missionOpen}
+              onToggleMission={onToggleMission}
+            />
+          </div>
         </div>
 
         {hasAssistantActivity ? (

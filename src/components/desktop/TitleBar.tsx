@@ -11,8 +11,10 @@
  * Sits ABOVE everything. Height: 44px. Frosted glass.
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
+import { UsersThree, Bell } from '@phosphor-icons/react';
+import { ChromeButton } from './chrome/ChromeButton';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render Lucide React components) ──
 
@@ -39,14 +41,6 @@ function IconTerminal({ size = 16 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" x2="20" y1="19" y2="19" />
-    </svg>
-  );
-}
-
-function IconMessageSquare({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
 }
@@ -93,17 +87,27 @@ interface TitleBarProps {
   onToggleWorkspacePanel?: () => void;
   o8PanelVisible?: boolean;
   onToggleO8Panel?: () => void;
+  // Agents / Alerts slots — migrated out of the NavRail.
+  isAgentsSectionActive?: boolean;
+  onOpenAgents?: () => void;
+  alertCount?: number;
+  onToggleAlerts?: () => void;
+  /** Alert tray component to render anchored to the alerts button. */
+  alertTray?: ReactNode;
 }
 
 // ── Icon Button ──
 
+// TitleBarButton is now a thin wrapper around the shared ChromeButton so
+// every button in the title bar uses the same neomorphic look pioneered by
+// the NavRail. Color / hoverBg props are ignored (the neomorphic preset
+// handles all tint variants from the active theme), preserved only for
+// existing callers that still pass them.
 function TitleBarButton({
   icon,
   label,
   onClick,
   active,
-  color,
-  hoverBg,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -112,44 +116,14 @@ function TitleBarButton({
   color?: string;
   hoverBg?: string;
 }) {
-  const defaultColor = color ?? 'var(--t-text-secondary)';
-  const defaultHoverBg = hoverBg ?? 'var(--t-hover)';
-
   return (
-    <button
-      type="button"
+    <ChromeButton
+      icon={icon}
+      label={label}
       onClick={onClick}
-      aria-label={label}
-      style={{
-        width: 32,
-        height: 32,
-        borderRadius: 8,
-        border: 'none',
-        background: active ? 'var(--t-panel-active)' : 'transparent',
-        color: active ? 'var(--t-text)' : defaultColor,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'pointer',
-        WebkitTapHighlightColor: 'transparent',
-        transition: 'background 120ms ease, color 120ms ease',
-        flexShrink: 0,
-        padding: 0,
-        ['WebkitAppRegion' as string]: 'no-drag',
-      }}
-      onMouseEnter={(e) => {
-        if (!active) {
-          e.currentTarget.style.background = defaultHoverBg;
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!active) {
-          e.currentTarget.style.background = 'transparent';
-        }
-      }}
-    >
-      {icon}
-    </button>
+      active={active}
+      noDrag
+    />
   );
 }
 
@@ -274,9 +248,20 @@ export function TitleBar({
   onToggleWorkspacePanel,
   o8PanelVisible = false,
   onToggleO8Panel,
+  isAgentsSectionActive = false,
+  onOpenAgents,
+  alertCount = 0,
+  onToggleAlerts,
+  alertTray,
 }: TitleBarProps) {
   const [searchExpanded, setSearchExpanded] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
+  const [alertAnchorEl, setAlertAnchorEl] = useState<HTMLElement | null>(null);
+  // Inject the alerts button's wrapper element into the tray so its popover
+  // anchors to the bell icon instead of the old NavRail column.
+  const alertTrayNode = alertTray && isValidElement(alertTray)
+    ? cloneElement(alertTray as ReactElement<{ anchorEl?: HTMLElement | null }>, { anchorEl: alertAnchorEl })
+    : alertTray;
 
   // Window drag — Tauri v2 startDragging API
   const handleMouseDown = useCallback(async (e: React.MouseEvent) => {
@@ -356,6 +341,20 @@ export function TitleBar({
           onClick={onToggleSidebar}
           active={sidebarVisible}
         />
+
+        {/* Agents — returns the center workspace to the main agents view.
+            Lives here instead of the retired NavRail so users always have a
+            one-click "home" back to the three-pane workspace from Settings
+            or Analytics. */}
+        {onOpenAgents ? (
+          <ChromeButton
+            icon={<UsersThree size={18} weight={isAgentsSectionActive ? 'fill' : 'bold'} color={isAgentsSectionActive ? 'var(--t-accent)' : 'var(--t-text)'} />}
+            label="Agents"
+            onClick={onOpenAgents}
+            active={isAgentsSectionActive}
+            noDrag
+          />
+        ) : null}
       </div>
 
       {/* ── Center — Search ── */}
@@ -436,7 +435,24 @@ export function TitleBar({
         flexShrink: 0,
         paddingRight: 4,
       }}>
-        {/* WS indicator moved to left of Open button */}
+        {/* Alerts bell — migrated from the NavRail. The tray popover is
+            rendered as a child of this wrapper so it anchors to the bell's
+            DOM node via the alertTray prop's anchorEl. */}
+        {onToggleAlerts ? (
+          <div
+            ref={setAlertAnchorEl}
+            style={{ position: 'relative', ['WebkitAppRegion' as string]: 'no-drag' }}
+          >
+            <ChromeButton
+              icon={<Bell size={18} weight={alertCount > 0 ? 'fill' : 'bold'} color={alertCount > 0 ? '#ef4444' : 'var(--t-text)'} />}
+              label={alertCount > 0 ? `${alertCount} unread alerts` : 'Alerts'}
+              onClick={onToggleAlerts}
+              badge={alertCount}
+              noDrag
+            />
+            {alertTrayNode}
+          </div>
+        ) : null}
 
         {/* Terminal toggle — opens the global terminal in the bottom tray */}
         <TitleBarButton

@@ -7,6 +7,7 @@ import {
   THEME_ACCENT,
   THEME_ACCENT_BORDER,
   THEME_ACCENT_SOFT,
+  AgentSpinner,
   orchestratorRuntimeTone,
   orchestratorStatusTone,
   packetMatchesBranch,
@@ -121,7 +122,7 @@ function RepoCardExpandedContentBase({
   );
 
   return (
-    <div style={{ padding: '4px 14px 14px 14px' }}>
+    <div style={{ padding: '6px 14px 12px 14px' }}>
       {devLogsOpen && devServerRunning ? (
         <div
           style={{
@@ -167,6 +168,68 @@ function RepoCardExpandedContentBase({
           </pre>
         </div>
       ) : null}
+
+      {/* Active workspace tabs — Orchestrator + Assistant shown inline so
+          users can see what's running on this repo at a glance. The braille
+          spinner fires when this repo is the active workspace. */}
+      {(() => {
+        const isActiveRepo = activeWorkspacePath === repo.localPath
+          || (activeWorkspacePath && activeWorkspacePath.startsWith(repo.localPath + '/'));
+        const spinnerStatus = isActiveRepo ? 'running' : 'idle';
+        const ROW_STYLE: React.CSSProperties = {
+          display: 'flex',
+          alignItems: 'center',
+          gap: 9,
+          padding: '5px 8px',
+          borderRadius: 7,
+          background: 'transparent',
+          borderWidth: 0,
+          cursor: 'default',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+        };
+        const LABEL_STYLE: React.CSSProperties = {
+          fontSize: 12,
+          fontWeight: 440,
+          color: 'var(--t-text)',
+          letterSpacing: '-0.005em',
+          lineHeight: 1.35,
+        };
+        const SUB_STYLE: React.CSSProperties = {
+          fontSize: 10,
+          fontWeight: 400,
+          color: 'var(--t-text-faint)',
+          letterSpacing: '-0.005em',
+          lineHeight: 1.3,
+        };
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 4 }}>
+            <div style={ROW_STYLE}>
+              <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
+                <AgentSpinner status={spinnerStatus} size={6} />
+              </span>
+              <ClaudeIcon size={12} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+                <span style={LABEL_STYLE}>Orchestrator</span>
+                <span style={SUB_STYLE}>{isActiveRepo ? 'Active' : 'Idle'}</span>
+              </div>
+            </div>
+            <div style={ROW_STYLE}>
+              <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
+                <AgentSpinner status={spinnerStatus} size={6} />
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 12, height: 12, flexShrink: 0 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+                <span style={LABEL_STYLE}>Assistant</span>
+                <span style={SUB_STYLE}>{isActiveRepo ? 'Active' : 'Idle'}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {unmatchedRepoPackets.length > 0 ? (
         <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -242,9 +305,21 @@ function RepoCardExpandedContentBase({
         </div>
       ) : null}
 
-      <div style={{ marginTop: 6 }}>
+      <div style={{ marginTop: 0 }}>
         {branchesLoading ? (
-          <div style={{ fontSize: 11, color: 'var(--t-text-faint)', padding: '4px 0' }}>Loading branches…</div>
+          <div
+            style={{
+              fontSize: 11.5,
+              fontWeight: 440,
+              color: 'var(--t-text-faint)',
+              paddingTop: 6,
+              paddingBottom: 6,
+              letterSpacing: '-0.005em',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+            }}
+          >
+            Loading branches...
+          </div>
         ) : visibleBranches.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {visibleBranches.map((branch) => (
@@ -435,7 +510,13 @@ function RepoCardExpandedContentBase({
               alignItems: 'center',
               gap: 6,
               width: '100%',
-              padding: '6px 7px',
+              // paddingLeft matches the branch row's effective indent:
+              // 8px row padding + 12px indicator slot + 9px flex gap = 29px
+              // so the FolderOpen icon aligns with the GitBranch icons above.
+              paddingTop: 6,
+              paddingRight: 7,
+              paddingBottom: 6,
+              paddingLeft: 29,
               marginTop: 2,
               border: 'none',
               background: 'transparent',

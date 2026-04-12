@@ -403,8 +403,11 @@ export function ensureOrchestratorSession(repoPath: string): OrchestratorSession
  */
 export type OrchestratorPermissionMode = 'full' | 'plan';
 
+export type ThinkingEffort = 'medium' | 'high' | 'max';
+
 export interface SendToOrchestratorOptions {
   permissionMode?: OrchestratorPermissionMode;
+  thinkingEffort?: ThinkingEffort;
 }
 
 /**
@@ -419,6 +422,7 @@ export async function sendToOrchestrator(
   options: SendToOrchestratorOptions = {},
 ): Promise<void> {
   const permissionMode: OrchestratorPermissionMode = options.permissionMode ?? 'full';
+  const thinkingEffort: ThinkingEffort = options.thinkingEffort ?? 'max';
 
   // #457 — Auto-recover dead sessions by creating a fresh one
   if (session.status === 'dead') {
@@ -436,6 +440,14 @@ export async function sendToOrchestrator(
   // Generate MCP config so Claude Code can use Cortex tools
   const mcpConfigPath = ensureMcpConfig(session.repoPath);
 
+  // Map thinking effort to Claude Code CLI's --thinking-budget flag.
+  // medium = 10k tokens, high = 50k tokens, max = 128k tokens (xhigh).
+  const thinkingBudgetMap: Record<ThinkingEffort, string> = {
+    medium: '10000',
+    high: '50000',
+    max: '128000',
+  };
+
   const args: string[] = [
     '-p', message,
     '--output-format', 'stream-json',
@@ -444,6 +456,7 @@ export async function sendToOrchestrator(
       : ['--dangerously-skip-permissions']),
     '--verbose',
     '--mcp-config', mcpConfigPath,
+    '--thinking-budget', thinkingBudgetMap[thinkingEffort],
   ];
 
   // Resume existing conversation if we have a session ID

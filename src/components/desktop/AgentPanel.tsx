@@ -3,7 +3,7 @@
 
 import { memo, type CSSProperties } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Clock, Plus } from 'lucide-react';
+import { Clock } from 'lucide-react';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import {
   AgentPanelEmptyState,
@@ -92,49 +92,10 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         } as CSSProperties}
         className="hide-scrollbar"
       >
-        <SidebarSection
-          title="Workspaces"
-          summary={workspacesSummary}
-          accent="#ef4444"
-          open={reposOpen}
-          onToggle={() => setReposOpen((current) => !current)}
-          headerAction={(
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <button
-                type="button"
-                aria-label="Add repository"
-                onClick={requestAddRepo}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 26,
-                  height: 26,
-                  padding: 0,
-                  borderRadius: 8,
-                  border: 'none',
-                  background: 'transparent',
-                  color: 'var(--t-text-muted)',
-                  cursor: 'pointer',
-                  appearance: 'none',
-                  WebkitAppearance: 'none',
-                  lineHeight: 0,
-                  transition: 'background 140ms ease, color 140ms ease',
-                }}
-                onMouseEnter={(event) => {
-                  event.currentTarget.style.background = 'var(--t-panel-hover)';
-                  event.currentTarget.style.color = 'var(--t-text)';
-                }}
-                onMouseLeave={(event) => {
-                  event.currentTarget.style.background = 'transparent';
-                  event.currentTarget.style.color = 'var(--t-text-muted)';
-                }}
-              >
-                <Plus size={15} strokeWidth={2.2} />
-              </button>
-            </div>
-          )}
-        >
+        {/* Workspaces section — the "Workspaces" title and its collapse
+            affordance were removed. The repo registry is the only content
+            of this panel, so it renders flush without a labelled header. */}
+        <section style={{ display: 'flex', flexDirection: 'column' }}>
           {fleetMeta?.mode === 'stale' ? (
             <div
               style={{
@@ -177,8 +138,20 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
               </button>
             </div>
           ) : gatewayReachable && gatewayWarming ? (
-            <div style={{ padding: '8px 2px 2px', fontSize: 11, color: THEME_ACCENT }}>
-              Loading live workspaces...
+            <div
+              style={{
+                paddingTop: 14,
+                paddingRight: 14,
+                paddingBottom: 8,
+                paddingLeft: 14,
+                fontSize: 11.5,
+                fontWeight: 440,
+                color: 'var(--t-text-faint)',
+                letterSpacing: '-0.005em',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+              }}
+            >
+              Loading workspaces...
             </div>
           ) : null}
 
@@ -203,13 +176,14 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             ideWorkspaceSessions={ideWorkspaceSessions}
             hideHeader
           />
-        </SidebarSection>
+        </section>
 
-        <AnimatePresence initial={false}>
-          {!inventoryLoading && agents.length === 0 ? (
-            <AgentPanelEmptyState key="agent-panel-empty-state" />
-          ) : null}
-        </AnimatePresence>
+        {/* AgentPanelEmptyState ("No active agents") removed — it tracked
+            runtime-discovered CLI sessions, not workspace chat tabs, so it
+            was misleading when the user had an Orchestrator or Assistant
+            tab open. The repo list above is the primary panel content;
+            discovered agent sessions appear inline on branch rows when
+            they exist. */}
 
       </div>
     </div>
