@@ -478,57 +478,7 @@ function RepoBranchRowBase({
 
           {orderedBranchAgents.length > 0 ? (
             <>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setSessionDisclosureByBranch((current) => ({
-                    ...current,
-                    [branch.name]: !(current[branch.name] ?? true),
-                  }));
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  width: '100%',
-                  padding: 0,
-                  border: 'none',
-                  background: 'transparent',
-                  color: 'var(--t-text-faint)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.04em',
-                  textTransform: 'uppercase',
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                }}
-              >
-                {sessionsExpanded ? <ChevronDown size={12} strokeWidth={2.2} /> : <ChevronRight size={12} strokeWidth={2.2} />}
-                <span>Sessions</span>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minWidth: 18,
-                    height: 18,
-                    padding: '0 6px',
-                    borderRadius: 999,
-                    background: 'var(--t-divider-subtle)',
-                    color: 'var(--t-text-secondary)',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                    textTransform: 'none',
-                    letterSpacing: 'normal',
-                  }}
-                >
-                  {orderedBranchAgents.length}
-                </span>
-              </button>
-              {sessionsExpanded ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   {orderedBranchAgents.map((agent) => {
                     const statusTone = sessionStatusTone(agent.status);
                     const isSelectedSession = activeSessionKey === agent.sessionKey;
@@ -594,7 +544,6 @@ function RepoBranchRowBase({
                     );
                   })}
                 </div>
-              ) : null}
             </>
           ) : null}
         </div>
