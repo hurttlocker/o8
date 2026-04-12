@@ -180,6 +180,7 @@ function RepoCardExpandedContentBase({
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 4 }}>
             <div
+              title={isActiveRepo ? 'Orchestrator is focused on this repo' : 'Orchestrator can work on this repo — mention it in conversation'}
               style={{
                 display: 'flex',
                 alignItems: 'center',

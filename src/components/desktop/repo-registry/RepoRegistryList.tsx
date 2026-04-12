@@ -34,8 +34,8 @@ interface RepoRegistryListProps {
   effectiveAgentBranchMap: Map<string, Map<string, BranchAgent[]>>;
   orchestratorPackets?: OrchestratorPacket[];
   portsByRepo: Map<string, number[]>;
-  expandedRepoId: string | null;
-  setExpandedRepoId: React.Dispatch<React.SetStateAction<string | null>>;
+  expandedRepoIds: Set<string>;
+  setExpandedRepoIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeRepoLocalPath?: string | null;
   activeWorkspacePath?: string | null;
 }
@@ -62,8 +62,8 @@ function RepoRegistryListBase({
   effectiveAgentBranchMap,
   orchestratorPackets = [],
   portsByRepo,
-  expandedRepoId,
-  setExpandedRepoId,
+  expandedRepoIds,
+  setExpandedRepoIds,
   activeRepoLocalPath = null,
   activeWorkspacePath = null,
 }: RepoRegistryListProps) {
@@ -239,8 +239,13 @@ function RepoRegistryListBase({
                 agentsByBranch={effectiveAgentBranchMap.get(repo.name)}
                 orchestratorPackets={orchestratorPackets}
                 activePorts={portsByRepo.get(repo.name)}
-                expanded={expandedRepoId === repo.id}
-                onToggle={() => setExpandedRepoId((current) => current === repo.id ? null : repo.id)}
+                expanded={expandedRepoIds.has(repo.id)}
+                onToggle={() => setExpandedRepoIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(repo.id)) next.delete(repo.id);
+                  else next.add(repo.id);
+                  return next;
+                })}
                 isActive={repo.localPath === activeRepoLocalPath}
                 activeWorkspacePath={activeWorkspacePath}
               />
