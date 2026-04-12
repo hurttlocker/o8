@@ -43,7 +43,7 @@ function ChainOfThoughtBase({
           minWidth: 0,
           textAlign: 'left',
           transition: 'all 150ms ease',
-          fontFamily: '-apple-system, system-ui, sans-serif',
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         }}
       >
         <span

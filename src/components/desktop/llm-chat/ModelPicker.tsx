@@ -72,7 +72,7 @@ function ModelPickerBase({
         type="button"
         onClick={() => { if (!disabled) setOpen((value) => !value); }}
         disabled={disabled}
-        style={{ display: 'flex', alignItems: 'center', gap: 5, paddingTop: 5, paddingRight: 6, paddingBottom: 5, paddingLeft: 8, border: 'none', borderRadius: 8, background: open ? THEME_ACCENT_SOFT : 'transparent', color: open ? 'var(--t-text)' : 'var(--t-text-secondary)', fontSize: 13, fontWeight: 400, fontFamily: '-apple-system, system-ui, sans-serif', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1, transition: 'color 150ms, background 150ms' }}
+        style={{ display: 'flex', alignItems: 'center', gap: 5, paddingTop: 5, paddingRight: 6, paddingBottom: 5, paddingLeft: 8, border: 'none', borderRadius: 8, background: open ? THEME_ACCENT_SOFT : 'transparent', color: open ? 'var(--t-text)' : 'var(--t-text-secondary)', fontSize: 13, fontWeight: 400, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1, transition: 'color 150ms, background 150ms' }}
         onMouseEnter={(event) => {
           if (disabled || open) return;
           event.currentTarget.style.color = 'var(--t-text)';
@@ -128,7 +128,7 @@ function ModelRow({ model, onSelect, selected }: { model: ModelOption; onSelect:
     <button
       type="button"
       onClick={() => onSelect(model)}
-      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', paddingTop: 7, paddingRight: 12, paddingBottom: 7, paddingLeft: 16, border: 'none', background: model.id === selected.id ? THEME_ACCENT_SOFT : 'transparent', color: 'var(--t-text)', fontSize: 13, fontFamily: '-apple-system, system-ui, sans-serif', cursor: 'pointer', textAlign: 'left', transition: 'background 100ms' }}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', paddingTop: 7, paddingRight: 12, paddingBottom: 7, paddingLeft: 16, border: 'none', background: model.id === selected.id ? THEME_ACCENT_SOFT : 'transparent', color: 'var(--t-text)', fontSize: 13, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', cursor: 'pointer', textAlign: 'left', transition: 'background 100ms' }}
       onMouseEnter={(event) => { event.currentTarget.style.background = THEME_ACCENT_SOFT; }}
       onMouseLeave={(event) => { event.currentTarget.style.background = model.id === selected.id ? THEME_ACCENT_SOFT : 'transparent'; }}
     >

@@ -302,7 +302,7 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
               color: `#${label.color}`,
               fontSize: 9,
               fontWeight: 600,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             {label.name}
@@ -422,7 +422,7 @@ export function renderExpandedDetail(
           <span style={{ color: 'var(--t-text-secondary)', fontWeight: 600 }}>{item.hash}</span>
           <span style={{ color: 'var(--t-text-faint)' }}>{item.age}</span>
         </div>
-        <div style={{ color: 'var(--t-text)', fontSize: 12, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+        <div style={{ color: 'var(--t-text)', fontSize: 12, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
           {item.message}
         </div>
       </div>
@@ -460,7 +460,7 @@ export function renderExpandedDetail(
         ) : detail === undefined ? (
           <div style={{ ...DETAIL_ROW_STYLE, color: 'var(--t-text-faint)' }}>Loading...</div>
         ) : null}
-        <div style={{ ...DETAIL_ROW_STYLE, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+        <div style={{ ...DETAIL_ROW_STYLE, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
           <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{item.author}</span>
           <span style={{ color: 'var(--t-text-faint)' }}> on </span>
           <span style={{ color: 'var(--t-text-secondary)' }}>{item.branch}</span>
@@ -512,11 +512,11 @@ export function renderExpandedDetail(
           ))}
         </div>
         {item.body ? (
-          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.6, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.6, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
             {item.body.slice(0, 200)}{item.body.length > 200 ? '...' : ''}
           </div>
         ) : null}
-        <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+        <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
           {item.author ? <span><span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{item.author}</span></span> : null}
           {item.assignees.length > 0 ? <span style={{ color: 'var(--t-text-faint)' }}>{item.assignees.join(', ')}</span> : null}
           {item.comments > 0 ? <span>{item.comments} comment{item.comments === 1 ? '' : 's'}</span> : null}
@@ -544,7 +544,7 @@ export function itemBadge(item: ActivityItem): React.ReactNode {
         background: item.state === 'merged' ? 'rgba(139,92,246,0.1)' : item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
         color: item.state === 'merged' ? '#8b5cf6' : item.state === 'open' ? '#22c55e' : '#ef4444',
         textTransform: 'uppercase',
-        fontFamily: '-apple-system, system-ui, sans-serif',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}>
         {item.state}
       </span>
@@ -565,7 +565,7 @@ export function itemBadge(item: ActivityItem): React.ReactNode {
         background: item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(139,92,246,0.1)',
         color: item.state === 'open' ? '#22c55e' : '#8b5cf6',
         textTransform: 'uppercase',
-        fontFamily: '-apple-system, system-ui, sans-serif',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}>
         {item.state}
       </span>

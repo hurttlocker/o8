@@ -219,7 +219,7 @@ export const TabBar = memo(function TabBar({
                     : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)'),
                   fontSize: 12,
                   fontWeight: isActive ? 560 : 460,
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   letterSpacing: '-0.008em',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',

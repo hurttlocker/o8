@@ -186,7 +186,7 @@ export function APIKeysTab() {
                         fontSize: 12,
                         fontWeight: 500,
                         cursor: 'pointer',
-                        fontFamily: '-apple-system, system-ui, sans-serif',
+                        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                         transition: 'background 100ms',
                       }}
                       onMouseEnter={(e) => { (e.currentTarget).style.background = '#f8fafc'; }}
@@ -211,7 +211,7 @@ export function APIKeysTab() {
                           fontSize: 12,
                           fontWeight: 500,
                           cursor: 'pointer',
-                          fontFamily: '-apple-system, system-ui, sans-serif',
+                          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                           transition: 'background 100ms',
                         }}
                         onMouseEnter={(e) => { (e.currentTarget).style.background = '#fef2f2'; }}
@@ -292,7 +292,7 @@ export function APIKeysTab() {
                       fontSize: 13,
                       fontWeight: 500,
                       cursor: keyInput.trim() ? 'pointer' : 'default',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                       transition: 'background 150ms',
                     }}
                   >
@@ -312,7 +312,7 @@ export function APIKeysTab() {
                       color: '#64748b',
                       fontSize: 13,
                       cursor: 'pointer',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                     }}
                   >
                     Cancel

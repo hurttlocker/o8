@@ -70,7 +70,7 @@ const ThinkingXray = memo(function ThinkingXray({
               : 'var(--t-hover)',
             cursor: (isThinking || isStreaming) ? 'pointer' : 'default',
             fontSize: 11, fontWeight: 600,
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             color: isThinking || isStreaming ? '#3b82f6' : 'var(--t-text-muted)',
             transition: 'all 200ms ease',
             letterSpacing: '-0.01em',
@@ -388,7 +388,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
                   color: 'var(--t-text)',
                   cursor: 'pointer',
                   textAlign: 'left',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}
               >
                 <span style={{ fontSize: 12, fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>

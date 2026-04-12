@@ -1,6 +1,7 @@
 html {
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   /* Hide scrollbar on mobile — page still scrolls, no visual bar stealing width */
   scrollbar-width: none; /* Firefox */
 }

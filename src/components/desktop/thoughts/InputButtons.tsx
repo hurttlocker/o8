@@ -127,7 +127,7 @@ export function InputButtons({
             color: 'var(--t-text-faint)',
             letterSpacing: '-0.005em',
             whiteSpace: 'nowrap',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
         >
           {modelLabel}

@@ -241,7 +241,7 @@ export function SidebarSection({
             background: 'transparent',
             color: 'var(--t-text)',
             cursor: 'pointer',
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
         >
           {Icon ? (
@@ -358,7 +358,7 @@ export function ActivityDock({
           background: 'transparent',
           cursor: 'pointer',
           color: 'var(--t-text)',
-          fontFamily: '-apple-system, system-ui, sans-serif',
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         }}
       >
         <ChevronDown

@@ -132,7 +132,7 @@ function RepoCardHeaderBase({
         letterSpacing: '0.04em',
         textTransform: 'uppercase',
         flexShrink: 0,
-        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}
     >
       Current
@@ -409,7 +409,7 @@ function RepoCardHeaderBase({
                     fontWeight: 540,
                     color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
                     letterSpacing: '-0.008em',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                     minWidth: 0,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -505,7 +505,7 @@ function RepoCardHeaderBase({
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                   letterSpacing: '-0.005em',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}
               >
                 {rowMetaSegments.length > 0 ? (
@@ -543,7 +543,7 @@ function RepoCardHeaderBase({
                 fontSize: 18,
                 fontWeight: 300,
                 lineHeight: 0,
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 appearance: 'none',
                 WebkitAppearance: 'none',
                 marginRight: -2,
@@ -740,7 +740,7 @@ function RepoCardHeaderBase({
                   fontWeight: 500,
                   cursor: 'pointer',
                   padding: '2px 6px',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}
               >
                 Cancel
@@ -761,7 +761,7 @@ function RepoCardHeaderBase({
                   cursor: 'pointer',
                   padding: '2px 8px',
                   borderRadius: 6,
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}
               >
                 Remove

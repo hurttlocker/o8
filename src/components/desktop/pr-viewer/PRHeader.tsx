@@ -197,7 +197,7 @@ function PRHeaderBase({
                 color: activeSection === s.id ? '#2563eb' : '#6b7280',
                 background: activeSection === s.id ? 'rgba(37,99,235,0.08)' : 'transparent',
                 cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
               title={`Shortcut ${s.shortcut}`}
             >
@@ -236,7 +236,7 @@ function PRHeaderBase({
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: actionLoading ? 'wait' : 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}
               >
                 <Check size={12} strokeWidth={2.5} />
@@ -265,7 +265,7 @@ function PRHeaderBase({
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: actionLoading ? 'wait' : 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}
               >
                 <XCircle size={12} strokeWidth={2.5} />
@@ -296,7 +296,7 @@ function PRHeaderBase({
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: actionLoading ? 'wait' : reviewGuidance.mergeAllowed ? 'pointer' : 'not-allowed',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   opacity: reviewGuidance.mergeAllowed ? 1 : 0.7,
                 }}
               >
@@ -366,7 +366,7 @@ function PRHeaderBase({
               background: 'var(--t-panel)',
               color: 'var(--t-text)',
               outline: 'none',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           />
           <button
@@ -388,7 +388,7 @@ function PRHeaderBase({
               fontSize: 11,
               fontWeight: 600,
               cursor: commentText.trim() ? 'pointer' : 'default',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
             <Send size={11} />

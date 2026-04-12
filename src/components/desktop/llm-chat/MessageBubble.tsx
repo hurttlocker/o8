@@ -211,7 +211,7 @@ function MessageBubbleBase({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 4, animation: isLast ? 'llmFadeIn 200ms ease-out' : undefined }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <div style={{ maxWidth: isUser ? '75%' : '90%', paddingTop: isUser ? 10 : 16, paddingRight: isUser ? 16 : 0, paddingBottom: isUser ? 10 : 16, paddingLeft: isUser ? 16 : 0, borderRadius: isUser ? 18 : 0, background: isUser ? 'transparent' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent', color: isUser ? 'var(--t-text-muted)' : message.isError ? '#dc2626' : 'var(--t-text)', fontSize: 14, lineHeight: '1.6', fontFamily: '-apple-system, system-ui, sans-serif', wordBreak: 'break-word', ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}) }}>
+      <div style={{ maxWidth: isUser ? '75%' : '90%', paddingTop: isUser ? 10 : 16, paddingRight: isUser ? 16 : 0, paddingBottom: isUser ? 10 : 16, paddingLeft: isUser ? 16 : 0, borderRadius: isUser ? 18 : 0, background: isUser ? 'transparent' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent', color: isUser ? 'var(--t-text-muted)' : message.isError ? '#dc2626' : 'var(--t-text)', fontSize: 14, lineHeight: '1.6', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', wordBreak: 'break-word', ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}) }}>
         {isUser ? (
           <>
             {message.content}
@@ -227,7 +227,7 @@ function MessageBubbleBase({
       </div>
 
       {!isUser && message.fallbackNotice ? (
-        <div style={{ maxWidth: '90%', paddingTop: 2, paddingBottom: 6, paddingLeft: 2, fontSize: 11, color: 'var(--t-text-muted)', fontStyle: 'italic', fontFamily: '-apple-system, system-ui, sans-serif', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div style={{ maxWidth: '90%', paddingTop: 2, paddingBottom: 6, paddingLeft: 2, fontSize: 11, color: 'var(--t-text-muted)', fontStyle: 'italic', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', display: 'flex', alignItems: 'center', gap: 5 }}>
           <svg width="12" height="12" viewBox="0 0 256 256" fill="none" style={{ flexShrink: 0, opacity: 0.7 }}>
             <path d="M236.8 188.09 149.35 36.22a24.76 24.76 0 0 0-42.7 0L19.2 188.09a23.51 23.51 0 0 0 0 23.72A24.35 24.35 0 0 0 40.55 224h174.9a24.35 24.35 0 0 0 21.33-12.19 23.51 23.51 0 0 0 .02-23.72ZM120 104a8 8 0 0 1 16 0v40a8 8 0 0 1-16 0Zm8 88a12 12 0 1 1 12-12 12 12 0 0 1-12 12Z" fill="currentColor" />
           </svg>
@@ -241,13 +241,13 @@ function MessageBubbleBase({
       {!isUser && collapsedToolCalls.length > 0 && !(message.thinkingSteps && message.thinkingSteps.length > 0) ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '90%', marginTop: 4 }}>
           {collapsedToolCalls.map((item, index) => item.kind === 'group' ? (
-            <div key={`group-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10, background: THEME_BG_CARD, border: '1px solid var(--t-panel-border)', borderRadius: 8, fontSize: 12, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+            <div key={`group-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10, background: THEME_BG_CARD, border: '1px solid var(--t-panel-border)', borderRadius: 8, fontSize: 12, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
               <div style={{ width: 6, height: 6, borderRadius: '50%', background: item.allDone ? '#10b981' : '#3b82f6', flexShrink: 0, ...(item.allDone ? {} : { animation: 'llmDot 1.4s ease-in-out infinite' }) }} />
               <span style={{ color: 'var(--t-text-secondary)', fontWeight: 500 }}>{item.count} command{item.count > 1 ? 's' : ''} executed</span>
               {item.allDone ? <Check size={12} style={{ color: '#10b981', marginLeft: 'auto' }} /> : null}
             </div>
           ) : (
-            <div key={`${item.toolCall.name}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, paddingRight: 10, paddingBottom: 6, paddingLeft: 10, background: THEME_BG_CARD, border: '1px solid var(--t-panel-border)', borderRadius: 8, fontSize: 12, fontFamily: '-apple-system, system-ui, sans-serif', animation: 'llmFadeIn 200ms ease-out' }}>
+            <div key={`${item.toolCall.name}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, paddingRight: 10, paddingBottom: 6, paddingLeft: 10, background: THEME_BG_CARD, border: '1px solid var(--t-panel-border)', borderRadius: 8, fontSize: 12, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', animation: 'llmFadeIn 200ms ease-out' }}>
               <div style={{ width: 6, height: 6, borderRadius: '50%', background: item.toolCall.status === 'done' ? '#10b981' : '#3b82f6', flexShrink: 0, ...(item.toolCall.status !== 'done' ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}) }} />
               <span style={{ color: 'var(--t-text-secondary)', fontWeight: 500 }}>{item.toolCall.name === 'search_web' ? 'Searched' : item.toolCall.name === 'read_file' ? 'Read' : item.toolCall.name === 'list_files' ? 'Listed' : item.toolCall.name === 'search_code' ? 'Searched code' : item.toolCall.name}</span>
               <span style={{ color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.toolCall.name === 'search_web' && item.toolCall.args?.query ? `"${item.toolCall.args.query}"` : item.toolCall.name === 'read_file' && item.toolCall.args?.path ? String(item.toolCall.args.path) : item.toolCall.name === 'search_code' && item.toolCall.args?.query ? `"${item.toolCall.args.query}"` : item.toolCall.name === 'list_files' && item.toolCall.args?.path ? String(item.toolCall.args.path) : item.toolCall.preview ? String(item.toolCall.preview).slice(0, 60) : ''}</span>
@@ -265,7 +265,7 @@ function MessageBubbleBase({
               target={source.url ? '_blank' : undefined}
               rel="noopener noreferrer"
               onClick={source.path && !source.url ? (event) => event.preventDefault() : undefined}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 8, background: THEME_ACCENT_SOFT, border: `1px solid ${THEME_ACCENT_BORDER}`, borderRadius: 6, fontSize: 11, color: THEME_ACCENT, textDecoration: 'none', fontFamily: '-apple-system, system-ui, sans-serif', transition: 'background 100ms', cursor: 'pointer', animation: 'llmFadeIn 200ms ease-out' }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 8, background: THEME_ACCENT_SOFT, border: `1px solid ${THEME_ACCENT_BORDER}`, borderRadius: 6, fontSize: 11, color: THEME_ACCENT, textDecoration: 'none', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', transition: 'background 100ms', cursor: 'pointer', animation: 'llmFadeIn 200ms ease-out' }}
               onMouseEnter={(event) => {
                 event.currentTarget.style.background = THEME_ACCENT_SOFT_STRONG;
               }}
@@ -294,10 +294,10 @@ function MessageBubbleBase({
 
       {!isUser && message.content ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, paddingTop: 2, paddingBottom: 4, opacity: hovered || isLast ? 1 : 0, transition: 'opacity 150ms' }}>
-          {message.model ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)', marginRight: 4, fontFamily: '-apple-system, system-ui, sans-serif' }}>{message.model}</span> : null}
+          {message.model ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)', marginRight: 4, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>{message.model}</span> : null}
           {message.tokens ? <span style={{ fontSize: 10, color: 'var(--t-text-faint)', marginRight: 4, fontFamily: 'ui-monospace, monospace' }}>{message.tokens.input + message.tokens.output} tok</span> : null}
           {message.costUsd != null && message.costUsd > 0 ? <span style={{ fontSize: 10, color: 'var(--t-text-faint)', marginRight: 6, fontFamily: 'ui-monospace, monospace' }}>${message.costUsd.toFixed(4)}</span> : null}
-          {message.recalledFacts != null && message.recalledFacts > 0 ? <span title={`${message.recalledFacts} memor${message.recalledFacts === 1 ? 'y' : 'ies'} recalled from Cortex`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#8b5cf6', marginRight: 4, fontFamily: '-apple-system, system-ui, sans-serif' }}><Brain size={10} />{message.recalledFacts}</span> : null}
+          {message.recalledFacts != null && message.recalledFacts > 0 ? <span title={`${message.recalledFacts} memor${message.recalledFacts === 1 ? 'y' : 'ies'} recalled from Cortex`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#8b5cf6', marginRight: 4, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}><Brain size={10} />{message.recalledFacts}</span> : null}
           <div style={{ width: 1, height: 14, background: 'var(--t-divider)', marginLeft: 2, marginRight: 2 }} />
           <ActionButton icon={copied ? <Check size={14} /> : <Copy size={14} />} label={copied ? 'Copied' : 'Copy'} active={copied} onClick={handleCopy} />
           <ActionButton icon={ttsState === 'loading' ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : ttsState === 'playing' ? <VolumeOff size={14} /> : <Volume2 size={14} />} label={ttsState === 'playing' ? 'Stop' : ttsState === 'loading' ? 'Loading...' : 'Read aloud'} active={ttsState === 'playing'} activeColor="#3b82f6" onClick={handleSpeak} />

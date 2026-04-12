@@ -202,7 +202,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
               color: 'var(--t-text)',
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}>
               Workspace Diff
             </span>
@@ -290,7 +290,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                       background: isActive ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
                       cursor: 'pointer',
                       textAlign: 'left',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                       transition: 'all 100ms ease',
                     }}
                   >

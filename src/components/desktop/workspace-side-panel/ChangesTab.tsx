@@ -319,7 +319,7 @@ export const ChangesTab = memo(function ChangesTab({
               outline: 'none',
               background: THEME_BG_CARD,
               color: 'var(--t-text)',
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           />
           <button

@@ -311,7 +311,7 @@ function OrchestratorHistorySidebarBase({
                             background: 'transparent',
                             cursor: isDeleting ? 'default' : 'pointer',
                             textAlign: 'left',
-                            fontFamily: '-apple-system, system-ui, sans-serif',
+                            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                           }}
                         >
                           <div

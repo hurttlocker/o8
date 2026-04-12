@@ -140,7 +140,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
             outline: 'none',
             fontSize: 13,
             color: 'var(--t-text)',
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             fontWeight: 400,
             letterSpacing: '-0.01em',
           }}
@@ -168,7 +168,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
             background: 'var(--t-divider-subtle)',
             padding: '2px 5px',
             borderRadius: 4,
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             fontWeight: 500,
           }}>⌘K</kbd>
         )}
@@ -226,7 +226,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
                     background: isSelected ? 'rgba(59, 130, 246, 0.06)' : 'transparent',
                     cursor: 'pointer',
                     textAlign: 'left',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                     transition: 'background 80ms ease',
                   }}
                 >

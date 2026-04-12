@@ -115,7 +115,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
                   cursor: 'pointer',
                   fontSize: 11,
                   fontWeight: 700,
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   flexShrink: 0,
                 }}
               >
@@ -141,7 +141,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
                 cursor: 'pointer',
                 fontSize: 11,
                 fontWeight: 700,
-                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 flexShrink: 0,
               }}
             >

@@ -204,7 +204,7 @@ export function renderMarkdownBlocks(text: string, onOpenMermaid?: (code: string
               <table style={{
                 width: '100%',
                 borderCollapse: 'collapse',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}>
                 <thead>
                   <tr>

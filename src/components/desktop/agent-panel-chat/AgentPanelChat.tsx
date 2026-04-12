@@ -834,10 +834,10 @@ export function AgentPanelChat({
             {connectionState === 'connected' ? `Lane missing. Jump to ${fallbackLiveSession.name} or refresh the workspace snapshot.` : 'Recovering lane. The last selected lane is waiting for the runtime inventory to return.'}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <button type="button" onClick={() => handleSessionFocus(fallbackLiveSession.sessionKey)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', borderRadius: 999, background: 'rgba(185, 28, 28, 0.1)', color: '#b91c1c', padding: '4px 8px', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+            <button type="button" onClick={() => handleSessionFocus(fallbackLiveSession.sessionKey)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', borderRadius: 999, background: 'rgba(185, 28, 28, 0.1)', color: '#b91c1c', padding: '4px 8px', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
               Open live lane
             </button>
-            <button type="button" onClick={() => window.location.reload()} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', borderRadius: 999, background: 'rgba(185, 28, 28, 0.1)', color: '#b91c1c', padding: '4px 8px', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: '-apple-system, system-ui, sans-serif' }}>
+            <button type="button" onClick={() => window.location.reload()} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', borderRadius: 999, background: 'rgba(185, 28, 28, 0.1)', color: '#b91c1c', padding: '4px 8px', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
               Reload
             </button>
           </div>

@@ -505,7 +505,7 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
                   color: activeView === view ? '#2563eb' : 'var(--t-text-secondary)',
                   background: activeView === view ? 'rgba(37,99,235,0.08)' : 'transparent',
                   cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}
               >
                 {view === 'content' ? 'Content' : 'Diff'}
@@ -530,7 +530,7 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
           flexDirection: 'column',
           gap: 8,
           zIndex: 9999,
-          fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         }}>
           {/* Agent picker pills */}
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
