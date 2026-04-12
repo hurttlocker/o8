@@ -582,11 +582,11 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
       background: thoughtsBodyBackground,
       minHeight: 0,
     }}>
-      {/* Compact mission header — single row with title + metrics, then
-          a roomy input block with Plan Packets inline. Cut the explainer
-          copy and the redundant Mission Summary card — the prompt textarea
-          is the source of truth. */}
-      <div style={{
+      {/* Mission Control header + packet input removed — packets are now
+          created exclusively through the orchestrator chat or MCP tools.
+          The Issues list below is the only user-facing surface here. */}
+
+      {false && <div style={{
         paddingTop: 12,
         paddingRight: 14,
         paddingBottom: 12,
@@ -801,7 +801,7 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
             </button>
           </div>
         </div>
-      </div>
+      </div>}
 
       {repoIssues.length > 0 ? (
         <div style={{
@@ -918,21 +918,6 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
               ) : null}
             </div>
           ) : null}
-        </div>
-      ) : null}
-
-      {missionState.packets.length === 0 ? (
-        <div style={{
-          padding: '18px 16px',
-          borderRadius: 16,
-          border: '1px dashed var(--t-panel-border)',
-          background: 'rgba(148, 163, 184, 0.06)',
-          color: 'var(--t-text-secondary)',
-          fontSize: 12,
-          lineHeight: 1.6,
-          textAlign: 'center',
-        }}>
-          Add packets from issues above, or describe a mission and plan.
         </div>
       ) : null}
 
@@ -1491,6 +1476,32 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
                   >
                     {packet.archivedAt ? 'Restore' : 'Archive'}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateMissionState((current) => ({
+                        ...current,
+                        packets: current.packets.filter((p) => p.id !== packet.id),
+                      }));
+                    }}
+                    style={{
+                      borderWidth: 0,
+                      background: 'transparent',
+                      color: 'var(--t-text-muted)',
+                      paddingTop: 4,
+                      paddingRight: 8,
+                      paddingBottom: 4,
+                      paddingLeft: 8,
+                      borderRadius: 5,
+                      fontSize: 10.5,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'; e.currentTarget.style.color = '#ef4444'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-muted)'; }}
+                  >
+                    Delete
+                  </button>
                   <div style={{ flex: 1 }} />
                   {!packet.lane ? (
                     <button
@@ -1777,4 +1788,5 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
       })}
     </div>
   );
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 });

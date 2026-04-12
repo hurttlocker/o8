@@ -6,6 +6,7 @@ import type { DesktopWsCallbacks } from '../hooks/useDesktopWebSocket';
 import { isTauri } from '@/lib/tauri/bridge';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
@@ -81,6 +82,18 @@ export function useAgentPanelState({
     setReposOpen(true);
     setAddRepoIntentNonce((current) => current + 1);
   }, []);
+
+  // The global DesktopStatusBar's "+" button dispatches this window event so
+  // the add-repo intent can be triggered from outside the AgentPanel's own
+  // state scope. Same local handler, different entry point.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => requestAddRepo();
+    window.addEventListener(REQUEST_ADD_REPO_EVENT, handler as EventListener);
+    return () => {
+      window.removeEventListener(REQUEST_ADD_REPO_EVENT, handler as EventListener);
+    };
+  }, [requestAddRepo]);
 
   const launchRepoTask = useCallback(async (request: RepoTaskLaunchRequest) => {
     if (onLaunchWorkspaceTask) {

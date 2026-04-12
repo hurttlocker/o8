@@ -37,6 +37,7 @@ function RepoCardBase(props: RepoCardProps) {
         agentsByBranch={props.agentsByBranch}
         activePorts={props.activePorts}
         isActive={props.isActive ?? false}
+        expanded={props.expanded}
         activeWorkspacePath={props.activeWorkspacePath}
         onToggle={props.onToggle}
         onRemove={props.onRemove}

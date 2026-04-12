@@ -19,6 +19,8 @@ import {
   Trash2,
   branchSessionLabel,
   compareBranchAgents,
+  formatBranchDisplayName,
+  formatCompactAge,
   orchestratorRuntimeTone,
   orchestratorStatusTone,
   packetMatchesBranch,
@@ -120,8 +122,33 @@ function RepoBranchRowBase({
   const branchBaseBackground = isActiveScope ? 'rgba(37, 99, 235, 0.08)' : 'transparent';
   const branchHoverBackground = 'var(--t-panel-hover)';
 
+  // Status indicator — mirrors Superconductor's left-side glyph column:
+  //   spinning braille → running agent on this branch
+  //   ● solid dot      → has pending changes (additions/deletions) but idle
+  //   ?                → worktree needs attention (stale, conflicts)
+  //   (empty)          → clean branch, no activity
+  const hasRunningAgent = branchAgents.some((a) => a.status === 'running' || a.status === 'reviewing');
+  const hasChanges = (branch.additions ?? 0) > 0 || (branch.deletions ?? 0) > 0
+    || (branchDiffAgent && ((branchDiffAgent.additions ?? 0) > 0 || (branchDiffAgent.deletions ?? 0) > 0));
+  const needsAttention = branch.isStale || worktree?.status === 'stale';
+  const branchIndicator: 'spinner' | 'dot' | 'question' | null =
+    hasRunningAgent ? 'spinner'
+    : needsAttention ? 'question'
+    : hasChanges ? 'dot'
+    : null;
+  // The repo card header already shows "{repo.defaultBranch} · {status}" as
+  // its subtitle. Rendering a row for the default branch at the repo root is
+  // visually redundant — suppress the row header but keep any child packets
+  // and sessions so they still show up (flush, without the indent rail).
+  // Note: `isWorktree` is TRUE for the root checkout too (git-worktree-aware
+  // API), so gate on "default branch AND lives at repo root" instead.
+  const isRootDefaultBranch = branch.name === repo.defaultBranch
+    && (!branch.isWorktree || branch.worktreePath === repo.localPath);
+  const isRedundantDefaultBranch = isRootDefaultBranch;
+
   return (
     <div>
+      {isRedundantDefaultBranch ? null : (
       <div
         onClick={() => {
           // For any branch (worktree or not), try to open the agent transcript first
@@ -173,18 +200,54 @@ function RepoBranchRowBase({
         style={{
           display: 'flex',
           alignItems: 'flex-start',
-          gap: 8,
-          minHeight: branch.isWorktree ? 40 : 32,
-          padding: '6px 7px',
-          borderRadius: 8,
+          gap: 9,
+          padding: '5px 8px',
+          borderRadius: 7,
           background: branchBaseBackground,
-          border: isActiveScope ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid transparent',
+          border: 'none',
           cursor: branch.current ? 'default' : checkoutBusy ? 'wait' : 'pointer',
-          transition: 'background 120ms ease, border-color 120ms ease',
+          transition: 'background 120ms ease',
         }}
       >
+        {/* Status indicator — fixed-width slot to the left of the branch
+            icon. Always reserves 12px so the branch name never shifts
+            horizontally when an indicator appears or disappears. */}
+        <span
+          style={{
+            width: 12,
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginTop: 2,
+          }}
+        >
+          {branchIndicator === 'spinner' ? (
+            <AgentSpinner status="running" size={6} />
+          ) : branchIndicator === 'dot' ? (
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: '#d4a050',
+              }}
+            />
+          ) : branchIndicator === 'question' ? (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: '#d4a050',
+                lineHeight: 1,
+              }}
+            >
+              ?
+            </span>
+          ) : null}
+        </span>
         <GitBranch
-          size={11}
+          size={12}
           strokeWidth={2}
           style={{
             flexShrink: 0,
@@ -192,46 +255,39 @@ function RepoBranchRowBase({
             marginTop: branch.isWorktree ? 2 : 1,
           }}
         />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: branch.isWorktree ? 1 : 0, flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
           <span
+            title={branch.name}
             style={{
-              fontSize: 11.5,
-              fontWeight: branch.current || branch.isWorktree ? 620 : 560,
+              fontSize: 12,
+              fontWeight: 440,
               color: 'var(--t-text)',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
               minWidth: 0,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
+              lineHeight: 1.35,
+              letterSpacing: '-0.005em',
             }}
           >
-            {branch.name}
+            {formatBranchDisplayName(branch.name)}
           </span>
-          {branch.isWorktree ? (() => {
-            const hasPacketSession = branchPackets.some((packet) => packet.lane?.sessionKey);
-            const hasAgentSession = branchAgents.length > 0;
-            const hasSession = hasPacketSession || hasAgentSession;
-            const laneStatus = branchPackets.find((packet) => packet.lane?.lastEventLabel)?.lane?.lastEventLabel;
-            const statusLabel = hasSession
-              ? (laneStatus === 'agent_completed' ? 'Completed' : laneStatus === 'session_launched' ? 'Working' : 'Has session')
-              : worktreeTone?.label ?? 'No session';
-            const statusColor = hasSession ? '#15803d' : 'var(--t-text-faint)';
-            return (
-              <span
-                style={{
-                  fontSize: 10,
-                  lineHeight: 1.2,
-                  color: statusColor,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {statusLabel}
-              </span>
-            );
-          })() : null}
+          <span
+            style={{
+              fontSize: 10,
+              lineHeight: 1.3,
+              fontWeight: 400,
+              color: 'var(--t-text-faint)',
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              letterSpacing: '-0.005em',
+            }}
+          >
+            {formatCompactAge(branch.lastCommitUnix)}
+          </span>
         </div>
         {isActiveScope ? (
           <span
@@ -254,71 +310,50 @@ function RepoBranchRowBase({
             Current
           </span>
         ) : null}
-        {branchDiffAgent ? (
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: 'var(--t-text-secondary)',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-              letterSpacing: '-0.01em',
-              flexShrink: 0,
-            }}
-          >
-            +{(branchDiffAgent.additions ?? 0).toLocaleString()} -{(branchDiffAgent.deletions ?? 0).toLocaleString()}
-          </span>
-        ) : null}
+        {(() => {
+          // Prefer a live agent's in-progress diff (more informative while an
+          // agent is working), otherwise fall back to the branch-level diff
+          // vs the repo's default branch (what Superconductor shows).
+          const adds = branchDiffAgent?.additions ?? branch.additions ?? 0;
+          const dels = branchDiffAgent?.deletions ?? branch.deletions ?? 0;
+          if (adds === 0 && dels === 0) return null;
+          return (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 10.5,
+                fontWeight: 440,
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                letterSpacing: '-0.005em',
+                flexShrink: 0,
+                marginTop: 1,
+              }}
+            >
+              <span style={{ color: '#4ea672' }}>+{adds.toLocaleString()}</span>
+              <span style={{ color: '#c97070' }}>-{dels.toLocaleString()}</span>
+            </span>
+          );
+        })()}
       </div>
+      )}
 
       {branchPackets.length > 0 || orderedBranchAgents.length > 0 ? (
         <div
           style={{
-            marginLeft: 24,
-            marginTop: 4,
-            marginBottom: 7,
-            paddingLeft: 12,
-            borderLeft: '1px solid var(--t-divider-subtle)',
+            marginLeft: isRedundantDefaultBranch ? 0 : 22,
+            marginTop: isRedundantDefaultBranch ? 0 : 2,
+            marginBottom: isRedundantDefaultBranch ? 0 : 4,
+            paddingLeft: isRedundantDefaultBranch ? 0 : 10,
+            borderLeft: isRedundantDefaultBranch ? 'none' : '1px solid var(--t-divider-subtle)',
             display: 'flex',
             flexDirection: 'column',
-            gap: 6,
+            gap: 1,
           }}
         >
           {branchPackets.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  color: 'var(--t-text-faint)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.04em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                <span>Work</span>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minWidth: 18,
-                    height: 18,
-                    padding: '0 6px',
-                    borderRadius: 999,
-                    background: 'var(--t-divider-subtle)',
-                    color: 'var(--t-text-secondary)',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                    textTransform: 'none',
-                    letterSpacing: 'normal',
-                  }}
-                >
-                  {branchPackets.length}
-                </span>
-              </div>
               {branchPackets.map((packet) => {
                 const runtimeTone = orchestratorRuntimeTone(packet.runtime);
                 const statusTone = orchestratorStatusTone(packet.status);
@@ -345,69 +380,65 @@ function RepoBranchRowBase({
                       width: '100%',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 8,
-                      paddingTop: 6,
+                      gap: 9,
+                      paddingTop: 5,
                       paddingRight: 8,
-                      paddingBottom: 6,
+                      paddingBottom: 5,
                       paddingLeft: 8,
-                      borderRadius: 10,
-                      border: isSelectedPacket
-                        ? `1px solid ${THEME_ACCENT_BORDER}`
-                        : '1px solid var(--t-panel-border)',
-                      // Theme-aware surface — hardcoded `rgba(255, 255, 255, 0.56)`
-                      // rendered as a huge light-gray blob in the midnight theme.
-                      background: isSelectedPacket ? THEME_ACCENT_SOFT : 'var(--t-bg-card)',
+                      borderRadius: 7,
+                      border: 'none',
+                      background: isSelectedPacket ? THEME_ACCENT_SOFT : 'transparent',
                       color: 'var(--t-text)',
                       cursor: packet.lane?.sessionKey && onSelectSession ? 'pointer' : 'default',
                       fontFamily: '-apple-system, system-ui, sans-serif',
                       textAlign: 'left',
-                      boxShadow: isSelectedPacket ? `0 0 0 1px ${THEME_ACCENT_RING}` : 'none',
-                      transition: 'background 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
+                      transition: 'background 120ms ease',
                       opacity: packet.lane?.sessionKey && onSelectSession ? 1 : 0.82,
                     }}
+                    onMouseEnter={(event) => {
+                      if (!isSelectedPacket) {
+                        event.currentTarget.style.background = 'var(--t-panel-hover)';
+                      }
+                    }}
+                    onMouseLeave={(event) => {
+                      if (!isSelectedPacket) {
+                        event.currentTarget.style.background = 'transparent';
+                      }
+                    }}
                   >
+                    {/* 12px indicator slot — keeps packet cards aligned with
+                        branch rows that have the same reserved column. */}
+                    <span style={{ width: 12, flexShrink: 0 }} />
                     <span
+                      title={runtimeTone.label}
                       style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: '50%',
-                        background: statusTone.dot,
-                        boxShadow: `0 0 8px ${statusTone.dot}44`,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 14,
+                        height: 14,
                         flexShrink: 0,
+                        marginTop: 1,
                       }}
-                    />
-                    <span style={{ flex: 1, minWidth: 0 }}>
+                    >
+                      {packet.runtime === 'claude-code'
+                        ? <ClaudeIcon size={13} />
+                        : <CodexIcon size={13} />}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            paddingTop: 1,
-                            paddingRight: 5,
-                            paddingBottom: 1,
-                            paddingLeft: 5,
-                            borderRadius: 999,
-                            background: 'var(--t-divider-subtle)',
-                            color: 'var(--t-text-secondary)',
-                            fontSize: 8.5,
-                            fontWeight: 800,
-                            letterSpacing: '0.04em',
-                            textTransform: 'uppercase',
-                            flexShrink: 0,
-                          }}
-                        >
-                          {packet.referenceLabel}
-                        </span>
                         <span
                           style={{
                             minWidth: 0,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
-                            fontSize: 11,
-                            fontWeight: 620,
+                            fontSize: 12,
+                            fontWeight: 440,
                             color: 'var(--t-text)',
-                            letterSpacing: '-0.01em',
+                            letterSpacing: '-0.005em',
+                            lineHeight: 1.35,
+                            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
                           }}
                         >
                           {packet.title}
@@ -423,7 +454,7 @@ function RepoBranchRowBase({
                           overflow: 'hidden',
                           whiteSpace: 'nowrap',
                           textOverflow: 'ellipsis',
-                          fontSize: 9.5,
+                          fontSize: 10.5,
                           lineHeight: 1.3,
                           color: 'var(--t-text-faint)',
                         }}
@@ -438,25 +469,6 @@ function RepoBranchRowBase({
                           </>
                         ) : null}
                       </span>
-                    </span>
-                    <span
-                      title={runtimeTone.label}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 22,
-                        height: 22,
-                        borderRadius: 999,
-                        background: runtimeTone.background,
-                        border: `1px solid ${runtimeTone.border}`,
-                        color: runtimeTone.color,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {packet.runtime === 'claude-code'
-                        ? <ClaudeIcon size={14} color={runtimeTone.color} />
-                        : <CodexIcon size={14} color={runtimeTone.color} />}
                     </span>
                   </button>
                 );

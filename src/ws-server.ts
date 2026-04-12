@@ -1576,6 +1576,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   // match legacy behavior for clients that haven't been updated yet.
   const permissionMode: 'full' | 'plan' =
     msg.permissionMode === 'plan' ? 'plan' : 'full';
+  const thinkingEffort = msg.thinkingEffort === 'medium' ? 'medium'
+    : msg.thinkingEffort === 'high' ? 'high'
+    : 'max' as const;
 
   try {
     let session = getOrchestratorSession(repoPath);
@@ -1664,7 +1667,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           if (c) sendRaw(c, wsMsg);
         }
       }
-    }, { permissionMode });
+    }, { permissionMode, thinkingEffort });
 
     // After user message completes, drain any queued supervisor escalations
     void drainOrchestratorAutoQueue();

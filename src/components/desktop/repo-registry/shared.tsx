@@ -80,6 +80,8 @@ export interface BranchInfo {
   worktreePath?: string;
   ahead: number;
   behind: number;
+  additions?: number;
+  deletions?: number;
   isStale: boolean;
   staleDays?: number;
   diskSize?: string;
@@ -114,12 +116,12 @@ export const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.2
 export const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
 export const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 export const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
-export const THEME_SUCCESS_SOFT = 'rgba(34, 197, 94, 0.12)';
-export const THEME_SUCCESS_BORDER = 'rgba(34, 197, 94, 0.18)';
-export const THEME_SUCCESS_TEXT = '#4ade80';
-export const THEME_DANGER_SOFT = 'rgba(239, 68, 68, 0.12)';
-export const THEME_DANGER_BORDER = 'rgba(239, 68, 68, 0.2)';
-export const THEME_DANGER_TEXT = '#f87171';
+export const THEME_SUCCESS_SOFT = 'rgba(78, 166, 114, 0.12)';
+export const THEME_SUCCESS_BORDER = 'rgba(78, 166, 114, 0.18)';
+export const THEME_SUCCESS_TEXT = '#78b791';
+export const THEME_DANGER_SOFT = 'rgba(201, 112, 112, 0.12)';
+export const THEME_DANGER_BORDER = 'rgba(201, 112, 112, 0.2)';
+export const THEME_DANGER_TEXT = '#d28787';
 export const THEME_WORKTREE_SOFT = 'rgba(245, 158, 11, 0.12)';
 export const THEME_WORKTREE_SOFT_STRONG = 'rgba(245, 158, 11, 0.18)';
 export const THEME_WORKTREE_BORDER = 'rgba(245, 158, 11, 0.24)';
@@ -145,6 +147,42 @@ export function formatRelativeTime(value: string | null) {
     month: 'short',
     day: 'numeric',
   });
+}
+
+/**
+ * Strips the `worktree/<runtime>/` prefix that Cortex IDE uses to namespace
+ * agent-spawned branches. The full name stays available as a tooltip — this
+ * is purely a display-density helper so the branch row can show the slug
+ * portion (the part humans actually care about) instead of the prefix.
+ *
+ *   worktree/codex/create-a-new-file-at-docs       → create-a-new-file-at-docs
+ *   worktree/claude-code/fix-login-race            → fix-login-race
+ *   feat/meta-chat                                 → feat/meta-chat (unchanged)
+ */
+export function formatBranchDisplayName(name: string): string {
+  const match = name.match(/^worktree\/(?:codex|claude-code)\/(.+)$/);
+  return match ? match[1] : name;
+}
+
+/**
+ * Compact "Xh ago" / "Xd ago" formatter used by branch/packet list rows.
+ * Mirrors the Superconductor reference density — short, always two chars of
+ * unit, no localization overhead. Accepts a unix-ms timestamp.
+ */
+export function formatCompactAge(unixMs: number): string {
+  if (!unixMs || Number.isNaN(unixMs)) return '';
+  const delta = Math.max(0, Date.now() - unixMs);
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  if (delta < minute) return 'just now';
+  if (delta < hour) return `${Math.floor(delta / minute)}m ago`;
+  if (delta < day) return `${Math.floor(delta / hour)}h ago`;
+  if (delta < week) return `${Math.floor(delta / day)}d ago`;
+  if (delta < 30 * day) return `${Math.floor(delta / week)}w ago`;
+  if (delta < 365 * day) return `${Math.floor(delta / (30 * day))}mo ago`;
+  return `${Math.floor(delta / (365 * day))}y ago`;
 }
 
 export function shortenPath(value: string) {
