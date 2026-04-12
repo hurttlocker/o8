@@ -2383,6 +2383,10 @@ function DashboardInner() {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
+                borderRadius: 14,
+                marginTop: 4,
+                marginBottom: 4,
+                marginRight: 4,
               }}
             >
               <AnimatePresence initial={false} mode="wait">
