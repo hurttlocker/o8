@@ -31,6 +31,7 @@ interface ChatHistoryEntry {
 
 export async function GET(request: NextRequest) {
   const searchQuery = request.nextUrl.searchParams.get('q')?.toLowerCase();
+  const includeOrchestrator = request.nextUrl.searchParams.get('include') === 'orchestrator';
 
   try {
     const files = readdirSync(HISTORY_DIR).filter(f => f.endsWith('.json'));
@@ -45,9 +46,9 @@ export async function GET(request: NextRequest) {
 
         if (!data.messages || data.messages.length === 0) continue;
 
-        // Skip orchestrator threads — they have their own history sidebar
+        // Skip orchestrator threads unless explicitly requested
         const tabId = basename(file, '.json');
-        if (tabId.startsWith('thoughts-')) continue;
+        if (!includeOrchestrator && tabId.startsWith('thoughts-')) continue;
 
         const messages = data.messages as { role: string; content: string }[];
         const firstUserMsg = messages.find(m => m.role === 'user');
