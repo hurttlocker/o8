@@ -129,6 +129,115 @@ export function collectLeafContentKinds(node: TileNode): TileContentKind[] {
   ];
 }
 
+/** Flat list of every leaf in the tree, in pre-order. */
+export function collectLeafNodes(node: TileNode): TileLeafNode[] {
+  if (isTileLeafNode(node)) {
+    return [node];
+  }
+  return [
+    ...collectLeafNodes(node.children[0]),
+    ...collectLeafNodes(node.children[1]),
+  ];
+}
+
+/**
+ * Rect in normalized container coordinates. All four values are in [0, 1].
+ * `left + width <= 1` and `top + height <= 1` — suitable for CSS percentages.
+ */
+export interface TileRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Geometry of a single split derived from the tile tree. `container` is the
+ * full rect of the split (used to convert drag events back into a ratio),
+ * `boundary` is the zero-width/height line where the resize handle lives.
+ */
+export interface TileSplitFrame {
+  id: string;
+  direction: TileSplitDirection;
+  container: TileRect;
+  boundary: TileRect;
+}
+
+/**
+ * Walk the tile tree and compute a flat layout: a rect per leaf and a frame
+ * per split. The TileContainer uses this to render every leaf as an
+ * absolutely-positioned sibling in a single React parent, so React preserves
+ * component state for each leaf across any tree-shape change (splitting,
+ * unsplitting, wrapping, closing a sibling, etc.).
+ */
+export function computeTileLayout(
+  root: TileNode,
+  viewport: TileRect = { left: 0, top: 0, width: 1, height: 1 },
+): {
+  leafRects: Map<string, TileRect>;
+  splitFrames: TileSplitFrame[];
+} {
+  const leafRects = new Map<string, TileRect>();
+  const splitFrames: TileSplitFrame[] = [];
+
+  function walk(node: TileNode, rect: TileRect) {
+    if (isTileLeafNode(node)) {
+      leafRects.set(node.id, rect);
+      return;
+    }
+
+    if (node.direction === 'vertical') {
+      // Children side-by-side, col-resize handle at ratio along x axis.
+      const leftWidth = rect.width * node.ratio;
+      const firstRect: TileRect = { ...rect, width: leftWidth };
+      const secondRect: TileRect = {
+        ...rect,
+        left: rect.left + leftWidth,
+        width: rect.width - leftWidth,
+      };
+      splitFrames.push({
+        id: node.id,
+        direction: node.direction,
+        container: rect,
+        boundary: {
+          left: rect.left + leftWidth,
+          top: rect.top,
+          width: 0,
+          height: rect.height,
+        },
+      });
+      walk(node.children[0], firstRect);
+      walk(node.children[1], secondRect);
+      return;
+    }
+
+    // 'horizontal' — children stacked top/bottom, row-resize handle along y.
+    const topHeight = rect.height * node.ratio;
+    const firstRect: TileRect = { ...rect, height: topHeight };
+    const secondRect: TileRect = {
+      ...rect,
+      top: rect.top + topHeight,
+      height: rect.height - topHeight,
+    };
+    splitFrames.push({
+      id: node.id,
+      direction: node.direction,
+      container: rect,
+      boundary: {
+        left: rect.left,
+        top: rect.top + topHeight,
+        width: rect.width,
+        height: 0,
+      },
+    });
+    walk(node.children[0], firstRect);
+    walk(node.children[1], secondRect);
+  }
+
+  walk(root, viewport);
+  return { leafRects, splitFrames };
+}
+
 export function mapTile(
   node: TileNode,
   tileId: string,
