@@ -921,6 +921,31 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
         </div>
       ) : null}
 
+      {/* Empty state — no issues and no packets */}
+      {repoIssues.length === 0 && missionState.packets.length === 0 ? (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          paddingTop: 40,
+          paddingBottom: 40,
+          color: 'var(--t-text-muted)',
+        }}>
+          <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', opacity: 0.4 }}>
+            <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
+            <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
+          </svg>
+          <span style={{ fontSize: 11, fontWeight: 500 }}>
+            {issuesLoading ? 'Loading issues...' : 'No open issues or packets'}
+          </span>
+          <span style={{ fontSize: 10, color: 'var(--t-text-faint)', textAlign: 'center', maxWidth: 200 }}>
+            Issues from GitHub and dispatch packets will appear here.
+          </span>
+        </div>
+      ) : null}
+
       {missionState.packets.map((packet) => {
         const statusMeta = orchestratorStatusTone(packet.status);
         const runtimeMeta = orchestratorRuntimeTone(packet.runtime);
