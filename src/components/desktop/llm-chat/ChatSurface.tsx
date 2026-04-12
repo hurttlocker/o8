@@ -266,14 +266,14 @@ function ChatSurfaceBase({
 
           {isStreaming ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
-              {activeThinking && activeThinking.steps.length > 0 ? <ChainOfThought steps={activeThinking.steps} thinking={activeThinking.thinking} isLive /> : null}
+              {activeThinking ? <ChainOfThought steps={activeThinking.steps} thinking={activeThinking.thinking} isLive /> : null}
               {activeToolCalls.length > 0 && !activeThinking?.steps.length ? <LiveToolCalls toolCalls={activeToolCalls} /> : null}
               {streamContent ? (
                 <div style={{ maxWidth: '90%', paddingTop: 16, paddingBottom: 16, fontSize: 14, lineHeight: '1.6', color: '#1e293b', wordBreak: 'break-word', animation: 'llmFadeIn 200ms ease-out' }}>
                   {renderLLMMarkdown(streamContent)}
                   <span style={{ display: 'inline-block', width: 2, height: 16, background: '#3b82f6', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'llmDot 1s ease-in-out infinite' }} />
                 </div>
-              ) : <StreamingIndicator />}
+              ) : !activeThinking ? <StreamingIndicator /> : null}
             </div>
           ) : null}
         </div>
