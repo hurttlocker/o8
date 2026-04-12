@@ -11,7 +11,6 @@ import {
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
-import type { WorkspaceSidePanelRepo, WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import {
@@ -60,11 +59,6 @@ interface UseTileLayoutArgs {
   findWorkspaceTarget: () => TileLeafNode | null;
   globalRepoEntries: RepoRegistryEntry[];
   globalRepoEntry: RepoRegistryEntry | null;
-  openWorkspaceSidePanel: (
-    view: WorkspaceSidePanelView,
-    repo?: WorkspaceSidePanelRepo | null,
-    options?: { pullRequestNumber?: number | null; compactReview?: boolean },
-  ) => void;
   setActiveTileId: Dispatch<SetStateAction<string | null>>;
   setTileLayout: Dispatch<SetStateAction<TileLayout>>;
   tileLayout: TileLayout;
@@ -88,7 +82,6 @@ export function useTileLayout({
   findWorkspaceTarget,
   globalRepoEntries,
   globalRepoEntry,
-  openWorkspaceSidePanel,
   setActiveTileId,
   setTileLayout,
   tileLayout,
@@ -631,23 +624,6 @@ export function useTileLayout({
   }, [canvasStateByTileId, ensureCanvasTile, setActiveTileId, setCanvasTileRepoScope]);
 
   const openCanvasTab = useCallback((tab: CanvasTab) => {
-    if (tab.kind === 'ci') {
-      const repoPath = resolveCanvasTabRepoPath(tab);
-      const repoEntry = repoPath
-        ? globalRepoEntries.find((repo) => repo.localPath === repoPath) ?? null
-        : (tab.meta?.repo
-            ? globalRepoEntries.find((repo) => repoSlugFromRemote(repo.remoteUrl) === tab.meta?.repo) ?? null
-            : null);
-      openWorkspaceSidePanel('review', repoEntry ? {
-        name: repoEntry.name,
-        localPath: repoEntry.localPath,
-        branch: repoEntry.readiness?.currentBranch ?? repoEntry.defaultBranch,
-        readiness: repoEntry.readiness ?? null,
-        remoteUrl: repoEntry.remoteUrl ?? undefined,
-      } : null);
-      return;
-    }
-
     // Route all canvas tabs to workspace tabs — no more Inspector panel
     const repoPath = resolveCanvasTabRepoPath(tab);
     const repoEntry = repoPath
@@ -670,7 +646,7 @@ export function useTileLayout({
       // Last resort fallback — should rarely hit since workspace auto-creates
       openCanvasInInspectorTile(tab, repoPath);
     })();
-  }, [globalRepoEntries, openCanvasInInspectorTile, openWorkspaceSidePanel, resolveCanvasTabRepoPath, waitForWorkspaceTerminalTarget]);
+  }, [globalRepoEntries, openCanvasInInspectorTile, resolveCanvasTabRepoPath, waitForWorkspaceTerminalTarget]);
 
   const closeCanvasTab = useCallback((tileId: string, tabId: string) => {
     setCanvasStateByTileId((prev) => {

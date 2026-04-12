@@ -167,11 +167,20 @@ export const ChangesTab = memo(function ChangesTab({
   const [commitLoading, setCommitLoading] = useState(false);
   const [actionToast, setActionToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const workspaceQuery = useMemo(() => (
-    repo?.localPath ? `?workspace=${encodeURIComponent(repo.localPath)}` : ''
-  ), [repo?.localPath]);
+  const repoPath = repo?.localPath ?? null;
 
   const refreshFiles = useCallback(async () => {
+    // Never hit the review/files APIs without a concrete workspace path —
+    // the server falls back to process.cwd() and would leak that repo's
+    // diff into the panel when the user has removed the real repo.
+    if (!repoPath) {
+      setFiles([]);
+      setTree([]);
+      setActionToast(null);
+      setLoading(false);
+      return;
+    }
+    const workspaceQuery = `?workspace=${encodeURIComponent(repoPath)}`;
     setLoading(true);
     try {
       const [diffRes, treeRes] = await Promise.all([
@@ -195,11 +204,13 @@ export const ChangesTab = memo(function ChangesTab({
     } finally {
       setLoading(false);
     }
-  }, [workspaceQuery]);
+  }, [repoPath]);
 
   useEffect(() => {
     void refreshFiles();
-    // WS-driven: instant refresh on agent/lane events instead of 20s polling
+    // Only subscribe to realtime/poll refreshes when we actually have a repo.
+    // Otherwise every WS event would trigger an empty refetch cycle.
+    if (!repoPath) return;
     const handler = () => { void refreshFiles(); };
     const wsEvents = ['o8:agent-lifecycle', 'o8:lane-lifecycle'];
     for (const e of wsEvents) window.addEventListener(e, handler);
@@ -208,12 +219,19 @@ export const ChangesTab = memo(function ChangesTab({
       for (const e of wsEvents) window.removeEventListener(e, handler);
       window.clearInterval(fallbackId);
     };
-  }, [refreshFiles]);
+  }, [refreshFiles, repoPath]);
 
   useEffect(() => {
+    // Eagerly clear stale state the moment the repo reference is lost. This
+    // prevents the previous repo's diff/tree from lingering on-screen while
+    // the next refreshFiles() resolves (or never fires, if repoPath is null).
+    if (!repoPath) {
+      setFiles([]);
+      setTree([]);
+      setActionToast(null);
+    }
     setCommitMsg('');
-    setActionToast(null);
-  }, [repo?.localPath]);
+  }, [repoPath]);
 
   const stageAndCommit = useCallback(async () => {
     if (!commitMsg.trim()) return;

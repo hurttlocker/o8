@@ -54,11 +54,6 @@ interface WorkspaceAgentLaunchRequest {
   autoArchiveOnIdle?: boolean;
 }
 
-interface OpenWorkspaceSidePanelOptions {
-  pullRequestNumber?: number | null;
-  compactReview?: boolean;
-}
-
 export interface TileRegistryDeps {
   activeTileId: string | null;
   canvasStateByTileId: Record<string, CanvasTileState>;
@@ -86,7 +81,6 @@ export interface TileRegistryDeps {
   openWorkspaceSidePanel: (
     view: WorkspaceSidePanelView,
     repo?: WorkspaceSidePanelRepo | null,
-    options?: OpenWorkspaceSidePanelOptions,
   ) => void;
   orchestratorWorkspaceTargets: OrchestratorWorkspaceTarget[];
   parsedAgents: PaletteAgentSummary[];

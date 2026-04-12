@@ -5,7 +5,11 @@ import { execSync } from 'child_process';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+// No process.cwd() fallback on purpose — the server runs from wherever Node
+// was started (dev repo, Tauri bundled dir, etc) and that has nothing to do
+// with the user's workspace. Callers must pass ?workspace=<absolute path>.
+// The CORTEX_IDE_REVIEW_REPO_ROOT env stays as an explicit dev/CI override.
+const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || null;
 const IGNORE = new Set(['node_modules', '.next', '.turbo', 'target', 'dist', '.DS_Store', '.pnpm-store', '.cache']);
 
 // Response cache — file tree doesn't change every second
@@ -83,10 +87,16 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const workspaceParam = searchParams.get('workspace');
 
-  let root = DEFAULT_ROOT;
+  let root: string | null = DEFAULT_ROOT;
   if (workspaceParam) {
     const home = process.env.HOME || require('os').homedir();
     root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', home) : workspaceParam;
+  }
+
+  // No workspace → return an empty tree instead of silently leaking
+  // whatever repo the server process happens to be sitting in.
+  if (!root) {
+    return NextResponse.json({ tree: [], root: null, changedFiles: [] });
   }
 
   // Return cached if fresh
