@@ -797,7 +797,7 @@ export function AgentPanelChat({
         flexDirection: 'column',
         height: '100%',
         minHeight: 0,
-        background: '#ffffff',
+        background: 'var(--t-chat-surface-bg, #ffffff)',
         position: 'relative',
         outline: dragOver ? '2px solid #3b82f6' : 'none',
         outlineOffset: -2,
