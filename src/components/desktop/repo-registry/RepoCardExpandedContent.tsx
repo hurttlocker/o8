@@ -213,20 +213,6 @@ function RepoCardExpandedContentBase({
                 <span style={SUB_STYLE}>{isActiveRepo ? 'Active' : 'Idle'}</span>
               </div>
             </div>
-            <div style={ROW_STYLE}>
-              <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
-                <AgentSpinner status={spinnerStatus} size={6} />
-              </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 12, height: 12, flexShrink: 0 }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-              </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-                <span style={LABEL_STYLE}>Assistant</span>
-                <span style={SUB_STYLE}>{isActiveRepo ? 'Active' : 'Idle'}</span>
-              </div>
-            </div>
           </div>
         );
       })()}
