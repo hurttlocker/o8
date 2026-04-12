@@ -10,13 +10,43 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import {
-  createElementPickerBridgeScript,
   ELEMENT_PICKER_START_EVENT,
-  ELEMENT_PICKER_STOP_EVENT,
   ELEMENT_PICKER_RESULT_EVENT,
   type PickedElement,
 } from '@/lib/browser/element-picker-bridge';
 import { O8ElementPanel } from './O8ElementPanel';
+
+// ── iframe-proxy helper ──
+// The element picker needs the bridge script living inside the iframe's
+// document. Loading a dev server directly makes the iframe cross-origin with
+// our dashboard, which blocks script injection. Routing the URL through our
+// own origin (`/api/panel/iframe-proxy?url=...`) makes it same-origin, lets
+// the proxy route inject the bridge, and unblocks the picker. For non-loopback
+// URLs we fall back to direct loading — external sites don't support picking.
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const host = u.hostname;
+    return (
+      host === 'localhost'
+      || host === '127.0.0.1'
+      || host === '0.0.0.0'
+      || host === '::1'
+      || /^10\./.test(host)
+      || /^192\.168\./.test(host)
+      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function proxiedPickUrl(url: string): string {
+  return isLoopbackUrl(url)
+    ? `/api/panel/iframe-proxy?pick=1&url=${encodeURIComponent(url)}`
+    : url;
+}
 
 // ── Types ──
 
@@ -178,29 +208,45 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
   }, [activeTab]);
 
   // ── Element Picker ──
-
+  //
+  // Default iframe loads the target URL DIRECTLY so the user's SPA boots
+  // normally (Next.js, Vite, etc.). Direct load means cross-origin, which
+  // blocks the picker bridge — that's fine until the user wants to pick.
+  //
+  // When the picker is toggled ON we swap the iframe src to the proxy route
+  // with `?pick=1`, which serves the same HTML from OUR origin with every
+  // `<script>` tag stripped and the bridge pre-installed. The SSR-rendered
+  // DOM is fully visible and pickable; there is no runtime to crash with
+  // "Application error". When toggled OFF we swap back to the direct URL
+  // and the SPA rehydrates.
   const togglePicker = useCallback(() => {
+    setPickerActive((prev) => {
+      const next = !prev;
+      if (next) setSelectedElement(null);
+      return next;
+    });
+  }, []);
+
+  // Build the iframe src based on picker state. When picking, proxy + strip
+  // scripts. Otherwise direct-load for full SPA functionality.
+  const iframeSrc = activeTab?.url
+    ? (pickerActive ? proxiedPickUrl(activeTab.url) : activeTab.url)
+    : '';
+
+  // When the proxied iframe finishes loading, kick the bridge script into
+  // picker mode with a postMessage. The bridge was injected at the top of
+  // `<head>` by the proxy, so by onLoad time it has installed its listeners.
+  // When the user toggles picker OFF, the iframe navigates back to the
+  // direct URL and the old document is unloaded — no explicit STOP needed.
+  const handleIframeLoad = useCallback(() => {
+    if (!pickerActive) return;
     const iframe = iframeRef.current;
     if (!iframe?.contentWindow) return;
-    if (pickerActive) {
-      iframe.contentWindow.postMessage({ type: ELEMENT_PICKER_STOP_EVENT }, '*');
-      setPickerActive(false);
-      return;
-    }
-    // Inject bridge script (same-origin only)
     try {
-      const doc = iframe.contentDocument;
-      if (doc && !doc.getElementById('o8-picker-bridge')) {
-        const script = doc.createElement('script');
-        script.id = 'o8-picker-bridge';
-        script.textContent = createElementPickerBridgeScript();
-        doc.body.appendChild(script);
-      }
       iframe.contentWindow.postMessage({ type: ELEMENT_PICKER_START_EVENT }, '*');
-      setPickerActive(true);
-      setSelectedElement(null);
     } catch {
-      console.warn('[o8-browser] Cannot inject picker — cross-origin iframe');
+      // Target origin is '*' so postMessage rarely throws, but swallow in case
+      // the iframe is cross-origin (non-loopback URL) and doesn't hear it.
     }
   }, [pickerActive]);
 
@@ -497,8 +543,9 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
             <iframe
               ref={iframeRef}
               key={activeTab.id + '-' + activeTab.url}
-              src={activeTab.url}
+              src={iframeSrc}
               title={activeTab.title}
+              onLoad={handleIframeLoad}
               sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
               style={{
                 width: '100%', height: selectedElement ? 'calc(100% - 32px)' : '100%',

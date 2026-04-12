@@ -10,11 +10,31 @@
  * Layout:
  *   Hero metrics row → Hourly/Daily chart → Surface breakdown →
  *   Agent breakdown → Model breakdown → Top sessions
+ *
+ * Visual language: one accent (var(--t-accent)) everywhere. Hierarchy is
+ * expressed by weight, size, and neutral grays — never by hue. Apple Stocks /
+ * Health / Finder do the same thing. Color-coding per agent/surface/model was
+ * noise and broke on midnight (some hardcoded hexes went black-on-black).
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Activity, BarChart3, Clock, Cpu, DollarSign, Layers, TrendingUp, Zap } from 'lucide-react';
+import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 import { formatTokens } from '@/lib/util/format-tokens';
+
+/**
+ * Render the official brand logo for an agent/surface/model name when it
+ * matches a known family; otherwise return null so callers can fall back
+ * to the generic accent dot.
+ */
+function brandLogoFor(name: string, size = 12): ReactNode | null {
+  const lower = name.toLowerCase();
+  if (lower.includes('claude')) return <ClaudeIcon size={size} />;
+  if (lower.includes('codex') || lower.startsWith('gpt')) return <CodexIcon size={size} />;
+  return null;
+}
+
 interface Totals {
   cost: number;
   messages: number;
@@ -74,54 +94,17 @@ function formatCost(n: number): string {
   return `$${n.toFixed(4)}`;
 }
 
-const AGENT_COLORS: Record<string, string> = {
-  Mister: '#111827',
-  Niot: '#2563eb',
-  Hawk: '#f59e0b',
-  'Codex CLI': '#10b981',
-  'Claude Code': '#7c3aed',
-  'IDE LLM Chat': '#ec4899',
-};
-
-const SURFACE_COLORS: Record<string, string> = {
-  'Codex CLI': '#2563eb',
-  'Claude Code': '#f59e0b',
-  'IDE LLM Chat': '#7c3aed',
-};
-
-const MODEL_COLORS: Record<string, string> = {
-  'claude-opus-4-6': '#7c3aed',
-  'claude-sonnet-4': '#2563eb',
-  'claude-sonnet-4-5': '#3b82f6',
-  'claude-haiku-4-5': '#14b8a6',
-  'claude-haiku-3-5': '#22c55e',
-  'gemini-3-pro-preview': '#f59e0b',
-  'gemini-3-flash-preview': '#fb923c',
-  'codex': '#10b981',
-  'gpt-5': '#10b981',
-  'delivery-mirror': '#6b7280',
-};
-
-function getModelColor(model: string): string {
-  for (const [key, color] of Object.entries(MODEL_COLORS)) {
-    if (model.includes(key)) return color;
-  }
-  return '#9ca3af';
-}
-
 // ── Hero Metric Card ──
 const MetricCard = memo(function MetricCard({
   icon: Icon,
   label,
   value,
   sub,
-  color,
 }: {
   icon: typeof DollarSign;
   label: string;
   value: string;
   sub?: string;
-  color: string;
 }) {
   return (
     <div style={{
@@ -137,22 +120,32 @@ const MetricCard = memo(function MetricCard({
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{
-          width: 28, height: 28, borderRadius: 8,
-          background: `${color}12`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 28,
+          height: 28,
+          borderRadius: 8,
+          background: 'var(--t-accent-soft)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}>
-          <Icon size={14} strokeWidth={2} color={color} />
+          <Icon size={14} strokeWidth={2} color="var(--t-accent)" />
         </div>
         <span style={{
-          fontSize: 11, fontWeight: 600, color: 'var(--t-text-muted)',
-          textTransform: 'uppercase', letterSpacing: '0.06em',
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--t-text-muted)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
         }}>
           {label}
         </span>
       </div>
       <div style={{
-        fontSize: 26, fontWeight: 700, color: 'var(--t-text)',
-        letterSpacing: '-0.03em', fontFamily: '"SF Mono", ui-monospace, monospace',
+        fontSize: 26,
+        fontWeight: 700,
+        color: 'var(--t-text)',
+        letterSpacing: '-0.03em',
+        fontFamily: '"SF Mono", ui-monospace, monospace',
         fontVariantNumeric: 'tabular-nums',
       }}>
         {value}
@@ -201,20 +194,25 @@ const SpendChart = memo(function SpendChart({ data }: { data: HourBucket[] }) {
       padding: '16px 18px',
     }}>
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         marginBottom: 14,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <BarChart3 size={14} strokeWidth={2} color="#2563eb" />
+          <BarChart3 size={14} strokeWidth={2} color="var(--t-accent)" />
           <span style={{
-            fontSize: 13, fontWeight: 700, color: 'var(--t-text)',
+            fontSize: 13,
+            fontWeight: 700,
+            color: 'var(--t-text)',
             letterSpacing: '-0.01em',
           }}>
             {isDaily ? 'Daily Spend' : 'Hourly Spend'}
           </span>
         </div>
         <span style={{
-          fontSize: 11, color: 'var(--t-text-faint)',
+          fontSize: 11,
+          color: 'var(--t-text-faint)',
           fontFamily: '"SF Mono", ui-monospace, monospace',
         }}>
           {chartData.length} {isDaily ? 'days' : 'hours'}
@@ -240,8 +238,8 @@ const SpendChart = memo(function SpendChart({ data }: { data: HourBucket[] }) {
                   x={x} y={chartHeight - h}
                   width={barWidth} height={Math.max(h, 1)}
                   rx={barWidth > 12 ? 4 : 2}
-                  fill="#2563eb"
-                  opacity={0.7}
+                  fill="var(--t-accent)"
+                  opacity={0.78}
                 >
                   <title>{`${d.hour}\n${formatCost(d.cost)} · ${d.messages} msgs · ${formatTokens(d.tokens)} tokens`}</title>
                 </rect>
@@ -265,22 +263,21 @@ const SpendChart = memo(function SpendChart({ data }: { data: HourBucket[] }) {
 });
 
 // ── Breakdown Card (shared for Agent, Surface) ──
+// Single accent color, hierarchy by bar width + text weight, no per-entry hue.
 const BreakdownCard = memo(function BreakdownCard({
   title,
   icon: Icon,
-  iconColor,
   entries,
   totalCost,
-  colorMap,
 }: {
   title: string;
   icon: typeof Cpu;
-  iconColor: string;
   entries: Array<[string, BreakdownEntry]>;
   totalCost: number;
-  colorMap: Record<string, string>;
 }) {
   if (entries.length === 0) return null;
+
+  const tokenTotal = entries.reduce((s, [, d]) => s + d.tokens, 0);
 
   return (
     <div style={{
@@ -290,7 +287,7 @@ const BreakdownCard = memo(function BreakdownCard({
       padding: '16px 18px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <Icon size={14} strokeWidth={2} color={iconColor} />
+        <Icon size={14} strokeWidth={2} color="var(--t-accent)" />
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
           {title}
         </span>
@@ -298,22 +295,23 @@ const BreakdownCard = memo(function BreakdownCard({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {entries.map(([name, data]) => {
           const pct = totalCost > 0 ? (data.cost / totalCost) * 100 : 0;
-          const tokenPct = entries.reduce((s, [, d]) => s + d.tokens, 0);
-          const tokPct = tokenPct > 0 ? (data.tokens / tokenPct) * 100 : 0;
-          const color = colorMap[name] || '#9ca3af';
-          const barPct = Math.max(pct, tokPct); // Use whichever is larger for bar visibility
+          const tokPct = tokenTotal > 0 ? (data.tokens / tokenTotal) * 100 : 0;
+          const barPct = Math.max(pct, tokPct);
+          const brand = brandLogoFor(name, 14);
           return (
             <div key={name}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: 4, background: color }} />
+                  {brand ?? <div style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--t-accent)' }} />}
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)' }}>{name}</span>
                   <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
                     {data.sessions} session{data.sessions !== 1 ? 's' : ''}
                   </span>
                 </div>
                 <span style={{
-                  fontSize: 13, fontWeight: 700, color: 'var(--t-text)',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: 'var(--t-text)',
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                 }}>
                   {data.cost > 0 ? formatCost(data.cost) : formatTokens(data.tokens) + ' tok'}
@@ -324,8 +322,8 @@ const BreakdownCard = memo(function BreakdownCard({
                   width: `${Math.max(barPct, 1)}%`,
                   height: '100%',
                   borderRadius: 3,
-                  background: color,
-                  opacity: 0.7,
+                  background: 'var(--t-accent)',
+                  opacity: 0.78,
                   transition: 'width 300ms cubic-bezier(0.32, 0.72, 0, 1)',
                 }} />
               </div>
@@ -362,42 +360,48 @@ const ModelBreakdownCard = memo(function ModelBreakdownCard({ byModel }: { byMod
       padding: '16px 18px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <Zap size={14} strokeWidth={2} color="#7c3aed" />
+        <Zap size={14} strokeWidth={2} color="var(--t-accent)" />
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
           By Model
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {byModel.map((m) => {
-          const color = getModelColor(m.model);
+          const brand = brandLogoFor(m.model, 12);
           return (
-            <div key={m.model} style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '8px 10px',
-              borderRadius: 10,
-              background: 'var(--t-bg-subtle)',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ width: 6, height: 6, borderRadius: 3, background: color }} />
-                <span style={{
-                  fontSize: 11, fontWeight: 600, color: 'var(--t-text)',
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                }}>
-                  {m.model}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
-                  {m.sessions} sess · {m.messages} msgs
-                </span>
-                <span style={{
-                  fontSize: 12, fontWeight: 700, color: 'var(--t-text)',
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                }}>
-                  {m.cost > 0 ? formatCost(m.cost) : `${m.messages} calls`}
-                </span>
-              </div>
+          <div key={m.model} style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 10px',
+            borderRadius: 10,
+            background: 'var(--t-bg-subtle)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {brand ?? <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--t-accent)' }} />}
+              <span style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--t-text)',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+              }}>
+                {m.model}
+              </span>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
+                {m.sessions} sess · {m.messages} msgs
+              </span>
+              <span style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: 'var(--t-text)',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+              }}>
+                {m.cost > 0 ? formatCost(m.cost) : `${m.messages} calls`}
+              </span>
+            </div>
+          </div>
           );
         })}
       </div>
@@ -423,29 +427,67 @@ const TopSessionsCard = memo(function TopSessionsCard({ sessions }: { sessions: 
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {sessions.map((s, i) => (
+        {sessions.map((s, i) => {
+          const brand = brandLogoFor(s.agent, 14);
+          return (
           <div key={s.id} style={{
-            display: 'flex', alignItems: 'center', gap: 8,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
             padding: '8px 10px',
             borderRadius: 10,
             background: i % 2 === 0 ? 'var(--t-bg-subtle)' : 'transparent',
           }}>
             <span style={{
-              width: 18, fontSize: 10, fontWeight: 700,
-              color: 'var(--t-text-faint)', textAlign: 'right',
+              width: 18,
+              fontSize: 10,
+              fontWeight: 700,
+              color: 'var(--t-text-faint)',
+              textAlign: 'right',
             }}>
               {i + 1}
             </span>
-            <div style={{
-              width: 8, height: 8, borderRadius: 4,
-              background: s.active ? '#34c759' : (AGENT_COLORS[s.agent] || '#9ca3af'),
-              boxShadow: s.active ? '0 0 6px rgba(52, 211, 153, 0.4)' : 'none',
-            }} />
+            {brand ? (
+              <div style={{
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 14,
+                height: 14,
+                flexShrink: 0,
+              }}>
+                {brand}
+                {s.active ? (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      right: -2,
+                      bottom: -2,
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      background: 'var(--t-accent)',
+                      boxShadow: '0 0 5px var(--t-accent-ring)',
+                    }}
+                  />
+                ) : null}
+              </div>
+            ) : (
+              <div style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                background: s.active ? 'var(--t-accent)' : 'var(--t-text-faint)',
+                boxShadow: s.active ? '0 0 6px var(--t-accent-ring)' : 'none',
+              }} />
+            )}
             <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text)', width: 80 }}>
               {s.agent}
             </span>
             <span style={{
-              fontSize: 10, color: 'var(--t-text-faint)',
+              fontSize: 10,
+              color: 'var(--t-text-faint)',
               fontFamily: '"SF Mono", ui-monospace, monospace',
               flex: 1,
             }}>
@@ -455,14 +497,18 @@ const TopSessionsCard = memo(function TopSessionsCard({ sessions }: { sessions: 
               {s.messages} msgs
             </span>
             <span style={{
-              fontSize: 12, fontWeight: 700, color: 'var(--t-text)',
+              fontSize: 12,
+              fontWeight: 700,
+              color: 'var(--t-text)',
               fontFamily: '"SF Mono", ui-monospace, monospace',
-              width: 70, textAlign: 'right',
+              width: 70,
+              textAlign: 'right',
             }}>
               {s.cost > 0 ? formatCost(s.cost) : `${s.messages}×`}
             </span>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -519,6 +565,7 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
   return (
     <div style={{
       flex: 1,
+      minHeight: 0,
       overflowY: 'auto',
       padding: '24px 32px',
       scrollbarWidth: 'none',
@@ -528,13 +575,17 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
     >
       {/* Header */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         marginBottom: 20,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Activity size={18} strokeWidth={2} color="var(--t-accent)" />
           <span style={{
-            fontSize: 20, fontWeight: 800, color: 'var(--t-text)',
+            fontSize: 20,
+            fontWeight: 800,
+            color: 'var(--t-text)',
             letterSpacing: '-0.03em',
           }}>
             Analytics
@@ -542,7 +593,8 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
         </div>
         {/* Time range picker */}
         <div style={{
-          display: 'flex', gap: 2,
+          display: 'flex',
+          gap: 2,
           background: 'var(--t-panel)',
           border: '1px solid var(--t-divider-subtle)',
           borderRadius: 8,
@@ -578,8 +630,13 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
         </div>
       ) : data && data.totals.messages === 0 ? (
         <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          gap: 12, padding: '80px 32px', color: 'var(--t-text-faint)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 12,
+          padding: '80px 32px',
+          color: 'var(--t-text-faint)',
         }}>
           <BarChart3 size={40} strokeWidth={1.5} style={{ opacity: 0.3 }} />
           <span style={{ fontSize: 15, fontWeight: 600 }}>No activity in this period</span>
@@ -594,21 +651,18 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
               label="Total Spend"
               value={formatCost(data.totals.cost)}
               sub={`${data.totals.sessions} sessions`}
-              color="#22c55e"
             />
             <MetricCard
               icon={Zap}
               label="Messages"
               value={data.totals.messages.toLocaleString()}
               sub={`~${Math.round(data.totals.messages / Math.max(data.hourly.length, 1))}/hr avg`}
-              color="#2563eb"
             />
             <MetricCard
               icon={Clock}
               label="Cost/Hour"
               value={formatCost(data.totals.cost / Math.max(data.hourly.length, 1))}
               sub={`over ${data.hourly.length} hours`}
-              color="#f59e0b"
             />
           </div>
 
@@ -619,21 +673,18 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
               label="Input Tokens"
               value={formatTokens(data.totals.inputTokens)}
               sub={`${formatTokens(data.totals.cacheWriteTokens)} cache writes`}
-              color="#f59e0b"
             />
             <MetricCard
               icon={TrendingUp}
               label="Output Tokens"
               value={formatTokens(data.totals.outputTokens)}
               sub={`${formatTokens(data.totals.totalTokens)} total tokens`}
-              color="#7c3aed"
             />
             <MetricCard
               icon={Activity}
               label="Cache Hit Rate"
               value={`${data.totals.cacheHitRate.toFixed(1)}%`}
               sub={`${formatTokens(data.totals.cacheTokens)} cache reads saved`}
-              color="#22c55e"
             />
           </div>
 
@@ -645,10 +696,8 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
             <BreakdownCard
               title="By Surface"
               icon={Layers}
-              iconColor="#2563eb"
               entries={surfaceEntries}
               totalCost={data.totals.cost}
-              colorMap={SURFACE_COLORS}
             />
           )}
 
@@ -658,10 +707,8 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
               <BreakdownCard
                 title="By Agent"
                 icon={Cpu}
-                iconColor="#111827"
                 entries={agentEntries}
                 totalCost={data.totals.cost}
-                colorMap={AGENT_COLORS}
               />
             </div>
             <div style={{ flex: 1 }}>
