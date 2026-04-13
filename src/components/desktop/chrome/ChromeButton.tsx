@@ -21,46 +21,20 @@
 
 import { type CSSProperties, type ReactNode } from 'react';
 
-const NEO_LIGHT = {
-  inactive: {
-    background: 'rgba(255, 255, 255, 0.72)',
-    boxShadow: '0 1px 3px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
-  },
-  active: {
-    background: 'rgba(255, 255, 255, 0.98)',
-    boxShadow: '0 3px 10px rgba(15, 23, 42, 0.12), 0 1px 2px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95)',
-  },
-  hover: {
-    background: 'rgba(255, 255, 255, 0.88)',
-    boxShadow: '0 2px 8px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
-  },
-};
-
-const NEO_DARK = {
-  inactive: {
-    background: 'rgba(22, 26, 34, 0.55)',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.07)',
-  },
-  active: {
-    background: 'rgba(32, 38, 50, 0.82)',
-    boxShadow: '0 3px 10px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
-  },
-  hover: {
-    background: 'rgba(28, 34, 44, 0.7)',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.32), 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
-  },
-};
-
-function getNeoPreset() {
-  if (typeof document === 'undefined') return NEO_LIGHT;
-  const theme = document.documentElement.getAttribute('data-theme');
-  const isDark = theme === 'dark' || theme === 'midnight';
-  return isDark ? NEO_DARK : NEO_LIGHT;
-}
+// Chrome button surface tokens. Each theme defines these in `themes.ts`, and a
+// `[data-chrome-surface="true"]` scope in the ThemeProvider overrides them when
+// a chrome region sits on top of the vibrancy bleed (right panel in light
+// mode, etc). Consuming CSS vars means hover/active updates cascade through
+// the override without the component having to know about it.
+const BG_INACTIVE = 'var(--t-chrome-btn-bg)';
+const BG_HOVER = 'var(--t-chrome-btn-hover-bg)';
+const BG_ACTIVE = 'var(--t-chrome-btn-active-bg)';
+const SHADOW_INACTIVE = 'var(--t-chrome-btn-shadow)';
+const SHADOW_HOVER = 'var(--t-chrome-btn-hover-shadow)';
+const SHADOW_ACTIVE = 'var(--t-chrome-btn-active-shadow)';
+const TEXT_COLOR = 'var(--t-chrome-btn-text, var(--t-text))';
 
 export function chromeNeoStyle(active: boolean, size = 32, radius = 10): CSSProperties {
-  const neo = getNeoPreset();
-  const preset = active ? neo.active : neo.inactive;
   return {
     width: size,
     height: size,
@@ -69,8 +43,8 @@ export function chromeNeoStyle(active: boolean, size = 32, radius = 10): CSSProp
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    background: preset.background,
-    boxShadow: preset.boxShadow,
+    background: active ? BG_ACTIVE : BG_INACTIVE,
+    boxShadow: active ? SHADOW_ACTIVE : SHADOW_INACTIVE,
     transition: 'box-shadow 150ms ease, background 150ms ease',
   };
 }
@@ -81,28 +55,26 @@ export function chromeNeoStyle(active: boolean, size = 32, radius = 10): CSSProp
  * same tint/shadow but manage their own dimensions.
  */
 export function chromeNeoSurface(active: boolean): { background: string; boxShadow: string } {
-  const neo = getNeoPreset();
-  const preset = active ? neo.active : neo.inactive;
-  return { background: preset.background, boxShadow: preset.boxShadow };
+  return {
+    background: active ? BG_ACTIVE : BG_INACTIVE,
+    boxShadow: active ? SHADOW_ACTIVE : SHADOW_INACTIVE,
+  };
 }
 
 export function chromeNeoHoverSurface(): { background: string; boxShadow: string } {
-  const neo = getNeoPreset();
-  return { background: neo.hover.background, boxShadow: neo.hover.boxShadow };
+  return { background: BG_HOVER, boxShadow: SHADOW_HOVER };
 }
 
 function applyNeoHover(el: HTMLElement, active: boolean) {
   if (active) return;
-  const neo = getNeoPreset();
-  el.style.background = neo.hover.background;
-  el.style.boxShadow = neo.hover.boxShadow;
+  el.style.background = BG_HOVER;
+  el.style.boxShadow = SHADOW_HOVER;
 }
 
 function resetNeoHover(el: HTMLElement, active: boolean) {
   if (active) return;
-  const neo = getNeoPreset();
-  el.style.background = neo.inactive.background;
-  el.style.boxShadow = neo.inactive.boxShadow;
+  el.style.background = BG_INACTIVE;
+  el.style.boxShadow = SHADOW_INACTIVE;
 }
 
 interface ChromeButtonProps {
@@ -155,7 +127,7 @@ export function ChromeButton({
         if (neo) resetNeoHover(neo, active);
       }}
     >
-      <div data-neo="" style={{ ...chromeNeoStyle(active, size, radius), color: 'var(--t-text)' }}>
+      <div data-neo="" style={{ ...chromeNeoStyle(active, size, radius), color: TEXT_COLOR }}>
         {icon}
       </div>
       {badge !== undefined && badge > 0 ? (

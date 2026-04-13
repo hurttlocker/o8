@@ -92,6 +92,17 @@ export const themes: ThemeTokens[] = [
       '--t-btn-secondary-bg': 'rgba(255, 255, 255, 0.55)',
       '--t-btn-secondary-border': 'rgba(15, 23, 42, 0.12)',
       '--t-btn-secondary-hover': 'rgba(15, 23, 42, 0.06)',
+      // Chrome buttons (TitleBar / StatusBar / WorkspaceTerminal tabs). These
+      // default to the chunky neomorphic white-pill preset. The
+      // [data-chrome-surface="true"] override in ThemeProvider flips them to
+      // a transparent glass preset for chrome regions that sit over the
+      // vibrancy bleed in light mode (right panel, title bar right controls).
+      '--t-chrome-btn-bg': 'rgba(255, 255, 255, 0.72)',
+      '--t-chrome-btn-hover-bg': 'rgba(255, 255, 255, 0.88)',
+      '--t-chrome-btn-active-bg': 'rgba(255, 255, 255, 0.98)',
+      '--t-chrome-btn-shadow': '0 1px 3px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
+      '--t-chrome-btn-hover-shadow': '0 2px 8px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+      '--t-chrome-btn-active-shadow': '0 3px 10px rgba(15, 23, 42, 0.12), 0 1px 2px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95)',
       '--t-kbd-bg': 'rgba(255, 255, 255, 0.68)',
       '--t-kbd-border': 'rgba(15, 23, 42, 0.14)',
       '--t-kbd-color': '#334155',
@@ -203,6 +214,12 @@ export const themes: ThemeTokens[] = [
       '--t-btn-secondary-bg': 'rgba(62, 68, 78, 0.38)',
       '--t-btn-secondary-border': 'rgba(255, 255, 255, 0.1)',
       '--t-btn-secondary-hover': 'rgba(255, 255, 255, 0.06)',
+      '--t-chrome-btn-bg': 'rgba(22, 26, 34, 0.55)',
+      '--t-chrome-btn-hover-bg': 'rgba(28, 34, 44, 0.7)',
+      '--t-chrome-btn-active-bg': 'rgba(32, 38, 50, 0.82)',
+      '--t-chrome-btn-shadow': '0 1px 3px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.07)',
+      '--t-chrome-btn-hover-shadow': '0 2px 8px rgba(0, 0, 0, 0.32), 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+      '--t-chrome-btn-active-shadow': '0 3px 10px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
       '--t-kbd-bg': 'rgba(255, 255, 255, 0.06)',
       '--t-kbd-border': 'rgba(255, 255, 255, 0.1)',
       '--t-kbd-color': '#d0d8e4',
