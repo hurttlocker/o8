@@ -1,16 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
-import {
-  readNavRailHoverExpandEnabled,
-  subscribeNavRailHoverExpandEnabled,
-  writeNavRailHoverExpandEnabled,
-} from '@/lib/appearance/nav-rail';
 import {
   THEME_ACCENT,
   THEME_ACCENT_SOFT,
-  THEME_ACCENT_SOFT_STRONG,
   THEME_ACCENT_BORDER,
   THEME_ACCENT_RING,
 } from './shared';
@@ -178,18 +172,10 @@ export function AppearanceTab() {
     if (typeof window === 'undefined') return 'smart';
     return (localStorage.getItem('cortex-ide-fleet-mode') as 'smart' | 'all') ?? 'smart';
   });
-  const [navRailHoverExpand, setNavRailHoverExpand] = useState(() => readNavRailHoverExpandEnabled());
-
-  useEffect(() => subscribeNavRailHoverExpandEnabled(setNavRailHoverExpand), []);
 
   const handleFleetModeChange = (mode: 'smart' | 'all') => {
     setFleetMode(mode);
     localStorage.setItem('cortex-ide-fleet-mode', mode);
-  };
-
-  const handleNavRailHoverExpandChange = (enabled: boolean) => {
-    setNavRailHoverExpand(enabled);
-    writeNavRailHoverExpandEnabled(enabled);
   };
 
   return (
@@ -226,103 +212,6 @@ export function AppearanceTab() {
             />
           ))}
         </div>
-      </div>
-
-      <div style={{
-        background: 'var(--t-panel)',
-        borderRadius: 14,
-        padding: 24,
-        border: '1px solid var(--t-panel-border)',
-        boxShadow: 'var(--t-panel-shadow)',
-      }}>
-        <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>
-            Motion
-          </h3>
-          <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '4px 0 0' }}>
-            Reduce movement in the shell without changing the underlying layout or actions.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          role="switch"
-          aria-checked={navRailHoverExpand}
-          onClick={() => handleNavRailHoverExpandChange(!navRailHoverExpand)}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 16,
-            padding: '14px 16px',
-            borderRadius: 12,
-            border: navRailHoverExpand
-              ? `1.5px solid ${THEME_ACCENT_BORDER}`
-              : '1px solid var(--t-panel-border)',
-            background: navRailHoverExpand
-              ? THEME_ACCENT_SOFT
-              : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
-            cursor: 'pointer',
-            textAlign: 'left',
-            transition: 'border-color 140ms ease, background 140ms ease, box-shadow 140ms ease',
-            boxShadow: navRailHoverExpand
-              ? `0 10px 28px ${THEME_ACCENT_RING}`
-              : 'none',
-          }}
-        >
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
-                Expand nav rail on hover
-              </span>
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '3px 8px',
-                borderRadius: 999,
-                background: navRailHoverExpand ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider-subtle)',
-                color: navRailHoverExpand ? THEME_ACCENT : 'var(--t-text-secondary)',
-                fontSize: 11,
-                fontWeight: 700,
-              }}>
-                <span style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: '50%',
-                  background: navRailHoverExpand ? THEME_ACCENT : 'var(--t-text-muted)',
-                }} />
-                {navRailHoverExpand ? 'On' : 'Off'}
-              </span>
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 5, lineHeight: 1.45 }}>
-              When off, the left rail stays compact at all times and users open sections with clicks only.
-            </div>
-          </div>
-
-          <div style={{
-            width: 42,
-            height: 24,
-            borderRadius: 999,
-            background: navRailHoverExpand ? THEME_ACCENT : 'var(--t-divider-strong)',
-            position: 'relative',
-            flexShrink: 0,
-            boxShadow: navRailHoverExpand ? `inset 0 0 0 1px ${THEME_ACCENT_BORDER}` : 'inset 0 0 0 1px var(--t-divider)',
-            transition: 'background 140ms ease',
-          }}>
-            <span style={{
-              position: 'absolute',
-              top: 3,
-              left: navRailHoverExpand ? 21 : 3,
-              width: 18,
-              height: 18,
-              borderRadius: '50%',
-              background: 'var(--t-text-strong)',
-              boxShadow: '0 2px 8px rgba(15, 23, 42, 0.28)',
-              transition: 'left 140ms ease',
-            }} />
-          </div>
-        </button>
       </div>
 
       {/* Section: Fleet Display */}
