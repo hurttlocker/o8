@@ -759,7 +759,7 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
             height="100%"
             language={getMonacoLanguage(filePath)}
             value={editContent}
-            theme={themeId === 'dark' ? 'cortex-graphite' : 'cortex-frost'}
+            theme={themeId === 'light' ? 'cortex-frost' : 'cortex-graphite'}
             onChange={(value) => {
               if (editing && value !== undefined) {
                 setEditContent(value);

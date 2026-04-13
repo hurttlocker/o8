@@ -19,7 +19,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  themeId: 'dark',
+  themeId: 'midnight',
   setTheme: () => {},
   themes: [],
 });
@@ -29,8 +29,11 @@ export function useTheme() {
 }
 
 const STORAGE_KEY = 'cortex-theme';
+// Legacy ids get remapped onto shipping themes. `dark` used to be its own
+// variant — it's gone now, so anyone still stored on it lands on midnight.
 const LEGACY_THEME_IDS: Record<string, string> = {
-  chocolate: 'dark',
+  chocolate: 'midnight',
+  dark: 'midnight',
 };
 
 function normalizeThemeId(themeId: string | null) {
@@ -39,12 +42,12 @@ function normalizeThemeId(themeId: string | null) {
 }
 
 function readStoredThemeId() {
-  if (typeof window === 'undefined') return 'dark';
+  if (typeof window === 'undefined') return 'midnight';
   try {
     const saved = normalizeThemeId(localStorage.getItem(STORAGE_KEY));
-    return saved && themes.find((theme) => theme.id === saved) ? saved : 'dark';
+    return saved && themes.find((theme) => theme.id === saved) ? saved : 'midnight';
   } catch {
-    return 'dark';
+    return 'midnight';
   }
 }
 
@@ -75,14 +78,16 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
     root.style.setProperty(key, value);
   }
 
-  // Tauri vibrancy: force transparent chrome so OS frost shows through.
-  // Light theme opts out — it should read as solid white, not glass.
-  if (root.dataset.tauri === 'true' && theme.id !== 'light') {
+  // Tauri vibrancy: both shipping themes (light + midnight) pass chrome
+  // through to the OS vibrancy backdrop. Light reads as frosted silver
+  // glass with dark text; midnight reads as dark graphite glass with
+  // light text. The workspace/terminal/chat-surface tokens stay solid
+  // per-theme so the main content area is never translucent.
+  if (root.dataset.tauri === 'true') {
     root.style.setProperty('--t-chrome', 'transparent');
     root.style.setProperty('--t-bg-gradient', 'transparent');
     root.style.setProperty('--t-chrome-nav', 'transparent');
 
-    // Inject style to force vibrancy-passthrough tagged elements transparent
     let vibrancyStyle = document.getElementById('tauri-vibrancy-overrides');
     if (!vibrancyStyle) {
       vibrancyStyle = document.createElement('style');
@@ -96,10 +101,6 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
         -webkit-backdrop-filter: none !important;
       }
     `;
-  } else if (root.dataset.tauri === 'true' && theme.id === 'light') {
-    // Light theme in Tauri — clear any vibrancy overrides from a prior dark/midnight session.
-    const vibrancyStyle = document.getElementById('tauri-vibrancy-overrides');
-    if (vibrancyStyle) vibrancyStyle.remove();
   }
 
   root.style.colorScheme = theme.colorScheme;

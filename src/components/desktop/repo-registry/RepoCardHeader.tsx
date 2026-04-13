@@ -106,7 +106,7 @@ function RepoCardHeaderBase({
   const rowStatusLabel = activeWorktreeTone?.label ?? readinessDisplayLabel ?? null;
   const rowStatusColor = activeWorktreeTone?.color ?? readinessPalette?.color ?? 'var(--t-text-faint)';
   const rowStatusExplanation = activeWorktreeExplanation ?? readinessExplanation;
-  const darkHoverCardStyle = themeId === 'dark'
+  const darkHoverCardStyle = themeId !== 'light'
     ? {
         background: 'linear-gradient(180deg, rgba(68, 75, 85, 0.96) 0%, rgba(54, 60, 69, 0.94) 100%)',
         boxShadow: '0 22px 56px rgba(0, 0, 0, 0.28), 0 8px 24px rgba(15, 23, 42, 0.12)',
