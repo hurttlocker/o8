@@ -428,13 +428,16 @@ export function TitleBar({
       {/* Open In — moved to Command Palette (⌘K → "open in") */}
 
       {/* ── Right controls ── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 2,
-        flexShrink: 0,
-        paddingRight: 4,
-      }}>
+      <div
+        data-chrome-surface="true"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          flexShrink: 0,
+          paddingRight: 4,
+        }}
+      >
         {/* Alerts bell — migrated from the NavRail. The tray popover is
             rendered as a child of this wrapper so it anchors to the bell's
             DOM node via the alertTray prop's anchorEl. */}
