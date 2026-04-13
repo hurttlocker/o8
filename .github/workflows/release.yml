@@ -54,8 +54,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           tagName: v__VERSION__
-          releaseName: 'Cortex IDE v__VERSION__'
-          releaseBody: 'See the assets to download and install Cortex IDE.'
-          releaseDraft: true
+          releaseName: 'o8 v__VERSION__'
+          releaseBody: 'See the assets to download and install o8.'
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
