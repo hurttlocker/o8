@@ -60,6 +60,8 @@ function ChatSurfaceBase({
   shouldShowSuggestedPrompts,
   showTypingIndicator,
   streamContent,
+  liveFallbackNotice,
+  permissionMode,
 }: {
   activeThinking: ActiveThinkingState | null;
   activeToolCalls: ToolCallInfo[];
@@ -92,6 +94,8 @@ function ChatSurfaceBase({
   shouldShowSuggestedPrompts: boolean;
   showTypingIndicator: boolean;
   streamContent: string;
+  liveFallbackNotice?: string | null;
+  permissionMode?: 'full' | 'plan';
 }) {
   return (
     <>
@@ -266,6 +270,14 @@ function ChatSurfaceBase({
 
           {isStreaming ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+              {liveFallbackNotice ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 6, paddingBottom: 4, paddingLeft: 2, fontSize: 11, color: 'var(--t-text-muted)', fontStyle: 'italic', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', animation: 'llmFadeIn 200ms ease-out' }}>
+                  <svg width="12" height="12" viewBox="0 0 256 256" fill="none" style={{ flexShrink: 0, opacity: 0.7 }}>
+                    <path d="M236.8 188.09 149.35 36.22a24.76 24.76 0 0 0-42.7 0L19.2 188.09a23.51 23.51 0 0 0 0 23.72A24.35 24.35 0 0 0 40.55 224h174.9a24.35 24.35 0 0 0 21.33-12.19 23.51 23.51 0 0 0 .02-23.72ZM120 104a8 8 0 0 1 16 0v40a8 8 0 0 1-16 0Zm8 88a12 12 0 1 1 12-12 12 12 0 0 1-12 12Z" fill="currentColor" />
+                  </svg>
+                  {liveFallbackNotice}
+                </div>
+              ) : null}
               {activeThinking ? <ChainOfThought steps={activeThinking.steps} thinking={activeThinking.thinking} isLive /> : null}
               {activeToolCalls.length > 0 && !activeThinking?.steps.length ? <LiveToolCalls toolCalls={activeToolCalls} /> : null}
               {streamContent ? (
@@ -274,6 +286,15 @@ function ChatSurfaceBase({
                   <span style={{ display: 'inline-block', width: 2, height: 16, background: '#3b82f6', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'llmDot 1s ease-in-out infinite' }} />
                 </div>
               ) : !activeThinking ? <StreamingIndicator /> : null}
+            </div>
+          ) : null}
+          {permissionMode === 'plan' && model.provider === 'operator' && messages.length === 0 && !isStreaming ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, background: 'var(--t-bg-card)', border: '1px solid var(--t-panel-border)', borderRadius: 10, fontSize: 11, fontWeight: 500, color: 'var(--t-text-muted)', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.75 }}>
+                <rect x="3" y="11" width="18" height="11" rx="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              Plan mode — Operator will think and answer but cannot edit files or run commands
             </div>
           ) : null}
         </div>

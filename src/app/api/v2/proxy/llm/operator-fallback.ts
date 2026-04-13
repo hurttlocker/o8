@@ -81,7 +81,9 @@ export async function streamOpenRouterFallback({
       enqueue({
         type: 'fallback',
         originalModel: 'gemini-2.5-flash',
+        originalModelLabel: 'Gemini 2.5 Flash',
         fallbackModel: model,
+        fallbackModelLabel: 'OpenRouter free tier',
         reason: 'Gemini quota exhausted — using OpenRouter free tier',
       });
 

@@ -147,8 +147,11 @@ function jsonError(message: string, status: number) {
   );
 }
 
+const PLAN_MODE_NOTE = '\n\nIMPORTANT: You are in PLAN mode. You have NO tools available. Do not write `<execute_tool>` markers, function calls, or pretend to invoke tools. Reason and answer using only the conversation context. If the user asks for something that needs a tool, explain what you would do and ask them to switch to Code mode.';
+
 function buildGoogleRequest(messages: Message[], disableTools: boolean) {
-  const systemMessage = messages.find((message) => message.role === 'system')?.content;
+  const baseSystem = messages.find((message) => message.role === 'system')?.content;
+  const systemMessage = disableTools && baseSystem ? `${baseSystem}${PLAN_MODE_NOTE}` : baseSystem;
   const contents: GoogleContent[] = messages
     .filter((message) => message.role !== 'system')
     .map((message) => {
