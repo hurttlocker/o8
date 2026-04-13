@@ -8,7 +8,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
-} from 'lucide-react';
+} from '../lucide-shims';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
 import type { FileNode, WorkspaceSidePanelRepo } from './types';
 import {

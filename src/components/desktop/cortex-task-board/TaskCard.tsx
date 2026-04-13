@@ -8,7 +8,7 @@ import {
   RefreshCw,
   RotateCcw,
   Trash2,
-} from 'lucide-react';
+} from '../lucide-shims';
 import type { TaskCardProps } from './types';
 import { taskCardStyle, dependencyHandleStyle, dependencyHandleDotsStyle } from './constants';
 import { miniActionButtonStyle, relativeAge, statusTone } from './utils';

@@ -137,7 +137,16 @@ export function useLLMChatLifecycle({
           }
         }
       }
-      // Prefer CLI models (installed, no key needed), then API models with configured keys
+      // o8 Operator is the default for new chats — it's branded, free, and zero-setup.
+      // Users can switch to a CLI runtime or another API model via the picker.
+      const operatorDefault = allModels.find((entry) => entry.provider === 'operator');
+      if (operatorDefault) {
+        setModel(operatorDefault);
+        setModelResolved(true);
+        return;
+      }
+      // Fallback chain (only hit if the Operator entry was somehow filtered out):
+      // first CLI runtime, then any API model with a configured key.
       const cliDefault = allModels.find((entry) => entry.backend === 'cli');
       if (cliDefault) {
         setModel(cliDefault);

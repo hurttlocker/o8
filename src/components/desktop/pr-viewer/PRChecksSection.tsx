@@ -5,7 +5,7 @@ import {
   Check,
   ExternalLink,
   MessageSquare,
-} from 'lucide-react';
+} from '../lucide-shims';
 import {
   formatCiCheckInjection,
   formatCiCheckBatchInjection,

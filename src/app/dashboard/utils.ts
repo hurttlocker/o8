@@ -48,6 +48,7 @@ export function normalizeDetection(raw: Record<string, unknown>): DetectionResul
       codex: { ...mkTool('codex'), threads: (findTool('codex')?.details?.threads as number) ?? 0 },
       claudeCode: { ...mkTool('claude-code'), recentSessions: (findTool('claude-code')?.details?.recentSessions as number) ?? 0 },
       gemini: mkTool('gemini'),
+      opencode: { ...mkTool('opencode'), authedProviders: (findTool('opencode')?.details?.authedProviders as string[]) ?? [] },
       cortex: { ...mkTool('cortex'), facts: (findTool('cortex')?.details?.facts as number) ?? 0, memories: (findTool('cortex')?.details?.memories as number) ?? 0 },
       ollama: { ...mkTool('ollama'), hasEmbeddingModel: (findTool('ollama')?.details?.hasEmbeddingModel as boolean) ?? false },
     } as DetectionResult['tools'],

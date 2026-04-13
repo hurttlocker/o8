@@ -8,7 +8,7 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Gauge, ShieldCheck, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Gauge, ShieldCheck, X } from '@/components/desktop/lucide-shims';
 import type { Alert } from '@/lib/alerts/types';
 
 const TOAST_DURATION = 5_000;

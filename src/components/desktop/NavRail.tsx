@@ -395,9 +395,9 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
             minWidth: 180,
             padding: 6,
             borderRadius: 10,
-            background: '#1e2028',
-            border: '1px solid rgba(255,255,255,0.1)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+            background: 'var(--t-panel-solid)',
+            border: '1px solid var(--t-panel-border)',
+            boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
             zIndex: 9999,
           }}
         >

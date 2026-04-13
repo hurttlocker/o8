@@ -260,9 +260,9 @@ export const O8ActivityPane = memo(function O8ActivityPane({
               right: 0,
               zIndex: 20,
               borderRadius: 12,
-              border: '1px solid var(--t-divider)',
-              background: 'var(--t-chrome, #1e2028)',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+              border: '1px solid var(--t-panel-border)',
+              background: 'var(--t-panel-solid)',
+              boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
               maxHeight: 200,
               overflowY: 'auto',
             }}>

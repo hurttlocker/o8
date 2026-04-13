@@ -13,7 +13,7 @@ import {
   Search,
   Square,
   X,
-} from 'lucide-react';
+} from '../lucide-shims';
 import { IssueLinkPickerModal, type LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
 import { LIGHT_CANVAS_VARS } from '@/components/desktop/canvas-utils';
 import {

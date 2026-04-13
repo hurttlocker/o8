@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { ExternalLink, MessageSquare } from 'lucide-react';
+import { ExternalLink, MessageSquare } from '../lucide-shims';
 import type {
   WorkspaceReviewCheckRun,
   WorkspaceReviewCheckRunDetail,

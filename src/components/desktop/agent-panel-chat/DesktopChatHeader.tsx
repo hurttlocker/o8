@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight } from '../lucide-shims';
 import { CaretDown } from '@phosphor-icons/react';
 import { ContextUsageRing } from '@/components/ContextUsageRing';
 import { sessionPickerTitle, sessionPickerRowSubtitle } from './shared';

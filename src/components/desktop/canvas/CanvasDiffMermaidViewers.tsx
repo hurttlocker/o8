@@ -1,7 +1,7 @@
 'use client';
 import type React from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Clipboard, RotateCcw, Trash2 } from 'lucide-react';
+import { Check, Clipboard, RotateCcw, Trash2 } from '../lucide-shims';
 import { DiffStatusIcon, renderDiffLines } from '@/components/desktop/diff-utils';
 interface ChangedFile {
   path: string;

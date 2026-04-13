@@ -1081,8 +1081,13 @@ function DashboardInner() {
 
     // Lane-scoped context: when the active lane has branch info, use it
     // so the review rail shows the selected lane's diff, not main's.
+    // BUT only when the lane's repo matches the user's sidebar focus —
+    // otherwise the lane is stale relative to the explicit sidebar choice.
     let nextRepoContext: WorkspaceSidePanelRepo | null = null;
-    if (activeWorkspaceLane?.repoPath && activeWorkspaceLane.branch) {
+    const sidebarRepoPath = globalRepoEntry?.localPath ?? null;
+    const laneMatchesSidebar = activeWorkspaceLane?.repoPath
+      && (!sidebarRepoPath || activeWorkspaceLane.repoPath === sidebarRepoPath);
+    if (laneMatchesSidebar && activeWorkspaceLane?.repoPath && activeWorkspaceLane.branch) {
       const laneName = activeWorkspaceLane.repoPath.split('/').pop() ?? 'repo';
       nextRepoContext = {
         name: laneName,

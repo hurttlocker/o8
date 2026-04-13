@@ -20,7 +20,7 @@ import {
   ShieldCheck,
   WifiOff,
   X,
-} from 'lucide-react';
+} from '@/components/desktop/lucide-shims';
 import type { Alert, AlertType } from '@/lib/alerts/types';
 
 const ICON_MAP: Record<AlertType, typeof Bell> = {

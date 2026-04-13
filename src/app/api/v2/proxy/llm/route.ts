@@ -17,11 +17,14 @@ import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
 import {
   computeCost,
   isSupportedProvider,
+  OPERATOR_GEMINI_MODEL,
+  OPERATOR_OPENROUTER_MODEL,
   PROVIDERS,
   resolveApiKey,
   type Message,
 } from './provider-config';
 import { createGoogleToolResponseStream } from './google-native-tools';
+import { streamOpenRouterFallback } from './operator-fallback';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
 
@@ -154,6 +157,42 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     if (budget != null && spent >= budget) {
       return jsonError('Monthly token budget exceeded. Upgrade your plan or add a BYOK key.', 402);
     }
+  }
+
+  // o8 Operator — try Gemini Flash with the user's Google key; if quota is exhausted,
+  // fall back to a free OpenRouter model. Uses the same plumbing as a regular google call.
+  if (provider === 'operator') {
+    const geminiKey = process.env.GOOGLE_AI_API_KEY ?? null;
+    if (geminiKey) {
+      const geminiResponse = await createGoogleToolResponseStream({
+        apiKey: geminiKey,
+        auth,
+        disableTools,
+        lastUserContent: lastUserMsg?.content,
+        messages,
+        model: OPERATOR_GEMINI_MODEL,
+        scopedRepoRoot: effectiveRepoRoot,
+        tabId,
+      });
+      const status = geminiResponse.status;
+      if (geminiResponse.ok || (status !== 429 && status !== 503 && status !== 402)) {
+        return geminiResponse;
+      }
+      // Drop the failed Gemini response; fall through to OpenRouter.
+    }
+    const openRouterKey = process.env.OPENROUTER_API_KEY ?? null;
+    if (!openRouterKey) {
+      return jsonError(
+        'o8 Operator unavailable: Gemini quota exhausted and no OPENROUTER_API_KEY configured for fallback.',
+        503,
+      );
+    }
+    return streamOpenRouterFallback({
+      apiKey: openRouterKey,
+      messages,
+      model: OPERATOR_OPENROUTER_MODEL,
+      auth,
+    });
   }
 
   const apiKey = resolveApiKey(provider);

@@ -4,7 +4,7 @@
 import type React from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ExternalLink, RefreshCw } from 'lucide-react';
+import { ExternalLink, RefreshCw } from '../lucide-shims';
 import { LIGHT_CANVAS_VARS } from '@/components/desktop/canvas-utils';
 import { measureHeight } from '@/lib/pretext';
 

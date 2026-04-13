@@ -106,3 +106,10 @@ declare module 'lucide-react' {
   export const XCircle: LucideIcon;
   export const Zap: LucideIcon;
 }
+
+// Subpath modules used by the lucide-shims raw-SVG renderer.
+// Each icon file exports an __iconNode data array we render manually
+// to bypass the Tauri webview rendering bug in the lucide React components.
+declare module 'lucide-react/dist/esm/icons/*.js' {
+  export const __iconNode: ReadonlyArray<readonly [string, Record<string, string | number>]>;
+}

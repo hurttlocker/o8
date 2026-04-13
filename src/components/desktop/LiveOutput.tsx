@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/purity -- relative age labels intentionally snapshot current time during render */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { X, ChevronDown, FileCode, FilePlus, PenLine, Eye, Terminal } from 'lucide-react';
+import { X, ChevronDown, FileCode, FilePlus, PenLine, Eye, Terminal } from './lucide-shims';
 import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 

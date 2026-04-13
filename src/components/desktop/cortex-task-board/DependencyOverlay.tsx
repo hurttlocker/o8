@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { X } from 'lucide-react';
+import { X } from '../lucide-shims';
 import type { DependencyOverlayProps } from './types';
 import { dependencyDeleteButtonStyle } from './constants';
 

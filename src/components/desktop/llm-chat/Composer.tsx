@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type React from 'react';
-import { AlertCircle, ArrowUp, Eye, GitPullRequest, Globe, Lightbulb, Pencil, Plus, Search, Sparkles, Square, Terminal, Trash2, Wrench, X } from 'lucide-react';
+import { AlertCircle, ArrowUp, Eye, GitPullRequest, Globe, Lightbulb, Pencil, Plus, Search, Sparkles, Square, Terminal, Trash2, Wrench, X } from '../lucide-shims';
 
 import type { LinkedIssueRef } from '../IssueLinkPicker';
 import { ApprovalBanner } from './ApprovalBanner';

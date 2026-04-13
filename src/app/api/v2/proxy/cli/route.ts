@@ -11,7 +11,7 @@ import { NextResponse } from 'next/server';
  * and streams the output back as SSE events matching our existing stream format.
  */
 
-type CliRuntime = 'claude-code' | 'codex' | 'gemini';
+type CliRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode';
 
 type CliEffort = 'low' | 'medium' | 'high' | 'max';
 
@@ -125,6 +125,15 @@ export async function POST(request: Request) {
         args = ['--prompt', prompt, '--output-format', 'stream-json', '--model', cliModel];
         break;
       }
+      case 'opencode': {
+        // opencode's auto-selected default in non-TTY context is sometimes a stale model
+        // (e.g. google/gemini-3-pro-preview) that fails with 404 — pass an explicit -m so
+        // the spawn is deterministic. opencode/gpt-5-nano is one of opencode's own free
+        // hosted models and works without user auth. Issue #512 tracks per-provider rows.
+        cmd = 'opencode';
+        args = ['run', '--format', 'json', '-m', 'opencode/gpt-5-nano', prompt];
+        break;
+      }
       default:
         return NextResponse.json({ error: `Unsupported runtime: ${runtime}` }, { status: 400 });
     }
@@ -217,6 +226,8 @@ function normalizeCliEvent(runtime: CliRuntime, raw: any): SseEvent[] {
       return normalizeCodex(raw);
     case 'gemini':
       return normalizeGemini(raw);
+    case 'opencode':
+      return normalizeOpenCode(raw);
     default:
       return [];
   }
@@ -289,6 +300,45 @@ function normalizeGemini(raw: any): SseEvent[] {
       type: 'usage',
       inputTokens: raw.stats.input_tokens ?? raw.stats.input ?? 0,
       outputTokens: raw.stats.output_tokens ?? 0,
+    });
+  }
+
+  return events;
+}
+
+function normalizeOpenCode(raw: any): SseEvent[] {
+  // opencode --format json emits envelope events of the shape:
+  //   { type: 'step_start' | 'text' | 'tool' | 'step_finish', part: {...} }
+  // where `part.type` describes the inner block. Verified against opencode 1.4.3.
+  const events: SseEvent[] = [];
+  const part = raw.part;
+
+  if (raw.type === 'text' && part?.type === 'text' && typeof part.text === 'string') {
+    events.push({ type: 'content', text: part.text });
+  }
+
+  // Tool invocation — opencode emits the tool call inside a part with type='tool'
+  if (raw.type === 'tool' && part?.type === 'tool' && part.name) {
+    events.push({
+      type: 'tool_call',
+      toolName: part.name,
+      toolId: part.id ?? '',
+      args: part.input ?? part.arguments ?? {},
+    });
+  }
+
+  // Reasoning / thinking blocks
+  if (raw.type === 'reasoning' && part?.type === 'reasoning' && typeof part.text === 'string') {
+    events.push({ type: 'thinking', text: part.text });
+  }
+
+  // Usage on step finish — { tokens: { input, output, reasoning, cache, total }, cost }
+  if (raw.type === 'step_finish' && part?.tokens) {
+    events.push({
+      type: 'usage',
+      inputTokens: part.tokens.input ?? 0,
+      outputTokens: part.tokens.output ?? 0,
+      ...(typeof part.cost === 'number' ? { costUsd: part.cost } : {}),
     });
   }
 

@@ -5,7 +5,7 @@ import {
   Check,
   MessageSquare,
   X,
-} from 'lucide-react';
+} from '../lucide-shims';
 import {
   formatReviewCommentInjection,
   formatReviewCommentBatchInjection,

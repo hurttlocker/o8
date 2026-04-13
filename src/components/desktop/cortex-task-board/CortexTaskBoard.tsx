@@ -4,7 +4,7 @@ import {
   AlertCircle,
   Plus,
   RefreshCw,
-} from 'lucide-react';
+} from '../lucide-shims';
 import {
   emptyStateStyle,
   errorBannerStyle,

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Sparkles } from '../lucide-shims';
 import { THEME_ACCENT_SOFT, THEME_ACCENT, THEME_ACCENT_BORDER, THEME_BG_CARD } from './constants';
 import { relativeTimeLabel } from './shared';
 import type { SidebarApprovalCardProps, SidebarApproval } from './types';

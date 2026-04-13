@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Download, RefreshCw } from 'lucide-react';
+import { Download, RefreshCw } from './lucide-shims';
 
 interface UpdateInfo {
   version: string;

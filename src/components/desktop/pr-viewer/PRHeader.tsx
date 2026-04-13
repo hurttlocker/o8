@@ -6,7 +6,7 @@ import {
   GitMerge,
   Send,
   XCircle,
-} from 'lucide-react';
+} from '../lucide-shims';
 import { deriveWorkflowStage, describeWorkflowStage } from '@/lib/workflows/status';
 import { readinessTone, formatAge } from '../canvas-utils';
 import type { PRDetail, PRSection, PRSectionTab, ActionResult } from './types';

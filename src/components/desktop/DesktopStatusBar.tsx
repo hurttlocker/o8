@@ -17,7 +17,7 @@
 
 import { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { GitBranch } from 'lucide-react';
+import { GitBranch } from './lucide-shims';
 import { ChartBar, FolderPlus, GearSix } from '@phosphor-icons/react';
 import { ChromeButton } from './chrome/ChromeButton';
 import { formatBranchDisplayName } from './repo-registry/shared';

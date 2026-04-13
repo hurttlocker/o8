@@ -8,7 +8,7 @@ import {
   FileText,
   Globe,
   MessageSquare,
-} from 'lucide-react';
+} from '../lucide-shims';
 import { MarkdownBody } from '../MarkdownBody';
 import {
   formatReviewCommentInjection,

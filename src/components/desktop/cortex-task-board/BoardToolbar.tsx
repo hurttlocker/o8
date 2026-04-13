@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw } from '../lucide-shims';
 import type { BoardToolbarProps } from './types';
 import { compactPath, toolbarButtonStyle } from './utils';
 import { MetricChip } from './shared';
