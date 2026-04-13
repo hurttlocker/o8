@@ -301,7 +301,7 @@ export function CommitViewer({ commitHash, workspace }: { commitHash: string; wo
   const activeDiff = selectedFile ? (fileDiffs.get(selectedFile) ?? '') : commit.diff;
   const selectedFileEntry = selectedFile ? commit.files.find((file) => file.path === selectedFile) ?? null : null;
   const compareLanguage = selectedFile ? getMonacoLanguage(selectedFile) : 'plaintext';
-  const editorTheme = themeId === 'dark' ? 'cortex-graphite' : 'cortex-frost';
+  const editorTheme = themeId === 'light' ? 'cortex-frost' : 'cortex-graphite';
   const hasWorkspace = Boolean(workspace);
   const normalizedSelectedFilePath = selectedFile
     ? selectedFile.replace(/^\/+/, '').replace(/\s+/g, '-')
