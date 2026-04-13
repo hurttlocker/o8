@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ApprovalRisk, PolicyRule, PolicyRuleOverride } from '@/lib/approvals/types';
 
-export const POLICIES_DIR = path.join(homedir(), '.cortex-ide');
+export const POLICIES_DIR = path.join(homedir(), '.o8');
 export const POLICIES_PATH = path.join(POLICIES_DIR, 'policies.json');
 
 interface ParsedPolicyRules {

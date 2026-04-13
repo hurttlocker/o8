@@ -104,7 +104,7 @@ export async function GET() {
     let repos: { name: string; localPath: string }[] = [];
     try {
       const repoData = JSON.parse(
-        execSync('cat ~/.cortex-ide/repos.json 2>/dev/null || echo "[]"', { encoding: 'utf-8' }),
+        execSync('cat ~/.o8/repos.json 2>/dev/null || echo "[]"', { encoding: 'utf-8' }),
       );
       repos = (Array.isArray(repoData) ? repoData : repoData.repos ?? []).map(
         (r: { name?: string; localPath?: string }) => ({

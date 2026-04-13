@@ -22,7 +22,7 @@ import type { Alert } from './types';
 import { SEVERITY_ORDER } from './types';
 import { detectAlerts, mergeAlerts } from './engine';
 
-const STORAGE_KEY = 'cortex-ide-alerts';
+const STORAGE_KEY = 'o8-alerts';
 const IS_SERVER = typeof window === 'undefined';
 
 interface AlertContextValue {

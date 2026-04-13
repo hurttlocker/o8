@@ -43,8 +43,8 @@ import {
   repoSlugFromRemote,
 } from '../utils';
 
-export const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
-const ACTIVE_TILE_STORAGE_KEY = 'cortex-ide:dashboard-active-tile:v1';
+export const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
+const ACTIVE_TILE_STORAGE_KEY = 'o8:dashboard-active-tile:v1';
 
 interface WorkspaceTerminalTarget {
   tileId: string;

@@ -11,7 +11,7 @@ import {
   updateOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
 
-const ORCHESTRATOR_DIR = join(homedir(), '.cortex-ide');
+const ORCHESTRATOR_DIR = join(homedir(), '.o8');
 const ORCHESTRATOR_PATH = join(ORCHESTRATOR_DIR, 'orchestrator-state.json');
 const ORCHESTRATOR_TMP_PATH = `${ORCHESTRATOR_PATH}.tmp`;
 

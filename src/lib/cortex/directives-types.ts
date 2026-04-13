@@ -2,7 +2,7 @@
  * Directive types — operator-authored rules injected into agent sessions.
  *
  * Directives are markdown files with YAML frontmatter, stored in
- * ~/.cortex-ide/directives/ and indexed in SQLite for fast lookup.
+ * ~/.o8/directives/ and indexed in SQLite for fast lookup.
  */
 
 export type DirectiveScope = 'global' | 'repo';

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import os from 'node:os';
 import path from 'node:path';
 
-const STATE_DIR = path.join(os.homedir(), '.cortex-ide');
+const STATE_DIR = path.join(os.homedir(), '.o8');
 const STATE_SCOPE_DIR = path.join(STATE_DIR, 'terminal-states');
 const LEGACY_STATE_FILE = path.join(STATE_DIR, 'terminal-state.json');
 

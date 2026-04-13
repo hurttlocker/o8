@@ -41,7 +41,7 @@ function sectionHeaderStyle(colors: ThemeColors) {
 
 function shortRepoName(name: string): string {
   const map: Record<string, string> = {
-    'cortex-ide': 'Cortex IDE',
+    'cortex-ide': 'o8',
     cortex: 'Cortex',
     'spear-production': 'Spear',
     'parasite-network': 'Parasite',

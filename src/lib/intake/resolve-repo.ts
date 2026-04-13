@@ -1,6 +1,6 @@
 /**
  * Resolve a GitHub repo full name (e.g., "hurttlocker/cortex-ide") to a local
- * filesystem path using the repo registry at ~/.cortex-ide/repos.json.
+ * filesystem path using the repo registry at ~/.o8/repos.json.
  */
 
 import 'server-only';
@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
-const REGISTRY_PATH = join(homedir(), '.cortex-ide', 'repos.json');
+const REGISTRY_PATH = join(homedir(), '.o8', 'repos.json');
 
 function getRemoteSlug(repoPath: string): string | null {
   try {

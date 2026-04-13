@@ -17,7 +17,7 @@ function resolveApiBase(): string {
   const envPort = process.env.O8_API_PORT?.trim();
   if (envPort) return `http://127.0.0.1:${envPort}`;
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.cortex-ide');
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
     const portFile = join(dataDir, 'api-port');
     if (existsSync(portFile)) {
       const n = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
@@ -100,7 +100,7 @@ let _cachedRegistry: { mtimeMs: number; paths: Set<string> } | null = null;
 
 function loadRegisteredRepoPaths(): Set<string> {
   const registryPath = join(
-    process.env.CORTEX_IDE_DATA_DIR || join(process.env.HOME || '', '.cortex-ide'),
+    process.env.CORTEX_IDE_DATA_DIR || join(process.env.HOME || '', '.o8'),
     'repos.json',
   );
 
@@ -140,7 +140,7 @@ function ensureRepoPath(repoPath: string) {
     throw new Error(`Repository path not found: ${normalized}`);
   }
 
-  // Security: reject paths not registered in ~/.cortex-ide/repos.json.
+  // Security: reject paths not registered in ~/.o8/repos.json.
   // An MCP client could otherwise point gh/Codex at any directory on disk.
   // If the registry is empty (fresh install), fall through — the user has
   // no registered repos yet and first-run flows need to work.
@@ -151,7 +151,7 @@ function ensureRepoPath(repoPath: string) {
       throw new Error(
         `repoPath ${normalized} is not in the registered repository list. ` +
         `Add it via the o8 desktop app (Workspaces → Add repository) or edit ` +
-        `~/.cortex-ide/repos.json before dispatching.`,
+        `~/.o8/repos.json before dispatching.`,
       );
     }
   }

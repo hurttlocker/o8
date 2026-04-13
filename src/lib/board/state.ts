@@ -26,7 +26,7 @@ import type {
   BoardTaskView,
 } from './types';
 
-const BOARD_STORE_DIR = path.join(os.homedir(), '.cortex-ide', 'boards');
+const BOARD_STORE_DIR = path.join(os.homedir(), '.o8', 'boards');
 const BOARD_VERSION = 1;
 const BOARD_COLUMN_TITLES: Record<BoardColumnId, string> = {
   backlog: 'Backlog',

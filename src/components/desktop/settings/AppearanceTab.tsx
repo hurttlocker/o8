@@ -170,12 +170,12 @@ export function AppearanceTab() {
   const { themeId, setTheme, themes: themeList } = useTheme();
   const [fleetMode, setFleetMode] = useState<'smart' | 'all'>(() => {
     if (typeof window === 'undefined') return 'smart';
-    return (localStorage.getItem('cortex-ide-fleet-mode') as 'smart' | 'all') ?? 'smart';
+    return (localStorage.getItem('o8-fleet-mode') as 'smart' | 'all') ?? 'smart';
   });
 
   const handleFleetModeChange = (mode: 'smart' | 'all') => {
     setFleetMode(mode);
-    localStorage.setItem('cortex-ide-fleet-mode', mode);
+    localStorage.setItem('o8-fleet-mode', mode);
   };
 
   return (

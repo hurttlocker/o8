@@ -261,7 +261,7 @@ function detectApiKeys(): DetectedTool {
   // (the Next server's cwd) which is the repo root in both dev and packaged builds.
   const repoRoot = process.env.CORTEX_IDE_REPO_ROOT || process.cwd();
   const paths = [
-    join(home, '.cortex-ide', '.env.local'),
+    join(home, '.o8', '.env.local'),
     join(repoRoot, '.env.local'),
   ];
 

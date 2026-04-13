@@ -38,7 +38,7 @@ export interface AuthState {
 
 // ── Constants ──
 
-const USER_KEY = 'cortex-ide-user';
+const USER_KEY = 'o8-user';
 
 // ── Hook ──
 
@@ -87,13 +87,13 @@ export function useAuth(): AuthState {
     setUser(newUser);
     localStorage.setItem(USER_KEY, JSON.stringify(newUser));
     // Migrate: remove any legacy token from localStorage
-    localStorage.removeItem('cortex-ide-token');
+    localStorage.removeItem('o8-token');
   }, []);
 
   const signOut = useCallback(async () => {
     setUser(null);
     localStorage.removeItem(USER_KEY);
-    localStorage.removeItem('cortex-ide-token'); // clean up legacy
+    localStorage.removeItem('o8-token'); // clean up legacy
 
     // Clear server-side cookie + session
     try {

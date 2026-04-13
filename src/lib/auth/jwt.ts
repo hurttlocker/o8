@@ -14,7 +14,7 @@ import path from 'node:path';
 
 // ── Secret management ──
 
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.cortex-ide');
+const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
 const SECRET_FILE = path.join(DATA_DIR, '.jwt-secret');
 
 function getSecret(): Uint8Array {

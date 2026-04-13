@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ApprovalRecord } from './types';
 
-const LEGACY_STORE_PATH = path.join(os.homedir(), '.cortex-ide', 'approvals.json');
+const LEGACY_STORE_PATH = path.join(os.homedir(), '.o8', 'approvals.json');
 
 interface LegacyApprovalStoreShape {
   version: 1;

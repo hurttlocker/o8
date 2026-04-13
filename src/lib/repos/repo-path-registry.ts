@@ -5,8 +5,8 @@ import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const REPO_REGISTRY_DISPLAY_PATH = '~/.cortex-ide/repos.json';
-const REPO_REGISTRY_PATH = path.join(os.homedir(), '.cortex-ide', 'repos.json');
+const REPO_REGISTRY_DISPLAY_PATH = '~/.o8/repos.json';
+const REPO_REGISTRY_PATH = path.join(os.homedir(), '.o8', 'repos.json');
 
 export interface RegisteredRepoPathEntry extends Record<string, unknown> {
   path: string;

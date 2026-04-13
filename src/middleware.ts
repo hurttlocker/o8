@@ -21,6 +21,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { migrateDataDirOnce } from '@/lib/data-dir-migration';
+
+migrateDataDirOnce();
 
 // Middleware must run in Node runtime to read the ws-token file.
 export const config = {
@@ -35,7 +38,7 @@ let _cachedToken: { value: string; mtimeMs: number } | null = null;
 function loadPanelToken(): string | null {
   try {
     const dataDir = process.env.CORTEX_IDE_DATA_DIR
-      || join(process.env.HOME || '', '.cortex-ide');
+      || join(process.env.HOME || '', '.o8');
     const tokenPath = join(dataDir, 'ws-token');
     if (!existsSync(tokenPath)) return null;
 
@@ -181,7 +184,7 @@ export function middleware(req: NextRequest): NextResponse {
 
   // Bearer-token fallback for non-loopback callers (Tailscale, mobile Safari
   // hitting the dev port over LAN). The presented token MUST match the
-  // panel bearer token persisted in ~/.cortex-ide/ws-token.
+  // panel bearer token persisted in ~/.o8/ws-token.
   const panelToken = loadPanelToken();
   if (panelToken) {
     const auth = req.headers.get('authorization');

@@ -13,7 +13,7 @@ import type {
 
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
 export const ORCHESTRATOR_STATE_API_PATH = '/api/orchestrator/state';
-const LEGACY_THOUGHTS_STORAGE_KEY = 'cortex-ide:thoughts:mission-control-v1';
+const LEGACY_THOUGHTS_STORAGE_KEY = 'o8:thoughts:mission-control-v1';
 const STALE_LANE_REASON = 'Previously bound workspace lane is missing. Re-launch to reattach.';
 const MAX_RECOVERY_ATTEMPTS = 2;
 const RECOVERY_COOLDOWN_MS = 60_000;

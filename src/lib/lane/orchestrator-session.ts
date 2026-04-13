@@ -69,7 +69,7 @@ function resolveCortexMcpServerPath(): { command: string; path: string } {
   return { command: 'npx', path: devSource };
 }
 
-const MCP_CONFIG_DIR = join(homedir(), '.cortex-ide', 'mcp');
+const MCP_CONFIG_DIR = join(homedir(), '.o8', 'mcp');
 const LOG_PREFIX = '[orchestrator-rehydrate]';
 /** #457 — Kill the claude process if it doesn't finish within this window */
 const PROCESS_TIMEOUT_MS = 90_000;
@@ -262,7 +262,7 @@ function buildOrchestratorSystemPrompt(repoPath: string): string {
   // Load all registered repos for fleet awareness
   let allRepos: Array<{ name: string; localPath: string }> = [];
   try {
-    const reposFile = join(homedir(), '.cortex-ide', 'repos.json');
+    const reposFile = join(homedir(), '.o8', 'repos.json');
     if (existsSync(reposFile)) {
       const { readFileSync } = require('node:fs');
       const parsed = JSON.parse(readFileSync(reposFile, 'utf-8'));

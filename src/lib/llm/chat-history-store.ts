@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { MobileTranscriptEntry, MobileTranscriptSource, MobileTranscriptThinkingStep, MobileTranscriptToolCall } from '@/lib/mobile/types';
 
-const HISTORY_DIR = join(homedir(), '.cortex-ide', 'chat-history');
+const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
 export interface PersistedLlmChatMessage {
   id: string;

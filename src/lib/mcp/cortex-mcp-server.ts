@@ -20,7 +20,7 @@ import { getOrCreateWsToken } from '../ws-auth';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
- * The Tauri sidecar writes ~/.cortex-ide/api-port after probing for a free
+ * The Tauri sidecar writes ~/.o8/api-port after probing for a free
  * port, so MCP servers spawned long after the Tauri shell picked a port
  * still land on the live backend.
  */
@@ -28,7 +28,7 @@ function resolveApiBase(): string {
   if (process.env.CORTEX_API_BASE) return process.env.CORTEX_API_BASE;
   if (process.env.O8_API_PORT) return `http://127.0.0.1:${process.env.O8_API_PORT}`;
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.cortex-ide');
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
     const portFile = join(dataDir, 'api-port');
     if (existsSync(portFile)) {
       const n = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
