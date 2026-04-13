@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { Brain, Check, ChevronRight, Eye, FileText, Search, Zap } from 'lucide-react';
+import { Brain, Check, ChevronRight, Eye, FileText, Search, Zap } from '../lucide-shims';
 
 import { THEME_ACCENT, THEME_ACCENT_BORDER, THEME_ACCENT_SOFT, THEME_BG_CARD, type ThinkingStep, type ToolCallInfo } from './shared';
 

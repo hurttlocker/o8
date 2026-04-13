@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- preserved from legacy Canvas.tsx extraction */
 
 import { memo, useEffect, useState } from 'react';
-import { ExternalLink, GitPullRequest } from 'lucide-react';
+import { ExternalLink, GitPullRequest } from '../lucide-shims';
 import { MarkdownBody } from '@/components/desktop/MarkdownBody';
 import { formatAge } from '@/components/desktop/canvas-utils';
 

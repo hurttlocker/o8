@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
-import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight, Play } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight, Play } from './lucide-shims';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';

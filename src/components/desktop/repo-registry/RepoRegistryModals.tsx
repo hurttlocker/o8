@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2 } from '../lucide-shims';
 import {
   AlertCircle,
   GlassModal,

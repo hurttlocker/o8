@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { MessageSquare, PanelLeftClose, Star, Trash2 } from 'lucide-react';
+import { MessageSquare, PanelLeftClose, Star, Trash2 } from '../lucide-shims';
 
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 

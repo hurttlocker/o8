@@ -2,7 +2,7 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronDown, type LucideIcon } from 'lucide-react';
+import { ChevronDown, type LucideIcon } from '../lucide-shims';
 import type { ActivityItem, AgentDetail, EventEntry, PRHoverDetail, WorkspaceGroup } from './types';
 
 export const THEME_ACCENT = 'var(--t-accent, #ef4444)';

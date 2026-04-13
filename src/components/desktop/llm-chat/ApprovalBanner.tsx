@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { AlertCircle, Eye, GitPullRequest, Pencil, Plus, Terminal, Trash2 } from 'lucide-react';
+import { AlertCircle, Eye, GitPullRequest, Pencil, Plus, Terminal, Trash2 } from '../lucide-shims';
 
 import type { LLMMessage } from './shared';
 import { type PendingApprovalState } from './shared';

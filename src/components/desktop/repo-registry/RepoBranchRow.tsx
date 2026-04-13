@@ -2,7 +2,7 @@
 
 import { memo } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight, ExternalLink, PlayCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, PlayCircle } from '../lucide-shims';
 import {
   AlertCircle,
   FolderOpen,

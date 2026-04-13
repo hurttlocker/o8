@@ -19,7 +19,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Activity, BarChart3, Clock, Cpu, DollarSign, Layers, TrendingUp, Zap } from 'lucide-react';
+import { Activity, BarChart3, Clock, Cpu, DollarSign, Layers, TrendingUp, Zap } from './lucide-shims';
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 import { formatTokens } from '@/lib/util/format-tokens';
 

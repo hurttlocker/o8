@@ -8,7 +8,7 @@
  */
 
 import { memo } from 'react';
-import { Bell } from 'lucide-react';
+import { Bell } from '@/components/desktop/lucide-shims';
 
 interface AlertBellProps {
   unreadCount: number;

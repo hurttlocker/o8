@@ -8,7 +8,7 @@ import {
   RefreshCw,
   ShieldCheck,
   XCircle,
-} from 'lucide-react';
+} from './lucide-shims';
 import type { ApprovalAuditEvent, ApprovalRecord, ApprovalRisk, OrchestratorReviewFinding } from '@/lib/approvals/types';
 
 type TimeRangeOption = 'all' | '1h' | '24h' | '7d' | '30d';

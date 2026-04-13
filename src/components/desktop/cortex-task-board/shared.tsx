@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { GitBranch, X } from 'lucide-react';
+import { GitBranch, X } from '../lucide-shims';
 import type {
   BoardFormProps,
   BoardPillProps,

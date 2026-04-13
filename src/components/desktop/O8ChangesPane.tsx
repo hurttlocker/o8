@@ -249,7 +249,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
   }, [expandedCommitSha, filter, loading, loadCommitDiff, resolveCommitSha]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#1e2028' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--t-panel-solid)' }}>
       <div
         style={{
           display: 'flex',

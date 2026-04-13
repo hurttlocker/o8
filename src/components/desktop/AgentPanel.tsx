@@ -3,7 +3,7 @@
 
 import { memo, type CSSProperties } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Clock } from 'lucide-react';
+import { Clock } from './lucide-shims';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import {
   AgentPanelEmptyState,

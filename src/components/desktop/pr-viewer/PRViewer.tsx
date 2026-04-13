@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps -- extracted from Canvas.tsx */
 
 import React from 'react';
-import { ExternalLink, RefreshCw } from 'lucide-react';
+import { ExternalLink, RefreshCw } from '../lucide-shims';
 import { LIGHT_CANVAS_VARS } from '../canvas-utils';
 import type { PRViewerProps } from './types';
 import { usePRData } from './usePRData';

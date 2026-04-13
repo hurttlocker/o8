@@ -9,7 +9,7 @@ import {
   MessageSquare,
   RotateCcw,
   Send,
-} from 'lucide-react';
+} from '../lucide-shims';
 import {
   formatReviewCommentBatchInjection,
   formatReviewThreadInjection,

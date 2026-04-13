@@ -12,7 +12,7 @@
 
 import React, { memo, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { X } from './lucide-shims';
 import { CodeBlock } from './CodeBlock';
 
 // ── Image URL resolver ──

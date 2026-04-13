@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, FileEdit, FileMinus, FilePlus, FileText, MessageSquare } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileEdit, FileMinus, FilePlus, FileText, MessageSquare } from '../lucide-shims';
 import type { ReviewChangedFile, ReviewWorktreeSummary } from '@/lib/fleet/types';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { WorkspacePanelTabId, WorkspaceReviewCheckRun, WorkflowRunGroup, WorkspaceChatTargetOption } from './types';
@@ -315,13 +315,13 @@ export function FilesTabDropdown({
           minWidth: 120,
           padding: '4px',
           borderRadius: 10,
-          border: '1px solid rgba(255, 255, 255, 0.08)',
-          background: '#1e2028',
+          border: '1px solid var(--t-panel-border)',
+          background: 'var(--t-panel-solid)',
           backdropFilter: 'none',
           WebkitBackdropFilter: 'none',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.28), 0 1px 3px rgba(0,0,0,0.15)',
+          boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
           zIndex: 100,
-          color: '#e2e8f0',
+          color: 'var(--t-text)',
         } as React.CSSProperties}>
           {FILES_TAB_OPTIONS.map((option) => (
             <button
@@ -505,9 +505,9 @@ export function ChatTargetSelector({
             maxWidth: 280,
             padding: 6,
             borderRadius: 12,
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            background: '#1e2028',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.28), 0 1px 3px rgba(0,0,0,0.15)',
+            border: '1px solid var(--t-panel-border)',
+            background: 'var(--t-panel-solid)',
+            boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
             backdropFilter: 'none',
             WebkitBackdropFilter: 'none',
             zIndex: 30,

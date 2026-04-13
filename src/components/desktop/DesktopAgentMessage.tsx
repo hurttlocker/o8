@@ -11,7 +11,7 @@ import {
   Search,
   TerminalSquare,
   Wrench,
-} from 'lucide-react';
+} from './lucide-shims';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
 import type {
   MobileTranscriptEntry,

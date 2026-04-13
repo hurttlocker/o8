@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
-import { FileText } from 'lucide-react';
+import { FileText } from '../lucide-shims';
 import type { PRDetail } from './types';
 
 interface PRFilesSectionProps {

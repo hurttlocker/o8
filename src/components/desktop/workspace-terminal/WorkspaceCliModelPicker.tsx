@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useEffect, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown } from '../lucide-shims';
 import {
   THEME_ACCENT_SOFT,
   THEME_BG_CARD,

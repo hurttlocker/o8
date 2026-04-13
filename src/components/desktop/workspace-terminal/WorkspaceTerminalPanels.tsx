@@ -1,7 +1,7 @@
 'use client';
 
 import { MutableRefObject, Suspense, lazy, memo } from 'react';
-import { Terminal as TerminalIcon } from 'lucide-react';
+import { Terminal as TerminalIcon } from '../lucide-shims';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
 import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
@@ -73,7 +73,7 @@ function WorkspaceTerminalPanelsBase({
   onLaunchWorkspaceTask,
 }: WorkspaceTerminalPanelsProps) {
   return (
-    <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, #ffffff)' }}>
+    <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
       {visibleTabs.map((tab) => (
         tab.kind === 'orchestrator' ? (
           <Suspense key={tab.id} fallback={null}>

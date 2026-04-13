@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useEffect, useState } from 'react';
-import { GitCommit } from 'lucide-react';
+import { GitCommit } from '../lucide-shims';
 import type { WorkspaceGitLogCommit, WorkspaceSidePanelRepo } from './types';
 import { THEME_ACCENT, THEME_ACCENT_SOFT, THEME_PANEL_GLASS, formatAge } from './shared';
 

@@ -15,7 +15,17 @@ import { compactConversation, shouldCompact, type LLMMessage as CompactMessage }
 
 export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, draftInjection, onSummaryChange, onConsumeDraftInjection, onLinkedIssueChange, onOpenInCanvas, onRunInTerminal, onOpenHistoryChat }: LLMChatProps) {
   const [cliModels, setCliModels] = useState<ModelOption[]>([]);
-  const allModels = cliModels.length > 0 ? [...cliModels, ...API_MODELS] : API_MODELS;
+  // null = keys not yet fetched (show all to avoid flicker); Set = configured provider IDs
+  const [apiKeyProviders, setApiKeyProviders] = useState<Set<string> | null>(null);
+  // Operator is always available — it's o8's branded free tier. Other API models require their key.
+  const availableApiModels = apiKeyProviders === null
+    ? API_MODELS
+    : API_MODELS.filter((m) => (
+      m.provider === 'operator'
+      || m.provider === 'local'
+      || apiKeyProviders.has(m.provider)
+    ));
+  const allModels = cliModels.length > 0 ? [...cliModels, ...availableApiModels] : availableApiModels;
 
   const [messages, setMessages] = useState<LLMMessage[]>([]), [input, setInput] = useState(''), [model, setModel] = useState<ModelOption>(API_MODELS[0]), [isStreaming, setIsStreaming] = useState(false), [streamContent, setStreamContent] = useState(''), [modelResolved, setModelResolved] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]), [showFilePicker, setShowFilePicker] = useState(false), [attachedFiles, setAttachedFiles] = useState<string[]>([]), [filePickerIndex, setFilePickerIndex] = useState(0);
@@ -29,21 +39,41 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
 
   const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), handledDraftInjectionRef = useRef<string | null>(null), scrollRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null), abortRef = useRef<AbortController | null>(null), fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Detect installed CLI runtimes and build CLI model entries
+  // Detect installed CLI runtimes + configured API keys, then build the visible model list.
+  // Only models whose CLI is installed OR whose API key is configured will appear in the picker.
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/setup/detect');
-        if (!res.ok) return;
-        const data = await res.json();
-        const detected: ModelOption[] = [];
-        for (const tool of data.tools ?? []) {
-          if (tool.detected && CLI_RUNTIME_MODELS[tool.id as string]) {
-            detected.push(...CLI_RUNTIME_MODELS[tool.id as string]);
+        const [detectRes, keysRes] = await Promise.all([
+          fetch('/api/setup/detect').catch(() => null),
+          fetch('/api/v2/keys').catch(() => null),
+        ]);
+
+        if (detectRes?.ok) {
+          const data = await detectRes.json();
+          const detected: ModelOption[] = [];
+          for (const tool of data.tools ?? []) {
+            if (tool.detected && CLI_RUNTIME_MODELS[tool.id as string]) {
+              detected.push(...CLI_RUNTIME_MODELS[tool.id as string]);
+            }
           }
+          if (detected.length > 0) setCliModels(detected);
         }
-        if (detected.length > 0) setCliModels(detected);
-      } catch { /* non-critical */ }
+
+        if (keysRes?.ok) {
+          const data = await keysRes.json();
+          const configured = new Set<string>(
+            (data.providers ?? [])
+              .filter((p: { configured: boolean }) => p.configured)
+              .map((p: { id: string }) => p.id),
+          );
+          setApiKeyProviders(configured);
+        } else {
+          setApiKeyProviders(new Set());
+        }
+      } catch {
+        setApiKeyProviders(new Set());
+      }
     })();
   }, []);
 

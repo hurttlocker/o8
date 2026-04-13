@@ -9,7 +9,7 @@ import {
   GitMerge,
   GitPullRequest,
   MessageSquare,
-} from 'lucide-react';
+} from '../lucide-shims';
 import { ApprovalQueuePanel } from '../ApprovalQueuePanel';
 import { deriveWorkflowStage, describeWorkflowStage, workflowBadge } from '@/lib/workflows/status';
 import {

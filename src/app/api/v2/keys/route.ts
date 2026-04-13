@@ -33,31 +33,10 @@ interface ProviderKeyConfig {
   validateUrl?: string;
 }
 
+// o8 v1: only OpenRouter is exposed as a user-managed key. CLI runtimes (codex,
+// claude-code, gemini, opencode) handle their own provider auth. The o8 Operator
+// uses Gemini under the hood via GOOGLE_AI_API_KEY which is provisioned silently.
 const PROVIDERS: ProviderKeyConfig[] = [
-  {
-    id: 'anthropic',
-    label: 'Anthropic',
-    envVar: 'ANTHROPIC_API_KEY',
-    placeholder: 'sk-ant-...',
-    docsUrl: 'https://console.anthropic.com/settings/keys',
-    validateUrl: 'https://api.anthropic.com/v1/messages',
-  },
-  {
-    id: 'openai',
-    label: 'OpenAI',
-    envVar: 'OPENAI_API_KEY',
-    placeholder: 'sk-...',
-    docsUrl: 'https://platform.openai.com/api-keys',
-    validateUrl: 'https://api.openai.com/v1/models',
-  },
-  {
-    id: 'google',
-    label: 'Google AI',
-    envVar: 'GOOGLE_AI_API_KEY',
-    placeholder: 'AIza...',
-    docsUrl: 'https://aistudio.google.com/apikey',
-    validateUrl: 'https://generativelanguage.googleapis.com/v1beta/models',
-  },
   {
     id: 'openrouter',
     label: 'OpenRouter',
@@ -65,14 +44,6 @@ const PROVIDERS: ProviderKeyConfig[] = [
     placeholder: 'sk-or-...',
     docsUrl: 'https://openrouter.ai/keys',
     validateUrl: 'https://openrouter.ai/api/v1/models',
-  },
-  {
-    id: 'xai',
-    label: 'xAI (Grok)',
-    envVar: 'XAI_API_KEY',
-    placeholder: 'xai-...',
-    docsUrl: 'https://console.x.ai',
-    validateUrl: 'https://api.x.ai/v1/models',
   },
 ];
 

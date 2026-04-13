@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps, react-hooks/set-state-in-effect -- extracted from Canvas.tsx */
 
 import { memo, useEffect, useState } from 'react';
-import { ExternalLink, Play } from 'lucide-react';
+import { ExternalLink, Play } from './lucide-shims';
 import { MarkdownBody } from './MarkdownBody';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import { repoSlugFromRemote, readinessTone, formatAge, LIGHT_CANVAS_VARS, type CanvasRepoTaskLaunchRequest } from './canvas-utils';

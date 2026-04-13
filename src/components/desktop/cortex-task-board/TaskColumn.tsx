@@ -5,7 +5,7 @@ import {
   ExternalLink,
   Play,
   RefreshCw,
-} from 'lucide-react';
+} from '../lucide-shims';
 import type { TaskColumnProps } from './types';
 import {
   columnStyle,

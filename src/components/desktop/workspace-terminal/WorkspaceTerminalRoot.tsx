@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw } from '../lucide-shims';
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
 import { TabBar } from '@/components/desktop/workspace-terminal/TabBar';
 import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';

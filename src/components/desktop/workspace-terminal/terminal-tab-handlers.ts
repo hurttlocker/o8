@@ -428,7 +428,12 @@ export function computeCloseTab(
   const remaining = tabs.filter((entry) => entry.id !== tabId);
   let nextActiveId: string | null = null;
   if (tabId === activeTabId && remaining.length > 0) {
-    nextActiveId = remaining[Math.min(index, remaining.length - 1)].id;
+    // Prefer the Orchestrator tab as the fallback so closing a CLI/chat session
+    // returns the user to the brain rather than skipping into the Assistant.
+    const orchestrator = remaining.find((entry) => entry.kind === 'orchestrator');
+    nextActiveId = orchestrator
+      ? orchestrator.id
+      : remaining[Math.min(index, remaining.length - 1)].id;
   } else if (tabId === activeTabId) {
     nextActiveId = '';
   }

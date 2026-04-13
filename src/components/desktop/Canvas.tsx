@@ -29,7 +29,7 @@ import {
   Radio,
   Terminal,
   X,
-} from 'lucide-react';
+} from './lucide-shims';
 const AuditLogPanel = lazy(() => import('@/components/desktop/AuditLogPanel').then(m => ({ default: m.AuditLogPanel })));
 const CommitViewer = lazy(() => import('@/components/desktop/CommitViewer').then(m => ({ default: m.CommitViewer })));
 const FileViewer = lazy(() => import('@/components/desktop/FileViewer').then(m => ({ default: m.FileViewer })));

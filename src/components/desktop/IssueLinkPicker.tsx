@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Check, ExternalLink, Search } from 'lucide-react';
+import { AlertCircle, Check, ExternalLink, Search } from './lucide-shims';
 
 export interface LinkedIssueRef {
   repo: string;
