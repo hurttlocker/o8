@@ -444,6 +444,12 @@ function buildRuntimeSurface(thread: CodexThreadRow, activity?: CodexThreadActiv
   const repoSlug = repoSlugFromOrigin(thread.git_origin_url);
   const activityState = classifyActivity(thread, activity);
   const isLive = activityState === 'active';
+  // Non-live discovered sessions can still be resumed: `codex exec resume
+  // <threadId> <message>` spawns a fresh subprocess that picks up the
+  // persisted thread state. We accept that pathway as valid input; the
+  // adapter (src/lib/runtimes/codex.ts resume) routes closed sessions
+  // through `codex exec resume`, live ones through the owned pipeline.
+  const canSendInput = Boolean(thread.id);
   const activeProcessLabel = activity?.active
     ? `Local Codex discovery • live pid ${activity.pid}${activity.tty ? ` • ${activity.tty}` : ''}`
     : activityState === 'recent'
@@ -463,7 +469,7 @@ function buildRuntimeSurface(thread: CodexThreadRow, activity?: CodexThreadActiv
     capabilities: {
       attach: true,
       readTail: true,
-      sendInput: isLive,
+      sendInput: canSendInput,
       interrupt: isLive,
       resize: false,
       diffContext: Boolean(thread.git_branch || repoSlug),
@@ -751,8 +757,8 @@ export async function getCodexDiscoveredFleetAdditions(
       sourceLabel: CODEX_SOURCE_LABEL,
       note:
         activeCount > 0
-          ? 'Codex runtime inventory now distinguishes live pid-backed terminals from recent session history. Mutation stays disabled until a truthful input/interrupt seam exists.'
-          : 'Codex local sessions are surfaced read-only for now from state_5.sqlite + rollout history. Mutation stays disabled until a truthful input/interrupt seam exists.',
+          ? 'Codex runtime inventory distinguishes live pid-backed terminals from closed sessions. Both support resume via `codex exec resume <threadId>`, routed through the adapter.'
+          : 'Codex local sessions are read from state_5.sqlite + rollout history. Closed sessions still accept input — the adapter spawns `codex exec resume <threadId> <message>` to continue the thread.',
     };
   } catch (error) {
     return {
