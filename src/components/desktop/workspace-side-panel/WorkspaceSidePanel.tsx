@@ -53,6 +53,7 @@ export function WorkspaceSidePanel({
 
   return (
     <div
+      data-chrome-surface="true"
       style={{
         flex: 1,
         minHeight: 0,

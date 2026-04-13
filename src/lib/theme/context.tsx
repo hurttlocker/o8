@@ -103,6 +103,51 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
     `;
   }
 
+  // Chrome-surface scope — flips text + button tokens to glass-on-white for
+  // regions that sit on top of the vibrancy bleed in light mode. Chrome
+  // surfaces are marked with `data-chrome-surface="true"` in the component
+  // tree (right panel, title bar right-controls, etc). In midnight the
+  // normal text tokens are already light, so this scope is a no-op and
+  // lives only under the light theme selector.
+  let chromeScopeStyle = document.getElementById('theme-chrome-surface');
+  if (!chromeScopeStyle) {
+    chromeScopeStyle = document.createElement('style');
+    chromeScopeStyle.id = 'theme-chrome-surface';
+    document.head.appendChild(chromeScopeStyle);
+  }
+  chromeScopeStyle.textContent = `
+    [data-theme="light"] [data-chrome-surface="true"] {
+      --t-text: rgba(255, 255, 255, 0.96);
+      --t-text-strong: #ffffff;
+      --t-text-secondary: rgba(255, 255, 255, 0.78);
+      --t-text-muted: rgba(255, 255, 255, 0.6);
+      --t-text-faint: rgba(255, 255, 255, 0.42);
+      --t-tab-active-text: #ffffff;
+      --t-tab-text: rgba(255, 255, 255, 0.6);
+      --t-border: rgba(255, 255, 255, 0.14);
+      --t-divider: rgba(255, 255, 255, 0.12);
+      --t-divider-strong: rgba(255, 255, 255, 0.2);
+      --t-divider-subtle: rgba(255, 255, 255, 0.07);
+      --t-hover: rgba(255, 255, 255, 0.1);
+      --t-panel-border: rgba(255, 255, 255, 0.14);
+      --t-panel-hover: rgba(255, 255, 255, 0.08);
+      --t-btn-secondary-bg: rgba(255, 255, 255, 0.1);
+      --t-btn-secondary-border: rgba(255, 255, 255, 0.16);
+      --t-btn-secondary-hover: rgba(255, 255, 255, 0.16);
+      --t-input-bg: rgba(255, 255, 255, 0.08);
+      --t-input-border: rgba(255, 255, 255, 0.16);
+      --t-bg-card: rgba(255, 255, 255, 0.06);
+      --t-code-bg: rgba(255, 255, 255, 0.08);
+      --t-chrome-btn-bg: rgba(255, 255, 255, 0.08);
+      --t-chrome-btn-hover-bg: rgba(255, 255, 255, 0.16);
+      --t-chrome-btn-active-bg: rgba(255, 255, 255, 0.24);
+      --t-chrome-btn-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+      --t-chrome-btn-hover-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+      --t-chrome-btn-active-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+      --t-chrome-btn-text: rgba(255, 255, 255, 0.96);
+    }
+  `;
+
   root.style.colorScheme = theme.colorScheme;
   root.dataset.theme = theme.id;
   if (body) {
