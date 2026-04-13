@@ -78,6 +78,8 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
     shouldShowSuggestedPrompts: rest.shouldShowSuggestedPrompts,
     showTypingIndicator: rest.showTypingIndicator,
     streamContent: rest.streamContent,
+    liveFallbackNotice: rest.liveFallbackNotice,
+    permissionMode: rest.permissionMode,
   };
 
   const composerProps: React.ComponentProps<typeof Composer> = {
@@ -127,6 +129,8 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
     onStop: rest.onStop,
     onUploadFiles: rest.onUploadFiles,
     searchApplyFiles: rest.searchApplyFiles,
+    permissionMode: rest.permissionMode,
+    onTogglePermission: rest.onTogglePermission,
   };
 
   return (
