@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 /**
  * GET/POST/DELETE /api/v2/chat-history — persist LLM chat messages per tab
  *
- * Stored at ~/.cortex-ide/chat-history/{tabId}.json
+ * Stored at ~/.o8/chat-history/{tabId}.json
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from '
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-const HISTORY_DIR = join(homedir(), '.cortex-ide', 'chat-history');
+const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
 function ensureDir() {
   mkdirSync(HISTORY_DIR, { recursive: true });

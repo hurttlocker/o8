@@ -1,4 +1,4 @@
-export const TIMELINE_VISIBLE_STORAGE_KEY = 'cortex-ide:appearance:timeline-visible';
+export const TIMELINE_VISIBLE_STORAGE_KEY = 'o8:appearance:timeline-visible';
 export const TIMELINE_VISIBLE_EVENT = 'cortex:timeline-visible-changed';
 
 export function readTimelineVisible() {

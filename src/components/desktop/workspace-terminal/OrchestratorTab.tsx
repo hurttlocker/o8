@@ -72,8 +72,8 @@ function persistPermissionMode(tabId: string, mode: ThoughtsChatPermissionMode):
   }
 }
 
-const HISTORY_OPEN_KEY = 'cortex-ide:orchestrator:history-open';
-const MISSION_OPEN_KEY = 'cortex-ide:orchestrator:mission-open';
+const HISTORY_OPEN_KEY = 'o8:orchestrator:history-open';
+const MISSION_OPEN_KEY = 'o8:orchestrator:mission-open';
 
 function readBooleanPref(key: string): boolean {
   if (typeof window === 'undefined') return false;

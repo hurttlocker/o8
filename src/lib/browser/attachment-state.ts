@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 
-const STATE_DIR = join(homedir(), '.cortex-ide');
+const STATE_DIR = join(homedir(), '.o8');
 const ATTACHMENT_STATE_PATH = join(STATE_DIR, 'browser-attachment.json');
 
 function ensureStateDir() {

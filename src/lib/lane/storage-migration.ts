@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Lane, LaneEvent, LaneStoreState } from './types';
 
-const LEGACY_STORE_PATH = path.join(os.homedir(), '.cortex-ide', 'lanes.json');
+const LEGACY_STORE_PATH = path.join(os.homedir(), '.o8', 'lanes.json');
 
 function nowIso() {
   return new Date().toISOString();

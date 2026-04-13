@@ -9,7 +9,7 @@ import {
 } from './neomorph';
 
 const REPO_DISPLAY: Record<string, string> = {
-  'cortex-ide': 'Cortex IDE',
+  'cortex-ide': 'o8',
   'cortex': 'Cortex',
   'spear-production': 'Spear',
   'mybeautifulwife': 'Eyes Web',

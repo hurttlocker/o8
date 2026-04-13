@@ -37,7 +37,7 @@ export function getGitHubToken(): string | undefined {
 
   // Check config files
   for (const path of [
-    join(homedir(), '.cortex-ide', '.env.local'),
+    join(homedir(), '.o8', '.env.local'),
     join(process.cwd(), '.env.local'),
   ]) {
     if (!existsSync(path)) continue;

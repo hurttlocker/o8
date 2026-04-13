@@ -8,7 +8,7 @@ export type IdeSurfaceState = {
   activeRepoPath?: string | null;
 };
 
-const STATE_DIR = path.join(homedir(), '.cortex-ide');
+const STATE_DIR = path.join(homedir(), '.o8');
 const SURFACE_STATE_FILE = path.join(STATE_DIR, 'ide-surface-state.json');
 
 function normalizeRepoPath(repoPath?: string | null) {

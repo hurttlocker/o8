@@ -641,7 +641,7 @@ const InspectorSidebar = memo(function InspectorSidebar({
 > cwd=${selectedRuntimeSurface?.cwd ?? selectedAgent.workspace}
 > branch=${selectedRuntimeSurface?.branch ?? selectedAgent.branch}
 > ownership=${selectedRuntimeSurface?.ownership ?? 'owned'}
-> tail_source=${selectedRuntimeSurface?.tailSourceLabel ?? '~/.cortex-ide/owned-codex/...'}
+> tail_source=${selectedRuntimeSurface?.tailSourceLabel ?? '~/.o8/owned-codex/...'}
 
 $ POST /api/runtime/action { action: "steer", surfaceId: "${selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}", message: "..." }
 $ POST /api/runtime/action { action: "stop", surfaceId: "${selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}" }

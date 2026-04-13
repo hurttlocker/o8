@@ -12,7 +12,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 
-const HISTORY_DIR = join(homedir(), '.cortex-ide', 'chat-history');
+const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
 interface ChatHistoryEntry {
   tabId: string;

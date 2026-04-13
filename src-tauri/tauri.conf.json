@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Cortex IDE",
+  "productName": "o8",
   "version": "0.1.2",
-  "identifier": "com.cortexide.app",
+  "identifier": "ai.o8.desktop",
   "build": {
     "frontendDist": "../out/frontend",
     "devUrl": "http://localhost:3001/dashboard",

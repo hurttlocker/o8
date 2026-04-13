@@ -22,7 +22,7 @@ import type {
 import { truncateText } from '@/lib/util/text';
 
 const execFileAsync = promisify(execFile);
-const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(os.homedir(), '.cortex-ide', 'owned-codex');
+const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(os.homedir(), '.o8', 'owned-codex');
 const RUNS_DIR = 'runs';
 const METADATA_FILE = 'session.json';
 const ACTIVE_WINDOW_MS = 10 * 60_000;

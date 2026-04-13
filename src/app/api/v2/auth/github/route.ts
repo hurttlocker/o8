@@ -78,7 +78,7 @@ export async function POST(request: Request) {
     });
 
     // Set HTTP-only cookie for browser auth (30 day expiry)
-    response.cookies.set('cortex-ide-token', token, {
+    response.cookies.set('o8-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',

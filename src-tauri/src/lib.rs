@@ -12,12 +12,79 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 use window_vibrancy::apply_blur;
 
 // ── Data directory resolution ──
+//
+// Canonical location: ~/.o8 (was ~/.cortex-ide before the April 13 rebrand).
+// On first launch of the renamed binary we copy the old dir into the new
+// location once, drop a marker file, and never touch it again. The old dir
+// is left in place so rolling back to an older installer still works.
+//
+// Priority:
+//   1. O8_DATA_DIR      — explicit override, no migration
+//   2. CORTEX_IDE_DATA_DIR — legacy override, also no migration
+//   3. ~/.o8           — default, auto-migrate from ~/.cortex-ide on first use
 
-fn cortex_data_dir() -> String {
-    std::env::var("CORTEX_IDE_DATA_DIR").unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_default();
-        format!("{}/.cortex-ide", home)
-    })
+fn o8_data_dir() -> String {
+    if let Ok(dir) = std::env::var("O8_DATA_DIR") {
+        return dir;
+    }
+    if let Ok(dir) = std::env::var("CORTEX_IDE_DATA_DIR") {
+        return dir;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let new_dir = format!("{}/.o8", home);
+    migrate_data_dir_once(&home, &new_dir);
+    new_dir
+}
+
+fn migrate_data_dir_once(home: &str, new_dir: &str) {
+    let marker = format!("{}/.migrated-from-cortex-ide", new_dir);
+    if std::path::Path::new(&marker).exists() {
+        return;
+    }
+    let old_dir = format!("{}/.cortex-ide", home);
+    let old_exists = std::path::Path::new(&old_dir).exists();
+    let new_exists = std::path::Path::new(new_dir).exists();
+
+    if !new_exists && !old_exists {
+        let _ = std::fs::create_dir_all(new_dir);
+        let _ = std::fs::write(&marker, format!("Fresh install on {:?}\n", std::time::SystemTime::now()));
+        return;
+    }
+    if new_exists {
+        let has_content = std::fs::read_dir(new_dir)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false);
+        if has_content {
+            let _ = std::fs::write(&marker, format!("Existing dir on {:?}\n", std::time::SystemTime::now()));
+            return;
+        }
+    }
+    if old_exists {
+        log::info!("[data-dir] Migrating {} → {}", old_dir, new_dir);
+        let _ = std::fs::create_dir_all(new_dir);
+        if let Err(e) = copy_dir_recursive(&old_dir, new_dir) {
+            log::warn!("[data-dir] Migration failed: {}", e);
+        } else {
+            let _ = std::fs::write(&marker, format!("Migrated from {} on {:?}\n", old_dir, std::time::SystemTime::now()));
+            log::info!("[data-dir] Migration complete. Old dir left at {} for rollback.", old_dir);
+        }
+    }
+}
+
+fn copy_dir_recursive(src: &str, dst: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let file_name = entry.file_name();
+        let dst_path = std::path::Path::new(dst).join(&file_name);
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(src_path.to_str().unwrap_or(""), dst_path.to_str().unwrap_or(""))?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
 }
 
 // ── Dynamic port allocation ──
@@ -50,7 +117,7 @@ fn find_free_port(range: std::ops::Range<u16>, skip: Option<u16>) -> Option<u16>
 /// Persist the chosen ports to the data dir so child processes (MCP server,
 /// generators) can read the same values without guessing.
 fn write_port_file(name: &str, port: u16) -> std::io::Result<()> {
-    let dir = cortex_data_dir();
+    let dir = o8_data_dir();
     let _ = std::fs::create_dir_all(&dir);
     let path = format!("{}/{}", dir, name);
     std::fs::write(path, port.to_string())
@@ -69,7 +136,7 @@ fn write_port_file(name: &str, port: u16) -> std::io::Result<()> {
 /// prior run to `<name>.prev` first. Returns `None` if the filesystem is
 /// unwritable (we prefer to keep the app bootable rather than failing loud).
 fn open_child_log(name: &str) -> Option<std::fs::File> {
-    let dir = format!("{}/logs", cortex_data_dir());
+    let dir = format!("{}/logs", o8_data_dir());
     if let Err(e) = std::fs::create_dir_all(&dir) {
         log::warn!("Could not create log dir {}: {}", dir, e);
         return None;
@@ -335,7 +402,7 @@ fn get_app_data_dir(app: tauri::AppHandle) -> Option<String> {
 /// Equivalent to GET /api/panel/repos but without readiness enrichment.
 #[tauri::command]
 fn read_repos() -> Result<serde_json::Value, String> {
-    let repos_path = format!("{}/repos.json", cortex_data_dir());
+    let repos_path = format!("{}/repos.json", o8_data_dir());
     let content = std::fs::read_to_string(&repos_path)
         .map_err(|e| format!("Failed to read repos.json: {}", e))?;
     let store: serde_json::Value = serde_json::from_str(&content)
@@ -470,7 +537,7 @@ fn read_git_status(repo: String) -> Result<serde_json::Value, String> {
 // ── SQLite helper (read-only, WAL mode) ──
 
 fn open_cortex_db() -> Result<Connection, String> {
-    let db_path = format!("{}/cortex-ide.db", cortex_data_dir());
+    let db_path = format!("{}/cortex-ide.db", o8_data_dir());
     if !std::path::Path::new(&db_path).exists() {
         return Err("db_not_found".to_string());
     }
@@ -683,7 +750,10 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Auto-saves window size + position to the OS data dir on close and
+        // restores them on next launch. No config needed.
+        .plugin(tauri_plugin_window_state::Builder::default().build());
 
     // MCP plugin: exposes app to AI agents (screenshots, DOM, input simulation).
     // Optional dev-only feature. Requires a sibling checkout of tauri-plugin-mcp.

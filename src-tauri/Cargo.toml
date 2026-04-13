@@ -1,7 +1,7 @@
 [package]
-name = "cortex-ide"
+name = "o8"
 version = "0.1.2"
-description = "Agent-first coding IDE with persistent memory"
+description = "o8 — governance layer for autonomous engineering teams"
 authors = ["hurttlocker"]
 license = "MIT"
 repository = "https://github.com/hurttlocker/cortex-ide"
@@ -35,6 +35,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
+tauri-plugin-window-state = "2"
 # Optional: see [features].dev-mcp-plugin above. Relative path so clones can
 # opt in by placing the plugin repo next to cortex-ide.
 tauri-plugin-mcp = { path = "../../tauri-plugin-mcp", optional = true }

@@ -46,7 +46,7 @@ export function withAuth(handler: AuthHandler) {
       token = authHeader.slice(7);
     } else {
       // Fall back to cookie
-      token = request.cookies.get('cortex-ide-token')?.value ?? null;
+      token = request.cookies.get('o8-token')?.value ?? null;
     }
 
     if (!token) {
@@ -101,7 +101,7 @@ export function withOptionalAuth(
     if (authHeader?.startsWith('Bearer ')) {
       token = authHeader.slice(7);
     } else {
-      token = request.cookies.get('cortex-ide-token')?.value ?? null;
+      token = request.cookies.get('o8-token')?.value ?? null;
     }
 
     if (!token) {

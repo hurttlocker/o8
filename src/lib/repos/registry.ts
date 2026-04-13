@@ -15,7 +15,7 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-const REGISTRY_DIR = path.join(os.homedir(), '.cortex-ide');
+const REGISTRY_DIR = path.join(os.homedir(), '.o8');
 const REGISTRY_PATH = path.join(REGISTRY_DIR, 'repos.json');
 
 function nowIso() {
@@ -268,7 +268,7 @@ async function readStore(): Promise<RepoRegistryStore> {
 
   const parsed = await readJsonFile<Partial<RepoRegistryStore>>(REGISTRY_PATH).catch(() => null);
   if (!parsed || !Array.isArray(parsed.repos)) {
-    throw new Error('Repository registry is unreadable. Check ~/.cortex-ide/repos.json.');
+    throw new Error('Repository registry is unreadable. Check ~/.o8/repos.json.');
   }
 
   return {

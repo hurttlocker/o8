@@ -46,6 +46,10 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
+import { migrateDataDirOnce } from '@/lib/data-dir-migration';
+
+migrateDataDirOnce();
+
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
@@ -87,7 +91,7 @@ const execFileAsync = promisify(execFile);
 // Read repo registry directly (avoid importing registry.ts which uses 'server-only')
 function listRepoPathsSync(): string[] {
   try {
-    const registryPath = join(homedir(), '.cortex-ide', 'repos.json');
+    const registryPath = join(homedir(), '.o8', 'repos.json');
     const raw = readFileSync(registryPath, 'utf-8');
     const store = JSON.parse(raw) as { repos?: Array<{ localPath?: string }> };
     return (store.repos ?? []).map(r => r.localPath).filter(Boolean) as string[];

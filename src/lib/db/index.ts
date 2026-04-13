@@ -2,7 +2,7 @@
  * Database Connection — SQLite via Drizzle ORM
  *
  * Single connection per process (Next.js server).
- * Database file lives at DATA_DIR/cortex-ide.db (defaults to ~/.cortex-ide/).
+ * Database file lives at DATA_DIR/cortex-ide.db (defaults to ~/.o8/).
  * Ensures tables on first connection until a schema marker is written.
  *
  * For production multi-tenant: swap better-sqlite3 for @neondatabase/serverless
@@ -14,6 +14,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { migrateDataDirOnce } from '@/lib/data-dir-migration';
 import { extractApprovalContextIdsFromMetadataJson } from '@/lib/approvals/context';
 import * as schema from './schema';
 import { migrateLegacyApprovalStoreIfNeeded } from '@/lib/approvals/storage-migration';
@@ -22,7 +23,14 @@ import { ensureUsageLogIndexes, ensureUsageLogSchema } from '@/lib/db/usage-log-
 
 // ── Data directory ──
 
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.cortex-ide');
+migrateDataDirOnce();
+
+const DATA_DIR = process.env.O8_DATA_DIR
+  || process.env.CORTEX_IDE_DATA_DIR
+  || path.join(os.homedir(), '.o8');
+// Keep the filename as cortex-ide.db so the data dir migration's byte-for-byte
+// copy still points at the right file. Renaming the file would require a
+// second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
 const DB_SCHEMA_VERSION = 3;

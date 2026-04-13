@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const WORKSPACE_ROOT = process.env.CORTEX_IDE_WORKSPACE_ROOT || require('os').homedir();
-const MEDIA_ROOT = process.env.CORTEX_IDE_MEDIA_ROOT || `${homedir()}/.cortex-ide/media`;
+const MEDIA_ROOT = process.env.CORTEX_IDE_MEDIA_ROOT || `${homedir()}/.o8/media`;
 const EXTRA_MEDIA_ROOTS = [
   `${WORKSPACE_ROOT}/inbox`,
   `${WORKSPACE_ROOT}/archive/artifacts`,

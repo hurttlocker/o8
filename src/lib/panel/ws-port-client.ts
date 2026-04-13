@@ -2,7 +2,7 @@
  * Browser-side WS port resolver.
  *
  * The Tauri Rust sidecar probes a free port for the ws-server and writes it
- * to `~/.cortex-ide/ws-port`. The root layout (`src/app/layout.tsx`) reads
+ * to `~/.o8/ws-port`. The root layout (`src/app/layout.tsx`) reads
  * that file server-side and injects the value as `window.__O8_WS_PORT__`
  * before any client code runs.
  *

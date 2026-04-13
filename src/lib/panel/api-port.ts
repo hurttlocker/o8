@@ -3,7 +3,7 @@
  *
  * Resolution order (first match wins):
  *   1. Explicit env var: PORT, O8_API_PORT, CORTEX_IDE_PORT.
- *   2. `~/.cortex-ide/api-port` written by the Tauri Rust sidecar during
+ *   2. `~/.o8/api-port` written by the Tauri Rust sidecar during
  *      startup (probe-from-3001-upward). Stale files are tolerated because
  *      the env var path wins when present.
  *   3. Legacy default 3001 so dev workflows (`npm run dev`) still work.
@@ -28,7 +28,7 @@ let _cached: { info: PortInfo; mtimeMs: number } | null = null;
 
 function dataDir(): string {
   return process.env.CORTEX_IDE_DATA_DIR
-    || join(process.env.HOME || '', '.cortex-ide');
+    || join(process.env.HOME || '', '.o8');
 }
 
 function readPortFile(name: string): number | null {

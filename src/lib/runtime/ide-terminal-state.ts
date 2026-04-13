@@ -31,7 +31,7 @@ export type IdeTerminalStateFile = {
   tabs: PersistedTab[];
 };
 
-const TERMINAL_STATE_DIR = path.join(homedir(), '.cortex-ide', 'terminal-states');
+const TERMINAL_STATE_DIR = path.join(homedir(), '.o8', 'terminal-states');
 
 function toMillis(isoLike?: string) {
   if (!isoLike) return 0;
