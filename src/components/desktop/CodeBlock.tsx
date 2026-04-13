@@ -13,7 +13,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Copy, Expand, Minus, Plus, X, FileCode, PanelRight, Play } from 'lucide-react';
+import { Check, ChevronDown, Copy, Expand, Minus, Plus, X, FileCode, PanelRight, Play } from './lucide-shims';
 
 interface CodeBlockProps {
   code: string;

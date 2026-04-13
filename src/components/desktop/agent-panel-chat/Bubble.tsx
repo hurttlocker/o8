@@ -2,7 +2,7 @@
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
-import { ChevronRight, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { ChevronRight, SlidersHorizontal, Sparkles } from '../lucide-shims';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
 import { DesktopToolCallStack } from '../DesktopAgentMessage';
 import { MessageActions } from '../MessageActions';

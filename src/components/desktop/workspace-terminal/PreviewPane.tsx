@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Crosshair, RefreshCw, X } from 'lucide-react';
+import { Crosshair, RefreshCw, X } from '../lucide-shims';
 import type {
   LocalhostPreview,
   PreviewSelectionPayload,

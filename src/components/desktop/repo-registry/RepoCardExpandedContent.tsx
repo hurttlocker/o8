@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useMemo, useState } from 'react';
-import { GitBranch } from 'lucide-react';
+import { GitBranch } from '../lucide-shims';
 import {
   FolderOpen,
   THEME_ACCENT,

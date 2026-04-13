@@ -21,7 +21,7 @@ import {
   Sparkles,
   X,
   type LucideIcon,
-} from 'lucide-react';
+} from '@/components/desktop/lucide-shims';
 
 type ResultKind = 'conversation' | 'agent' | 'issue' | 'file' | 'symbol';
 type CommandPaletteCategory = 'attention' | 'workspace' | 'review' | 'recovery' | 'settings';

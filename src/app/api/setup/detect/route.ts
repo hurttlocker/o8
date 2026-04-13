@@ -158,6 +158,40 @@ function detectGemini(): DetectedTool {
   };
 }
 
+function detectOpenCode(): DetectedTool {
+  const path = safeWhich('opencode');
+  const detected = !!path;
+  let version: string | undefined;
+  let authedProviders: string[] = [];
+
+  if (detected) {
+    version = safeExec('opencode', ['--version'], 2000);
+  }
+
+  // Best-effort: peek at the auth manifest to see which providers the user has authed.
+  // Used by the picker to show e.g. "OpenCode · 4 providers" — full sub-row expansion is
+  // tracked in issue #512.
+  const authPath = join(homedir(), '.local', 'share', 'opencode', 'auth.json');
+  if (detected && existsSync(authPath)) {
+    try {
+      const raw = readFileSync(authPath, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      authedProviders = Object.keys(parsed).sort();
+    } catch {
+      // ignore parse errors
+    }
+  }
+
+  return {
+    id: 'opencode',
+    name: 'OpenCode CLI',
+    detected,
+    version,
+    path,
+    details: { authedProviders },
+  };
+}
+
 function detectCortex(): DetectedTool {
   const home = homedir();
   let path = join(home, 'bin', 'cortex');
@@ -231,10 +265,9 @@ function detectApiKeys(): DetectedTool {
     join(repoRoot, '.env.local'),
   ];
 
+  // v1: only OpenRouter is exposed in the wizard. The o8 Operator uses Gemini
+  // under the hood via GOOGLE_AI_API_KEY which is provisioned silently.
   const keys = {
-    ANTHROPIC_API_KEY: false,
-    OPENAI_API_KEY: false,
-    GOOGLE_AI_API_KEY: false,
     OPENROUTER_API_KEY: false,
   };
 
@@ -312,13 +345,14 @@ export async function GET() {
     detectCodex(),
     detectClaudeCode(),
     detectGemini(),
+    detectOpenCode(),
     detectCortex(),
     await detectOllama(),
     detectApiKeys(),
   ];
 
   const hasAgentSurface = false;
-  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'gemini'].includes(t.id) && t.detected);
+  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'gemini', 'opencode'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
   const hasMemory = tools.some(t => t.id === 'cortex' && t.detected);
   const hasEmbeddings = tools.some(t => t.id === 'ollama' && t.detected);

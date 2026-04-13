@@ -111,13 +111,13 @@ export interface MissionCardData {
 export interface ModelOption {
   id: string;
   label: string;
-  provider: 'anthropic' | 'openai' | 'google' | 'openrouter' | 'local';
+  provider: 'anthropic' | 'openai' | 'google' | 'openrouter' | 'local' | 'operator';
   color: string;
   description: string;
   /** 'cli' = routed through installed CLI runtime, 'api' = direct API via BYOK key */
   backend: 'cli' | 'api';
   /** Which CLI runtime powers this model (only when backend === 'cli') */
-  cliRuntime?: 'claude-code' | 'codex' | 'gemini';
+  cliRuntime?: 'claude-code' | 'codex' | 'gemini' | 'opencode';
   /** Whether this model supports thinking/reasoning output */
   supportsThinking?: boolean;
   /** Default effort level for CLI models (Claude: low/medium/high/max) */
@@ -193,16 +193,34 @@ export const CLI_RUNTIME_MODELS: Record<string, ModelOption[]> = {
     { id: 'cli:gemini:gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', color: '#4285f4', description: 'Stable, GA', backend: 'cli', cliRuntime: 'gemini', supportsThinking: true },
     { id: 'cli:gemini:gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', color: '#4285f4', description: 'Fast + cheap', backend: 'cli', cliRuntime: 'gemini', supportsThinking: true },
   ],
+  opencode: [
+    // v1: single row that routes to whatever opencode is configured to use by default.
+    // Issue #512 tracks the eager-parse follow-up that surfaces individual authed providers
+    // (anthropic/openai/google/etc.) as sub-rows under this group.
+    { id: 'cli:opencode:default', label: 'OpenCode (default)', provider: 'local', color: '#a855f7', description: '75+ providers', backend: 'cli', cliRuntime: 'opencode' },
+  ],
 };
 
-/** API-backed models — OpenRouter, local, and direct provider keys */
+/** o8 Operator — branded, free, zero-setup default. Routes to Gemini Flash with OpenRouter free fallback. */
+export const OPERATOR_MODEL: ModelOption = {
+  id: 'o8-operator',
+  label: 'o8 Operator',
+  provider: 'operator',
+  color: '#2563eb',
+  description: 'Free • powered by o8',
+  backend: 'api',
+  supportsThinking: false,
+};
+
+/** API-backed models in the picker.
+ *
+ * v1: Operator only. Direct Anthropic / OpenAI / Google / xAI keys were dropped —
+ * power users either install a CLI runtime (codex / claude-code / gemini / opencode)
+ * or use the Operator (which already uses Gemini + OpenRouter under the hood).
+ * Future: surface OpenRouter as a separate "direct routes" section.
+ */
 export const API_MODELS: ModelOption[] = [
-  // Direct provider API (BYOK)
-  { id: 'claude-opus-4-6', label: 'Claude Opus', provider: 'anthropic', color: '#e07a3a', description: 'Via API key', backend: 'api', supportsThinking: true },
-  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet', provider: 'anthropic', color: '#e07a3a', description: 'Via API key', backend: 'api', supportsThinking: true },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', color: '#4285f4', description: 'Via API key', backend: 'api', supportsThinking: true },
-  { id: 'gpt-5.4', label: 'GPT-5.4', provider: 'openai', color: '#10a37f', description: 'Via API key', backend: 'api', supportsThinking: true },
-  { id: 'o3', label: 'o3', provider: 'openai', color: '#10a37f', description: 'Via API key', backend: 'api', supportsThinking: true },
+  OPERATOR_MODEL,
 ];
 
 /** Backward compat — streaming.ts uses this for fallback label resolution */

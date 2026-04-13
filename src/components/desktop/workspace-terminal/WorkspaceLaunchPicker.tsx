@@ -7,7 +7,7 @@ import {
   MessageSquare,
   Radio,
   Terminal as TerminalIcon,
-} from 'lucide-react';
+} from '../lucide-shims';
 import { CLI_AGENTS, THEME_ACCENT, THEME_ACCENT_SOFT } from '@/components/desktop/workspace-terminal/constants';
 import { AgentDot, PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
 import { CodexIcon, ClaudeIcon } from '@/components/desktop/repo-registry/shared';
@@ -123,13 +123,13 @@ function WorkspaceLaunchPickerBase({
             zIndex: 9000,
             marginTop: 4,
             minWidth: 220,
-            background: '#1e2028',
+            background: 'var(--t-panel-solid)',
             backdropFilter: 'none',
             WebkitBackdropFilter: 'none',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            border: '1px solid var(--t-panel-border)',
             borderRadius: 10,
             overflow: 'hidden',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.15)',
+            boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.12)',
           } as CSSProperties}
         >
           {pickerStep === 'main' ? (

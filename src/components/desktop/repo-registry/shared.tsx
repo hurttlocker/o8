@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertCircle, FolderOpen, GitBranch, GitPullRequest, Plus, Settings2, Trash2, X } from 'lucide-react';
+import { AlertCircle, FolderOpen, GitBranch, GitPullRequest, Plus, Settings2, Trash2, X } from '../lucide-shims';
 import { BlueGlassActionButton, BlueGlassHoverCard, BlueGlassMetricPill, BlueGlassSparklineLane } from '@/components/desktop/BlueGlassHoverCard';
 import type {
   RepoReadinessState,

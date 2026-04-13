@@ -6,7 +6,7 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { FileText, Search, X } from 'lucide-react';
+import { FileText, Search, X } from './lucide-shims';
 
 interface SearchResult {
   file: string;

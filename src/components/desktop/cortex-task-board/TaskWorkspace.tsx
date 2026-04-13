@@ -9,7 +9,7 @@ import {
   RefreshCw,
   RotateCcw,
   Trash2,
-} from 'lucide-react';
+} from '../lucide-shims';
 import { WorkflowReviewPanel } from '@/components/workflow-review-panel';
 import type { TaskWorkspaceProps } from './types';
 import {

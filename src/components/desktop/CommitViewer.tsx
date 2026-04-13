@@ -8,7 +8,7 @@ import {
   FileText,
   Send,
   X,
-} from 'lucide-react';
+} from './lucide-shims';
 import dynamic from 'next/dynamic';
 import { useTheme } from '@/lib/theme/context';
 import { formatAge } from './canvas-utils';

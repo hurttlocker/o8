@@ -13,7 +13,7 @@ import {
   PlayCircle,
   XCircle,
   Zap,
-} from 'lucide-react';
+} from '../lucide-shims';
 import {
   BlueGlassActionButton,
   BlueGlassHoverCard,

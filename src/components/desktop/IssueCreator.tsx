@@ -5,7 +5,7 @@
  */
 
 import { memo, useCallback, useState } from 'react';
-import { Check, Loader2, Sparkles, Tag, X } from 'lucide-react';
+import { Check, Loader2, Sparkles, Tag, X } from './lucide-shims';
 import { MarkdownBody } from './MarkdownBody';
 
 interface IssueCreatorProps {

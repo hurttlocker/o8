@@ -75,8 +75,9 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
     root.style.setProperty(key, value);
   }
 
-  // Tauri vibrancy: force transparent chrome so OS frost shows through
-  if (root.dataset.tauri === 'true') {
+  // Tauri vibrancy: force transparent chrome so OS frost shows through.
+  // Light theme opts out — it should read as solid white, not glass.
+  if (root.dataset.tauri === 'true' && theme.id !== 'light') {
     root.style.setProperty('--t-chrome', 'transparent');
     root.style.setProperty('--t-bg-gradient', 'transparent');
     root.style.setProperty('--t-chrome-nav', 'transparent');
@@ -95,6 +96,10 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
         -webkit-backdrop-filter: none !important;
       }
     `;
+  } else if (root.dataset.tauri === 'true' && theme.id === 'light') {
+    // Light theme in Tauri — clear any vibrancy overrides from a prior dark/midnight session.
+    const vibrancyStyle = document.getElementById('tauri-vibrancy-overrides');
+    if (vibrancyStyle) vibrancyStyle.remove();
   }
 
   root.style.colorScheme = theme.colorScheme;

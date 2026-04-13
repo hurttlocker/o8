@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect, @next/next/no-img-element -- preserved from legacy Canvas.tsx extraction */
 
 import { memo, useEffect, useState } from 'react';
-import { FileText, GitCommit, Globe } from 'lucide-react';
+import { FileText, GitCommit, Globe } from '../lucide-shims';
 import { MarkdownBody } from '@/components/desktop/MarkdownBody';
 import { formatAge } from '@/components/desktop/canvas-utils';
 

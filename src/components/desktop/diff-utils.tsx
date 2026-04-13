@@ -8,7 +8,7 @@ import {
   FileMinus,
   FilePlus,
   FileText,
-} from 'lucide-react';
+} from './lucide-shims';
 import { measureHeight } from '@/lib/pretext';
 
 const diffStatusColors: Record<string, string> = {

@@ -9,7 +9,7 @@
 
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronRight, FileText, FilePlus, FileMinus, FileEdit, X } from 'lucide-react';
+import { ChevronRight, FileText, FilePlus, FileMinus, FileEdit, X } from './lucide-shims';
 import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import { measureHeight } from '@/lib/pretext';
 

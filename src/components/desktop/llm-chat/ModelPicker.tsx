@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown } from '../lucide-shims';
 import { createPortal } from 'react-dom';
 
 import { THEME_ACCENT, THEME_ACCENT_SOFT, THEME_PANEL_GLASS, type ModelOption } from './shared';
@@ -8,6 +8,7 @@ const RUNTIME_META: Record<string, { label: string; logo?: string; color: string
   'claude-code': { label: 'Claude Code', logo: '/logos/claude.png', color: '#e07a3a' },
   codex: { label: 'Codex', logo: '/logos/codex.webp', color: '#10a37f' },
   gemini: { label: 'Gemini CLI', color: '#4285f4' },
+  opencode: { label: 'OpenCode', color: '#a855f7' },
 };
 
 const SECTION_HEADER = { paddingTop: 8, paddingRight: 12, paddingBottom: 4, paddingLeft: 12, fontSize: 10, fontWeight: 600, color: 'var(--t-text-faint)', textTransform: 'uppercase' as const, letterSpacing: '0.06em' };

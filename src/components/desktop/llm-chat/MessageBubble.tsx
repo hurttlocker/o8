@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Bookmark, Brain, Check, ChevronRight, Copy, FileText, GitBranch, Loader2, Pencil, RefreshCw, Square, ThumbsDown, ThumbsUp, Trash2, Volume2, VolumeOff } from 'lucide-react';
+import { Bookmark, Brain, Check, ChevronRight, Copy, FileText, GitBranch, Loader2, Pencil, RefreshCw, Square, ThumbsDown, ThumbsUp, Trash2, Volume2, VolumeOff } from '../lucide-shims';
 
 import { renderLLMMarkdown } from '../LLMMarkdown';
 import { ChainOfThought } from './ChainOfThought';

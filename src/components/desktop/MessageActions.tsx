@@ -22,7 +22,7 @@ import {
   RotateCw,
   Square,
   Volume2,
-} from 'lucide-react';
+} from './lucide-shims';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';

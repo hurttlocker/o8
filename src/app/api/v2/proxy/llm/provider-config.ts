@@ -1,7 +1,13 @@
 import { parseInlineMarkdownDataImages } from '@/lib/llm/inline-images';
 import { toolsForAnthropic, toolsForOpenAI } from '@/lib/llm/tools';
 
-export type Provider = 'anthropic' | 'openai' | 'google';
+export type Provider = 'anthropic' | 'openai' | 'google' | 'operator';
+
+/** o8 Operator backing model — Gemini Flash via the user's GOOGLE_AI_API_KEY. */
+export const OPERATOR_GEMINI_MODEL = 'gemini-2.5-flash';
+
+/** o8 Operator fallback — OpenRouter free model when Gemini quota is exhausted. */
+export const OPERATOR_OPENROUTER_MODEL = 'openai/gpt-oss-120b:free';
 
 export interface Message {
   role: string;
@@ -54,7 +60,7 @@ const THINKING_MODELS = new Set([
 
 export const GOOGLE_PROVIDER_ENV_KEY = 'GOOGLE_AI_API_KEY';
 
-export const PROVIDERS: Record<Exclude<Provider, 'google'>, ProviderConfig> = {
+export const PROVIDERS: Record<Exclude<Provider, 'google' | 'operator'>, ProviderConfig> = {
   anthropic: {
     url: 'https://api.anthropic.com/v1/messages',
     envKey: 'ANTHROPIC_API_KEY',
@@ -230,11 +236,16 @@ export function computeCost(model: string, inputTokens: number, outputTokens: nu
 }
 
 export function isSupportedProvider(provider: string): provider is Provider {
-  return provider === 'google' || provider === 'anthropic' || provider === 'openai';
+  return (
+    provider === 'google'
+    || provider === 'anthropic'
+    || provider === 'openai'
+    || provider === 'operator'
+  );
 }
 
 export function resolveApiKey(provider: Provider): string | null {
-  if (provider === 'google') {
+  if (provider === 'google' || provider === 'operator') {
     return process.env[GOOGLE_PROVIDER_ENV_KEY] ?? null;
   }
   return process.env[PROVIDERS[provider].envKey] ?? null;

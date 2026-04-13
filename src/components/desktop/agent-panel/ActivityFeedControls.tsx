@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, type CSSProperties, type ReactNode } from 'react';
-import { AlertCircle, CheckCircle2, ChevronDown, Folder, GitCommit, GitPullRequest, Globe, Zap } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronDown, Folder, GitCommit, GitPullRequest, Globe, Zap } from '../lucide-shims';
 import { THEME_ACCENT, THEME_ACCENT_SOFT, shortRepoLabel } from './shared';
 import type { FeedFilter } from './types';
 

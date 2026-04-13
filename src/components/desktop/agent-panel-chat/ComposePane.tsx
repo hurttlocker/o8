@@ -329,7 +329,6 @@ export const DesktopComposePane = memo(function DesktopComposePane({
           ref={composeRef}
           name="agentPanelMessage"
           aria-label={`Message ${currentAgentName}`}
-          className="remodex-compose-input"
           value={draft}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => {
@@ -353,6 +352,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
             maxHeight: 400,
             resize: 'none',
             transition: 'none',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
         />
         {showSlashSuggestions ? (

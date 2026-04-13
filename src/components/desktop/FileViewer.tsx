@@ -3,7 +3,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FileText } from 'lucide-react';
+import { FileText } from './lucide-shims';
 import dynamic from 'next/dynamic';
 import { loader } from '@monaco-editor/react';
 import { useTheme } from '@/lib/theme/context';

@@ -2,7 +2,7 @@
 
 import React, { memo, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, FolderOpen, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, FolderOpen, SlidersHorizontal } from '../lucide-shims';
 import { DesktopToolCallStack } from '../DesktopAgentMessage';
 import {
   THEME_ACCENT_SOFT,
