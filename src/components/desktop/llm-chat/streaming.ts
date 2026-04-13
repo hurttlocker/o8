@@ -44,6 +44,7 @@ export async function generateFollowUps(lastResponse: string, model: { id: strin
 export async function streamAssistantResponse({
   approvedToolsSet,
   controller,
+  disableTools,
   linkedIssue,
   messageForModel,
   messages,
@@ -51,6 +52,7 @@ export async function streamAssistantResponse({
   preferredRepo,
   showTypingIndicator,
   tabId,
+  onFallback,
   onPendingApproval,
   onStreamContent,
   onThinking,
@@ -59,6 +61,7 @@ export async function streamAssistantResponse({
 }: {
   approvedToolsSet: Set<string>;
   controller: AbortController;
+  disableTools?: boolean;
   linkedIssue?: LinkedIssueRef | null;
   messageForModel: string;
   messages: LLMMessage[];
@@ -66,6 +69,7 @@ export async function streamAssistantResponse({
   preferredRepo?: PreferredRepoContext | null;
   showTypingIndicator: boolean;
   tabId: string;
+  onFallback?: (notice: string) => void;
   onPendingApproval: (approval: PendingApprovalState | null, editedCommand?: string) => void;
   onStreamContent: (content: string) => void;
   onThinking: (state: ActiveThinkingState | null) => void;
@@ -92,6 +96,7 @@ export async function streamAssistantResponse({
         provider: model.provider,
         messages: [...recentMessages, { role: 'user', content: [buildLinkedIssueContext(linkedIssue), messageForModel].filter(Boolean).join('\n\n') }],
         approvedTools: [...approvedToolsSet],
+        ...(disableTools ? { disableTools: true } : {}),
       });
 
   let response: Response | null = null;
@@ -232,9 +237,14 @@ export async function streamAssistantResponse({
           continue;
         }
         if (parsed.type === 'fallback') {
-          const originalLabel = MODELS.find((entry) => entry.id === parsed.originalModel)?.label ?? parsed.originalModel;
-          const fallbackLabel = MODELS.find((entry) => entry.id === parsed.fallbackModel)?.label ?? parsed.fallbackModel;
-          fallbackNotice = `${originalLabel} unavailable - using ${fallbackLabel}`;
+          const originalLabel = parsed.originalModelLabel
+            ?? MODELS.find((entry) => entry.id === parsed.originalModel)?.label
+            ?? parsed.originalModel;
+          const fallbackLabel = parsed.fallbackModelLabel
+            ?? MODELS.find((entry) => entry.id === parsed.fallbackModel)?.label
+            ?? parsed.fallbackModel;
+          fallbackNotice = `${originalLabel} unavailable — using ${fallbackLabel}`;
+          onFallback?.(fallbackNotice);
           continue;
         }
         if (parsed.type === 'error') {

@@ -67,6 +67,8 @@ function ComposerBase({
   onStop,
   onUploadFiles,
   searchApplyFiles,
+  permissionMode = 'full',
+  onTogglePermission,
 }: {
   applyFileIndex: number;
   applyFileSuggestions: Array<{ path: string }>;
@@ -114,6 +116,8 @@ function ComposerBase({
   onStop: () => void;
   onUploadFiles: (files: FileList) => void;
   searchApplyFiles: (query: string) => void;
+  permissionMode?: 'full' | 'plan';
+  onTogglePermission?: () => void;
 }) {
   return (
     <>
@@ -211,6 +215,46 @@ function ComposerBase({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {model.provider === 'operator' && onTogglePermission ? (
+                <button
+                  type="button"
+                  onClick={onTogglePermission}
+                  title={permissionMode === 'full' ? 'Code mode — can edit files & run commands. Click to switch to Plan.' : 'Plan mode — read-only. Click to switch to Code.'}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    minHeight: 28,
+                    paddingTop: 0,
+                    paddingRight: 10,
+                    paddingBottom: 0,
+                    paddingLeft: 9,
+                    borderRadius: 999,
+                    border: '1px solid var(--t-panel-border)',
+                    background: permissionMode === 'plan' ? 'var(--t-bg-card)' : THEME_ACCENT_SOFT,
+                    color: permissionMode === 'plan' ? 'var(--t-text-secondary)' : THEME_ACCENT,
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    letterSpacing: '-0.005em',
+                    transition: 'background 150ms, color 150ms, border-color 150ms',
+                  }}
+                >
+                  {permissionMode === 'plan' ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                      <rect x="3" y="11" width="18" height="11" rx="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                      <rect x="3" y="11" width="18" height="11" rx="2" />
+                      <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+                    </svg>
+                  )}
+                  {permissionMode === 'plan' ? 'Plan' : 'Code'}
+                </button>
+              ) : null}
               <ModelPicker selected={model} models={models} onSelect={onModelSelect} disabled={isStreaming} />
               {isStreaming ? (
                 <button type="button" onClick={onStop} title="Stop generating (Esc)" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, border: 'none', borderRadius: 10, background: '#ef4444', color: '#ffffff', cursor: 'pointer', flexShrink: 0, transition: 'background 150ms' }} onMouseEnter={(event) => { event.currentTarget.style.background = '#dc2626'; }} onMouseLeave={(event) => { event.currentTarget.style.background = '#ef4444'; }}>
