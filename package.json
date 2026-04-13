@@ -27,7 +27,7 @@
     "tunnel": "npx cloudflared tunnel --url http://localhost:3001",
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
-    "tauri:build:signed": "sh -c 'TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD= cargo tauri build'",
+    "tauri:build:signed": "sh -c 'TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD= cargo tauri build -- --features dev-mcp-plugin'",
     "release": "node scripts/release.mjs",
     "ship": "npm run tauri:build:signed && npm run release",
     "postinstall": "node scripts/postinstall.mjs",
