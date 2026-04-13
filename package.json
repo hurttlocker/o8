@@ -1,6 +1,6 @@
 {
   "name": "cortex-ide",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "productName": "o8",
   "private": true,
   "main": "src/app/layout.tsx",
