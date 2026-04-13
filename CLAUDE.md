@@ -22,8 +22,14 @@ npx tsc --noEmit         # Quick type check (skips next typegen)
 npm run typecheck        # Full: rm types cache → next typegen → tsc --noEmit
 
 # Build
-npm run build            # Next.js production build (webpack, not turbopack)
-cargo tauri build        # Native macOS app (from src-tauri/)
+npm run build               # Next.js production build (webpack, not turbopack)
+npm run tauri:build         # Unsigned native macOS app
+npm run tauri:build:signed  # Signed (updater-ready) build, passes --features dev-mcp-plugin
+
+# Ship (local release — bypasses CI, publishes to GitHub)
+npm version patch            # bump + sync all manifests + tag (runs sync-version.mjs hook)
+git push --follow-tags
+npm run ship                 # build signed + upload via scripts/release.mjs
 
 # Lint
 npm run lint             # ESLint (flat config, next core-web-vitals + TS)
@@ -286,6 +292,88 @@ Most are optional. Fresh clones boot with nothing set. Specific features gate on
 - All work on `main` branch (no feature branches — rapid iteration mode)
 - `npx tsc --noEmit` before every commit
 - `git push origin main` after each commit
+
+## Shipping (dev prod mode — the daily driver loop)
+
+The user daily-drives the **installed** production app at `/Applications/o8.app` and develops *through* it (via Claude talking to `tauri-plugin-mcp`). Every code change needs to reach the installed app through an auto-update, not through `cargo tauri dev`.
+
+### The loop
+
+```bash
+npm version patch              # 0.1.X → 0.1.X+1 — sync-version.mjs hook updates
+                               # package.json + src-tauri/tauri.conf.json +
+                               # src-tauri/Cargo.toml in a single commit, then
+                               # npm creates the v0.1.X+1 tag
+git push --follow-tags          # send commit + tag to origin
+npm run ship                    # cargo tauri build with signing key +
+                               # dev-mcp-plugin feature, then
+                               # scripts/release.mjs creates the GH release
+                               # and uploads all 4 assets
+```
+
+The user's installed `o8.app` sees the new version via the `UpdateBanner` component (polls every 30 min or on launch), downloads the signed `.app.tar.gz`, verifies the minisign signature against the pubkey in `tauri.conf.json`, extracts, replaces `/Applications/o8.app`, and relaunches.
+
+### Why local instead of CI
+
+GitHub Actions macOS runners failed because of billing. Local `npm run ship` takes ~2–4 min vs ~6 min CI and costs nothing. The CI release workflow (`.github/workflows/release.yml`) still exists as a fallback — it triggers on `v*` tags and uses the same `TAURI_SIGNING_PRIVATE_KEY` secret. If CI billing gets fixed, the workflow will auto-publish parallel to the local script (harmless — `gh release create` in the script errors cleanly when the release already exists, use `--clobber` inside the script to replace assets).
+
+### Signing
+
+`~/.tauri/cortex-ide.key` is the minisign private key. Its pubkey is embedded in `tauri.conf.json` under `plugins.updater.pubkey`. DON'T rotate without re-signing every future release — the installed app will refuse the update if the signature doesn't validate.
+
+### tauri-plugin-mcp (lets Claude drive the installed app)
+
+The production build includes `tauri-plugin-mcp` via the `dev-mcp-plugin` Cargo feature (always-on now in `tauri:build:signed`). On launch it opens a Unix socket at `/tmp/tauri-mcp-o8-marquisehurtt.sock`. The Claude Code bridge at `~/tauri-plugin-mcp/mcp-server-ts/build/index.js` connects to that socket and exposes 10 MCP tools (screenshot, query_page, click, type_text, execute_js, etc.).
+
+`.mcp.json` at the repo root registers both the `o8` operator MCP server and the `tauri-mcp` bridge. Any new Claude Code session that opens this directory picks them up automatically.
+
+**Known seam issue:** `execute_js`, `query_page` (map/state/find_element), `manage_storage` sometimes time out when the webview's JS main thread is busy (streaming orchestrator response, Next.js hydration). `take_screenshot`, `query_page` (app_info), `manage_window`, `navigate` always work because they run on the Rust side. Work around by taking screenshots + clicking via raw coordinates.
+
+## Theme System (current state, April 13)
+
+**Two shipping themes: `light` and `midnight`. Dark was removed** — legacy users on `dark` auto-remap to `midnight` via `LEGACY_THEME_IDS` in `src/lib/theme/context.tsx`.
+
+### Shape of both themes
+
+Both use **translucent glass chrome over the macOS vibrancy backdrop**. The `ThemeProvider` forces `--t-chrome`, `--t-bg-gradient`, `--t-chrome-nav` to `transparent` in Tauri for any theme — the difference between light and midnight is the RGBA tint of the *other* panel tokens that paint on top of the vibrancy.
+
+| Surface | Light | Midnight |
+|---|---|---|
+| Chrome (vibrancy-passthrough) | `transparent` | `transparent` |
+| `--t-panel` | `rgba(255, 255, 255, 0.58)` | `rgba(62, 68, 78, 0.36)` |
+| `--t-bg` | `rgba(250, 251, 253, 0.62)` | `rgba(22, 25, 30, 0.56)` |
+| **Workspace / chat / terminal** | **solid `#ffffff`** | **solid `#1a1e24` / `#16191e`** |
+| `--t-text` | `#0f172a` (dark) | `#e8ecf2` (light) |
+
+### The workspace/center is always solid, never glass
+
+`--t-chat-surface-bg`, `--t-canvas-bg`, `--t-terminal-bg` are pinned to solid colors in both themes. The LLM chat panel in `LLMChatLayout.tsx` paints `background: var(--t-chat-surface-bg)` over itself, so the center content area never bleeds the vibrancy. That's intentional — code/chat/terminal text needs a stable paper surface.
+
+### Macos vibrancy material
+
+`src-tauri/src/lib.rs` currently applies `NSVisualEffectMaterial::HudWindow` unconditionally at startup. HudWindow is dark, so light-tinted RGBA panels look silver-grey rather than white. This is a known tradeoff — a dynamic material swap (Rust side, via a theme-change event) would let Light use `NSVisualEffectMaterial::Sidebar` or `HeaderView` (adaptive or light-only).
+
+### Open visual work (for a new agent picking this up)
+
+**User's immediate ask (April 13 evening):**
+
+> In Light mode, the background of the white workspace is correct. But the buttons in the left sidebar and right Changes panel are hard to read — they should be transparent (glass) with white font. The vibrancy-bled chrome reads darker than the workspace, so button labels need to flip to white text ON the dark glass chrome while the workspace keeps dark text.
+
+This is a two-text-palette problem. Light mode currently uses a single `--t-text: #0f172a` for everything, which is correct for the white workspace but wrong for the darker glass chrome overlay.
+
+**Proposed fix (unvalidated — verify visually with the user before shipping):**
+
+1. In `light` theme, leave `--t-text-*` as dark (they're read by components inside the white chat surface)
+2. Add or repurpose **chrome-specific text tokens** that are light-colored in both themes:
+   - `--t-chrome-text` / `--t-chrome-text-secondary` / `--t-chrome-text-muted`
+   - Light: near-white values (`#ffffff`, `rgba(255,255,255,0.78)`, etc.)
+   - Midnight: existing `--t-text-*` values
+3. Update sidebar (`NavRail / WorkspacesPanel`), header (status bar, command palette), footer (port chips, issue badges), right panel (Changes / Commit) to reference `var(--t-chrome-text-*)` instead of `var(--t-text-*)`
+4. `LLMChatLayout.tsx` already overrides `--t-text` to chat-surface-text inside the chat card — make sure that override still wins
+
+Alternative path: swap the vibrancy material to something lighter (`NSVisualEffectMaterial::Sidebar`) for light theme via a Rust-side event. Cleaner long-term but needs more Rust plumbing.
+
+**How to iterate:** the installed app has `tauri-plugin-mcp` enabled. Use `mcp__tauri-mcp__take_screenshot` after each theme tweak. Ship with `npm run ship` after each change — takes ~2 min to build + upload + auto-update. Don't rely on `cargo tauri dev` — the user daily-drives the prod build so that's where the feedback loop lives.
 
 ## Orchestrator Model
 
