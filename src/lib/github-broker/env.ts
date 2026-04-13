@@ -13,7 +13,7 @@ export interface GitHubAppConfig {
 }
 
 const DEFAULT_APP_ID = '3167857';
-const DEFAULT_PEM_PATH = join(homedir(), '.cortex-ide', 'github-app.pem');
+const DEFAULT_PEM_PATH = join(homedir(), '.o8', 'github-app.pem');
 
 function normalizePrivateKey(value: string) {
   return value.includes('\\n') ? value.replace(/\\n/g, '\n') : value;

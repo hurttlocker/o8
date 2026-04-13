@@ -8,7 +8,7 @@ import type { SetupConfig } from '@/lib/setup/types';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CONFIG_DIR = join(homedir(), '.cortex-ide');
+const CONFIG_DIR = join(homedir(), '.o8');
 const CONFIG_PATH = join(CONFIG_DIR, 'setup.json');
 
 function getDefaultConfig(): SetupConfig {

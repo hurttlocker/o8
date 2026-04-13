@@ -7,7 +7,7 @@ import { listRepos } from '@/lib/repos/registry';
 import { buildRepoStateScope } from '@/lib/terminal/tab-state';
 
 const HOME = process.env.HOME ?? '/tmp';
-const STATE_DIR = path.join(HOME, '.cortex-ide');
+const STATE_DIR = path.join(HOME, '.o8');
 const STATE_SCOPE_DIR = path.join(STATE_DIR, 'terminal-states');
 const LEGACY_STATE_FILE = path.join(STATE_DIR, 'terminal-state.json');
 

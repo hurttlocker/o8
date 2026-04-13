@@ -113,7 +113,7 @@ export async function GET() {
     const portInfo = resolvePortInfo();
 
     const dataDir = process.env.CORTEX_IDE_DATA_DIR
-      || join(process.env.HOME || '', '.cortex-ide');
+      || join(process.env.HOME || '', '.o8');
     const dbPath = join(dataDir, 'cortex-ide.db');
     const dbExists = existsSync(dbPath);
     const dbSize = dbExists ? statSync(dbPath).size : 0;

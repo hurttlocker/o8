@@ -56,7 +56,7 @@ type WorkspaceMutation =
   | { action: 'restore'; workspaceId: string }
   | { action: 'mark_read'; workspaceId: string };
 
-const STATE_DIR = path.join(os.homedir(), '.cortex-ide');
+const STATE_DIR = path.join(os.homedir(), '.o8');
 const STORE_PATH = path.join(STATE_DIR, 'workspace-lifecycle.json');
 
 function nowIso() {

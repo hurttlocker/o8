@@ -185,7 +185,7 @@ function createSession(id: string, agent: string, surface: SurfaceKey, active: b
 }
 
 function discoverIdeChatSessions(sinceTs: number): Array<{ id: string; model: string }> {
-  const historyDir = join(homedir(), '.cortex-ide', 'chat-history');
+  const historyDir = join(homedir(), '.o8', 'chat-history');
   const sessions: Array<{ id: string; model: string }> = [];
 
   for (const file of safeReadDir(historyDir)) {
@@ -315,8 +315,8 @@ export async function GET(request: NextRequest) {
 
     // ── Codex CLI sessions ────────────────────────────────────────────────────
     const codexRoots = [
-      join(homedir(), '.cortex-ide', 'owned-codex'),
-      join(homedir(), '.cortex-ide', 'owned-codex-archive'),
+      join(homedir(), '.o8', 'owned-codex'),
+      join(homedir(), '.o8', 'owned-codex-archive'),
     ];
 
     for (const root of codexRoots) {

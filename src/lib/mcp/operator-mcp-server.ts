@@ -89,7 +89,7 @@ interface McpToolResult {
  * Resolve the backend base URL. Priority:
  *   1. O8_API_BASE env var (explicit override)
  *   2. O8_API_PORT env var (set by Tauri sidecar at spawn time)
- *   3. ~/.cortex-ide/api-port file (written by Tauri sidecar after probing)
+ *   3. ~/.o8/api-port file (written by Tauri sidecar after probing)
  *   4. Legacy default http://localhost:3001 (dev workflow)
  *
  * This MCP server can be launched long after the Tauri shell picks a port,
@@ -103,7 +103,7 @@ function resolveApiBase(): string {
   }
   try {
     const dataDir = process.env.CORTEX_IDE_DATA_DIR
-      || join(process.env.HOME || '', '.cortex-ide');
+      || join(process.env.HOME || '', '.o8');
     const portFile = join(dataDir, 'api-port');
     if (existsSync(portFile)) {
       const raw = readFileSync(portFile, 'utf-8').trim();

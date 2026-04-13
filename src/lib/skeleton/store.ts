@@ -1,7 +1,7 @@
 /**
  * Skeleton Map — SQLite cache layer.
  *
- * Separate database at ~/.cortex-ide/skeleton.db.
+ * Separate database at ~/.o8/skeleton.db.
  * Disposable cache — can be deleted anytime with zero data loss.
  * Follows the same singleton + pragma pattern as src/lib/db/index.ts.
  */
@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ChunkCacheRow, CodeChunk, FileChunks, FileSkeleton, SkeletonCacheRow, SkeletonSymbol, SymbolKind } from './types';
 
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.cortex-ide');
+const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
 const DB_PATH = path.join(DATA_DIR, 'skeleton.db');
 
 // ── Singleton ──

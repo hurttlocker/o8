@@ -37,7 +37,7 @@ interface IssuesPageProps {
   onOpenPR?: (repo: string, prNumber: number) => void;
 }
 
-const STORAGE_KEY = 'cortex-ide:registered-repos';
+const STORAGE_KEY = 'o8:registered-repos';
 const DEFAULT_REPOS = ['', 'hurttlocker/cortex'];
 
 function sectionHeaderStyle(colors: ThemeColors) {

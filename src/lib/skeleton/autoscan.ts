@@ -95,7 +95,7 @@ export function triggerScanIfStale(repoPath: string): void {
 export function triggerBootScan(): void {
   const registryPath = require('node:path').join(
     require('node:os').homedir(),
-    '.cortex-ide',
+    '.o8',
     'repos.json',
   );
 

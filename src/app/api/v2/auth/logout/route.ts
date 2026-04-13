@@ -11,7 +11,7 @@ import { hashToken, deleteSessionByTokenHash, purgeExpiredSessions } from '@/lib
  */
 export async function POST(request: NextRequest) {
   // Revoke the session in the database
-  const token = request.cookies.get('cortex-ide-token')?.value;
+  const token = request.cookies.get('o8-token')?.value;
   if (token) {
     deleteSessionByTokenHash(hashToken(token));
   }
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   const response = NextResponse.json({ ok: true });
 
-  response.cookies.set('cortex-ide-token', '', {
+  response.cookies.set('o8-token', '', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',

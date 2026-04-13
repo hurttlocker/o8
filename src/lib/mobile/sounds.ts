@@ -7,7 +7,7 @@
  * Inspired by iOS system sounds: short, muted, tasteful.
  */
 
-const SOUND_STORAGE_KEY = 'cortex-ide:sounds';
+const SOUND_STORAGE_KEY = 'o8:sounds';
 const SOUND_DEFAULT_ENABLED = true;
 
 let audioCtx: AudioContext | null = null;

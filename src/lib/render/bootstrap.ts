@@ -49,7 +49,7 @@ const EMPTY_BROWSER_INVENTORY: BrowserInventorySnapshot = {
   sourceLabel: 'Browser inventory warming…',
   surfaces: [],
 };
-const RENDER_BOOTSTRAP_CACHE_DIR = join(homedir(), '.cortex-ide', 'render-bootstrap');
+const RENDER_BOOTSTRAP_CACHE_DIR = join(homedir(), '.o8', 'render-bootstrap');
 const COMMAND_CENTER_BROKER_PATH = join(RENDER_BOOTSTRAP_CACHE_DIR, 'command-center.json');
 const MOBILE_BROKER_PATH = join(RENDER_BOOTSTRAP_CACHE_DIR, 'mobile.json');
 

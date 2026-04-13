@@ -11,7 +11,7 @@ interface TerminalSessionRegistryEntry {
 
 type TerminalSessionRegistry = Record<string, TerminalSessionRegistryEntry>;
 
-const STATE_DIR = path.join(homedir(), '.cortex-ide');
+const STATE_DIR = path.join(homedir(), '.o8');
 const REGISTRY_PATH = path.join(STATE_DIR, 'runtime-terminal-sessions.json');
 
 function readRegistry(): TerminalSessionRegistry {

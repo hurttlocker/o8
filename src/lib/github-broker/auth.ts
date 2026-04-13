@@ -11,7 +11,7 @@ function githubHeaders(token: string, extra?: HeadersInit): HeadersInit {
   return {
     Accept: 'application/vnd.github+json',
     Authorization: `Bearer ${token}`,
-    'User-Agent': 'cortex-ide-github-broker',
+    'User-Agent': 'o8-github-broker',
     'X-GitHub-Api-Version': '2022-11-28',
     ...extra,
   };

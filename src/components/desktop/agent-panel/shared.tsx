@@ -88,7 +88,7 @@ export function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
     const repo = deriveRepo(workspace);
     const repoDisplayNames: Record<string, string> = {
       workspace: 'Workspace',
-      'cortex-ide': 'Cortex IDE',
+      'cortex-ide': 'o8',
       cortex: 'Cortex',
       'parasite-network': 'Parasite Network',
       'spear-production': 'Spear',

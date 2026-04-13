@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     // Stash if requested
     if (dirty && stash) {
       try {
-        execSync(`git stash push -m "cortex-ide: auto-stash before switching to ${branch}"`, {
+        execSync(`git stash push -m "o8: auto-stash before switching to ${branch}"`, {
           cwd, timeout: 10000,
         });
       } catch (err) {

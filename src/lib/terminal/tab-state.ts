@@ -1,6 +1,6 @@
 /**
  * Persisted terminal tab state — survives app restarts.
- * Stored per workspace tile under ~/.cortex-ide/terminal-states/<scope>.json
+ * Stored per workspace tile under ~/.o8/terminal-states/<scope>.json
  */
 
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';

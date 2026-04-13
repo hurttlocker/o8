@@ -1,6 +1,6 @@
 import type { OrchestratorRuntime } from './types';
 
-export const ORCHESTRATOR_RUNTIME_STORAGE_KEY = 'cortex-ide:orchestrator:runtime';
+export const ORCHESTRATOR_RUNTIME_STORAGE_KEY = 'o8:orchestrator:runtime';
 export const ORCHESTRATOR_RUNTIME_EVENT = 'cortex:orchestrator-runtime-changed';
 
 export function readOrchestratorRuntimePreference(): OrchestratorRuntime {

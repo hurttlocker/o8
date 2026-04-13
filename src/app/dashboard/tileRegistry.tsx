@@ -39,7 +39,7 @@ import {
 const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
 const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then(m => ({ default: m.Canvas })));
 
-const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
+const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
 
 interface WorkspaceAgentLaunchRequest {
   repoPath: string;

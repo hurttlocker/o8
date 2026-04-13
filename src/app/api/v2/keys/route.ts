@@ -17,8 +17,8 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { requirePanelAuth } from '@/lib/panel/auth';
 
-// Config lives in ~/.cortex-ide/ so it survives app updates
-const CONFIG_DIR = join(homedir(), '.cortex-ide');
+// Config lives in ~/.o8/ so it survives app updates
+const CONFIG_DIR = join(homedir(), '.o8');
 const ENV_FILE = join(CONFIG_DIR, '.env.local');
 
 // Also check project-local .env.local as fallback (dev mode)
@@ -68,7 +68,7 @@ function parseEnvFromPath(path: string): Map<string, string> {
 }
 
 function parseEnvFile(): Map<string, string> {
-  // Merge: project-local first, then ~/.cortex-ide/ overrides
+  // Merge: project-local first, then ~/.o8/ overrides
   const local = parseEnvFromPath(LOCAL_ENV);
   const global = parseEnvFromPath(ENV_FILE);
   // Also check process.env for runtime-set values

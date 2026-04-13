@@ -120,7 +120,7 @@ export function GitHubTab({
                 ? `App ${broker.appId} · installed on @${broker.installationAccount} · ${repoCount} ${repoCount === 1 ? 'repo' : 'repos'}`
                 : appConfigured
                   ? broker?.note ?? 'Diagnostics below show what still needs to be configured.'
-                  : 'The product needs the GitHub App to read issues, open PRs, and act on your behalf. Set GITHUB_APP_ID + GITHUB_APP_INSTALLATION_ID and drop the PEM at ~/.cortex-ide/github-app.pem.'}
+                  : 'The product needs the GitHub App to read issues, open PRs, and act on your behalf. Set GITHUB_APP_ID + GITHUB_APP_INSTALLATION_ID and drop the PEM at ~/.o8/github-app.pem.'}
             </div>
           </div>
           <button
@@ -171,7 +171,7 @@ export function GitHubTab({
               status={broker!.privateKeyConfigured ? 'ready' : 'missing'}
               detail={broker!.privateKeyConfigured
                 ? `App ${broker!.appId ?? 'unknown'} can sign installation token requests.`
-                : 'Missing GitHub App private key at ~/.cortex-ide/github-app.pem.'}
+                : 'Missing GitHub App private key at ~/.o8/github-app.pem.'}
             />
             <ScopeDiagnostic
               title="Installation"

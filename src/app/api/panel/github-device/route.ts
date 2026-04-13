@@ -280,7 +280,7 @@ export async function POST(request: Request) {
 
       // Set auth cookie (token never exposed in response body)
       if (jwt) {
-        response.cookies.set('cortex-ide-token', jwt, {
+        response.cookies.set('o8-token', jwt, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
           sameSite: 'lax',

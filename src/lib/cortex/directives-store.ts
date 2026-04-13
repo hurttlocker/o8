@@ -1,5 +1,5 @@
 /**
- * Directive Store — CRUD over ~/.cortex-ide/directives/ flat files.
+ * Directive Store — CRUD over ~/.o8/directives/ flat files.
  *
  * Each directive is a markdown file with YAML frontmatter.
  * SQLite is NOT used for storage — files on disk are the source of truth.
@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Directive, CreateDirectiveInput, UpdateDirectiveInput, DirectiveBlock } from './directives-types';
 
-const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(process.env.HOME || '', '.cortex-ide');
+const DATA_DIR = process.env.CORTEX_IDE_DATA_DIR || path.join(process.env.HOME || '', '.o8');
 const DIRECTIVES_DIR = path.join(DATA_DIR, 'directives');
 
 function ensureDirectivesDir(): void {

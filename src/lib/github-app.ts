@@ -2,14 +2,14 @@
  * GitHub App authentication — generates installation tokens from PEM key.
  * 15,000 req/hr per installation (vs 5,000 PAT / 60 unauthenticated).
  *
- * Config: ~/.cortex-ide/github-app.pem + app ID + installation ID
+ * Config: ~/.o8/github-app.pem + app ID + installation ID
  */
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { createSign } from 'crypto';
 
-const CONFIG_DIR = join(homedir(), '.cortex-ide');
+const CONFIG_DIR = join(homedir(), '.o8');
 const PEM_PATH = join(CONFIG_DIR, 'github-app.pem');
 
 // NOTE: no fallback values. A fresh clone without GITHUB_APP_ID set returns
