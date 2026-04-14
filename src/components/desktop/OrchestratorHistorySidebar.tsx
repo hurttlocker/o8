@@ -31,6 +31,19 @@ interface OrchestratorThread {
   model?: string;
 }
 
+interface ArchivedLaneRow {
+  id: string;
+  label: string;
+  repoPath: string;
+  branch: string;
+  baseBranch: string;
+  runtime: 'codex' | 'claude-code';
+  sessionKey: string | null;
+  updatedAt: string;
+}
+
+type HistoryMode = 'conversations' | 'archive';
+
 function threadRuntime(model?: string): 'claude-code' | 'codex' | null {
   if (!model) return null;
   const lower = model.toLowerCase();
@@ -44,6 +57,7 @@ interface OrchestratorHistorySidebarProps {
   currentThreadId: string | null;
   onClose: () => void;
   onSelectThread: (tabId: string) => void;
+  onSelectArchivedLane?: (sessionKey: string, label: string) => void;
 }
 
 function groupThreads(threads: OrchestratorThread[]): Array<{ label: string; items: OrchestratorThread[] }> {
@@ -73,13 +87,43 @@ function groupThreads(threads: OrchestratorThread[]): Array<{ label: string; ite
   return groups;
 }
 
+function groupArchivedLanes(lanes: ArchivedLaneRow[]): Array<{ label: string; items: ArchivedLaneRow[] }> {
+  const today: ArchivedLaneRow[] = [];
+  const yesterday: ArchivedLaneRow[] = [];
+  const thisWeek: ArchivedLaneRow[] = [];
+  const older: ArchivedLaneRow[] = [];
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+  const startOfWeek = startOfToday - 7 * 24 * 60 * 60 * 1000;
+
+  for (const lane of lanes) {
+    const ts = new Date(lane.updatedAt).getTime();
+    if (ts >= startOfToday) today.push(lane);
+    else if (ts >= startOfYesterday) yesterday.push(lane);
+    else if (ts >= startOfWeek) thisWeek.push(lane);
+    else older.push(lane);
+  }
+
+  const groups: Array<{ label: string; items: ArchivedLaneRow[] }> = [];
+  if (today.length > 0) groups.push({ label: 'Today', items: today });
+  if (yesterday.length > 0) groups.push({ label: 'Yesterday', items: yesterday });
+  if (thisWeek.length > 0) groups.push({ label: 'This week', items: thisWeek });
+  if (older.length > 0) groups.push({ label: 'Older', items: older });
+  return groups;
+}
+
 function OrchestratorHistorySidebarBase({
   open,
   currentThreadId,
   onClose,
   onSelectThread,
+  onSelectArchivedLane,
 }: OrchestratorHistorySidebarProps) {
+  const [mode, setMode] = useState<HistoryMode>('conversations');
   const [threads, setThreads] = useState<OrchestratorThread[]>([]);
+  const [archivedLanes, setArchivedLanes] = useState<ArchivedLaneRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -109,6 +153,33 @@ function OrchestratorHistorySidebarBase({
     }
   }, []);
 
+  const fetchArchivedLanes = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/lanes?active=false', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json() as { lanes?: ArchivedLaneRow[] };
+      const archived = (data.lanes ?? [])
+        .filter((l: ArchivedLaneRow & { status?: string }) => l.status === 'archived')
+        .map((l) => ({
+          id: l.id,
+          label: l.label,
+          repoPath: l.repoPath,
+          branch: l.branch,
+          baseBranch: l.baseBranch,
+          runtime: l.runtime,
+          sessionKey: l.sessionKey,
+          updatedAt: l.updatedAt,
+        }))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      setArchivedLanes(archived);
+    } catch {
+      // silent — best effort
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const handleDelete = useCallback(async (threadTabId: string) => {
     // Optimistic — drop from local state first so the click feels instant.
     setThreads((current) => current.filter((t) => t.tabId !== threadTabId));
@@ -126,8 +197,20 @@ function OrchestratorHistorySidebarBase({
   }, []);
 
   useEffect(() => {
-    if (open) void fetchThreads();
-  }, [open, fetchThreads]);
+    if (!open) return;
+    if (mode === 'conversations') {
+      void fetchThreads();
+    } else {
+      void fetchArchivedLanes();
+    }
+  }, [open, mode, fetchThreads, fetchArchivedLanes]);
+
+  useEffect(() => {
+    if (mode !== 'archive') return;
+    const handler = () => { void fetchArchivedLanes(); };
+    window.addEventListener('o8:lane-lifecycle', handler);
+    return () => window.removeEventListener('o8:lane-lifecycle', handler);
+  }, [mode, fetchArchivedLanes]);
 
   const filteredThreads = useMemo(() => {
     if (!search.trim()) return threads;
@@ -135,7 +218,14 @@ function OrchestratorHistorySidebarBase({
     return threads.filter((t) => t.title.toLowerCase().includes(needle));
   }, [threads, search]);
 
+  const filteredArchivedLanes = useMemo(() => {
+    if (!search.trim()) return archivedLanes;
+    const needle = search.trim().toLowerCase();
+    return archivedLanes.filter((l) => l.label.toLowerCase().includes(needle) || l.branch.toLowerCase().includes(needle));
+  }, [archivedLanes, search]);
+
   const grouped = useMemo(() => groupThreads(filteredThreads), [filteredThreads]);
+  const groupedArchive = useMemo(() => groupArchivedLanes(filteredArchivedLanes), [filteredArchivedLanes]);
 
   return (
     <div
@@ -178,7 +268,7 @@ function OrchestratorHistorySidebarBase({
                 letterSpacing: '-0.01em',
               }}
             >
-              Orchestrator History
+              History
             </span>
             <button
               type="button"
@@ -201,12 +291,59 @@ function OrchestratorHistorySidebarBase({
             </button>
           </div>
 
-          <div style={{ paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10, flexShrink: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 4,
+              paddingTop: 8,
+              paddingRight: 10,
+              paddingBottom: 4,
+              paddingLeft: 10,
+              flexShrink: 0,
+            }}
+          >
+            {([
+              { id: 'conversations' as const, label: 'Threads' },
+              { id: 'archive' as const, label: 'Archive' },
+            ]).map((option) => {
+              const isActive = mode === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setMode(option.id)}
+                  style={{
+                    flex: 1,
+                    paddingTop: 6,
+                    paddingBottom: 6,
+                    paddingLeft: 10,
+                    paddingRight: 10,
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: isActive ? 'var(--t-accent-border)' : 'var(--t-panel-border)',
+                    borderRadius: 7,
+                    background: isActive ? 'var(--t-accent-soft)' : 'transparent',
+                    color: isActive ? 'var(--t-accent)' : 'var(--t-text-secondary)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: '-0.005em',
+                    cursor: 'pointer',
+                    transition: 'background 120ms, border-color 120ms, color 120ms',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ paddingTop: 6, paddingRight: 10, paddingBottom: 8, paddingLeft: 10, flexShrink: 0 }}>
             <input
               type="text"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search conversations..."
+              placeholder={mode === 'conversations' ? 'Search conversations...' : 'Search archived lanes...'}
               style={{
                 width: '100%',
                 paddingTop: 6,
@@ -234,7 +371,120 @@ function OrchestratorHistorySidebarBase({
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
-            {loading ? (
+            {mode === 'archive' ? (
+              loading ? (
+                <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 11 }}>Loading…</div>
+              ) : filteredArchivedLanes.length === 0 ? (
+                <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 11 }}>
+                  {search ? 'No matches' : 'No archived work yet'}
+                </div>
+              ) : (
+                groupedArchive.map((group) => (
+                  <div key={group.label}>
+                    <div
+                      style={{
+                        paddingTop: 10,
+                        paddingBottom: 4,
+                        paddingLeft: 14,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: 'var(--t-text-muted)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                      }}
+                    >
+                      {group.label}
+                    </div>
+                    {group.items.map((lane) => {
+                      const disabled = !lane.sessionKey || !onSelectArchivedLane;
+                      return (
+                        <button
+                          key={lane.id}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => {
+                            if (disabled || !lane.sessionKey) return;
+                            onSelectArchivedLane?.(lane.sessionKey, lane.label);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            width: 'calc(100% - 8px)',
+                            marginLeft: 4,
+                            marginRight: 4,
+                            paddingTop: 9,
+                            paddingRight: 12,
+                            paddingBottom: 9,
+                            paddingLeft: 12,
+                            borderWidth: 0,
+                            borderRadius: 7,
+                            background: 'transparent',
+                            textAlign: 'left',
+                            cursor: disabled ? 'default' : 'pointer',
+                            opacity: disabled ? 0.55 : 1,
+                            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                            transition: 'background 120ms',
+                          }}
+                          onMouseEnter={(event) => {
+                            if (disabled) return;
+                            event.currentTarget.style.background = 'var(--t-panel-hover)';
+                          }}
+                          onMouseLeave={(event) => {
+                            event.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 22,
+                              height: 22,
+                              borderRadius: 6,
+                              flexShrink: 0,
+                              background: 'transparent',
+                              color: 'var(--t-text-muted)',
+                            }}
+                          >
+                            {lane.runtime === 'claude-code' ? <ClaudeIcon size={16} /> : <CodexIcon size={16} />}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontSize: 11.5,
+                                fontWeight: 500,
+                                color: 'var(--t-text)',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                lineHeight: 1.3,
+                                letterSpacing: '-0.005em',
+                              }}
+                            >
+                              {lane.label}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 9.5,
+                                color: 'var(--t-text-muted)',
+                                marginTop: 2,
+                                fontWeight: 500,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {lane.branch}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))
+              )
+            ) : loading ? (
               <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 11 }}>Loading…</div>
             ) : filteredThreads.length === 0 ? (
               <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 11 }}>
