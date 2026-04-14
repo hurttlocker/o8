@@ -145,7 +145,7 @@ The operator MCP server also exposes 7 tools for controlling the running o8 webv
 
 These wrap a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock` exposed by the Tauri `dev-mcp-plugin` feature. Signed/prod builds always include the socket. Dev builds need `cargo tauri dev --features dev-mcp-plugin`.
 
-This supersedes the standalone `tauri-plugin-mcp` bridge in `.mcp.json` (removal of that entry is a follow-up once the new tools are verified).
+The previous standalone `tauri-mcp` node bridge has been retired — the operator MCP server now owns all webview control. Only the `o8` entry remains in `.mcp.json`.
 
 Both bundle via esbuild in `scripts/tauri-export.mjs` → `out/server/*.mjs`. The Tauri sidecar sets `O8_BUNDLED_MCP_PATH` + `O8_BUNDLED_MCP_DIR` so packaged installs launch with `node <bundled>.mjs` instead of dev `tsx` paths. Config generator at `/api/setup/mcp-config` emits the correct command per install mode.
 
@@ -311,7 +311,7 @@ Most are optional. Fresh clones boot with nothing set. Specific features gate on
 
 ## Shipping (dev prod mode — the daily driver loop)
 
-The user daily-drives the **installed** production app at `/Applications/o8.app` and develops *through* it (via Claude talking to `tauri-plugin-mcp`). Every code change needs to reach the installed app through an auto-update, not through `cargo tauri dev`.
+The user daily-drives the **installed** production app at `/Applications/o8.app` and develops *through* it (via Claude talking to the bundled `o8_view_*` MCP tools on the operator server). Every code change needs to reach the installed app through an auto-update, not through `cargo tauri dev`.
 
 ### The loop
 
@@ -337,13 +337,13 @@ GitHub Actions macOS runners failed because of billing. Local `npm run ship` tak
 
 `~/.tauri/cortex-ide.key` is the minisign private key. Its pubkey is embedded in `tauri.conf.json` under `plugins.updater.pubkey`. DON'T rotate without re-signing every future release — the installed app will refuse the update if the signature doesn't validate.
 
-### tauri-plugin-mcp (lets Claude drive the installed app)
+### o8_view_* webview tools (lets Claude drive the installed app)
 
-The production build includes `tauri-plugin-mcp` via the `dev-mcp-plugin` Cargo feature (always-on now in `tauri:build:signed`). On launch it opens a Unix socket at `/tmp/tauri-mcp-o8-marquisehurtt.sock`. The Claude Code bridge at `~/tauri-plugin-mcp/mcp-server-ts/build/index.js` connects to that socket and exposes 10 MCP tools (screenshot, query_page, click, type_text, execute_js, etc.).
+The production build includes the `tauri-plugin-mcp` Rust crate via the `dev-mcp-plugin` Cargo feature (always-on now in `tauri:build:signed`). On launch it opens a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock`. The **operator MCP server** connects to that socket and exposes 7 tools with `o8_view_*` verbs (screenshot, snapshot, click, type, read, eval, navigate).
 
-`.mcp.json` at the repo root registers both the `o8` operator MCP server and the `tauri-mcp` bridge. Any new Claude Code session that opens this directory picks them up automatically.
+`.mcp.json` at the repo root registers only the `o8` operator MCP server. Any new Claude Code session that opens this directory picks it up automatically and the webview tools appear under `mcp__o8__o8_view_*`.
 
-**Known seam issue:** `execute_js`, `query_page` (map/state/find_element), `manage_storage` sometimes time out when the webview's JS main thread is busy (streaming orchestrator response, Next.js hydration). `take_screenshot`, `query_page` (app_info), `manage_window`, `navigate` always work because they run on the Rust side. Work around by taking screenshots + clicking via raw coordinates.
+**Known seam issue:** `o8_view_eval` and `o8_view_snapshot` sometimes time out when the webview's JS main thread is busy (streaming orchestrator response, Next.js hydration). `o8_view_screenshot` and `o8_view_navigate` always work because they run on the Rust side. Work around by taking screenshots + clicking via raw coordinates.
 
 ## Theme System (current state, April 13)
 
@@ -389,7 +389,7 @@ This is a two-text-palette problem. Light mode currently uses a single `--t-text
 
 Alternative path: swap the vibrancy material to something lighter (`NSVisualEffectMaterial::Sidebar`) for light theme via a Rust-side event. Cleaner long-term but needs more Rust plumbing.
 
-**How to iterate:** the installed app has `tauri-plugin-mcp` enabled. Use `mcp__tauri-mcp__take_screenshot` after each theme tweak. Ship with `npm run ship` after each change — takes ~2 min to build + upload + auto-update. Don't rely on `cargo tauri dev` — the user daily-drives the prod build so that's where the feedback loop lives.
+**How to iterate:** the installed app has the `dev-mcp-plugin` Cargo feature enabled. Use `mcp__o8__o8_view_screenshot` after each theme tweak. Ship with `npm run ship` after each change — takes ~2 min to build + upload + auto-update. Don't rely on `cargo tauri dev` — the user daily-drives the prod build so that's where the feedback loop lives.
 
 ## Orchestrator Model
 
