@@ -323,6 +323,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           baseBranch: lane.baseBranch,
           isolate: !lane.worktreePath,
           skipSetup: true,
+          existingLaneId: command.laneId,
         });
 
         if (!result.ok) {
