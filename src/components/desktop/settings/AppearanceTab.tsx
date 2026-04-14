@@ -1,9 +1,17 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import {
+  readTimelineVisible,
+  subscribeTimelineVisible,
+  writeTimelineVisible,
+} from '@/lib/appearance/timeline';
+import {
   THEME_ACCENT,
+  THEME_ACCENT_BORDER,
   THEME_ACCENT_RING,
+  THEME_ACCENT_SOFT,
 } from './shared';
 
 // ── Theme Preview Card ──
@@ -165,6 +173,9 @@ function ThemePreviewCard({ theme, active, onSelect }: {
 
 export function AppearanceTab() {
   const { themeId, setTheme, themes: themeList } = useTheme();
+  const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
+
+  useEffect(() => subscribeTimelineVisible(setTimelineVisible), []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -200,6 +211,91 @@ export function AppearanceTab() {
             />
           ))}
         </div>
+      </div>
+
+      <div style={{
+        background: 'var(--t-panel)',
+        borderRadius: 14,
+        padding: 24,
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
+      }}>
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>
+            Workspace
+          </h3>
+          <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '4px 0 0', lineHeight: 1.5 }}>
+            Control the chrome around the main dashboard while we keep refining the timeline presentation.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => writeTimelineVisible(!timelineVisible)}
+          aria-pressed={timelineVisible}
+          style={{
+            width: '100%',
+            minHeight: 56,
+            paddingTop: 14,
+            paddingRight: 16,
+            paddingBottom: 14,
+            paddingLeft: 16,
+            borderRadius: 16,
+            border: `1px solid ${timelineVisible ? THEME_ACCENT_BORDER : 'var(--t-panel-border)'}`,
+            background: timelineVisible ? THEME_ACCENT_SOFT : 'var(--t-bg-card)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            cursor: 'pointer',
+            textAlign: 'left',
+            transition: 'border-color 180ms ease, background 180ms ease, box-shadow 180ms ease',
+            boxShadow: timelineVisible ? `0 0 0 3px ${THEME_ACCENT_RING}` : 'none',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+              Show Session Timeline
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>
+              Keeps the timeline rail visible under the title bar. Turn it off to simplify the dashboard.
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: timelineVisible ? THEME_ACCENT : 'var(--t-text-muted)',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}>
+              {timelineVisible ? 'Shown' : 'Hidden'}
+            </span>
+            <div style={{
+              width: 42,
+              height: 24,
+              borderRadius: 999,
+              background: timelineVisible ? THEME_ACCENT : 'var(--t-divider-strong)',
+              paddingTop: 2,
+              paddingRight: 2,
+              paddingBottom: 2,
+              paddingLeft: 2,
+              boxSizing: 'border-box',
+              transition: 'background 180ms ease',
+            }}>
+              <div style={{
+                width: 20,
+                height: 20,
+                borderRadius: 999,
+                background: '#ffffff',
+                transform: timelineVisible ? 'translateX(18px)' : 'translateX(0)',
+                transition: 'transform 180ms ease',
+                boxShadow: '0 2px 8px rgba(15, 23, 42, 0.18)',
+              }} />
+            </div>
+          </div>
+        </button>
       </div>
 
     </div>
