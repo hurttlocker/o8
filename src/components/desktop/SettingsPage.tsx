@@ -8,7 +8,7 @@
  * and passed as props to GitHubTab because it requires cross-tab persistence.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type CSSProperties } from 'react';
 import type {
   SettingsTab,
   GitHubAccount,
@@ -21,13 +21,11 @@ import {
   TabButton,
   PlugIcon,
   KeyIcon,
-  UsersIcon,
   PaletteIcon,
   ActivityIcon,
   InfoIcon,
 } from './settings/shared';
 import { GitHubTab } from './settings/GitHubTab';
-import { AgentsTab } from './settings/AgentsTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
 import { AppearanceTab } from './settings/AppearanceTab';
@@ -227,14 +225,20 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
   }, [deviceFlow, pollDeviceFlow]);
 
   return (
-    <div style={{
-      height: '100%',
-      overflow: 'auto',
-      padding: 24,
-      background: 'var(--t-bg-gradient)',
-      display: 'flex',
-      gap: 20,
-    }}>
+    <div
+      className="hide-scrollbar"
+      style={{
+        height: '100%',
+        overflow: 'auto',
+        padding: 24,
+        background: 'var(--t-bg-gradient)',
+        display: 'flex',
+        gap: 20,
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
+        WebkitOverflowScrolling: 'touch',
+      } as CSSProperties}
+    >
       {/* Left sidebar — tab navigation */}
       <div style={{
         width: 200,
@@ -256,7 +260,6 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         </div>
         <TabButton label="Connectors" icon={<PlugIcon />} active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} />
         <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
-        <TabButton label="Agents" icon={<UsersIcon />} active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
         <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
@@ -289,9 +292,6 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         )}
         {activeTab === 'api-keys' && (
           <APIKeysTab />
-        )}
-        {activeTab === 'agents' && (
-          <AgentsTab />
         )}
         {activeTab === 'mcp' && (
           <MCPTab />

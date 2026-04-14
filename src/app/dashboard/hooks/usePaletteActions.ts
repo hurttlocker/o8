@@ -655,16 +655,6 @@ export function usePaletteActions({
     });
 
     actions.push({
-      id: 'settings:agents',
-      category: 'settings',
-      title: 'Open agent settings',
-      detail: 'Agent defaults, model choices, and runtime controls.',
-      keywords: ['settings', 'agents', 'models', 'runtime'],
-      priority: 205,
-      run: () => handleOpenSettingsTab('agents'),
-    });
-
-    actions.push({
       id: 'settings:appearance',
       category: 'settings',
       title: 'Open appearance settings',

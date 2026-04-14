@@ -324,12 +324,15 @@ export function TitleBar({
       }}
     >
       {/* ── Left: Traffic light spacer + controls ── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        flexShrink: 0,
-      }}>
+      <div
+        data-chrome-surface="true"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexShrink: 0,
+        }}
+      >
         {/* Spacer for macOS traffic lights (close/minimize/maximize) */}
         <div style={{ width: 78, flexShrink: 0 }} />
 
