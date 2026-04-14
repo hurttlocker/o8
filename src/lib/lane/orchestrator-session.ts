@@ -498,7 +498,12 @@ export async function sendToOrchestrator(
         FORCE_COLOR: '0',
         NO_COLOR: '1',
       },
-      stdio: ['pipe', 'pipe', 'pipe'],
+      // We pass the full prompt via the `-p` CLI flag, not via stdin.
+      // Leaving stdin on 'pipe' causes Claude Code to wait 3s for input
+      // that never arrives, then warn "no stdin data received in 3s,
+      // proceeding without it" and drop the warning into the transcript.
+      // Ignore stdin so the CLI knows there's nothing to read.
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     session.proc = proc;
 
