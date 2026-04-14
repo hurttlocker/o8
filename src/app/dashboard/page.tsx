@@ -82,6 +82,7 @@ import {
 } from './utils';
 import { useFtuxMilestones } from './hooks/useFtuxMilestones';
 import { useGlobalRepoState } from './hooks/useGlobalRepoState';
+import { useLaneArchivedView } from './hooks/useLaneArchivedSet';
 import { useOrchestratorMission } from './hooks/useOrchestratorMission';
 import { usePaletteActions } from './hooks/usePaletteActions';
 import { useSessionState } from './hooks/useSessionState';
@@ -363,6 +364,12 @@ function DashboardInner() {
     workspaceScopeEntries,
     workspaceTerminalPreferredRepo,
   });
+
+  const archivedLaneView = useLaneArchivedView();
+  const activePackets = useMemo(
+    () => thoughtsMissionState.packets.filter((packet) => !archivedLaneView.packetIds.has(packet.id)),
+    [thoughtsMissionState.packets, archivedLaneView.packetIds],
+  );
   const getWorkspaceSidePanelRepoBySlug = useCallback((repoSlug?: string | null): WorkspaceSidePanelRepo | null => {
     if (!repoSlug) return globalRepoEntry ? {
       name: globalRepoEntry.name,
@@ -2285,7 +2292,7 @@ function DashboardInner() {
             onAgentsUpdate={handleAgentsUpdate}
             onAgentKill={sendAgentKill}
             lifecycleEvents={lifecycleEvents}
-            orchestratorPackets={thoughtsMissionState.packets}
+            orchestratorPackets={activePackets}
             ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
           />
         </motion.div>

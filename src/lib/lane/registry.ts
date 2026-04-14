@@ -229,7 +229,10 @@ export function findLaneBySession(sessionKey: string): Lane | null {
   const row = getLaneDb()
     .select()
     .from(lanes)
-    .where(eq(lanes.sessionKey, sessionKey))
+    .where(and(
+      eq(lanes.sessionKey, sessionKey),
+      notInArray(lanes.status, ['archived', 'completed']),
+    ))
     .get();
   return mapLaneRow(row);
 }
@@ -569,9 +572,13 @@ export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lan
     return null;
   }
 
+  // Keep sessionKey on archive — it lets clients correlate archived lanes
+  // back to their spawned sessions (sidebar filter, history drawer). Since
+  // `findLaneBySession()` now excludes archived rows, leaving the key in
+  // place doesn't collide with future launches that reuse the same key.
+  // worktreePath stays nulled so the reaper doesn't re-enter cleanup.
   const updated = updateLane(laneId, {
     status: 'archived',
-    sessionKey: null,
     worktreePath: null,
     writerToken: null,
     lastEventAt: nowIso(),
