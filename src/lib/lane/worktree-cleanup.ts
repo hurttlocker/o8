@@ -56,6 +56,18 @@ export async function cleanupLaneWorktree(
     return false;
   }
 
+  // Safety guard: never touch the main working tree. A lane whose
+  // worktreePath equals its repoPath is an un-isolated session running in
+  // the main checkout — `git worktree remove` would fail and, worse,
+  // `preserveUncommittedWork` would drop a rogue "chore: preserve agent
+  // work" commit onto whatever branch main is currently on. Bail cleanly.
+  const repoPath = lane.repoPath.replace(/\/+$/, '');
+  const normalizedWorktree = worktreePath.replace(/\/+$/, '');
+  if (normalizedWorktree === repoPath) {
+    console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: worktree path equals repo path (no isolation).`);
+    return false;
+  }
+
   try {
     const manager = getWorktreeManager(lane.repoPath);
     const worktree = (await manager.list()).find((candidate) => candidate.path === worktreePath);
