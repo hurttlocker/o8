@@ -1,44 +1,23 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import packageJson from '../../../../package.json';
-import { normalizeVersion } from './shared';
+import {
+  THEME_ACCENT,
+  THEME_ACCENT_BORDER,
+  THEME_ACCENT_SOFT,
+  normalizeVersion,
+} from './shared';
 
 export function AboutTab() {
-  const [cortexVersion, setCortexVersion] = useState('');
   const isProduction = process.env.NODE_ENV === 'production';
-  const [platform] = useState(() => {
+  const platform = (() => {
     if (typeof navigator !== 'undefined' && navigator.platform) return navigator.platform;
     return '—';
-  });
-
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      const cortexResult = await fetch('/api/v2/cortex/config').catch(() => null);
-
-      if (!active) return;
-
-      if (cortexResult?.ok) {
-        try {
-          const data = await cortexResult.json();
-          if (active) {
-            setCortexVersion(data.version || '');
-          }
-        } catch {
-          // noop
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, []);
+  })();
 
   const systemInfo = [
     { label: 'Platform', value: platform },
-    { label: 'Cortex Memory', value: cortexVersion ? normalizeVersion(cortexVersion) : '—' },
+    { label: 'Version', value: normalizeVersion(packageJson.version) },
   ];
 
   return (
@@ -57,14 +36,14 @@ export function AboutTab() {
             fontWeight: 700,
             padding: '4px 9px',
             borderRadius: 999,
-            background: 'rgba(37, 99, 235, 0.08)',
-            color: '#2563eb',
+            background: THEME_ACCENT_SOFT,
+            color: THEME_ACCENT,
           }}>
             {normalizeVersion(packageJson.version)}
           </span>
         </div>
         <p style={{ fontSize: 13, color: 'var(--t-text-secondary)', margin: '0 0 18px', lineHeight: 1.5 }}>
-          Built with Next.js + Tauri · Powered by Cortex Memory
+          Built with Next.js + Tauri
         </p>
 
         <div style={{
@@ -147,9 +126,9 @@ export function AboutTab() {
               }}
               style={{
                 padding: '8px 14px', borderRadius: 10,
-                border: '1px solid rgba(37, 99, 235, 0.3)',
-                background: 'rgba(37, 99, 235, 0.06)',
-                color: '#2563eb', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                border: `1px solid ${THEME_ACCENT_BORDER}`,
+                background: THEME_ACCENT_SOFT,
+                color: THEME_ACCENT, fontSize: 12, fontWeight: 600, cursor: 'pointer',
               }}
             >
               ▸ Reset + Run Onboarding
@@ -157,13 +136,13 @@ export function AboutTab() {
             <button
               type="button"
               onClick={() => {
-                window.dispatchEvent(new CustomEvent('cortex-trigger-onboarding'));
+                window.dispatchEvent(new CustomEvent('o8-trigger-onboarding'));
               }}
               style={{
                 padding: '8px 14px', borderRadius: 10,
-                border: '1px solid rgba(37, 99, 235, 0.3)',
-                background: 'rgba(37, 99, 235, 0.06)',
-                color: '#2563eb', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                border: `1px solid ${THEME_ACCENT_BORDER}`,
+                background: THEME_ACCENT_SOFT,
+                color: THEME_ACCENT, fontSize: 12, fontWeight: 600, cursor: 'pointer',
               }}
             >
               ▸ Preview Onboarding
@@ -183,22 +162,6 @@ export function AboutTab() {
               }}
             >
               ▸ View Detection
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                const res = await fetch('/api/cortex/seed/status');
-                const data = await res.json();
-                alert(JSON.stringify(data, null, 2));
-              }}
-              style={{
-                padding: '8px 14px', borderRadius: 10,
-                border: '1px solid var(--t-panel-border)',
-                background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
-                color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-              }}
-            >
-              ▸ Seed Status
             </button>
           </div>
         </div>

@@ -59,11 +59,12 @@ export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'appearance' | 'di
 
 // ── Constants ──
 
-export const THEME_ACCENT = 'var(--t-accent, #2563eb)';
-export const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
-export const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
-export const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
-export const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
+export const THEME_ACCENT = 'var(--t-settings-accent, #7c9cff)';
+export const THEME_ACCENT_SOFT = 'var(--t-settings-accent-soft, rgba(124, 156, 255, 0.12))';
+export const THEME_ACCENT_SOFT_STRONG = 'var(--t-settings-accent-soft-strong, rgba(124, 156, 255, 0.2))';
+export const THEME_ACCENT_BORDER = 'var(--t-settings-accent-border, rgba(124, 156, 255, 0.28))';
+export const THEME_ACCENT_RING = 'var(--t-settings-accent-ring, rgba(124, 156, 255, 0.18))';
+export const APP_FONT_STACK = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 
 // ── Helpers ──
 
@@ -223,6 +224,7 @@ export function TabButton({ label, icon, active, onClick }: {
         fontWeight: active ? 600 : 500,
         cursor: 'pointer',
         textAlign: 'left',
+        fontFamily: APP_FONT_STACK,
         transition: 'background 120ms, color 120ms, border-color 120ms, box-shadow 120ms',
         boxShadow: active ? `0 10px 24px ${THEME_ACCENT_RING}` : 'none',
       }}
@@ -313,9 +315,9 @@ export function GitHubAvatar({
         width: size,
         height: size,
         borderRadius: size / 2,
-        border: '1px solid rgba(37, 99, 235, 0.18)',
-        background: 'rgba(37, 99, 235, 0.08)',
-        color: '#2563eb',
+        border: `1px solid ${THEME_ACCENT_BORDER}`,
+        background: THEME_ACCENT_SOFT,
+        color: THEME_ACCENT,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -336,7 +338,7 @@ export function GitHubAvatar({
       onError={() => setFailed(true)}
       style={{
         borderRadius: size / 2,
-        border: '2px solid rgba(37, 99, 235, 0.2)',
+        border: `2px solid ${THEME_ACCENT_BORDER}`,
         flexShrink: 0,
       }}
     />

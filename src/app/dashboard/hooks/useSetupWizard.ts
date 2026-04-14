@@ -52,8 +52,8 @@ export function useSetupWizard() {
   // Dev: trigger onboarding from settings without resetting config
   useEffect(() => {
     const handler = () => setSetupWizardOpen(true);
-    window.addEventListener('cortex-trigger-onboarding', handler);
-    return () => window.removeEventListener('cortex-trigger-onboarding', handler);
+    window.addEventListener('o8-trigger-onboarding', handler);
+    return () => window.removeEventListener('o8-trigger-onboarding', handler);
   }, []);
 
   return {

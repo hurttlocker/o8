@@ -25,10 +25,6 @@ export interface SetupWarmState {
 
 export interface SetupConfig {
   setupComplete: boolean;
-  cortex?: {
-    binaryPath: string;
-    detected: boolean;
-  };
   completedAt?: string | null;
   skippedSteps?: string[];
   warmState?: SetupWarmState;

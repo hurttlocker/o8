@@ -95,8 +95,6 @@ const ALLOWLIST_ANY_METHOD: RegExp[] = [
 const GATED_PREFIXES = [
   '/api/panel/',
   '/api/orchestrator/',
-  '/api/directives',
-  '/api/cortex/',
   '/api/runtime/',
   '/api/lanes',
   '/api/worktrees',

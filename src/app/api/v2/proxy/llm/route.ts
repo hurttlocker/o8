@@ -8,10 +8,6 @@ import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
-// Cortex v2: directives + ledger replace vector search
-import path from 'node:path';
-import { buildDirectiveBlock } from '@/lib/cortex/directives-store';
-import { buildLedgerBlock } from '@/lib/cortex/ledger';
 import { executeTool, type ToolResult } from '@/lib/llm/tools';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
 import {
@@ -121,13 +117,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   const isFreshChatTurn = assistantMessageCount === 0 && userMessageCount <= 1;
 
   let systemPrompt = buildSystemPrompt(getWorkspaceContext(effectiveRepoRoot));
-
-  // Cortex v2: directives + ledger replace vector search
-  const repoName = path.basename(effectiveRepoRoot);
-  const directiveBlock = buildDirectiveBlock(repoName);
-  const ledgerBlock = buildLedgerBlock(effectiveRepoRoot);
-  if (directiveBlock.text) systemPrompt += '\n\n' + directiveBlock.text;
-  if (ledgerBlock.text) systemPrompt += '\n\n' + ledgerBlock.text;
 
   const lastUserMsg = [...nonSystemMessages].reverse().find((message) => message.role === 'user');
 

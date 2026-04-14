@@ -186,7 +186,6 @@ export interface AgentPanelProps {
   onCreateIssue?: (repo?: string) => void;
   onOpenGitLog?: (workspace?: string) => void;
   onOpenDeploy?: (project?: string) => void;
-  onOpenMemory?: () => void;
   onAgentsUpdate?: (agents: AgentDetail[]) => void;
   onAgentKill?: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   lifecycleEvents?: Map<string, { state: string; exitCode?: number; ts: number }>;

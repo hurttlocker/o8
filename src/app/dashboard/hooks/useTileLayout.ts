@@ -539,7 +539,7 @@ export function useTileLayout({
   }, [canvasStateByTileId]);
 
   const resolveCanvasTabRepoPath = useCallback((tab: CanvasTab) => {
-    if (tab.kind === 'timeline' || tab.kind === 'memory' || tab.kind === 'welcome' || tab.kind === 'audit-log' || tab.kind === 'mermaid') {
+    if (tab.kind === 'timeline' || tab.kind === 'welcome' || tab.kind === 'audit-log' || tab.kind === 'mermaid') {
       return null;
     }
 

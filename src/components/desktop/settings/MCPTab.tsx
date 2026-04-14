@@ -13,6 +13,9 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { APP_FONT_STACK } from './shared';
+import { ClaudeIcon } from '../repo-registry/shared';
+import { ChevronDown, ChevronRight } from '../lucide-shims';
 
 interface McpServerConfig {
   command: string;
@@ -239,15 +242,72 @@ export function MCPTab() {
 
   const configJson = JSON.stringify(data.fullConfig, null, 2);
   const d = data.diagnostics;
+  const ready = d.nodeInstalled;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-      {/* Status */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* ── Hero ── */}
       <div>
         <SectionHeader
-          title="MCP Integration"
-          subtitle="Connect Claude Desktop or Claude Code to o8 so the orchestrator can dispatch work, approve merges, and read agent status via MCP tools."
+          title="Connect Claude"
+          subtitle="One click to let Claude Desktop or Claude Code dispatch work to your o8 fleet. Your other MCP servers stay untouched — we only write the o8 entry."
         />
+
+        {!ready ? (
+          <div style={{
+            marginBottom: 14,
+            padding: '14px 16px',
+            borderRadius: 12,
+            background: 'rgba(239, 68, 68, 0.08)',
+            border: '1px solid rgba(239, 68, 68, 0.22)',
+            fontSize: 13,
+            color: 'var(--t-text)',
+            lineHeight: 1.55,
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Install Node.js first</div>
+            <div style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>
+              o8&apos;s MCP server runs on Node. Grab the latest LTS from{' '}
+              <a
+                href="https://nodejs.org"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--t-accent)', textDecoration: 'underline' }}
+              >
+                nodejs.org
+              </a>
+              {' '}(v22+), then relaunch o8.
+            </div>
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <ClaudeTargetCard
+            label="Claude Desktop"
+            target="claude-desktop"
+            status={desktopStatus}
+            installing={installing === 'claude-desktop'}
+            disabled={!ready}
+            note={installNote?.target === 'claude-desktop' ? installNote : null}
+            onInstall={() => { void installToClaude('claude-desktop'); }}
+            onRemove={() => { void removeFromClaude('claude-desktop'); }}
+            restartHint="Quit Claude Desktop (⌘Q) and reopen it."
+          />
+          <ClaudeTargetCard
+            label="Claude Code"
+            target="claude-code"
+            status={codeStatus}
+            installing={installing === 'claude-code'}
+            disabled={!ready}
+            note={installNote?.target === 'claude-code' ? installNote : null}
+            onInstall={() => { void installToClaude('claude-code'); }}
+            onRemove={() => { void removeFromClaude('claude-code'); }}
+            restartHint="Restart Claude Code or run /mcp reload."
+          />
+        </div>
+      </div>
+
+      {/* ── System details (collapsed) ── */}
+      <Disclosure title="System details" subtitle="Show the runtime environment o8 is using.">
         <div style={{
           padding: 14,
           borderRadius: 12,
@@ -265,32 +325,6 @@ export function MCPTab() {
           <StatusRow label="GitHub CLI" ok={d.ghInstalled} detail={d.ghBin} />
           <StatusRow label="Database" ok={d.dbExists} detail={d.dbExists ? `${(d.dbSize / 1024 / 1024).toFixed(1)} MB` : 'not initialized'} />
         </div>
-        {!d.nodeInstalled ? (
-          <div style={{
-            marginTop: 10,
-            padding: 12,
-            borderRadius: 10,
-            background: 'rgba(239, 68, 68, 0.08)',
-            border: '1px solid rgba(239, 68, 68, 0.22)',
-            fontSize: 12,
-            color: 'var(--t-text)',
-            lineHeight: 1.55,
-          }}>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Node.js is required.</div>
-            <div>
-              Install the latest LTS from{' '}
-              <a
-                href="https://nodejs.org"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: 'var(--t-accent)', textDecoration: 'underline' }}
-              >
-                nodejs.org
-              </a>
-              {' '}(v22+), then restart o8. Without Node, the MCP server can&apos;t run and Claude has no way to reach the o8 tools.
-            </div>
-          </div>
-        ) : null}
         {d.nodeInstalled && !d.codexInstalled ? (
           <div style={{
             marginTop: 10,
@@ -302,29 +336,13 @@ export function MCPTab() {
             color: 'var(--t-text)',
             lineHeight: 1.55,
           }}>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Codex CLI not found.</div>
-            <div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Codex CLI not found</div>
+            <div style={{ color: 'var(--t-text-muted)' }}>
               Install with{' '}
-              <code style={{
-                fontFamily: MONO_FONT,
-                background: 'var(--t-input-bg)',
-                padding: '1px 6px',
-                borderRadius: 4,
-                fontSize: 11,
-              }}>
+              <code style={{ fontFamily: MONO_FONT, background: 'var(--t-input-bg)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>
                 npm i -g @openai/codex-cli
               </code>
-              {' '}and sign in with your ChatGPT Plus account or an{' '}
-              <code style={{
-                fontFamily: MONO_FONT,
-                background: 'var(--t-input-bg)',
-                padding: '1px 6px',
-                borderRadius: 4,
-                fontSize: 11,
-              }}>
-                OPENAI_API_KEY
-              </code>
-              {' '}env var. Without Codex, mission dispatch, create_mission, and approve_and_merge will fail — but o8_status, directives, and the desktop UI still work.
+              {' '}and sign in with ChatGPT Plus or an OPENAI_API_KEY. Without Codex, mission dispatch won&apos;t work — but o8_status, directives, and the desktop UI still do.
             </div>
           </div>
         ) : null}
@@ -333,38 +351,26 @@ export function MCPTab() {
             marginTop: 10,
             padding: 12,
             borderRadius: 10,
-            background: 'rgba(148, 163, 184, 0.1)',
-            border: '1px solid rgba(148, 163, 184, 0.22)',
+            background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+            border: '1px solid var(--t-panel-border)',
             fontSize: 12,
             color: 'var(--t-text-muted)',
             lineHeight: 1.55,
           }}>
-            <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--t-text)' }}>
-              GitHub CLI not found (optional).
-            </div>
+            <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--t-text)' }}>GitHub CLI not found (optional)</div>
             <div>
               Install with{' '}
-              <code style={{
-                fontFamily: MONO_FONT,
-                background: 'var(--t-input-bg)',
-                padding: '1px 6px',
-                borderRadius: 4,
-                fontSize: 11,
-              }}>
+              <code style={{ fontFamily: MONO_FONT, background: 'var(--t-input-bg)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>
                 brew install gh
               </code>
-              {' '}to enable create_mission from GitHub issues. Without it, inline packets and the desktop UI still work.
+              {' '}to enable create_mission from GitHub issues.
             </div>
           </div>
         ) : null}
-      </div>
+      </Disclosure>
 
-      {/* Config JSON */}
-      <div>
-        <SectionHeader
-          title="Configuration"
-          subtitle="Copy this JSON into your Claude Desktop or Claude Code MCP config."
-        />
+      {/* ── Manual config (collapsed) ── */}
+      <Disclosure title="Manual config" subtitle="Prefer to edit the file yourself? Copy the JSON here.">
         <div style={{
           position: 'relative',
           borderRadius: 12,
@@ -387,7 +393,7 @@ export function MCPTab() {
               fontSize: 11,
               fontWeight: 600,
               cursor: 'pointer',
-              fontFamily: 'system-ui, sans-serif',
+              fontFamily: APP_FONT_STACK,
               letterSpacing: '-0.01em',
               transition: 'background 120ms ease, color 120ms ease',
               zIndex: 1,
@@ -408,37 +414,54 @@ export function MCPTab() {
             {configJson}
           </pre>
         </div>
-      </div>
+      </Disclosure>
+    </div>
+  );
+}
 
-      {/* One-click install */}
-      <div>
-        <SectionHeader
-          title="One-click install"
-          subtitle="Writes the config directly into Claude's settings file. Your other MCP servers are preserved; we only touch the o8 entry."
-        />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <ClaudeTargetCard
-            label="Claude Desktop"
-            target="claude-desktop"
-            status={desktopStatus}
-            installing={installing === 'claude-desktop'}
-            note={installNote?.target === 'claude-desktop' ? installNote : null}
-            onInstall={() => { void installToClaude('claude-desktop'); }}
-            onRemove={() => { void removeFromClaude('claude-desktop'); }}
-            restartHint="Quit Claude Desktop (⌘Q) and reopen it."
-          />
-          <ClaudeTargetCard
-            label="Claude Code"
-            target="claude-code"
-            status={codeStatus}
-            installing={installing === 'claude-code'}
-            note={installNote?.target === 'claude-code' ? installNote : null}
-            onInstall={() => { void installToClaude('claude-code'); }}
-            onRemove={() => { void removeFromClaude('claude-code'); }}
-            restartHint="Restart Claude Code or run /mcp reload."
-          />
-        </div>
-      </div>
+// ── Disclosure ──
+
+function Disclosure({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          width: '100%',
+          padding: '10px 2px',
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontFamily: APP_FONT_STACK,
+        }}
+      >
+        <span style={{ display: 'inline-flex', color: 'var(--t-text-muted)' }}>
+          {open ? <ChevronDown size={14} strokeWidth={2.2} /> : <ChevronRight size={14} strokeWidth={2.2} />}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+          {title}
+        </span>
+        {subtitle ? (
+          <span style={{ fontSize: 12, color: 'var(--t-text-muted)', marginLeft: 4 }}>
+            {subtitle}
+          </span>
+        ) : null}
+      </button>
+      {open ? <div style={{ marginTop: 8 }}>{children}</div> : null}
     </div>
   );
 }
@@ -450,6 +473,7 @@ function ClaudeTargetCard({
   target: _target,
   status,
   installing,
+  disabled = false,
   note,
   onInstall,
   onRemove,
@@ -459,133 +483,161 @@ function ClaudeTargetCard({
   target: Target;
   status: ClaudeTargetStatus | null;
   installing: boolean;
+  disabled?: boolean;
   note: { target: Target; message: string; ok: boolean } | null;
   onInstall: () => void;
   onRemove: () => void;
   restartHint: string;
 }) {
-  const primary = status?.alreadyUpToDate
-    ? { label: 'Installed ✓', disabled: true }
-    : status?.alreadyRegistered
-      ? { label: 'Update config', disabled: false }
-      : { label: 'Install', disabled: false };
+  const connected = Boolean(status?.alreadyUpToDate);
+  const needsUpdate = Boolean(status?.alreadyRegistered && !status?.alreadyUpToDate);
+
+  const statusLine = !status
+    ? 'Checking…'
+    : connected
+      ? 'Connected to o8'
+      : needsUpdate
+        ? 'Older o8 entry found — click Update'
+        : status.fileExists
+          ? `Ready to connect${status.otherServers.length > 0 ? ` (${status.otherServers.length} other server${status.otherServers.length === 1 ? '' : 's'})` : ''}`
+          : 'Not connected yet';
+
+  const primary = connected
+    ? { label: 'Connected', disabled: true }
+    : needsUpdate
+      ? { label: 'Update', disabled: false }
+      : { label: 'Connect', disabled: false };
+
+  const primaryDisabled = disabled || installing || primary.disabled;
 
   return (
     <div style={{
-      padding: 14,
-      borderRadius: 12,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 14,
+      padding: '14px 16px',
+      borderRadius: 14,
       background: 'var(--t-panel)',
-      border: '1px solid var(--t-panel-border)',
+      border: `1px solid ${connected ? 'rgba(34, 197, 94, 0.24)' : 'var(--t-panel-border)'}`,
+      boxShadow: connected ? '0 0 0 1px rgba(34, 197, 94, 0.1) inset' : 'none',
+      transition: 'border-color 180ms ease, box-shadow 180ms ease',
+      opacity: disabled ? 0.55 : 1,
     }}>
+      {/* Logo */}
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 8,
+        width: 40,
+        height: 40,
+        borderRadius: 10,
+        display: 'grid',
+        placeItems: 'center',
+        background: 'var(--t-bg-card, rgba(148, 163, 184, 0.1))',
+        flexShrink: 0,
       }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>
+        <ClaudeIcon size={22} />
+      </div>
+
+      {/* Name + status */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
             {label}
-          </div>
-          <div style={{
-            fontSize: 11,
-            color: 'var(--t-text-muted)',
-            fontFamily: MONO_FONT,
-            marginTop: 3,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            maxWidth: 560,
-          }}>
-            {status?.path ?? '…'}
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-          {status?.alreadyRegistered ? (
-            <button
-              type="button"
-              onClick={onRemove}
-              disabled={installing}
-              style={{
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--t-input-border)',
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                fontSize: 12,
-                fontWeight: 500,
-                cursor: installing ? 'default' : 'pointer',
-                opacity: installing ? 0.6 : 1,
-                fontFamily: 'system-ui, sans-serif',
-                minHeight: 30,
-              }}
-            >
-              Remove
-            </button>
+          </span>
+          {connected ? (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 8px',
+              borderRadius: 999,
+              background: 'rgba(34, 197, 94, 0.14)',
+              color: '#16a34a',
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.02em',
+              textTransform: 'uppercase',
+            }}>
+              Connected
+            </span>
           ) : null}
+        </div>
+        <div style={{
+          marginTop: 2,
+          fontSize: 12,
+          color: 'var(--t-text-muted)',
+          lineHeight: 1.4,
+        }}>
+          {statusLine}
+        </div>
+        {note ? (
+          <div style={{
+            marginTop: 8,
+            padding: '7px 10px',
+            borderRadius: 8,
+            fontSize: 11,
+            lineHeight: 1.5,
+            background: note.ok ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+            border: `1px solid ${note.ok ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+            color: note.ok ? '#16a34a' : '#ef4444',
+          }}>
+            {note.ok ? `${note.message} ${restartHint}` : note.message}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        {status?.alreadyRegistered ? (
           <button
             type="button"
-            onClick={onInstall}
-            disabled={installing || primary.disabled}
+            onClick={onRemove}
+            disabled={installing || disabled}
             style={{
-              padding: '6px 14px',
-              borderRadius: 8,
-              border: primary.disabled
-                ? '1px solid var(--t-input-border)'
-                : '1px solid var(--t-accent-border)',
-              background: primary.disabled ? 'transparent' : 'var(--t-accent)',
-              color: primary.disabled ? 'var(--t-text-faint)' : '#ffffff',
+              padding: '7px 12px',
+              borderRadius: 9,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'transparent',
+              color: 'var(--t-text-muted)',
               fontSize: 12,
-              fontWeight: 600,
-              cursor: installing || primary.disabled ? 'default' : 'pointer',
-              opacity: installing ? 0.7 : 1,
-              fontFamily: 'system-ui, sans-serif',
-              minHeight: 30,
-              letterSpacing: '-0.01em',
+              fontWeight: 500,
+              cursor: installing || disabled ? 'default' : 'pointer',
+              opacity: installing ? 0.6 : 1,
+              fontFamily: APP_FONT_STACK,
+              minHeight: 32,
             }}
           >
-            {installing ? 'Working…' : primary.label}
+            Remove
           </button>
-        </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={onInstall}
+          disabled={primaryDisabled}
+          style={{
+            padding: '7px 14px',
+            borderRadius: 9,
+            border: connected
+              ? '1px solid rgba(34, 197, 94, 0.32)'
+              : '1px solid rgba(143, 180, 255, 0.36)',
+            background: connected
+              ? 'rgba(34, 197, 94, 0.14)'
+              : primaryDisabled
+                ? 'rgba(143, 180, 255, 0.1)'
+                : 'rgba(143, 180, 255, 0.22)',
+            color: connected ? '#16a34a' : 'var(--t-accent)',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: primaryDisabled ? 'default' : 'pointer',
+            opacity: installing ? 0.7 : 1,
+            fontFamily: APP_FONT_STACK,
+            minHeight: 32,
+            letterSpacing: '-0.01em',
+            boxShadow: !primaryDisabled && !connected ? '0 0 10px rgba(143, 180, 255, 0.24)' : 'none',
+            transition: 'background 140ms ease, box-shadow 140ms ease',
+          }}
+        >
+          {installing ? 'Working…' : primary.label}
+        </button>
       </div>
-
-      {/* Status row */}
-      <div style={{
-        fontSize: 11,
-        color: 'var(--t-text-muted)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        marginTop: 6,
-      }}>
-        <span>
-          {status
-            ? status.fileExists
-              ? status.alreadyUpToDate
-                ? 'Config is up to date.'
-                : status.alreadyRegistered
-                  ? 'Older o8 entry found — click Update config.'
-                  : `Config exists (${status.otherServers.length} other server${status.otherServers.length === 1 ? '' : 's'}).`
-              : 'No config file yet — one will be created.'
-            : 'Checking…'}
-        </span>
-      </div>
-
-      {/* Install result */}
-      {note ? (
-        <div style={{
-          marginTop: 10,
-          padding: '8px 10px',
-          borderRadius: 8,
-          fontSize: 12,
-          lineHeight: 1.5,
-          background: note.ok ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
-          border: `1px solid ${note.ok ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
-          color: 'var(--t-text)',
-        }}>
-          {note.ok ? `${note.message} ${restartHint}` : note.message}
-        </div>
-      ) : null}
     </div>
   );
 }
