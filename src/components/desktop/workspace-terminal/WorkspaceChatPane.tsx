@@ -1,10 +1,11 @@
 'use client';
 
-import { Suspense, lazy, memo, type CSSProperties } from 'react';
+import { Suspense, lazy, memo, useMemo, type CSSProperties } from 'react';
 import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  CheckCircle2,
   FileText,
   Lightbulb,
   MessageSquare,
@@ -14,6 +15,7 @@ import {
   Square,
   X,
 } from '../lucide-shims';
+import { useLaneArchivedView } from '@/app/dashboard/hooks/useLaneArchivedSet';
 import { IssueLinkPickerModal, type LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
 import {
   CLI_SUGGESTED_PROMPTS,
@@ -71,6 +73,18 @@ function WorkspaceChatPaneBase({
     onSelectModel,
     onConsumeDraftInjection,
   });
+
+  // When the lane bound to this tab's session has been archived (reviewed +
+  // merged, reaped for a missing worktree, or explicitly archived by the
+  // operator), we flip the composer into read-only mode with a dismissible
+  // banner. The transcript stays visible so the user can still scroll the
+  // history, but they can't send new turns to a retired session.
+  const archivedLaneView = useLaneArchivedView();
+  const isLaneArchived = useMemo(() => {
+    if (tab.kind !== 'chat') return false;
+    const sessionKey = tab.chatSessionKey;
+    return sessionKey ? archivedLaneView.sessionKeys.has(sessionKey) : false;
+  }, [tab.kind, tab.chatSessionKey, archivedLaneView.sessionKeys]);
 
   return (
     <div
@@ -368,14 +382,43 @@ function WorkspaceChatPaneBase({
         </div>
       ) : null}
 
+      {isLaneArchived ? (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+            paddingTop: 12,
+            paddingBottom: 12,
+            paddingLeft: 20,
+            paddingRight: 20,
+            borderTop: '1px solid var(--t-divider)',
+            background: 'linear-gradient(180deg, rgba(34, 197, 94, 0.06), rgba(34, 197, 94, 0.02))',
+            color: 'var(--t-text-secondary)',
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: '-0.005em',
+          }}
+        >
+          <CheckCircle2 size={14} style={{ color: '#22c55e', flexShrink: 0 }} />
+          <span>Merged · read-only</span>
+          <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>
+            This session's lane has been archived. The transcript stays for review.
+          </span>
+        </div>
+      ) : null}
+
       <div
         style={{
           paddingTop: 12,
           paddingBottom: 16,
           paddingLeft: 24,
           paddingRight: 24,
-          borderTop: '1px solid var(--t-divider)',
+          borderTop: isLaneArchived ? 'none' : '1px solid var(--t-divider)',
           background: 'transparent',
+          opacity: isLaneArchived ? 0.5 : 1,
+          pointerEvents: isLaneArchived ? 'none' : 'auto',
         }}
       >
         <div
