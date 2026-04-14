@@ -83,6 +83,28 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
   // glass with dark text; midnight reads as dark graphite glass with
   // light text. The workspace/terminal/chat-surface tokens stay solid
   // per-theme so the main content area is never translucent.
+  //
+  // We detect Tauri TWO ways because the inline script in layout.tsx
+  // that sets `data-tauri='true'` races against the Tauri runtime's
+  // injection of `window.__TAURI_INTERNALS__` — if the script runs
+  // first, the check fails, the attribute never lands, and the
+  // vibrancy-passthrough CSS rules in globals.css never match. By
+  // also checking for `__TAURI_INTERNALS__` directly here (this runs
+  // in a React useEffect, well after hydration, so the runtime is
+  // guaranteed to be present), we self-heal the attribute.
+  const hasTauriInternals = typeof window !== 'undefined'
+    && typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
+  if (hasTauriInternals && root.dataset.tauri !== 'true') {
+    root.dataset.tauri = 'true';
+    if (body) body.dataset.tauri = 'true';
+    // The hardcoded inline background on <html>/<body> from layout.tsx
+    // (set before React hydrates to prevent FOUC in browser mode) keeps
+    // fighting the `html[data-tauri='true'] { background: transparent
+    // !important }` rule on some Tauri builds. Nuke the inline style
+    // directly once we know we're in Tauri so the CSS rule can win.
+    root.style.background = '';
+    if (body) body.style.background = '';
+  }
   if (root.dataset.tauri === 'true') {
     root.style.setProperty('--t-chrome', 'transparent');
     root.style.setProperty('--t-bg-gradient', 'transparent');
