@@ -173,6 +173,28 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
       required: ['path'],
     },
   },
+  {
+    name: 'o8_view_wait_for',
+    description: 'Poll the o8 webview until a CSS selector resolves (optionally until its text includes a substring). Use to avoid racey sleep/screenshot retry loops when waiting for UI state — eg. a modal to open, a toast to appear, or a transcript line to render.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector to poll for via document.querySelector.',
+        },
+        text: {
+          type: 'string',
+          description: 'Optional substring that must appear in the element\'s innerText/textContent.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Max wait in milliseconds (default 10000, capped at 25000).',
+        },
+      },
+      required: ['selector'],
+    },
+  },
 ];
 
 export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): Record<string, ToolHandler> {
@@ -220,6 +242,14 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
     o8_view_navigate: async (args) => withStructuredErrors(async () => {
       const path = requiredString(args, 'path');
       const result = await getClient().navigate(path);
+      return jsonResult(result);
+    }),
+
+    o8_view_wait_for: async (args) => withStructuredErrors(async () => {
+      const selector = requiredString(args, 'selector');
+      const text = typeof args.text === 'string' && args.text.length > 0 ? args.text : undefined;
+      const timeoutMs = parseOptionalNumber(args.timeoutMs);
+      const result = await getClient().waitFor({ selector, text, timeoutMs });
       return jsonResult(result);
     }),
   };

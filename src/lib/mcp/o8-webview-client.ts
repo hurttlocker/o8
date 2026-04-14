@@ -409,6 +409,63 @@ export class O8WebviewClient {
     return { result: normalizeTextResult(result) };
   }
 
+  async waitFor(opts: { selector: string; text?: string; timeoutMs?: number }): Promise<{
+    ok: boolean;
+    matchedText: string;
+    elapsedMs: number;
+  }> {
+    const selector = opts.selector;
+    const expectedText = typeof opts.text === 'string' && opts.text.length > 0 ? opts.text : null;
+    const timeoutMs = typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0
+      ? Math.min(opts.timeoutMs, 25_000)
+      : 10_000;
+
+    // The Rust execute_js bridge does not await Promises, so we poll from Node.
+    // Each tick runs a synchronous scan in the webview; the sleep happens here.
+    // When `text` is provided, scan every match (querySelectorAll), not just
+    // the first — otherwise `button` + text="Orchestrator" never finds the
+    // right button.
+    const started = Date.now();
+    const deadline = started + timeoutMs;
+    const probeCode = expectedText === null
+      ? `(() => {
+          const el = document.querySelector(${JSON.stringify(selector)});
+          if (!el) return '__O8_WAIT_NOT_FOUND__';
+          const text = (el.innerText || el.textContent || '').trim();
+          return '__O8_WAIT_FOUND__' + text.slice(0, 200);
+        })()`
+      : `(() => {
+          const needle = ${JSON.stringify(expectedText)};
+          const candidates = document.querySelectorAll(${JSON.stringify(selector)});
+          for (const el of candidates) {
+            const text = (el.innerText || el.textContent || '').trim();
+            if (text.includes(needle)) {
+              return '__O8_WAIT_FOUND__' + text.slice(0, 200);
+            }
+          }
+          return '__O8_WAIT_NOT_FOUND__';
+        })()`;
+
+    while (true) {
+      const raw = await this.evalJs(probeCode);
+      const result = raw.result;
+      if (typeof result === 'string' && result.startsWith('__O8_WAIT_FOUND__')) {
+        return {
+          ok: true,
+          matchedText: result.slice('__O8_WAIT_FOUND__'.length),
+          elapsedMs: Date.now() - started,
+        };
+      }
+      if (Date.now() >= deadline) {
+        throw createCodedError(
+          `wait_for timed out after ${Date.now() - started}ms (selector: ${selector}${expectedText ? `, text: ${expectedText}` : ''})`,
+          'ETIMEDOUT',
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+
   async navigate(path: string): Promise<{ ok: boolean }> {
     await this.evalJs(`(() => {
       const next = new URL(${JSON.stringify(path)}, window.location.origin);

@@ -142,6 +142,7 @@ The operator MCP server also exposes 7 tools for controlling the running o8 webv
 - `o8_view_read` — visible text of the page
 - `o8_view_eval` — run JS in the webview
 - `o8_view_navigate` — push a new route via history.pushState
+- `o8_view_wait_for` — poll until a CSS selector resolves (optional text substring match), caps at 25s
 
 These wrap a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock` exposed by the Tauri `dev-mcp-plugin` feature. Signed/prod builds always include the socket. Dev builds need `cargo tauri dev --features dev-mcp-plugin`.
 
