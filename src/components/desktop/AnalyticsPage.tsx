@@ -23,6 +23,8 @@ import { Activity, BarChart3, Clock, Cpu, DollarSign, Layers, TrendingUp, Zap } 
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 import { formatTokens } from '@/lib/util/format-tokens';
 
+const APP_FONT_STACK = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+
 /**
  * Render the official brand logo for an agent/surface/model name when it
  * matches a known family; otherwise return null so callers can fall back
@@ -145,7 +147,7 @@ const MetricCard = memo(function MetricCard({
         fontWeight: 700,
         color: 'var(--t-text)',
         letterSpacing: '-0.03em',
-        fontFamily: '"SF Mono", ui-monospace, monospace',
+        fontFamily: APP_FONT_STACK,
         fontVariantNumeric: 'tabular-nums',
       }}>
         {value}
@@ -213,7 +215,8 @@ const SpendChart = memo(function SpendChart({ data }: { data: HourBucket[] }) {
         <span style={{
           fontSize: 11,
           color: 'var(--t-text-faint)',
-          fontFamily: '"SF Mono", ui-monospace, monospace',
+          fontFamily: APP_FONT_STACK,
+          fontVariantNumeric: 'tabular-nums',
         }}>
           {chartData.length} {isDaily ? 'days' : 'hours'}
         </span>
@@ -248,7 +251,7 @@ const SpendChart = memo(function SpendChart({ data }: { data: HourBucket[] }) {
                     x={x + barWidth / 2} y={chartHeight + 16}
                     textAnchor="middle"
                     fontSize={9} fill="var(--t-text-faint)"
-                    fontFamily='"SF Mono", ui-monospace, monospace'
+                    fontFamily={APP_FONT_STACK}
                   >
                     {isDaily ? d.hour.slice(5) : (d.hour.split(' ')[1] || d.hour.slice(-5))}
                   </text>
@@ -312,7 +315,8 @@ const BreakdownCard = memo(function BreakdownCard({
                   fontSize: 13,
                   fontWeight: 700,
                   color: 'var(--t-text)',
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  fontFamily: APP_FONT_STACK,
+                  fontVariantNumeric: 'tabular-nums',
                 }}>
                   {data.cost > 0 ? formatCost(data.cost) : formatTokens(data.tokens) + ' tok'}
                 </span>
@@ -328,14 +332,14 @@ const BreakdownCard = memo(function BreakdownCard({
                 }} />
               </div>
               <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-                <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: APP_FONT_STACK, fontVariantNumeric: 'tabular-nums' }}>
                   {data.messages.toLocaleString()} msgs
                 </span>
-                <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: APP_FONT_STACK, fontVariantNumeric: 'tabular-nums' }}>
                   {formatTokens(data.tokens)} tokens
                 </span>
                 {data.cost > 0 && (
-                  <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                  <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: APP_FONT_STACK, fontVariantNumeric: 'tabular-nums' }}>
                     {pct.toFixed(1)}%
                   </span>
                 )}
@@ -383,7 +387,7 @@ const ModelBreakdownCard = memo(function ModelBreakdownCard({ byModel }: { byMod
                 fontSize: 11,
                 fontWeight: 600,
                 color: 'var(--t-text)',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
+                fontFamily: APP_FONT_STACK,
               }}>
                 {m.model}
               </span>
@@ -396,7 +400,8 @@ const ModelBreakdownCard = memo(function ModelBreakdownCard({ byModel }: { byMod
                 fontSize: 12,
                 fontWeight: 700,
                 color: 'var(--t-text)',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
+                fontFamily: APP_FONT_STACK,
+                fontVariantNumeric: 'tabular-nums',
               }}>
                 {m.cost > 0 ? formatCost(m.cost) : `${m.messages} calls`}
               </span>
@@ -488,7 +493,8 @@ const TopSessionsCard = memo(function TopSessionsCard({ sessions }: { sessions: 
             <span style={{
               fontSize: 10,
               color: 'var(--t-text-faint)',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
+              fontFamily: APP_FONT_STACK,
+              fontVariantNumeric: 'tabular-nums',
               flex: 1,
             }}>
               {s.id.slice(0, 8)}…
@@ -500,7 +506,8 @@ const TopSessionsCard = memo(function TopSessionsCard({ sessions }: { sessions: 
               fontSize: 12,
               fontWeight: 700,
               color: 'var(--t-text)',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
+              fontFamily: APP_FONT_STACK,
+              fontVariantNumeric: 'tabular-nums',
               width: 70,
               textAlign: 'right',
             }}>
@@ -614,7 +621,8 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
                 fontSize: 11,
                 fontWeight: 600,
                 cursor: 'pointer',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
+                fontFamily: APP_FONT_STACK,
+                fontVariantNumeric: 'tabular-nums',
                 transition: 'all 120ms',
               }}
             >

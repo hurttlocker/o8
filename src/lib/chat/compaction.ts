@@ -1,12 +1,5 @@
 /**
- * Cortex-aware chat compaction — recursive multi-pass compression.
- *
- * Pass 1: Extract facts → store in Cortex (don't repeat known facts)
- * Pass 2: Query Cortex for what's already known about the conversation topics
- * Pass 3: Summarize only what's NEW — open threads, decisions, current state
- *
- * The result is a dense, high-signal summary that doesn't waste tokens
- * re-stating things Cortex already knows.
+ * Chat compaction — summarize older turns into a dense session handoff.
  */
 
 export interface LLMMessage {
@@ -33,9 +26,6 @@ export function shouldCompact(messageCount: number): boolean {
   return messageCount > COMPACTION_THRESHOLD;
 }
 
-/**
- * Cortex-aware recursive compaction.
- */
 export async function compactConversation(
   messages: LLMMessage[],
   tabId: string,
@@ -57,54 +47,6 @@ export async function compactConversation(
     transcript = transcript.slice(-MAX_TRANSCRIPT_CHARS);
   }
 
-  // ── Pass 1: Query Cortex for what it already knows ──
-  // Extract key topics from the conversation to search against
-  let knownFacts = '';
-  try {
-    const topicRes = await fetch('/api/v2/proxy/llm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId },
-      body: JSON.stringify({
-        model: 'gemini-2.5-flash-lite',
-        provider: 'google',
-        messages: [{
-          role: 'user',
-          content: `Extract 3-5 key topic keywords from this conversation. Return ONLY comma-separated keywords, nothing else.\n\n${transcript.slice(0, 3000)}`,
-        }],
-      }),
-    });
-
-    if (topicRes.ok && topicRes.body) {
-      const topics = await parseSSEContent(topicRes.body);
-      if (topics) {
-        // Search Cortex for each topic
-        const topicList = topics.split(',').map(t => t.trim()).filter(Boolean).slice(0, 5);
-        const cortexResults: string[] = [];
-
-        for (const topic of topicList) {
-          try {
-            const searchRes = await fetch(`/api/v2/cortex/search?q=${encodeURIComponent(topic)}&limit=3`);
-            if (searchRes.ok) {
-              const data = await searchRes.json();
-              if (data.results) {
-                for (const r of data.results) {
-                  if (r.snippet) cortexResults.push(r.snippet.slice(0, 150));
-                }
-              }
-            }
-          } catch { /* continue */ }
-        }
-
-        if (cortexResults.length > 0) {
-          knownFacts = cortexResults.slice(0, 10).join('\n');
-        }
-      }
-    }
-  } catch (err) {
-    console.error('[compaction] Pass 1 (topic extraction) failed:', err);
-  }
-
-  // ── Pass 2: Smart compression — knows what Cortex already has ──
   // Optionally include skeleton map so the compressor knows real codebase structure.
   // Fetched via API (not direct import) because this module is bundled for the client
   // and skeleton depends on better-sqlite3 which is Node-only.
@@ -129,7 +71,6 @@ export async function compactConversation(
 3. Preserve exact file paths, function names, commit hashes, issue numbers
 4. Drop: greetings, "sounds good", "let me check", thinking-out-loud, tool execution details
 5. Keep: architecture decisions, user preferences, error descriptions, what worked vs didn't
-6. If a fact is already known to the system, reference it briefly — don't restate the full detail
 
 ## FORMAT
 Write a dense narrative summary in this structure:
@@ -148,7 +89,7 @@ Write a dense narrative summary in this structure:
 **Open Items:**
 - [unresolved questions, next steps the user mentioned]
 
-${knownFacts ? `\n## ALREADY KNOWN (Cortex has these — reference briefly, don't restate)\n${knownFacts}\n` : ''}${skeletonContext}`;
+${skeletonContext}`;
 
   // Call proxy for the actual compression
   const res = await fetch('/api/v2/proxy/llm', {
@@ -176,24 +117,6 @@ ${knownFacts ? `\n## ALREADY KNOWN (Cortex has these — reference briefly, don'
     return { newMessages: messages, summary: '', compactedCount: 0 };
   }
 
-  // ── Pass 3: Store the summary in Cortex for cross-session recall ──
-  try {
-    // Write to temp file and import
-    const storeRes = await fetch('/api/v2/cortex/action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        command: 'import',
-        args: `Chat session compaction (${messagesToCompact.length} messages, tab: ${tabId}):\n\n${summary}`,
-      }),
-    });
-    if (storeRes.ok) {
-      console.log('[compaction] Summary stored in Cortex');
-    }
-  } catch {
-    // Non-critical
-  }
-
   // Build compaction message
   const compactionMessage: LLMMessage = {
     id: `compaction-${Date.now()}`,
@@ -204,7 +127,7 @@ ${knownFacts ? `\n## ALREADY KNOWN (Cortex has these — reference briefly, don'
     compactedCount: messagesToCompact.length,
   };
 
-  console.log(`[compaction] Compressed ${messagesToCompact.length} messages → ${summary.length} chars (${knownFacts ? 'Cortex-aware' : 'standalone'})`);
+  console.log(`[compaction] Compressed ${messagesToCompact.length} messages -> ${summary.length} chars`);
 
   return {
     newMessages: [compactionMessage, ...recentMessages],

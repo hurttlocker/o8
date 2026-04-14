@@ -29,7 +29,6 @@ export interface DetectionResult {
     claudeCode: ToolDetection;
     gemini: ToolDetection;
     opencode: ToolDetection;
-    cortex: ToolDetection;
     ollama: ToolDetection;
   };
   apiKeys: ApiKeyStatus[];
@@ -37,7 +36,6 @@ export interface DetectionResult {
   hasAgentSurface: boolean;
   hasCliAgent: boolean;
   hasApiKey: boolean;
-  hasMemory: boolean;
   hasEmbeddings: boolean;
   recommendedPath: string;
   summary: string;
