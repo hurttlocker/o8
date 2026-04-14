@@ -128,8 +128,24 @@ Global Next middleware runs in Node runtime and gates these prefixes on loopback
 ### MCP servers (`src/lib/mcp/`)
 
 Two stdio MCP servers expose o8 to Claude Desktop / Claude Code:
-- `operator-mcp-server.ts` — user-facing tools: `o8_status`, `o8_send`, `o8_approve`, `o8_reject`, `o8_history`, `create_mission`, `dispatch_mission`, `get_mission_status`, `submit_review`, `approve_and_merge`, `reset_packet`, `retry_packet`
+- `operator-mcp-server.ts` — user-facing tools: `o8_status`, `o8_send`, `o8_approve`, `o8_reject`, `o8_history`, `create_mission`, `dispatch_mission`, `get_mission_status`, `submit_review`, `approve_and_merge`, `reset_packet`, `retry_packet`, plus the `o8_view_*` webview control tools
 - `cortex-mcp-server.ts` — internal tools spawned by orchestrator Claude Code sessions (fleet/issues/PRs/approvals/agents)
+
+#### Webview control tools (`o8_view_*`)
+
+The operator MCP server also exposes 7 tools for controlling the running o8 webview directly:
+
+- `o8_view_screenshot` — capture the current window as PNG base64
+- `o8_view_snapshot` — numbered accessibility tree for element discovery
+- `o8_view_click` — click by ref or coordinates
+- `o8_view_type` — type into focused element
+- `o8_view_read` — visible text of the page
+- `o8_view_eval` — run JS in the webview
+- `o8_view_navigate` — push a new route via history.pushState
+
+These wrap a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock` exposed by the Tauri `dev-mcp-plugin` feature. Signed/prod builds always include the socket. Dev builds need `cargo tauri dev --features dev-mcp-plugin`.
+
+This supersedes the standalone `tauri-plugin-mcp` bridge in `.mcp.json` (removal of that entry is a follow-up once the new tools are verified).
 
 Both bundle via esbuild in `scripts/tauri-export.mjs` → `out/server/*.mjs`. The Tauri sidecar sets `O8_BUNDLED_MCP_PATH` + `O8_BUNDLED_MCP_DIR` so packaged installs launch with `node <bundled>.mjs` instead of dev `tsx` paths. Config generator at `/api/setup/mcp-config` emits the correct command per install mode.
 

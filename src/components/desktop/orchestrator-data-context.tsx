@@ -26,6 +26,8 @@ export interface OrchestratorDataValue {
   onMissionStateChange: ThoughtsCardProps['onMissionStateChange'];
   onLaunchPacket?: ThoughtsCardProps['onLaunchPacket'];
   draftInjection?: ThoughtsCardProps['draftInjection'];
+  /** Open the given agent session in a workspace terminal tab. */
+  onSelectSession?: (sessionKey: string) => void;
 }
 
 const OrchestratorDataContext = createContext<OrchestratorDataValue | null>(null);

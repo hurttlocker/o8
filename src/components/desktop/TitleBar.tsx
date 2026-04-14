@@ -260,7 +260,7 @@ export function TitleBar({
   // Inject the alerts button's wrapper element into the tray so its popover
   // anchors to the bell icon instead of the old NavRail column.
   const alertTrayNode = alertTray && isValidElement(alertTray)
-    ? cloneElement(alertTray as ReactElement<{ anchorEl?: HTMLElement | null }>, { anchorEl: alertAnchorEl })
+    ? cloneElement(alertTray as ReactElement<{ desktopAnchorEl?: HTMLElement | null }>, { desktopAnchorEl: alertAnchorEl })
     : alertTray;
 
   // Window drag — Tauri v2 startDragging API
@@ -358,6 +358,15 @@ export function TitleBar({
             noDrag
           />
         ) : null}
+
+        {/* Terminal toggle — lives next to Agents on the left so the whole
+            "workspace shortcut" cluster is grouped together. */}
+        <TitleBarButton
+          icon={<IconTerminal />}
+          label="Toggle terminal"
+          onClick={onToggleBottomPanel}
+          active={bottomPanelVisible}
+        />
       </div>
 
       {/* ── Center — Search ── */}
@@ -459,14 +468,6 @@ export function TitleBar({
             {alertTrayNode}
           </div>
         ) : null}
-
-        {/* Terminal toggle — opens the global terminal in the bottom tray */}
-        <TitleBarButton
-          icon={<IconTerminal />}
-          label="Toggle terminal"
-          onClick={onToggleBottomPanel}
-          active={bottomPanelVisible}
-        />
 
         <RightPanelMorphButton
           workspacePanelVisible={workspacePanelVisible}

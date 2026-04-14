@@ -43,6 +43,8 @@ interface McpConfigResponse {
     dataDir: string;
     dbExists: boolean;
     dbSize: number;
+    webviewSocketPath: string;
+    webviewToolsAvailable: boolean;
   };
 }
 
@@ -324,6 +326,13 @@ export function MCPTab() {
           <StatusRow label="Codex CLI" ok={d.codexInstalled} detail={d.codexBin} />
           <StatusRow label="GitHub CLI" ok={d.ghInstalled} detail={d.ghBin} />
           <StatusRow label="Database" ok={d.dbExists} detail={d.dbExists ? `${(d.dbSize / 1024 / 1024).toFixed(1)} MB` : 'not initialized'} />
+          <StatusRow
+            label="Webview tools"
+            ok={d.webviewToolsAvailable}
+            detail={d.webviewToolsAvailable
+              ? `Connected to ${d.webviewSocketPath}`
+              : 'Off — launch with --features dev-mcp-plugin'}
+          />
         </div>
         {d.nodeInstalled && !d.codexInstalled ? (
           <div style={{
