@@ -45,6 +45,10 @@ export interface RuntimeLaunchRequest {
   isolate?: boolean;
   isolation?: 'main' | 'branch';
   skipSetup?: boolean;
+  // When set, the caller already owns a lane for this launch (eg. packet
+  // dispatch going through the lane command bus). launchRuntimeSurface will
+  // skip its implicit lane creation and leave binding to the caller.
+  existingLaneId?: string;
 }
 
 export interface RuntimeLaunchResult {
@@ -56,6 +60,7 @@ export interface RuntimeLaunchResult {
   cwd: string;
   repoPath: string;
   worktree: WorktreeInfo | null;
+  laneId: string | null;
 }
 
 function summarizeTaskName(prompt: string) {
@@ -128,6 +133,41 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     await linkSessionToWorktree(repoPath, launchWorktree.worktree.id, result.sessionKey);
   }
 
+  // Wrap every launch in a lane so the governance layer is universal and the
+  // session retires automatically when its work lands. Packet dispatch passes
+  // `existingLaneId` to opt out — it already created a lane upstream and will
+  // attach the session itself. We only auto-wrap launches that got a worktree;
+  // un-isolated scratch runs still fall through without a lane.
+  let laneId: string | null = payload.existingLaneId ?? null;
+  const laneRuntime: 'codex' | 'claude-code' | null = runtimeId === 'codex'
+    ? 'codex'
+    : runtimeId === 'claude-code'
+      ? 'claude-code'
+      : null;
+  if (!laneId && launchWorktree?.worktree && laneRuntime) {
+    try {
+      const { createLane, attachSession } = await import('@/lib/lane/registry');
+      const implicitLabel = payload.taskName?.trim() || summarizeTaskName(prompt);
+      const lane = createLane({
+        repoPath,
+        branch: launchWorktree.worktree.branch,
+        baseBranch: payload.baseBranch?.trim() || 'main',
+        runtime: laneRuntime,
+        label: implicitLabel,
+        ownership: 'managed',
+        worktreePath: launchWorktree.worktree.path,
+        actor: 'user',
+      });
+      attachSession(lane.id, result.sessionKey, 'system');
+      laneId = lane.id;
+    } catch (err) {
+      // Lane wrap is best-effort — never block a successful launch if the
+      // governance layer has a hiccup. The reaper + manual archive paths can
+      // still reconcile later.
+      console.warn('[runtime-actions] Failed to wrap launch in lane:', err instanceof Error ? err.message : err);
+    }
+  }
+
   return {
     ok: true,
     runtime: runtimeId,
@@ -139,6 +179,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     cwd,
     repoPath,
     worktree: launchWorktree?.worktree ?? null,
+    laneId,
   };
 }
 
