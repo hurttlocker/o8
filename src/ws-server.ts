@@ -75,6 +75,7 @@ import {
   type SupervisorCallbacks,
   type AgentUpdateEvent,
 } from './lib/supervisor/agent-supervisor';
+import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import type {
   LaneLifecycleEventPayload,
   RealtimeBatchMessage,
@@ -3401,6 +3402,7 @@ async function bootstrapWsServer() {
     };
     startSupervisorLoop(supervisorCallbacks);
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
+    startWorktreeReaper();
 
     void ensureReviewDrainStarted().catch((error) => {
       console.error('[ws-server] Failed to start review queue drain:', error instanceof Error ? error.message : String(error));
@@ -3419,6 +3421,7 @@ function shutdown(signal: string) {
   stopSupervisorLoop();
   stopHeadlessLoop?.();
   stopHeadlessLoop = null;
+  stopWorktreeReaper();
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
   if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);

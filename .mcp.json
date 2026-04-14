@@ -6,13 +6,6 @@
       "env": {
         "O8_API_BASE": "http://localhost:3001"
       }
-    },
-    "tauri-mcp": {
-      "command": "node",
-      "args": ["/Users/marquisehurtt/tauri-plugin-mcp/mcp-server-ts/build/index.js"],
-      "env": {
-        "TAURI_MCP_IPC_PATH": "/tmp/tauri-mcp-o8-marquisehurtt.sock"
-      }
     }
   }
 }
