@@ -44,6 +44,7 @@ import {
   packetStatusFromLaneStatus,
   pathBelongsToRepoScope,
 } from '../utils';
+import { useLaneArchivedSet } from './useLaneArchivedSet';
 
 interface UseWorkspaceTerminalArgs {
   activeTileId: string | null;
@@ -240,16 +241,22 @@ export function useWorkspaceTerminal({
     return Object.values(workspaceChatSessionsByTileId).find((sessions) => sessions.length > 0) ?? [];
   }, [activeTileId, tileLayout.root, workspaceChatSessionsByTileId, workspaceTerminalPreferredRepo?.localPath]);
 
+  const archivedLaneSessionKeys = useLaneArchivedSet();
+
   const ideWorkspaceSessionsForSidebar = useMemo(() => {
     const deduped = new Map<string, MobileInboxSnapshot['sessions'][number]>();
     for (const sessions of Object.values(workspaceChatSessionsByTileId)) {
       for (const session of sessions) {
         if (!session?.sessionKey) continue;
+        // Hide sessions whose lane has been archived. Leaves orphaned
+        // (lane-less) sessions in place so we never regress visibility for
+        // sessions that pre-date the lane-wrap work.
+        if (archivedLaneSessionKeys.has(session.sessionKey)) continue;
         deduped.set(session.sessionKey, session);
       }
     }
     return [...deduped.values()];
-  }, [workspaceChatSessionsByTileId]);
+  }, [workspaceChatSessionsByTileId, archivedLaneSessionKeys]);
 
   const workspaceChatTargets = useMemo(
     () => buildWorkspaceChatTargetOptions(workspaceChatSessions),
