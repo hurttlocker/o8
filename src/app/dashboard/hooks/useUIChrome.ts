@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { NavSection } from '@/components/desktop/NavRail';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
-import { readTimelineVisible, subscribeTimelineVisible } from '@/lib/appearance/timeline';
+import {
+  readTimelineVisible,
+  subscribeTimelineVisible,
+  writeTimelineVisible,
+} from '@/lib/appearance/timeline';
+
+// Stable server snapshot — the timeline div is hidden until hydration finishes,
+// which avoids a mismatch against localStorage-driven client state. Hydration
+// runs the subscribe effect and a rerender flips the visibility to the real
+// value. Brief flicker on first paint is the price for correct SSR.
+const getTimelineServerSnapshot = () => false;
 
 export function useUIChrome() {
   // ── Navigation ──
@@ -10,7 +20,17 @@ export function useUIChrome() {
 
   // ── Sidebar + Timeline ──
   const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
+  const timelineVisible = useSyncExternalStore(
+    subscribeTimelineVisible,
+    readTimelineVisible,
+    getTimelineServerSnapshot,
+  );
+  const setTimelineVisible = useCallback((
+    value: boolean | ((previous: boolean) => boolean),
+  ) => {
+    const next = typeof value === 'function' ? value(readTimelineVisible()) : value;
+    writeTimelineVisible(next);
+  }, []);
 
   // ── Overlay state ──
   const [alertTrayOpen, setAlertTrayOpen] = useState(false);
@@ -22,9 +42,6 @@ export function useUIChrome() {
 
   // ── Mobile remote href ──
   const [mobileRemoteHref, setMobileRemoteHref] = useState('/mobile');
-
-  // ── Timeline visibility subscription ──
-  useEffect(() => subscribeTimelineVisible(setTimelineVisible), []);
 
   // ── Resolve mobile remote href on mount ──
   /* eslint-disable react-hooks/set-state-in-effect -- one-shot SSR-to-client origin sync */
