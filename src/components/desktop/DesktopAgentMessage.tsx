@@ -530,9 +530,9 @@ function MediaGrid({
                 display: 'block',
                 overflow: 'hidden',
                 borderRadius: 14,
-                border: tint === 'user' ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(226, 232, 240, 0.95)',
-                background: tint === 'user' ? 'rgba(255,255,255,0.10)' : '#ffffff',
-                boxShadow: tint === 'user' ? 'none' : '0 8px 20px rgba(15, 23, 42, 0.05)',
+                border: tint === 'user' ? '1px solid rgba(255,255,255,0.18)' : '1px solid var(--t-divider)',
+                background: tint === 'user' ? 'rgba(255,255,255,0.10)' : 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
+                boxShadow: tint === 'user' ? 'none' : 'var(--t-panel-shadow)',
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -561,8 +561,8 @@ function MediaGrid({
             gap: 10,
             padding: '10px 12px',
             borderRadius: 12,
-            border: tint === 'user' ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(226, 232, 240, 0.95)',
-            background: tint === 'user' ? 'rgba(255,255,255,0.10)' : 'rgba(248, 250, 252, 0.98)',
+            border: tint === 'user' ? '1px solid rgba(255,255,255,0.18)' : '1px solid var(--t-divider)',
+            background: tint === 'user' ? 'rgba(255,255,255,0.10)' : 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
             color: tint === 'user' ? '#ffffff' : 'var(--t-text)',
           }}
         >
@@ -573,8 +573,8 @@ function MediaGrid({
             width: 30,
             height: 30,
             borderRadius: 10,
-            background: tint === 'user' ? 'rgba(255,255,255,0.14)' : 'rgba(37, 99, 235, 0.08)',
-            color: tint === 'user' ? '#ffffff' : '#2563eb',
+            background: tint === 'user' ? 'rgba(255,255,255,0.14)' : 'var(--t-accent-soft)',
+            color: tint === 'user' ? '#ffffff' : 'var(--t-accent)',
             flexShrink: 0,
           }}>
             <FileText size={16} strokeWidth={2} />
@@ -592,7 +592,7 @@ function MediaGrid({
             </div>
             <div style={{
               fontSize: 10,
-              color: tint === 'user' ? 'rgba(255,255,255,0.78)' : '#64748b',
+              color: tint === 'user' ? 'rgba(255,255,255,0.78)' : 'var(--t-text-muted)',
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
             }}>
@@ -606,7 +606,7 @@ function MediaGrid({
             style={{
               fontSize: 11,
               fontWeight: 700,
-              color: tint === 'user' ? '#ffffff' : '#2563eb',
+              color: tint === 'user' ? '#ffffff' : 'var(--t-accent)',
               textDecoration: 'none',
             }}
           >
@@ -741,9 +741,9 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
           wordBreak: 'break-word',
           padding: entry.role === 'system' ? '10px 12px' : 0,
           borderRadius: entry.role === 'system' ? 12 : 0,
-          background: entry.role === 'system' ? 'rgba(248, 250, 252, 0.98)' : 'transparent',
-          border: entry.role === 'system' ? '1px solid rgba(226, 232, 240, 0.95)' : 'none',
-          boxShadow: entry.role === 'system' ? '0 8px 20px rgba(15, 23, 42, 0.04)' : 'none',
+          background: entry.role === 'system' ? 'var(--t-bg-card, rgba(148, 163, 184, 0.06))' : 'transparent',
+          border: entry.role === 'system' ? '1px solid var(--t-divider)' : 'none',
+          boxShadow: entry.role === 'system' ? 'var(--t-panel-shadow)' : 'none',
         }}>
           {renderLLMMarkdown(displayText, {
             onApplyToFile,

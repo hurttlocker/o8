@@ -435,7 +435,6 @@ export function createTileRegistry({
           sendAgentKill={sendAgentKill}
           termWsConnected={termWsConnected}
           onSplitVertical={() => handleSplitTile(tileId, 'vertical')}
-          onSplitHorizontal={() => handleSplitTile(tileId, 'horizontal')}
           onClose={() => handleCloseTile(tileId)}
         />
       ),

@@ -24,6 +24,8 @@ import {
   resetPacket,
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
+import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webview-tools';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 // ── Pre-flight diagnostics (run once at startup) ──
@@ -79,7 +81,10 @@ interface McpTool {
 }
 
 interface McpToolResult {
-  content: Array<{ type: 'text'; text: string }>;
+  content: Array<
+    | { type: 'text'; text: string }
+    | { type: 'image'; data: string; mimeType: string }
+  >;
   isError?: boolean;
 }
 
@@ -306,6 +311,15 @@ function parseReviewFindings(value: unknown): OrchestratorReviewFinding[] {
   });
 }
 
+let o8WebviewClient: O8WebviewClient | null = null;
+
+function getO8WebviewClient(): O8WebviewClient {
+  if (!o8WebviewClient) {
+    o8WebviewClient = new O8WebviewClient();
+  }
+  return o8WebviewClient;
+}
+
 // ── Tool Definitions ──
 
 const TOOLS: McpTool[] = [
@@ -403,6 +417,7 @@ const TOOLS: McpTool[] = [
       required: ['sessionKey'],
     },
   },
+  ...O8_WEBVIEW_TOOLS,
   {
     name: 'create_mission',
     description:
@@ -796,8 +811,19 @@ async function handleCreateMission(args: Record<string, unknown>): Promise<McpTo
         sequential,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
-        const dispatchResult = await dispatchMission({ missionId: createResult.missionId });
-        return jsonResult({ ...createResult, dispatch: dispatchResult });
+        // Fire-and-forget: dispatch can take 30–60s on its own, and the
+        // combined create+dispatch path often exceeds the MCP client's
+        // tool-call timeout (~60s), which closes the transport while the
+        // backend is still processing. Return the create result immediately
+        // so the caller gets a clean response, and run dispatch in the
+        // background. Callers can poll get_mission_status for progress.
+        void dispatchMission({ missionId: createResult.missionId }).catch((err) => {
+          console.error('[mcp-operator] background dispatch failed', errorText(err));
+        });
+        return jsonResult({
+          ...createResult,
+          dispatch: { queued: true, note: 'Dispatch running in background. Use get_mission_status to poll.' },
+        });
       }
       return jsonResult(createResult);
     }
@@ -810,8 +836,13 @@ async function handleCreateMission(args: Record<string, unknown>): Promise<McpTo
       sequential,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
-      const dispatchResult = await dispatchMission({ missionId: createResult.missionId });
-      return jsonResult({ ...createResult, dispatch: dispatchResult });
+      void dispatchMission({ missionId: createResult.missionId }).catch((err) => {
+        console.error('[mcp-operator] background dispatch failed', errorText(err));
+      });
+      return jsonResult({
+        ...createResult,
+        dispatch: { queued: true, note: 'Dispatch running in background. Use get_mission_status to poll.' },
+      });
     }
     return jsonResult(createResult);
   } catch (error) {
@@ -897,6 +928,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_approve: handleApprove,
   o8_reject: handleReject,
   o8_history: handleHistory,
+  ...createO8WebviewToolHandlers(getO8WebviewClient),
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,
   get_mission_status: handleGetMissionStatus,

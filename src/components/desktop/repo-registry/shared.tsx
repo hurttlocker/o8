@@ -451,6 +451,54 @@ export function ClaudeIcon({ size = 14 }: { size?: number; color?: string }) {
   );
 }
 
+/** Google Gemini sparkle mark — inline SVG (no brand asset available). */
+export function GeminiIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      style={{ display: 'block', flexShrink: 0 } as React.CSSProperties}
+      aria-label="Gemini"
+    >
+      <defs>
+        <linearGradient id="cortex-gemini-grad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#4285f4" />
+          <stop offset="50%" stopColor="#9b72ff" />
+          <stop offset="100%" stopColor="#f06292" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M12 1.5c.4 4.9 4.1 8.6 9 9-4.9.4-8.6 4.1-9 9-.4-4.9-4.1-8.6-9-9 4.9-.4 8.6-4.1 9-9z"
+        fill="url(#cortex-gemini-grad)"
+      />
+    </svg>
+  );
+}
+
+/** OpenCode mark — inline SVG (no brand asset available). Orange bracket monogram. */
+export function OpenCodeIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#fb923c"
+      strokeWidth={2.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 } as React.CSSProperties}
+      aria-label="OpenCode"
+    >
+      <path d="M8 6 3 12l5 6" />
+      <path d="m16 6 5 6-5 6" />
+      <path d="M14 5 10 19" />
+    </svg>
+  );
+}
+
 export function runtimeBadgeTone(runtime?: string | null) {
   switch (runtime) {
     case 'claude-code':

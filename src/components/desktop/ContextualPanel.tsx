@@ -15,6 +15,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import type React from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
+import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 
 // ── CLI Agents (terminal only, no chat modes) ──
 
@@ -22,10 +23,20 @@ const CLI_AGENTS = [
   { id: 'shell', label: 'Shell', color: '#64748b', command: null },
   { id: 'claude', label: 'Claude Code', color: '#e07a3a', command: 'claude' },
   { id: 'codex', label: 'Codex', color: '#6b7280', command: 'codex' },
+  { id: 'opencode', label: 'OpenCode', color: '#fb923c', command: 'opencode' },
   { id: 'gemini', label: 'Gemini CLI', color: '#4285f4', command: 'gemini' },
 ] as const;
 
 type CliAgent = (typeof CLI_AGENTS)[number];
+
+function AgentGlyph({ agentId, size = 14 }: { agentId: string; size?: number }) {
+  if (agentId === 'claude') return <ClaudeIcon size={size} />;
+  if (agentId === 'codex') return <CodexIcon size={size} />;
+  if (agentId === 'opencode') return <OpenCodeIcon size={size} />;
+  if (agentId === 'gemini') return <GeminiIcon size={size} />;
+  // shell fallback — a small square/terminal glyph via AgentDot below
+  return null;
+}
 
 // ── Types ──
 
@@ -50,7 +61,6 @@ export interface ContextualPanelProps {
   sendAgentKill: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   termWsConnected: boolean;
   onSplitVertical?: () => void;
-  onSplitHorizontal?: () => void;
   onClose: () => void;
 }
 
@@ -103,16 +113,6 @@ function SplitVerticalIcon({ size = 12 }: { size?: number }) {
       <path d="M12 4v16" />
       <path d="M6 7v10" />
       <path d="M18 7v10" />
-    </svg>
-  );
-}
-
-function SplitHorizontalIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M4 12h16" />
-      <path d="M7 6h10" />
-      <path d="M7 18h10" />
     </svg>
   );
 }
@@ -362,7 +362,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       sendTerminalDetach,
       termWsConnected,
       onSplitVertical,
-      onSplitHorizontal,
       onClose,
     },
     ref,
@@ -619,7 +618,9 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                     flexShrink: 0,
                   }}
                 >
-                  <AgentDot color={agent.color} />
+                  {agent.id === 'shell'
+                    ? <AgentDot color={agent.color} />
+                    : <AgentGlyph agentId={agent.id} size={12} />}
                   <span style={{
                     fontSize: 12,
                     fontWeight: isActive ? 600 : 500,
@@ -717,7 +718,17 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                     onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                   >
-                    <AgentDot color={agent.color} />
+                    <span style={{
+                      width: 18,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      {agent.id === 'shell'
+                        ? <AgentDot color={agent.color} />
+                        : <AgentGlyph agentId={agent.id} size={16} />}
+                    </span>
                     <span style={{
                       fontSize: 12,
                       fontWeight: 500,
@@ -763,31 +774,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
               <SplitVerticalIcon />
-            </button>
-          )}
-
-          {onSplitHorizontal && (
-            <button
-              type="button"
-              onClick={onSplitHorizontal}
-              aria-label="Split horizontally"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                cursor: 'pointer',
-                flexShrink: 0,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            >
-              <SplitHorizontalIcon />
             </button>
           )}
 
