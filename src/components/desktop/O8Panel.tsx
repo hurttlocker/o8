@@ -152,13 +152,16 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      background: 'var(--t-bg)',
-      borderLeft: '1px solid var(--t-divider)',
-    }}>
+    <div
+      data-chrome-surface="true"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        background: 'var(--t-bg)',
+        borderLeft: '1px solid var(--t-divider)',
+      }}
+    >
       {/* Tab bar */}
       <div style={{
         display: 'flex',

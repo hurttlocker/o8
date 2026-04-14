@@ -2242,6 +2242,7 @@ function DashboardInner() {
           animate={{ width: leftWidth }}
           transition={showAgentPanelFtux ? FTUX_SPRING_TRANSITION : { duration: 0.001 }}
           data-mcp-scope="agent-panel"
+          data-chrome-surface="true"
           style={{
             width: leftWidth,
             flexShrink: 0,

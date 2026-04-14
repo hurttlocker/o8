@@ -145,10 +145,10 @@ function FooterPorts({ onPortPreview }: { onPortPreview?: DesktopStatusBarProps[
             left: popoverLeft,
             minWidth: 200,
             padding: 6,
-            borderRadius: 10,
-            background: 'var(--t-bg-card)',
+            borderRadius: 12,
+            background: 'var(--t-panel-solid)',
             border: '1px solid var(--t-panel-border)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.28)',
+            boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
             zIndex: 9999,
             fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
@@ -250,6 +250,7 @@ function DesktopStatusBarBase({
   return (
     <div
       data-mcp-scope="desktop-status-bar"
+      data-chrome-surface="true"
       style={{
         height: 28,
         flexShrink: 0,

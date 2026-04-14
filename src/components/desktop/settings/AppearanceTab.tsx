@@ -1,11 +1,8 @@
 'use client';
 
-import { useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import {
   THEME_ACCENT,
-  THEME_ACCENT_SOFT,
-  THEME_ACCENT_BORDER,
   THEME_ACCENT_RING,
 } from './shared';
 
@@ -168,15 +165,6 @@ function ThemePreviewCard({ theme, active, onSelect }: {
 
 export function AppearanceTab() {
   const { themeId, setTheme, themes: themeList } = useTheme();
-  const [fleetMode, setFleetMode] = useState<'smart' | 'all'>(() => {
-    if (typeof window === 'undefined') return 'smart';
-    return (localStorage.getItem('o8-fleet-mode') as 'smart' | 'all') ?? 'smart';
-  });
-
-  const handleFleetModeChange = (mode: 'smart' | 'all') => {
-    setFleetMode(mode);
-    localStorage.setItem('o8-fleet-mode', mode);
-  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -214,73 +202,6 @@ export function AppearanceTab() {
         </div>
       </div>
 
-      {/* Section: Fleet Display */}
-      <div style={{
-        background: 'var(--t-panel)',
-        borderRadius: 14,
-        padding: 24,
-        border: '1px solid var(--t-panel-border)',
-        boxShadow: 'var(--t-panel-shadow)',
-      }}>
-        <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>
-            Fleet Display
-          </h3>
-          <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '4px 0 0' }}>
-            Control how agents and their sessions appear in the sidebar.
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {([
-            {
-              id: 'smart' as const,
-              label: 'Agents + Updates',
-              desc: 'Show all main agent surfaces and one card per sub-agent. Cron runs update existing cards instead of creating new ones.',
-            },
-            {
-              id: 'all' as const,
-              label: 'All Agents + Crons',
-              desc: 'Show every session including individual cron runs. More detail, more cards.',
-            },
-          ]).map((option) => (
-            <div
-              key={option.id}
-              onClick={() => handleFleetModeChange(option.id)}
-              style={{
-                display: 'flex', alignItems: 'flex-start', gap: 12,
-                padding: '12px 14px', borderRadius: 10,
-                border: fleetMode === option.id
-                  ? `1.5px solid ${THEME_ACCENT_BORDER}`
-                  : '1px solid var(--t-panel-border)',
-                background: fleetMode === option.id
-                  ? THEME_ACCENT_SOFT
-                  : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
-                cursor: 'pointer',
-                transition: 'all 120ms ease',
-                boxShadow: fleetMode === option.id ? `0 10px 24px ${THEME_ACCENT_RING}` : 'none',
-              }}
-            >
-              <div style={{
-                width: 16, height: 16, borderRadius: '50%', flexShrink: 0, marginTop: 1,
-                border: fleetMode === option.id
-                  ? `5px solid ${THEME_ACCENT}`
-                  : '2px solid var(--t-text-muted)',
-                background: fleetMode === option.id ? 'var(--t-panel)' : 'transparent',
-                transition: 'all 120ms ease',
-              }} />
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>
-                  {option.label}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2, lineHeight: 1.4 }}>
-                  {option.desc}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

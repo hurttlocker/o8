@@ -117,6 +117,11 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
   }
   chromeScopeStyle.textContent = `
     [data-theme="light"] [data-chrome-surface="true"] {
+      --t-bg: transparent;
+      --t-bg-subtle: transparent;
+      --t-panel: transparent;
+      --t-panel-translucent: transparent;
+      --t-panel-solid: transparent;
       --t-text: rgba(255, 255, 255, 0.96);
       --t-text-strong: #ffffff;
       --t-text-secondary: rgba(255, 255, 255, 0.78);
@@ -140,11 +145,16 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
       --t-code-bg: rgba(255, 255, 255, 0.08);
       --t-chrome-btn-bg: rgba(255, 255, 255, 0.08);
       --t-chrome-btn-hover-bg: rgba(255, 255, 255, 0.16);
-      --t-chrome-btn-active-bg: rgba(255, 255, 255, 0.24);
+      --t-chrome-btn-active-bg: rgba(143, 180, 255, 0.18);
       --t-chrome-btn-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
       --t-chrome-btn-hover-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
-      --t-chrome-btn-active-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+      --t-chrome-btn-active-shadow: inset 0 0 0 1px rgba(143, 180, 255, 0.36), 0 0 12px rgba(143, 180, 255, 0.28);
       --t-chrome-btn-text: rgba(255, 255, 255, 0.96);
+      --t-accent: #8fb4ff;
+      --t-accent-soft: rgba(143, 180, 255, 0.14);
+      --t-accent-soft-strong: rgba(143, 180, 255, 0.22);
+      --t-accent-border: rgba(143, 180, 255, 0.28);
+      --t-accent-ring: rgba(143, 180, 255, 0.14);
     }
   `;
 
