@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     const sessionKeyFilter = request.nextUrl.searchParams.get('sessionKey') || undefined;
 
     const [snapshot, pendingAll] = await Promise.all([
-      getRuntimeInventorySnapshot({ fleetMode: 'smart', fresh: true }),
+      getRuntimeInventorySnapshot({ fresh: true }),
       listApprovals({ status: 'pending' }),
     ]);
 

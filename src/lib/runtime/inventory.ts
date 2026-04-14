@@ -355,11 +355,10 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
 }
 
 export async function getRuntimeInventorySnapshot(
-  options: { fleetMode?: 'smart' | 'all'; fresh?: boolean } = {},
+  options: { fresh?: boolean } = {},
 ): Promise<FleetSnapshot> {
-  const fleetMode = options.fleetMode ?? 'smart';
   const fresh = options.fresh ?? false;
-  const cacheKey = fleetMode;
+  const cacheKey = 'default';
   const now = Date.now();
   const generation = runtimeInventoryGeneration;
 

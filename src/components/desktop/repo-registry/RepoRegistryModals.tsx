@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { CheckCircle2 } from '../lucide-shims';
+import { CheckCircle2, FolderOpen, GitBranch, Globe, Loader2 } from '../lucide-shims';
 import {
   AlertCircle,
   GlassModal,
@@ -11,19 +11,71 @@ import {
   type WorkspaceCreateResult,
 } from './shared';
 
+// Normalise a remote URL to a friendly "owner/repo" label.
+// https://github.com/hurttlocker/cortex-ide.git → hurttlocker/cortex-ide
+// git@github.com:hurttlocker/cortex-ide.git     → hurttlocker/cortex-ide
+function prettyRemoteLabel(remoteUrl: string): string {
+  const trimmed = remoteUrl.trim().replace(/\.git$/, '');
+  const sshMatch = trimmed.match(/git@([^:]+):(.+)$/);
+  if (sshMatch) return sshMatch[2];
+  try {
+    const url = new URL(trimmed);
+    return url.pathname.replace(/^\//, '');
+  } catch {
+    return trimmed;
+  }
+}
+
+function Chip({
+  icon,
+  label,
+  tone = 'neutral',
+  muted = false,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  tone?: 'neutral' | 'accent';
+  muted?: boolean;
+}) {
+  const isAccent = tone === 'accent' && !muted;
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '5px 10px',
+        borderRadius: 999,
+        border: isAccent
+          ? '1px solid rgba(143, 180, 255, 0.32)'
+          : '1px solid var(--t-divider-strong)',
+        background: isAccent
+          ? 'rgba(143, 180, 255, 0.14)'
+          : 'var(--t-divider-subtle)',
+        color: muted
+          ? 'var(--t-text-muted)'
+          : isAccent
+            ? 'var(--t-accent)'
+            : 'var(--t-text-secondary)',
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: '-0.005em',
+      }}
+    >
+      {icon}
+      {label}
+    </span>
+  );
+}
+
 interface RepoRegistryModalsProps {
   addOpen: boolean;
   resetAddModal: () => void;
-  repoPathInput: string;
-  setRepoPathInput: React.Dispatch<React.SetStateAction<string>>;
   validating: boolean;
   validationError: string | null;
-  setValidationError: React.Dispatch<React.SetStateAction<string | null>>;
   validationResult: ValidatedRepoCandidate | null;
-  setValidationResult: React.Dispatch<React.SetStateAction<ValidatedRepoCandidate | null>>;
   adding: boolean;
   handleBrowseForRepo: () => Promise<void>;
-  handleValidate: () => Promise<void>;
   handleAddRepo: () => Promise<void>;
   workspaceRepo: RepoRegistryEntry | null;
   closeWorkspaceModal: () => void;
@@ -61,16 +113,11 @@ interface RepoRegistryModalsProps {
 function RepoRegistryModalsBase({
   addOpen,
   resetAddModal,
-  repoPathInput,
-  setRepoPathInput,
   validating,
   validationError,
-  setValidationError,
   validationResult,
-  setValidationResult,
   adding,
   handleBrowseForRepo,
-  handleValidate,
   handleAddRepo,
   workspaceRepo,
   closeWorkspaceModal,
@@ -109,63 +156,189 @@ function RepoRegistryModalsBase({
       <GlassModal
         open={addOpen}
         onClose={resetAddModal}
-        title="Add Repository"
-        subtitle="First pass is local-folder only. Cortex validates the path, resolves the repo root, and records the default branch plus setup scaffold."
+        title="Add a Repository"
+        subtitle="Pick a folder on your Mac. o8 will detect the branch and link your GitHub remote automatically."
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <label htmlFor="add-repository-path" style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-            Local folder path
-          </label>
-          <div style={{ display: 'flex', alignItems: 'stretch', gap: 8 }}>
-            <input
-              id="add-repository-path"
-              name="addRepositoryPath"
-              value={repoPathInput}
-              onChange={(event) => {
-                setRepoPathInput(event.currentTarget.value);
-                setValidationError(null);
-                setValidationResult(null);
-              }}
-              placeholder="~/projects/cortex-ide"
-              autoFocus
-              style={{
-                flex: 1,
-                minHeight: 40,
-                padding: '10px 12px',
-                borderRadius: 12,
-                border: '1px solid var(--t-btn-secondary-border)',
-                background: 'var(--t-input-bg)',
-                color: 'var(--t-text)',
-                fontSize: 13,
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                outline: 'none',
-              }}
-            />
+        {validationResult ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+              padding: 18,
+              borderRadius: 14,
+              border: '1px solid var(--t-panel-border)',
+              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  display: 'grid',
+                  placeItems: 'center',
+                  background: 'rgba(143, 180, 255, 0.14)',
+                  color: '#8fb4ff',
+                  flexShrink: 0,
+                }}
+              >
+                <FolderOpen size={22} strokeWidth={1.8} />
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: 'var(--t-text)',
+                    letterSpacing: '-0.01em',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {validationResult.name}
+                </div>
+                <div
+                  style={{
+                    marginTop: 2,
+                    fontSize: 12,
+                    color: 'var(--t-text-muted)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={shortenPath(validationResult.localPath)}
+                >
+                  {shortenPath(validationResult.localPath)}
+                </div>
+              </div>
+              <div
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 12,
+                  display: 'grid',
+                  placeItems: 'center',
+                  background: 'rgba(34, 197, 94, 0.14)',
+                  color: '#16a34a',
+                  flexShrink: 0,
+                }}
+                aria-label="Validated"
+              >
+                <CheckCircle2 size={14} strokeWidth={2.4} />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <Chip icon={<GitBranch size={12} strokeWidth={2} />} label={validationResult.defaultBranch} />
+              {validationResult.remoteUrl ? (
+                <Chip
+                  icon={<Globe size={12} strokeWidth={2} />}
+                  label={prettyRemoteLabel(validationResult.remoteUrl)}
+                  tone="accent"
+                />
+              ) : (
+                <Chip icon={<Globe size={12} strokeWidth={2} />} label="No remote linked" muted />
+              )}
+            </div>
+
             <button
               type="button"
-              onClick={() => {
-                void handleBrowseForRepo();
-              }}
+              onClick={() => { void handleBrowseForRepo(); }}
               disabled={validating || adding}
               style={{
-                minHeight: 40,
-                padding: '0 12px',
-                borderRadius: 12,
-                border: '1px solid var(--t-btn-secondary-border)',
-                background: 'var(--t-panel-hover)',
-                color: 'var(--t-text-secondary)',
+                alignSelf: 'flex-start',
+                padding: 0,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-accent)',
                 fontSize: 12,
                 fontWeight: 600,
-                cursor: validating || adding ? 'not-allowed' : 'pointer',
+                cursor: validating || adding ? 'default' : 'pointer',
                 opacity: validating || adding ? 0.45 : 1,
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                whiteSpace: 'nowrap',
               }}
             >
-              Browse…
+              Choose a different folder
             </button>
           </div>
-        </div>
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 16,
+              padding: '28px 20px',
+              borderRadius: 14,
+              border: '1px dashed var(--t-panel-border)',
+              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.04))',
+              textAlign: 'center',
+            }}
+          >
+            <div
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 18,
+                display: 'grid',
+                placeItems: 'center',
+                background: 'rgba(143, 180, 255, 0.14)',
+                color: '#8fb4ff',
+              }}
+            >
+              <FolderOpen size={28} strokeWidth={1.6} />
+            </div>
+            <button
+              type="button"
+              onClick={() => { void handleBrowseForRepo(); }}
+              disabled={validating || adding}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                minHeight: 42,
+                padding: '0 22px',
+                borderRadius: 12,
+                border: '1px solid rgba(143, 180, 255, 0.36)',
+                background: 'rgba(143, 180, 255, 0.18)',
+                color: 'var(--t-accent)',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: validating || adding ? 'not-allowed' : 'pointer',
+                opacity: validating || adding ? 0.6 : 1,
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                boxShadow: validating ? 'none' : '0 0 12px rgba(143, 180, 255, 0.24)',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              {validating ? (
+                <>
+                  <Loader2 size={14} strokeWidth={2.2} style={{ animation: 'spin 900ms linear infinite' }} />
+                  Opening folder…
+                </>
+              ) : (
+                <>
+                  <FolderOpen size={14} strokeWidth={2} />
+                  Choose Folder
+                </>
+              )}
+            </button>
+            <div
+              style={{
+                maxWidth: 360,
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: 'var(--t-text-muted)',
+              }}
+            >
+              We&apos;ll scan it, find your GitHub remote, and add it to your fleet.
+            </div>
+          </div>
+        )}
 
         {validationError ? (
           <div
@@ -173,11 +346,11 @@ function RepoRegistryModalsBase({
               display: 'flex',
               alignItems: 'flex-start',
               gap: 8,
-              padding: 12,
-              borderRadius: 12,
-              border: '1px solid rgba(239, 68, 68, 0.18)',
-              background: 'rgba(254, 242, 242, 0.82)',
-              color: '#991b1b',
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              background: 'rgba(254, 226, 226, 0.24)',
+              color: '#ef4444',
               fontSize: 12,
               lineHeight: 1.45,
             }}
@@ -187,91 +360,47 @@ function RepoRegistryModalsBase({
           </div>
         ) : null}
 
-        {validationResult ? (
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 12,
-              border: '1px solid rgba(34, 197, 94, 0.18)',
-              background: 'rgba(240, 253, 244, 0.85)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 12,
-                fontWeight: 700,
-                color: '#166534',
-              }}
-            >
-              <CheckCircle2 size={14} strokeWidth={2} />
-              Validation complete
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '92px 1fr', gap: '6px 10px', fontSize: 12 }}>
-              <span style={{ color: 'var(--t-text-muted)' }}>Repo</span>
-              <span style={{ color: 'var(--t-text)', fontWeight: 600 }}>{validationResult.name}</span>
-              <span style={{ color: 'var(--t-text-muted)' }}>Path</span>
-              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
-                {shortenPath(validationResult.localPath)}
-              </span>
-              <span style={{ color: 'var(--t-text-muted)' }}>Branch</span>
-              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                {validationResult.defaultBranch}
-              </span>
-              <span style={{ color: 'var(--t-text-muted)' }}>Remote</span>
-              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
-                {validationResult.remoteUrl ?? 'No origin remote'}
-              </span>
-            </div>
-          </div>
-        ) : null}
-
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
           <button
             type="button"
-            onClick={() => {
-              void handleValidate();
-            }}
-            disabled={validating || adding}
+            onClick={resetAddModal}
+            disabled={adding}
             style={{
               minHeight: 36,
-              padding: '8px 12px',
+              padding: '8px 14px',
               borderRadius: 10,
               border: '1px solid var(--t-btn-secondary-border)',
-              background: 'var(--t-panel-hover)',
+              background: 'transparent',
               color: 'var(--t-text-secondary)',
               fontSize: 12,
               fontWeight: 600,
-              cursor: validating || adding ? 'not-allowed' : 'pointer',
-              opacity: validating || adding ? 0.45 : 1,
+              cursor: adding ? 'not-allowed' : 'pointer',
+              opacity: adding ? 0.45 : 1,
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
-            {validating ? 'Validating…' : 'Validate'}
+            Cancel
           </button>
           <button
             type="button"
-            onClick={() => {
-              void handleAddRepo();
-            }}
-            disabled={adding || validating}
+            onClick={() => { void handleAddRepo(); }}
+            disabled={!validationResult || adding || validating}
             style={{
               minHeight: 36,
-              padding: '8px 12px',
+              padding: '8px 16px',
               borderRadius: 10,
-              border: '1px solid rgba(37, 99, 235, 0.2)',
-              background: 'rgba(37, 99, 235, 0.08)',
-              color: '#1d4ed8',
+              border: '1px solid rgba(143, 180, 255, 0.36)',
+              background: !validationResult || adding || validating
+                ? 'rgba(143, 180, 255, 0.1)'
+                : 'rgba(143, 180, 255, 0.22)',
+              color: 'var(--t-accent)',
               fontSize: 12,
               fontWeight: 700,
-              cursor: adding || validating ? 'not-allowed' : 'pointer',
-              opacity: adding || validating ? 0.45 : 1,
+              cursor: !validationResult || adding || validating ? 'not-allowed' : 'pointer',
+              opacity: !validationResult || adding || validating ? 0.55 : 1,
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              boxShadow: !validationResult || adding || validating ? 'none' : '0 0 10px rgba(143, 180, 255, 0.24)',
+              letterSpacing: '-0.01em',
             }}
           >
             {adding ? 'Adding…' : 'Add Repository'}

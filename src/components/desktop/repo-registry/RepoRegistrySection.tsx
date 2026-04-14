@@ -366,17 +366,6 @@ function RepoRegistrySectionBase({
     await validateRepoPath(folderPath);
   }, [pickFolderPath, validateRepoPath]);
 
-  const handleValidate = useCallback(async () => {
-    const localPath = repoPathInput.trim();
-    if (!localPath) {
-      setValidationError('Enter a local folder path.');
-      setValidationResult(null);
-      return;
-    }
-
-    await validateRepoPath(localPath);
-  }, [repoPathInput, validateRepoPath]);
-
   const handleAddRepo = useCallback(async () => {
     const localPath = repoPathInput.trim();
     if (!localPath) {
@@ -703,16 +692,11 @@ function RepoRegistrySectionBase({
       <RepoRegistryModals
         addOpen={addOpen}
         resetAddModal={resetAddModal}
-        repoPathInput={repoPathInput}
-        setRepoPathInput={setRepoPathInput}
         validating={validating}
         validationError={validationError}
-        setValidationError={setValidationError}
         validationResult={validationResult}
-        setValidationResult={setValidationResult}
         adding={adding}
         handleBrowseForRepo={handleBrowseForRepo}
-        handleValidate={handleValidate}
         handleAddRepo={handleAddRepo}
         workspaceRepo={workspaceRepo}
         closeWorkspaceModal={closeWorkspaceModal}

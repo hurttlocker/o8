@@ -180,7 +180,7 @@ export function useAgentPanelState({
       if (!inventoryLoadedRef.current) setInventoryLoading(true);
       try {
         const [inventoryResponse, workspacesResponse, reposResponse] = await Promise.all([
-          fetch(`/api/runtime/inventory?fleetMode=${typeof window !== 'undefined' ? localStorage.getItem('o8-fleet-mode') ?? 'smart' : 'smart'}`).catch(() => null),
+          fetch('/api/runtime/inventory').catch(() => null),
           fetchOnce('/api/panel/workspaces').catch(() => null),
           fetchOnce('/api/panel/repos').catch(() => null),
         ]);
