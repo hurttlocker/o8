@@ -273,6 +273,9 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
           currentThreadId={chatChromeState.threadId}
           onClose={handleToggleHistory}
           onSelectThread={handleSelectThread}
+          onSelectArchivedLane={data.onSelectSession
+            ? (sessionKey) => data.onSelectSession?.(sessionKey)
+            : undefined}
         />
 
         {/* Center: chat body */}
