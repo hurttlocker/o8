@@ -1,6 +1,5 @@
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
-import { queryPacketOutcome, writeSessionOutcome } from '@/lib/cortex/ledger';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
@@ -21,6 +20,7 @@ const SUMMARY_LIMIT = 1_200;
 const NOTE_LIMIT = 320;
 const NOTE_PATTERN = /\b(blocker|blocked|blocking|note|notes|remaining|next step|todo|unable|could not|can't|cannot|failed|failure|error|waiting)\b/i;
 type PacketReviewContext = NonNullable<PacketContext['review']>;
+const packetCompletionContextStore = new Map<string, PacketContext>();
 
 function inferRuntimeId(sessionKey: string): RuntimeId | null {
   if (sessionKey.startsWith('claude-code:')) {
@@ -354,34 +354,7 @@ export async function readPacketCompletionContext(packetId: string): Promise<Pac
   if (!normalizedPacketId) {
     return null;
   }
-
-  const row = queryPacketOutcome(normalizedPacketId);
-  if (!row) {
-    return null;
-  }
-
-  let patterns: string[] = [];
-  try {
-    const parsed = JSON.parse(row.patterns_json ?? '[]');
-    if (Array.isArray(parsed)) {
-      patterns = parsed.filter((v: unknown): v is string => typeof v === 'string');
-    }
-  } catch { /* ignore malformed JSON */ }
-
-  return {
-    packetId: normalizedPacketId,
-    sessionKey: `ledger:${row.id}`,
-    summary: row.summary ?? '',
-    changedFiles: [],
-    completedAt: row.completed_at ?? new Date().toISOString(),
-    model: row.model ?? 'unknown',
-    patterns: patterns.length > 0 ? patterns : undefined,
-    reviewFindings: undefined,
-    conflictZones: undefined,
-    review: row.review_approved != null
-      ? { approved: Boolean(row.review_approved), findings: [], reviewedAt: row.completed_at ?? new Date().toISOString() }
-      : undefined,
-  };
+  return packetCompletionContextStore.get(normalizedPacketId) ?? null;
 }
 
 export async function recordPacketReviewContext(
@@ -426,6 +399,8 @@ export async function recordPacketReviewContext(
         model: lane?.runtime ?? 'unknown',
         review: reviewContext,
       };
+
+  packetCompletionContextStore.set(normalizedPacketId, nextContext);
 
   return nextContext;
 }
@@ -483,38 +458,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     ...approvalReviewContext,
   };
 
-  // Cortex v2: write session outcome to the ledger
-  try {
-    const startedAt = agent?.runtimeSurface?.lifecycle?.lastRunStartedAt ?? context.completedAt;
-    const durationMs = startedAt ? Date.parse(context.completedAt) - Date.parse(startedAt) : null;
-    const outcome = context.selfReview?.passed === false ? 'failed'
-      : context.review?.approved === false ? 'failed'
-      : 'succeeded';
-    writeSessionOutcome({
-      repoPath: lane?.repoPath ?? '',
-      branch: lane?.branch ?? null,
-      runtime: 'codex',
-      sessionKey: normalizedSessionKey,
-      laneId: lane?.id ?? null,
-      packetId: normalizedPacketId,
-      outcome,
-      summary: context.summary,
-      attempts: 1,
-      durationMs: durationMs && durationMs > 0 ? durationMs : null,
-      totalTokens: telemetry?.totalTokens ?? 0,
-      costUsd: telemetry?.estimatedCostUsd ?? 0,
-      model: context.model,
-      patterns: context.patterns ?? [],
-      conflictZones: context.conflictZones ?? [],
-      changedFiles: context.changedFiles,
-      reviewApproved: context.review ? context.review.approved : null,
-      reviewFindingsCount: context.reviewFindings?.length ?? context.review?.findings?.length ?? 0,
-      startedAt,
-      completedAt: context.completedAt,
-    });
-  } catch (ledgerError) {
-    console.error('[context-relay] Failed to write session outcome:', ledgerError);
-  }
+  packetCompletionContextStore.set(normalizedPacketId, context);
 
   return context;
 }

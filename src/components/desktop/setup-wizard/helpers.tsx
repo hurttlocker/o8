@@ -3,7 +3,7 @@ import type { DetectionResult, MissingToolAction, ToolDisplayInfo, WizardMode } 
 
 export function deriveWizardMode(detection: DetectionResult): WizardMode {
   const { recommendedPath } = detection;
-  if (recommendedPath === 'ready' || recommendedPath === 'add-memory') return 'ready';
+  if (recommendedPath === 'ready') return 'ready';
   if (detection.hasAnything) return 'quick-setup';
   return 'full-wizard';
 }

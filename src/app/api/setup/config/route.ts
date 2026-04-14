@@ -14,10 +14,6 @@ const CONFIG_PATH = join(CONFIG_DIR, 'setup.json');
 function getDefaultConfig(): SetupConfig {
   return {
     setupComplete: false,
-    cortex: {
-      binaryPath: join(homedir(), 'bin', 'cortex'),
-      detected: false,
-    },
     skippedSteps: [],
   };
 }
@@ -43,21 +39,19 @@ function writeConfig(config: SetupConfig): void {
 }
 
 function mergeConfig(current: SetupConfig, patch: Partial<SetupConfig>): SetupConfig {
+  const { cortex: _legacyCurrentCortex, ...currentRest } = current as SetupConfig & { cortex?: unknown };
+  const { cortex: _legacyPatchCortex, ...patchRest } = patch as Partial<SetupConfig> & { cortex?: unknown };
   return {
-    ...current,
-    ...patch,
-    cortex: patch.cortex ? {
-      ...current.cortex,
-      ...patch.cortex,
-    } : current.cortex,
-    skippedSteps: patch.skippedSteps ?? current.skippedSteps,
-    warmState: patch.warmState ? {
-      ...current.warmState,
-      ...patch.warmState,
-      repos: patch.warmState.repos ?? current.warmState?.repos,
-      runtimes: patch.warmState.runtimes ?? current.warmState?.runtimes,
-      profile: patch.warmState.profile ?? current.warmState?.profile ?? null,
-    } : current.warmState,
+    ...currentRest,
+    ...patchRest,
+    skippedSteps: patchRest.skippedSteps ?? currentRest.skippedSteps,
+    warmState: patchRest.warmState ? {
+      ...currentRest.warmState,
+      ...patchRest.warmState,
+      repos: patchRest.warmState.repos ?? currentRest.warmState?.repos,
+      runtimes: patchRest.warmState.runtimes ?? currentRest.warmState?.runtimes,
+      profile: patchRest.warmState.profile ?? currentRest.warmState?.profile ?? null,
+    } : currentRest.warmState,
   };
 }
 

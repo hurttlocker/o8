@@ -18,6 +18,7 @@ import type {
   GitHubActionKind,
 } from './settings/shared';
 import {
+  APP_FONT_STACK,
   TabButton,
   PlugIcon,
   KeyIcon,
@@ -231,9 +232,10 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         height: '100%',
         overflow: 'auto',
         padding: 24,
-        background: 'var(--t-bg-gradient)',
+        background: 'var(--t-bg-subtle)',
         display: 'flex',
         gap: 20,
+        fontFamily: APP_FONT_STACK,
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
         WebkitOverflowScrolling: 'touch',

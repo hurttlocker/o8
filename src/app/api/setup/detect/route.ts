@@ -22,7 +22,6 @@ interface DetectionResult {
   hasAgentSurface: boolean;
   hasCliAgent: boolean;
   hasApiKey: boolean;
-  hasMemory: boolean;
   hasEmbeddings: boolean;
   recommendedPath: 'ready' | 'quick-setup' | 'full-wizard';
   summary: string;
@@ -192,45 +191,6 @@ function detectOpenCode(): DetectedTool {
   };
 }
 
-function detectCortex(): DetectedTool {
-  const home = homedir();
-  let path = join(home, 'bin', 'cortex');
-  if (!existsSync(path)) {
-    path = safeWhich('cortex');
-  }
-  const detected = !!path && existsSync(path);
-  let version: string | undefined;
-  let memoryCount = 0;
-  let factCount = 0;
-
-  if (detected) {
-    version = safeExec(path, ['version'], 2000);
-  }
-
-  const dbPath = join(home, '.cortex', 'cortex.db');
-  if (existsSync(dbPath) && detected) {
-    const healthRaw = safeExec(path, ['health', '--json'], 3000);
-    if (healthRaw) {
-      try {
-        const health = JSON.parse(healthRaw) as { memories?: number; facts?: number };
-        memoryCount = health.memories ?? 0;
-        factCount = health.facts ?? 0;
-      } catch {
-        // ignore parse errors
-      }
-    }
-  }
-
-  return {
-    id: 'cortex',
-    name: 'Cortex Memory',
-    detected,
-    version,
-    path,
-    details: { memoryCount, factCount, dbPath },
-  };
-}
-
 async function detectOllama(): Promise<DetectedTool> {
   const res = await safeFetch('http://localhost:11434/api/tags', 2000);
   const detected = res?.ok ?? false;
@@ -321,13 +281,6 @@ function buildSummary(tools: DetectedTool[]): string {
     parts.push(`Codex (${threadCount} threads)`);
   }
 
-  const cortex = tools.find(t => t.id === 'cortex');
-  if (cortex?.detected) {
-    const factCount = (cortex.details?.factCount as number) ?? 0;
-    const k = Math.floor(factCount / 1000);
-    parts.push(`Cortex Memory (${k}K facts)`);
-  }
-
   const ollama = tools.find(t => t.id === 'ollama');
   if (ollama?.detected) {
     parts.push('Ollama ready');
@@ -346,7 +299,6 @@ export async function GET() {
     detectClaudeCode(),
     detectGemini(),
     detectOpenCode(),
-    detectCortex(),
     await detectOllama(),
     detectApiKeys(),
   ];
@@ -354,7 +306,6 @@ export async function GET() {
   const hasAgentSurface = false;
   const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'gemini', 'opencode'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
-  const hasMemory = tools.some(t => t.id === 'cortex' && t.detected);
   const hasEmbeddings = tools.some(t => t.id === 'ollama' && t.detected);
   const hasAnything = hasAgentSurface || hasCliAgent || hasApiKey;
 
@@ -375,7 +326,6 @@ export async function GET() {
     hasAgentSurface,
     hasCliAgent,
     hasApiKey,
-    hasMemory,
     hasEmbeddings,
     recommendedPath,
     summary,

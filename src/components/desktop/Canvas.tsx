@@ -26,7 +26,6 @@ import {
   Globe,
   Hexagon,
   Plus,
-  Radio,
   Terminal,
   X,
 } from './lucide-shims';
@@ -54,10 +53,6 @@ import type { CanvasRepoTaskLaunchRequest } from './canvas-utils';
 
 export { type CanvasRepoTaskLaunchRequest } from './canvas-utils';
 
-const LazyGraphExplorer3D = lazy(() =>
-  import('@/components/desktop/GraphExplorer3D').then((module) => ({ default: module.GraphExplorer3D })),
-);
-
 export type CanvasTabKind =
   | 'issue'
   | 'transcript'
@@ -71,7 +66,6 @@ export type CanvasTabKind =
   | 'git-log'
   | 'image'
   | 'deploy'
-  | 'memory'
   | 'welcome'
   | 'timeline'
   | 'audit-log'
@@ -356,8 +350,6 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
       return <FileText size={size} />;
     case 'deploy':
       return <Globe size={size} />;
-    case 'memory':
-      return <Radio size={size} />;
     case 'welcome':
       return <BookOpen size={size} />;
     case 'timeline':
@@ -418,8 +410,6 @@ const TabContent = memo(function TabContent({
             return <ImagePreview filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
           case 'deploy':
             return <DeployViewer project={tab.meta?.project} />;
-          case 'memory':
-            return <LazyGraphExplorer3D />;
           case 'welcome':
             return <CanvasEmpty selectedRepo={selectedRepo} mode="welcome" />;
           case 'timeline':

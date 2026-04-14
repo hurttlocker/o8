@@ -2,8 +2,6 @@ import { execFile } from 'node:child_process';
 import { dirname } from 'node:path';
 import { promisify } from 'node:util';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
-import { buildDirectiveBlock } from '@/lib/cortex/directives-store';
-import { buildLedgerBlock } from '@/lib/cortex/ledger';
 import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
@@ -502,18 +500,6 @@ async function buildPacketPrompt(
     console.log(`[dispatch] Injected preservation envelope for packet ${packet.id} (${preservationSections.length - 2} files)`);
   }
 
-  // Cortex v2: inject directives and session ledger
-  const repoPath = packet.workspaceTargetPath ?? '';
-  const repoName = repoPath ? repoPath.split('/').pop() ?? '' : '';
-  const directiveBlock = buildDirectiveBlock(repoName);
-  const ledgerBlock = buildLedgerBlock(repoPath);
-  if (directiveBlock.text) {
-    console.log(`[dispatch] Injected ${directiveBlock.directiveCount} directives for packet ${packet.id}`);
-  }
-  if (ledgerBlock.text) {
-    console.log(`[dispatch] Injected ledger context (${ledgerBlock.outcomeCount} outcomes) for packet ${packet.id}`);
-  }
-
   return [
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
@@ -525,8 +511,6 @@ async function buildPacketPrompt(
     ...priorAttemptLearningSections,
     ...fileSizeSections,
     ...preservationSections,
-    directiveBlock.text || null,
-    ledgerBlock.text || null,
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     ...buildPacketSelfReviewInstructions(baseBranch),
     'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',

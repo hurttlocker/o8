@@ -3148,36 +3148,6 @@ async function bootstrapWsServer() {
           const { findLaneBySession, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
           const lane = findLaneBySession(surfaceId);
           if (!lane) {
-            // Cortex v2 (#9): CLI Sessions never create a lane, so the lane-path
-            // ledger write below never fires. Fall back to a minimal write here so
-            // the implicit memory layer captures ALL agent runs, not just packet
-            // dispatches. Without this, session_outcomes stays permanently empty.
-            try {
-              const watched = getWatchedAgents().find((a) => a.surfaceId === surfaceId);
-              if (watched && watched.repoPath) {
-                const { writeSessionOutcome } = await import('@/lib/cortex/ledger');
-                const startedAt = new Date(watched.registeredAt).toISOString();
-                const completedAt = new Date().toISOString();
-                const durationMs = Math.max(0, Date.now() - watched.registeredAt);
-                const summary = (watched.prompt || watched.name || 'CLI Session').slice(0, 1200);
-                writeSessionOutcome({
-                  repoPath: watched.repoPath,
-                  runtime: 'codex',
-                  sessionKey: surfaceId,
-                  laneId: null,
-                  packetId: null,
-                  outcome: outcome === 'completed' ? 'succeeded' : 'failed',
-                  summary,
-                  attempts: 1,
-                  durationMs,
-                  startedAt,
-                  completedAt,
-                });
-                console.log(`[ledger] Wrote CLI Session outcome for ${surfaceId} (${outcome})`);
-              }
-            } catch (error) {
-              console.error(`[ledger] Failed to write CLI Session outcome for ${surfaceId}:`, error);
-            }
             return;
           }
 
@@ -3398,28 +3368,6 @@ async function bootstrapWsServer() {
                   await capturePacketCompletionContext(packetId, sessionKey);
                 } catch (error) {
                   console.error(`[context-relay] Failed to capture completion context for packet ${packetId}:`, error);
-                }
-              } else {
-                // Cortex v2: write a minimal session outcome even for non-packet lanes.
-                // This captures ad-hoc dispatches (no orchestrator mission) into the ledger.
-                try {
-                  const { writeSessionOutcome } = await import('@/lib/cortex/ledger');
-                  writeSessionOutcome({
-                    repoPath: updated.repoPath ?? lane.repoPath ?? '',
-                    branch: updated.branch ?? lane.branch ?? null,
-                    runtime: (updated.runtime ?? lane.runtime ?? 'codex') as 'codex' | 'claude-code',
-                    sessionKey,
-                    laneId: updated.id,
-                    packetId: null,
-                    outcome: 'succeeded',
-                    summary: updated.label ?? lane.label ?? 'Ad-hoc session',
-                    attempts: 1,
-                    startedAt: lane.createdAt ?? new Date().toISOString(),
-                    completedAt: new Date().toISOString(),
-                  });
-                  console.log(`[context-relay] Wrote ad-hoc session outcome for lane ${lane.id}`);
-                } catch (error) {
-                  console.error(`[context-relay] Failed to write ad-hoc session outcome for lane ${lane.id}:`, error);
                 }
               }
               await enqueueAutoReview(updated.id);

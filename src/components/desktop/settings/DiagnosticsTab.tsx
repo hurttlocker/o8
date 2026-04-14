@@ -16,6 +16,8 @@ interface DiagnosticTool {
   path?: string;
 }
 
+const HIDDEN_DIAGNOSTIC_TOOL_IDS = new Set(['ollama']);
+
 // ── Diagnostics Tab ──
 
 export function DiagnosticsTab() {
@@ -31,7 +33,7 @@ export function DiagnosticsTab() {
       const res = await fetch('/api/setup/detect');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { tools?: DiagnosticTool[] };
-      setTools(data.tools ?? []);
+      setTools((data.tools ?? []).filter((tool) => !HIDDEN_DIAGNOSTIC_TOOL_IDS.has(tool.id)));
       setLastChecked(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run diagnostics');
