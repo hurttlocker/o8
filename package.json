@@ -1,6 +1,6 @@
 {
   "name": "o8",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "productName": "o8",
   "private": true,
   "main": "src/app/layout.tsx",
