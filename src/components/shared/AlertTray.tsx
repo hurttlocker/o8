@@ -48,7 +48,7 @@ interface AlertTrayProps {
 
 interface DesktopTrayPosition {
   left: number;
-  bottom: number;
+  top: number;
 }
 
 const AlertCard = memo(function AlertCard({
@@ -63,7 +63,6 @@ const AlertCard = memo(function AlertCard({
   onAction?: (alert: Alert) => void;
 }) {
   const Icon = ICON_MAP[alert.type] ?? Bell;
-  const color = '#2563eb';
   const age = formatAge(alert.timestamp);
 
   return (
@@ -71,14 +70,18 @@ const AlertCard = memo(function AlertCard({
       onClick={() => {
         if (!alert.read) onMarkRead(alert.id);
       }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = alert.read ? 'transparent' : 'var(--t-accent-soft)';
+      }}
       style={{
         display: 'flex',
         alignItems: 'flex-start',
         gap: 10,
         padding: '12px 14px',
         borderRadius: 12,
-        background: alert.read ? 'transparent' : 'rgba(37, 99, 235, 0.06)',
-        transition: 'background 200ms ease',
+        background: alert.read ? 'transparent' : 'var(--t-accent-soft)',
+        transition: 'background 180ms ease',
         cursor: 'pointer',
         position: 'relative',
       }}
@@ -89,14 +92,14 @@ const AlertCard = memo(function AlertCard({
           width: 32,
           height: 32,
           borderRadius: 10,
-          background: `${color}14`,
+          background: 'var(--t-accent-soft-strong)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
         }}
       >
-        <Icon size={16} strokeWidth={2} style={{ color }} />
+        <Icon size={16} strokeWidth={2} style={{ color: 'var(--t-accent)' }} />
       </div>
 
       {/* Content */}
@@ -112,7 +115,7 @@ const AlertCard = memo(function AlertCard({
             style={{
               fontSize: 13,
               fontWeight: alert.read ? 500 : 600,
-              color: '#0f172a',
+              color: 'var(--t-text)',
               lineHeight: 1.3,
               flex: 1,
             }}
@@ -125,8 +128,9 @@ const AlertCard = memo(function AlertCard({
                 width: 7,
                 height: 7,
                 borderRadius: '50%',
-                background: color,
+                background: 'var(--t-accent)',
                 flexShrink: 0,
+                boxShadow: '0 0 6px var(--t-accent-ring)',
               }}
             />
           ) : null}
@@ -134,7 +138,7 @@ const AlertCard = memo(function AlertCard({
         <div
           style={{
             fontSize: 12,
-            color: '#8e8e93',
+            color: 'var(--t-text-muted)',
             lineHeight: 1.4,
             marginTop: 2,
           }}
@@ -149,7 +153,7 @@ const AlertCard = memo(function AlertCard({
             marginTop: 6,
           }}
         >
-          <span style={{ fontSize: 11, color: '#aeaeb2' }}>{age}</span>
+          <span style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>{age}</span>
           {alert.actionable && onAction ? (
             <button
               type="button"
@@ -160,7 +164,7 @@ const AlertCard = memo(function AlertCard({
               style={{
                 fontSize: 11,
                 fontWeight: 600,
-                color: '#007aff',
+                color: 'var(--t-accent)',
                 background: 'none',
                 border: 'none',
                 padding: 0,
@@ -185,6 +189,8 @@ const AlertCard = memo(function AlertCard({
           onDismiss(alert.id);
         }}
         aria-label="Dismiss"
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-btn-secondary-hover)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -194,10 +200,11 @@ const AlertCard = memo(function AlertCard({
           borderRadius: 12,
           border: 'none',
           background: 'transparent',
-          color: '#c7c7cc',
+          color: 'var(--t-text-faint)',
           cursor: 'pointer',
           padding: 0,
           flexShrink: 0,
+          transition: 'background 140ms ease',
         }}
       >
         <X size={13} strokeWidth={2.5} />
@@ -231,13 +238,19 @@ export const AlertTray = memo(function AlertTray({
         const viewportWidth = window.innerWidth;
         const trayWidth = 360;
         const margin = 16;
-        const left = Math.max(margin, Math.min(rect.left, viewportWidth - trayWidth - margin));
-        const bottom = Math.max(margin, window.innerHeight - rect.top + 8);
+        // Right-align the tray to the bell so it flares out to the left
+        // (the bell lives near the right edge of the title bar). Clamp to
+        // the viewport so it never extends off-screen.
+        const right = Math.max(margin, viewportWidth - rect.right);
+        const left = Math.max(margin, Math.min(viewportWidth - trayWidth - right, viewportWidth - trayWidth - margin));
+        // Drop the tray DOWN from the anchor's bottom edge (bell is at the
+        // top of the screen, not the bottom).
+        const top = rect.bottom + 8;
 
         setDesktopPosition((prev) => (
-          prev && Math.abs(prev.left - left) < 1 && Math.abs(prev.bottom - bottom) < 1
+          prev && Math.abs(prev.left - left) < 1 && Math.abs(prev.top - top) < 1
             ? prev
-            : { left, bottom }
+            : { left, top }
         ));
       }
 
@@ -346,16 +359,16 @@ export const AlertTray = memo(function AlertTray({
       style={{
         position: 'fixed',
         left: desktopPosition.left,
-        bottom: desktopPosition.bottom,
+        top: desktopPosition.top,
         width: 360,
         maxHeight: 480,
         borderRadius: 18,
-        background: 'linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(241, 245, 249, 0.82))',
+        background: 'var(--t-panel-solid)',
         backdropFilter: 'blur(28px) saturate(1.7)',
         WebkitBackdropFilter: 'blur(28px) saturate(1.7)',
-        border: '1px solid rgba(148, 163, 184, 0.22)',
-        boxShadow:
-          '0 22px 56px rgba(15, 23, 42, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.45)',
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-glass-shadow, var(--t-panel-shadow))',
+        color: 'var(--t-text)',
         opacity: open ? 1 : 0,
         transform: open ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.97)',
         pointerEvents: open ? 'auto' : 'none',
@@ -389,11 +402,11 @@ function renderHeader(
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '14px 16px 10px',
-        borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
+        borderBottom: '1px solid var(--t-divider)',
         flexShrink: 0,
       }}
     >
-      <span style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>
+      <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)' }}>
         Alerts{alerts.length > 0 ? ` (${alerts.length})` : ''}
       </span>
       <div style={{ display: 'flex', gap: 8 }}>
@@ -405,7 +418,7 @@ function renderHeader(
               style={{
                 fontSize: 12,
                 fontWeight: 500,
-                color: '#007aff',
+                color: 'var(--t-accent)',
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
@@ -420,7 +433,7 @@ function renderHeader(
               style={{
                 fontSize: 12,
                 fontWeight: 500,
-                color: '#8e8e93',
+                color: 'var(--t-text-muted)',
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
@@ -435,6 +448,8 @@ function renderHeader(
           type="button"
           onClick={onClose}
           aria-label="Close"
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-btn-secondary-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-btn-secondary-bg)'; }}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -443,10 +458,11 @@ function renderHeader(
             height: 28,
             borderRadius: 14,
             border: 'none',
-            background: 'rgba(100, 116, 139, 0.08)',
-            color: '#64748b',
+            background: 'var(--t-btn-secondary-bg)',
+            color: 'var(--t-text-secondary)',
             cursor: 'pointer',
             padding: 0,
+            transition: 'background 140ms ease',
           }}
         >
           <X size={14} strokeWidth={2.5} />
@@ -472,7 +488,7 @@ function renderBody(
           alignItems: 'center',
           justifyContent: 'center',
           padding: '40px 20px',
-          color: '#c7c7cc',
+          color: 'var(--t-text-faint)',
         }}
       >
         <BellOff size={32} strokeWidth={1.5} />
@@ -480,7 +496,7 @@ function renderBody(
           style={{
             fontSize: 14,
             fontWeight: 500,
-            color: '#aeaeb2',
+            color: 'var(--t-text-muted)',
             marginTop: 12,
           }}
         >

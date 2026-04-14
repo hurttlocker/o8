@@ -24,6 +24,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { existsSync, statSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
@@ -111,6 +112,7 @@ export async function GET() {
     const codexBin = findCommand('codex');
     const ghBin = findCommand('gh');
     const portInfo = resolvePortInfo();
+    const webviewSocketPath = `/tmp/tauri-mcp-o8-${userInfo().username}.sock`;
 
     const dataDir = process.env.CORTEX_IDE_DATA_DIR
       || join(process.env.HOME || '', '.o8');
@@ -138,6 +140,8 @@ export async function GET() {
         dataDir,
         dbExists,
         dbSize,
+        webviewSocketPath,
+        webviewToolsAvailable: existsSync(webviewSocketPath),
       },
     });
   } catch (error) {

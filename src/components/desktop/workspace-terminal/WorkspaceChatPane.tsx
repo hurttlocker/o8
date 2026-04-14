@@ -15,7 +15,6 @@ import {
   X,
 } from '../lucide-shims';
 import { IssueLinkPickerModal, type LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
-import { LIGHT_CANVAS_VARS } from '@/components/desktop/canvas-utils';
 import {
   CLI_SUGGESTED_PROMPTS,
   THEME_ACCENT,
@@ -75,14 +74,13 @@ function WorkspaceChatPaneBase({
 
   return (
     <div
-      data-vibrancy-passthrough=""
       style={{
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
         minHeight: 0,
-        background: '#ffffff',
-        ...LIGHT_CANVAS_VARS,
+        background: 'var(--t-chat-surface-bg, #ffffff)',
+        color: 'var(--t-chat-surface-text, var(--t-text))',
         position: 'relative',
       } as CSSProperties}
     >

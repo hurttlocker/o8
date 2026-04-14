@@ -2375,6 +2375,7 @@ function DashboardInner() {
             onMissionStateChange={handleThoughtsMissionStateChange}
             onLaunchPacket={launchOrchestrationPacket}
             draftInjection={thoughtsDraftInjection}
+            onSelectSession={handleSelectSession}
           >
             <TileContainer
               layout={tileLayout}

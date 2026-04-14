@@ -67,15 +67,22 @@ export function computeCliChatSession(
     && tab.chatRuntime === resolvedRuntime
     && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
   ));
+  // When a specific targetSessionKey was passed (e.g. clicking a packet/
+  // session card), ONLY reuse a tab whose session key matches exactly.
+  // Otherwise we'd retarget the currently active tab and the user would
+  // never be able to view two running agents side by side. When no target
+  // key is given (e.g. "new Codex chat" quick action), fall back to the
+  // active chat tab of the same runtime so we don't stack duplicates.
   const matchingExisting = options.createNew
     ? null
-    : targetedExisting
-      ?? activeExisting
-      ?? currentTabs.find((tab) => (
-        tab.kind === 'chat'
-        && tab.chatRuntime === resolvedRuntime
-        && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-      ));
+    : options.targetSessionKey
+      ? targetedExisting ?? null
+      : activeExisting
+        ?? currentTabs.find((tab) => (
+          tab.kind === 'chat'
+          && tab.chatRuntime === resolvedRuntime
+          && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+        ));
   const injection = options.initialText ? {
     id: `workspace-chat-injection-${Date.now()}`,
     text: options.initialText,

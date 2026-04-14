@@ -251,8 +251,12 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
         </div>
       ) : null}
 
-      {/* Session visualizer — only when there are active sessions */}
-      {hasActiveSessions ? <SessionVisualizer agents={agents} /> : null}
+      {/* Session visualizer — only when there are active sessions.
+          Clicking a card opens that agent's live transcript in a workspace
+          terminal tab instead of spilling the running output inline. */}
+      {hasActiveSessions ? (
+        <SessionVisualizer agents={agents} onSelectSession={data.onSelectSession} />
+      ) : null}
 
       {/* 3-pane body: History | Chat | Mission */}
       <div

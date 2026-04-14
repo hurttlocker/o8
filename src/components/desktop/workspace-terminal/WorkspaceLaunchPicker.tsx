@@ -10,7 +10,7 @@ import {
 } from '../lucide-shims';
 import { CLI_AGENTS, THEME_ACCENT, THEME_ACCENT_SOFT } from '@/components/desktop/workspace-terminal/constants';
 import { AgentDot, PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
-import { CodexIcon, ClaudeIcon } from '@/components/desktop/repo-registry/shared';
+import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/types';
 
 interface WorkspaceLaunchPickerProps {
@@ -228,8 +228,10 @@ function WorkspaceLaunchPickerBase({
                       <ClaudeIcon size={18} />
                     ) : agent.id === 'codex' ? (
                       <CodexIcon size={18} />
+                    ) : agent.id === 'opencode' ? (
+                      <OpenCodeIcon size={18} />
                     ) : (
-                      <AgentDot color={agent.color} size={10} />
+                      <GeminiIcon size={18} />
                     )}
                   </span>
                   <div>
