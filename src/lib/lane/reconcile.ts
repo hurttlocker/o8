@@ -1,6 +1,8 @@
+import { existsSync } from 'node:fs';
+
 import { createApproval } from '@/lib/approvals/store';
 import { listLanes, setLaneStatus } from '@/lib/lane/registry';
-import type { Lane, LaneRuntime } from '@/lib/lane/types';
+import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { getRuntime } from '@/lib/runtimes';
 
 function isStuckLane(lane: Lane) {
@@ -59,6 +61,43 @@ function createSessionLostApproval(lane: Lane) {
       verb: 'resume',
     },
   });
+}
+
+// #534 follow-up — orchestrator often bash-merges (git merge + git push) and
+// cleans up its worktree without invoking the lane `merge` verb. The git
+// state is correct but the lane SQLite record stays stuck in 'reviewing'
+// forever because setLaneStatus never fired. Solution: detect lanes whose
+// worktree path no longer exists on disk and auto-transition them to
+// 'completed'. Model-agnostic — works whether the agent used the merge verb,
+// raw bash, or any other path. Synchronous so it can run inside hot request
+// handlers without a round-trip to the event loop for each stat call.
+const RECONCILABLE_WORKTREE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStatus>([
+  'reviewing',
+  'merging',
+  'awaiting_input',
+]);
+
+export function reconcileOrphanedWorktrees(): number {
+  const candidates = listLanes().filter(
+    (lane) =>
+      RECONCILABLE_WORKTREE_STATUSES.has(lane.status)
+      && typeof lane.worktreePath === 'string'
+      && lane.worktreePath.length > 0
+      && !existsSync(lane.worktreePath),
+  );
+  if (candidates.length === 0) return 0;
+
+  let reconciled = 0;
+  for (const lane of candidates) {
+    const updated = setLaneStatus(lane.id, 'completed', 'system', 'worktree_missing_reconciled');
+    if (updated) {
+      reconciled += 1;
+      console.log(
+        `[reconcile] Lane ${lane.id} (${lane.label || lane.branch}) worktree ${lane.worktreePath} is gone — transitioned ${lane.status} → completed`,
+      );
+    }
+  }
+  return reconciled;
 }
 
 export async function reconcileStuckLanes(): Promise<void> {
