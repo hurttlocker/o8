@@ -1,18 +1,27 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import type { MobileTranscriptEntry, MobileTranscriptSource, MobileTranscriptThinkingStep, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import type {
+  MobileTranscriptEntry,
+  MobileTranscriptMedia,
+  MobileTranscriptSource,
+  MobileTranscriptThinkingStep,
+  MobileTranscriptToolCall,
+} from '@/lib/mobile/types';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
 export interface PersistedLlmChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: MobileTranscriptEntry['role'];
   content: string;
+  type?: MobileTranscriptEntry['type'];
+  media?: MobileTranscriptMedia[];
   model?: string;
   tokens?: { input: number; output: number };
   costUsd?: number;
   timestamp: number;
+  timestampLabel?: string;
   toolCalls?: MobileTranscriptToolCall[];
   sources?: MobileTranscriptSource[];
   thinking?: string;
@@ -23,6 +32,7 @@ export interface PersistedLlmChatMessage {
   isCompaction?: boolean;
   compactedCount?: number;
   isPartial?: boolean;
+  compaction?: MobileTranscriptEntry['compaction'];
 }
 
 export interface PersistedLlmChatHistory {
@@ -127,10 +137,12 @@ export function mapLlmHistoryToMobileTranscript(messages: PersistedLlmChatMessag
     id: message.id,
     role: message.role,
     text: message.content,
+    type: message.type ?? (message.compaction || message.isCompaction ? 'compaction' : 'message'),
+    media: message.media,
     timestamp: message.timestamp,
-    timestampLabel: message.timestamp
+    timestampLabel: message.timestampLabel ?? (message.timestamp
       ? new Date(message.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-      : '',
+      : ''),
     model: message.model,
     tokens: message.tokens,
     costUsd: message.costUsd,
@@ -140,5 +152,6 @@ export function mapLlmHistoryToMobileTranscript(messages: PersistedLlmChatMessag
     thinkingSteps: message.thinkingSteps,
     thinkingDurationMs: message.thinkingDurationMs,
     recalledFacts: message.recalledFacts,
+    compaction: message.compaction,
   }));
 }
