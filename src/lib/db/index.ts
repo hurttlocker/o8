@@ -360,6 +360,18 @@ function ensureTables(sqlite: Database.Database): void {
       timestamp TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS external_mcp_servers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      transport TEXT NOT NULL,
+      command TEXT NOT NULL,
+      args TEXT NOT NULL DEFAULT '[]',
+      env_json TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_github_prs_repo_number ON github_pull_requests(repo_full_name, number);
 
     -- Indexes for common queries
@@ -387,6 +399,8 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_lanes_status ON lanes(status);
     CREATE INDEX IF NOT EXISTS idx_lane_events_lane_timestamp ON lane_events(lane_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_lane_events_timestamp ON lane_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_enabled ON external_mcp_servers(enabled);
+    CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_updated_at ON external_mcp_servers(updated_at);
 
     CREATE TABLE IF NOT EXISTS review_queue (
       id TEXT PRIMARY KEY,
