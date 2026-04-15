@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DetectionResult } from '@/components/desktop/SetupWizard';
+import { loadSetupDetection } from '@/lib/setup/detection-cache';
 import { normalizeDetection } from '../utils';
 
 export function useSetupWizard() {
@@ -15,18 +16,17 @@ export function useSetupWizard() {
         const configRes = await fetch('/api/setup/config');
         if (!configRes.ok) return;
         const config = await configRes.json();
+        try {
+          const rawDetection = await loadSetupDetection();
+          if (rawDetection) {
+            setSetupDetection(normalizeDetection(rawDetection as Record<string, unknown>));
+          }
+        } catch { /* detection is optional for onboarding */ }
         // Treat either flag as "done" — some older installs only have
         // completedAt because of the schema-drift bug fixed 2026-04-09.
         if (config.setupComplete || config.completedAt) return;
         // Show the onboarding screen immediately — detection runs in background
         setSetupWizardOpen(true);
-        try {
-          const detectRes = await fetch('/api/setup/detect');
-          if (detectRes.ok) {
-            const rawDetection = await detectRes.json() as Record<string, unknown>;
-            setSetupDetection(normalizeDetection(rawDetection));
-          }
-        } catch { /* detection is optional for onboarding */ }
       } catch { /* silent — don't block dashboard */ }
     })();
   }, []);
