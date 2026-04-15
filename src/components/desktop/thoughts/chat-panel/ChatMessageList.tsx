@@ -7,6 +7,7 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 interface ChatMessageListProps {
   displayMessages: MobileTranscriptEntry[];
   displayWaiting: boolean;
+  repoPath?: string | null;
   activeTargetLabel: string;
   activeTargetColor: string;
   thoughtsBodyBackground: string;
@@ -26,6 +27,7 @@ interface ChatMessageListProps {
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
   displayMessages,
   displayWaiting,
+  repoPath,
   activeTargetLabel,
   activeTargetColor,
   thoughtsBodyBackground,
@@ -71,6 +73,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
           key={msg.id}
           entry={msg}
           isLast={index === displayMessages.length - 1 && !displayWaiting}
+          repoPath={repoPath}
         />
       ))}
 
