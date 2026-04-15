@@ -103,6 +103,10 @@ export interface MergeResult {
   note: string;
   /** PR URL if action was 'pr' */
   prUrl?: string;
+  /** Merge-specific — true only when `git push origin <targetBranch>` also succeeded (#534) */
+  pushedToOrigin?: boolean;
+  /** Merge-specific — captured when the push failed so callers can surface it */
+  pushError?: string;
 }
 
 /**

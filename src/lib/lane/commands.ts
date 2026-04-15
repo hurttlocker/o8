@@ -804,14 +804,41 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
         await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
 
+        // #534 — push the merge to origin. Failure here must NOT revert the merge:
+        // the base branch already has the commit locally, and we want the operator
+        // to see "merged locally, push failed" rather than rolling back a valid merge.
+        let pushedToOrigin = false;
+        let pushError: string | undefined;
+        try {
+          await execFileAsync('git', ['push', 'origin', lane.baseBranch], {
+            cwd: lane.repoPath,
+            timeout: 60_000,
+          });
+          pushedToOrigin = true;
+          console.log(`[lane-merge] Pushed ${lane.baseBranch} to origin after merging ${actualBranch}`);
+        } catch (pushErr) {
+          pushError = pushErr instanceof Error ? pushErr.message : String(pushErr);
+          console.warn(`[lane-merge] Push to origin failed for ${lane.baseBranch} after merging ${actualBranch}: ${pushError}`);
+        }
+
         // Cleanup worktree + prune any other stale worktrees in the background
         await mgr.cleanup(worktree.id, { force: true, deleteBranch: true });
         void mgr.prune().catch(() => {});
         updateLane(command.laneId, { worktreePath: null }, 'system');
-        setLaneStatus(command.laneId, 'completed', actor, 'merged');
+        setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
 
         const updated = getLane(command.laneId);
-        return { ok: true, laneId: command.laneId, note: `Merged ${lane.branch} into ${lane.baseBranch}.`, lane: updated ?? undefined };
+        const mergeNote = pushedToOrigin
+          ? `Merged ${lane.branch} into ${lane.baseBranch} and pushed to origin.`
+          : `Merged ${lane.branch} into ${lane.baseBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.`;
+        return {
+          ok: true,
+          laneId: command.laneId,
+          note: mergeNote,
+          lane: updated ?? undefined,
+          pushedToOrigin,
+          pushError,
+        };
       } catch (err) {
         setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');
         const message = err instanceof Error ? err.message : 'Merge failed.';
