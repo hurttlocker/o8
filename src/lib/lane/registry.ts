@@ -41,7 +41,10 @@ function generateEventId(): string {
 // fire session_lost.
 const SESSION_LOST_GRACE_MS = 90_000;
 const sessionMissingSince = new Map<string, number>();
-const REVIEW_SCREENSHOT_DIR = join(homedir(), '.o8', 'review-screenshots');
+const REVIEW_SCREENSHOT_DIR = join(
+  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.cortex-ide'),
+  'review-screenshots',
+);
 let reviewScreenshotClient: O8WebviewClient | null = null;
 
 function getLaneDb() {
