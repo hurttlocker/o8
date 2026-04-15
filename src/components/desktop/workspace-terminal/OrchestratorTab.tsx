@@ -155,10 +155,24 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     setTimeout(() => chatPanelRef.current?.focusInput(), 40);
   }, []);
 
-  const handleNewConversation = useCallback(() => {
-    chatPanelRef.current?.reset();
-    setTimeout(() => chatPanelRef.current?.focusInput(), 30);
-  }, []);
+  const handleNewConversation = useCallback(async () => {
+    try {
+      const response = await fetch('/api/orchestrator/reset-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(repoPath ? { repoPath } : {}),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(payload?.error?.message ?? 'Unable to reset orchestrator session.');
+      }
+
+      chatPanelRef.current?.reset();
+      setTimeout(() => chatPanelRef.current?.focusInput(), 30);
+    } catch (error) {
+      console.error('[orchestrator] Failed to reset orchestrator conversation.', error);
+    }
+  }, [repoPath]);
 
   const handleQuickAction = useCallback((prompt: string) => {
     chatPanelRef.current?.sendNow(prompt);
@@ -340,7 +354,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             <button
               type="button"
               onClick={handleNewConversation}
-              title="New conversation"
+              title="New orchestrator conversation"
               style={{
                 position: 'absolute',
                 top: 10,

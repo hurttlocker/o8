@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import { spawn, execSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +44,10 @@ export type OrchestratorEvent =
 // ── Constants ──
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
+const ORCHESTRATOR_STATE_DIR = join(
+  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
+  'orchestrator',
+);
 
 /**
  * Resolve the Cortex MCP server entry point.
@@ -89,6 +93,39 @@ let startupRehydrationComplete = false;
 
 function normalizeRepoPath(repoPath: string): string {
   return resolve(repoPath).replace(/\/+$/, '');
+}
+
+function ensureOrchestratorStateDir(): void {
+  if (!existsSync(ORCHESTRATOR_STATE_DIR)) {
+    mkdirSync(ORCHESTRATOR_STATE_DIR, { recursive: true });
+  }
+}
+
+function orchestratorResetSignalPath(repoPath: string): string {
+  return join(ORCHESTRATOR_STATE_DIR, `session-reset-${repoHash(normalizeRepoPath(repoPath))}.json`);
+}
+
+function writeOrchestratorResetSignal(repoPath: string): void {
+  ensureOrchestratorStateDir();
+  writeFileSync(
+    orchestratorResetSignalPath(repoPath),
+    `${JSON.stringify({ repoPath: normalizeRepoPath(repoPath), requestedAt: Date.now() })}\n`,
+    'utf8',
+  );
+}
+
+function consumeOrchestratorResetSignal(repoPath: string): boolean {
+  const signalPath = orchestratorResetSignalPath(repoPath);
+  if (!existsSync(signalPath)) {
+    return false;
+  }
+
+  try {
+    rmSync(signalPath, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function extractClaudeSessionId(sessionKey: string): string | null {
@@ -348,16 +385,18 @@ export function getOrchestratorSession(repoPath: string): OrchestratorSession | 
   return sessions.get(orchestratorSessionName(repoPath)) ?? null;
 }
 
-// ── Reset session (clears claudeSessionId so next message starts fresh) ──
+export function requestOrchestratorSessionReset(repoPath: string): { repoPath: string; sessionName: string } {
+  const normalizedRepoPath = normalizeRepoPath(repoPath);
+  const sessionName = orchestratorSessionName(normalizedRepoPath);
 
-export function resetOrchestratorSession(repoPath: string): boolean {
-  const session = getOrchestratorSession(repoPath);
-  if (!session) return false;
-  session.claudeSessionId = null;
-  session.status = 'ready';
-  session.proc = null;
-  console.log(`[orchestrator-session] Reset ${session.sessionName} — next message will start a fresh conversation`);
-  return true;
+  writeOrchestratorResetSignal(normalizedRepoPath);
+
+  const session = sessions.get(sessionName);
+  if (session) {
+    session.claudeSessionId = null;
+  }
+
+  return { repoPath: normalizedRepoPath, sessionName };
 }
 
 // ── Ensure session exists ──
@@ -434,6 +473,10 @@ export async function sendToOrchestrator(
   }
   if (session.status === 'busy') {
     throw new Error('Orchestrator session is busy');
+  }
+
+  if (consumeOrchestratorResetSignal(session.repoPath)) {
+    session.claudeSessionId = null;
   }
 
   session.status = 'busy';
