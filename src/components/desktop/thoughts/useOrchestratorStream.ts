@@ -67,6 +67,17 @@ export function useOrchestratorStream(
   const firstTurnPlanStartedRef = useRef(false);
   const firstTurnPlanChunksRef = useRef<string[]>([]);
 
+  // #539 — reconnect reconciliation. eventCountRef advances on every relevant
+  // orchestrator event; lastEventAtRef tracks wall-clock time of the last
+  // event. Together they let us detect stale "busy" state after a ws-server
+  // restart (no events arrive post-reconnect) or a dead backend turn (no
+  // events for > HEAL_STALE_AFTER_MS while the UI still thinks it's working).
+  const eventCountRef = useRef(0);
+  const lastEventAtRef = useRef<number>(Date.now());
+  const RECONNECT_HEAL_DELAY_MS = 3000;
+  const HEAL_STALE_AFTER_MS = 300_000;
+  const HEAL_POLL_INTERVAL_MS = 30_000;
+
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -107,6 +118,32 @@ export function useOrchestratorStream(
     planTextRef.current = nextPlanText;
     setPlanText(nextPlanText);
   }, [resetFirstTurnPlanCapture]);
+
+  // #539 — clear any stale "running" state when the client's local view of
+  // a busy turn no longer matches reality. Used by both the reconnect heal
+  // and the heartbeat-based stall detector. Idempotent — safe to call when
+  // nothing needs healing.
+  const healStaleBusyState = useCallback((reason: string) => {
+    const hasStaleStatus = statusRef.current === 'busy';
+    const hasOrphanAssistant = currentAssistantRef.current !== null;
+    const hasRunningTools = messagesRef.current.some((m) =>
+      m.toolCalls?.some((t) => t.status === 'running'),
+    );
+    if (!hasStaleStatus && !hasOrphanAssistant && !hasRunningTools) return;
+
+    console.warn(`[orchestrator-stream] Healing stale busy state: ${reason}`);
+    if (hasStaleStatus) setStatus('ready');
+    if (hasOrphanAssistant) currentAssistantRef.current = null;
+    if (hasRunningTools) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.toolCalls?.some((t) => t.status === 'running')
+            ? { ...m, toolCalls: m.toolCalls.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)) }
+            : m,
+        ),
+      );
+    }
+  }, []);
 
   const flushCurrentAssistant = useCallback(() => {
     const current = currentAssistantRef.current;
@@ -154,6 +191,20 @@ export function useOrchestratorStream(
       }));
 
       console.log('[orchestrator-stream] Connected, subscribing...');
+
+      // #539 — reconnect heal. If this is a fresh connect, status is already
+      // 'connecting' and the heal is a no-op. If we're reconnecting after a
+      // ws-server restart or a network flap, any "busy" state we carried over
+      // is potentially stale. Give the server 3 seconds to push events for a
+      // genuinely active turn; if nothing arrives, clear the stale indicators.
+      const countAtOpen = eventCountRef.current;
+      setTimeout(() => {
+        if (ws !== wsRef.current) return;
+        if (eventCountRef.current !== countAtOpen) return;
+        if (statusRef.current === 'busy' || currentAssistantRef.current) {
+          healStaleBusyState('reconnect with no follow-up events after 3s');
+        }
+      }, RECONNECT_HEAL_DELAY_MS);
     };
 
     ws.onmessage = (event) => {
@@ -168,6 +219,10 @@ export function useOrchestratorStream(
       }
 
       if (msg.channel !== 'orchestrator') return;
+
+      // #539 — signal liveness for the reconnect heal + stall watchdog.
+      eventCountRef.current += 1;
+      lastEventAtRef.current = Date.now();
 
       switch (msg.event) {
         case 'output': {
@@ -367,6 +422,23 @@ export function useOrchestratorStream(
       }
     };
   }, [repoPath, connect]);
+
+  // #539 — stall watchdog. If the UI stays in 'busy' state for > 5 minutes
+  // without any events from the stream, the backend turn is almost certainly
+  // dead even if the WS is still connected. Heal so the composer unlocks.
+  useEffect(() => {
+    if (!repoPath) return;
+
+    const interval = setInterval(() => {
+      if (statusRef.current !== 'busy') return;
+      const quietFor = Date.now() - lastEventAtRef.current;
+      if (quietFor >= HEAL_STALE_AFTER_MS) {
+        healStaleBusyState(`no events for ${Math.round(quietFor / 1000)}s while status=busy`);
+      }
+    }, HEAL_POLL_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [repoPath, healStaleBusyState]);
 
   const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max' }) => {
     if (!repoPathRef.current) return;
