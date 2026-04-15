@@ -3,6 +3,7 @@
 import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestrator/display';
 import { packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorPacket, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
+import { hasPacketBranchTarget } from '@/components/desktop/thoughts/mission-panel/branchTarget';
 import type { EditingField, ReviewPanelState } from './types';
 import { PacketMetaRows } from './PacketMetaRows';
 import { PacketReviewPanel } from './PacketReviewPanel';
@@ -45,7 +46,9 @@ export function PacketCard({
   const statusMeta = orchestratorStatusTone(packet.status);
   const runtimeMeta = orchestratorRuntimeTone(packet.runtime);
   const dependencyBlocker = packetReleaseBlockedBy(packet, allPackets);
-  const canLaunch = !packet.archivedAt && packet.releaseState !== 'released' && packet.queueState !== 'held' && !dependencyBlocker;
+  const hasBranchTarget = hasPacketBranchTarget(packet.branchTarget);
+  const canShowLaunchAction = !packet.archivedAt && packet.releaseState !== 'released' && packet.queueState !== 'held' && !dependencyBlocker;
+  const canLaunch = canShowLaunchAction && hasBranchTarget;
   const hasInteractiveLane = Boolean(packet.lane?.tileId && packet.lane?.tabId);
   const targetLabel = workspaceTargets.find((target) => target.localPath === packet.workspaceTargetPath)?.label ?? null;
   const showReviewSection = packet.status === 'awaiting_review' && Boolean(packet.lane?.laneId);
@@ -53,7 +56,7 @@ export function PacketCard({
   return (
     <div
       style={{
-        borderRadius: 10,
+        borderRadius: 14,
         background: 'var(--t-panel)',
         borderWidth: 1,
         borderStyle: 'solid',
@@ -107,21 +110,26 @@ export function PacketCard({
             <path d="M2.5 3.5L5 6L7.5 3.5" />
           </svg>
         </button>
-        {canLaunch && !packet.lane ? (
+        {canShowLaunchAction && !packet.lane ? (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onLaunch(); }}
+            disabled={!canLaunch}
             title="Dispatch this packet"
             style={{
               flexShrink: 0,
-              border: 'none',
+              borderWidth: 0,
               background: '#2563eb',
               color: '#fff',
-              padding: '4px 10px',
-              borderRadius: 6,
+              paddingTop: 4,
+              paddingRight: 10,
+              paddingBottom: 4,
+              paddingLeft: 10,
+              borderRadius: 12,
               fontSize: 10,
               fontWeight: 700,
-              cursor: 'pointer',
+              cursor: canLaunch ? 'pointer' : 'not-allowed',
+              opacity: canLaunch ? 1 : 0.5,
               letterSpacing: '-0.01em',
             }}
           >
@@ -270,20 +278,21 @@ export function PacketCard({
                 disabled={!canLaunch}
                 style={{
                   borderWidth: 0,
-                  background: canLaunch ? '#2563eb' : 'var(--t-divider)',
-                  color: canLaunch ? '#fff' : 'var(--t-text-faint)',
-                  paddingTop: 4,
-                  paddingRight: 10,
-                  paddingBottom: 4,
-                  paddingLeft: 10,
-                  borderRadius: 5,
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  cursor: canLaunch ? 'pointer' : 'default',
-                  letterSpacing: '-0.01em',
-                }}
-              >
-                Launch
+                background: canLaunch ? '#2563eb' : 'var(--t-divider)',
+                color: canLaunch ? '#fff' : 'var(--t-text-faint)',
+                paddingTop: 4,
+                paddingRight: 10,
+                paddingBottom: 4,
+                paddingLeft: 10,
+                borderRadius: 12,
+                fontSize: 10.5,
+                fontWeight: 700,
+                cursor: canLaunch ? 'pointer' : 'not-allowed',
+                opacity: canLaunch ? 1 : 0.5,
+                letterSpacing: '-0.01em',
+              }}
+            >
+              Launch
               </button>
             ) : (
               <>
