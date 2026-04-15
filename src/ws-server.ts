@@ -3097,13 +3097,32 @@ async function bootstrapWsServer() {
   }
 
   try {
-    const { reconcileStuckLanes } = await import('@/lib/lane/reconcile');
+    const { reconcileStuckLanes, reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
     await reconcileStuckLanes();
+    reconcileOrphanedWorktrees();
   } catch (error) {
     console.warn(
       `[reconcile] WS startup lane reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+
+  // #534 follow-up — periodic sweep catches lanes whose worktree was deleted
+  // out-of-band (orchestrator bash-merge) so the UI heals within 30s even if
+  // no API caller triggers the inline reconcile. Cheap: a few existsSync
+  // checks on a small set of non-terminal lanes.
+  setInterval(async () => {
+    try {
+      const { reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
+      const healed = reconcileOrphanedWorktrees();
+      if (healed > 0) {
+        console.log(`[reconcile] Periodic sweep healed ${healed} orphaned lane(s)`);
+      }
+    } catch (error) {
+      console.warn(
+        `[reconcile] Periodic orphan sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }, 30_000).unref();
 
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
