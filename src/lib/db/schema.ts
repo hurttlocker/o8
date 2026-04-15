@@ -325,6 +325,25 @@ export const lanes = sqliteTable('lanes', {
   statusIdx: index('idx_lanes_status').on(table.status),
 }));
 
+// ══════════════════════════════════════════════════════════════════
+//  External MCP Servers — user-configured orchestrator context sources
+// ══════════════════════════════════════════════════════════════════
+
+export const externalMcpServers = sqliteTable('external_mcp_servers', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  transport: text('transport', { enum: ['stdio', 'http'] }).notNull(),
+  command: text('command').notNull(),
+  args: text('args').notNull().default('[]'),
+  envJson: text('env_json'),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  enabledIdx: index('idx_external_mcp_servers_enabled').on(table.enabled),
+  updatedAtIdx: index('idx_external_mcp_servers_updated_at').on(table.updatedAt),
+}));
+
 export const approvalEvents = sqliteTable('approval_events', {
   id: text('id').primaryKey(),
   approvalId: text('approval_id').notNull(),
