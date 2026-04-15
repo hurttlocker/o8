@@ -59,6 +59,7 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
     missionCard: rest.missionCard,
     model: rest.model,
     onApplyToFile: rest.onApplyToFile,
+    onApplyDiff: rest.onApplyDiff,
     onClearFollowUps: rest.onClearFollowUps,
     onDeleteMessage: rest.onDeleteMessage,
     onEditMessage: rest.onEditMessage,

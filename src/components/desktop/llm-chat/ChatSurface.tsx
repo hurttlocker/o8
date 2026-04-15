@@ -41,6 +41,7 @@ function ChatSurfaceBase({
   missionCard,
   model,
   onApplyToFile,
+  onApplyDiff,
   onClearFollowUps,
   onDeleteMessage,
   onEditMessage,
@@ -75,6 +76,7 @@ function ChatSurfaceBase({
   missionCard: MissionCardData | null;
   model: ModelOption;
   onApplyToFile: (code: string, language: string) => void;
+  onApplyDiff?: (diffText: string) => void;
   onClearFollowUps: () => void;
   onDeleteMessage: (index: number) => void;
   onEditMessage: (index: number, content: string) => void;
@@ -242,6 +244,7 @@ function ChatSurfaceBase({
                     onDelete={() => onDeleteMessage(index)}
                     onFork={message.role === 'assistant' ? () => onForkMessage(index) : undefined}
                     onApplyToFile={onApplyToFile}
+                    onApplyDiff={onApplyDiff}
                     onOpenInCanvas={onOpenInCanvas}
                     onRunInTerminal={onRunInTerminal}
                   />

@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import {
   Check,
   FileCode2,
@@ -28,13 +28,12 @@ import {
 } from './thoughts/toolClassifier';
 import { publishO8PanelFocus } from '@/lib/events/o8-panel-focus';
 
-const THEME_ACCENT = 'var(--t-accent, #2563eb)';
-const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
 
 interface DesktopAgentMessageProps {
   entry: MobileTranscriptEntry;
   isLast?: boolean;
+  repoPath?: string | null;
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
@@ -647,6 +646,7 @@ function MediaGrid({
 export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   entry,
   isLast = false,
+  repoPath,
   onApplyToFile,
   onOpenInCanvas,
   onRunInTerminal,
@@ -670,6 +670,29 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     1.55,
     'pre-wrap',
   );
+
+  const handleApplyDiff = useCallback(async (diffText: string) => {
+    const trimmedRepoPath = repoPath?.trim();
+    if (!trimmedRepoPath) {
+      console.error('[diff-card] Failed to apply diff:', new Error('No active repository selected.'));
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/lanes/apply-diff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ diffText, repoPath: trimmedRepoPath }),
+      });
+      const result = await response.json().catch(() => null) as { laneId?: string; error?: string; note?: string } | null;
+      if (!response.ok || !result?.laneId) {
+        throw new Error(result?.error || result?.note || 'Apply failed');
+      }
+      window.dispatchEvent(new CustomEvent('o8:lane-lifecycle'));
+    } catch (error) {
+      console.error('[diff-card] Failed to apply diff:', error);
+    }
+  }, [repoPath]);
 
   if (isCompaction) {
     return (
@@ -773,6 +796,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         }}>
           {renderLLMMarkdown(displayText, {
             onApplyToFile,
+            onApplyDiff: repoPath ? handleApplyDiff : undefined,
             onOpenInCanvas,
             onRunInTerminal,
           })}

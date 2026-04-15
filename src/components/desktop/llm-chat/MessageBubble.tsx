@@ -106,6 +106,7 @@ function MessageBubbleBase({
   onDelete,
   onFork,
   onApplyToFile,
+  onApplyDiff,
   onOpenInCanvas,
   onRunInTerminal,
 }: {
@@ -116,6 +117,7 @@ function MessageBubbleBase({
   onDelete?: () => void;
   onFork?: () => void;
   onApplyToFile?: (code: string, language: string) => void;
+  onApplyDiff?: (diffText: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
 }) {
@@ -223,7 +225,7 @@ function MessageBubbleBase({
               </div>
             ) : null}
           </>
-        ) : renderLLMMarkdown(message.content, { onApplyToFile, onOpenInCanvas, onRunInTerminal })}
+        ) : renderLLMMarkdown(message.content, { onApplyToFile, onApplyDiff, onOpenInCanvas, onRunInTerminal })}
       </div>
 
       {!isUser && message.fallbackNotice ? (
