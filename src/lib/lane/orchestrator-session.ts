@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
+import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
@@ -71,6 +72,19 @@ function resolveCortexMcpServerPath(): { command: string; path: string } {
     }
   }
   const devSource = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/cortex-mcp-server.ts');
+  return { command: 'npx', path: devSource };
+}
+
+function resolveOperatorMcpServerPath(): { command: string; path: string } {
+  const bundledDir = process.env.O8_BUNDLED_MCP_DIR;
+  if (bundledDir) {
+    const bundled = join(bundledDir, 'operator-mcp-server.mjs');
+    if (existsSync(bundled)) {
+      const nodeBin = process.env.O8_NODE_BIN || 'node';
+      return { command: nodeBin, path: bundled };
+    }
+  }
+  const devSource = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/operator-mcp-server.ts');
   return { command: 'npx', path: devSource };
 }
 
@@ -263,7 +277,7 @@ function detectRepoSlug(repoPath: string): string {
   } catch { return ''; }
 }
 
-/** Generate a temporary MCP config file pointing to the Cortex MCP server. */
+/** Generate a temporary MCP config file for orchestrator context sources. */
 function ensureMcpConfig(repoPath: string): string {
   if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
 
@@ -275,17 +289,42 @@ function ensureMcpConfig(repoPath: string): string {
   const { getApiBase } = require('@/lib/panel/api-port') as typeof import('@/lib/panel/api-port');
   const apiBase = getApiBase();
 
-  // Dev: `npx tsx <ts source>`. Packaged app: `node <bundled .mjs>`.
-  const mcpServer = resolveCortexMcpServerPath();
-  const args = mcpServer.command === 'npx'
-    ? ['tsx', mcpServer.path]
-    : [mcpServer.path];
+  const cortexServer = resolveCortexMcpServerPath();
+  const cortexArgs = cortexServer.command === 'npx'
+    ? ['tsx', cortexServer.path]
+    : [cortexServer.path];
+
+  const operatorServer = resolveOperatorMcpServerPath();
+  const operatorArgs = operatorServer.command === 'npx'
+    ? ['tsx', operatorServer.path]
+    : [operatorServer.path];
+
+  const externalServers: Record<string, ReturnType<typeof externalServerToMcpConfig>> = {};
+  try {
+    for (const server of listEnabledExternalMcpServers()) {
+      externalServers[server.name] = externalServerToMcpConfig(server);
+    }
+  } catch (error) {
+    console.warn(
+      `[orchestrator-session] Failed to load external MCP servers: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   const config = {
     mcpServers: {
+      ...externalServers,
+      operator: {
+        type: 'stdio' as const,
+        command: operatorServer.command,
+        args: operatorArgs,
+        env: {
+          O8_API_BASE: apiBase,
+        },
+      },
       cortex: {
-        command: mcpServer.command,
-        args,
+        type: 'stdio' as const,
+        command: cortexServer.command,
+        args: cortexArgs,
         env: {
           CORTEX_API_BASE: apiBase,
           CORTEX_REPO_PATH: repoPath,
