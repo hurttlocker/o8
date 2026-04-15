@@ -618,6 +618,9 @@ function resumeWatchedAgentAfterCompletionCheck(watched: WatchedAgent, now: numb
   watched.lastActivityAt = now;
   recordWatchedAgentEvent(watched, now);
   watched.batchReported = false;
+  // Release the terminal-state reservation so the next polling pass can
+  // re-enter handleStatusChange and react to a fresh transition.
+  watched.completionReported = false;
   watched.tentativeFinishedSince = now;
   watched.tentativeTranscriptLength = watched.lastTranscriptLength;
   watched.tentativeTranscriptEntryId = watched.lastTranscriptEntryId;
@@ -633,10 +636,20 @@ async function handleStatusChange(
   now: number,
 ): Promise<void> {
   if (!callbacks) return;
+  // Completion is a terminal state. Once reported, subsequent polling ticks
+  // must not re-enter this handler and fire a second onAgentCompletion — that
+  // path overwrote a successfully-merged lane back to awaiting_input/agent_failed
+  // when the codex PTY exited after the auto-merge finished (#531).
+  if (watched.completionReported) return;
 
   const duration = Math.round((now - watched.registeredAt) / 1000);
 
-  if (status === 'finished' && !watched.completionReported) {
+  if (status === 'finished') {
+    // Claim the terminal transition BEFORE awaiting the completion handler so a
+    // concurrent poll during the async window can't re-enter with a stale
+    // 'failed' or 'interrupted' status.
+    watched.completionReported = true;
+    persistWatchedAgent(watched);
     const completionDecision = await callbacks.onAgentCompletion?.(watched.surfaceId, 'completed');
     if (completionDecision?.resume) {
       resumeWatchedAgentAfterCompletionCheck(watched, now);
@@ -650,7 +663,6 @@ async function handleStatusChange(
       return;
     }
     if (completionDecision?.block) {
-      watched.completionReported = true;
       recordWatchedAgentEvent(watched, now);
       persistWatchedAgent(watched);
       callbacks.broadcastAgentUpdate({
@@ -664,7 +676,6 @@ async function handleStatusChange(
       return;
     }
 
-    watched.completionReported = true;
     recordWatchedAgentEvent(watched, now);
     persistWatchedAgent(watched);
     callbacks.broadcastAgentUpdate({
@@ -676,6 +687,7 @@ async function handleStatusChange(
     });
 
     setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
+    return;
   }
 
   if (status === 'failed') {
@@ -778,6 +790,9 @@ async function checkStuck(
   now: number,
 ): Promise<void> {
   if (!callbacks) return;
+  // Terminal state — don't escalate a stuck signal on top of a reported
+  // completion. The agent is done from our perspective. Same #531 guard.
+  if (watched.completionReported) return;
 
   if (now - watched.registeredAt < 30_000) return;
 
