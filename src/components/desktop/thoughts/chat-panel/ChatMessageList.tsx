@@ -16,6 +16,11 @@ interface ChatMessageListProps {
   emptyStateOverride?: React.ReactNode;
   emptyStateFallback: React.ReactNode;
   topContent?: React.ReactNode;
+  // Orchestrator has its own sticky ComposerStatusBar above the textarea
+  // that already surfaces "working" state + elapsed time + running tools.
+  // Duplicating the inline "is thinking…" bubble here makes the chat feel
+  // noisy during tool-heavy turns. CLI lane panels still need the bubble.
+  isOrchestratorMode?: boolean;
 }
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
@@ -30,6 +35,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   emptyStateOverride,
   emptyStateFallback,
   topContent,
+  isOrchestratorMode = false,
 }, chatEndRef) {
   const showEmptyWithOverride = displayMessages.length === 0 && !displayWaiting && emptyStateOverride;
   const showEmptyWithFallback = displayMessages.length === 0 && !displayWaiting && !emptyStateOverride;
@@ -89,7 +95,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
         </div>
       ) : null}
 
-      {displayWaiting && !isCompacting ? (
+      {displayWaiting && !isCompacting && !isOrchestratorMode ? (
         <div style={{
           alignSelf: 'flex-start',
           display: 'flex',

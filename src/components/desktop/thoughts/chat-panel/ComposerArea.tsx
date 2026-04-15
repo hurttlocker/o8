@@ -286,7 +286,13 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 }
               }
             }}
-            placeholder={displayWaiting ? `${activeTargetLabel} is thinking...` : (isOrchestratorMode ? 'Type a message...' : `Message ${activeTargetLabel}…`)}
+            placeholder={
+              isOrchestratorMode
+                ? 'Type a message...'
+                : displayWaiting
+                  ? `${activeTargetLabel} is thinking...`
+                  : `Message ${activeTargetLabel}…`
+            }
             disabled={isDisabled}
             rows={2}
             style={{
