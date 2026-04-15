@@ -92,6 +92,14 @@ export async function GET(req: NextRequest) {
       const isCurrent = head?.trim() === '*';
       const isWt = worktrees.has(trimmedName);
 
+      // Orphaned managed-worktree branches pollute the sidebar with dead rows
+      // for lanes that finished long ago. The `worktree/` prefix is our own
+      // convention for codex/claude-code scratch branches — once the worktree
+      // is gone, the ref exists only because git doesn't auto-prune it.
+      if (!isCurrent && !isWt && trimmedName.startsWith('worktree/')) {
+        continue;
+      }
+
       // Get ahead/behind vs origin
       let ahead = 0, behind = 0;
       try {
