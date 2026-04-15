@@ -41,6 +41,7 @@ export interface PersistedLlmChatHistory {
   savedAt?: string;
   starred?: boolean;
   title?: string;
+  planText?: string;
   repoName?: string;
   repoPath?: string;
   repoBranch?: string;
@@ -70,6 +71,12 @@ function stripImages(message: PersistedLlmChatMessage): PersistedLlmChatMessage 
   };
 }
 
+function normalizePlanText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export function readPersistedLlmChat(tabId: string): PersistedLlmChatRecord | null {
   const filePath = safePath(tabId);
   try {
@@ -91,10 +98,12 @@ export function writePersistedLlmChat(tabId: string, history: PersistedLlmChatHi
   const filePath = safePath(tabId);
   let starred = false;
   let title: string | undefined;
+  let planText: string | undefined;
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedLlmChatHistory;
     starred = existing.starred || false;
     title = existing.title;
+    planText = normalizePlanText(existing.planText);
   } catch {
     // no existing history
   }
@@ -105,6 +114,7 @@ export function writePersistedLlmChat(tabId: string, history: PersistedLlmChatHi
     savedAt: new Date().toISOString(),
     starred: history.starred ?? starred,
     title: history.title ?? title,
+    planText: normalizePlanText(history.planText) ?? planText,
   }));
 }
 

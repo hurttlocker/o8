@@ -33,7 +33,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 3;
+const DB_SCHEMA_VERSION = 4;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -183,6 +183,21 @@ function ensureTables(sqlite: Database.Database): void {
       ip_address TEXT,
       expires_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_history (
+      tab_id TEXT PRIMARY KEY,
+      messages_json TEXT NOT NULL DEFAULT '[]',
+      model TEXT,
+      saved_at TEXT,
+      modified_at TEXT NOT NULL DEFAULT (datetime('now')),
+      starred INTEGER NOT NULL DEFAULT 0,
+      title TEXT,
+      plan_text TEXT,
+      repo_name TEXT,
+      repo_path TEXT,
+      repo_branch TEXT,
+      remote_url TEXT
     );
 
     CREATE TABLE IF NOT EXISTS teams (
@@ -358,6 +373,8 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_chat_history_modified_at ON chat_history(modified_at);
+    CREATE INDEX IF NOT EXISTS idx_chat_history_repo_path ON chat_history(repo_path);
     CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
     CREATE INDEX IF NOT EXISTS idx_github_repositories_installation ON github_repositories(installation_id);
@@ -401,6 +418,7 @@ function ensureTables(sqlite: Database.Database): void {
 
   ensureApprovalContextColumns(sqlite);
   ensureWatchedAgentColumns(sqlite);
+  ensureChatHistoryColumns(sqlite);
   ensureUsageLogSchema(sqlite);
   ensureApprovalEventsTable(sqlite);
   migrateLegacyApprovalStoreIfNeeded(sqlite, { approvalsTablePreviouslyMissing });
@@ -450,6 +468,12 @@ function ensureApprovalContextColumns(sqlite: Database.Database): void {
 function ensureWatchedAgentColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'watched_agents', 'last_event_at')) {
     sqlite.exec('ALTER TABLE watched_agents ADD COLUMN last_event_at INTEGER NOT NULL DEFAULT 0');
+  }
+}
+
+function ensureChatHistoryColumns(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'chat_history', 'plan_text')) {
+    sqlite.exec('ALTER TABLE chat_history ADD COLUMN plan_text TEXT');
   }
 }
 

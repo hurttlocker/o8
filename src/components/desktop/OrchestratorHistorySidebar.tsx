@@ -11,6 +11,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
 // Raw SVG icons — lucide-react doesn't render in Tauri
 function MessageSquareIcon({ size = 12 }: { size?: number }) {
@@ -33,6 +34,7 @@ interface OrchestratorThread {
   modifiedAt: string;
   messageCount?: number;
   model?: string;
+  planText?: string | null;
 }
 
 interface ArchivedLaneRow {
@@ -148,7 +150,7 @@ function OrchestratorHistorySidebarBase({
       const res = await fetch('/api/v2/chat-history/list?include=orchestrator');
       if (!res.ok) return;
       const data = await res.json() as {
-        conversations?: Array<{ tabId: string; title?: string; modifiedAt: string; messageCount?: number; model?: string }>;
+        conversations?: Array<{ tabId: string; title?: string; modifiedAt: string; messageCount?: number; model?: string; planText?: string | null }>;
       };
       const filtered = (data.conversations ?? [])
         .filter((c) => c.tabId.startsWith('thoughts-'))
@@ -158,6 +160,7 @@ function OrchestratorHistorySidebarBase({
           modifiedAt: c.modifiedAt,
           messageCount: c.messageCount,
           model: c.model,
+          planText: typeof c.planText === 'string' && c.planText.trim() ? c.planText : null,
         }));
       setThreads(filtered);
     } catch {
@@ -565,188 +568,201 @@ function OrchestratorHistorySidebarBase({
                     const exportStatus = copyState.threadId === thread.tabId ? copyState.status : 'idle';
                     const actionsVisible = isHovered || exportStatus !== 'idle';
                     return (
-                      <div
-                        key={thread.tabId}
-                        data-thread-row={thread.tabId}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 2,
-                          width: 'calc(100% - 8px)',
-                          marginLeft: 4,
-                          marginRight: 4,
-                          borderRadius: 14,
-                          background: isCurrent
-                            ? 'var(--t-accent-soft)'
-                            : isHovered
-                              ? 'var(--t-panel-hover)'
-                              : 'transparent',
-                          transition: 'background 100ms',
-                          opacity: isDeleting ? 0.4 : 1,
-                          position: 'relative',
-                        }}
-                        onMouseEnter={() => setHoveredThreadId(thread.tabId)}
-                        onMouseLeave={() => setHoveredThreadId((current) => (current === thread.tabId ? null : current))}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => onSelectThread(thread.tabId)}
-                          disabled={isDeleting}
+                      <div key={thread.tabId} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div
+                          data-thread-row={thread.tabId}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 10,
-                            flex: 1,
-                            minWidth: 0,
-                            minHeight: 44,
-                            paddingTop: 9,
-                            paddingRight: 4,
-                            paddingBottom: 9,
-                            paddingLeft: 12,
-                            borderWidth: 0,
-                            background: 'transparent',
-                            cursor: isDeleting ? 'default' : 'pointer',
-                            textAlign: 'left',
-                            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                            gap: 2,
+                            width: 'calc(100% - 8px)',
+                            marginLeft: 4,
+                            marginRight: 4,
+                            borderRadius: 14,
+                            background: isCurrent
+                              ? 'var(--t-accent-soft)'
+                              : isHovered
+                                ? 'var(--t-panel-hover)'
+                                : 'transparent',
+                            transition: 'background 100ms',
+                            opacity: isDeleting ? 0.4 : 1,
+                            position: 'relative',
                           }}
+                          onMouseEnter={() => setHoveredThreadId(thread.tabId)}
+                          onMouseLeave={() => setHoveredThreadId((current) => (current === thread.tabId ? null : current))}
                         >
-                          <div
+                          <button
+                            type="button"
+                            onClick={() => onSelectThread(thread.tabId)}
+                            disabled={isDeleting}
                             style={{
                               display: 'flex',
                               alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 22,
-                              height: 22,
-                              borderRadius: 6,
-                              flexShrink: 0,
-                              background: runtime
-                                ? 'transparent'
-                                : isCurrent
-                                  ? 'var(--t-accent)'
-                                  : 'var(--t-bg-card)',
-                              color: isCurrent ? '#ffffff' : 'var(--t-text-muted)',
-                              transition: 'background 120ms ease, color 120ms ease',
+                              gap: 10,
+                              flex: 1,
+                              minWidth: 0,
+                              minHeight: 44,
+                              paddingTop: 9,
+                              paddingRight: 4,
+                              paddingBottom: 9,
+                              paddingLeft: 12,
+                              borderWidth: 0,
+                              background: 'transparent',
+                              cursor: isDeleting ? 'default' : 'pointer',
+                              textAlign: 'left',
+                              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                             }}
                           >
-                            {runtime === 'claude-code' ? (
-                              <ClaudeIcon size={16} />
-                            ) : runtime === 'codex' ? (
-                              <CodexIcon size={16} />
-                            ) : (
-                              <MessageSquareIcon size={12} />
-                            )}
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
                             <div
                               style={{
-                                fontSize: 11.5,
-                                fontWeight: isCurrent ? 600 : 500,
-                                color: 'var(--t-text)',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                lineHeight: 1.3,
-                                letterSpacing: '-0.005em',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: 22,
+                                height: 22,
+                                borderRadius: 6,
+                                flexShrink: 0,
+                                background: runtime
+                                  ? 'transparent'
+                                  : isCurrent
+                                    ? 'var(--t-accent)'
+                                    : 'var(--t-bg-card)',
+                                color: isCurrent ? '#ffffff' : 'var(--t-text-muted)',
+                                transition: 'background 120ms ease, color 120ms ease',
                               }}
                             >
-                              {thread.title}
+                              {runtime === 'claude-code' ? (
+                                <ClaudeIcon size={16} />
+                              ) : runtime === 'codex' ? (
+                                <CodexIcon size={16} />
+                              ) : (
+                                <MessageSquareIcon size={12} />
+                              )}
                             </div>
-                            {thread.messageCount != null && thread.messageCount > 0 ? (
+                            <div style={{ flex: 1, minWidth: 0 }}>
                               <div
                                 style={{
-                                  fontSize: 9.5,
-                                  color: 'var(--t-text-muted)',
-                                  marginTop: 2,
-                                  fontWeight: 500,
+                                  fontSize: 11.5,
+                                  fontWeight: isCurrent ? 600 : 500,
+                                  color: 'var(--t-text)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  lineHeight: 1.3,
+                                  letterSpacing: '-0.005em',
                                 }}
                               >
-                                {thread.messageCount} msg{thread.messageCount !== 1 ? 's' : ''}
+                                {thread.title}
                               </div>
-                            ) : null}
+                              {thread.messageCount != null && thread.messageCount > 0 ? (
+                                <div
+                                  style={{
+                                    fontSize: 9.5,
+                                    color: 'var(--t-text-muted)',
+                                    marginTop: 2,
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  {thread.messageCount} msg{thread.messageCount !== 1 ? 's' : ''}
+                                </div>
+                              ) : null}
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleExport(thread.tabId, thread.title);
+                            }}
+                            disabled={isDeleting || exportStatus === 'copying'}
+                            title={exportStatus === 'copied' ? 'Copied as Markdown' : 'Copy thread as Markdown'}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 44,
+                              height: 44,
+                              borderWidth: 0,
+                              borderRadius: 12,
+                              background: exportStatus === 'copied' ? 'var(--t-accent-soft)' : 'transparent',
+                              color: exportStatus === 'copied'
+                                ? 'var(--t-accent)'
+                                : exportStatus === 'error'
+                                  ? 'var(--t-danger, #ef4444)'
+                                  : 'var(--t-text-muted)',
+                              cursor: isDeleting || exportStatus === 'copying' ? 'default' : 'pointer',
+                              opacity: actionsVisible ? 1 : 0,
+                              transition: 'opacity 120ms ease, color 120ms ease, background 120ms ease',
+                              flexShrink: 0,
+                            }}
+                            onMouseEnter={(event) => {
+                              if (isDeleting || exportStatus === 'copying' || exportStatus === 'copied') return;
+                              event.currentTarget.style.background = 'var(--t-bg-card)';
+                              event.currentTarget.style.color = exportStatus === 'error'
+                                ? 'var(--t-danger, #ef4444)'
+                                : 'var(--t-text)';
+                            }}
+                            onMouseLeave={(event) => {
+                              event.currentTarget.style.background = exportStatus === 'copied'
+                                ? 'var(--t-accent-soft)'
+                                : 'transparent';
+                              event.currentTarget.style.color = exportStatus === 'copied'
+                                ? 'var(--t-accent)'
+                                : exportStatus === 'error'
+                                  ? 'var(--t-danger, #ef4444)'
+                                  : 'var(--t-text-muted)';
+                            }}
+                          >
+                            <CopyMarkdownIcon size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleDelete(thread.tabId);
+                            }}
+                            disabled={isDeleting}
+                            title="Delete conversation"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 44,
+                              height: 44,
+                              marginRight: 2,
+                              borderWidth: 0,
+                              borderRadius: 12,
+                              background: 'transparent',
+                              color: 'var(--t-text-muted)',
+                              cursor: isDeleting ? 'default' : 'pointer',
+                              opacity: actionsVisible ? 1 : 0,
+                              transition: 'opacity 120ms ease, color 120ms ease, background 120ms ease',
+                              flexShrink: 0,
+                            }}
+                            onMouseEnter={(event) => {
+                              event.currentTarget.style.background = 'var(--t-bg-card)';
+                              event.currentTarget.style.color = 'var(--t-danger, #ef4444)';
+                            }}
+                            onMouseLeave={(event) => {
+                              event.currentTarget.style.background = 'transparent';
+                              event.currentTarget.style.color = 'var(--t-text-muted)';
+                            }}
+                          >
+                            <TrashIcon size={11} />
+                          </button>
+                        </div>
+                        {isCurrent && thread.planText ? (
+                          <div
+                            style={{
+                              paddingTop: 0,
+                              paddingRight: 8,
+                              paddingBottom: 6,
+                              paddingLeft: 8,
+                            }}
+                          >
+                            <CollapsiblePlanCard text={thread.planText} compact />
                           </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleExport(thread.tabId, thread.title);
-                          }}
-                          disabled={isDeleting || exportStatus === 'copying'}
-                          title={exportStatus === 'copied' ? 'Copied as Markdown' : 'Copy thread as Markdown'}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: 44,
-                            height: 44,
-                            borderWidth: 0,
-                            borderRadius: 12,
-                            background: exportStatus === 'copied' ? 'var(--t-accent-soft)' : 'transparent',
-                            color: exportStatus === 'copied'
-                              ? 'var(--t-accent)'
-                              : exportStatus === 'error'
-                                ? 'var(--t-danger, #ef4444)'
-                                : 'var(--t-text-muted)',
-                            cursor: isDeleting || exportStatus === 'copying' ? 'default' : 'pointer',
-                            opacity: actionsVisible ? 1 : 0,
-                            transition: 'opacity 120ms ease, color 120ms ease, background 120ms ease',
-                            flexShrink: 0,
-                          }}
-                          onMouseEnter={(event) => {
-                            if (isDeleting || exportStatus === 'copying' || exportStatus === 'copied') return;
-                            event.currentTarget.style.background = 'var(--t-bg-card)';
-                            event.currentTarget.style.color = exportStatus === 'error'
-                              ? 'var(--t-danger, #ef4444)'
-                              : 'var(--t-text)';
-                          }}
-                          onMouseLeave={(event) => {
-                            event.currentTarget.style.background = exportStatus === 'copied'
-                              ? 'var(--t-accent-soft)'
-                              : 'transparent';
-                            event.currentTarget.style.color = exportStatus === 'copied'
-                              ? 'var(--t-accent)'
-                              : exportStatus === 'error'
-                                ? 'var(--t-danger, #ef4444)'
-                                : 'var(--t-text-muted)';
-                          }}
-                        >
-                          <CopyMarkdownIcon size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleDelete(thread.tabId);
-                          }}
-                          disabled={isDeleting}
-                          title="Delete conversation"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: 44,
-                            height: 44,
-                            marginRight: 2,
-                            borderWidth: 0,
-                            borderRadius: 12,
-                            background: 'transparent',
-                            color: 'var(--t-text-muted)',
-                            cursor: isDeleting ? 'default' : 'pointer',
-                            opacity: actionsVisible ? 1 : 0,
-                            transition: 'opacity 120ms ease, color 120ms ease, background 120ms ease',
-                            flexShrink: 0,
-                          }}
-                          onMouseEnter={(event) => {
-                            event.currentTarget.style.background = 'var(--t-bg-card)';
-                            event.currentTarget.style.color = 'var(--t-danger, #ef4444)';
-                          }}
-                          onMouseLeave={(event) => {
-                            event.currentTarget.style.background = 'transparent';
-                            event.currentTarget.style.color = 'var(--t-text-muted)';
-                          }}
-                        >
-                          <TrashIcon size={11} />
-                        </button>
+                        ) : null}
                       </div>
                     );
                   })}

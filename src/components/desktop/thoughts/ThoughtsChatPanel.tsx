@@ -1,6 +1,7 @@
 'use client';
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import type {
   OrchestratorMissionState,
@@ -23,6 +24,7 @@ import { useOrchestratorStream } from './useOrchestratorStream';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { ComposerArea } from './chat-panel/ComposerArea';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
+import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import type {
   ThoughtsChatPanelChromeState,
   ThoughtsChatPanelHandle,
@@ -41,25 +43,6 @@ type ThoughtsHistoryMessage = ExportThreadMessage & {
   isPartial?: boolean;
   isCompaction?: boolean;
 };
-
-function CopyMarkdownIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ display: 'block', flexShrink: 0 }}
-    >
-      <rect x="9" y="9" width="11" height="11" rx="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  );
-}
 
 function mapHistoryMessagesToTranscript(messages: ThoughtsHistoryMessage[]): MobileTranscriptEntry[] {
   return messages
@@ -137,6 +120,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [enhancing, setEnhancing] = useState(false);
   const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>('max');
   const [chatMessages, setChatMessages] = useState<MobileTranscriptEntry[]>([]);
+  const [planText, setPlanText] = useState<string | null>(null);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [targetAgentKey, setTargetAgentKey] = useState<string>('__claude__');
   const pollRef = useRef<number | null>(null);
@@ -158,8 +142,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const isOrchestratorMode = targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey);
 
-  const orchStream = useOrchestratorStream(isOrchestratorMode ? resolvedRepoPath : null);
+  const orchStream = useOrchestratorStream(isOrchestratorMode ? resolvedRepoPath : null, {
+    seededPlanText: planText,
+    hasHistory: chatMessages.length > 0,
+  });
   const useStream = orchStream.connected && isOrchestratorMode;
+
+  useEffect(() => {
+    if (!isOrchestratorMode) return;
+    if (!orchStream.planText || planText) return;
+    setPlanText(orchStream.planText);
+  }, [isOrchestratorMode, orchStream.planText, planText]);
 
   const targetAgent = useMemo(
     () => isOrchestratorMode ? null : (sessionTargets.find((agent) => agent.key === targetAgentKey) ?? null),
@@ -448,6 +441,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput('');
     setPreEnhanceInput(null);
     setChatMessages([]);
+    setPlanText(null);
     setWaitingForReply(false);
     clearPolling();
     seenServerEntriesRef.current.clear();
@@ -491,7 +485,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   // ── Thread persistence ──
 
-  const persistThread = useCallback((msgs: MobileTranscriptEntry[], tid: string | null) => {
+  const persistThread = useCallback((msgs: MobileTranscriptEntry[], tid: string | null, nextPlanText: string | null) => {
     if (!tid || msgs.length === 0) return;
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
@@ -521,6 +515,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           tabId: tid,
           messages,
           model: 'claude-code',
+          planText: nextPlanText ?? undefined,
           repoPath: resolvedRepoPath,
         }),
       }).catch(() => { /* silent */ });
@@ -551,11 +546,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const newId = `thoughts-${Date.now()}`;
       threadIdRef.current = newId;
       setThreadId(newId);
-      persistThread(msgs, newId);
+      persistThread(msgs, newId, planText);
     } else {
-      persistThread(msgs, threadIdRef.current);
+      persistThread(msgs, threadIdRef.current, planText);
     }
-  }, [chatMessages, orchStream.messages, isOrchestratorMode, persistThread]);
+  }, [chatMessages, orchStream.messages, isOrchestratorMode, persistThread, planText]);
 
   const autoRestoreAttemptedRef = useRef(false);
   useEffect(() => {
@@ -577,8 +572,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           if (!histRes.ok) return;
           const histData = await histRes.json() as {
             messages?: ThoughtsHistoryMessage[];
+            planText?: string | null;
           };
           const msgs = mapHistoryMessagesToTranscript(histData.messages ?? []);
+          setPlanText(histData.planText ?? null);
           if (msgs.length > 0) {
             setChatMessages(msgs);
             threadIdRef.current = latest.tabId;
@@ -597,9 +594,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       if (!res.ok) return;
       const data = await res.json() as {
         messages?: ThoughtsHistoryMessage[];
+        planText?: string | null;
       };
       const msgs = mapHistoryMessagesToTranscript(data.messages ?? []);
       setChatMessages(msgs);
+      setPlanText(data.planText ?? null);
       threadIdRef.current = tabId;
       setThreadId(tabId);
       setWaitingForReply(false);
@@ -631,9 +630,21 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return chatMessages;
   }, [chatMessages, isOrchestratorMode, orchStream.messages]);
   const displayWaiting = isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
+  const displayPlanText = isOrchestratorMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
   const activeTargetLabel = isOrchestratorMode ? 'Claude Code' : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
   const activeTargetColor = isOrchestratorMode ? '#e07a3a' : (targetAgent?.color ?? orchestratorRuntimeTone(preferredRuntime).color);
+  const transcriptTopContent = displayPlanText ? (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 0,
+      }}
+    >
+      <CollapsiblePlanCard key={`plan-${threadId ?? 'active'}`} text={displayPlanText} />
+    </div>
+  ) : null;
 
   useEffect(() => {
     onChromeChange({
@@ -722,18 +733,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [displayMessages, setExportFeedback, threadId]);
 
-  const exportButtonLabel = exportState === 'copied'
-    ? 'Copied'
-    : exportState === 'error'
-      ? 'Retry copy'
-      : exportState === 'copying'
-        ? 'Copying...'
-        : 'Copy as Markdown';
-
-  const exportButtonTitle = exportState === 'error'
-    ? 'Retry copying the active thread as Markdown'
-    : 'Copy the active thread as Markdown';
-
   return (
     <>
       {displayMessages.length > 0 ? (
@@ -748,69 +747,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             flexShrink: 0,
           }}
         >
-          <button
-            type="button"
-            onClick={() => { void handleCopyMarkdown(); }}
-            disabled={exportState === 'copying'}
-            title={exportButtonTitle}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              minWidth: 170,
-              minHeight: 44,
-              paddingTop: 0,
-              paddingRight: 14,
-              paddingBottom: 0,
-              paddingLeft: 14,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: exportState === 'copied'
-                ? 'var(--t-accent-border)'
-                : exportState === 'error'
-                  ? 'var(--t-danger, #ef4444)'
-                  : 'var(--t-panel-border)',
-              borderRadius: 12,
-              background: exportState === 'copied'
-                ? 'var(--t-accent-soft)'
-                : exportState === 'error'
-                  ? 'var(--t-bg-card)'
-                  : 'var(--t-panel)',
-              color: exportState === 'copied'
-                ? 'var(--t-accent)'
-                : exportState === 'error'
-                  ? 'var(--t-danger, #ef4444)'
-                  : 'var(--t-text-secondary)',
-              cursor: exportState === 'copying' ? 'default' : 'pointer',
-              fontSize: 11.5,
-              fontWeight: 700,
-              letterSpacing: '-0.01em',
-              transition: 'background 140ms ease, border-color 140ms ease, color 140ms ease',
-              boxShadow: exportState === 'copied' ? 'var(--t-glass-shadow)' : 'none',
-            }}
-            onMouseEnter={(event) => {
-              if (exportState === 'copying' || exportState === 'copied') return;
-              event.currentTarget.style.background = 'var(--t-panel-hover)';
-              event.currentTarget.style.color = exportState === 'error'
-                ? 'var(--t-danger, #ef4444)'
-                : 'var(--t-text)';
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.background = exportState === 'copied'
-                ? 'var(--t-accent-soft)'
-                : exportState === 'error'
-                  ? 'var(--t-bg-card)'
-                  : 'var(--t-panel)';
-              event.currentTarget.style.color = exportState === 'copied'
-                ? 'var(--t-accent)'
-                : exportState === 'error'
-                  ? 'var(--t-danger, #ef4444)'
-                  : 'var(--t-text-secondary)';
-            }}
-          >
-            <CopyMarkdownIcon size={14} />
-            {exportButtonLabel}
-          </button>
+          <ThreadExportButton state={exportState} onClick={() => { void handleCopyMarkdown(); }} />
         </div>
       ) : null}
 
@@ -826,6 +763,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         thoughtsElevatedShadow={thoughtsElevatedShadow}
         emptyStateOverride={emptyStateOverride}
         emptyStateFallback={fallbackEmptyState}
+        topContent={transcriptTopContent}
       />
 
       <ComposerArea
