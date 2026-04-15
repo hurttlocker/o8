@@ -403,28 +403,6 @@ export function compactText(value: string | null | undefined, max = 56) {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
-export function normalizeSessionTaskLabel(value?: string | null) {
-  const raw = value?.trim();
-  if (!raw) return null;
-  const cleaned = raw
-    .replace(/^Live Codex terminal verified via pid\/log mapping(?: on [^.]+)?\.\s*/i, '')
-    .replace(/^Live Codex terminal detected(?: on [^.]+)?\.\s*/i, '')
-    .replace(/^Recent Codex session recovered from local runtime history\.\s*/i, '')
-    .replace(/^Historical Codex session recovered from local runtime history\.\s*/i, '')
-    .replace(/^IDE-owned Codex session launched and waiting for its first thread id\.\s*/i, '')
-    .replace(/^IDE-owned Codex session is ready for resume after an interrupted run\.\s*/i, '')
-    .replace(/^IDE-owned Codex session is ready for a corrective follow-up after a failed run\.\s*/i, '')
-    .replace(/^IDE-owned Codex session ready for the next input via resume\.\s*/i, '')
-    .replace(/^IDE-owned Codex session is idle\.\s*/i, '')
-    .replace(/^Operator marked this owned result resolved\.\s*/i, '')
-    .replace(/^Mirroring the live Q ↔ Mister conversation, not spawning a fresh session\.\s*/i, '')
-    .trim();
-  const summary = cleaned || raw;
-  return summary.charAt(0).toLowerCase() === summary.charAt(0)
-    ? `${summary.charAt(0).toUpperCase()}${summary.slice(1)}`
-    : summary;
-}
-
 /** Official Codex logo — uses actual brand asset */
 export function CodexIcon({ size = 14 }: { size?: number; color?: string }) {
   return (
@@ -626,10 +604,12 @@ export function compareBranchAgents(left: BranchAgent, right: BranchAgent) {
 }
 
 export function branchSessionLabel(agent: BranchAgent) {
-  const summary = compactText(normalizeSessionTaskLabel(agent.currentTask), 60);
-  if (summary) return summary;
+  // The stable name (agentName → packet title → runtime fallback) is the
+  // only safe label source for the sidebar. `currentTask` falls through to
+  // the latest transcript message when no packet is bound (see #529), which
+  // leaks codex assistant output into the repo sidebar. Never show it here.
   const runtime = runtimeBadgeTone(agent.runtime).label;
-  return compactText(agent.agentName || agent.name || `${runtime} session`, 60) ?? `${runtime} session`;
+  return compactText(agent.agentName || agent.name, 60) ?? `${runtime} session`;
 }
 
 export function repoOwnsPath(repoPath: string, candidate?: string | null) {
