@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { AgentRuntime, RuntimeSession } from '@/lib/runtimes/types';
 import type { AgentSummary, EventItem, FleetSnapshot, SquadSummary } from '@/lib/fleet/types';
@@ -254,7 +256,26 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
 
   const discoveredAll = results
     .filter((result): result is PromiseFulfilledResult<{ runtime: AgentRuntime; sessions: RuntimeSession[] }> => result.status === 'fulfilled')
-    .flatMap((result) => result.value.sessions.map((session) => ({ runtime: result.value.runtime, session })));
+    .flatMap((result) => result.value.sessions.map((session) => ({ runtime: result.value.runtime, session })))
+    // Drop ghost sessions whose cwd doesn't exist on disk. Owned codex
+    // sessions survive lane archival and worktree removal because codex
+    // keeps its own session registry — they'd otherwise flood the left
+    // sidebar with cards pointing at paths that were deleted long ago.
+    // Also catches sessions whose repo was moved or removed (e.g. old
+    // ~/cortex/ide paths from a rename). Only absolute paths get checked;
+    // placeholder cwds like 'unknown' or relative strings pass through so
+    // sessions that haven't reported a real path yet aren't dropped.
+    .filter(({ session }) => {
+      const cwd = (session.cwd || '').trim();
+      if (!cwd) return true;
+      const expanded = cwd.startsWith('~') ? cwd.replace(/^~/, os.homedir()) : cwd;
+      if (!path.isAbsolute(expanded)) return true;
+      try {
+        return existsSync(expanded);
+      } catch {
+        return false;
+      }
+    });
 
   discoveredAll.sort((left, right) => {
     const statusWeight = (status: RuntimeSession['status']) => (
@@ -286,8 +307,21 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     [...discovered, ...discoveredAll.filter(({ session }) => fallbackAgents.some((agent) => agent.sessionKey === session.sessionKey))]
       .map(({ session }) => session.sessionKey),
   );
+  // Ghost-agent promotion: tabs whose session isn't in the live set become
+  // "ghost" entries in the sidebar so users can inspect or dismiss them.
+  // Keep the existing behavior for tabs without a liveSessionKey (synthetic
+  // persistent surfaces like the orchestrator tab) and for non-codex-owned
+  // tabs. Codex-owned sessions never resurrect — once codex's own session
+  // registry stops reporting them, they're permanently dead and cluttering
+  // the sidebar serves no purpose. Drop them at the filter instead of
+  // letting the persisted tab files resurrect the ghosts on every render.
   const ghostAgents = ideTabs
-    .filter((tab) => !tab.liveSessionKey || !liveSessionKeys.has(tab.liveSessionKey))
+    .filter((tab) => {
+      if (!tab.liveSessionKey) return true;
+      if (liveSessionKeys.has(tab.liveSessionKey)) return false;
+      if (tab.liveSessionKey.startsWith('codex-owned:')) return false;
+      return true;
+    })
     .map(mapIdeGhostRuntimeTabToAgent);
   agents.push(...ghostAgents);
 
