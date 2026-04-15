@@ -41,6 +41,7 @@ import {
 } from '@/components/desktop/thoughts/ThoughtsChatPanel';
 import { ThoughtsMissionPanel } from '@/components/desktop/thoughts/ThoughtsMissionPanel';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
+import { AgentTileLayout } from './AgentTileLayout';
 
 interface OrchestratorTabProps {
   tabId: string;
@@ -110,6 +111,8 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
   });
   const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
   const [missionOpen, setMissionOpen] = useState(() => readBooleanPref(MISSION_OPEN_KEY));
+  const [tiledSessions, setTiledSessions] = useState<string[]>([]);
+  const [tileDockExpanded, setTileDockExpanded] = useState(true);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
 
   useEffect(() => subscribeOrchestratorRuntimePreference(setPreferredRuntime), []);
@@ -120,11 +123,27 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     return () => window.clearTimeout(timeout);
   }, [active]);
 
-  const agents = data?.agents ?? [];
+  const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
   const sessionTargets = useMemo(
     () => buildAgentTargets(agents, preferredRuntime),
     [agents, preferredRuntime],
   );
+  const isTiled = tiledSessions.length > 1;
+
+  useEffect(() => {
+    const activeSessions = new Set(
+      agents.map((agent) => agent.sessionKey).filter((sessionKey): sessionKey is string => Boolean(sessionKey)),
+    );
+    setTiledSessions((current) => {
+      const next = current.filter((sessionKey) => activeSessions.has(sessionKey));
+      return next.length === current.length ? current : next;
+    });
+  }, [agents]);
+
+  useEffect(() => {
+    if (!isTiled) return;
+    setTileDockExpanded(true);
+  }, [isTiled]);
 
   const handleTogglePermission = useCallback(() => {
     setPermissionMode((current) => {
@@ -148,6 +167,28 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
       writeBooleanPref(MISSION_OPEN_KEY, next);
       return next;
     });
+  }, []);
+
+  const handleToggleTileSession = useCallback((sessionKey: string) => {
+    setTiledSessions((current) => {
+      if (current.includes(sessionKey)) {
+        return current.filter((key) => key !== sessionKey);
+      }
+      const appended = [...current, sessionKey];
+      return appended.length > 4 ? appended.slice(appended.length - 4) : appended;
+    });
+  }, []);
+
+  const handleCloseTileSession = useCallback((sessionKey: string) => {
+    setTiledSessions((current) => current.filter((key) => key !== sessionKey));
+  }, []);
+
+  const handleClearTiles = useCallback(() => {
+    setTiledSessions([]);
+  }, []);
+
+  const handleToggleTileDock = useCallback(() => {
+    setTileDockExpanded((current) => !current);
   }, []);
 
   const handleSelectThread = useCallback((threadTabId: string) => {
@@ -224,6 +265,34 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     );
   }
 
+  const thoughtsChatPanel = (
+    <ThoughtsChatPanel
+      ref={chatPanelRef}
+      open
+      draftInjection={data.draftInjection}
+      agents={agents}
+      missionState={data.missionState}
+      preferredRuntime={preferredRuntime}
+      sessionTargets={sessionTargets}
+      workspaceTargets={data.workspaceTargets ?? []}
+      repoPath={repoPath ?? null}
+      thoughtsBodyBackground={thoughtsBodyBackground}
+      thoughtsElevatedSurface={thoughtsElevatedSurface}
+      thoughtsElevatedBorder={thoughtsElevatedBorder}
+      thoughtsElevatedShadow={thoughtsElevatedShadow}
+      thoughtsMutedGlass={thoughtsMutedGlass}
+      permissionMode={permissionMode}
+      onTogglePermission={handleTogglePermission}
+      missionOpen={missionOpen}
+      onToggleMission={handleToggleMission}
+      repoLabel={repoLabel}
+      emptyStateOverride={emptyStateNode}
+      onMissionStateChange={data.onMissionStateChange}
+      onLaunchPacket={data.onLaunchPacket}
+      onChromeChange={setChatChromeState}
+    />
+  );
+
   return (
     <div
       style={{
@@ -269,7 +338,13 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
           Clicking a card opens that agent's live transcript in a workspace
           terminal tab instead of spilling the running output inline. */}
       {hasActiveSessions ? (
-        <SessionVisualizer agents={agents} onSelectSession={data.onSelectSession} />
+        <SessionVisualizer
+          agents={agents}
+          tiledSessions={tiledSessions}
+          onSelectSession={data.onSelectSession}
+          onToggleTileSession={handleToggleTileSession}
+          onClearTiles={handleClearTiles}
+        />
       ) : null}
 
       {/* 3-pane body: History | Chat | Mission */}
@@ -388,31 +463,125 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
               New
             </button>
           ) : null}
-          <ThoughtsChatPanel
-            ref={chatPanelRef}
-            open
-            draftInjection={data.draftInjection}
-            agents={agents}
-            missionState={data.missionState}
-            preferredRuntime={preferredRuntime}
-            sessionTargets={sessionTargets}
-            workspaceTargets={data.workspaceTargets ?? []}
-            repoPath={repoPath ?? null}
-            thoughtsBodyBackground={thoughtsBodyBackground}
-            thoughtsElevatedSurface={thoughtsElevatedSurface}
-            thoughtsElevatedBorder={thoughtsElevatedBorder}
-            thoughtsElevatedShadow={thoughtsElevatedShadow}
-            thoughtsMutedGlass={thoughtsMutedGlass}
-            permissionMode={permissionMode}
-            onTogglePermission={handleTogglePermission}
-            missionOpen={missionOpen}
-            onToggleMission={handleToggleMission}
-            repoLabel={repoLabel}
-            emptyStateOverride={emptyStateNode}
-            onMissionStateChange={data.onMissionStateChange}
-            onLaunchPacket={data.onLaunchPacket}
-            onChromeChange={setChatChromeState}
-          />
+          {isTiled ? (
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <AgentTileLayout
+                sessions={tiledSessions}
+                agents={agents}
+                onCloseSession={handleCloseTileSession}
+              />
+              <div
+                style={{
+                  height: tileDockExpanded ? 232 : 160,
+                  minHeight: tileDockExpanded ? 232 : 160,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  borderTopWidth: 1,
+                  borderTopStyle: 'solid',
+                  borderTopColor: 'var(--t-divider-subtle)',
+                  background: 'var(--t-bg-card)',
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    height: 44,
+                    minHeight: 44,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    paddingTop: 0,
+                    paddingRight: 12,
+                    paddingBottom: 0,
+                    paddingLeft: 16,
+                    borderBottomWidth: 1,
+                    borderBottomStyle: 'solid',
+                    borderBottomColor: 'var(--t-border)',
+                    background: 'var(--t-panel)',
+                  }}
+                >
+                  <div
+                    style={{
+                      minWidth: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 2,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: 'var(--t-text)',
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      Orchestrator chat
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 500,
+                        color: 'var(--t-text-secondary)',
+                      }}
+                    >
+                      Send follow-ups here while monitoring live agent panes.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={tileDockExpanded ? 'Collapse orchestrator chat dock' : 'Expand orchestrator chat dock'}
+                    title={tileDockExpanded ? 'Collapse chat dock' : 'Expand chat dock'}
+                    onClick={handleToggleTileDock}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 12,
+                      borderWidth: 0,
+                      background: 'transparent',
+                      color: 'var(--t-text-secondary)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
+                    onMouseEnter={(event) => {
+                      event.currentTarget.style.background = 'var(--t-bg-card)';
+                      event.currentTarget.style.color = 'var(--t-text)';
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.background = 'transparent';
+                      event.currentTarget.style.color = 'var(--t-text-secondary)';
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                      {tileDockExpanded ? <path d="M18 14l-6-6-6 6" /> : <path d="M6 10l6 6 6-6" />}
+                    </svg>
+                  </button>
+                </div>
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {thoughtsChatPanel}
+                </div>
+              </div>
+            </div>
+          ) : thoughtsChatPanel}
         </div>
 
         {/* Right: mission control sidebar */}
