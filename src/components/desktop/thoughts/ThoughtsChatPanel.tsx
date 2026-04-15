@@ -9,6 +9,7 @@ import type {
   OrchestratorWorkspaceTarget,
 } from '@/lib/orchestrator/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
 import { type ThinkingEffort } from './InputButtons';
 import type { AgentTarget, FleetAgent } from './types';
 import {
@@ -29,6 +30,62 @@ import type {
 } from './chat-panel/types';
 
 export type { ThoughtsChatPanelHandle, ThoughtsChatPanelChromeState, ThoughtsChatPermissionMode };
+
+type ThoughtsHistoryMessage = ExportThreadMessage & {
+  id: string;
+  role: MobileTranscriptEntry['role'];
+  media?: MobileTranscriptEntry['media'];
+  thinkingSteps?: MobileTranscriptEntry['thinkingSteps'];
+  thinkingDurationMs?: MobileTranscriptEntry['thinkingDurationMs'];
+  recalledFacts?: MobileTranscriptEntry['recalledFacts'];
+  isPartial?: boolean;
+  isCompaction?: boolean;
+};
+
+function CopyMarkdownIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 }}
+    >
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function mapHistoryMessagesToTranscript(messages: ThoughtsHistoryMessage[]): MobileTranscriptEntry[] {
+  return messages
+    .filter((message) => !message.isPartial)
+    .map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text ?? message.content ?? '',
+      type: message.type ?? (message.compaction || message.isCompaction ? 'compaction' : 'message'),
+      media: message.media,
+      toolCalls: message.toolCalls,
+      timestamp: message.timestamp ?? Date.now(),
+      timestampLabel: message.timestampLabel ?? (message.timestamp
+        ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : ''),
+      model: message.model,
+      tokens: message.tokens,
+      costUsd: message.costUsd,
+      sources: message.sources,
+      thinking: message.thinking,
+      thinkingSteps: message.thinkingSteps,
+      thinkingDurationMs: message.thinkingDurationMs,
+      recalledFacts: message.recalledFacts,
+      compaction: message.compaction,
+    }));
+}
 
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   open: boolean;
@@ -95,7 +152,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exportFeedbackTimerRef = useRef<number | null>(null);
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
+  const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
 
   const isOrchestratorMode = targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey);
 
@@ -183,7 +242,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       }
     })();
     return () => { cancelled = true; };
-  }, [isOrchestratorMode, orchestratorSpawning, repoPathProp]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOrchestratorMode, orchestratorSpawning, repoPathProp]);
 
   useEffect(() => {
     if (!open || !draftInjection?.id) return;
@@ -203,6 +262,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return () => {
       if (pollRef.current !== null) window.clearInterval(pollRef.current);
       if (pollDelayRef.current !== null) window.clearTimeout(pollDelayRef.current);
+      if (exportFeedbackTimerRef.current !== null) window.clearTimeout(exportFeedbackTimerRef.current);
     };
   }, []);
 
@@ -214,6 +274,20 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (pollDelayRef.current !== null) {
       window.clearTimeout(pollDelayRef.current);
       pollDelayRef.current = null;
+    }
+  }, []);
+
+  const setExportFeedback = useCallback((next: 'idle' | 'copying' | 'copied' | 'error') => {
+    setExportState(next);
+    if (exportFeedbackTimerRef.current !== null) {
+      window.clearTimeout(exportFeedbackTimerRef.current);
+      exportFeedbackTimerRef.current = null;
+    }
+    if (next === 'copied' || next === 'error') {
+      exportFeedbackTimerRef.current = window.setTimeout(() => {
+        setExportState('idle');
+        exportFeedbackTimerRef.current = null;
+      }, 1800);
     }
   }, []);
 
@@ -313,119 +387,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
     startPollingForSession(sessionKey);
   }, [isOrchestratorMode, startPollingForSession, targetSessionKey]);
-
-  const handleOrchestratorSend = useCallback(async (msg: string) => {
-    setWaitingForReply(true);
-
-    if (orchestratorSessionRef.current) {
-      try {
-        await captureServerSnapshot(orchestratorSessionRef.current);
-        const res = await fetch('/api/runtime/action', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'steer',
-            surfaceId: orchestratorSessionRef.current,
-            message: msg,
-          }),
-        });
-        if (!res.ok) throw new Error('Resume failed');
-        startPollingForSession(orchestratorSessionRef.current);
-        return;
-      } catch {
-        orchestratorSessionRef.current = null;
-      }
-    }
-
-    setOrchestratorSpawning(true);
-    try {
-      let launchRepoPath = repoPathProp;
-      if (!launchRepoPath) {
-        try {
-          const reposRes = await fetch('/api/panel/repos');
-          if (reposRes.ok) {
-            const reposData = await reposRes.json() as { repos?: Array<{ localPath: string }> };
-            launchRepoPath = reposData.repos?.[0]?.localPath ?? null;
-          }
-        } catch { /* silent */ }
-      }
-
-      const launchRes = await fetch('/api/runtime/launch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          runtime: 'claude-code',
-          prompt: msg,
-          repoPath: launchRepoPath || undefined,
-          cwd: launchRepoPath || undefined,
-          skipSetup: true,
-        }),
-      });
-      const launchData = await launchRes.json() as { ok?: boolean; surfaceId?: string; note?: string; error?: string };
-
-      if (!launchData.ok || !launchData.surfaceId) {
-        throw new Error(launchData.note ?? launchData.error ?? 'Failed to launch Claude Code session.');
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 6000));
-
-      const candidateKeys = [launchData.surfaceId];
-
-      try {
-        const invRes = await fetch('/api/runtime/inventory?fresh=1');
-        if (invRes.ok) {
-          const invData = await invRes.json() as { agents?: Array<{ sessionKey: string; runtime: string; lastEventAt: string; status: string }> };
-          const ccRecent = (invData.agents ?? [])
-            .filter((a) => a.runtime === 'claude-code' && a.sessionKey && a.sessionKey !== launchData.surfaceId)
-            .sort((a, b) => (b.lastEventAt ?? '').localeCompare(a.lastEventAt ?? ''))
-            .slice(0, 3);
-          for (const a of ccRecent) {
-            if (!candidateKeys.includes(a.sessionKey)) candidateKeys.push(a.sessionKey);
-          }
-        }
-      } catch { /* silent */ }
-
-      let resolvedKey = launchData.surfaceId;
-      for (const key of candidateKeys) {
-        try {
-          const txRes = await fetch(transcriptUrl(key));
-          if (!txRes.ok) continue;
-          const txData = await txRes.json() as { transcript?: MobileTranscriptEntry[] };
-          const entries = txData.transcript ?? [];
-          const hasOurMessage = entries.some((e) => e.role === 'user' && e.text === msg);
-          if (hasOurMessage) {
-            resolvedKey = key;
-            const assistantEntries = entries.filter((e) => e.role !== 'user' && isRenderableThoughtEntry(e));
-            if (assistantEntries.length > 0) {
-              setChatMessages((prev) => mergeTranscriptEntries(prev, assistantEntries));
-              const nextSeen = new Map<string, string>();
-              for (const entry of entries) nextSeen.set(entry.id, entrySignature(entry));
-              seenServerEntriesRef.current = nextSeen;
-              setWaitingForReply(false);
-              orchestratorSessionRef.current = resolvedKey;
-              return;
-            }
-            break;
-          }
-        } catch { /* try next */ }
-      }
-
-      orchestratorSessionRef.current = resolvedKey;
-      seenServerEntriesRef.current.clear();
-      startPollingForSession(resolvedKey);
-    } catch (err) {
-      setChatMessages((prev) => [...prev, {
-        id: `claude-error-${Date.now()}`,
-        role: 'system',
-        text: `Unable to launch Claude Code: ${(err as Error).message ?? 'Unknown error.'}`,
-        timestamp: Date.now(),
-        timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }]);
-      setWaitingForReply(false);
-    } finally {
-      setOrchestratorSpawning(false);
-    }
-  }, [captureServerSnapshot, repoPathProp, startPollingForSession, transcriptUrl]);
 
   const handleTaskSend = useCallback(async () => {
     const effectiveWaiting = isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
@@ -538,7 +499,20 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         id: m.id,
         role: m.role,
         content: m.text,
+        type: m.type,
+        media: m.media,
+        toolCalls: m.toolCalls,
         timestamp: m.timestamp ?? Date.now(),
+        timestampLabel: m.timestampLabel,
+        model: m.model,
+        tokens: m.tokens,
+        costUsd: m.costUsd,
+        sources: m.sources,
+        thinking: m.thinking,
+        thinkingSteps: m.thinkingSteps,
+        thinkingDurationMs: m.thinkingDurationMs,
+        recalledFacts: m.recalledFacts,
+        compaction: m.compaction,
       }));
       void fetch('/api/v2/chat-history', {
         method: 'POST',
@@ -591,7 +565,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     autoRestoreAttemptedRef.current = true;
     void (async () => {
       try {
-        const res = await fetch('/api/v2/chat-history/list');
+        const res = await fetch('/api/v2/chat-history/list?include=orchestrator');
         if (!res.ok) return;
         const data = await res.json() as { conversations?: Array<{ tabId: string; modifiedAt?: string }> };
         const thoughtsThreads = (data.conversations ?? [])
@@ -602,17 +576,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           const histRes = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(latest.tabId)}`);
           if (!histRes.ok) return;
           const histData = await histRes.json() as {
-            messages?: Array<{ id: string; role: string; content: string; timestamp?: number }>;
+            messages?: ThoughtsHistoryMessage[];
           };
-          const msgs = (histData.messages ?? []).map((m) => ({
-            id: m.id,
-            role: m.role as MobileTranscriptEntry['role'],
-            text: m.content,
-            timestamp: m.timestamp ?? Date.now(),
-            timestampLabel: m.timestamp
-              ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : '',
-          }));
+          const msgs = mapHistoryMessagesToTranscript(histData.messages ?? []);
           if (msgs.length > 0) {
             setChatMessages(msgs);
             threadIdRef.current = latest.tabId;
@@ -630,17 +596,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`);
       if (!res.ok) return;
       const data = await res.json() as {
-        messages?: Array<{ id: string; role: string; content: string; timestamp?: number }>;
+        messages?: ThoughtsHistoryMessage[];
       };
-      const msgs = (data.messages ?? []).map((m) => ({
-        id: m.id,
-        role: m.role as MobileTranscriptEntry['role'],
-        text: m.content,
-        timestamp: m.timestamp ?? Date.now(),
-        timestampLabel: m.timestamp
-          ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : '',
-      }));
+      const msgs = mapHistoryMessagesToTranscript(data.messages ?? []);
       setChatMessages(msgs);
       threadIdRef.current = tabId;
       setThreadId(tabId);
@@ -744,8 +702,118 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [orchStream, permissionMode, useStream]);
 
+  const handleCopyMarkdown = useCallback(async () => {
+    if (displayMessages.length === 0) return;
+    if (!navigator.clipboard?.writeText) {
+      console.log('[export-thread] Clipboard API unavailable for active thread export');
+      setExportFeedback('error');
+      return;
+    }
+
+    setExportFeedback('copying');
+    try {
+      const markdown = serializeThreadToMarkdown(displayMessages, { threadId });
+      await navigator.clipboard.writeText(markdown);
+      console.log(`[export-thread] Copied active thread ${threadId ?? 'unsaved-thread'} to clipboard`);
+      setExportFeedback('copied');
+    } catch (error) {
+      console.log('[export-thread] Failed to copy active thread markdown', error);
+      setExportFeedback('error');
+    }
+  }, [displayMessages, setExportFeedback, threadId]);
+
+  const exportButtonLabel = exportState === 'copied'
+    ? 'Copied'
+    : exportState === 'error'
+      ? 'Retry copy'
+      : exportState === 'copying'
+        ? 'Copying...'
+        : 'Copy as Markdown';
+
+  const exportButtonTitle = exportState === 'error'
+    ? 'Retry copying the active thread as Markdown'
+    : 'Copy the active thread as Markdown';
+
   return (
     <>
+      {displayMessages.length > 0 ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            paddingTop: 10,
+            paddingRight: 16,
+            paddingBottom: 0,
+            paddingLeft: 16,
+            flexShrink: 0,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => { void handleCopyMarkdown(); }}
+            disabled={exportState === 'copying'}
+            title={exportButtonTitle}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              minWidth: 170,
+              minHeight: 44,
+              paddingTop: 0,
+              paddingRight: 14,
+              paddingBottom: 0,
+              paddingLeft: 14,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: exportState === 'copied'
+                ? 'var(--t-accent-border)'
+                : exportState === 'error'
+                  ? 'var(--t-danger, #ef4444)'
+                  : 'var(--t-panel-border)',
+              borderRadius: 12,
+              background: exportState === 'copied'
+                ? 'var(--t-accent-soft)'
+                : exportState === 'error'
+                  ? 'var(--t-bg-card)'
+                  : 'var(--t-panel)',
+              color: exportState === 'copied'
+                ? 'var(--t-accent)'
+                : exportState === 'error'
+                  ? 'var(--t-danger, #ef4444)'
+                  : 'var(--t-text-secondary)',
+              cursor: exportState === 'copying' ? 'default' : 'pointer',
+              fontSize: 11.5,
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              transition: 'background 140ms ease, border-color 140ms ease, color 140ms ease',
+              boxShadow: exportState === 'copied' ? 'var(--t-glass-shadow)' : 'none',
+            }}
+            onMouseEnter={(event) => {
+              if (exportState === 'copying' || exportState === 'copied') return;
+              event.currentTarget.style.background = 'var(--t-panel-hover)';
+              event.currentTarget.style.color = exportState === 'error'
+                ? 'var(--t-danger, #ef4444)'
+                : 'var(--t-text)';
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.background = exportState === 'copied'
+                ? 'var(--t-accent-soft)'
+                : exportState === 'error'
+                  ? 'var(--t-bg-card)'
+                  : 'var(--t-panel)';
+              event.currentTarget.style.color = exportState === 'copied'
+                ? 'var(--t-accent)'
+                : exportState === 'error'
+                  ? 'var(--t-danger, #ef4444)'
+                  : 'var(--t-text-secondary)';
+            }}
+          >
+            <CopyMarkdownIcon size={14} />
+            {exportButtonLabel}
+          </button>
+        </div>
+      ) : null}
+
       <ChatMessageList
         ref={chatEndRef}
         displayMessages={displayMessages}

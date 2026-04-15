@@ -11,6 +11,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
 // Raw SVG icons — lucide-react doesn't render in Tauri
 function MessageSquareIcon({ size = 12 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>;
@@ -20,6 +21,9 @@ function PanelLeftCloseIcon({ size = 13 }: { size?: number }) {
 }
 function TrashIcon({ size = 11 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>;
+}
+function CopyMarkdownIcon({ size = 12 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>;
 }
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 
@@ -41,6 +45,11 @@ interface ArchivedLaneRow {
   sessionKey: string | null;
   updatedAt: string;
 }
+
+type ThreadHistoryMessage = ExportThreadMessage & {
+  id: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+};
 
 type HistoryMode = 'conversations' | 'archive';
 
@@ -127,6 +136,11 @@ function OrchestratorHistorySidebarBase({
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<{ threadId: string | null; status: 'idle' | 'copying' | 'copied' | 'error' }>({
+    threadId: null,
+    status: 'idle',
+  });
 
   const fetchThreads = useCallback(async () => {
     setLoading(true);
@@ -196,6 +210,34 @@ function OrchestratorHistorySidebarBase({
     }
   }, []);
 
+  const handleExport = useCallback(async (threadTabId: string, fallbackTitle: string) => {
+    if (!navigator.clipboard?.writeText) {
+      console.log('[export-thread] Clipboard API unavailable for sidebar export');
+      setCopyState({ threadId: threadTabId, status: 'error' });
+      return;
+    }
+
+    setCopyState({ threadId: threadTabId, status: 'copying' });
+    try {
+      const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadTabId)}`, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data = await res.json() as { messages?: ThreadHistoryMessage[]; title?: string | null };
+      const markdown = serializeThreadToMarkdown(data.messages ?? [], {
+        title: data.title ?? fallbackTitle,
+        threadId: threadTabId,
+      });
+      await navigator.clipboard.writeText(markdown);
+      console.log(`[export-thread] Copied sidebar thread ${threadTabId} to clipboard`);
+      setCopyState({ threadId: threadTabId, status: 'copied' });
+    } catch (error) {
+      console.log('[export-thread] Failed to copy sidebar thread markdown', error);
+      setCopyState({ threadId: threadTabId, status: 'error' });
+    }
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     if (mode === 'conversations') {
@@ -211,6 +253,14 @@ function OrchestratorHistorySidebarBase({
     window.addEventListener('o8:lane-lifecycle', handler);
     return () => window.removeEventListener('o8:lane-lifecycle', handler);
   }, [mode, fetchArchivedLanes]);
+
+  useEffect(() => {
+    if (copyState.status !== 'copied' && copyState.status !== 'error') return undefined;
+    const timeout = window.setTimeout(() => {
+      setCopyState({ threadId: null, status: 'idle' });
+    }, 1800);
+    return () => window.clearTimeout(timeout);
+  }, [copyState]);
 
   const filteredThreads = useMemo(() => {
     if (!search.trim()) return threads;
@@ -510,7 +560,10 @@ function OrchestratorHistorySidebarBase({
                   {group.items.map((thread) => {
                     const isCurrent = thread.tabId === currentThreadId;
                     const isDeleting = deletingId === thread.tabId;
+                    const isHovered = hoveredThreadId === thread.tabId;
                     const runtime = threadRuntime(thread.model);
+                    const exportStatus = copyState.threadId === thread.tabId ? copyState.status : 'idle';
+                    const actionsVisible = isHovered || exportStatus !== 'idle';
                     return (
                       <div
                         key={thread.tabId}
@@ -522,26 +575,18 @@ function OrchestratorHistorySidebarBase({
                           width: 'calc(100% - 8px)',
                           marginLeft: 4,
                           marginRight: 4,
-                          borderRadius: 7,
-                          background: isCurrent ? 'var(--t-accent-soft)' : 'transparent',
+                          borderRadius: 14,
+                          background: isCurrent
+                            ? 'var(--t-accent-soft)'
+                            : isHovered
+                              ? 'var(--t-panel-hover)'
+                              : 'transparent',
                           transition: 'background 100ms',
                           opacity: isDeleting ? 0.4 : 1,
                           position: 'relative',
                         }}
-                        onMouseEnter={(event) => {
-                          if (!isCurrent) {
-                            event.currentTarget.style.background = 'var(--t-panel-hover)';
-                          }
-                          const del = event.currentTarget.querySelector('[data-delete-btn]') as HTMLElement | null;
-                          if (del) del.style.opacity = '1';
-                        }}
-                        onMouseLeave={(event) => {
-                          if (!isCurrent) {
-                            event.currentTarget.style.background = 'transparent';
-                          }
-                          const del = event.currentTarget.querySelector('[data-delete-btn]') as HTMLElement | null;
-                          if (del) del.style.opacity = '0';
-                        }}
+                        onMouseEnter={() => setHoveredThreadId(thread.tabId)}
+                        onMouseLeave={() => setHoveredThreadId((current) => (current === thread.tabId ? null : current))}
                       >
                         <button
                           type="button"
@@ -553,6 +598,7 @@ function OrchestratorHistorySidebarBase({
                             gap: 10,
                             flex: 1,
                             minWidth: 0,
+                            minHeight: 44,
                             paddingTop: 9,
                             paddingRight: 4,
                             paddingBottom: 9,
@@ -621,7 +667,53 @@ function OrchestratorHistorySidebarBase({
                         </button>
                         <button
                           type="button"
-                          data-delete-btn
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleExport(thread.tabId, thread.title);
+                          }}
+                          disabled={isDeleting || exportStatus === 'copying'}
+                          title={exportStatus === 'copied' ? 'Copied as Markdown' : 'Copy thread as Markdown'}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 44,
+                            height: 44,
+                            borderWidth: 0,
+                            borderRadius: 12,
+                            background: exportStatus === 'copied' ? 'var(--t-accent-soft)' : 'transparent',
+                            color: exportStatus === 'copied'
+                              ? 'var(--t-accent)'
+                              : exportStatus === 'error'
+                                ? 'var(--t-danger, #ef4444)'
+                                : 'var(--t-text-muted)',
+                            cursor: isDeleting || exportStatus === 'copying' ? 'default' : 'pointer',
+                            opacity: actionsVisible ? 1 : 0,
+                            transition: 'opacity 120ms ease, color 120ms ease, background 120ms ease',
+                            flexShrink: 0,
+                          }}
+                          onMouseEnter={(event) => {
+                            if (isDeleting || exportStatus === 'copying' || exportStatus === 'copied') return;
+                            event.currentTarget.style.background = 'var(--t-bg-card)';
+                            event.currentTarget.style.color = exportStatus === 'error'
+                              ? 'var(--t-danger, #ef4444)'
+                              : 'var(--t-text)';
+                          }}
+                          onMouseLeave={(event) => {
+                            event.currentTarget.style.background = exportStatus === 'copied'
+                              ? 'var(--t-accent-soft)'
+                              : 'transparent';
+                            event.currentTarget.style.color = exportStatus === 'copied'
+                              ? 'var(--t-accent)'
+                              : exportStatus === 'error'
+                                ? 'var(--t-danger, #ef4444)'
+                                : 'var(--t-text-muted)';
+                          }}
+                        >
+                          <CopyMarkdownIcon size={12} />
+                        </button>
+                        <button
+                          type="button"
                           onClick={(event) => {
                             event.stopPropagation();
                             void handleDelete(thread.tabId);
@@ -632,21 +724,21 @@ function OrchestratorHistorySidebarBase({
                             display: 'inline-flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            width: 22,
-                            height: 22,
-                            marginRight: 6,
+                            width: 44,
+                            height: 44,
+                            marginRight: 2,
                             borderWidth: 0,
-                            borderRadius: 5,
+                            borderRadius: 12,
                             background: 'transparent',
                             color: 'var(--t-text-muted)',
                             cursor: isDeleting ? 'default' : 'pointer',
-                            opacity: 0,
+                            opacity: actionsVisible ? 1 : 0,
                             transition: 'opacity 120ms ease, color 120ms ease, background 120ms ease',
                             flexShrink: 0,
                           }}
                           onMouseEnter={(event) => {
-                            event.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)';
-                            event.currentTarget.style.color = '#ef4444';
+                            event.currentTarget.style.background = 'var(--t-bg-card)';
+                            event.currentTarget.style.color = 'var(--t-danger, #ef4444)';
                           }}
                           onMouseLeave={(event) => {
                             event.currentTarget.style.background = 'transparent';
