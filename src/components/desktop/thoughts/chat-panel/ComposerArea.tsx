@@ -17,15 +17,37 @@ function ComposerStatusBar({
   displayWaiting,
   runningTools,
   activeTargetLabel,
+  latestUserMessageId,
 }: {
   displayWaiting: boolean;
   runningTools: MobileTranscriptToolCall[];
   activeTargetLabel: string;
+  latestUserMessageId: string | null;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const startedAtRef = useRef<number | null>(null);
+  const prevDisplayWaitingRef = useRef(displayWaiting);
+  const prevLatestUserMessageIdRef = useRef<string | null>(latestUserMessageId);
   const hasRunningTools = runningTools.length > 0;
   const active = displayWaiting || hasRunningTools;
+
+  // Reset the elapsed anchor on turn boundaries — either the user sent a new
+  // message (which includes steer messages fired while a previous turn is
+  // still running) or displayWaiting rose from false to true (fresh thinking
+  // starts). A single trigger doesn't cover both cases: a steer sent mid-turn
+  // never flips displayWaiting, and a fresh thinking cycle without a new user
+  // message (tool-initiated work) never bumps the user id.
+  useEffect(() => {
+    const risingEdge = displayWaiting && !prevDisplayWaitingRef.current;
+    const newUserMessage = latestUserMessageId !== null
+      && latestUserMessageId !== prevLatestUserMessageIdRef.current;
+    prevDisplayWaitingRef.current = displayWaiting;
+    prevLatestUserMessageIdRef.current = latestUserMessageId;
+    if (risingEdge || newUserMessage) {
+      startedAtRef.current = Date.now();
+      setNow(Date.now());
+    }
+  }, [displayWaiting, latestUserMessageId]);
 
   useEffect(() => {
     if (!active) {
@@ -200,6 +222,12 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     }
     return [];
   }, [chatMessages, isOrchestratorMode]);
+  const latestUserMessageId = useMemo<string | null>(() => {
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+      if (chatMessages[i].role === 'user') return chatMessages[i].id;
+    }
+    return null;
+  }, [chatMessages]);
   const isDisabled = (displayWaiting || runningTools.length > 0) || (!isOrchestratorMode && !targetAgentExists);
 
   return (
@@ -214,6 +242,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           displayWaiting={displayWaiting}
           runningTools={runningTools}
           activeTargetLabel={activeTargetLabel}
+          latestUserMessageId={latestUserMessageId}
         />
       ) : null}
       <div style={{ position: 'relative' }}>
