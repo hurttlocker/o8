@@ -16,6 +16,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { APP_FONT_STACK } from './shared';
 import { ClaudeIcon } from '../repo-registry/shared';
 import { ChevronDown, ChevronRight } from '../lucide-shims';
+import { ExternalMcpServersSection } from './mcp/ExternalMcpServersSection';
+import { MONO_FONT } from './mcp/shared';
 
 interface McpServerConfig {
   command: string;
@@ -60,8 +62,6 @@ interface ClaudeTargetStatus {
   size: number;
 }
 
-const MONO_FONT = '"SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
-
 function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div style={{ marginBottom: 12 }}>
@@ -94,7 +94,7 @@ function StatusRow({ label, ok, detail }: { label: string; ok: boolean; detail?:
       alignItems: 'center',
       gap: 8,
       fontSize: 12,
-      padding: '6px 0',
+      paddingTop: 6, paddingBottom: 6, paddingLeft: 0, paddingRight: 0,
     }}>
       <span style={{
         width: 8,
@@ -258,7 +258,7 @@ export function MCPTab() {
         {!ready ? (
           <div style={{
             marginBottom: 14,
-            padding: '14px 16px',
+            paddingTop: 14, paddingBottom: 14, paddingLeft: 16, paddingRight: 16,
             borderRadius: 12,
             background: 'rgba(239, 68, 68, 0.08)',
             border: '1px solid rgba(239, 68, 68, 0.22)',
@@ -307,6 +307,8 @@ export function MCPTab() {
           />
         </div>
       </div>
+
+      <ExternalMcpServersSection />
 
       {/* ── System details (collapsed) ── */}
       <Disclosure title="System details" subtitle="Show the runtime environment o8 is using.">
