@@ -1,28 +1,14 @@
 'use client';
 
-/**
- * SessionVisualizer — horizontal strip of active agent sessions.
- *
- * First pass ("try some stuff"). Sits at the top of the orchestrator tile,
- * above the chat body. Shows one card per active fleet agent with:
- *   - Runtime badge (codex / claude-code)
- *   - Workspace / branch label
- *   - Status dot (running / idle / waiting / error)
- *   - Headline of the current activity
- *
- * Empty state nudges the user to spawn a session via the chat composer below.
- *
- * This is a visual scaffold — click handlers are stubbed. The goal is to
- * get something on screen that reads as "here are my agents right now"
- * so we can iterate on density, affordances, and interactions.
- */
-
 import { memo, useMemo } from 'react';
 import type { FleetAgent } from './thoughts/types';
 
 interface SessionVisualizerProps {
   agents: FleetAgent[];
+  tiledSessions?: string[];
   onSelectSession?: (sessionKey: string) => void;
+  onToggleTileSession?: (sessionKey: string) => void;
+  onClearTiles?: () => void;
 }
 
 type VisualStatus = 'running' | 'waiting' | 'idle' | 'error';
@@ -52,17 +38,17 @@ const STATUS_LABELS: Record<VisualStatus, string> = {
 };
 
 function classifyStatus(rawStatus: string | undefined): VisualStatus {
-  const s = (rawStatus ?? '').toLowerCase();
-  if (s.includes('error') || s.includes('fail')) return 'error';
-  if (s.includes('wait') || s.includes('approval') || s.includes('pending')) return 'waiting';
-  if (s.includes('running') || s.includes('active') || s.includes('working')) return 'running';
+  const value = (rawStatus ?? '').toLowerCase();
+  if (value.includes('error') || value.includes('fail')) return 'error';
+  if (value.includes('wait') || value.includes('approval') || value.includes('pending')) return 'waiting';
+  if (value.includes('running') || value.includes('active') || value.includes('working')) return 'running';
   return 'idle';
 }
 
-function classifyRuntime(raw: string | undefined): VisualSession['runtime'] {
-  const r = (raw ?? '').toLowerCase();
-  if (r.includes('claude')) return 'claude-code';
-  if (r.includes('codex')) return 'codex';
+function classifyRuntime(rawRuntime: string | undefined): VisualSession['runtime'] {
+  const value = (rawRuntime ?? '').toLowerCase();
+  if (value.includes('claude')) return 'claude-code';
+  if (value.includes('codex')) return 'codex';
   return 'other';
 }
 
@@ -74,7 +60,7 @@ function runtimeLabel(runtime: VisualSession['runtime']): string {
 
 function runtimeTint(runtime: VisualSession['runtime']): string {
   if (runtime === 'claude-code') return '#c86b2b';
-  if (runtime === 'codex') return '#8b5cf6';
+  if (runtime === 'codex') return '#2563eb';
   return 'var(--t-text-muted)';
 }
 
@@ -98,8 +84,35 @@ function toVisualSession(agent: FleetAgent, index: number): VisualSession {
   };
 }
 
-function SessionVisualizerBase({ agents, onSelectSession }: SessionVisualizerProps) {
+function SplitTileIcon({
+  active,
+}: {
+  active: boolean;
+}) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3.5" y="5" width="7" height="14" rx="2.2" />
+      <rect x="13.5" y="5" width="7" height="14" rx="2.2" />
+      {active ? (
+        <>
+          <path d="M8.1 8.1l2 2" />
+          <path d="M10.1 8.1l-2 2" />
+        </>
+      ) : null}
+    </svg>
+  );
+}
+
+function SessionVisualizerBase({
+  agents,
+  tiledSessions = [],
+  onSelectSession,
+  onToggleTileSession,
+  onClearTiles,
+}: SessionVisualizerProps) {
   const sessions = useMemo(() => agents.map(toVisualSession), [agents]);
+  const tiledSet = useMemo(() => new Set(tiledSessions), [tiledSessions]);
+  const showClearTiles = tiledSessions.length > 1;
 
   return (
     <div
@@ -122,30 +135,96 @@ function SessionVisualizerBase({ agents, onSelectSession }: SessionVisualizerPro
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 8,
+          gap: 12,
         }}
       >
         <div
           style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: 'var(--t-text-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            minWidth: 0,
           }}
         >
-          Sessions
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--t-text-muted)',
+            }}
+          >
+            Sessions
+          </div>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: 'var(--t-text-faint)',
+            }}
+          >
+            {sessions.length === 0
+              ? 'None active'
+              : `${sessions.length} ${sessions.length === 1 ? 'agent' : 'agents'}`}
+          </div>
         </div>
         <div
           style={{
-            fontSize: 10,
-            fontWeight: 600,
-            color: 'var(--t-text-faint)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexShrink: 0,
           }}
         >
-          {sessions.length === 0
-            ? 'None active'
-            : `${sessions.length} ${sessions.length === 1 ? 'agent' : 'agents'}`}
+          {tiledSessions.length > 0 ? (
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: 'var(--t-text-faint)',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {`${tiledSessions.length} tiled`}
+            </div>
+          ) : null}
+          {showClearTiles ? (
+            <button
+              type="button"
+              onClick={onClearTiles}
+              style={{
+                minWidth: 96,
+                height: 44,
+                paddingTop: 0,
+                paddingRight: 14,
+                paddingBottom: 0,
+                paddingLeft: 14,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'var(--t-border)',
+                background: 'var(--t-bg-card)',
+                color: 'var(--t-text-secondary)',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.borderColor = 'var(--t-border-hover, var(--t-accent-border))';
+                event.currentTarget.style.background = 'var(--t-panel)';
+                event.currentTarget.style.color = 'var(--t-text)';
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.borderColor = 'var(--t-border)';
+                event.currentTarget.style.background = 'var(--t-bg-card)';
+                event.currentTarget.style.color = 'var(--t-text-secondary)';
+              }}
+            >
+              Clear tiles
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -155,10 +234,12 @@ function SessionVisualizerBase({ agents, onSelectSession }: SessionVisualizerPro
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            height: 56,
-            paddingLeft: 12,
+            minHeight: 56,
+            paddingTop: 0,
             paddingRight: 12,
-            borderRadius: 10,
+            paddingBottom: 0,
+            paddingLeft: 12,
+            borderRadius: 14,
             borderWidth: 1,
             borderStyle: 'dashed',
             borderColor: 'var(--t-divider-subtle)',
@@ -186,173 +267,227 @@ function SessionVisualizerBase({ agents, onSelectSession }: SessionVisualizerPro
             gap: 8,
             overflowX: 'auto',
             overflowY: 'hidden',
+            paddingTop: 2,
+            paddingRight: 0,
             paddingBottom: 2,
+            paddingLeft: 0,
             scrollbarWidth: 'thin',
-          } as React.CSSProperties}
+          }}
         >
           {sessions.map((session) => {
             const statusColor = STATUS_COLORS[session.status];
             const tint = runtimeTint(session.runtime);
+            const tiled = tiledSet.has(session.key);
+
             return (
-              <button
+              <div
                 key={session.key}
-                type="button"
-                onClick={() => onSelectSession?.(session.key)}
                 title={`${session.name} — ${session.headline}`}
                 style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 5,
-                  minWidth: 180,
-                  maxWidth: 240,
-                  paddingTop: 9,
-                  paddingRight: 12,
-                  paddingBottom: 9,
-                  paddingLeft: 12,
-                  borderRadius: 10,
+                  position: 'relative',
+                  minWidth: 196,
+                  maxWidth: 252,
+                  borderRadius: 14,
                   borderWidth: 1,
                   borderStyle: 'solid',
-                  borderColor: 'var(--t-divider-subtle)',
-                  background: 'var(--t-bg-card)',
+                  borderColor: tiled ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)',
+                  background: tiled ? 'var(--t-panel)' : 'var(--t-bg-card)',
                   color: 'var(--t-text)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
                   flexShrink: 0,
-                  transition: 'border-color 120ms ease, background 120ms ease',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  boxShadow: tiled ? '0 14px 30px rgba(37, 99, 235, 0.08)' : '0 10px 24px rgba(15, 23, 42, 0.04)',
+                  transition: 'border-color 120ms ease, background 120ms ease, transform 120ms ease',
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--t-accent-border)';
-                  e.currentTarget.style.background = 'var(--t-panel-hover)';
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.borderColor = 'var(--t-accent-border)';
+                  if (!tiled) event.currentTarget.style.background = 'var(--t-panel)';
+                  event.currentTarget.style.transform = 'translateY(-1px)';
                 }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
-                  e.currentTarget.style.background = 'var(--t-bg-card)';
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)';
+                  event.currentTarget.style.background = tiled ? 'var(--t-panel)' : 'var(--t-bg-card)';
+                  event.currentTarget.style.transform = 'translateY(0)';
                 }}
               >
-                {/* Row 1: runtime + status */}
-                <div
+                <button
+                  type="button"
+                  onClick={() => onSelectSession?.(session.key)}
                   style={{
+                    width: '100%',
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 6,
+                    flexDirection: 'column',
+                    gap: 5,
+                    paddingTop: 9,
+                    paddingRight: 52,
+                    paddingBottom: 9,
+                    paddingLeft: 12,
+                    borderRadius: 14,
+                    borderWidth: 0,
+                    background: 'transparent',
+                    color: 'inherit',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   }}
                 >
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      color: tint,
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 5,
-                        height: 5,
-                        borderRadius: '50%',
-                        background: tint,
-                      }}
-                    />
-                    {runtimeLabel(session.runtime)}
-                  </span>
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      fontSize: 9,
-                      fontWeight: 600,
-                      color: statusColor,
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: '50%',
-                        background: statusColor,
-                        boxShadow: session.status === 'running'
-                          ? `0 0 0 3px ${statusColor}22`
-                          : 'none',
-                      }}
-                    />
-                    {STATUS_LABELS[session.status]}
-                  </span>
-                </div>
-
-                {/* Row 2: name / workspace */}
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: 'var(--t-text)',
-                    letterSpacing: '-0.01em',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {session.name}
-                  {session.workspace ? (
-                    <span
-                      style={{
-                        marginLeft: 6,
-                        fontSize: 10.5,
-                        fontWeight: 500,
-                        color: 'var(--t-text-muted)',
-                      }}
-                    >
-                      · {session.workspace}
-                    </span>
-                  ) : null}
-                </div>
-
-                {/* Row 3: headline */}
-                <div
-                  style={{
-                    fontSize: 10.5,
-                    fontWeight: 500,
-                    color: 'var(--t-text-muted)',
-                    lineHeight: 1.35,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {session.headline}
-                </div>
-
-                {/* Optional row 4: context bar */}
-                {session.contextPct !== null ? (
                   <div
                     style={{
-                      marginTop: 2,
-                      height: 3,
-                      borderRadius: 2,
-                      background: 'var(--t-divider-subtle)',
-                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 6,
                     }}
                   >
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        color: tint,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          background: tint,
+                        }}
+                      />
+                      {runtimeLabel(session.runtime)}
+                    </span>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        fontSize: 9,
+                        fontWeight: 600,
+                        color: statusColor,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: statusColor,
+                          boxShadow: session.status === 'running'
+                            ? `0 0 0 3px ${statusColor}22`
+                            : 'none',
+                        }}
+                      />
+                      {STATUS_LABELS[session.status]}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: 'var(--t-text)',
+                      letterSpacing: '-0.01em',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {session.name}
+                    {session.workspace ? (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          fontSize: 10.5,
+                          fontWeight: 500,
+                          color: 'var(--t-text-muted)',
+                        }}
+                      >
+                        · {session.workspace}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 500,
+                      color: 'var(--t-text-muted)',
+                      lineHeight: 1.35,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {session.headline}
+                  </div>
+
+                  {session.contextPct !== null ? (
                     <div
                       style={{
-                        width: `${Math.min(100, Math.max(0, session.contextPct))}%`,
-                        height: '100%',
-                        background: session.contextPct > 85
-                          ? '#ef4444'
-                          : session.contextPct > 65
-                            ? '#f59e0b'
-                            : 'var(--t-accent)',
+                        marginTop: 2,
+                        height: 3,
+                        borderRadius: 2,
+                        background: 'var(--t-divider-subtle)',
+                        overflow: 'hidden',
                       }}
-                    />
-                  </div>
-                ) : null}
-              </button>
+                    >
+                      <div
+                        style={{
+                          width: `${Math.min(100, Math.max(0, session.contextPct))}%`,
+                          height: '100%',
+                          background: session.contextPct > 85
+                            ? '#ef4444'
+                            : session.contextPct > 65
+                              ? '#f59e0b'
+                              : 'var(--t-accent)',
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                </button>
+
+                <button
+                  type="button"
+                  aria-label={tiled ? `Remove ${session.name} from tiled view` : `Add ${session.name} to tiled view`}
+                  title={tiled ? 'Remove from tiled view' : 'Add to tiled view'}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleTileSession?.(session.key);
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: 6,
+                    right: 6,
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: tiled ? 'var(--t-accent-border)' : 'transparent',
+                    background: tiled ? 'var(--t-accent-soft)' : 'transparent',
+                    color: tiled ? 'var(--t-accent)' : 'var(--t-text-secondary)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.background = tiled ? 'var(--t-accent-soft)' : 'var(--t-panel)';
+                    event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'var(--t-border)';
+                    event.currentTarget.style.color = tiled ? 'var(--t-accent)' : 'var(--t-text)';
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.background = tiled ? 'var(--t-accent-soft)' : 'transparent';
+                    event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'transparent';
+                    event.currentTarget.style.color = tiled ? 'var(--t-accent)' : 'var(--t-text-secondary)';
+                  }}
+                >
+                  <SplitTileIcon active={tiled} />
+                </button>
+              </div>
             );
           })}
         </div>
