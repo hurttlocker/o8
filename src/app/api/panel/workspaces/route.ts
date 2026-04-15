@@ -165,6 +165,47 @@ function resolveGitBranch(repoPath: string) {
   }
 }
 
+// Cache of active git worktree branches per repo, used to filter ghost
+// codex sessions whose worktree has been removed. Parses `git worktree list
+// --porcelain` and returns the set of branch names currently attached to a
+// real worktree directory.
+const worktreeBranchCache = new Map<string, { branches: Set<string>; ts: number }>();
+const WORKTREE_BRANCH_CACHE_TTL = 10_000;
+
+function getActiveWorktreeBranches(repoPath: string): Set<string> {
+  const now = Date.now();
+  const cached = worktreeBranchCache.get(repoPath);
+  if (cached && now - cached.ts < WORKTREE_BRANCH_CACHE_TTL) return cached.branches;
+
+  const branches = new Set<string>();
+  try {
+    const resolved = resolveWorkspacePath(repoPath);
+    const output = execSync(`git -C "${resolved}" worktree list --porcelain 2>/dev/null`, {
+      encoding: 'utf-8',
+      timeout: 3000,
+    });
+    // Parser: entries are separated by blank lines. Each entry has `worktree
+    // <path>` and optionally `branch refs/heads/<name>`. Detached worktrees
+    // have `detached` instead of `branch` — we skip those (no branch to
+    // match against an agent's branch field).
+    for (const block of output.split(/\n\n+/)) {
+      for (const line of block.split('\n')) {
+        if (line.startsWith('branch refs/heads/')) {
+          branches.add(line.slice('branch refs/heads/'.length).trim());
+        }
+      }
+    }
+  } catch {
+    // If git fails, fall back to permissive (empty set would drop every
+    // non-main session including legitimate ones, so return the repo's
+    // current branch to avoid false negatives).
+    branches.add(resolveGitBranch(repoPath));
+  }
+
+  worktreeBranchCache.set(repoPath, { branches, ts: now });
+  return branches;
+}
+
 function getLocalDiffStats(workspace: string) {
   try {
     const isDefault = workspace === 'unknown';
@@ -300,7 +341,21 @@ async function collectWorkspaceLifecycle() {
       branchName,
     };
   }).filter((prepared) => pathBelongsToRegisteredRepo(prepared.repoPath, registeredRepoPaths))
-    .filter((prepared) => !prepared.branchName.startsWith('worktree-you-are-the-orchestrator-'));
+    .filter((prepared) => !prepared.branchName.startsWith('worktree-you-are-the-orchestrator-'))
+    .filter((prepared) => {
+      // Drop ghost workspace entries whose git worktree no longer exists.
+      // Owned codex sessions survive lane archival and worktree removal
+      // because codex keeps its own session registry — they'd otherwise
+      // linger in the left sidebar forever with status='reviewing', burying
+      // real work under stale cards. Check against the live `git worktree
+      // list` set: if the agent's branch is `main` or a branch that git
+      // still tracks as an active worktree, it's real; otherwise the
+      // worktree has been removed and the session is a ghost.
+      const branch = prepared.branchName;
+      if (!branch || branch === 'main') return true;
+      const activeBranches = getActiveWorktreeBranches(prepared.repoPath);
+      return activeBranches.has(branch);
+    });
 
   const prsByBranch = new Map<string, PRData & { ghRepo: string }>();
   for (const repoName of repoSet) {

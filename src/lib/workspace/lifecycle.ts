@@ -395,7 +395,16 @@ export function syncWorkspaceLifecycleRecords(liveInputs: LiveWorkspaceLifecycle
   }
 
   writeStore({ version: 1, records: nextRecords });
-  const views = sortViews(nextRecords.map((record) => toView(record, liveIds)));
+  // The store retains every record ever seen for history. The returned view
+  // only exposes records that are currently live OR explicitly archived by
+  // the user — stale records (not live, no archive timestamp) would
+  // otherwise linger in the sidebar forever as ghosts. When a live session
+  // ends without being archived (lane disappeared, worktree removed), drop
+  // the record from the view; history is still available via the store.
+  const visibleRecords = nextRecords.filter((record) => (
+    liveIds.has(record.id) || Boolean(record.archivedAt)
+  ));
+  const views = sortViews(visibleRecords.map((record) => toView(record, liveIds)));
   return {
     records: views,
     summary: buildSummary(views),
