@@ -449,7 +449,9 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
 
   // Sync first so reconciliation runs, then apply the release on top.
   // This prevents reconciliation from resetting the packet status after we set it.
-  const synced = await syncOrchestratorControlPlaneState(readOrchestratorControlPlaneState());
+  // Pass undefined so sync re-reads inside the mutex — otherwise we race the
+  // /api/orchestrator/state GET poll and other concurrent writers.
+  const synced = await syncOrchestratorControlPlaneState();
 
   if (result.ok) {
     for (const packetState of synced.packets) {

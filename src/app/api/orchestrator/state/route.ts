@@ -40,7 +40,12 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    const mission = await syncOrchestratorControlPlaneState(readOrchestratorControlPlaneState());
+    // Pass undefined so sync re-reads inside the mutex — reading outside the
+    // lock and then passing the snapshot in races against concurrent writers
+    // (e.g. /api/orchestrator/delegate's packet synthesis) whose writes land
+    // between our read and the lock acquisition. undefined → reconcile reads
+    // fresh state inside the lock.
+    const mission = await syncOrchestratorControlPlaneState();
     return NextResponse.json(buildStateResponse(mission), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
