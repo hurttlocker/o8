@@ -80,27 +80,21 @@ export async function POST(request: NextRequest) {
       lane: null,
     };
 
-    // Write the packet under the shared orchestrator-state mutex — otherwise a
-    // concurrent reconcile (lane archive, headless sprint tick, etc.) races the
-    // read-modify-write cycle and the new packet disappears from disk before
-    // the lane even opens. #460 introduced withLockedState specifically for
-    // this class of racey read-append-write against orchestrator-state.json.
-    const { withLockedState, writeOrchestratorControlPlaneState } = await import(
-      '@/lib/orchestrator/control-plane'
-    );
+    // Append the packet by MUTATING the state object passed into the
+    // withLockedState callback. Critical: do NOT call writeOrchestratorControlPlaneState
+    // from inside the callback — withLockedState's post-callback reconcile uses
+    // the ORIGINAL `current` reference and writes that, which would clobber any
+    // direct write we made ourselves. Mutation is the working pattern because
+    // reconcile re-reads the mutated fields from the same object.
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
     await withLockedState((current) => {
-      writeOrchestratorControlPlaneState({
-        ...current,
-        version: 2,
-        missionId: current.missionId || `delegate-${Date.now().toString(36)}`,
-        prompt: current.prompt || `Delegated work: ${taskName}`,
-        summary: current.summary || `Delegate dispatches routed through /api/orchestrator/delegate.`,
-        repoPath: current.repoPath || repoPath,
-        runtime: current.runtime || 'codex',
-        constraints: current.constraints || '',
-        packets: [...current.packets, packet],
-        updatedAt: now,
-      });
+      current.packets.push(packet);
+      if (!current.missionId) current.missionId = `delegate-${Date.now().toString(36)}`;
+      if (!current.prompt) current.prompt = `Delegated work: ${taskName}`;
+      if (!current.summary) current.summary = `Delegate dispatches routed through /api/orchestrator/delegate.`;
+      if (!current.repoPath) current.repoPath = repoPath;
+      if (!current.runtime) current.runtime = 'codex';
+      current.updatedAt = now;
     });
 
     // Step 2: Open a lane bound to the synthesized packet

@@ -1,10 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { aggregateMissionCost } from '@/lib/orchestrator/cost-aggregator';
-import {
-  readOrchestratorControlPlaneState,
-  syncOrchestratorControlPlaneState,
-} from '@/lib/orchestrator/control-plane';
+import { syncOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 
@@ -22,7 +19,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    const mission = await syncOrchestratorControlPlaneState(readOrchestratorControlPlaneState());
+    const mission = await syncOrchestratorControlPlaneState();
     const cost = await aggregateMissionCost(mission);
     return jsonResponse({ cost });
   } catch (error) {
@@ -39,7 +36,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({})) as { mission?: OrchestratorMissionState };
     const mission = body.mission
       ? normalizeOrchestratorMissionState(body.mission)
-      : await syncOrchestratorControlPlaneState(readOrchestratorControlPlaneState());
+      : await syncOrchestratorControlPlaneState();
     const cost = await aggregateMissionCost(mission);
     return jsonResponse({ cost });
   } catch (error) {
