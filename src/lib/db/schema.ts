@@ -136,6 +136,28 @@ export const sessions = sqliteTable('sessions', {
 });
 
 // ══════════════════════════════════════════════════════════════════
+//  Chat History — mirrored session ledger for persisted transcripts
+// ══════════════════════════════════════════════════════════════════
+
+export const chatHistory = sqliteTable('chat_history', {
+  tabId: text('tab_id').primaryKey(),
+  messagesJson: text('messages_json').notNull().default('[]'),
+  model: text('model'),
+  savedAt: text('saved_at'),
+  modifiedAt: text('modified_at').notNull().default(sql`(datetime('now'))`),
+  starred: integer('starred', { mode: 'boolean' }).notNull().default(false),
+  title: text('title'),
+  planText: text('plan_text'),
+  repoName: text('repo_name'),
+  repoPath: text('repo_path'),
+  repoBranch: text('repo_branch'),
+  remoteUrl: text('remote_url'),
+}, (table) => ({
+  modifiedAtIdx: index('idx_chat_history_modified_at').on(table.modifiedAt),
+  repoPathIdx: index('idx_chat_history_repo_path').on(table.repoPath),
+}));
+
+// ══════════════════════════════════════════════════════════════════
 //  Teams — multi-user organizations
 // ══════════════════════════════════════════════════════════════════
 

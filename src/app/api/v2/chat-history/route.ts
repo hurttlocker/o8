@@ -23,6 +23,12 @@ function safePath(tabId: string): string {
   return join(HISTORY_DIR, `${safe}.json`);
 }
 
+function normalizePlanText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export async function GET(request: NextRequest) {
   const tabId = request.nextUrl.searchParams.get('tabId');
   if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
@@ -38,6 +44,7 @@ export async function GET(request: NextRequest) {
       savedAt: null,
       starred: false,
       title: null,
+      planText: null,
       repoName: null,
       repoPath: null,
       repoBranch: null,
@@ -69,6 +76,7 @@ export async function POST(request: NextRequest) {
   // Preserve starred status from existing file
   let starred = false;
   let title: string | undefined;
+  let planText: string | undefined;
   let repoName: string | undefined;
   let repoPath: string | undefined;
   let repoBranch: string | undefined;
@@ -77,6 +85,7 @@ export async function POST(request: NextRequest) {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
     starred = existing.starred || false;
     title = existing.title;
+    planText = normalizePlanText(existing.planText);
     repoName = existing.repoName;
     repoPath = existing.repoPath;
     repoBranch = existing.repoBranch;
@@ -89,6 +98,7 @@ export async function POST(request: NextRequest) {
     savedAt: new Date().toISOString(),
     starred: body.starred ?? starred,
     title: body.title ?? title,
+    planText: normalizePlanText(body.planText) ?? planText,
     repoName: body.repoName ?? repoName,
     repoPath: body.repoPath ?? repoPath,
     repoBranch: body.repoBranch ?? repoBranch,
@@ -107,6 +117,7 @@ export async function PATCH(request: NextRequest) {
     const data = JSON.parse(readFileSync(filePath, 'utf-8'));
     if (body.starred !== undefined) data.starred = body.starred;
     if (body.title !== undefined) data.title = body.title;
+    if (body.planText !== undefined) data.planText = normalizePlanText(body.planText) ?? null;
     if (body.repoName !== undefined) data.repoName = body.repoName;
     if (body.repoPath !== undefined) data.repoPath = body.repoPath;
     if (body.repoBranch !== undefined) data.repoBranch = body.repoBranch;
