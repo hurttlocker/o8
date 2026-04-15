@@ -532,6 +532,26 @@ export function useRepoCardModel({
     void refreshWorktreeSummary();
   }, [expanded, refreshWorktreeSummary]);
 
+  // #532 — refetch branches + worktree summary whenever a lane lifecycle event
+  // fires while this card is expanded. Without this the sidebar keeps showing
+  // merged/archived branches until the operator manually collapses and
+  // re-expands the card. Subscription is gated on `expanded` so collapsed
+  // cards don't subscribe to events they won't render.
+  useEffect(() => {
+    if (!expanded) return;
+    const handleLifecycle = () => {
+      fetch(`/api/panel/branches?path=${encodeURIComponent(repo.localPath)}`)
+        .then((response) => response.json())
+        .then((data) => setBranches(data.branches ?? []))
+        .catch(() => {});
+      void refreshWorktreeSummary();
+    };
+    window.addEventListener('o8:lane-lifecycle', handleLifecycle);
+    return () => {
+      window.removeEventListener('o8:lane-lifecycle', handleLifecycle);
+    };
+  }, [expanded, refreshWorktreeSummary, repo.localPath]);
+
   useEffect(() => {
     if (!expanded || !workspaceNotice) return;
     void refreshWorktreeSummary();
