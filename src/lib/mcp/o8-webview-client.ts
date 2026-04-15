@@ -104,7 +104,10 @@ function resolveImageDataCandidate(value: unknown): string | null {
 
 function getImageDimensions(base64Data: string): { width: number; height: number } {
   const bytes = Buffer.from(base64Data, 'base64');
+  return getImageDimensionsFromBytes(bytes);
+}
 
+function getImageDimensionsFromBytes(bytes: Buffer): { width: number; height: number } {
   if (isPng(bytes)) {
     return {
       width: bytes.readUInt32BE(16),
@@ -117,6 +120,17 @@ function getImageDimensions(base64Data: string): { width: number; height: number
   }
 
   throw new Error('Unsupported screenshot image format returned by o8 webview socket');
+}
+
+function detectImageMimeType(base64Data: string, fallbackMimeType: string): string {
+  const bytes = Buffer.from(base64Data, 'base64');
+  if (isPng(bytes)) {
+    return 'image/png';
+  }
+  if (isJpeg(bytes)) {
+    return JPEG_MIME_TYPE;
+  }
+  return fallbackMimeType;
 }
 
 function isPng(bytes: Buffer): boolean {
@@ -335,15 +349,16 @@ export class O8WebviewClient {
     process.once('exit', cleanup);
   }
 
-  async screenshot(): Promise<{ imageBase64: string; width: number; height: number }> {
+  async screenshot(): Promise<{ imageBase64: string; mimeType: string; width: number; height: number }> {
     const result = await this.sendCommand('take_screenshot', {
       window_label: DEFAULT_WINDOW_LABEL,
       save_to_disk: false,
       thumbnail: false,
     });
-    const { base64 } = extractDataUrlPayload(result);
+    const { base64, mimeType } = extractDataUrlPayload(result);
+    const resolvedMimeType = detectImageMimeType(base64, mimeType);
     const { width, height } = getImageDimensions(base64);
-    return { imageBase64: base64, width, height };
+    return { imageBase64: base64, mimeType: resolvedMimeType, width, height };
   }
 
   async snapshot(): Promise<{ tree: string }> {
