@@ -15,6 +15,7 @@ interface ChatMessageListProps {
   thoughtsElevatedShadow: string;
   emptyStateOverride?: React.ReactNode;
   emptyStateFallback: React.ReactNode;
+  topContent?: React.ReactNode;
 }
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
@@ -28,6 +29,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   thoughtsElevatedShadow,
   emptyStateOverride,
   emptyStateFallback,
+  topContent,
 }, chatEndRef) {
   const showEmptyWithOverride = displayMessages.length === 0 && !displayWaiting && emptyStateOverride;
   const showEmptyWithFallback = displayMessages.length === 0 && !displayWaiting && !emptyStateOverride;
@@ -55,6 +57,8 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
         </div>
       ) : null}
       {showEmptyWithFallback ? emptyStateFallback : null}
+
+      {topContent}
 
       {displayMessages.map((msg, index) => (
         <DesktopAgentMessage
