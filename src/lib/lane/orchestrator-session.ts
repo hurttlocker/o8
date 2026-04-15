@@ -307,6 +307,17 @@ function buildOrchestratorSystemPrompt(repoPath: string): string {
     `- **Time budget awareness.** You have roughly 2–3 minutes of wall clock per turn before the user assumes you're stuck. Prioritize dispatch first, analysis second. If you have 2 agents to launch and time for 1 deep analysis, launch both and skip the analysis.`,
     `- **Trust the governance layer.** The lane reaper, merge gate, approval flow, and supervisor auto-steering all run independently. You do not need to baby-sit dispatched agents in the same turn you launched them. Launch → report → end turn. Review is a separate turn triggered by a follow-up user message or supervisor event.`,
     ``,
+    `## HOW TURNS ACTUALLY END (READ THIS CAREFULLY)`,
+    ``,
+    `The Claude Code CLI in -p mode ends your turn the moment you stop emitting assistant content. That means: **if you run tool calls and then don't write a text summary immediately after, the turn ends silently and the user sees only the tool history with no verdict.** This is the #1 failure mode. It has happened on every review turn so far.`,
+    ``,
+    `Concrete rules that prevent this:`,
+    ``,
+    `1. **Summary text ALWAYS comes after the last tool call, in the same turn.** Never run a tool and then stop. The turn is not over until you have written the summary.`,
+    `2. **Do not promise a summary. Write it.** Phrases like "then I'll summarize", "let me check and then report", "I'll give you the verdict after this" are forbidden. If you catch yourself typing one, delete it and just write the summary now.`,
+    `3. **Your final assistant message is text. Not a tool call.** If the last thing you emitted was a tool call result, the turn is broken — always write a text summary after reading the tool results.`,
+    `4. **Over-budget is better than under-delivered.** If you are running out of turn budget and have tools still to run, stop running tools and write the summary with what you have so far ("ESLint timed out but TypeScript passed; recommending approve with note…"). Half a verdict is infinitely more useful than no verdict.`,
+    ``,
     `## FINAL-MESSAGE FORMAT FOR DISPATCH`,
     ``,
     `When you dispatch N agents in a turn, end with exactly this shape:`,
@@ -320,6 +331,21 @@ function buildOrchestratorSystemPrompt(repoPath: string): string {
     `\`\`\``,
     ``,
     `Nothing else. No plan, no analysis, no "I will check back." The user sees the surfaceIds, trusts the governance layer, and moves on.`,
+    ``,
+    `## FINAL-MESSAGE FORMAT FOR REVIEW`,
+    ``,
+    `When you review completed agent work, end EVERY review turn with exactly this shape — one VERDICT block per lane you reviewed. This block is not optional; turns that end without it are considered failed and the user has to re-dispatch you.`,
+    ``,
+    `\`\`\``,
+    `VERDICT #<issue> — <approve | reject | needs-follow-up>`,
+    `Lane: <laneId>`,
+    `Diff summary: <2-3 sentences of what changed>`,
+    `Typecheck: <pass | fail + specific error>`,
+    `Concerns: <bullet list, or "none">`,
+    `Next action: <approve_and_merge | cortex_steer_agent with nudge | reject with reason>`,
+    `\`\`\``,
+    ``,
+    `If you verified the work but the governance tools can't reach the approval yet (permissions, ordering), still write the VERDICT block and name the exact command you would run — the user will fire it. The verdict IS the deliverable. Running the approval is mechanical; writing the judgment is the part only you can do.`,
     ``,
     `## YOUR ROLE`,
     ``,
@@ -555,6 +581,20 @@ export async function sendToOrchestrator(
     let lineBuffer = '';
     let sessionId: string | null = session.claudeSessionId;
     let cost: number | null = null;
+    // Accumulate the tail of the assistant's final text so we can detect
+    // narrate-and-exit turns — where the model runs tools and then ends the
+    // turn without emitting a VERDICT or Dispatched summary.
+    let lastAssistantText = '';
+    let sawToolUseAfterText = false;
+    const captureEvent = (e: OrchestratorEvent) => {
+      if (e.type === 'text') {
+        lastAssistantText += e.text;
+        sawToolUseAfterText = false;
+      } else if (e.type === 'tool_use') {
+        sawToolUseAfterText = true;
+      }
+      onEvent(e);
+    };
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       lineBuffer += chunk.toString('utf-8');
@@ -565,7 +605,7 @@ export async function sendToOrchestrator(
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line) as Record<string, unknown>;
-          processStreamEvent(event, onEvent, (id) => { sessionId = id; }, (c) => { cost = c; });
+          processStreamEvent(event, captureEvent, (id) => { sessionId = id; }, (c) => { cost = c; });
         } catch {
           // Not JSON — ignore
         }
@@ -594,7 +634,7 @@ export async function sendToOrchestrator(
       if (lineBuffer.trim()) {
         try {
           const event = JSON.parse(lineBuffer) as Record<string, unknown>;
-          processStreamEvent(event, onEvent, (id) => { sessionId = id; }, (c) => { cost = c; });
+          processStreamEvent(event, captureEvent, (id) => { sessionId = id; }, (c) => { cost = c; });
         } catch {
           // ignore
         }
@@ -603,6 +643,23 @@ export async function sendToOrchestrator(
       // Update session state
       if (sessionId) session.claudeSessionId = sessionId;
       session.status = code === 0 ? 'ready' : 'dead';
+
+      // Narrate-and-exit telemetry: a clean-exit turn should END with a text
+      // summary that includes a VERDICT or Dispatched marker. If the last
+      // assistant content was a tool call and no subsequent text was emitted,
+      // the model silently dropped the turn — log it so we can measure how
+      // often the new prompt rules are holding.
+      if (code === 0) {
+        const tail = lastAssistantText.trim().slice(-1200);
+        const hasSummaryMarker = /VERDICT\s*[#\-]|Dispatched\s+\d+\s+agent/i.test(tail);
+        if (sawToolUseAfterText || !hasSummaryMarker) {
+          console.warn(
+            `[orchestrator-session] narrate-and-exit suspected for ${session.sessionName}: ` +
+            `sawToolUseAfterText=${sawToolUseAfterText} hasSummaryMarker=${hasSummaryMarker} ` +
+            `tailLen=${tail.length}`,
+          );
+        }
+      }
 
       onEvent({ type: 'done', sessionId, cost });
 

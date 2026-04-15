@@ -28,6 +28,15 @@ function generateEventId(): string {
   return `evt-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
 }
 
+// session_lost grace period: reconciliation runs frequently and session
+// discovery has transient blind spots (runtime adapter restart, polling race,
+// slow gateway). Without a grace period a healthy agent can flip to
+// session_lost within seconds even though its process is still writing files
+// in the worktree. Require the key to be missing for this many ms before we
+// fire session_lost.
+const SESSION_LOST_GRACE_MS = 90_000;
+const sessionMissingSince = new Map<string, number>();
+
 function getLaneDb() {
   const db = getDb();
   if (!db) {
@@ -429,11 +438,25 @@ export function reconcileLanesWithSessions(
       if (lane.sessionKey) {
         const session = sessionByKey.get(lane.sessionKey);
         if (!session) {
+          // Grace period: transient discovery blind spots should not fire
+          // session_lost. Record when the key was first seen missing and only
+          // act after SESSION_LOST_GRACE_MS has elapsed. If the key reappears
+          // on a later tick the timer is cleared below.
+          const firstMissingAt = sessionMissingSince.get(lane.sessionKey) ?? Date.now();
+          sessionMissingSince.set(lane.sessionKey, firstMissingAt);
+          const missingFor = Date.now() - firstMissingAt;
+          if (missingFor < SESSION_LOST_GRACE_MS) {
+            // Still within grace window — leave lane alone this tick.
+            continue;
+          }
+
           console.log('[session-lifecycle] session_lost detected', {
             laneId: lane.id,
             sessionKey: lane.sessionKey,
             status: lane.status,
+            missingMs: missingFor,
           });
+          sessionMissingSince.delete(lane.sessionKey);
           const nextValues: Partial<typeof lanes.$inferInsert> = {
             sessionKey: null,
             updatedAt: nowIso(),
@@ -459,6 +482,9 @@ export function reconcileLanesWithSessions(
           laneBySession.delete(lane.sessionKey);
           continue;
         }
+
+        // Session came back (or never went missing) — clear any pending grace timer.
+        sessionMissingSince.delete(lane.sessionKey);
 
         const nextValues: Partial<typeof lanes.$inferInsert> = {};
         let lifecycleTimestamp: string | null = null;
