@@ -3167,25 +3167,25 @@ async function bootstrapWsServer() {
           if (outcome === 'completed') {
             const {
               autoCommitCompletionWorktree,
-              runCompletionTypecheck,
+              runCompletionVerification,
             } = await import('@/lib/supervisor/completion-verification');
-            const typecheck = await runCompletionTypecheck(completionCwd);
+            const verification = await runCompletionVerification(completionCwd);
 
-            if (!typecheck.ok) {
-              console.warn(`[supervisor] Agent ${surfaceId} failed post-completion typecheck in ${completionCwd}`);
+            if (!verification.ok) {
+              console.warn(`[supervisor] Agent ${surfaceId} failed post-completion ${verification.kind} in ${completionCwd}`);
               const packetId = lane.packetId?.trim();
               if (!packetId) {
                 setLaneStatus(lane.id, 'awaiting_input', 'system', 'post_completion_typecheck_packet_missing');
                 queueOrchestratorEscalation(
                   lane.repoPath,
                   [
-                    `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion typecheck, but lane ${lane.id} is no longer bound to a packet.`,
+                    `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion ${verification.kind}, but lane ${lane.id} is no longer bound to a packet.`,
                     '',
                     'Cannot enter the bounded retry flow without a packet binding.',
                     '',
-                    'Typecheck output:',
+                    `Verification (${verification.kind}) output:`,
                     '```',
-                    typecheck.output,
+                    verification.output,
                     '```',
                     '',
                     'Decide: inspect the lane/worktree manually and either re-queue the packet or request changes.',
@@ -3193,7 +3193,7 @@ async function bootstrapWsServer() {
                 );
                 return {
                   block: true,
-                  detail: 'Post-completion typecheck failed, but the lane is not bound to a packet. Operator input is required.',
+                  detail: `Post-completion ${verification.kind} failed, but the lane is not bound to a packet. Operator input is required.`,
                 };
               }
 
@@ -3225,13 +3225,13 @@ async function bootstrapWsServer() {
                   queueOrchestratorEscalation(
                     lane.repoPath,
                     [
-                      `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion typecheck, but packet ${packetId} was not found in mission state.`,
+                      `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion ${verification.kind}, but packet ${packetId} was not found in mission state.`,
                       '',
                       'Cannot enter the bounded retry flow because the packet metadata is missing.',
                       '',
-                      'Typecheck output:',
+                      `Verification (${verification.kind}) output:`,
                       '```',
-                      typecheck.output,
+                      verification.output,
                       '```',
                       '',
                       'Decide: inspect the mission state, re-bind/reset the packet if needed, and then relaunch or request changes.',
@@ -3239,7 +3239,7 @@ async function bootstrapWsServer() {
                   );
                   return {
                     block: true,
-                    detail: 'Post-completion typecheck failed, but the packet could not be found in mission state. Operator input is required.',
+                    detail: `Post-completion ${verification.kind} failed, but the packet could not be found in mission state. Operator input is required.`,
                   };
                 }
 
@@ -3253,7 +3253,7 @@ async function bootstrapWsServer() {
                     completionCwd,
                     packetId,
                     attemptNumber,
-                    buildAttemptLearningFromFailure(typecheck.output, completionContext.selfReview),
+                    buildAttemptLearningFromFailure(verification.output, completionContext.selfReview),
                   );
                   await autoCommitCompletionWorktree(completionCwd);
                   updateLane(
@@ -3287,7 +3287,7 @@ async function bootstrapWsServer() {
                   return;
                 }
 
-                const currentLearning = buildAttemptLearningFromFailure(typecheck.output);
+                const currentLearning = buildAttemptLearningFromFailure(verification.output);
                 const priorLearnings = await readAttemptLearnings(completionCwd);
                 const learningSummary = [
                   ...priorLearnings.map((learning) => `- Attempt ${learning.attempt}: ${learning.summary}`),
@@ -3298,7 +3298,7 @@ async function bootstrapWsServer() {
                 queueOrchestratorEscalation(
                   lane.repoPath,
                   [
-                    `[SUPERVISOR] Packet ${packetSnapshot.referenceLabel} (${packetId}) exhausted bounded retries after failing post-completion typecheck.`,
+                    `[SUPERVISOR] Packet ${packetSnapshot.referenceLabel} (${packetId}) exhausted bounded retries after failing post-completion ${verification.kind}.`,
                     '',
                     `Lane: ${lane.id}`,
                     `Agent: ${surfaceId}`,
@@ -3308,9 +3308,9 @@ async function bootstrapWsServer() {
                     'Learnings summary:',
                     learningSummary,
                     '',
-                    'Typecheck output:',
+                    `Verification (${verification.kind}) output:`,
                     '```',
-                    typecheck.output,
+                    verification.output,
                     '```',
                     '',
                     'Decide: inspect the worktree, apply the fix manually or reset/re-queue the packet with a new approach.',
@@ -3319,7 +3319,7 @@ async function bootstrapWsServer() {
                 console.warn(`[ralph-loop] Max attempts (${maxAttempts}) exhausted for packet ${packetId}, escalating to operator`);
                 return {
                   block: true,
-                  detail: `Post-completion typecheck failed after ${attemptNumber}/${maxAttempts} attempts. Operator input is required.`,
+                  detail: `Post-completion ${verification.kind} failed after ${attemptNumber}/${maxAttempts} attempts. Operator input is required.`,
                 };
               } catch (retryError) {
                 updateLane(lane.id, { packetId }, 'system');
@@ -3327,16 +3327,16 @@ async function bootstrapWsServer() {
                 queueOrchestratorEscalation(
                   lane.repoPath,
                   [
-                    `[SUPERVISOR] Packet ${packetId} failed post-completion typecheck, and the bounded retry handoff failed.`,
+                    `[SUPERVISOR] Packet ${packetId} failed post-completion ${verification.kind}, and the bounded retry handoff failed.`,
                     '',
                     `Lane: ${lane.id}`,
                     `Agent: ${surfaceId}`,
                     '',
                     `Retry handoff failure: ${retryError instanceof Error ? retryError.message : String(retryError)}`,
                     '',
-                    'Typecheck output:',
+                    `Verification (${verification.kind}) output:`,
                     '```',
-                    typecheck.output,
+                    verification.output,
                     '```',
                     '',
                     'Decide: inspect the worktree and either repair/re-queue the packet manually or request changes.',
@@ -3345,7 +3345,7 @@ async function bootstrapWsServer() {
                 console.error('[ralph-loop] Failed to process bounded retry handoff:', retryError);
                 return {
                   block: true,
-                  detail: 'Post-completion typecheck failed and the bounded retry handoff also failed. Operator input is required.',
+                  detail: `Post-completion ${verification.kind} failed and the bounded retry handoff also failed. Operator input is required.`,
                 };
               }
             }

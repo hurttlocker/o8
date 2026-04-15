@@ -1,13 +1,23 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { buildRuleCheckFailureMessage, runRuleCheck } from './rule-check';
+
 const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 const TYPECHECK_TIMEOUT_MS = 120_000;
 const TYPECHECK_OUTPUT_LIMIT = 12_000;
 
+export type CompletionVerificationKind = 'typecheck' | 'rule-check';
+
 export interface CompletionTypecheckResult {
   ok: boolean;
+  output: string;
+}
+
+export interface CompletionVerificationResult {
+  ok: boolean;
+  kind: CompletionVerificationKind;
   output: string;
 }
 
@@ -49,6 +59,40 @@ export async function runCompletionTypecheck(cwd: string): Promise<CompletionTyp
       ),
     };
   }
+}
+
+export async function runCompletionVerification(cwd: string): Promise<CompletionVerificationResult> {
+  const typecheck = await runCompletionTypecheck(cwd);
+  if (!typecheck.ok) {
+    return {
+      ok: false,
+      kind: 'typecheck',
+      output: typecheck.output,
+    };
+  }
+
+  const ruleCheck = await runRuleCheck(cwd);
+  if (!ruleCheck.ok) {
+    return {
+      ok: false,
+      kind: 'rule-check',
+      output: buildRuleCheckFailureMessage(ruleCheck),
+    };
+  }
+
+  return { ok: true, kind: 'typecheck', output: '' };
+}
+
+export function buildVerificationFailureSteerMessage(result: CompletionVerificationResult): string {
+  if (result.kind === 'rule-check') {
+    return [
+      'Post-completion rule check failed. Do not stop here.',
+      'These are CLAUDE.md invariants enforced by the supervisor — fix every violation and report completion again.',
+      '',
+      result.output,
+    ].join('\n');
+  }
+  return buildTypecheckFailureSteerMessage(result.output);
 }
 
 export async function autoCommitCompletionWorktree(cwd: string): Promise<boolean> {
