@@ -354,6 +354,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             <button
               type="button"
               onClick={handleNewConversation}
+              aria-label="New orchestrator conversation"
               title="New orchestrator conversation"
               style={{
                 position: 'absolute',
@@ -361,24 +362,30 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
                 left: historyOpen ? 272 : 90,
                 display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                width: 24,
+                gap: 5,
                 height: 24,
+                paddingTop: 0,
+                paddingRight: 9,
+                paddingBottom: 0,
+                paddingLeft: 8,
                 borderRadius: 7,
                 borderWidth: 0,
                 background: 'transparent',
                 color: 'var(--t-text-muted)',
+                fontSize: 11,
+                fontWeight: 500,
                 cursor: 'pointer',
-                transition: 'left 200ms ease, color 120ms ease',
+                transition: 'left 200ms ease, background 120ms ease, color 120ms ease',
                 zIndex: 2,
               }}
               onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text-secondary)'; e.currentTarget.style.background = 'var(--t-bg-card)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; e.currentTarget.style.background = 'transparent'; }}
             >
-              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
                 <path d="M12 5v14" />
                 <path d="M5 12h14" />
               </svg>
+              New
             </button>
           ) : null}
           <ThoughtsChatPanel
