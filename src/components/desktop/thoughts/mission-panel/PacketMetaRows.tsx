@@ -1,7 +1,12 @@
 'use client';
 
+import { BranchPickerPopover } from '@/components/desktop/thoughts/BranchPickerPopover';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
+import {
+  clearPacketBranchBlockedReason,
+  hasPacketBranchTarget,
+} from '@/components/desktop/thoughts/mission-panel/branchTarget';
 import type { EditingField } from './types';
 
 interface PacketMetaRowsProps {
@@ -23,6 +28,7 @@ export function PacketMetaRows({
   const isEditingRuntime = editingField?.packetId === packet.id && editingField.field === 'runtime';
   const isEditingRepo = editingField?.packetId === packet.id && editingField.field === 'repo';
   const isEditingBranch = editingField?.packetId === packet.id && editingField.field === 'branch';
+  const canEditBranch = packet.queueState === 'draft';
 
   const workspaceLabel = packet.workspaceTargetPath
     ? (workspaceTargets.find((t) => t.localPath === packet.workspaceTargetPath)?.label ?? packet.workspaceTargetPath.split('/').pop() ?? 'target')
@@ -240,7 +246,12 @@ export function PacketMetaRows({
             <button
               type="button"
               onClick={() => {
-                onPatch((current) => ({ ...current, workspaceTargetPath: null }));
+                onPatch((current) => ({
+                  ...current,
+                  workspaceTargetPath: null,
+                  branchTarget: '',
+                  blockedReason: clearPacketBranchBlockedReason(current.blockedReason),
+                }));
                 onEditingFieldChange(null);
               }}
               style={{
@@ -271,7 +282,8 @@ export function PacketMetaRows({
                     onPatch((current) => ({
                       ...current,
                       workspaceTargetPath: target.localPath,
-                      branchTarget: target.branch ?? current.branchTarget,
+                      branchTarget: '',
+                      blockedReason: clearPacketBranchBlockedReason(current.blockedReason),
                     }));
                     onEditingFieldChange(null);
                   }}
@@ -310,51 +322,44 @@ export function PacketMetaRows({
       </div>
 
       {/* Branch row */}
-      <div data-packet-row>
-        {isEditingBranch ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10 }}>
-            <span style={rowLabelStyle}>branch</span>
-            <input
-              autoFocus
-              value={packet.branchTarget}
-              onChange={(event) => onPatch((current) => ({ ...current, branchTarget: event.target.value }))}
-              onBlur={() => onEditingFieldChange(null)}
-              onKeyDown={(event) => { if (event.key === 'Enter') onEditingFieldChange(null); }}
-              placeholder="branch"
-              style={{
-                flex: 1,
-                minWidth: 0,
-                paddingTop: 4,
-                paddingRight: 8,
-                paddingBottom: 4,
-                paddingLeft: 8,
-                borderRadius: 6,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: 'var(--t-accent-border)',
-                background: 'var(--t-input-bg)',
-                fontSize: 11.5,
-                color: 'var(--t-text)',
-                outline: 'none',
-                fontFamily: 'inherit',
-              }}
-            />
-          </div>
-        ) : (
+      <div data-packet-row style={{ position: 'relative' }}>
+        {canEditBranch ? (
           <button
             type="button"
-            onClick={() => onEditingFieldChange({ packetId: packet.id, field: 'branch' })}
+            onClick={() => onEditingFieldChange(isEditingBranch ? null : { packetId: packet.id, field: 'branch' })}
             style={rowChromeStyle}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <span style={rowLabelStyle}>branch</span>
-            <span style={{ ...rowValueStyle, color: packet.branchTarget ? 'var(--t-text)' : 'var(--t-text-faint)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}>
-              {packet.branchTarget || 'main'}
+            <span style={{ ...rowValueStyle, color: hasPacketBranchTarget(packet.branchTarget) ? 'var(--t-text)' : 'var(--t-text-faint)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}>
+              {hasPacketBranchTarget(packet.branchTarget) ? packet.branchTarget : 'Select branch'}
             </span>
             {chevron}
           </button>
+        ) : (
+          <div style={{ ...rowChromeStyle, cursor: 'default' }}>
+            <span style={rowLabelStyle}>branch</span>
+            <span style={{ ...rowValueStyle, color: hasPacketBranchTarget(packet.branchTarget) ? 'var(--t-text)' : 'var(--t-text-faint)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}>
+              {hasPacketBranchTarget(packet.branchTarget) ? packet.branchTarget : 'Not set'}
+            </span>
+          </div>
         )}
+        {isEditingBranch && canEditBranch ? (
+          <BranchPickerPopover
+            open={isEditingBranch}
+            workspaceTargetPath={packet.workspaceTargetPath}
+            selectedBranch={packet.branchTarget}
+            onSelect={(branchName) => {
+              onPatch((current) => ({
+                ...current,
+                branchTarget: branchName,
+                blockedReason: clearPacketBranchBlockedReason(current.blockedReason),
+              }));
+            }}
+            onClose={() => onEditingFieldChange(null)}
+          />
+        ) : null}
       </div>
     </>
   );

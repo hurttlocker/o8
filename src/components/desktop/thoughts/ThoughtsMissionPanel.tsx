@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   OrchestratorLaneBinding,
   OrchestratorMissionState,
@@ -16,6 +16,13 @@ import type {
   RepoIssuesGroup,
   ReviewPanelState,
 } from './mission-panel/types';
+import {
+  clearPacketBranchBlockedReason,
+  fetchPacketBranches,
+  findCurrentPacketBranch,
+  hasPacketBranchTarget,
+  PACKET_BRANCH_REQUIRED_REASON,
+} from './mission-panel/branchTarget';
 import { IssueGroupList } from './mission-panel/IssueGroupList';
 import { PacketCard } from './mission-panel/PacketCard';
 
@@ -55,6 +62,8 @@ export function ThoughtsMissionPanel({
   const [expandedPacketId, setExpandedPacketId] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [reviewStateByPacketId, setReviewStateByPacketId] = useState<Record<string, ReviewPanelState>>({});
+  const branchAutofillAttemptRef = useRef<Record<string, string>>({});
+  const branchRequestByRepoPathRef = useRef<Record<string, Promise<Awaited<ReturnType<typeof fetchPacketBranches>>>>>({});
 
   // Close editing field on Escape or click outside any row in the
   // expanded packet card.
@@ -150,7 +159,6 @@ export function ThoughtsMissionPanel({
           title: issue.title,
           summary: `#${issue.number} — ${issue.title}`,
           workspaceTargetPath: target?.localPath ?? null,
-          branchTarget: target?.branch ?? 'main',
           queueState: 'draft',
         }),
       ],
@@ -187,7 +195,53 @@ export function ThoughtsMissionPanel({
     });
   }, []);
 
+  const getBranchesForWorkspace = useCallback((workspaceTargetPath: string) => {
+    const existingRequest = branchRequestByRepoPathRef.current[workspaceTargetPath];
+    if (existingRequest) return existingRequest;
+    const request = fetchPacketBranches(workspaceTargetPath)
+      .finally(() => {
+        delete branchRequestByRepoPathRef.current[workspaceTargetPath];
+      });
+    branchRequestByRepoPathRef.current[workspaceTargetPath] = request;
+    return request;
+  }, []);
+
+  useEffect(() => {
+    missionState.packets.forEach((packet) => {
+      if (packet.queueState !== 'draft') return;
+      if (!packet.workspaceTargetPath) return;
+      if (hasPacketBranchTarget(packet.branchTarget)) return;
+
+      const attemptKey = `${packet.id}:${packet.workspaceTargetPath}`;
+      if (branchAutofillAttemptRef.current[packet.id] === attemptKey) return;
+      branchAutofillAttemptRef.current[packet.id] = attemptKey;
+
+      void getBranchesForWorkspace(packet.workspaceTargetPath)
+        .then((branches) => {
+          const currentBranch = findCurrentPacketBranch(branches);
+          if (!currentBranch) return;
+          patchPacket(packet.id, (current) => {
+            if (current.workspaceTargetPath !== packet.workspaceTargetPath) return current;
+            if (hasPacketBranchTarget(current.branchTarget)) return current;
+            return {
+              ...current,
+              branchTarget: currentBranch.name,
+              blockedReason: clearPacketBranchBlockedReason(current.blockedReason),
+            };
+          });
+        })
+        .catch(() => {});
+    });
+  }, [getBranchesForWorkspace, missionState.packets, patchPacket]);
+
   const handleLaunchPacket = useCallback(async (packet: OrchestratorPacket) => {
+    if (!hasPacketBranchTarget(packet.branchTarget)) {
+      patchPacket(packet.id, (current) => ({
+        ...current,
+        blockedReason: PACKET_BRANCH_REQUIRED_REASON,
+      }));
+      return;
+    }
     try {
       const binding = await onLaunchPacket?.(packet);
       patchPacket(packet.id, (current) => ({
