@@ -10,6 +10,7 @@ export type OrchestratorPermissionMode = 'full' | 'plan';
 
 interface OrchestratorStreamResult {
   messages: MobileTranscriptEntry[];
+  planText: string | null;
   status: OrchestratorStreamStatus;
   send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max' }) => void;
   reset: () => void;
@@ -40,8 +41,12 @@ function getWsUrl(): string {
  * Connects to ws-server on port 3002, subscribes to the orchestrator channel,
  * and accumulates output into renderable MobileTranscriptEntry messages.
  */
-export function useOrchestratorStream(repoPath: string | null): OrchestratorStreamResult {
+export function useOrchestratorStream(
+  repoPath: string | null,
+  options?: { seededPlanText?: string | null; hasHistory?: boolean },
+): OrchestratorStreamResult {
   const [messages, setMessages] = useState<MobileTranscriptEntry[]>([]);
+  const [planText, setPlanText] = useState<string | null>(null);
   const [status, setStatus] = useState<OrchestratorStreamStatus>('connecting');
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -52,6 +57,53 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
   const repoPathRef = useRef(repoPath);
   repoPathRef.current = repoPath;
   const mountedRef = useRef(false);
+  const messagesRef = useRef<MobileTranscriptEntry[]>([]);
+  const planTextRef = useRef<string | null>(null);
+  const hasHistoryRef = useRef(Boolean(options?.hasHistory));
+  const captureFirstTurnPlanRef = useRef(false);
+  const firstTurnPlanStartedRef = useRef(false);
+  const firstTurnPlanChunksRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    hasHistoryRef.current = Boolean(options?.hasHistory);
+  }, [options?.hasHistory]);
+
+  useEffect(() => {
+    const seededPlanText = options?.seededPlanText?.trim();
+    if (!seededPlanText || planTextRef.current === seededPlanText) {
+      return;
+    }
+
+    planTextRef.current = seededPlanText;
+    setPlanText(seededPlanText);
+  }, [options?.seededPlanText]);
+
+  const resetFirstTurnPlanCapture = useCallback(() => {
+    captureFirstTurnPlanRef.current = false;
+    firstTurnPlanStartedRef.current = false;
+    firstTurnPlanChunksRef.current = [];
+  }, []);
+
+  const finalizeFirstTurnPlanCapture = useCallback(() => {
+    if (!captureFirstTurnPlanRef.current || planTextRef.current) {
+      resetFirstTurnPlanCapture();
+      return;
+    }
+
+    const nextPlanText = firstTurnPlanChunksRef.current.join('').trim();
+    resetFirstTurnPlanCapture();
+
+    if (!nextPlanText) {
+      return;
+    }
+
+    planTextRef.current = nextPlanText;
+    setPlanText(nextPlanText);
+  }, [resetFirstTurnPlanCapture]);
 
   const flushCurrentAssistant = useCallback(() => {
     const current = currentAssistantRef.current;
@@ -120,6 +172,13 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
           if (!text) break;
           const isThinking = msg.data?.thinking === true;
 
+          if (!isThinking && captureFirstTurnPlanRef.current) {
+            if (firstTurnPlanStartedRef.current || text.trim()) {
+              firstTurnPlanStartedRef.current = true;
+              firstTurnPlanChunksRef.current.push(text);
+            }
+          }
+
           // Start a new assistant message if we don't have one
           if (!currentAssistantRef.current) {
             currentAssistantRef.current = {
@@ -148,6 +207,7 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
             // When agent goes ready, finalize current assistant message
             // and mark any running tools as done
             if (newStatus === 'ready' && currentAssistantRef.current) {
+              finalizeFirstTurnPlanCapture();
               flushCurrentAssistant();
               const finalId = currentAssistantRef.current.id;
               setMessages(prev => prev.map(m =>
@@ -156,6 +216,9 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
                   : m
               ));
               currentAssistantRef.current = null;
+            }
+            if (newStatus === 'dead') {
+              finalizeFirstTurnPlanCapture();
             }
           } else if (newStatus === 'starting') {
             setStatus('connecting');
@@ -201,6 +264,7 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
 
         case 'tool-use': {
           const toolName = typeof msg.data?.name === 'string' ? msg.data.name : 'unknown';
+          finalizeFirstTurnPlanCapture();
 
           // Ensure we have a current assistant message to attach the tool call to
           if (!currentAssistantRef.current) {
@@ -245,6 +309,7 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
         case 'error': {
           const error = typeof msg.data?.error === 'string' ? msg.data.error : 'Unknown error';
           console.error('[orchestrator-stream] Error:', error);
+          finalizeFirstTurnPlanCapture();
           setStatus('error');
           setMessages(prev => [...prev, {
             id: `orch-error-${Date.now()}`,
@@ -318,6 +383,11 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
 
     // Reset current assistant accumulator for the new response
     currentAssistantRef.current = null;
+    captureFirstTurnPlanRef.current = !planTextRef.current
+      && !hasHistoryRef.current
+      && !messagesRef.current.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
+    firstTurnPlanStartedRef.current = false;
+    firstTurnPlanChunksRef.current = [];
     setStatus('busy');
 
     const payload = JSON.stringify({
@@ -351,9 +421,12 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
 
   const reset = useCallback(() => {
     setMessages([]);
+    setPlanText(null);
     currentAssistantRef.current = null;
+    planTextRef.current = null;
+    resetFirstTurnPlanCapture();
     setStatus(connected ? 'ready' : 'connecting');
-  }, [connected]);
+  }, [connected, resetFirstTurnPlanCapture]);
 
-  return { messages, status, send, reset, connected };
+  return { messages, planText, status, send, reset, connected };
 }
