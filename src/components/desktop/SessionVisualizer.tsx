@@ -11,11 +11,12 @@ interface SessionVisualizerProps {
   onClearTiles?: () => void;
 }
 
-type VisualStatus = 'running' | 'waiting' | 'idle' | 'error';
+export type VisualStatus = 'running' | 'waiting' | 'idle' | 'error';
+export type VisualRuntime = 'codex' | 'claude-code' | 'other';
 
 interface VisualSession {
   key: string;
-  runtime: 'codex' | 'claude-code' | 'other';
+  runtime: VisualRuntime;
   name: string;
   workspace: string | null;
   status: VisualStatus;
@@ -23,7 +24,7 @@ interface VisualSession {
   contextPct: number | null;
 }
 
-const STATUS_COLORS: Record<VisualStatus, string> = {
+export const STATUS_COLORS: Record<VisualStatus, string> = {
   running: '#22c55e',
   waiting: '#f59e0b',
   idle: '#64748b',
@@ -37,7 +38,7 @@ const STATUS_LABELS: Record<VisualStatus, string> = {
   error: 'Error',
 };
 
-function classifyStatus(rawStatus: string | undefined): VisualStatus {
+export function classifyStatus(rawStatus: string | undefined): VisualStatus {
   const value = (rawStatus ?? '').toLowerCase();
   if (value.includes('error') || value.includes('fail')) return 'error';
   if (value.includes('wait') || value.includes('approval') || value.includes('pending')) return 'waiting';
@@ -45,7 +46,7 @@ function classifyStatus(rawStatus: string | undefined): VisualStatus {
   return 'idle';
 }
 
-function classifyRuntime(rawRuntime: string | undefined): VisualSession['runtime'] {
+export function classifyRuntime(rawRuntime: string | undefined): VisualRuntime {
   const value = (rawRuntime ?? '').toLowerCase();
   if (value.includes('claude')) return 'claude-code';
   if (value.includes('codex')) return 'codex';
