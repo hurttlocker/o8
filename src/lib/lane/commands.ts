@@ -321,6 +321,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           prompt: command.prompt,
           repoPath: lane.worktreePath ?? lane.repoPath,
           baseBranch: lane.baseBranch,
+          model: command.model,
           isolate: !lane.worktreePath,
           skipSetup: true,
           existingLaneId: command.laneId,
