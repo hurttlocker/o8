@@ -72,8 +72,17 @@ function resolveCortexMcpServerPath(): { command: string; path: string } {
 
 const MCP_CONFIG_DIR = join(homedir(), '.o8', 'mcp');
 const LOG_PREFIX = '[orchestrator-rehydrate]';
-/** #457 — Kill the claude process if it doesn't finish within this window */
-const PROCESS_TIMEOUT_MS = 90_000;
+/**
+ * #457 — Kill the claude process if it doesn't finish within this window.
+ *
+ * Set to 8 minutes (was 90s). Review turns on Opus 4.6 that read multiple
+ * agent transcripts, diff worktrees, run typecheck, and write a VERDICT block
+ * legitimately take 3-5 minutes. The old 90s budget SIGKILLed review turns
+ * mid-stream, which is what produced the "narrate-and-exit" failure mode —
+ * the model would narrate a plan, start running tools, and get killed before
+ * it could emit the final summary. Bumping this is the root fix.
+ */
+const PROCESS_TIMEOUT_MS = 480_000;
 
 let startupRehydrationPromise: Promise<void> | null = null;
 let startupRehydrationComplete = false;
@@ -337,6 +346,18 @@ export function getOrchestratorSession(repoPath: string): OrchestratorSession | 
     // Startup rehydration is best-effort; callers can still create a fresh session.
   });
   return sessions.get(orchestratorSessionName(repoPath)) ?? null;
+}
+
+// ── Reset session (clears claudeSessionId so next message starts fresh) ──
+
+export function resetOrchestratorSession(repoPath: string): boolean {
+  const session = getOrchestratorSession(repoPath);
+  if (!session) return false;
+  session.claudeSessionId = null;
+  session.status = 'ready';
+  session.proc = null;
+  console.log(`[orchestrator-session] Reset ${session.sessionName} — next message will start a fresh conversation`);
+  return true;
 }
 
 // ── Ensure session exists ──
