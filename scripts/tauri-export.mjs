@@ -226,6 +226,19 @@ compileServerBundle('ws-server', 'src/ws-server.ts', NATIVE_EXTERNALS);
 compileServerBundle('operator-mcp-server', 'src/lib/mcp/operator-mcp-server.ts', NATIVE_EXTERNALS);
 compileServerBundle('cortex-mcp-server', 'src/lib/mcp/cortex-mcp-server.ts', NATIVE_EXTERNALS);
 
+// ── Copy runtime-read prompt templates next to the bundles ──
+// orchestrator-session.ts resolves orchestrator.md via `import.meta.url`, so
+// the file has to sit next to the bundled ws-server.mjs at runtime. In dev it
+// lives alongside the source file; here we mirror it into out/server/.
+const ORCHESTRATOR_PROMPT_SRC = join(root, 'src', 'lib', 'lane', 'orchestrator.md');
+const ORCHESTRATOR_PROMPT_DST = join(server, 'orchestrator.md');
+if (existsSync(ORCHESTRATOR_PROMPT_SRC)) {
+  cpSync(ORCHESTRATOR_PROMPT_SRC, ORCHESTRATOR_PROMPT_DST);
+} else {
+  console.error('❌ Missing orchestrator.md at', ORCHESTRATOR_PROMPT_SRC);
+  process.exit(1);
+}
+
 // ── Sanity check: every expected standalone bundle must exist ──
 // Belt-and-braces guard against future compile failures slipping through.
 const REQUIRED_BUNDLES = ['ws-server.mjs', 'operator-mcp-server.mjs', 'cortex-mcp-server.mjs'];
