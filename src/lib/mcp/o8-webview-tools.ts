@@ -15,8 +15,6 @@ type McpTool = {
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<McpToolResult>;
 
-const SCREENSHOT_MIME_TYPE = 'image/jpeg';
-
 function textResult(text: string, isError = false): McpToolResult {
   return {
     content: [{ type: 'text', text }],
@@ -28,10 +26,10 @@ function jsonResult(data: unknown, isError = false): McpToolResult {
   return textResult(JSON.stringify(data), isError);
 }
 
-function imageResult(base64: string, meta: Record<string, unknown>): McpToolResult {
+function imageResult(base64: string, mimeType: string, meta: Record<string, unknown>): McpToolResult {
   return {
     content: [
-      { type: 'image', data: base64, mimeType: SCREENSHOT_MIME_TYPE },
+      { type: 'image', data: base64, mimeType },
       { type: 'text', text: JSON.stringify(meta) },
     ],
   };
@@ -201,11 +199,11 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
   return {
     o8_view_screenshot: async () => withStructuredErrors(async () => {
       const screenshot = await getClient().screenshot();
-      return imageResult(screenshot.imageBase64, {
+      return imageResult(screenshot.imageBase64, screenshot.mimeType, {
         ok: true,
         width: screenshot.width,
         height: screenshot.height,
-        mimeType: SCREENSHOT_MIME_TYPE,
+        mimeType: screenshot.mimeType,
       });
     }),
 
