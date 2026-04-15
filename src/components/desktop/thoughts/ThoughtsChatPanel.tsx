@@ -755,6 +755,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         ref={chatEndRef}
         displayMessages={displayMessages}
         displayWaiting={displayWaiting}
+        repoPath={resolvedRepoPath}
         activeTargetLabel={activeTargetLabel}
         activeTargetColor={activeTargetColor}
         thoughtsBodyBackground={thoughtsBodyBackground}
