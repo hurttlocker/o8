@@ -24,6 +24,61 @@ export const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
   { id: 'gpt-4o', label: 'GPT-4o', color: '#10b981' },
 ];
 
+const OPENCODE_MODEL_COLOR = '#fb923c';
+
+const OPENCODE_PROVIDER_MAP: Record<string, { label: string; models: Array<{ id: string; label: string }> }> = {
+  anthropic: {
+    label: 'Anthropic',
+    models: [
+      { id: 'opencode/claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+      { id: 'opencode/claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+    ],
+  },
+  openai: {
+    label: 'OpenAI',
+    models: [
+      { id: 'opencode/gpt-4o', label: 'GPT-4o' },
+      { id: 'opencode/o3', label: 'o3' },
+    ],
+  },
+  google: {
+    label: 'Google',
+    models: [
+      { id: 'opencode/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+      { id: 'opencode/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+    ],
+  },
+  xai: {
+    label: 'xAI',
+    models: [
+      { id: 'opencode/grok-3', label: 'Grok 3' },
+    ],
+  },
+};
+
+const OPENCODE_FALLBACK: WorkspaceCliModelOption[] = [
+  { id: 'opencode/default', label: 'OpenCode (default)', color: OPENCODE_MODEL_COLOR },
+];
+
+export function getOpenCodeModels(authedProviders: string[]): WorkspaceCliModelOption[] {
+  if (authedProviders.length === 0) return OPENCODE_FALLBACK;
+
+  const models: WorkspaceCliModelOption[] = [];
+  for (const provider of authedProviders) {
+    const info = OPENCODE_PROVIDER_MAP[provider.trim().toLowerCase()];
+    if (!info) continue;
+    for (const model of info.models) {
+      models.push({
+        id: model.id,
+        label: model.label,
+        color: OPENCODE_MODEL_COLOR,
+      });
+    }
+  }
+
+  return models.length > 0 ? models : OPENCODE_FALLBACK;
+}
+
 export const CLI_SUGGESTED_PROMPTS = [
   { icon: 'Idea', text: 'Summarize the current repo state', description: 'Quickly orient this CLI session to the local checkout' },
   { icon: 'Search', text: 'Find the files related to the current bug', description: 'Search the repo and point me to the likely change surface' },
