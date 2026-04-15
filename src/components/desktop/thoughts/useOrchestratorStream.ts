@@ -59,7 +59,10 @@ export function useOrchestratorStream(
   const mountedRef = useRef(false);
   const messagesRef = useRef<MobileTranscriptEntry[]>([]);
   const planTextRef = useRef<string | null>(null);
-  const hasHistoryRef = useRef(Boolean(options?.hasHistory));
+  const hasHistory = options?.hasHistory ?? false;
+  const seededPlanText = options?.seededPlanText ?? null;
+
+  const hasHistoryRef = useRef(Boolean(hasHistory));
   const captureFirstTurnPlanRef = useRef(false);
   const firstTurnPlanStartedRef = useRef(false);
   const firstTurnPlanChunksRef = useRef<string[]>([]);
@@ -69,18 +72,18 @@ export function useOrchestratorStream(
   }, [messages]);
 
   useEffect(() => {
-    hasHistoryRef.current = Boolean(options?.hasHistory);
-  }, [options?.hasHistory]);
+    hasHistoryRef.current = Boolean(hasHistory);
+  }, [hasHistory]);
 
   useEffect(() => {
-    const seededPlanText = options?.seededPlanText?.trim();
-    if (!seededPlanText || planTextRef.current === seededPlanText) {
+    const trimmed = seededPlanText?.trim();
+    if (!trimmed || planTextRef.current === trimmed) {
       return;
     }
 
-    planTextRef.current = seededPlanText;
-    setPlanText(seededPlanText);
-  }, [options?.seededPlanText]);
+    planTextRef.current = trimmed;
+    setPlanText(trimmed);
+  }, [seededPlanText]);
 
   const resetFirstTurnPlanCapture = useCallback(() => {
     captureFirstTurnPlanRef.current = false;
