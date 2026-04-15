@@ -21,6 +21,7 @@ import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
+import { DesignModeOverlay } from '@/components/desktop/DesignModeOverlay';
 import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
@@ -90,6 +91,7 @@ import { useSetupWizard } from './hooks/useSetupWizard';
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
+import { useDesignMode } from '@/hooks/useDesignMode';
 import { createTileRegistry } from './tileRegistry';
 
 /* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
@@ -147,6 +149,7 @@ function DashboardInner() {
   const [inTauri, setInTauri] = useState(false);
   useEffect(() => { setInTauri(isTauri()); initMcpPlugin(); }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
+  const designMode = useDesignMode();
 
   // ── Grouped state hooks ──
   const uiChrome = useUIChrome();
@@ -1165,6 +1168,13 @@ function DashboardInner() {
     });
   }, []);
 
+  const handleDesignModeCapture = useCallback((contextText: string) => {
+    setThoughtsDraftInjection({
+      id: globalThis.crypto?.randomUUID?.() ?? `design-mode-${Date.now()}`,
+      text: contextText,
+    });
+  }, [setThoughtsDraftInjection]);
+
   const injectPayloadIntoRepoChat = useCallback((payload: AgentPanelChatInjectionPayload, repoOverride?: WorkspaceSidePanelRepo | null) => {
     const nextInjection = {
       id: `${payload.reason}-${Date.now()}`,
@@ -2108,6 +2118,15 @@ function DashboardInner() {
             onClose={onClose}
           />
         )}
+      />
+
+      <DesignModeOverlay
+        active={designMode.state.active}
+        selection={designMode.state.selection}
+        captureRequestId={designMode.captureRequestId}
+        onSelectionChange={designMode.setSelection}
+        onCapture={handleDesignModeCapture}
+        onClose={designMode.close}
       />
 
       <AnimatePresence initial={false}>
