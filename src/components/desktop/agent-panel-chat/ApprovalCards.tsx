@@ -1,6 +1,7 @@
 'use client';
 
 import React, { memo, useState } from 'react';
+import { ApprovalReviewScreenshot } from '@/components/desktop/ApprovalReviewScreenshot';
 import { Sparkles } from '../lucide-shims';
 import { THEME_ACCENT_SOFT, THEME_ACCENT, THEME_ACCENT_BORDER, THEME_BG_CARD } from './constants';
 import { relativeTimeLabel } from './shared';
@@ -378,6 +379,8 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
               }}>
                 {approval.description}
               </div>
+
+              <ApprovalReviewScreenshot approval={approval} />
 
               <GateReportSection approval={approval} />
 
