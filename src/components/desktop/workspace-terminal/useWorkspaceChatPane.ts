@@ -5,13 +5,14 @@ import { buildLinkedIssueContext } from '@/components/desktop/IssueLinkPicker';
 import {
   CLAUDE_CLI_MODELS,
   CODEX_CLI_MODELS,
+  getOpenCodeModels,
 } from '@/components/desktop/workspace-terminal/constants';
 import type {
-  RegisteredRepo,
   TerminalTab,
   WorkspaceCliModelOption,
   WorkspaceLlmMessage,
 } from '@/components/desktop/workspace-terminal/types';
+import { getCachedOpenCodeProviders, loadOpenCodeProviders } from '@/lib/setup/detection-cache';
 import {
   buildQueuedContextCard,
   buildWorkspaceThinkingStep,
@@ -28,7 +29,6 @@ import type {
   MobileTranscriptThinkingStep,
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
-import type { LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
 
 interface UseWorkspaceChatPaneOptions {
   tab: TerminalTab;
@@ -50,6 +50,7 @@ export function useWorkspaceChatPane({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
+  const [openCodeProviders, setOpenCodeProviders] = useState<string[]>(() => getCachedOpenCodeProviders());
   const [queuedContextCards, setQueuedContextCards] = useState<ReturnType<typeof buildQueuedContextCard>[]>([]);
   const [liveAssistantId, setLiveAssistantId] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
@@ -71,10 +72,11 @@ export function useWorkspaceChatPane({
   const messagesRef = useRef<MobileTranscriptEntry[]>([]);
   const stickToBottomRef = useRef(true);
   const handledDraftInjectionRef = useRef<string | null>(null);
+  const openCodeProvidersLoadedRef = useRef(openCodeProviders.length > 0);
 
   const messages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
   const tabId = tab.id;
-  const chatRuntime = tab.chatRuntime;
+  const chatRuntime = tab.chatRuntime as 'codex' | 'claude-code' | 'opencode' | undefined;
   const chatSessionKey = tab.chatSessionKey;
   const linkedIssue = tab.linkedIssue ?? null;
   const normalizedSessionKey = useMemo(
@@ -86,12 +88,16 @@ export function useWorkspaceChatPane({
     [chatRuntime, chatSessionKey],
   );
   const runtimeLabel = useMemo(
-    () => ({ codex: 'Codex', 'claude-code': 'Claude Code' } as const)[tab.chatRuntime ?? 'codex'],
-    [tab.chatRuntime],
+    () => ({ codex: 'Codex', 'claude-code': 'Claude Code', opencode: 'OpenCode' } as const)[chatRuntime ?? 'codex'],
+    [chatRuntime],
   );
   const availableModels = useMemo<WorkspaceCliModelOption[]>(
-    () => (chatRuntime === 'claude-code' ? CLAUDE_CLI_MODELS : CODEX_CLI_MODELS),
-    [chatRuntime],
+    () => {
+      if (chatRuntime === 'claude-code') return CLAUDE_CLI_MODELS;
+      if (chatRuntime === 'opencode') return getOpenCodeModels(openCodeProviders);
+      return CODEX_CLI_MODELS;
+    },
+    [chatRuntime, openCodeProviders],
   );
   const selectedModel = useMemo(
     () => availableModels.find((model) => model.id === tab.chatModel) ?? availableModels[0],
@@ -99,6 +105,18 @@ export function useWorkspaceChatPane({
   );
   const isAgentTab = isAgentRuntimeTab(tab);
   const isRuntimeBound = Boolean(normalizedSessionKey && isAgentTab);
+
+  useEffect(() => {
+    if (chatRuntime !== 'opencode' || openCodeProvidersLoadedRef.current) return;
+    openCodeProvidersLoadedRef.current = true;
+    let cancelled = false;
+    void loadOpenCodeProviders().then((providers) => {
+      if (!cancelled) setOpenCodeProviders(providers);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatRuntime]);
 
   useEffect(() => {
     messagesRef.current = messages;

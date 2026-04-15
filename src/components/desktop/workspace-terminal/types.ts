@@ -54,7 +54,7 @@ export interface TerminalTab {
 
 export type LocalhostPreview = DetectedLocalhostPreview;
 export type { PreviewSelectionPayload };
-export type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'chat';
+export type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'opencode' | 'chat';
 
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
