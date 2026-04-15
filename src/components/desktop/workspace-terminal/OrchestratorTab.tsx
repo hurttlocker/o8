@@ -2,16 +2,17 @@
 
 /**
  * OrchestratorTab — full-workspace orchestrator surface inside a
- * WorkspaceTerminal tab. Three-pane layout:
+ * WorkspaceTerminal tab. Header + four-pane layout:
  *
- *   ┌───────┬────────────────────┬──────────┐
- *   │History│ Chat (ThoughtsChat)│ Mission  │
- *   │(260px)│                    │(320px)   │
- *   │ left  │                    │ right    │
- *   └───────┴────────────────────┴──────────┘
+ *   ┌────────────────────────────────────────┐
+ *   │ Header: History | Agents | Mission    │
+ *   ├───────┬────────┬────────────────┬─────┤
+ *   │History│ Agents │ Chat           │Mission
+ *   │(260px)│(280px) │ ThoughtsChat   │(340px)
+ *   └───────┴────────┴────────────────┴─────┘
  *
  * Both side panels are collapsed by default and toggle via the header
- * (History button, Mission button). This lets the orchestrator host
+ * (History, Agents, Mission). This lets the orchestrator host
  * past-conversation browsing AND mission planning without ever leaving
  * the chat — no tab switching, no lost flow.
  *
@@ -19,7 +20,7 @@
  * dashboard level) so WorkspaceTerminal doesn't prop-drill them.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import {
   readOrchestratorRuntimePreference,
@@ -32,6 +33,7 @@ import {
 } from '@/components/desktop/OrchestratorEmptyState';
 import { OrchestratorHistorySidebar } from '@/components/desktop/OrchestratorHistorySidebar';
 import { SessionVisualizer } from '@/components/desktop/SessionVisualizer';
+import { UnifiedAgentsSidebar } from '@/components/desktop/UnifiedAgentsSidebar';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import {
   ThoughtsChatPanel,
@@ -74,7 +76,10 @@ function persistPermissionMode(tabId: string, mode: ThoughtsChatPermissionMode):
 }
 
 const HISTORY_OPEN_KEY = 'o8:orchestrator:history-open';
+const AGENTS_OPEN_KEY = 'o8:orchestrator:agents-open';
 const MISSION_OPEN_KEY = 'o8:orchestrator:mission-open';
+
+const USERS_THREE_ICON_PATH = 'M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z';
 
 function readBooleanPref(key: string): boolean {
   if (typeof window === 'undefined') return false;
@@ -94,6 +99,103 @@ function writeBooleanPref(key: string, value: boolean): void {
   }
 }
 
+function HeaderToggleButton({
+  active,
+  label,
+  title,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  label: string;
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      style={{
+        height: 44,
+        paddingTop: 0,
+        paddingRight: 14,
+        paddingBottom: 0,
+        paddingLeft: 14,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: active ? 'var(--t-accent-border)' : 'var(--t-border)',
+        background: active ? 'var(--t-accent-soft)' : 'transparent',
+        color: active ? 'var(--t-accent)' : 'var(--t-text-secondary)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        cursor: 'pointer',
+        flexShrink: 0,
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: '-0.01em',
+        transition: 'background 180ms ease, border-color 180ms ease, color 180ms ease',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+      }}
+      onMouseEnter={(event) => {
+        if (active) return;
+        event.currentTarget.style.background = 'var(--t-bg-card)';
+        event.currentTarget.style.borderColor = 'var(--t-border)';
+        event.currentTarget.style.color = 'var(--t-text)';
+      }}
+      onMouseLeave={(event) => {
+        if (active) return;
+        event.currentTarget.style.background = 'transparent';
+        event.currentTarget.style.borderColor = 'var(--t-border)';
+        event.currentTarget.style.color = 'var(--t-text-secondary)';
+      }}
+    >
+      {children}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function ClockIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+function RocketIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }} aria-hidden="true">
+      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
+      <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
+      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" />
+      <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
+    </svg>
+  );
+}
+
+function UsersThreeIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 256 256" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
+      <path d={USERS_THREE_ICON_PATH} fill="currentColor" />
+    </svg>
+  );
+}
+
+function PlusIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }} aria-hidden="true">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
 export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: OrchestratorTabProps) {
   const data = useOrchestratorData();
 
@@ -110,6 +212,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     threadId: null,
   });
   const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
+  const [agentsOpen, setAgentsOpen] = useState(() => readBooleanPref(AGENTS_OPEN_KEY));
   const [missionOpen, setMissionOpen] = useState(() => readBooleanPref(MISSION_OPEN_KEY));
   const [tiledSessions, setTiledSessions] = useState<string[]>([]);
   const [tileDockExpanded, setTileDockExpanded] = useState(true);
@@ -157,6 +260,14 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     setHistoryOpen((prev) => {
       const next = !prev;
       writeBooleanPref(HISTORY_OPEN_KEY, next);
+      return next;
+    });
+  }, []);
+
+  const handleToggleAgents = useCallback(() => {
+    setAgentsOpen((prev) => {
+      const next = !prev;
+      writeBooleanPref(AGENTS_OPEN_KEY, next);
       return next;
     });
   }, []);
@@ -334,6 +445,104 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
         </div>
       ) : null}
 
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          paddingTop: 10,
+          paddingRight: 14,
+          paddingBottom: 10,
+          paddingLeft: 14,
+          borderBottomWidth: '0.5px',
+          borderBottomStyle: 'solid',
+          borderBottomColor: 'var(--t-divider-subtle)',
+          background: 'var(--t-panel)',
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            minWidth: 0,
+            flexWrap: 'wrap',
+          }}
+        >
+          <HeaderToggleButton
+            active={historyOpen}
+            label="History"
+            title={historyOpen ? 'Hide orchestrator history' : 'Show orchestrator history'}
+            onClick={handleToggleHistory}
+          >
+            <ClockIcon size={14} />
+          </HeaderToggleButton>
+          <HeaderToggleButton
+            active={agentsOpen}
+            label="Agents"
+            title={agentsOpen ? 'Hide live agents' : 'Show live agents'}
+            onClick={handleToggleAgents}
+          >
+            <UsersThreeIcon size={14} />
+          </HeaderToggleButton>
+          <HeaderToggleButton
+            active={missionOpen}
+            label="Mission"
+            title={missionOpen ? 'Hide Mission Control' : 'Show Mission Control'}
+            onClick={handleToggleMission}
+          >
+            <RocketIcon size={14} />
+          </HeaderToggleButton>
+        </div>
+
+        {hasMessages ? (
+          <button
+            type="button"
+            onClick={handleNewConversation}
+            aria-label="New orchestrator conversation"
+            title="New orchestrator conversation"
+            style={{
+              height: 44,
+              paddingTop: 0,
+              paddingRight: 14,
+              paddingBottom: 0,
+              paddingLeft: 14,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-border)',
+              background: 'var(--t-bg-card)',
+              color: 'var(--t-text-secondary)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              flexShrink: 0,
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              transition: 'background 180ms ease, border-color 180ms ease, color 180ms ease',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.background = 'var(--t-panel)';
+              event.currentTarget.style.borderColor = 'var(--t-border)';
+              event.currentTarget.style.color = 'var(--t-text)';
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.background = 'var(--t-bg-card)';
+              event.currentTarget.style.borderColor = 'var(--t-border)';
+              event.currentTarget.style.color = 'var(--t-text-secondary)';
+            }}
+          >
+            <PlusIcon size={13} />
+            <span>New</span>
+          </button>
+        ) : null}
+      </div>
+
       {/* Session visualizer — only when there are active sessions.
           Clicking a card opens that agent's live transcript in a workspace
           terminal tab instead of spilling the running output inline. */}
@@ -347,7 +556,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
         />
       ) : null}
 
-      {/* 3-pane body: History | Chat | Mission */}
+      {/* 4-pane body: History | Agents | Chat | Mission */}
       <div
         style={{
           flex: 1,
@@ -367,6 +576,13 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             : undefined}
         />
 
+        <UnifiedAgentsSidebar
+          open={agentsOpen}
+          agents={agents}
+          onClose={handleToggleAgents}
+          onSelectSession={data.onSelectSession}
+        />
+
         {/* Center: chat body */}
         <div
           style={{
@@ -377,92 +593,6 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             position: 'relative',
           }}
         >
-          {/* Inline History pill — matches the Assistant tab's floating
-              history link. Positioned at the top-left of the chat area so
-              it's discoverable but doesn't take a header slot. */}
-          <button
-            type="button"
-            onClick={handleToggleHistory}
-            title="Orchestrator history"
-            style={{
-              position: 'absolute',
-              top: 10,
-              left: 12,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              height: 24,
-              paddingTop: 0,
-              paddingRight: 9,
-              paddingBottom: 0,
-              paddingLeft: 8,
-              borderRadius: 7,
-              borderWidth: 0,
-              background: historyOpen ? 'var(--t-accent-soft)' : 'transparent',
-              color: historyOpen ? 'var(--t-accent)' : 'var(--t-text-muted)',
-              fontSize: 11,
-              fontWeight: 500,
-              cursor: 'pointer',
-              transition: 'background 120ms ease, color 120ms ease',
-              zIndex: 2,
-            }}
-            onMouseEnter={(event) => {
-              if (!historyOpen) {
-                event.currentTarget.style.background = 'var(--t-bg-card)';
-                event.currentTarget.style.color = 'var(--t-text-secondary)';
-              }
-            }}
-            onMouseLeave={(event) => {
-              if (!historyOpen) {
-                event.currentTarget.style.background = 'transparent';
-                event.currentTarget.style.color = 'var(--t-text-muted)';
-              }
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-              <circle cx="12" cy="12" r="9" />
-              <polyline points="12 7 12 12 15 14" />
-            </svg>
-            History
-          </button>
-          {hasMessages ? (
-            <button
-              type="button"
-              onClick={handleNewConversation}
-              aria-label="New orchestrator conversation"
-              title="New orchestrator conversation"
-              style={{
-                position: 'absolute',
-                top: 10,
-                left: historyOpen ? 272 : 90,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                height: 24,
-                paddingTop: 0,
-                paddingRight: 9,
-                paddingBottom: 0,
-                paddingLeft: 8,
-                borderRadius: 7,
-                borderWidth: 0,
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                fontSize: 11,
-                fontWeight: 500,
-                cursor: 'pointer',
-                transition: 'left 200ms ease, background 120ms ease, color 120ms ease',
-                zIndex: 2,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text-secondary)'; e.currentTarget.style.background = 'var(--t-bg-card)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; e.currentTarget.style.background = 'transparent'; }}
-            >
-              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
-              New
-            </button>
-          ) : null}
           {isTiled ? (
             <div
               style={{
