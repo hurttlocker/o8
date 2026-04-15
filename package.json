@@ -13,6 +13,7 @@
     "start": "sh -c 'next start -p \"${PORT:-3001}\"'",
     "lint": "eslint .",
     "typecheck": "rm -rf .next/types .next/dev/types && next typegen && tsc --noEmit",
+    "rule-check": "tsx scripts/rule-check.ts",
     "research:session": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 1",
     "research:session:2": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 2",
     "research:session:3": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 3",
