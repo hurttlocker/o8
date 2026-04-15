@@ -92,12 +92,15 @@ export function ApprovalReviewScreenshot({ approval }: { approval: ApprovalRecor
             flexDirection: 'column',
             gap: 8,
             width: '100%',
-            padding: 10,
+            paddingTop: 10,
+            paddingBottom: 10,
+            paddingLeft: 10,
+            paddingRight: 10,
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'rgba(37, 99, 235, 0.14)',
             borderRadius: 16,
-            background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(239, 246, 255, 0.94) 100%)',
+            background: 'var(--t-bg-card)',
             boxShadow: '0 12px 30px rgba(37, 99, 235, 0.08)',
             cursor: 'pointer',
             textAlign: 'left',
@@ -160,7 +163,7 @@ export function ApprovalReviewScreenshot({ approval }: { approval: ApprovalRecor
               borderWidth: 1,
               borderStyle: 'solid',
               borderColor: 'rgba(148, 163, 184, 0.26)',
-              background: 'rgba(226, 232, 240, 0.55)',
+              background: 'var(--t-divider-subtle)',
             }}
           />
         </button>
@@ -172,12 +175,18 @@ export function ApprovalReviewScreenshot({ approval }: { approval: ApprovalRecor
           onClick={() => setExpanded(false)}
           style={{
             position: 'fixed',
-            inset: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
             zIndex: 1400,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: 28,
+            paddingTop: 28,
+            paddingBottom: 28,
+            paddingLeft: 28,
+            paddingRight: 28,
             background: 'rgba(15, 23, 42, 0.72)',
             backdropFilter: 'blur(10px)',
           }}
@@ -188,14 +197,18 @@ export function ApprovalReviewScreenshot({ approval }: { approval: ApprovalRecor
             style={{
               width: 'min(1120px, 100%)',
               maxHeight: '100%',
-              padding: 16,
+              paddingTop: 16,
+              paddingBottom: 16,
+              paddingLeft: 16,
+              paddingRight: 16,
               borderRadius: 22,
-              background: 'rgba(255, 255, 255, 0.98)',
+              background: 'var(--t-bg-card)',
               borderWidth: 1,
               borderStyle: 'solid',
               borderColor: 'rgba(148, 163, 184, 0.24)',
               boxShadow: '0 30px 80px rgba(15, 23, 42, 0.28)',
-              overflow: 'auto',
+              overflowX: 'auto' as const,
+              overflowY: 'auto' as const,
             }}
           >
             <div
@@ -238,12 +251,15 @@ export function ApprovalReviewScreenshot({ approval }: { approval: ApprovalRecor
                 style={{
                   minWidth: 86,
                   height: 38,
-                  padding: '0 14px',
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                  paddingLeft: 14,
+                  paddingRight: 14,
                   borderWidth: 1,
                   borderStyle: 'solid',
                   borderColor: 'rgba(148, 163, 184, 0.28)',
                   borderRadius: 999,
-                  background: 'rgba(248, 250, 252, 0.95)',
+                  background: 'var(--t-input-bg)',
                   color: 'rgba(15, 23, 42, 0.82)',
                   fontSize: 12,
                   fontWeight: 700,
@@ -266,7 +282,7 @@ export function ApprovalReviewScreenshot({ approval }: { approval: ApprovalRecor
                 borderWidth: 1,
                 borderStyle: 'solid',
                 borderColor: 'rgba(148, 163, 184, 0.24)',
-                background: 'rgba(241, 245, 249, 0.82)',
+                background: 'var(--t-input-bg)',
               }}
             />
           </div>
