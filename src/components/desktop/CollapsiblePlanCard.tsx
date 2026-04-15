@@ -115,7 +115,7 @@ export function CollapsiblePlanCard({ text, compact = false }: CollapsiblePlanCa
             borderTopWidth: 1,
             borderTopStyle: 'solid',
             borderTopColor: 'var(--t-divider-subtle, rgba(148, 163, 184, 0.18))',
-            backgroundColor: 'rgba(255, 255, 255, 0.58)',
+            backgroundColor: 'var(--t-bg-card)',
           }}
         >
           <MarkdownBody text={normalizedText} compact={compact} />
