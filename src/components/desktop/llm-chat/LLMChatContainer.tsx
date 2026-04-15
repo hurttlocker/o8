@@ -54,7 +54,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false), [showTypingIndicator, setShowTypingIndicator] = useState(false), [issuePickerOpen, setIssuePickerOpen] = useState(false), [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
   const [applyPath, setApplyPath] = useState(''), [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'done' | 'error'>('idle'), [applyFileSuggestions, setApplyFileSuggestions] = useState<Array<{ path: string }>>([]), [applyFileIndex, setApplyFileIndex] = useState(0), [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
 
-  const { pendingFiles: droppedFiles, dragOver, processFiles: processDroppedFiles, removePendingFile: removeDroppedFile, clearPendingFiles: clearDroppedFiles, dragHandlers } = useFileDrop({ enablePaste: false });
+  const { pendingFiles: droppedFiles, dragOver, clearPendingFiles: clearDroppedFiles, dragHandlers } = useFileDrop({ enablePaste: false });
 
   const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), handledDraftInjectionRef = useRef<string | null>(null), scrollRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null), abortRef = useRef<AbortController | null>(null), fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -102,6 +102,32 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
     setApplyStatus('idle');
     setApplyFileSuggestions([]);
   }, []);
+
+  const handleApplyDiff = useCallback(async (diffText: string) => {
+    const repoPath = preferredRepo?.localPath?.trim();
+    if (!repoPath) {
+      console.error('[diff-card] Failed to apply diff:', new Error('No active repository selected.'));
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/lanes/apply-diff', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...buildRepoRequestHeaders(preferredRepo ?? null),
+        },
+        body: JSON.stringify({ diffText, repoPath }),
+      });
+      const result = await response.json().catch(() => null) as { laneId?: string; error?: string; note?: string } | null;
+      if (!response.ok || !result?.laneId) {
+        throw new Error(result?.error || result?.note || 'Apply failed');
+      }
+      window.dispatchEvent(new CustomEvent('o8:lane-lifecycle'));
+    } catch (error) {
+      console.error('[diff-card] Failed to apply diff:', error);
+    }
+  }, [preferredRepo]);
 
   const searchApplyFiles = useCallback((query: string) => {
     if (applySearchTimeout.current) {
@@ -849,6 +875,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
       onSuggestedPromptSelect={setInput}
       onToggleHistory={() => setHistoryOpen((current) => !current)}
       onUploadFiles={handleUploadFiles}
+      onApplyDiff={preferredRepo?.localPath ? handleApplyDiff : undefined}
       pendingApproval={pendingApproval}
       persistMissionDismissal={persistMissionDismissal}
       preferredRepo={preferredRepo}
