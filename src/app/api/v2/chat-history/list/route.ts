@@ -23,6 +23,7 @@ interface ChatHistoryEntry {
   savedAt: string;
   modifiedAt: string;
   starred: boolean;
+  planText?: string | null;
   repoName?: string | null;
   repoPath?: string | null;
   repoBranch?: string | null;
@@ -82,6 +83,7 @@ export async function GET(request: NextRequest) {
           savedAt: data.savedAt || stat.mtime.toISOString(),
           modifiedAt: stat.mtime.toISOString(),
           starred: data.starred || false,
+          planText: typeof data.planText === 'string' && data.planText.trim() ? data.planText : null,
           repoName: data.repoName || null,
           repoPath: data.repoPath || null,
           repoBranch: data.repoBranch || null,
