@@ -50,4 +50,8 @@ function ensureMonacoCodiconFont() {
 
 runStep('better-sqlite3 rebuild', 'npm', ['rebuild', 'better-sqlite3']);
 runStep('node-pty rebuild', 'npx', ['node-gyp', 'rebuild', '--directory=node_modules/node-pty']);
+// Re-apply local patches against registry-published dependencies. The
+// tauri-plugin-mcp patch fixes React onClick compatibility for the webview
+// click tool — see patches/tauri-plugin-mcp+0.1.0.patch.
+runStep('patch-package', 'npx', ['patch-package']);
 ensureMonacoCodiconFont();

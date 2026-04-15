@@ -1,0 +1,176 @@
+diff --git a/node_modules/tauri-plugin-mcp/dist-js/index.cjs b/node_modules/tauri-plugin-mcp/dist-js/index.cjs
+index 529fb71..32bebe7 100644
+--- a/node_modules/tauri-plugin-mcp/dist-js/index.cjs
++++ b/node_modules/tauri-plugin-mcp/dist-js/index.cjs
+@@ -413,34 +413,57 @@ function findElementByText(text) {
+ // Helper function to click an element
+ function clickElement(element, centerX, centerY) {
+     try {
+-        // Explicitly focus the element before dispatching mouse events.
+-        // Synthetic dispatchEvent() does NOT trigger the browser's native focus
+-        // behavior the way a real user click does. Without this, document.activeElement
+-        // stays on <body> and the type_into_focused handler can't find the target.
++        // Focus the element before any click so document.activeElement lands
++        // on the intended target — synthetic dispatchEvent() doesn't trigger
++        // the browser's native focus behavior the way a real user click does.
+         if (element instanceof HTMLElement) {
+             element.focus();
+         }
+         // Update _lastFocusedElement so type_into_focused can recover focus
+-        // even if the app's click handler shifts focus elsewhere (e.g. closes
+-        // a dropdown, re-renders a component).
++        // even if the app's click handler shifts focus elsewhere.
+         if (isTypeable(element)) {
+             _lastFocusedElement = element;
+         }
+-        // Create and dispatch mouse events
+-        const mouseDown = new MouseEvent('mousedown', {
++        // PREFER native element.click() for HTMLElements. React 17+ installs
++        // its synthetic event system at the root of the React tree, NOT on
++        // document. An element.dispatchEvent(new MouseEvent('click')) on a
++        // deep child does bubble up through the DOM but React's synthetic
++        // onClick listeners often miss these calls because isTrusted is false
++        // and React's event-plugin system discards them. A native .click()
++        // method call synthesizes a trusted click that React handles the same
++        // as a real user click — this is the only reliable way to drive a
++        // React onClick from a webview automation tool.
++        //
++        // We still dispatch mousedown/mouseup beforehand for non-React
++        // handlers (drag detection, hover transitions) that rely on the raw
++        // pointer phases.
++        const md = new MouseEvent('mousedown', {
+             bubbles: true,
+             cancelable: true,
+             view: window,
+             clientX: centerX,
+             clientY: centerY
+         });
+-        const mouseUp = new MouseEvent('mouseup', {
++        const mu = new MouseEvent('mouseup', {
+             bubbles: true,
+             cancelable: true,
+             view: window,
+             clientX: centerX,
+             clientY: centerY
+         });
++        element.dispatchEvent(md);
++        element.dispatchEvent(mu);
++        if (element instanceof HTMLElement && typeof element.click === 'function') {
++            element.click();
++            return {
++                success: true,
++                elementTag: element.tagName,
++                position: { x: centerX, y: centerY },
++                method: 'native-click'
++            };
++        }
++        // Fallback for SVGElement or other non-HTMLElement targets — dispatch
++        // a synthetic click and accept the React blind spot.
+         const click = new MouseEvent('click', {
+             bubbles: true,
+             cancelable: true,
+@@ -448,14 +471,12 @@ function clickElement(element, centerX, centerY) {
+             clientX: centerX,
+             clientY: centerY
+         });
+-        // Dispatch the events
+-        element.dispatchEvent(mouseDown);
+-        element.dispatchEvent(mouseUp);
+         element.dispatchEvent(click);
+         return {
+             success: true,
+             elementTag: element.tagName,
+-            position: { x: centerX, y: centerY }
++            position: { x: centerX, y: centerY },
++            method: 'dispatch-event'
+         };
+     }
+     catch (error) {
+diff --git a/node_modules/tauri-plugin-mcp/dist-js/index.js b/node_modules/tauri-plugin-mcp/dist-js/index.js
+index 6afd544..8989cfe 100644
+--- a/node_modules/tauri-plugin-mcp/dist-js/index.js
++++ b/node_modules/tauri-plugin-mcp/dist-js/index.js
+@@ -411,34 +411,57 @@ function findElementByText(text) {
+ // Helper function to click an element
+ function clickElement(element, centerX, centerY) {
+     try {
+-        // Explicitly focus the element before dispatching mouse events.
+-        // Synthetic dispatchEvent() does NOT trigger the browser's native focus
+-        // behavior the way a real user click does. Without this, document.activeElement
+-        // stays on <body> and the type_into_focused handler can't find the target.
++        // Focus the element before any click so document.activeElement lands
++        // on the intended target — synthetic dispatchEvent() doesn't trigger
++        // the browser's native focus behavior the way a real user click does.
+         if (element instanceof HTMLElement) {
+             element.focus();
+         }
+         // Update _lastFocusedElement so type_into_focused can recover focus
+-        // even if the app's click handler shifts focus elsewhere (e.g. closes
+-        // a dropdown, re-renders a component).
++        // even if the app's click handler shifts focus elsewhere.
+         if (isTypeable(element)) {
+             _lastFocusedElement = element;
+         }
+-        // Create and dispatch mouse events
+-        const mouseDown = new MouseEvent('mousedown', {
++        // PREFER native element.click() for HTMLElements. React 17+ installs
++        // its synthetic event system at the root of the React tree, NOT on
++        // document. An element.dispatchEvent(new MouseEvent('click')) on a
++        // deep child does bubble up through the DOM but React's synthetic
++        // onClick listeners often miss these calls because isTrusted is false
++        // and React's event-plugin system discards them. A native .click()
++        // method call synthesizes a trusted click that React handles the same
++        // as a real user click — this is the only reliable way to drive a
++        // React onClick from a webview automation tool.
++        //
++        // We still dispatch mousedown/mouseup beforehand for non-React
++        // handlers (drag detection, hover transitions) that rely on the raw
++        // pointer phases.
++        const md = new MouseEvent('mousedown', {
+             bubbles: true,
+             cancelable: true,
+             view: window,
+             clientX: centerX,
+             clientY: centerY
+         });
+-        const mouseUp = new MouseEvent('mouseup', {
++        const mu = new MouseEvent('mouseup', {
+             bubbles: true,
+             cancelable: true,
+             view: window,
+             clientX: centerX,
+             clientY: centerY
+         });
++        element.dispatchEvent(md);
++        element.dispatchEvent(mu);
++        if (element instanceof HTMLElement && typeof element.click === 'function') {
++            element.click();
++            return {
++                success: true,
++                elementTag: element.tagName,
++                position: { x: centerX, y: centerY },
++                method: 'native-click'
++            };
++        }
++        // Fallback for SVGElement or other non-HTMLElement targets — dispatch
++        // a synthetic click and accept the React blind spot.
+         const click = new MouseEvent('click', {
+             bubbles: true,
+             cancelable: true,
+@@ -446,14 +469,12 @@ function clickElement(element, centerX, centerY) {
+             clientX: centerX,
+             clientY: centerY
+         });
+-        // Dispatch the events
+-        element.dispatchEvent(mouseDown);
+-        element.dispatchEvent(mouseUp);
+         element.dispatchEvent(click);
+         return {
+             success: true,
+             elementTag: element.tagName,
+-            position: { x: centerX, y: centerY }
++            position: { x: centerX, y: centerY },
++            method: 'dispatch-event'
+         };
+     }
+     catch (error) {
