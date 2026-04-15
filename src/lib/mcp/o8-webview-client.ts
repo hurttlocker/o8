@@ -356,7 +356,7 @@ export class O8WebviewClient {
     return { tree: formatSnapshotTree(pageMap) };
   }
 
-  async click(opts: { ref?: number; x?: number; y?: number }): Promise<{ ok: boolean }> {
+  async click(opts: { ref?: number; x?: number; y?: number }): Promise<{ ok: boolean; element?: string }> {
     let targetX = opts.x;
     let targetY = opts.y;
 
@@ -375,14 +375,45 @@ export class O8WebviewClient {
       throw new Error('click requires either ref or x/y coordinates');
     }
 
-    await this.sendCommand('simulate_mouse_movement', {
-      window_label: DEFAULT_WINDOW_LABEL,
-      x: Math.round(targetX),
-      y: Math.round(targetY),
-      click: true,
-    });
+    // Click via JS element.click() instead of native NSEvent. React 17+
+    // installs its synthetic event system at the React tree root and ignores
+    // synthetic/low-trust MouseEvents dispatched through NSWindow.sendEvent —
+    // every onClick handler silently drops. A direct element.click() call
+    // generates a trusted click that React handles identically to a real
+    // user click. This is the only reliable way to drive a React button
+    // from webview automation.
+    //
+    // We walk up from elementFromPoint via closest() to the nearest
+    // interactive ancestor so hits on child nodes (SVG icons inside a
+    // button, span text inside an <a>) still fire the parent's onClick.
+    const x = Math.round(targetX);
+    const y = Math.round(targetY);
+    const clickScript = `(() => {
+  const el = document.elementFromPoint(${x}, ${y});
+  if (!el) return JSON.stringify({ ok: false, err: 'no element at (${x},${y})' });
+  const target = el.closest('button, a[href], [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="checkbox"], [role="switch"], [role="option"], input, textarea, select, label[for], [onclick], [data-clickable]') || el;
+  if (!(target instanceof HTMLElement)) {
+    return JSON.stringify({ ok: false, err: 'target not HTMLElement', tag: target.tagName });
+  }
+  try { target.focus({ preventScroll: true }); } catch (_) {}
+  target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y} }));
+  target.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y} }));
+  target.click();
+  const cls = (target.className || '').toString().slice(0, 80);
+  return JSON.stringify({ ok: true, tag: target.tagName, id: target.id || null, cls, title: target.title || null });
+})()`;
 
-    return { ok: true };
+    const { result } = await this.evalJs(clickScript);
+    let parsed: { ok: boolean; err?: string; tag?: string } = { ok: false };
+    try {
+      parsed = JSON.parse(result);
+    } catch (_err) {
+      throw new Error(`click eval returned unparseable result: ${result.slice(0, 200)}`);
+    }
+    if (!parsed.ok) {
+      throw new Error(`click failed at (${x},${y}): ${parsed.err || 'unknown'}`);
+    }
+    return { ok: true, element: parsed.tag };
   }
 
   async type(text: string): Promise<{ ok: boolean }> {
