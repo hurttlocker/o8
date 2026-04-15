@@ -44,13 +44,17 @@ export function createDraftPacket(
       : queueState === 'held'
         ? 'blocked'
         : 'draft');
+  const branchTarget = seed?.branchTarget
+    ?? (queueState === 'draft'
+      ? ''
+      : target?.branch ?? 'main');
   return {
     id: seed?.id ?? createPacketId(),
     referenceLabel: seed?.referenceLabel ?? nextPacketReferenceLabel(existingPackets),
     title: seed?.title ?? 'New work packet',
     summary: seed?.summary ?? '',
     workspaceTargetPath: seed?.workspaceTargetPath ?? target?.localPath ?? null,
-    branchTarget: seed?.branchTarget ?? target?.branch ?? 'main',
+    branchTarget,
     runtime: seed?.runtime ?? runtime,
     dependencyLabels: seed?.dependencyLabels ?? [],
     dependencyPacketIds: seed?.dependencyPacketIds ?? [],
@@ -103,7 +107,6 @@ export function buildPacketsFromMissionPrompt(
       title: packetTitleFromPrompt(seed),
       summary: seed,
       workspaceTargetPath: target?.localPath ?? null,
-      branchTarget: target?.branch ?? (index === 0 ? 'main' : `packet-${index + 1}`),
       dependencyLabels: index === 0 ? [] : [`P${index}`],
       dependencyPacketIds: [],
       queueState: 'draft',
