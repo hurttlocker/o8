@@ -1,10 +1,10 @@
 /**
  * Unified WebSocket server for o8 mobile.
  *
- * Runs alongside Next.js on port 3002. Multiplexes all real-time data
+ * Runs alongside Next.js on a dynamically resolved WS port. Multiplexes all real-time data
  * over a single WS connection per mobile client:
  *
- *   Mobile Client ←WS:3002→ This Server ←HTTP:3001→ Next.js (sync API)
+ *   Mobile Client ←WS→ This Server ←HTTP→ Next.js (sync API)
  *
  * Channels:
  *   chat    — streaming text deltas
@@ -52,6 +52,7 @@ migrateDataDirOnce();
 
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
+import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
 import '@/lib/ws-runtime-env';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -114,13 +115,22 @@ void import('node-pty')
 
 // ── Config ──
 
-const WS_PORT = Number(process.env.WS_PORT ?? 3002);
-const NEXT_ORIGIN = process.env.NEXT_ORIGIN ?? 'http://127.0.0.1:3001';
+const { wsPort: WS_PORT } = resolvePortInfo();
 const PING_INTERVAL_MS = 25_000;
 const FETCH_TIMEOUT_MS = 8_000;
+const NEXT_FETCH_MAX_ATTEMPTS = 5;
+const NEXT_FETCH_INITIAL_BACKOFF_MS = 100;
 const BACKPRESSURE_LIMIT = 64 * 1024; // 64KB — queue durable messages if client buffer exceeds this
 const BACKPRESSURE_QUEUE_LIMIT = 32; // max queued messages per client before oldest are dropped
 const BACKPRESSURE_FLUSH_MS = 50; // check interval to flush queued messages
+
+const RETRYABLE_NEXT_FETCH_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENOTFOUND',
+  'UND_ERR_SOCKET',
+]);
 
 interface RuntimeTranscriptApiEntry {
   id: string;
@@ -133,9 +143,52 @@ interface RuntimeTranscriptApiEntry {
   filePath?: string;
 }
 
+function getNextOrigin() {
+  return process.env.NEXT_ORIGIN ?? getApiBase();
+}
+
 function buildNextUrl(pathname: string, searchParams?: URLSearchParams) {
   const query = searchParams && searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-  return `${NEXT_ORIGIN}${pathname}${query}`;
+  return `${getNextOrigin()}${pathname}${query}`;
+}
+
+function getNextFetchErrorCode(error: Error): string | null {
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (!cause || typeof cause !== 'object') return null;
+  const code = (cause as { code?: unknown }).code;
+  return typeof code === 'string' ? code : null;
+}
+
+function isRetryableNextFetchError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'AbortError' || error.name === 'TimeoutError') return false;
+  const code = getNextFetchErrorCode(error);
+  return error.message === 'fetch failed' || (code !== null && RETRYABLE_NEXT_FETCH_CODES.has(code));
+}
+
+function delayNextFetchRetry(delayMs: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
+async function fetchWithRetry(input: string, init: RequestInit): Promise<Response> {
+  let backoffMs = NEXT_FETCH_INITIAL_BACKOFF_MS;
+
+  for (let attempt = 1; attempt <= NEXT_FETCH_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetch(input, init);
+    } catch (error) {
+      if (attempt === NEXT_FETCH_MAX_ATTEMPTS || !isRetryableNextFetchError(error)) {
+        throw error;
+      }
+
+      await delayNextFetchRetry(backoffMs);
+      backoffMs *= 2;
+    }
+  }
+
+  throw new Error('[ws-server] internal fetch retry loop exited unexpectedly');
 }
 
 async function fetchNextJson<T>(
@@ -154,7 +207,7 @@ async function fetchNextJson<T>(
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(buildNextUrl(pathname, options.searchParams), {
+  const response = await fetchWithRetry(buildNextUrl(pathname, options.searchParams), {
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -672,7 +725,7 @@ const chatListeners = new Set<(delta: ChatDelta) => void>();
 
 async function fetchSync(body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
   try {
-    const res = await fetch(`${NEXT_ORIGIN}/api/mobile/sync`, {
+    const res = await fetchWithRetry(buildNextUrl('/api/mobile/sync'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1812,7 +1865,9 @@ function startPollingLoops() {
     if (activeClients.length === 0) return;
 
     try {
-      const res = await fetch(`${NEXT_ORIGIN}/api/worktrees/conflicts?repo=${encodeURIComponent(process.cwd())}`, {
+      const res = await fetchWithRetry(buildNextUrl('/api/worktrees/conflicts', new URLSearchParams({
+        repo: process.cwd(),
+      })), {
         headers: {
           'Cache-Control': 'no-cache',
           'Authorization': `Bearer ${WS_TOKEN}`,
@@ -2268,10 +2323,15 @@ function isAuthorizedInternalRequest(req: import('http').IncomingMessage) {
 
 const httpServer = createServer((req, res) => {
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
-  const allowedOrigins = ['http://localhost:3001', 'http://127.0.0.1:3001', 'tauri://localhost'];
+  const { apiPort } = resolvePortInfo();
+  const allowedOrigins = new Set([
+    `http://localhost:${apiPort}`,
+    `http://127.0.0.1:${apiPort}`,
+    'tauri://localhost',
+  ]);
   const origin = req.headers.origin ?? '';
   const isPrivateOrigin = /^https?:\/\/(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(origin);
-  if (allowedOrigins.includes(origin) || isPrivateOrigin) {
+  if (allowedOrigins.has(origin) || isPrivateOrigin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -3082,7 +3142,7 @@ async function bootstrapWsServer() {
         }));
       },
       async steerAgent(surfaceId, message) {
-        const res = await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
+        const res = await fetchWithRetry(buildNextUrl('/api/runtime/action'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'steer', surfaceId, message }),
@@ -3094,7 +3154,7 @@ async function bootstrapWsServer() {
         }
       },
       async interruptAgent(surfaceId) {
-        await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
+        await fetchWithRetry(buildNextUrl('/api/runtime/action'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'interrupt', surfaceId }),
@@ -3102,7 +3162,7 @@ async function bootstrapWsServer() {
         });
       },
       async relaunchAgent(prompt, repoPath, taskName) {
-        const res = await fetch(`${NEXT_ORIGIN}/api/runtime/launch`, {
+        const res = await fetchWithRetry(buildNextUrl('/api/runtime/launch'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName }),
