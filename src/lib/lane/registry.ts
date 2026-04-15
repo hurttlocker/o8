@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { and, asc, desc, eq, isNotNull, ne, notInArray } from 'drizzle-orm';
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
+import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { publishLaneLifecycleEvent } from './lifecycle';
+import { extractLaneReviewScreenshot } from './review-screenshot';
 import type {
   Lane,
   LaneEvent,
@@ -36,6 +41,11 @@ function generateEventId(): string {
 // fire session_lost.
 const SESSION_LOST_GRACE_MS = 90_000;
 const sessionMissingSince = new Map<string, number>();
+const REVIEW_SCREENSHOT_DIR = join(
+  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.cortex-ide'),
+  'review-screenshots',
+);
+let reviewScreenshotClient: O8WebviewClient | null = null;
 
 function getLaneDb() {
   const db = getDb();
@@ -80,6 +90,11 @@ function parseEventPayload(payloadJson: string): Record<string, unknown> {
     // Invalid payloads should not break lane reads.
   }
   return {};
+}
+
+function getReviewScreenshotClient() {
+  reviewScreenshotClient ??= new O8WebviewClient();
+  return reviewScreenshotClient;
 }
 
 function mapLaneEventRow(row: LaneEventRow): LaneEvent {
@@ -128,6 +143,71 @@ function updateLaneRecord(
     return;
   }
   getLaneDb().update(lanes).set(updates).where(eq(lanes.id, laneId)).run();
+}
+
+function updateLaneEventPayload(
+  eventId: string,
+  updates: Record<string, unknown>,
+) {
+  if (Object.keys(updates).length === 0) {
+    return;
+  }
+
+  const row = getLaneDb()
+    .select()
+    .from(laneEvents)
+    .where(eq(laneEvents.id, eventId))
+    .get();
+
+  if (!row) {
+    return;
+  }
+
+  const nextPayload = {
+    ...parseEventPayload(row.payloadJson),
+    ...updates,
+  };
+
+  getLaneDb()
+    .update(laneEvents)
+    .set({ payloadJson: JSON.stringify(nextPayload) })
+    .where(eq(laneEvents.id, eventId))
+    .run();
+}
+
+async function captureReviewBoundaryScreenshot(
+  laneId: string,
+  eventId: string,
+) {
+  try {
+    const screenshot = await getReviewScreenshotClient().screenshot();
+    if (screenshot.mimeType !== 'image/png') {
+      throw new Error(`Expected image/png from o8 screenshot capture, received ${screenshot.mimeType}`);
+    }
+
+    const capturedAt = nowIso();
+    const screenshotPath = join(REVIEW_SCREENSHOT_DIR, `${laneId}.png`);
+    const screenshotBuffer = Buffer.from(screenshot.imageBase64, 'base64');
+    const payload: Record<string, unknown> = {
+      reviewScreenshotMimeType: screenshot.mimeType,
+      reviewScreenshotWidth: screenshot.width,
+      reviewScreenshotHeight: screenshot.height,
+      reviewScreenshotCapturedAt: capturedAt,
+    };
+
+    try {
+      await mkdir(REVIEW_SCREENSHOT_DIR, { recursive: true });
+      await writeFile(screenshotPath, screenshotBuffer);
+      payload.reviewScreenshotPath = screenshotPath;
+    } catch (writeError) {
+      console.warn(`[lane-registry] Failed to write review screenshot file for lane ${laneId}; storing base64 in the event payload instead.`, writeError);
+      payload.reviewScreenshotBase64 = screenshot.imageBase64;
+    }
+
+    updateLaneEventPayload(eventId, payload);
+  } catch (error) {
+    console.error(`[lane-registry] Failed to capture review screenshot for lane ${laneId}:`, error);
+  }
 }
 
 function getOrderedLaneList(): Lane[] {
@@ -277,6 +357,7 @@ export function updateLane(
   let updatedLane: Lane | null = null;
   let previousStatus: LaneStatus | null = null;
   let statusChanged = false;
+  let statusChangeEventId: string | null = null;
   let lifecycleTimestamp: string | null = null;
 
   db.transaction(() => {
@@ -319,7 +400,7 @@ export function updateLane(
     updateLaneRecord(laneId, nextValues);
 
     if (statusChanged) {
-      appendEvent(laneId, 'status_change', actor, { status: changes.status });
+      statusChangeEventId = appendEvent(laneId, 'status_change', actor, { status: changes.status }).id;
     } else {
       appendEvent(laneId, 'update', actor, changes);
     }
@@ -327,15 +408,26 @@ export function updateLane(
     updatedLane = getLane(laneId);
   })();
 
-  if (!updatedLane) {
-    return updatedLane;
+  const nextLane: Lane | null = updatedLane;
+  if (nextLane === null) {
+    return null;
   }
+  const resolvedLane = nextLane as Lane;
 
   if (statusChanged && previousStatus) {
-    publishLaneLifecycleEvent(updatedLane, previousStatus, lifecycleTimestamp ?? nowIso());
+    publishLaneLifecycleEvent(resolvedLane, previousStatus, lifecycleTimestamp ?? nowIso());
   }
 
-  return updatedLane;
+  if (
+    statusChanged
+    && previousStatus !== 'reviewing'
+    && resolvedLane.status === 'reviewing'
+    && statusChangeEventId
+  ) {
+    void captureReviewBoundaryScreenshot(resolvedLane.id, statusChangeEventId);
+  }
+
+  return resolvedLane;
 }
 
 export function setLaneStatus(
@@ -409,6 +501,18 @@ export function getAllEvents(limit = 200): LaneEvent[] {
     .all()
     .map(mapLaneEventRow)
     .reverse();
+}
+
+export function getLatestLaneReviewScreenshot(laneId: string, limit = 50) {
+  const events = getLaneEvents(laneId, limit);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const screenshot = extractLaneReviewScreenshot(events[index]?.payload);
+    if (screenshot) {
+      return screenshot;
+    }
+  }
+
+  return null;
 }
 
 export interface ReviewTransitionEntry {

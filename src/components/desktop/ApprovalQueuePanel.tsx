@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ApprovalRecord } from '@/lib/approvals/types';
+import { ApprovalReviewScreenshot } from './ApprovalReviewScreenshot';
 
 const POLL_INTERVAL = 5_000; // 5s — approvals are urgent
 const HISTORY_LIMIT = 20;
@@ -269,6 +270,8 @@ function ApprovalCard({
       }}>
         {approval.description}
       </div>
+
+      <ApprovalReviewScreenshot approval={approval} />
 
       {/* Command preview */}
       {approval.command && (
