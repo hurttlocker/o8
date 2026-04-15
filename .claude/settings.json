@@ -1,13 +1,24 @@
 {
-  "enableAllProjectMcpServers": true,
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/marquisehurtt/cortex-ide/dist/hooks/claude-code-pretool-hook.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PROJECT_DIR:-.}/dist/hooks/post-edit-typecheck.js",
+            "command": "node \"/Users/marquisehurtt/cortex-ide/dist/hooks/post-edit-typecheck.js\"",
             "timeout": 35
           }
         ]
@@ -17,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PROJECT_DIR:-.}/dist/hooks/completion-gate.js",
+            "command": "node \"/Users/marquisehurtt/cortex-ide/dist/hooks/completion-gate.js\"",
             "timeout": 50
           }
         ]
