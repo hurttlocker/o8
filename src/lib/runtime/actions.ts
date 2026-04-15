@@ -65,13 +65,24 @@ export interface RuntimeLaunchResult {
 }
 
 function summarizeTaskName(prompt: string) {
-  const compact = prompt
-    .split('\n')
-    .map((line) => line.trim())
-    .find(Boolean)
-    ?? 'agent-task';
-
-  return compact.replace(/\s+/g, ' ').slice(0, 80);
+  // #533 — orchestrator prompts start with `## Task\n\n<actual content>`, so
+  // picking "the first non-empty line" every time collapsed every dispatch
+  // to the literal word "task" and left every worktree in the same directory
+  // and branch. Skip pure markdown headings and bullet markers, and fall
+  // back to the first content line. Strip any residual heading markers on
+  // whatever we picked so the slug reflects the task, not the scaffolding.
+  const lines = prompt.split('\n').map((line) => line.trim()).filter(Boolean);
+  const headingPattern = /^#{1,6}\s+\S/;
+  const listPattern = /^[-*]\s+\S|^\d+\.\s+\S/;
+  const firstContent =
+    lines.find((line) => !headingPattern.test(line) && !listPattern.test(line)) ??
+    lines.find(Boolean) ??
+    'agent-task';
+  const cleaned = firstContent
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^[-*]\s+/, '')
+    .replace(/^\d+\.\s+/, '');
+  return cleaned.replace(/\s+/g, ' ').slice(0, 80);
 }
 
 export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
