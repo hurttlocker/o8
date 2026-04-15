@@ -764,6 +764,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         emptyStateOverride={emptyStateOverride}
         emptyStateFallback={fallbackEmptyState}
         topContent={transcriptTopContent}
+        isOrchestratorMode={isOrchestratorMode}
       />
 
       <ComposerArea
