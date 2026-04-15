@@ -233,7 +233,7 @@ function ToolStatusBadge({ status, tone }: { status: MobileTranscriptToolCall['s
     <span style={{
       display: 'inline-flex',
       alignItems: 'center',
-      gap: 4,
+      gap: 5,
       fontSize: 10,
       fontWeight: 700,
       color: done ? '#10b981' : tone,
@@ -244,13 +244,19 @@ function ToolStatusBadge({ status, tone }: { status: MobileTranscriptToolCall['s
       {done ? (
         <Check size={12} strokeWidth={2.3} />
       ) : (
-        <span style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: tone,
-          opacity: 0.85,
-        }} />
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={tone}
+          strokeWidth="3"
+          strokeLinecap="round"
+          style={{ animation: 'spin 0.9s linear infinite', display: 'block' }}
+          aria-hidden="true"
+        >
+          <path d="M21 12a9 9 0 1 1-6.22-8.56" />
+        </svg>
       )}
       {toolStatusLabel(status)}
     </span>
@@ -261,6 +267,7 @@ function ReadToolChip({ tool }: { tool: MobileTranscriptToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const detail = toolDetail(tool);
   const label = toolLabel(tool);
+  const isRunning = tool.status === 'running' || tool.status === 'calling';
   return (
     <div style={{ width: '100%', maxWidth: '92%' }}>
       <button
@@ -270,26 +277,45 @@ function ReadToolChip({ tool }: { tool: MobileTranscriptToolCall }) {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 10,
           width: '100%',
-          minHeight: 26,
-          paddingTop: 4,
-          paddingRight: 10,
-          paddingBottom: 4,
-          paddingLeft: 10,
-          borderWidth: 0,
-          borderRadius: 8,
-          background: 'transparent',
+          minHeight: 32,
+          paddingTop: 6,
+          paddingRight: 12,
+          paddingBottom: 6,
+          paddingLeft: 12,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: isRunning
+            ? 'rgba(37, 99, 235, 0.28)'
+            : 'var(--t-divider-subtle, rgba(148, 163, 184, 0.18))',
+          borderRadius: 10,
+          background: isRunning
+            ? 'rgba(37, 99, 235, 0.06)'
+            : 'var(--t-bg-card, rgba(148, 163, 184, 0.04))',
           color: 'var(--t-text-muted)',
           fontSize: 11,
           fontFamily: '"SF Mono", ui-monospace, monospace',
           textAlign: 'left',
           cursor: 'pointer',
+          transition: 'background 120ms ease, border-color 120ms ease',
         }}
       >
-        <span style={{ color: 'var(--t-text-faint)', flexShrink: 0 }}>$</span>
-        <span style={{ flexShrink: 0, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-          {tool.name}
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 18,
+          height: 18,
+          borderRadius: 5,
+          background: isRunning ? 'rgba(37, 99, 235, 0.12)' : 'rgba(148, 163, 184, 0.10)',
+          color: isRunning ? '#2563eb' : 'var(--t-text-muted)',
+          flexShrink: 0,
+        }}>
+          <ToolIcon tool={tool} />
+        </span>
+        <span style={{ flexShrink: 0, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em', fontSize: 11.5 }}>
+          {label}
         </span>
         <span style={{
           flex: 1,
@@ -299,13 +325,13 @@ function ReadToolChip({ tool }: { tool: MobileTranscriptToolCall }) {
           whiteSpace: 'nowrap',
           color: 'var(--t-text-muted)',
         }}>
-          {detail ? `→ ${detail}` : ''}
+          {detail ? `· ${detail}` : ''}
         </span>
-        <ToolStatusBadge status={tool.status} tone="var(--t-text-faint)" />
+        <ToolStatusBadge status={tool.status} tone="#2563eb" />
       </button>
       {expanded && detail ? (
         <div style={{
-          marginLeft: 22,
+          marginLeft: 28,
           marginTop: 4,
           paddingTop: 8,
           paddingRight: 10,
