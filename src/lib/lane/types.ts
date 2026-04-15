@@ -177,6 +177,10 @@ export interface LaneCommandResult {
   lane?: Lane;
   /** Set when the command requires human approval before proceeding */
   approvalId?: string;
+  /** Merge-specific — true only when `git push origin <baseBranch>` also succeeded */
+  pushedToOrigin?: boolean;
+  /** Merge-specific — captured when the push failed so the caller can surface it */
+  pushError?: string;
 }
 
 // ── Persisted State ──

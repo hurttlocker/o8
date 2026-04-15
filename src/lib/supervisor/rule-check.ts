@@ -31,14 +31,15 @@ export interface RuleCheckResult {
   scannedFiles: number;
 }
 
-// Layout orchestrators and multiplexers that are explicitly waived from the
-// 800-line ceiling (mirrors CLAUDE.md "ALWAYS respect the 800-line file ceiling"
-// carve-outs). New entries require a user decision, not a code change slipped
-// under the radar.
+// Layout orchestrators, multiplexers, and verb dispatchers that are explicitly
+// waived from the 800-line ceiling (mirrors CLAUDE.md "ALWAYS respect the
+// 800-line file ceiling" carve-outs). New entries require a user decision,
+// not a code change slipped under the radar.
 const CEILING_WAIVERS: ReadonlySet<string> = new Set([
   'src/app/dashboard/page.tsx',
   'src/ws-server.ts',
   'src/lib/worktree/manager.ts',
+  'src/lib/lane/commands.ts',
 ]);
 
 // Directories we never scan. Agent worktrees can contain these even on feature

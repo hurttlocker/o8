@@ -274,6 +274,21 @@ async function mergeToTarget(
       timeout: 15_000,
     });
 
+    // #534 — push the merge to origin. Failure here must NOT revert the merge:
+    // the base branch already has the commit locally.
+    let pushedToOrigin = false;
+    let pushError: string | undefined;
+    try {
+      await execFileAsync('git', ['push', 'origin', targetBranch], {
+        cwd: repoRoot,
+        timeout: 60_000,
+      });
+      pushedToOrigin = true;
+    } catch (pushErr) {
+      pushError = pushErr instanceof Error ? pushErr.message : String(pushErr);
+      console.warn(`[worktrees/merge] Push to origin failed for ${targetBranch} after merging ${branch}: ${pushError}`);
+    }
+
     // Restore original branch if it was different from target
     if (originalBranch && originalBranch !== targetBranch) {
       await execFileAsync('git', ['checkout', originalBranch], {
@@ -285,7 +300,11 @@ async function mergeToTarget(
     return {
       action: 'merge',
       ok: true,
-      note: `Merged ${branch} into ${targetBranch}`,
+      note: pushedToOrigin
+        ? `Merged ${branch} into ${targetBranch} and pushed to origin.`
+        : `Merged ${branch} into ${targetBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}.`,
+      pushedToOrigin,
+      pushError,
     };
   } catch (err) {
     // Abort any partial merge
