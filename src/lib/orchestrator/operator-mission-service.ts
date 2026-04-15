@@ -4,7 +4,7 @@ import { basename } from 'node:path';
 import { createApproval, recordApprovalAudit, resolveApproval } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
-import { findLaneByPacket, listLanes } from '@/lib/lane/registry';
+import { archiveLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { aggregateMissionCost } from '@/lib/orchestrator/cost-aggregator';
 import {
   buildDomainLaneSummaries,
@@ -62,6 +62,11 @@ export interface SubmitReviewInput {
 }
 
 export interface ApproveAndMergeInput {
+  packetId: string;
+  commitMessage?: string;
+}
+
+export interface PickComparisonWinnerInput {
   packetId: string;
   commitMessage?: string;
 }
@@ -792,6 +797,77 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
     note: mergedPrerequisites.length > 0
       ? `Merged ${mergedPrerequisites.join(', ')} before ${packet.referenceLabel} based on recommended same-wave merge order. ${requestedResult.note}`
       : requestedResult.note,
+  };
+}
+
+export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
+  const state = currentMissionState();
+  const winner = state.packets.find((candidate) => candidate.id === input.packetId);
+  if (!winner) {
+    throw new Error(`Packet ${input.packetId} not found.`);
+  }
+
+  const comparisonGroupId = winner.comparisonGroupId?.trim();
+  if (!comparisonGroupId) {
+    throw new Error(`Packet ${winner.id} is not part of a comparison group.`);
+  }
+
+  const comparisonPackets = state.packets.filter((packet) => packet.comparisonGroupId === comparisonGroupId);
+  if (comparisonPackets.length < 2) {
+    throw new Error(`Comparison group ${comparisonGroupId} has no alternate candidates to compare.`);
+  }
+
+  const archivedPacketIds = comparisonPackets
+    .filter((packet) => packet.id !== winner.id)
+    .map((packet) => packet.id);
+  const archivedAt = new Date().toISOString();
+
+  await withLockedState(async (current) => {
+    const activeComparisonGroups = new Set(current.activeComparisonGroups ?? []);
+    activeComparisonGroups.delete(comparisonGroupId);
+    current.activeComparisonGroups = [...activeComparisonGroups];
+
+    for (const packet of current.packets) {
+      if (packet.comparisonGroupId !== comparisonGroupId) {
+        continue;
+      }
+
+      if (packet.id === winner.id) {
+        packet.lastEventAt = archivedAt;
+        packet.lastEventLabel = 'comparison_winner_selected';
+        if (packet.lane) {
+          packet.lane.lastEventAt = archivedAt;
+          packet.lane.lastEventLabel = 'comparison_winner_selected';
+        }
+        continue;
+      }
+
+      packet.archivedAt = archivedAt;
+      packet.status = 'archived';
+      packet.queueState = 'held';
+      packet.blockedReason = null;
+      packet.lastEventAt = archivedAt;
+      packet.lastEventLabel = 'comparison_loser_archived';
+      if (packet.lane) {
+        packet.lane.lastEventAt = archivedAt;
+        packet.lane.lastEventLabel = 'comparison_loser_archived';
+      }
+
+      if (packet.lane?.laneId) {
+        archiveLane(packet.lane.laneId, 'user');
+      }
+    }
+  });
+
+  const mergeResult = await approveAndMergePacket({
+    packetId: winner.id,
+    commitMessage: input.commitMessage,
+  });
+
+  return {
+    ...mergeResult,
+    groupId: comparisonGroupId,
+    archivedPacketIds,
   };
 }
 

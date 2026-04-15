@@ -124,6 +124,16 @@ function normalizeMaxAttempts(value: unknown): number {
     : 3;
 }
 
+function normalizeComparisonModels(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const models = value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean);
+  return models.length > 0 ? models : undefined;
+}
+
 function normalizePacket(raw: unknown, index: number, existing: Array<Pick<OrchestratorPacket, 'referenceLabel'>>) {
   const packet = (raw && typeof raw === 'object' ? raw : {}) as Partial<OrchestratorPacket>;
   const referenceLabel = typeof packet.referenceLabel === 'string' && packet.referenceLabel.trim()
@@ -170,6 +180,16 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     archivedAt: typeof packet.archivedAt === 'string' ? packet.archivedAt : null,
     review: normalizePacketReview(packet.review),
     lane: normalizeLaneBinding(packet.lane),
+    comparisonModels: normalizeComparisonModels(packet.comparisonModels),
+    comparisonGroupId: typeof packet.comparisonGroupId === 'string' && packet.comparisonGroupId.trim()
+      ? packet.comparisonGroupId.trim()
+      : null,
+    comparisonIndex: typeof packet.comparisonIndex === 'number' && Number.isFinite(packet.comparisonIndex) && packet.comparisonIndex >= 0
+      ? Math.floor(packet.comparisonIndex)
+      : undefined,
+    assignedModel: typeof packet.assignedModel === 'string' && packet.assignedModel.trim()
+      ? packet.assignedModel.trim()
+      : null,
   } satisfies OrchestratorPacket;
 }
 
@@ -177,12 +197,22 @@ function normalizeLookupValue(value: string) {
   return value.trim().toLowerCase();
 }
 
+function comparisonSourcePacketId(packetId: string) {
+  const match = packetId.match(/^(.*)-cmp-(\d+)$/);
+  return match?.[1] ? match[1] : null;
+}
+
 function resolvePacketDependencies(packets: OrchestratorPacket[]) {
   const lookup = new Map<string, string>();
   packets.forEach((packet) => {
-    lookup.set(normalizeLookupValue(packet.referenceLabel), packet.id);
+    const sourcePacketId = packet.comparisonGroupId ? comparisonSourcePacketId(packet.id) : null;
+    const canonicalId = sourcePacketId ?? packet.id;
+    lookup.set(normalizeLookupValue(packet.referenceLabel), canonicalId);
     lookup.set(normalizeLookupValue(packet.id), packet.id);
-    lookup.set(normalizeLookupValue(packet.title), packet.id);
+    if (sourcePacketId) {
+      lookup.set(normalizeLookupValue(sourcePacketId), sourcePacketId);
+    }
+    lookup.set(normalizeLookupValue(packet.title), canonicalId);
   });
 
   return packets.map((packet) => ({
@@ -204,6 +234,7 @@ export function createEmptyOrchestratorMissionState(): OrchestratorMissionState 
     runtime: 'codex',
     constraints: '',
     packets: [],
+    activeComparisonGroups: [],
     updatedAt: nowIso(),
   };
 }
@@ -223,6 +254,11 @@ export function normalizeOrchestratorMissionState(raw: unknown): OrchestratorMis
     runtime: value.runtime === 'claude-code' ? 'claude-code' : 'codex',
     constraints: typeof value.constraints === 'string' ? value.constraints : '',
     packets: resolvePacketDependencies(normalizedPackets),
+    activeComparisonGroups: Array.isArray(value.activeComparisonGroups)
+      ? value.activeComparisonGroups
+        .map((groupId) => (typeof groupId === 'string' ? groupId.trim() : ''))
+        .filter((groupId, index, current) => Boolean(groupId) && current.indexOf(groupId) === index)
+      : [],
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso(),
   };
 }
@@ -323,7 +359,23 @@ export function subscribeOrchestratorMissionState(listener: (state: Orchestrator
 export function packetReleaseBlockedBy(packet: OrchestratorPacket, packets: OrchestratorPacket[]) {
   const packetById = new Map(packets.map((entry) => [entry.id, entry]));
   return packet.dependencyPacketIds
-    .map((dependencyId) => packetById.get(dependencyId) ?? null)
+    .map((dependencyId) => {
+      const exactMatch = packetById.get(dependencyId) ?? null;
+      if (exactMatch) {
+        return exactMatch.releaseState !== 'released' ? exactMatch : null;
+      }
+
+      const comparisonVariants = packets.filter((candidate) => candidate.id.startsWith(`${dependencyId}-cmp-`));
+      if (comparisonVariants.length === 0) {
+        return null;
+      }
+      if (comparisonVariants.some((candidate) => candidate.releaseState === 'released')) {
+        return null;
+      }
+      return comparisonVariants.find((candidate) => !candidate.archivedAt && candidate.status !== 'archived')
+        ?? comparisonVariants.find((candidate) => candidate.releaseState !== 'released')
+        ?? null;
+    })
     .find((dependency): dependency is OrchestratorPacket => dependency !== null && dependency.releaseState !== 'released')
     ?? null;
 }

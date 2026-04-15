@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import { promisify } from 'node:util';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
@@ -27,6 +28,68 @@ const MAX_THRESHOLD_GUIDANCE_FILES = 6;
 const PATH_TEXT_CHAR_PATTERN = /[A-Za-z0-9._/-]/;
 const SESSION_RECOVERY_COMMIT_MESSAGE = 'auto-commit: session recovery';
 const execFileAsync = promisify(execFile);
+
+function buildComparisonGroupId() {
+  return `cmp-${Date.now()}-${randomUUID().slice(0, 8)}`;
+}
+
+function fanOutComparisonPackets(state: OrchestratorMissionState): OrchestratorMissionState {
+  const activeComparisonGroups = new Set(state.activeComparisonGroups ?? []);
+  const nextPackets: OrchestratorPacket[] = [];
+  let changed = false;
+
+  for (const packet of state.packets) {
+    const comparisonModels = (packet.comparisonModels ?? [])
+      .map((model) => model.trim())
+      .filter(Boolean);
+    const shouldFanOut = comparisonModels.length > 0 && !packet.comparisonGroupId;
+
+    if (!shouldFanOut) {
+      nextPackets.push(packet);
+      continue;
+    }
+
+    changed = true;
+    const comparisonGroupId = buildComparisonGroupId();
+    activeComparisonGroups.add(comparisonGroupId);
+    console.log(
+      `[best-of-n] Fanning out ${packet.id} into ${comparisonModels.length} comparison lane${comparisonModels.length === 1 ? '' : 's'} (${comparisonModels.join(', ')})`,
+    );
+
+    comparisonModels.forEach((model, index) => {
+      nextPackets.push({
+        ...packet,
+        id: `${packet.id}-cmp-${index}`,
+        title: `${packet.title} (${model})`,
+        branchTarget: `${packet.branchTarget}-cmp-${index}`,
+        queueState: 'queued',
+        releaseState: 'pending',
+        status: 'queued',
+        blockedReason: null,
+        lastEventAt: null,
+        lastEventLabel: null,
+        archivedAt: null,
+        review: null,
+        lane: null,
+        comparisonModels: undefined,
+        comparisonGroupId,
+        comparisonIndex: index,
+        assignedModel: model,
+      });
+    });
+  }
+
+  if (!changed) {
+    return state;
+  }
+
+  return normalizeOrchestratorMissionState({
+    ...state,
+    packets: nextPackets,
+    activeComparisonGroups: [...activeComparisonGroups],
+    updatedAt: new Date().toISOString(),
+  });
+}
 
 /**
  * Files explicitly allowed to exceed the 600-line threshold.
@@ -643,6 +706,7 @@ async function dispatchPacket(
       laneResult.lane?.baseBranch ?? 'main',
       laneResult.lane?.worktreePath ?? null,
     ),
+    model: packet.assignedModel ?? undefined,
     actor: 'orchestrator',
   });
 
@@ -707,6 +771,7 @@ export async function runDispatchTick(
   state: OrchestratorMissionState,
 ): Promise<OrchestratorMissionState> {
   let nextState = normalizeOrchestratorMissionState(state);
+  nextState = fanOutComparisonPackets(nextState);
   const recoveryContextByPacketId = new Map(
     nextState.packets.flatMap((packet) => (
       packet.status === 'recovering'
