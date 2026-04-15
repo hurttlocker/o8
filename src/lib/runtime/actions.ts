@@ -37,6 +37,7 @@ export interface RuntimeActionResult {
 export interface RuntimeLaunchRequest {
   runtime: RuntimeId;
   prompt: string;
+  model?: string;
   clientMutationId?: string;
   cwd?: string;
   repoPath?: string;
@@ -121,6 +122,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   const result = await runtime.launch({
     cwd,
     prompt,
+    model: payload.model,
     worktreeFlag: launchWorktree?.claudeWorktreeFlag,
     worktreePath: launchWorktree?.worktree?.path,
   });

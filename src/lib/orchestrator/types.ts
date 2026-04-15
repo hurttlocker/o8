@@ -81,6 +81,14 @@ export interface OrchestratorPacket {
   archivedAt?: string | null;
   review?: OrchestratorPacketReview | null;
   lane?: OrchestratorLaneBinding | null;
+  /** When set, dispatch fans out N parallel lanes — one per model. */
+  comparisonModels?: string[];
+  /** Links sibling packets spawned from the same best-of-n group. */
+  comparisonGroupId?: string | null;
+  /** Index within a comparison group (0, 1, 2...). */
+  comparisonIndex?: number;
+  /** The model this specific packet runs on (set during fan-out). */
+  assignedModel?: string | null;
   /** Files predicted to be touched, computed from packet scope vs skeleton cache */
   predictedFiles?: string[];
 }
@@ -94,6 +102,8 @@ export interface OrchestratorMissionState {
   runtime?: OrchestratorRuntime;
   constraints?: string;
   packets: OrchestratorPacket[];
+  /** Active comparison group IDs for rendering the picker UI. */
+  activeComparisonGroups?: string[];
   updatedAt: string;
 }
 

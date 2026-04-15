@@ -21,12 +21,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ComparisonPicker } from '@/components/desktop/ComparisonPicker';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import {
   readOrchestratorRuntimePreference,
   subscribeOrchestratorRuntimePreference,
 } from '@/lib/orchestrator/preferences';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { loadOrchestratorMissionState } from '@/lib/orchestrator/store';
+import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   OrchestratorEmptyState,
   timeOfDayGreeting,
@@ -97,6 +99,14 @@ function writeBooleanPref(key: string, value: boolean): void {
   } catch {
     // ignore
   }
+}
+
+function isComparisonPacketComplete(packet: OrchestratorPacket): boolean {
+  return packet.status === 'awaiting_review'
+    || packet.status === 'released'
+    || packet.status === 'archived'
+    || packet.status === 'failed'
+    || Boolean(packet.review);
 }
 
 function HeaderToggleButton({
@@ -217,6 +227,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
   const [tiledSessions, setTiledSessions] = useState<string[]>([]);
   const [tileDockExpanded, setTileDockExpanded] = useState(true);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
+  const autoTiledComparisonGroupIdRef = useRef<string | null>(null);
 
   useEffect(() => subscribeOrchestratorRuntimePreference(setPreferredRuntime), []);
 
@@ -227,6 +238,23 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
   }, [active]);
 
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
+  const comparisonGroups = useMemo(() => {
+    const missionState = data?.missionState;
+    if (!missionState) {
+      return [] as Array<{ groupId: string; packets: OrchestratorPacket[] }>;
+    }
+
+    return (missionState.activeComparisonGroups ?? [])
+      .map((groupId) => ({
+        groupId,
+        packets: missionState.packets.filter((packet) => packet.comparisonGroupId === groupId),
+      }))
+      .filter((group) => group.packets.length > 0);
+  }, [data?.missionState]);
+  const readyComparisonGroups = useMemo(
+    () => comparisonGroups.filter((group) => group.packets.every(isComparisonPacketComplete)),
+    [comparisonGroups],
+  );
   const sessionTargets = useMemo(
     () => buildAgentTargets(agents, preferredRuntime),
     [agents, preferredRuntime],
@@ -247,6 +275,36 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     if (!isTiled) return;
     setTileDockExpanded(true);
   }, [isTiled]);
+
+  useEffect(() => {
+    const activeGroupIds = comparisonGroups.map((group) => group.groupId);
+    if (
+      autoTiledComparisonGroupIdRef.current
+      && !activeGroupIds.includes(autoTiledComparisonGroupIdRef.current)
+    ) {
+      autoTiledComparisonGroupIdRef.current = null;
+    }
+
+    const nextAutoTileGroup = comparisonGroups.find((group) => (
+      group.groupId !== autoTiledComparisonGroupIdRef.current
+      && group.packets.length > 1
+      && group.packets.every((packet) => Boolean(packet.lane?.sessionKey))
+    ));
+    if (!nextAutoTileGroup) {
+      return;
+    }
+
+    const sessionKeys = nextAutoTileGroup.packets
+      .map((packet) => packet.lane?.sessionKey ?? null)
+      .filter((sessionKey): sessionKey is string => Boolean(sessionKey));
+    if (sessionKeys.length !== nextAutoTileGroup.packets.length) {
+      return;
+    }
+
+    autoTiledComparisonGroupIdRef.current = nextAutoTileGroup.groupId;
+    setTiledSessions(sessionKeys);
+    console.log(`[best-of-n] Auto-tiled comparison group ${nextAutoTileGroup.groupId}`);
+  }, [comparisonGroups]);
 
   const handleTogglePermission = useCallback(() => {
     setPermissionMode((current) => {
@@ -328,6 +386,44 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
 
   const handleQuickAction = useCallback((prompt: string) => {
     chatPanelRef.current?.sendNow(prompt);
+  }, []);
+
+  const handleDismissComparisonGroup = useCallback((groupId: string) => {
+    if (!data) {
+      return;
+    }
+
+    data.onMissionStateChange((current) => ({
+      ...current,
+      activeComparisonGroups: (current.activeComparisonGroups ?? []).filter((candidate) => candidate !== groupId),
+    }));
+  }, [data]);
+
+  const handlePickComparisonWinner = useCallback(async (packetId: string) => {
+    try {
+      const response = await fetch('/api/orchestrator/comparison-pick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId }),
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        result?: { merged?: boolean; note?: string };
+        error?: { message?: string };
+      } | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error?.message ?? 'Unable to pick the comparison winner.');
+      }
+
+      if (payload.result?.merged === false) {
+        console.warn('[best-of-n] Comparison winner selected but merge did not complete.', payload.result?.note);
+      }
+
+      await loadOrchestratorMissionState();
+    } catch (error) {
+      console.error('[best-of-n] Failed to pick comparison winner.', error);
+    }
   }, []);
 
   const greeting = useMemo(() => timeOfDayGreeting(), []);
@@ -554,6 +650,34 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
           onToggleTileSession={handleToggleTileSession}
           onClearTiles={handleClearTiles}
         />
+      ) : null}
+
+      {readyComparisonGroups.length > 0 ? (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            paddingTop: 12,
+            paddingRight: 14,
+            paddingBottom: 12,
+            paddingLeft: 14,
+            borderBottomWidth: 1,
+            borderBottomStyle: 'solid',
+            borderBottomColor: 'var(--t-divider-subtle)',
+            background: 'var(--t-chat-surface-bg, #ffffff)',
+          }}
+        >
+          {readyComparisonGroups.map((group) => (
+            <ComparisonPicker
+              key={group.groupId}
+              groupId={group.groupId}
+              packets={group.packets}
+              onPickWinner={handlePickComparisonWinner}
+              onDismiss={() => handleDismissComparisonGroup(group.groupId)}
+            />
+          ))}
+        </div>
       ) : null}
 
       {/* 4-pane body: History | Agents | Chat | Mission */}

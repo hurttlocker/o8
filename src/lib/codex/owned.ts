@@ -36,6 +36,7 @@ type OwnedRunOutcome = 'running' | 'finished' | 'interrupted' | 'failed';
 export type OwnedCodexLaunchRequest = {
   cwd: string;
   prompt: string;
+  model?: string;
 };
 
 export type OwnedCodexLaunchResponse = {
@@ -75,6 +76,7 @@ type OwnedCodexSessionRecord = {
   threadId?: string;
   latestPrompt: string;
   latestSummary: string;
+  model?: string;
   reviewDisposition?: OwnedReviewDisposition;
   reviewDispositionUpdatedAt?: string;
   activeRun?: OwnedCodexRunRecord;
@@ -430,8 +432,18 @@ async function resolveRepoContext(repoPath: string) {
   };
 }
 
-function runArgsForLaunch(repoPath: string, prompt: string) {
-  return ['exec', '--json', '--dangerously-bypass-approvals-and-sandbox', '-s', 'danger-full-access', '-C', repoPath, prompt];
+function runArgsForLaunch(repoPath: string, prompt: string, model?: string) {
+  return [
+    'exec',
+    '--json',
+    '--dangerously-bypass-approvals-and-sandbox',
+    '-s',
+    'danger-full-access',
+    '-C',
+    repoPath,
+    ...(model ? ['--model', model] : []),
+    prompt,
+  ];
 }
 
 function runArgsForResume(threadId: string, prompt: string) {
@@ -1046,7 +1058,7 @@ async function spawnOwnedRun(session: OwnedCodexSessionRecord, prompt: string, m
   const stderrPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.stderr.log`);
 
   const args = mode === 'launch'
-    ? runArgsForLaunch(session.repoPath, prompt)
+    ? runArgsForLaunch(session.repoPath, prompt, session.model)
     : runArgsForResume(session.threadId ?? '', prompt);
 
   let pid = 0;
@@ -1134,6 +1146,7 @@ export async function launchOwnedCodexSession(request: OwnedCodexLaunchRequest):
     updatedAt: nowIso(),
     latestPrompt: prompt,
     latestSummary: compactText(prompt, 140) || 'Owned Codex session launched from Cortex IDE.',
+    model: request.model?.trim() || undefined,
     reviewDisposition: 'watching',
     reviewDispositionUpdatedAt: nowIso(),
     recentRuns: [],

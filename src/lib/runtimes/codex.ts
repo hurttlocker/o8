@@ -172,7 +172,7 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
-    const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt });
+    const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt, model: opts.model });
     return {
       ok: result.ok,
       note: result.note,
