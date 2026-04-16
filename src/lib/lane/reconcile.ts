@@ -88,6 +88,7 @@ export function reconcileOrphanedWorktrees(): number {
   if (candidates.length === 0) return 0;
 
   let reconciled = 0;
+  const decompositionScans = new Map<string, LaneRuntime>();
   for (const lane of candidates) {
     const updated = setLaneStatus(lane.id, 'completed', 'system', 'worktree_missing_reconciled');
     if (updated) {
@@ -95,8 +96,37 @@ export function reconcileOrphanedWorktrees(): number {
       console.log(
         `[reconcile] Lane ${lane.id} (${lane.label || lane.branch}) worktree ${lane.worktreePath} is gone — transitioned ${lane.status} → completed`,
       );
+      // #544 — When the orchestrator bash-merges and cleans up its worktree,
+      // the verb=merge post-merge hook never fires. This catches that case
+      // by triggering the same #538 decomposition scan on the merge commit
+      // (which is HEAD of baseBranch at this point). One scan per repo is
+      // enough — multiple lanes for the same repo share one merge SHA
+      // during a dogfood sweep.
+      decompositionScans.set(lane.repoPath, lane.runtime);
     }
   }
+
+  if (decompositionScans.size > 0) {
+    void (async () => {
+      try {
+        const { enqueueDecompositionsAfterMerge } = await import('@/lib/dispatch/decomposition-pipeline');
+        for (const [repoPath, runtime] of decompositionScans) {
+          try {
+            await enqueueDecompositionsAfterMerge({ repoPath, runtime });
+          } catch (error) {
+            console.warn(
+              `[reconcile] Decomposition scan failed for ${repoPath}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      } catch (error) {
+        console.warn(
+          `[reconcile] Failed to load decomposition pipeline: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    })();
+  }
+
   return reconciled;
 }
 
