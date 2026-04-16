@@ -712,6 +712,19 @@ function DashboardInner() {
     globalRepoEntry?.localPath,
     globalRepoId,
     refreshWorkspaceLifecycle,
+    setActiveSessionKey,
+    setActiveWorkspace,
+    setAgentsJson,
+    setAllRepoWorktrees,
+    setCanvasStateByTileId,
+    setGlobalRepoBranch,
+    setGlobalRepoEntries,
+    setGlobalRepoId,
+    setSelectedRepoWorktrees,
+    setWorkspaceChatSessionByTileId,
+    setWorkspaceChatSessionsByTileId,
+    setWorkspaceLaneByTileId,
+    setWorkspaceTerminalResetNonceByTileId,
     tileLayout.root,
     workspaceChatSessionsByTileId,
     workspaceLifecycleRecords,
@@ -912,6 +925,7 @@ function DashboardInner() {
     enqueueFtuxMilestone,
     focusOrchestrationPacketLane,
     globalRepoEntries,
+    setAllRepoWorktrees,
     thoughtsMissionState,
     waitForWorkspaceTerminalTarget,
     workspaceScopeEntries,
@@ -1022,7 +1036,7 @@ function DashboardInner() {
         }
       })
       .catch(() => { /* no README, skip */ });
-  }, [openCanvasTab]);
+  }, [openCanvasTab, setActiveWorkspace]);
 
   const handleOpenGitLog = useCallback((workspace?: string) => {
     openWorkspaceSidePanel('git-log', getWorkspaceSidePanelRepoByPath(workspace));
@@ -1125,12 +1139,12 @@ function DashboardInner() {
       ?? workspaceTerminalPreferredRepo?.localPath
       ?? globalRepoEntry?.localPath
       ?? null;
-    if (workspaceSidePanelRepoPath === nextRepoPath && sameWorkspaceSidePanelRepo(workspaceSidePanelRepoContext, nextRepoContext)) {
-      return;
-    }
-    setWorkspaceSidePanelRepoPath(nextRepoPath);
-    setWorkspaceSidePanelRepoContext(nextRepoContext);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- repoContext/repoPath are outputs, not inputs; including them creates a feedback loop
+    setWorkspaceSidePanelRepoPath((current) => (
+      current === nextRepoPath ? current : nextRepoPath
+    ));
+    setWorkspaceSidePanelRepoContext((current) => (
+      sameWorkspaceSidePanelRepo(current, nextRepoContext) ? current : nextRepoContext
+    ));
   }, [
     activeWorkspaceLane?.branch,
     activeWorkspaceLane?.repoPath,
@@ -1140,7 +1154,7 @@ function DashboardInner() {
     rightPanelMode,
     workspaceScopeEntries,
     workspaceSidePanelView,
-    workspaceTerminalPreferredRepo?.localPath,
+    workspaceTerminalPreferredRepo,
   ]);
 
   const handleSelectWorkspaceChatTarget = useCallback((sessionKey: string) => {
@@ -1166,7 +1180,7 @@ function DashboardInner() {
       id: `${payload.reason}-${Date.now()}`,
       text: payload.text,
     });
-  }, []);
+  }, [setDesktopDraftInjection]);
 
   const handleDesignModeCapture = useCallback((contextText: string) => {
     setThoughtsDraftInjection({
@@ -1218,7 +1232,7 @@ function DashboardInner() {
       setRightPanelMode('chat');
       setDesktopDraftInjection(nextInjection);
     })();
-  }, [activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets]);
+  }, [activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, setActiveWorkspace, setDesktopDraftInjection, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets]);
 
   const handleAgentPanelChatInjection = useCallback((payload: AgentPanelChatInjectionPayload) => {
     injectPayloadIntoRepoChat(payload, null);
@@ -1230,7 +1244,7 @@ function DashboardInner() {
     // (has id, name, status, context, approvalStatus, lastEventAt, sessionKey)
     updateAgents(agents as import('@/lib/fleet/types').AgentSummary[]);
     setAgentsJson(JSON.stringify(agents));
-  }, [updateAgents]);
+  }, [setAgentsJson, updateAgents]);
 
   // ── Run command in bottom terminal ──
   const handleRunInTerminal = useCallback((command: string) => {
@@ -1258,7 +1272,7 @@ function DashboardInner() {
       setActiveSessionKey(alert.sessionKey);
     }
     setAlertTrayOpen(false);
-  }, []);
+  }, [setActiveSessionKey, setAlertTrayOpen]);
 
   const handleOpenDeploy = useCallback((project?: string) => {
     openCanvasTab({
@@ -1345,7 +1359,7 @@ function DashboardInner() {
       autoArchiveOnIdle: request.autoArchiveOnIdle,
     });
     enqueueFtuxMilestone('firstAgentSpawned');
-  }, [enqueueFtuxMilestone, globalRepoEntries, loadRegisteredRepos, waitForWorkspaceTerminalTarget]);
+  }, [enqueueFtuxMilestone, globalRepoEntries, loadRegisteredRepos, setGlobalRepoBranch, setGlobalRepoId, waitForWorkspaceTerminalTarget]);
 
   // ── Auto-open workspace tab when orchestrator launches a Codex agent ──
   const openedSupervisorAgentsRef = useRef(new Set<string>());
@@ -1507,7 +1521,7 @@ function DashboardInner() {
       label: taskLabel,
     });
     enqueueFtuxMilestone('firstAgentSpawned');
-  }, [enqueueFtuxMilestone, waitForWorkspaceTerminalTarget]);
+  }, [enqueueFtuxMilestone, setGlobalRepoBranch, setGlobalRepoId, waitForWorkspaceTerminalTarget]);
 
   const handleSelectFile = useCallback((filePath: string, workspace?: string) => {
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
@@ -1767,6 +1781,7 @@ function DashboardInner() {
     thoughtsMissionState,
     tileLayoutHydrated,
     workspaceChatSessionsByTileId,
+    workspaceTerminalHandlesRef,
   ]);
   const paletteAgents = useMemo(() => parsedAgents, [parsedAgents]);
   const selectedSessionAgent = useMemo(
@@ -1859,7 +1874,7 @@ function DashboardInner() {
     const fallbackSession = paletteAgents.find((agent) => agent.isCurrentSession) ?? paletteAgents[0];
     if (!fallbackSession || fallbackSession.sessionKey === activeSessionKey) return;
     setActiveSessionKey(fallbackSession.sessionKey);
-  }, [activeSessionKey, paletteAgents, selectedSessionAgent]);
+  }, [activeSessionKey, paletteAgents, selectedSessionAgent, setActiveSessionKey]);
 
   useEffect(() => {
     if (!currentWorkspaceLifecycleRecord || currentWorkspaceLifecycleRecord.archivedAt || currentWorkspaceLifecycleRecord.unreadCount === 0) {
