@@ -3124,6 +3124,30 @@ async function bootstrapWsServer() {
     }
   }, 30_000).unref();
 
+  setInterval(async () => {
+    try {
+      const rulesPromotionModulePath: string = './lib/dispatch/rules-promotion';
+      const { runRulesPromotionCycle } = await import(rulesPromotionModulePath) as {
+        runRulesPromotionCycle: (options?: { now?: Date }) => Promise<{
+          scanned: number;
+          promoted: number;
+          demoted: number;
+          dropped: number;
+        }>;
+      };
+      const result = await runRulesPromotionCycle();
+      if (result.promoted + result.demoted + result.dropped > 0) {
+        console.log(
+          `[rules-promotion] scanned=${result.scanned} promoted=${result.promoted} demoted=${result.demoted} dropped=${result.dropped}`,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[rules-promotion] cycle failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }, 10 * 60 * 1000).unref();
+
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
   startAttachedBrowserRefreshLoop();
