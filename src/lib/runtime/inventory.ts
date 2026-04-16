@@ -11,6 +11,12 @@ import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-regist
 
 const RUNTIME_INVENTORY_TTL_MS = 15_000;
 const RUNTIME_INVENTORY_FRESH_COALESCE_MS = 2_000;
+// Hard ceiling on how long a single snapshot build can take before we serve
+// the prior cached snapshot (or an empty shell) and let discovery finish in
+// the background. When the local codex sessions directory has hundreds of
+// stale entries, discoverSessions balloons past 10s and the client fetch
+// surfaces as a 'Load failed' TypeError in the Next.js dev overlay.
+const RUNTIME_INVENTORY_BUILD_TIMEOUT_MS = 3_500;
 const runtimeInventoryCache = new Map<string, { snapshot: FleetSnapshot; cachedAt: number }>();
 const runtimeInventoryInflight = new Map<string, { generation: number; promise: Promise<FleetSnapshot> }>();
 let runtimeInventoryGeneration = 0;
@@ -388,6 +394,24 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
   };
 }
 
+function buildEmptyInventorySnapshot(): FleetSnapshot {
+  return {
+    meta: {
+      mode: 'stale',
+      sourceLabel: 'Runtime inventory warming',
+      mirrorMode: 'current-session-first',
+      gatewayFreshness: 'warming',
+      observablePending: true,
+      note: 'Runtime inventory is still warming up — showing last known state.',
+    },
+    generatedAt: new Date().toISOString(),
+    squads: [],
+    agents: [],
+    events: [],
+    artifacts: [],
+  };
+}
+
 export async function getRuntimeInventorySnapshot(
   options: { fresh?: boolean } = {},
 ): Promise<FleetSnapshot> {
@@ -404,7 +428,15 @@ export async function getRuntimeInventorySnapshot(
 
   const inflight = runtimeInventoryInflight.get(cacheKey);
   if (inflight && inflight.generation === generation) {
-    return inflight.promise;
+    // Race the inflight build against our hard timeout. If the build is slow
+    // (ghost-session flood), serve whatever cached snapshot we have rather
+    // than block the client for 7-10s.
+    return Promise.race([
+      inflight.promise,
+      new Promise<FleetSnapshot>((resolve) => {
+        setTimeout(() => resolve(cached?.snapshot ?? buildEmptyInventorySnapshot()), RUNTIME_INVENTORY_BUILD_TIMEOUT_MS);
+      }),
+    ]);
   }
 
   const promise = (async () => {
@@ -457,10 +489,20 @@ export async function getRuntimeInventorySnapshot(
   })();
 
   runtimeInventoryInflight.set(cacheKey, { generation, promise });
-  return promise.finally(() => {
+  promise.finally(() => {
     const current = runtimeInventoryInflight.get(cacheKey);
     if (current?.promise === promise) {
       runtimeInventoryInflight.delete(cacheKey);
     }
   });
+
+  // Same timeout race on the cold path: slow discovery falls back to cached
+  // data (or an empty shell on first boot) while the real build completes
+  // in the background and updates the cache for the next request.
+  return Promise.race([
+    promise,
+    new Promise<FleetSnapshot>((resolve) => {
+      setTimeout(() => resolve(cached?.snapshot ?? buildEmptyInventorySnapshot()), RUNTIME_INVENTORY_BUILD_TIMEOUT_MS);
+    }),
+  ]);
 }
