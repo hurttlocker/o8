@@ -19,7 +19,7 @@
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { migrateDataDirOnce } from '@/lib/data-dir-migration';
 
@@ -43,7 +43,6 @@ function loadPanelToken(): string | null {
     if (!existsSync(tokenPath)) return null;
 
     // Cheap mtime check to avoid re-reading every request.
-    const { statSync } = require('node:fs') as typeof import('node:fs');
     const stat = statSync(tokenPath);
     if (_cachedToken && _cachedToken.mtimeMs === stat.mtimeMs) {
       return _cachedToken.value;
@@ -87,6 +86,14 @@ const ALLOWLIST_ANY_METHOD: RegExp[] = [
   /^\/api\/panel\/github-auth(\/|$)/,
   /^\/api\/v2\/auth(\/|$)/,
 ];
+
+/**
+ * Worker protocol routes are authenticated inside each handler against the
+ * worker_tokens table. Workers run off-host (customer laptops, Vercel Sandbox),
+ * so the loopback-origin check does not apply here and they must bypass the
+ * panel ws-token gate entirely.
+ */
+const WORKER_PREFIXES = ['/api/worker/'];
 
 /**
  * Path prefixes that require auth. Everything else (pages, static, etc.) is
@@ -165,9 +172,19 @@ function needsGate(pathname: string): boolean {
   return GATED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+function isWorkerRoute(pathname: string): boolean {
+  return WORKER_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
 export function middleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
   const method = req.method.toUpperCase();
+
+  // Worker protocol uses its own bearer auth checked inside the route handler.
+  // Bypass the loopback+ws-token gate.
+  if (isWorkerRoute(pathname)) {
+    return NextResponse.next();
+  }
 
   // Short-circuit: non-API requests and allowlisted paths always pass.
   if (!needsGate(pathname) || isAllowlisted(pathname, method)) {
