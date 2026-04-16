@@ -18,6 +18,10 @@ artifacts/research/
 .cortex-worktrees/
 .claude/worktrees/
 
+# Agent attempt learnings + orchestrator scratch state — repo-local cache
+# the supervisor writes during retry cycles. Not source.
+.o8/
+
 # Smoke test artifacts
 test-results/
 tmp/
