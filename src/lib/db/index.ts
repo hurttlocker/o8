@@ -33,7 +33,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 5;
+const DB_SCHEMA_VERSION = 6;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -364,6 +364,37 @@ function ensureTables(sqlite: Database.Database): void {
       last_used_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS worker_tokens (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      label TEXT,
+      scope TEXT NOT NULL,
+      max_workers INTEGER NOT NULL DEFAULT 10,
+      created_at TEXT NOT NULL,
+      revoked_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS worker_runs (
+      id TEXT PRIMARY KEY,
+      lane_id TEXT NOT NULL REFERENCES lanes(id) ON DELETE CASCADE,
+      worker_token_id TEXT NOT NULL REFERENCES worker_tokens(id) ON DELETE CASCADE,
+      transport TEXT NOT NULL,
+      status TEXT NOT NULL,
+      remote_branch TEXT,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      last_event_at TEXT NOT NULL,
+      error_json TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS worker_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      worker_run_id TEXT NOT NULL REFERENCES worker_runs(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS lane_events (
       id TEXT PRIMARY KEY,
       lane_id TEXT NOT NULL REFERENCES lanes(id) ON DELETE CASCADE,
@@ -412,6 +443,9 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_lanes_status ON lanes(status);
     CREATE INDEX IF NOT EXISTS idx_dispatch_rules_repo_path_packet_type ON dispatch_rules(repo_path, packet_type);
     CREATE INDEX IF NOT EXISTS idx_dispatch_rules_signal_score_desc ON dispatch_rules(signal_score DESC);
+    CREATE INDEX IF NOT EXISTS idx_worker_runs_lane_id ON worker_runs(lane_id);
+    CREATE INDEX IF NOT EXISTS idx_worker_runs_status ON worker_runs(status);
+    CREATE INDEX IF NOT EXISTS idx_worker_events_run_created ON worker_events(worker_run_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_lane_events_lane_timestamp ON lane_events(lane_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_lane_events_timestamp ON lane_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_enabled ON external_mcp_servers(enabled);
