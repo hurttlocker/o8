@@ -363,6 +363,42 @@ export const dispatchRules = sqliteTable('dispatch_rules', {
   signalScoreIdx: index('idx_dispatch_rules_signal_score_desc').on(desc(table.signalScore)),
 }));
 
+export const workerTokens = sqliteTable('worker_tokens', {
+  id: text('id').primaryKey(),
+  tokenHash: text('token_hash').notNull().unique(),
+  label: text('label'),
+  scope: text('scope').notNull(),
+  maxWorkers: integer('max_workers').notNull().default(10),
+  createdAt: text('created_at').notNull(),
+  revokedAt: text('revoked_at'),
+});
+
+export const workerRuns = sqliteTable('worker_runs', {
+  id: text('id').primaryKey(),
+  laneId: text('lane_id').notNull().references(() => lanes.id, { onDelete: 'cascade' }),
+  workerTokenId: text('worker_token_id').notNull().references(() => workerTokens.id, { onDelete: 'cascade' }),
+  transport: text('transport').notNull(),
+  status: text('status').notNull(),
+  remoteBranch: text('remote_branch'),
+  startedAt: text('started_at').notNull(),
+  completedAt: text('completed_at'),
+  lastEventAt: text('last_event_at').notNull(),
+  errorJson: text('error_json'),
+}, (table) => ({
+  laneIdIdx: index('idx_worker_runs_lane_id').on(table.laneId),
+  statusIdx: index('idx_worker_runs_status').on(table.status),
+}));
+
+export const workerEvents = sqliteTable('worker_events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  workerRunId: text('worker_run_id').notNull().references(() => workerRuns.id, { onDelete: 'cascade' }),
+  eventType: text('event_type').notNull(),
+  payloadJson: text('payload_json').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => ({
+  runCreatedIdx: index('idx_worker_events_run_created').on(table.workerRunId, table.createdAt),
+}));
+
 // ══════════════════════════════════════════════════════════════════
 //  External MCP Servers — user-configured orchestrator context sources
 // ══════════════════════════════════════════════════════════════════
