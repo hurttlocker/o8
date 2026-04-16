@@ -9,6 +9,14 @@ interface LaneRecord {
   status: string;
 }
 
+interface LaneLifecycleEventData {
+  laneId?: string;
+  sessionKey?: string | null;
+  packetId?: string | null;
+  laneStatus?: string;
+  previousStatus?: string | null;
+}
+
 export interface ArchivedLaneView {
   sessionKeys: Set<string>;
   packetIds: Set<string>;
@@ -17,6 +25,19 @@ export interface ArchivedLaneView {
 // Fetches all lanes and exposes the sessionKeys + packetIds that belong to
 // lanes in `archived` status. Subscribes to the realtime lane lifecycle
 // window event so a refetch fires whenever a lane transitions.
+//
+// #542 — A supervisor retry loop binds multiple sessionKeys to the same
+// lane over its lifetime. By the time the lane archives, `lane.sessionKey`
+// is usually just the last one (or null, since some transitions clear it).
+// The API-only view therefore misses the intermediate retry sessionKeys,
+// leaving ghost agent rows in the sidebar.
+//
+// We layer an event-driven accumulator on top: every lane-lifecycle broadcast
+// includes `sessionKey` in its payload. We collect ALL sessionKeys we've
+// ever seen for each laneId, then when any lane archives we union its
+// accumulated keys into the archived set. The API fetch is still the
+// source of truth for packets + post-reload state (the accumulator resets
+// on mount), but the accumulator catches within-session ghosts.
 //
 // Used by the sidebar to hide session cards and orchestrator packet chips
 // whose lanes have been retired — packet dispatches that shipped, manual
@@ -27,6 +48,7 @@ export function useLaneArchivedView(): ArchivedLaneView {
     packetIds: new Set<string>(),
   }));
   const inflightRef = useRef(false);
+  const laneSessionKeysRef = useRef<Map<string, Set<string>>>(new Map());
 
   const fetchOnce = useCallback(async () => {
     if (inflightRef.current) return;
@@ -41,6 +63,10 @@ export function useLaneArchivedView(): ArchivedLaneView {
         if (lane.status !== 'archived') continue;
         if (lane.sessionKey) nextSessions.add(lane.sessionKey);
         if (lane.packetId) nextPackets.add(lane.packetId);
+        const accumulated = laneSessionKeysRef.current.get(lane.id);
+        if (accumulated) {
+          for (const key of accumulated) nextSessions.add(key);
+        }
       }
       setState((current) => {
         const sessionsSame = current.sessionKeys.size === nextSessions.size
@@ -61,7 +87,48 @@ export function useLaneArchivedView(): ArchivedLaneView {
 
   useEffect(() => {
     void fetchOnce();
-    const handler = () => { void fetchOnce(); };
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ data?: LaneLifecycleEventData }>).detail;
+      const data = detail?.data;
+      if (data?.laneId && data.sessionKey) {
+        // Accumulate every sessionKey we see bound to this lane — retries
+        // swap sessionKeys behind the scenes, and by the time `archived`
+        // fires we need the whole history to hide every ghost session card.
+        let keys = laneSessionKeysRef.current.get(data.laneId);
+        if (!keys) {
+          keys = new Set<string>();
+          laneSessionKeysRef.current.set(data.laneId, keys);
+        }
+        keys.add(data.sessionKey);
+      }
+      if (data?.laneStatus === 'archived') {
+        const keys = data.laneId ? laneSessionKeysRef.current.get(data.laneId) : null;
+        const packetId = data.packetId ?? null;
+        setState((current) => {
+          let changed = false;
+          const sessions = new Set(current.sessionKeys);
+          const packets = new Set(current.packetIds);
+          if (keys) {
+            for (const key of keys) {
+              if (!sessions.has(key)) {
+                sessions.add(key);
+                changed = true;
+              }
+            }
+          }
+          if (data.sessionKey && !sessions.has(data.sessionKey)) {
+            sessions.add(data.sessionKey);
+            changed = true;
+          }
+          if (packetId && !packets.has(packetId)) {
+            packets.add(packetId);
+            changed = true;
+          }
+          return changed ? { sessionKeys: sessions, packetIds: packets } : current;
+        });
+      }
+      void fetchOnce();
+    };
     window.addEventListener('o8:lane-lifecycle', handler);
     return () => window.removeEventListener('o8:lane-lifecycle', handler);
   }, [fetchOnce]);
