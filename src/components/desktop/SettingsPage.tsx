@@ -22,6 +22,7 @@ import {
   TabButton,
   PlugIcon,
   KeyIcon,
+  UsersIcon,
   PaletteIcon,
   ActivityIcon,
   InfoIcon,
@@ -29,6 +30,7 @@ import {
 import { GitHubTab } from './settings/GitHubTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
+import { WorkersTab } from './settings/WorkersTab';
 import { AppearanceTab } from './settings/AppearanceTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
@@ -263,6 +265,7 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         <TabButton label="Connectors" icon={<PlugIcon />} active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} />
         <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
+        <TabButton label="Workers" icon={<UsersIcon />} active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
         <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
@@ -297,6 +300,9 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         )}
         {activeTab === 'mcp' && (
           <MCPTab />
+        )}
+        {activeTab === 'workers' && (
+          <WorkersTab />
         )}
         {activeTab === 'appearance' && (
           <AppearanceTab />
