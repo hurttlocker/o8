@@ -33,7 +33,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 4;
+const DB_SCHEMA_VERSION = 5;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -351,6 +351,19 @@ function ensureTables(sqlite: Database.Database): void {
       last_event_label TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS dispatch_rules (
+      id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      packet_type TEXT NOT NULL,
+      rule_text TEXT NOT NULL,
+      source TEXT NOT NULL,
+      signal_score REAL NOT NULL DEFAULT 1,
+      promoted_at TEXT,
+      demoted_at TEXT,
+      created_at TEXT NOT NULL,
+      last_used_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS lane_events (
       id TEXT PRIMARY KEY,
       lane_id TEXT NOT NULL REFERENCES lanes(id) ON DELETE CASCADE,
@@ -397,6 +410,8 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_lanes_packet_id ON lanes(packet_id);
     CREATE INDEX IF NOT EXISTS idx_lanes_repo_branch_status ON lanes(repo_path, branch, status);
     CREATE INDEX IF NOT EXISTS idx_lanes_status ON lanes(status);
+    CREATE INDEX IF NOT EXISTS idx_dispatch_rules_repo_path_packet_type ON dispatch_rules(repo_path, packet_type);
+    CREATE INDEX IF NOT EXISTS idx_dispatch_rules_signal_score_desc ON dispatch_rules(signal_score DESC);
     CREATE INDEX IF NOT EXISTS idx_lane_events_lane_timestamp ON lane_events(lane_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_lane_events_timestamp ON lane_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_enabled ON external_mcp_servers(enabled);
