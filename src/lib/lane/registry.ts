@@ -3,9 +3,11 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { and, asc, desc, eq, isNotNull, ne, notInArray } from 'drizzle-orm';
-import { expireStaleApprovals } from '@/lib/approvals/store';
+import { expireStaleApprovals, listApprovalsForContext } from '@/lib/approvals/store';
 import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
+import { recordDispatchRule } from '@/lib/dispatch/rules-store';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishLaneLifecycleEvent } from './lifecycle';
 import { extractLaneReviewScreenshot } from './review-screenshot';
 import type {
@@ -439,6 +441,35 @@ export function updateLane(
 // from accidentally re-opening a closed lane.
 const TERMINAL_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set(['completed', 'archived']);
 
+function derivePacketType(lane: Pick<Lane, 'label'>) {
+  return lane.label.trim().split(/\s+/)[0]?.toLowerCase() ?? 'unknown';
+}
+
+function recordMergedLaneDispatchRules(lane: Lane) {
+  try {
+    const latestReview = listApprovalsForContext({ laneId: lane.id })
+      .flatMap((approval) => approval.audit.filter((event) => event.type === 'orchestrator_review'))
+      .sort((left, right) => right.timestamp - left.timestamp)[0];
+    const reviewSummary = latestReview?.note?.trim();
+    if (!reviewSummary) {
+      return;
+    }
+
+    const findings = extractReviewFindings(reviewSummary);
+    const patterns = extractReviewPatterns(reviewSummary, findings);
+    for (const ruleText of [...findings.map((finding) => finding.description), ...patterns]) {
+      recordDispatchRule({
+        repoPath: lane.repoPath,
+        packetType: derivePacketType(lane),
+        ruleText,
+        source: 'review',
+      });
+    }
+  } catch (error) {
+    console.error('[dispatch-rules] record failed:', error);
+  }
+}
+
 export function setLaneStatus(
   laneId: string,
   status: LaneStatus,
@@ -459,11 +490,22 @@ export function setLaneStatus(
   }
 
   const now = nowIso();
-  return updateLane(
+  const lane = updateLane(
     laneId,
     { status, lastEventAt: now, lastEventLabel: eventLabel ?? status },
     actor,
   );
+
+  if (
+    lane
+    && existing?.status !== 'completed'
+    && lane.status === 'completed'
+    && (eventLabel === 'merged' || eventLabel === 'merged_pushed')
+  ) {
+    recordMergedLaneDispatchRules(lane);
+  }
+
+  return lane;
 }
 
 export function attachSession(
