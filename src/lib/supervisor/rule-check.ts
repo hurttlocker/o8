@@ -101,6 +101,80 @@ async function listTouchedFiles(cwd: string, baseRef: string): Promise<string[] 
   return [...collected];
 }
 
+/**
+ * Parse `git diff -U0 <baseRef>` hunks into a Map<path, Set<lineNum>> where
+ * lineNum is the 1-based line in the post-state file that was added or
+ * modified. Missing map entries mean "no diff available" — caller should
+ * treat those files as "scan every line" (new/untracked). A file with an
+ * entry but empty set means "no lines in this file changed" (shouldn't
+ * happen if the file is in listTouchedFiles, but guard anyway).
+ */
+async function getChangedLinesPerFile(
+  cwd: string,
+  baseRef: string,
+  paths: string[],
+): Promise<Map<string, Set<number>>> {
+  const result = new Map<string, Set<number>>();
+  if (paths.length === 0) return result;
+
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['diff', '-U0', '--no-color', baseRef, '--', ...paths],
+      { cwd, maxBuffer: COMMAND_MAX_BUFFER },
+    );
+
+    let currentFile: string | null = null;
+    const hunkRe = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
+    const fileRe = /^\+\+\+ b\/(.+)$/;
+
+    for (const line of stdout.split('\n')) {
+      const fileMatch = line.match(fileRe);
+      if (fileMatch) {
+        currentFile = fileMatch[1];
+        if (!result.has(currentFile)) result.set(currentFile, new Set<number>());
+        continue;
+      }
+      const hunkMatch = line.match(hunkRe);
+      if (hunkMatch && currentFile) {
+        const start = Number.parseInt(hunkMatch[1], 10);
+        const count = hunkMatch[2] ? Number.parseInt(hunkMatch[2], 10) : 1;
+        if (count === 0) continue;
+        const set = result.get(currentFile);
+        if (set) {
+          for (let i = 0; i < count; i += 1) set.add(start + i);
+        }
+      }
+    }
+  } catch {
+    // best-effort — any file missing from the map is scanned as untracked
+  }
+
+  return result;
+}
+
+/**
+ * Get the line count of a file as it existed at baseRef, or null if the file
+ * is new (not present in baseRef). wc -l semantics.
+ */
+async function getOldLineCount(
+  cwd: string,
+  baseRef: string,
+  relPath: string,
+): Promise<number | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['show', `${baseRef}:${relPath}`],
+      { cwd, maxBuffer: COMMAND_MAX_BUFFER },
+    );
+    const newlines = (stdout.match(/\n/g) ?? []).length;
+    return newlines + (stdout.length > 0 && !stdout.endsWith('\n') ? 1 : 0);
+  } catch {
+    return null;
+  }
+}
+
 export async function runRuleCheck(cwd: string, baseRef = 'main'): Promise<RuleCheckResult> {
   const touched = await listTouchedFiles(cwd, baseRef);
   if (!touched) {
@@ -114,6 +188,8 @@ export async function runRuleCheck(cwd: string, baseRef = 'main'): Promise<RuleC
   if (filtered.length === 0) {
     return { ok: true, violations: [], scannedFiles: 0 };
   }
+
+  const changedLinesByFile = await getChangedLinesPerFile(cwd, baseRef, filtered);
 
   const violations: RuleViolation[] = [];
   let scanned = 0;
@@ -129,7 +205,13 @@ export async function runRuleCheck(cwd: string, baseRef = 'main'): Promise<RuleC
     }
     scanned += 1;
 
-    scanFileContent(relPath, content, violations);
+    // If the file isn't in the diff map, treat it as untracked/new — scan
+    // everything. Otherwise scope inline rules to changed lines only so
+    // pre-existing debt on untouched lines doesn't block new work.
+    const changedLines = changedLinesByFile.get(relPath) ?? null;
+    const oldLineCount = await getOldLineCount(cwd, baseRef, relPath);
+
+    scanFileContent(relPath, content, violations, { changedLines, oldLineCount });
   }
 
   return {
@@ -139,7 +221,12 @@ export async function runRuleCheck(cwd: string, baseRef = 'main'): Promise<RuleC
   };
 }
 
-function scanFileContent(relPath: string, content: string, violations: RuleViolation[]): void {
+function scanFileContent(
+  relPath: string,
+  content: string,
+  violations: RuleViolation[],
+  diffContext: { changedLines: Set<number> | null; oldLineCount: number | null },
+): void {
   // Split on \n then drop the trailing empty entry for files that end with a
   // newline so our line count matches wc -l. Without this a 800-line file ending
   // in \n reports 801 lines and trips the ceiling rule on its own.
@@ -148,22 +235,38 @@ function scanFileContent(relPath: string, content: string, violations: RuleViola
     ? rawLines.slice(0, -1)
     : rawLines;
 
+  // File-ceiling: only flag when the diff WORSENS the ceiling situation.
+  // Pre-existing over-ceiling files (debt) are not re-flagged on every touch —
+  // agents can edit them without scope-creep unless they're making the file
+  // bigger. New over-ceiling files and regressions still block.
   if (!CEILING_WAIVERS.has(relPath) && lines.length > FILE_CEILING) {
-    violations.push({
-      file: relPath,
-      line: lines.length,
-      rule: 'file-ceiling',
-      detail: `File is ${lines.length} lines (max ${FILE_CEILING}). Decompose before shipping — extract hooks, subcomponents, or types first.`,
-    });
+    const oldOverflow = diffContext.oldLineCount !== null && diffContext.oldLineCount > FILE_CEILING;
+    const madeItWorse = diffContext.oldLineCount === null || lines.length > diffContext.oldLineCount;
+    if (!oldOverflow || madeItWorse) {
+      violations.push({
+        file: relPath,
+        line: lines.length,
+        rule: 'file-ceiling',
+        detail: diffContext.oldLineCount !== null && oldOverflow
+          ? `File grew to ${lines.length} lines (was ${diffContext.oldLineCount}, max ${FILE_CEILING}). Decompose before shipping — extract hooks, subcomponents, or types first.`
+          : `File is ${lines.length} lines (max ${FILE_CEILING}). Decompose before shipping — extract hooks, subcomponents, or types first.`,
+      });
+    }
   }
 
   const isTsx = relPath.endsWith('.tsx');
   const isDesktopComponent = relPath.startsWith('src/components/desktop/');
+  const scanAllLines = diffContext.changedLines === null;
 
   for (let i = 0; i < lines.length; i += 1) {
     if (violations.length >= MAX_VIOLATIONS_REPORTED) break;
     const line = lines[i];
     const lineNum = i + 1;
+
+    // Inline rules are scoped to changed lines so agents touching a debt-heavy
+    // file don't inherit every pre-existing violation. New files (untracked)
+    // get full-file scanning.
+    if (!scanAllLines && !diffContext.changedLines!.has(lineNum)) continue;
 
     // Skip pure comment lines. Rough but cheap.
     const trimmed = line.trimStart();
