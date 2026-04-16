@@ -48,12 +48,13 @@ export abstract class RemoteRuntimeAdapter implements AgentRuntime {
       const request = await this.buildLaunchRequest(opts, this.createRunId());
       const response = await this.transport.sendLaunch(request);
 
-      // TODO: Packet #4 writes worker_runs once the transport and DB schema land.
       return {
         ok: response.accepted,
         note: response.accepted
           ? `Remote run accepted by worker ${response.workerId}.`
-          : `Remote run was not accepted by worker ${response.workerId}.`,
+          : response.workerId
+            ? `Remote run was not accepted by worker ${response.workerId}.`
+            : 'Remote run was not accepted by the remote worker transport.',
         sessionKey: response.accepted ? this.toSessionKey(request.runId) : undefined,
       };
     } catch (error) {

@@ -42,3 +42,11 @@ import { claudeCodeRuntime } from './claude-code';
 
 registerRuntime(codexRuntime);
 registerRuntime(claudeCodeRuntime);
+
+// Remote-customer runtime is behind an env flag for v1 — default builds don't
+// surface it. Set O8_ENABLE_REMOTE_RUNTIME=1 to wire it up.
+if (process.env.O8_ENABLE_REMOTE_RUNTIME === '1') {
+  // Dynamic import to avoid loading DB-coupled transport code unless enabled.
+  const { CustomerWorkerAdapter } = require('./remote/customer-worker-adapter');
+  registerRuntime(new CustomerWorkerAdapter());
+}
