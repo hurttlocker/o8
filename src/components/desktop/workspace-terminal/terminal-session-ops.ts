@@ -61,6 +61,20 @@ export function computeCliChatSession(
         && formatWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey) === normalizedTargetSessionKey
         && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
       ));
+  // #543 — Supervisor retries rebind the packet to a fresh sessionKey mid-
+  // flight. Matching purely on targetSessionKey would open a new tab for
+  // every retry and leave the old one as zombie cruft. When the dispatch
+  // carries a packetId, prefer the tab already bound to that packet so
+  // retries reuse the same surface — chatSessionKey is updated in the
+  // match-and-update block below so subsequent WS routing works correctly.
+  const targetedPacketId = options.orchestrationPacket?.packetId ?? null;
+  const packetExisting = options.createNew || !targetedPacketId
+    ? null
+    : currentTabs.find((tab) => (
+        tab.kind === 'chat'
+        && tab.orchestrationPacket?.packetId === targetedPacketId
+        && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+      ));
   const activeExisting = currentTabs.find((tab) => (
     tab.id === currentActiveTabId
     && tab.kind === 'chat'
@@ -75,14 +89,15 @@ export function computeCliChatSession(
   // active chat tab of the same runtime so we don't stack duplicates.
   const matchingExisting = options.createNew
     ? null
-    : options.targetSessionKey
-      ? targetedExisting ?? null
-      : activeExisting
-        ?? currentTabs.find((tab) => (
-          tab.kind === 'chat'
-          && tab.chatRuntime === resolvedRuntime
-          && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-        ));
+    : packetExisting
+      ?? (options.targetSessionKey
+        ? targetedExisting ?? null
+        : activeExisting
+          ?? currentTabs.find((tab) => (
+            tab.kind === 'chat'
+            && tab.chatRuntime === resolvedRuntime
+            && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+          )));
   const injection = options.initialText ? {
     id: `workspace-chat-injection-${Date.now()}`,
     text: options.initialText,
