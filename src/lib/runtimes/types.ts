@@ -11,7 +11,7 @@ import type { CompactionEvent } from '@/lib/runtimes/compaction-detector';
  */
 
 export type RuntimeKind = 'acp' | 'codex' | 'claude-code' | 'custom';
-export type RuntimeId = 'codex' | 'claude-code' | (string & {});
+export type RuntimeId = 'codex' | 'claude-code' | 'remote-customer' | (string & {});
 
 // ── Capabilities ──
 
@@ -152,6 +152,7 @@ export interface LaunchOptions {
   model?: string;
   worktreeFlag?: string;
   worktreePath?: string;
+  laneId?: string;
 }
 
 // ── Telemetry ──
