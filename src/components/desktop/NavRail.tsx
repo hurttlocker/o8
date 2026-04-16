@@ -315,6 +315,7 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
   const [groups, setGroups] = useState<PortGroup[]>([]);
   const [total, setTotal] = useState(0);
   const [hovered, setHovered] = useState(false);
+  const [popoverBottom, setPopoverBottom] = useState(8);
   const hideTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const badgeRef = useRef<HTMLDivElement>(null);
 
@@ -340,8 +341,24 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
     };
   }, []);
 
+  const syncPopoverPosition = () => {
+    const badgeTop = badgeRef.current?.getBoundingClientRect().top ?? window.innerHeight;
+    setPopoverBottom(Math.max(8, window.innerHeight - badgeTop - 8));
+  };
+
+  useEffect(() => {
+    if (!hovered) return;
+    window.addEventListener('resize', syncPopoverPosition);
+    window.addEventListener('scroll', syncPopoverPosition, true);
+    return () => {
+      window.removeEventListener('resize', syncPopoverPosition);
+      window.removeEventListener('scroll', syncPopoverPosition, true);
+    };
+  }, [hovered]);
+
   const showPopover = () => {
     if (hideTimeout.current) { clearTimeout(hideTimeout.current); hideTimeout.current = null; }
+    syncPopoverPosition();
     setHovered(true);
   };
   const scheduleHide = () => {
@@ -390,7 +407,7 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
           onMouseLeave={scheduleHide}
           style={{
             position: 'fixed',
-            bottom: Math.max(8, window.innerHeight - (badgeRef.current?.getBoundingClientRect().top ?? 0) - 8),
+            bottom: popoverBottom,
             left: 64,
             minWidth: 180,
             padding: 6,
