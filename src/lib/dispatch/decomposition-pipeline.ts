@@ -208,6 +208,7 @@ export async function enqueueDecompositionsAfterMerge(options: {
   }
 
   if (all.length === 0) {
+    console.log(`[decomposition] Scan clean for ${options.repoPath} — no over-ceiling files in the merge.`);
     return { enqueued: 0, candidates: [], skipped: [] };
   }
 
