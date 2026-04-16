@@ -1,5 +1,6 @@
 export interface LaunchRequest {
   runId: string;
+  laneId?: string;
   repoUrl: string;
   baseRef: string;
   remoteBranch: string;
