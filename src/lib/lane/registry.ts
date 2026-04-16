@@ -441,8 +441,8 @@ export function updateLane(
 // from accidentally re-opening a closed lane.
 const TERMINAL_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set(['completed', 'archived']);
 
-function derivePacketType(lane: Pick<Lane, 'label'>) {
-  return lane.label.trim().split(/\s+/)[0]?.toLowerCase() ?? 'unknown';
+export function derivePacketType(lane: Pick<Lane, 'label'>) {
+  return lane.label.trim().split(/\s+/)[0]?.toLowerCase() || 'unknown';
 }
 
 function recordMergedLaneDispatchRules(lane: Lane) {
