@@ -8,7 +8,7 @@
  */
 
 import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core';
-import { sql } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 
 // ══════════════════════════════════════════════════════════════════
 //  Users — core identity
@@ -345,6 +345,22 @@ export const lanes = sqliteTable('lanes', {
   packetIdIdx: index('idx_lanes_packet_id').on(table.packetId),
   repoBranchStatusIdx: index('idx_lanes_repo_branch_status').on(table.repoPath, table.branch, table.status),
   statusIdx: index('idx_lanes_status').on(table.status),
+}));
+
+export const dispatchRules = sqliteTable('dispatch_rules', {
+  id: text('id').primaryKey(),
+  repoPath: text('repo_path').notNull(),
+  packetType: text('packet_type').notNull(),
+  ruleText: text('rule_text').notNull(),
+  source: text('source', { enum: ['review', 'file', 'manual'] }).notNull(),
+  signalScore: real('signal_score').notNull().default(1),
+  promotedAt: text('promoted_at'),
+  demotedAt: text('demoted_at'),
+  createdAt: text('created_at').notNull(),
+  lastUsedAt: text('last_used_at'),
+}, (table) => ({
+  repoPathPacketTypeIdx: index('idx_dispatch_rules_repo_path_packet_type').on(table.repoPath, table.packetType),
+  signalScoreIdx: index('idx_dispatch_rules_signal_score_desc').on(desc(table.signalScore)),
 }));
 
 // ══════════════════════════════════════════════════════════════════
