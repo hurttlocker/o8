@@ -37,6 +37,7 @@ import {
   CodexIcon,
   ClaudeIcon,
 } from './shared';
+import { threeWordTaskSummary } from './task-label';
 
 interface RepoBranchRowProps {
   repo: RepoRegistryEntry;
@@ -482,6 +483,13 @@ function RepoBranchRowBase({
                   {orderedBranchAgents.map((agent) => {
                     const statusTone = sessionStatusTone(agent.status);
                     const isSelectedSession = activeSessionKey === agent.sessionKey;
+                    // Prefer a 3-word task summary when the agent is actively
+                    // working — "Editing NavRail now" beats "Working" when 30
+                    // rows would otherwise say the same thing. Falls back to
+                    // the status label when idle / blocked / no task known.
+                    const isActive = agent.status === 'running' || agent.status === 'reviewing';
+                    const taskSummary = isActive ? threeWordTaskSummary(agent.currentTask) : null;
+                    const secondaryLabel = taskSummary ?? statusTone.label;
                     return (
                       <button
                         key={agent.sessionKey}
@@ -535,9 +543,12 @@ function RepoBranchRowBase({
                               color: statusTone.color,
                               letterSpacing: '-0.005em',
                               lineHeight: 1.3,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
                             }}
                           >
-                            {statusTone.label}
+                            {secondaryLabel}
                           </span>
                         </div>
                       </button>
