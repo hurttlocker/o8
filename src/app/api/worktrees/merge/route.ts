@@ -77,6 +77,20 @@ export async function POST(req: NextRequest) {
         result = await mergeToTarget(body.repo, worktree.path, worktree.branch, body.targetBranch ?? 'main');
         if (result.ok) {
           await mgr.cleanup(body.worktreeId, { force: true, deleteBranch: true });
+          // #538 — Post-merge decomposition pipeline. Never blocks the response
+          // and never rolls back the merge on failure.
+          try {
+            const { enqueueDecompositionsAfterMerge } = await import('@/lib/dispatch/decomposition-pipeline');
+            const runtime = worktree.agentType === 'claude-code' ? 'claude-code' : 'codex';
+            await enqueueDecompositionsAfterMerge({
+              repoPath: body.repo,
+              runtime,
+            });
+          } catch (decompositionError) {
+            console.warn(
+              `[worktrees/merge] Decomposition scan failed for ${body.repo}: ${decompositionError instanceof Error ? decompositionError.message : String(decompositionError)}`,
+            );
+          }
         }
         break;
 
