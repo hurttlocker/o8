@@ -4,24 +4,33 @@ import { dispatchRules, getDb } from '@/lib/db';
 
 export type Rule = typeof dispatchRules.$inferSelect;
 
-type DispatchRuleDb = ReturnType<typeof getDb>;
+type DispatchRuleRootDb = NonNullable<ReturnType<typeof getDb>>;
+type DispatchRuleTx = Parameters<Parameters<DispatchRuleRootDb['transaction']>[0]>[0];
+type DispatchRuleDb = DispatchRuleRootDb | DispatchRuleTx;
 
 interface RecordDispatchRuleInput {
   repoPath: string;
   packetType: string;
   ruleText: string;
   source: Rule['source'];
-  db?: DispatchRuleDb;
+  db?: DispatchRuleRootDb;
 }
 
 interface GetTopRulesForPacketInput {
   repoPath: string;
   packetType: string;
   limit?: number;
-  db?: DispatchRuleDb;
+  db?: DispatchRuleRootDb;
 }
 
-function getDispatchRuleDb(db: DispatchRuleDb = getDb()) {
+function getDispatchRuleDb(db: DispatchRuleDb | null = getDb()) {
+  if (!db) {
+    throw new Error('[dispatch-rules] SQLite database is unavailable');
+  }
+  return db;
+}
+
+function getDispatchRuleRootDb(db: DispatchRuleRootDb | null = getDb()) {
   if (!db) {
     throw new Error('[dispatch-rules] SQLite database is unavailable');
   }
@@ -39,7 +48,7 @@ export function recordDispatchRule({
   source,
   db,
 }: RecordDispatchRuleInput): string {
-  const resolvedDb = getDispatchRuleDb(db);
+  const resolvedDb = getDispatchRuleRootDb(db);
 
   return resolvedDb.transaction((tx) => {
     const existing = tx
@@ -88,7 +97,7 @@ export function getTopRulesForPacket({
     return [];
   }
 
-  const resolvedDb = getDispatchRuleDb(db);
+  const resolvedDb = getDispatchRuleRootDb(db);
   return resolvedDb.transaction((tx) => {
     const rows = tx
       .select()
@@ -129,6 +138,13 @@ export function demoteRule(id: string, db?: DispatchRuleDb): void {
   getDispatchRuleDb(db)
     .update(dispatchRules)
     .set({ demotedAt: nowIso() })
+    .where(eq(dispatchRules.id, id))
+    .run();
+}
+
+export function deleteRule(id: string, db?: DispatchRuleDb): void {
+  getDispatchRuleDb(db)
+    .delete(dispatchRules)
     .where(eq(dispatchRules.id, id))
     .run();
 }
