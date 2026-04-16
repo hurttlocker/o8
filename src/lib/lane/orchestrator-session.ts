@@ -93,7 +93,7 @@ const LOG_PREFIX = '[orchestrator-rehydrate]';
 /**
  * #457 — Kill the claude process if it doesn't finish within this window.
  *
- * Set to 8 minutes (was 90s). Review turns on Opus 4.6 that read multiple
+ * Set to 8 minutes (was 90s). Review turns on Opus 4.7 that read multiple
  * agent transcripts, diff worktrees, run typecheck, and write a VERDICT block
  * legitimately take 3-5 minutes. The old 90s budget SIGKILLed review turns
  * mid-stream, which is what produced the "narrate-and-exit" failure mode —
@@ -539,10 +539,10 @@ export async function sendToOrchestrator(
     '--verbose',
     '--mcp-config', mcpConfigPath,
     '--effort', effortMap[thinkingEffort],
-    // Pin the orchestrator to Opus 4.6. Claude Code's CLI default is often
+    // Pin the orchestrator to Opus 4.7. Claude Code's CLI default is often
     // Sonnet for speed, which makes the orchestrator narrate + exit instead
     // of executing full multi-step flows in a single turn.
-    '--model', 'claude-opus-4-6',
+    '--model', 'claude-opus-4-7',
   ];
 
   // Resume existing conversation if we have a session ID

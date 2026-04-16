@@ -784,7 +784,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onUndoEnhance={handleUndoEnhance}
         onSubmit={() => { void handleTaskSend(); }}
         onSlashCommand={handleSlashCommand}
-        modelLabel={isOrchestratorMode ? 'Opus 4.6 (1M)' : activeTargetLabel}
+        modelLabel={isOrchestratorMode ? 'Opus 4.7 (1M)' : activeTargetLabel}
         effort={thinkingEffort}
         onEffortChange={setThinkingEffort}
         permissionMode={permissionMode}
