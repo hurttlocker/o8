@@ -1,3 +1,6 @@
+import { basename } from 'node:path';
+import { getTopRulesForPacket } from '@/lib/dispatch/rules-store';
+import { derivePacketType } from '@/lib/lane/registry';
 import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
@@ -122,6 +125,46 @@ function buildAttemptLearningSections(learnings: AttemptLearning[]): string[] {
     });
 }
 
+type PacketWithRepoPath = OrchestratorPacket & { repoPath?: string | null };
+
+function buildLearnedRuleSections(
+  packet: OrchestratorPacket,
+  packetType: string,
+): string[] {
+  const repoPath = ((packet as PacketWithRepoPath).repoPath ?? packet.workspaceTargetPath)?.trim();
+  if (!repoPath) {
+    return [];
+  }
+
+  try {
+    const seen = new Set<string>();
+    const rules = getTopRulesForPacket({
+      repoPath,
+      packetType,
+      limit: 5,
+    }).filter((rule) => {
+      const normalizedRuleText = rule.ruleText.trim().toLowerCase();
+      if (!normalizedRuleText || seen.has(normalizedRuleText)) {
+        return false;
+      }
+      seen.add(normalizedRuleText);
+      return true;
+    });
+
+    if (rules.length === 0) {
+      return [];
+    }
+
+    return [
+      `Learned rules for ${packetType} in ${basename(repoPath)}:`,
+      ...rules.map((rule) => `- ${truncateText(rule.ruleText, 200)}`),
+    ];
+  } catch (error) {
+    console.warn('[learned-rules] fetch failed:', error);
+    return [];
+  }
+}
+
 async function buildDependencyContextSections(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
@@ -184,6 +227,8 @@ export async function buildPacketPrompt(
     : [];
   const fileSizeSections = checkFileSizeThresholds(packet);
   const preservationSections = buildPreservationEnvelope(packet);
+  const packetType = derivePacketType({ label: packet.title });
+  const learnedRuleSections = buildLearnedRuleSections(packet, packetType);
   if (dependencySections.length > 0) {
     console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
   }
@@ -195,6 +240,9 @@ export async function buildPacketPrompt(
   }
   if (preservationSections.length > 0) {
     console.log(`[dispatch] Injected preservation envelope for packet ${packet.id} (${preservationSections.length - 2} files)`);
+  }
+  if (learnedRuleSections.length > 0) {
+    console.log(`[learned-rules] Injected ${learnedRuleSections.length - 1} rules for packet ${packet.id} (${packetType})`);
   }
 
   return [
@@ -208,6 +256,7 @@ export async function buildPacketPrompt(
     ...priorAttemptLearningSections,
     ...fileSizeSections,
     ...preservationSections,
+    ...learnedRuleSections,
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     ...buildPacketSelfReviewInstructions(baseBranch),
     'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
