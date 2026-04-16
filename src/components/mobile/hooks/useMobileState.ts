@@ -180,28 +180,30 @@ export function useMobileState(init: MobileStateInit) {
   useEffect(() => {
     if (selectedSessionFromSnapshot) {
       recoveredSelectionRef.current = '';
-      setSelection((current) => {
-        if (
-          current.id === selectedSessionFromSnapshot.id
-          && current.sessionKey === selectedSessionFromSnapshot.sessionKey
-          && current.fallback?.id === selectedSessionFromSnapshot.id
-          && current.fallback?.sessionKey === selectedSessionFromSnapshot.sessionKey
-        ) {
-          return current;
-        }
-        if (current.sessionKey !== selectedSessionFromSnapshot.sessionKey || current.id !== selectedSessionFromSnapshot.id) {
-          console.info('[mobile] canonicalizing selected session', {
-            selectedId: current.id,
-            selectedSessionKeyHint: current.sessionKey,
-            nextId: selectedSessionFromSnapshot.id,
-            nextSessionKey: selectedSessionFromSnapshot.sessionKey,
-          });
-        }
-        return {
-          id: selectedSessionFromSnapshot.id,
-          sessionKey: selectedSessionFromSnapshot.sessionKey,
-          fallback: selectedSessionFromSnapshot,
-        };
+      queueMicrotask(() => {
+        setSelection((current) => {
+          if (
+            current.id === selectedSessionFromSnapshot.id
+            && current.sessionKey === selectedSessionFromSnapshot.sessionKey
+            && current.fallback?.id === selectedSessionFromSnapshot.id
+            && current.fallback?.sessionKey === selectedSessionFromSnapshot.sessionKey
+          ) {
+            return current;
+          }
+          if (current.sessionKey !== selectedSessionFromSnapshot.sessionKey || current.id !== selectedSessionFromSnapshot.id) {
+            console.info('[mobile] canonicalizing selected session', {
+              selectedId: current.id,
+              selectedSessionKeyHint: current.sessionKey,
+              nextId: selectedSessionFromSnapshot.id,
+              nextSessionKey: selectedSessionFromSnapshot.sessionKey,
+            });
+          }
+          return {
+            id: selectedSessionFromSnapshot.id,
+            sessionKey: selectedSessionFromSnapshot.sessionKey,
+            fallback: selectedSessionFromSnapshot,
+          };
+        });
       });
       return;
     }
@@ -228,13 +230,15 @@ export function useMobileState(init: MobileStateInit) {
         selectedSessionKeyHint,
         availableSessionKeys: snapshot.sessions.map((session) => session.sessionKey),
       });
-      setSelection((current) => (
-        current.id || current.sessionKey || current.fallback
-          ? { id: '', sessionKey: '', fallback: null }
-          : current
-      ));
-      setActiveView('squad');
-      setSurfaceNote('No active session is available. Pick a recent thread.');
+      queueMicrotask(() => {
+        setSelection((current) => (
+          current.id || current.sessionKey || current.fallback
+            ? { id: '', sessionKey: '', fallback: null }
+            : current
+        ));
+        setActiveView('squad');
+        setSurfaceNote('No active session is available. Pick a recent thread.');
+      });
       return;
     }
     console.info('[mobile] selected session missing from latest snapshot; recovering to live fallback', {
@@ -246,19 +250,21 @@ export function useMobileState(init: MobileStateInit) {
       selectedSessionKeyHint,
       availableSessionKeys: snapshot.sessions.map((session) => session.sessionKey),
     });
-    setSelection((current) => (
-      current.id === nextSession.id
-      && current.sessionKey === nextSession.sessionKey
-      && current.fallback?.id === nextSession.id
-      && current.fallback?.sessionKey === nextSession.sessionKey
-        ? current
-        : {
-            id: nextSession.id,
-            sessionKey: nextSession.sessionKey,
-            fallback: nextSession,
-          }
-    ));
-    setSurfaceNote(`Recovered to ${nextSession.name}. Previous session is no longer live.`);
+    queueMicrotask(() => {
+      setSelection((current) => (
+        current.id === nextSession.id
+        && current.sessionKey === nextSession.sessionKey
+        && current.fallback?.id === nextSession.id
+        && current.fallback?.sessionKey === nextSession.sessionKey
+          ? current
+          : {
+              id: nextSession.id,
+              sessionKey: nextSession.sessionKey,
+              fallback: nextSession,
+            }
+      ));
+      setSurfaceNote(`Recovered to ${nextSession.name}. Previous session is no longer live.`);
+    });
   }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, setActiveView, setSelection, setSurfaceNote, snapshot]);
 
   return {
