@@ -827,10 +827,33 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         updateLane(command.laneId, { worktreePath: null }, 'system');
         setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
 
+        // #538 — Post-merge decomposition pipeline. Scans files touched by the
+        // merge commit for ceiling violations and auto-enqueues decomposition
+        // packets. Failures are logged and swallowed — the merge is already
+        // committed and must not roll back on a governance-layer error.
+        let decompositionNote = '';
+        try {
+          const { enqueueDecompositionsAfterMerge } = await import('@/lib/dispatch/decomposition-pipeline');
+          const decomposition = await enqueueDecompositionsAfterMerge({
+            repoPath: lane.repoPath,
+            runtime: lane.runtime,
+          });
+          if (decomposition.enqueued > 0) {
+            const names = decomposition.candidates
+              .map((candidate) => candidate.relativePath)
+              .join(', ');
+            decompositionNote = ` Enqueued ${decomposition.enqueued} decomposition dispatch${decomposition.enqueued === 1 ? '' : 'es'} for over-ceiling file${decomposition.enqueued === 1 ? '' : 's'}: ${names}.`;
+          }
+        } catch (decompositionError) {
+          console.warn(
+            `[lane-merge] Decomposition scan failed for ${lane.repoPath}: ${decompositionError instanceof Error ? decompositionError.message : String(decompositionError)}`,
+          );
+        }
+
         const updated = getLane(command.laneId);
         const mergeNote = pushedToOrigin
-          ? `Merged ${lane.branch} into ${lane.baseBranch} and pushed to origin.`
-          : `Merged ${lane.branch} into ${lane.baseBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.`;
+          ? `Merged ${lane.branch} into ${lane.baseBranch} and pushed to origin.${decompositionNote}`
+          : `Merged ${lane.branch} into ${lane.baseBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${decompositionNote}`;
         return {
           ok: true,
           laneId: command.laneId,
