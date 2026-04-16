@@ -191,7 +191,12 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
   // ── Step navigation ──
   const goNext = useCallback(() => {
     const idx = STEP_ORDER.indexOf(step);
-    if (idx < STEP_ORDER.length - 1) setStep(STEP_ORDER[idx + 1]);
+    if (idx < STEP_ORDER.length - 1) {
+      const nextStep = STEP_ORDER[idx + 1];
+      if (nextStep === 'repos') setReposLoading(true);
+      if (nextStep === 'runtimes') setRuntimesLoading(true);
+      setStep(nextStep);
+    }
   }, [step]);
 
   // ── Cleanup timers ──
@@ -214,7 +219,6 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
   // ── Fetch repos when entering step 2 ──
   useEffect(() => {
     if (step !== 'repos') return;
-    setReposLoading(true);
     fetch('/api/panel/github-status')
       .then(r => r.json())
       .then(async (status) => {
@@ -235,7 +239,6 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
   // ── Detect runtimes when entering step 3 ──
   useEffect(() => {
     if (step !== 'runtimes') return;
-    setRuntimesLoading(true);
     fetch('/api/setup/detect')
       .then(r => r.json())
       .then((data) => {
