@@ -140,7 +140,13 @@ export async function runRuleCheck(cwd: string, baseRef = 'main'): Promise<RuleC
 }
 
 function scanFileContent(relPath: string, content: string, violations: RuleViolation[]): void {
-  const lines = content.split('\n');
+  // Split on \n then drop the trailing empty entry for files that end with a
+  // newline so our line count matches wc -l. Without this a 800-line file ending
+  // in \n reports 801 lines and trips the ceiling rule on its own.
+  const rawLines = content.split('\n');
+  const lines = rawLines.length > 0 && rawLines[rawLines.length - 1] === ''
+    ? rawLines.slice(0, -1)
+    : rawLines;
 
   if (!CEILING_WAIVERS.has(relPath) && lines.length > FILE_CEILING) {
     violations.push({
