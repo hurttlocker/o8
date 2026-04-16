@@ -164,6 +164,7 @@ function toHookPayload(output) {
     decision: output.decision,
     reason: output.reason,
     hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
       permissionDecision,
     },
     systemMessage: output.reason,
