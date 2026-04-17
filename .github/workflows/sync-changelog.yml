@@ -78,6 +78,7 @@ jobs:
               -e 's/Drizzle/ORM/gi' \
               -e 's/better-sqlite3?/database/gi' \
               -e 's/Gemini/AI provider/gi' \
+              -e 's/CLAUDE\.md/project rules/g' \
               -e 's/Claude/AI provider/gi' \
               -e 's/Anthropic/AI provider/gi' \
               -e 's/GPT-?[0-9.]*/AI model/gi' \
