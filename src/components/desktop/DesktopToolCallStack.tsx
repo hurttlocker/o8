@@ -189,95 +189,6 @@ function ToolStatusBadge({ status, tone }: { status: MobileTranscriptToolCall['s
   );
 }
 
-function ReadToolChip({ tool }: { tool: MobileTranscriptToolCall }) {
-  const [expanded, setExpanded] = useState(false);
-  const detail = toolDetail(tool);
-  const label = toolLabel(tool);
-  const isRunning = tool.status === 'running' || tool.status === 'calling';
-  return (
-    <div style={{ width: '100%', maxWidth: '92%' }}>
-      <button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        title={`${label} · ${detail}`}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          width: '100%',
-          minHeight: 32,
-          paddingTop: 6,
-          paddingRight: 12,
-          paddingBottom: 6,
-          paddingLeft: 12,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: isRunning
-            ? 'rgba(37, 99, 235, 0.28)'
-            : 'var(--t-divider-subtle, rgba(148, 163, 184, 0.18))',
-          borderRadius: 10,
-          background: isRunning
-            ? 'rgba(37, 99, 235, 0.06)'
-            : 'var(--t-bg-card, rgba(148, 163, 184, 0.04))',
-          color: 'var(--t-text-muted)',
-          fontSize: 11,
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-          textAlign: 'left',
-          cursor: 'pointer',
-          transition: 'background 120ms ease, border-color 120ms ease',
-        }}
-      >
-        <span style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 18,
-          height: 18,
-          borderRadius: 5,
-          background: isRunning ? 'rgba(37, 99, 235, 0.12)' : 'rgba(148, 163, 184, 0.10)',
-          color: isRunning ? '#2563eb' : 'var(--t-text-muted)',
-          flexShrink: 0,
-        }}>
-          <ToolIcon tool={tool} />
-        </span>
-        <span style={{ flexShrink: 0, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em', fontSize: 11.5 }}>
-          {label}
-        </span>
-        <span style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          color: 'var(--t-text-muted)',
-        }}>
-          {detail ? `· ${detail}` : ''}
-        </span>
-        <ToolStatusBadge status={tool.status} tone="#2563eb" />
-      </button>
-      {expanded && detail ? (
-        <div style={{
-          marginLeft: 28,
-          marginTop: 4,
-          paddingTop: 8,
-          paddingRight: 10,
-          paddingBottom: 8,
-          paddingLeft: 10,
-          borderRadius: 8,
-          background: 'var(--t-code-bg)',
-          color: 'var(--t-text-secondary)',
-          fontSize: 11,
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}>
-          {detail}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function WriteToolCard({ tool }: { tool: MobileTranscriptToolCall }) {
   const label = toolLabel(tool);
   const detail = toolDetail(tool);
@@ -438,7 +349,16 @@ function WriteToolCard({ tool }: { tool: MobileTranscriptToolCall }) {
   );
 }
 
-function MetaToolLine({ tool }: { tool: MobileTranscriptToolCall }) {
+// Single unified format for every expanded tool call. Quiet mono line —
+// bullet + name + optional detail + done check. Same shape whether the
+// call is a file read, MCP call, ToolSearch, or shell — Rams cohesion.
+function InlineToolLine({ tool }: { tool: MobileTranscriptToolCall }) {
+  const label = toolLabel(tool);
+  const detail = toolDetail(tool);
+  const isRunning = tool.status === 'running' || tool.status === 'calling';
+  const isDone = tool.status === 'done' || !tool.status;
+  const showDetail = detail && detail !== 'Tool activity';
+
   return (
     <div
       style={{
@@ -450,17 +370,50 @@ function MetaToolLine({ tool }: { tool: MobileTranscriptToolCall }) {
         paddingTop: 2,
         paddingRight: 10,
         paddingBottom: 2,
-        paddingLeft: 10,
+        paddingLeft: 2,
         fontSize: 10.5,
-        color: 'var(--t-text-faint)',
+        color: 'var(--t-text-muted)',
         fontFamily: '"SF Mono", ui-monospace, monospace',
       }}
-      title={`${tool.name} · meta`}
+      title={showDetail ? `${label} · ${detail}` : label}
     >
-      <span style={{ opacity: 0.6 }}>∙</span>
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {tool.name}
+      <span style={{ opacity: 0.5, flexShrink: 0 }}>·</span>
+      <span style={{ flexShrink: 0, color: 'var(--t-text)', fontWeight: 500 }}>
+        {label}
       </span>
+      {showDetail ? (
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: 'var(--t-text-muted)',
+          }}
+        >
+          · {truncate(detail, 120)}
+        </span>
+      ) : (
+        <span style={{ flex: 1 }} />
+      )}
+      {isRunning ? (
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#FF5A1F"
+          strokeWidth="3"
+          strokeLinecap="round"
+          style={{ animation: 'spin 0.9s linear infinite', flexShrink: 0 }}
+          aria-hidden="true"
+        >
+          <path d="M21 12a9 9 0 1 1-6.22-8.56" />
+        </svg>
+      ) : isDone ? (
+        <Check size={11} strokeWidth={2.4} color="#10b981" />
+      ) : null}
     </div>
   );
 }
@@ -572,8 +525,7 @@ function BatchedToolLine({ tools }: { tools: MobileTranscriptToolCall[] }) {
           {tools.map((tool, index) => {
             const cls = resolveSideEffectClass(tool);
             const key = `${tool.id ?? tool.name}-${index}`;
-            if (cls === 'read') return <ReadToolChip key={key} tool={tool} />;
-            return <MetaToolLine key={key} tool={tool} />;
+            return <InlineToolLine key={key} tool={tool} />;
           })}
         </div>
       ) : null}
@@ -593,13 +545,7 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
 
   const flushBatch = () => {
     if (pendingBatch.length === 0) return;
-    if (pendingBatch.length === 1) {
-      // Solo reads still render as the ReadToolChip, not collapsed — one call
-      // doesn't need batching ceremony.
-      groups.push({ kind: 'batch', tools: pendingBatch });
-    } else {
-      groups.push({ kind: 'batch', tools: pendingBatch });
-    }
+    groups.push({ kind: 'batch', tools: pendingBatch });
     pendingBatch = [];
   };
 
