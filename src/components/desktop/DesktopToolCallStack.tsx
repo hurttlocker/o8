@@ -465,20 +465,17 @@ function MetaToolLine({ tool }: { tool: MobileTranscriptToolCall }) {
   );
 }
 
-// Rams rule: every tool call gets one italic line. Writes (real mutations to
-// the repo) get the full card because the operator must see them. Everything
-// else — shell commands, reads, searches, fetches, list ops — collapses to a
-// quiet italic line, batched when consecutive. Click the line to expand.
-function isBatchable(cls: ToolSideEffectClass, tool: MobileTranscriptToolCall) {
-  if (cls === 'read' || cls === 'meta') return true;
-  // Shell exec is batchable — the chat was drowning in `Run /bin/zsh -lc "sed..."`
-  // cards. A grep is not a mutation.
+// Rams rule: every tool call gets one italic line. Only real mutations to the
+// repo — file writes, file edits — earn the full card. Everything else (shell
+// commands, reads, searches, MCP calls, ToolSearch, unknown tools) collapses
+// to a quiet italic line, batched when consecutive. Click the line to expand.
+// The inverse list keeps us from re-whitelisting every new MCP tool Anthropic
+// ships.
+function isBatchable(_cls: ToolSideEffectClass, tool: MobileTranscriptToolCall) {
   const n = tool.name.toLowerCase();
-  if (n === 'exec' || n === 'exec_command' || n === 'write_stdin') return true;
-  if (n === 'search_web' || n === 'web_search' || n === 'cortex_search' || n === 'memory_search') return true;
-  if (n === 'web_fetch' || n === 'fetch_url') return true;
-  if (n === 'list_files' || n === 'ls' || n === 'glob') return true;
-  return false;
+  if (n === 'write' || n === 'write_file' || n === 'create_file') return false;
+  if (n === 'edit' || n === 'edit_file' || n === 'multi_edit') return false;
+  return true;
 }
 
 function summarizeBatch(tools: MobileTranscriptToolCall[]): { verbs: string; anyRunning: boolean } {
