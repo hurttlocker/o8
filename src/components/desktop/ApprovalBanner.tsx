@@ -14,15 +14,21 @@ import type { ApprovalRecord } from '@/lib/approvals/types';
 // whole banner, not one per row.
 
 const ACCENT_ORANGE = '#FF5A1F';
+// Banner sits directly on the macOS vibrancy chrome (HudWindow material, dark
+// in both themes), so text must be light — not the content-surface tokens.
+const CHROME_TEXT = 'rgba(255, 255, 255, 0.94)';
+const CHROME_TEXT_MUTED = 'rgba(255, 255, 255, 0.68)';
+const CHROME_TEXT_FAINT = 'rgba(255, 255, 255, 0.48)';
+const CHROME_HAIRLINE = 'rgba(255, 255, 255, 0.18)';
 
 const bannerShell: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   width: '100%',
-  background: 'var(--t-bg-card)',
+  background: 'transparent',
   borderBottomWidth: 1,
   borderBottomStyle: 'solid',
-  borderBottomColor: 'var(--t-border)',
+  borderBottomColor: CHROME_HAIRLINE,
   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
 };
 
@@ -33,7 +39,7 @@ const summaryBar: CSSProperties = {
   height: 32,
   paddingLeft: 14,
   paddingRight: 8,
-  background: 'var(--t-panel)',
+  background: 'transparent',
 };
 
 const actions: CSSProperties = {
@@ -56,7 +62,7 @@ const summaryCount: CSSProperties = {
   fontWeight: 500,
   letterSpacing: '0.16em',
   textTransform: 'uppercase',
-  color: 'var(--t-text-muted)',
+  color: CHROME_TEXT_MUTED,
   fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
   flexShrink: 0,
 };
@@ -64,7 +70,7 @@ const summaryCount: CSSProperties = {
 const summaryLead: CSSProperties = {
   fontSize: 11.5,
   fontWeight: 400,
-  color: 'var(--t-text)',
+  color: CHROME_TEXT,
   letterSpacing: '-0.005em',
   flex: 1,
   minWidth: 0,
@@ -75,14 +81,16 @@ const summaryLead: CSSProperties = {
 
 const expandButton: CSSProperties = {
   height: 24,
+  paddingTop: 0,
+  paddingBottom: 0,
   paddingLeft: 10,
   paddingRight: 10,
   borderRadius: 6,
   borderWidth: 1,
   borderStyle: 'solid',
-  borderColor: 'var(--t-border)',
+  borderColor: CHROME_HAIRLINE,
   background: 'transparent',
-  color: 'var(--t-text-muted)',
+  color: CHROME_TEXT_MUTED,
   fontSize: 11,
   fontWeight: 500,
   letterSpacing: '-0.005em',
@@ -92,19 +100,23 @@ const expandButton: CSSProperties = {
   lineHeight: 1,
   display: 'inline-flex',
   alignItems: 'center',
+  justifyContent: 'center',
   gap: 5,
+  boxSizing: 'border-box',
 };
 
 const compactReject: CSSProperties = {
   height: 24,
+  paddingTop: 0,
+  paddingBottom: 0,
   paddingLeft: 12,
   paddingRight: 12,
   borderRadius: 6,
   borderWidth: 1,
   borderStyle: 'solid',
-  borderColor: 'var(--t-border)',
+  borderColor: CHROME_HAIRLINE,
   background: 'transparent',
-  color: 'var(--t-text-muted)',
+  color: CHROME_TEXT_MUTED,
   fontSize: 11,
   fontWeight: 500,
   letterSpacing: '-0.005em',
@@ -112,6 +124,10 @@ const compactReject: CSSProperties = {
   flexShrink: 0,
   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
   lineHeight: 1,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxSizing: 'border-box',
 };
 
 const compactApprove: CSSProperties = {
@@ -126,9 +142,10 @@ const listPane: CSSProperties = {
   flexDirection: 'column',
   maxHeight: 260,
   overflowY: 'auto',
+  background: 'transparent',
   borderTopWidth: 1,
   borderTopStyle: 'solid',
-  borderTopColor: 'var(--t-divider-subtle)',
+  borderTopColor: CHROME_HAIRLINE,
 };
 
 const listRow: CSSProperties = {
@@ -140,7 +157,7 @@ const listRow: CSSProperties = {
   paddingRight: 10,
   borderBottomWidth: 1,
   borderBottomStyle: 'solid',
-  borderBottomColor: 'var(--t-divider-subtle)',
+  borderBottomColor: CHROME_HAIRLINE,
 };
 
 const rowEyebrow: CSSProperties = {
@@ -148,7 +165,7 @@ const rowEyebrow: CSSProperties = {
   fontWeight: 500,
   letterSpacing: '0.14em',
   textTransform: 'uppercase',
-  color: 'var(--t-text-faint)',
+  color: CHROME_TEXT_FAINT,
   fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
   flexShrink: 0,
 };
@@ -156,7 +173,7 @@ const rowEyebrow: CSSProperties = {
 const rowTitle: CSSProperties = {
   fontSize: 12,
   fontWeight: 400,
-  color: 'var(--t-text)',
+  color: CHROME_TEXT,
   letterSpacing: '-0.005em',
   flex: 1,
   minWidth: 0,
