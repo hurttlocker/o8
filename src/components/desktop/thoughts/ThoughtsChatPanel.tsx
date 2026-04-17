@@ -90,6 +90,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onToggleMission?: () => void;
   repoLabel?: string | null;
   emptyStateOverride?: React.ReactNode;
+  showInlineExport?: boolean;
+  footerMeterSlot?: React.ReactNode;
   onMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
@@ -113,6 +115,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onToggleMission,
   repoLabel,
   emptyStateOverride,
+  showInlineExport = true,
+  footerMeterSlot,
   onChromeChange,
 }, ref) {
   const [input, setInput] = useState('');
@@ -678,6 +682,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => { void handleTaskSend(); }, 0);
   }, [handleTaskSend, isOrchestratorMode, orchStream, permissionMode, thinkingEffort]);
 
+  const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
+
   useImperativeHandle(ref, () => ({
     focusInput() {
       inputRef.current?.focus();
@@ -685,6 +691,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     reset: handleReset,
     loadThread: handleLoadThread,
     sendNow,
+    copyAsMarkdown: () => handleCopyMarkdownRef.current(),
   }), [handleReset, handleLoadThread, sendNow]);
 
   const fallbackEmptyState = (
@@ -715,12 +722,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [orchStream, permissionMode, useStream]);
 
-  const handleCopyMarkdown = useCallback(async () => {
-    if (displayMessages.length === 0) return;
+  const handleCopyMarkdown = useCallback(async (): Promise<boolean> => {
+    if (displayMessages.length === 0) return false;
     if (!navigator.clipboard?.writeText) {
       console.log('[export-thread] Clipboard API unavailable for active thread export');
       setExportFeedback('error');
-      return;
+      return false;
     }
 
     setExportFeedback('copying');
@@ -729,15 +736,21 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       await navigator.clipboard.writeText(markdown);
       console.log(`[export-thread] Copied active thread ${threadId ?? 'unsaved-thread'} to clipboard`);
       setExportFeedback('copied');
+      return true;
     } catch (error) {
       console.log('[export-thread] Failed to copy active thread markdown', error);
       setExportFeedback('error');
+      return false;
     }
   }, [displayMessages, setExportFeedback, threadId]);
 
+  useEffect(() => {
+    handleCopyMarkdownRef.current = handleCopyMarkdown;
+  }, [handleCopyMarkdown]);
+
   return (
     <>
-      {displayMessages.length > 0 ? (
+      {displayMessages.length > 0 && showInlineExport ? (
         <div
           style={{
             display: 'flex',
@@ -796,6 +809,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         repoLabel={repoLabel}
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
+        footerMeterSlot={footerMeterSlot}
       />
     </>
   );

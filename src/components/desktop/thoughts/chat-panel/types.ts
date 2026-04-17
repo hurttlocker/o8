@@ -16,6 +16,7 @@ export interface ThoughtsChatPanelHandle {
    * that click-to-dispatch.
    */
   sendNow: (text?: string) => void;
+  copyAsMarkdown: () => Promise<boolean>;
 }
 
 export interface ThoughtsChatPanelChromeState {

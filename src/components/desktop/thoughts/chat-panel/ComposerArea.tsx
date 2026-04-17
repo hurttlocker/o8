@@ -177,6 +177,7 @@ interface ComposerAreaProps {
   repoLabel?: string | null;
   displayMessagesCount: number;
   hasAssistantActivity: boolean;
+  footerMeterSlot?: React.ReactNode;
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
@@ -204,6 +205,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   repoLabel,
   displayMessagesCount,
   hasAssistantActivity,
+  footerMeterSlot,
 }, inputRef) {
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
     if (!isOrchestratorMode) return [];
@@ -334,9 +336,10 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         </div>
       </div>
 
-      {hasAssistantActivity ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 6, paddingLeft: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
-          <span>{displayMessagesCount} messages</span>
+      {hasAssistantActivity || footerMeterSlot ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, paddingLeft: 2, paddingRight: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
+          <span>{hasAssistantActivity ? `${displayMessagesCount} messages` : ''}</span>
+          {footerMeterSlot ? <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{footerMeterSlot}</div> : null}
         </div>
       ) : null}
     </div>
