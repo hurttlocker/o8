@@ -14,6 +14,8 @@
     "lint": "eslint .",
     "typecheck": "rm -rf .next/types .next/dev/types && next typegen && tsc --noEmit",
     "rule-check": "tsx scripts/rule-check.ts",
+    "worker:build": "node scripts/build-worker.mjs",
+    "worker:dev": "tsx scripts/worker/index.ts",
     "research:session": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 1",
     "research:session:2": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 2",
     "research:session:3": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 3",
