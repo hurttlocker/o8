@@ -172,7 +172,7 @@ jobs:
         env:
           TOKEN: ${{ secrets.PUBLIC_CHANGELOG_TOKEN }}
         run: |
-          git clone https://x-access-token:${TOKEN}@github.com/hurttlocker/Rainwater.git /tmp/public
+          git clone https://x-access-token:${TOKEN}@github.com/hurttlocker/o8.git /tmp/public
           cp /tmp/CHANGELOG.md /tmp/public/CHANGELOG.md
           cp /tmp/STATS.md /tmp/public/STATS.md
 

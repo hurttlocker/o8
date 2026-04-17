@@ -3,13 +3,13 @@ set -euo pipefail
 
 # Local fallback for .github/workflows/sync-changelog.yml while the CI account
 # is suspended for billing. Generates the sanitized o8 changelog + stats, then
-# pushes to hurttlocker/Rainwater. Logic mirrors the workflow — when updating
+# pushes to hurttlocker/o8. Logic mirrors the workflow — when updating
 # one, update the other.
 
 WORK_DIR="${WORK_DIR:-/tmp/o8-changelog-sync}"
 OUT_CHANGELOG="$WORK_DIR/CHANGELOG.md"
 OUT_STATS="$WORK_DIR/STATS.md"
-RAINWATER_CLONE="$WORK_DIR/Rainwater"
+PUBLIC_CLONE="$WORK_DIR/o8"
 SINCE="180 days ago"
 
 rm -rf "$WORK_DIR"
@@ -103,17 +103,17 @@ echo "[sync] Blocklist check passed"
 } > "$OUT_STATS"
 
 # Push to Rainwater
-gh repo clone hurttlocker/Rainwater "$RAINWATER_CLONE" -- --depth 1
-cp "$OUT_CHANGELOG" "$RAINWATER_CLONE/CHANGELOG.md"
-cp "$OUT_STATS" "$RAINWATER_CLONE/STATS.md"
-rm -f "$RAINWATER_CLONE/ROADMAP.md"
+gh repo clone hurttlocker/o8 "$PUBLIC_CLONE" -- --depth 1
+cp "$OUT_CHANGELOG" "$PUBLIC_CLONE/CHANGELOG.md"
+cp "$OUT_STATS" "$PUBLIC_CLONE/STATS.md"
+rm -f "$PUBLIC_CLONE/ROADMAP.md"
 
-cd "$RAINWATER_CLONE"
+cd "$PUBLIC_CLONE"
 git add -A
 if git diff --cached --quiet; then
-  echo "[sync] No changes — Rainwater already up to date"
+  echo "[sync] No changes — public mirror already up to date"
 else
   git commit -m "sync: Update changelog $(date -u +%Y-%m-%d)"
   git push
-  echo "[sync] Pushed clean changelog to hurttlocker/Rainwater"
+  echo "[sync] Pushed clean changelog to hurttlocker/o8"
 fi
