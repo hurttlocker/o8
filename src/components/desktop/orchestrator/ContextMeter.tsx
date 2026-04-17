@@ -10,7 +10,7 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
   const tone = percent >= 85 ? 'critical' : percent >= 60 ? 'warning' : 'idle';
   const label = `${meterLabel(runningTotal)} / 1M · ${percent}%`;
   const fill = Math.max(0, Math.min(8, Math.ceil((percent / 100) * 8)));
-  const fillColor = tone === 'critical' ? 'rgba(108, 175, 255, 0.9)' : tone === 'warning' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(255, 255, 255, 0.48)';
+  const fillColor = tone === 'critical' ? '#FF5A1F' : tone === 'warning' ? 'var(--t-text-muted)' : 'var(--t-text-faint)';
 
   return (
     <button
@@ -19,15 +19,15 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
       title={tokenCount > 0 ? `Context usage ${label} · +${meterLabel(tokenCount)} last turn` : `Context usage ${label}`}
       style={{
         height: 26, maxWidth: 280, paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 8, borderRadius: 8, borderWidth: 1, borderStyle: 'solid',
-        borderColor: tone === 'critical' ? 'rgba(108, 175, 255, 0.32)' : 'rgba(255, 255, 255, 0.18)', background: 'transparent',
-        color: tone === 'critical' ? 'rgba(141, 198, 255, 0.96)' : tone === 'warning' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(255, 255, 255, 0.78)',
+        borderColor: tone === 'critical' ? '#FF5A1F' : 'var(--t-border)', background: 'transparent',
+        color: tone === 'critical' ? '#FF5A1F' : 'var(--t-text-muted)',
         display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', minWidth: 0, fontSize: 11.5, fontWeight: 400, letterSpacing: '0.01em',
         whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
       }}
     >
-      <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, flexShrink: 0, background: tone === 'idle' ? 'rgba(255, 255, 255, 0.34)' : '#FF5A1F' }} />
+      <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, flexShrink: 0, background: tone === 'idle' ? 'var(--t-text-faint)' : '#FF5A1F' }} />
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-        {Array.from({ length: 8 }, (_, segment) => <span key={segment} aria-hidden="true" style={{ width: 8, height: 6, borderRadius: 2, background: segment < fill ? fillColor : 'rgba(255, 255, 255, 0.12)' }} />)}
+        {Array.from({ length: 8 }, (_, segment) => <span key={segment} aria-hidden="true" style={{ width: 8, height: 6, borderRadius: 2, background: segment < fill ? fillColor : 'var(--t-divider-subtle)' }} />)}
       </span>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
     </button>
