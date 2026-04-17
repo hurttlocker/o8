@@ -9,6 +9,8 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-17
 
+- `239c765` feat(orchestrator): unified busy-state UI + stream event routing [via-o8]
+- `a1d8850` feat(lane): tag merged lane tip commits with [via-o8] suffix
 - `6f63758` feat(theme): shift light-mode glass family from white to paper base
 - `be12215` feat(theme): light-mode content surfaces use paper (#F4F2ED) — match o8-site
 
