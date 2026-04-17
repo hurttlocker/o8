@@ -815,6 +815,11 @@ export function useOrchestratorStream(
             autoCompactArmedRef.current = true;
             return;
           }
+          await fetch('/api/orchestrator/reset-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repoPath }),
+          }).catch(() => null);
           setMessages(payload.transcript);
           if (payload.resumePrelude && typeof window !== 'undefined') window.localStorage.setItem(compactKey, payload.resumePrelude);
           const nextTotal = typeof payload.tokensAfter === 'number' ? payload.tokensAfter : 0;
@@ -883,13 +888,6 @@ export function useOrchestratorStream(
       const compactKey = `o8:orchestrator:auto-compact:${repoPathRef.current}`;
       const resumePrelude = typeof window !== 'undefined' ? window.localStorage.getItem(compactKey) : null;
       if (resumePrelude) {
-        try {
-          await fetch('/api/orchestrator/reset-session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ repoPath: repoPathRef.current }),
-          });
-        } catch { /* best effort */ }
         outboundMessage = `${resumePrelude}\n\nOperator message:\n${message}`;
         window.localStorage.removeItem(compactKey);
       }
