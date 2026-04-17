@@ -125,13 +125,11 @@ function buildAttemptLearningSections(learnings: AttemptLearning[]): string[] {
     });
 }
 
-type PacketWithRepoPath = OrchestratorPacket & { repoPath?: string | null };
-
 function buildLearnedRuleSections(
   packet: OrchestratorPacket,
   packetType: string,
 ): string[] {
-  const repoPath = ((packet as PacketWithRepoPath).repoPath ?? packet.workspaceTargetPath)?.trim();
+  const repoPath = packet.workspaceTargetPath?.trim();
   if (!repoPath) {
     return [];
   }

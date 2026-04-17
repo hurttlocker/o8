@@ -149,13 +149,25 @@ export function listExternalMcpServers(): ExternalMcpServerRecord[] {
 }
 
 export function listEnabledExternalMcpServers(): ExternalMcpServerRecord[] {
-  const db = requireDb();
-  return db.select()
-    .from(externalMcpServers)
-    .where(eq(externalMcpServers.enabled, true))
-    .orderBy(asc(externalMcpServers.createdAt), asc(externalMcpServers.name))
-    .all()
-    .map((row) => toRecord(row as ExternalMcpServerRow));
+  // #559 — Hot-path call from orchestrator-session spawn. If the DB connection
+  // was opened before the external_mcp_servers table existed (stale ws-server
+  // on an old migration marker), treat "no such table" as an empty result
+  // instead of logging every spawn. Unexpected errors still propagate.
+  try {
+    const db = requireDb();
+    return db.select()
+      .from(externalMcpServers)
+      .where(eq(externalMcpServers.enabled, true))
+      .orderBy(asc(externalMcpServers.createdAt), asc(externalMcpServers.name))
+      .all()
+      .map((row) => toRecord(row as ExternalMcpServerRow));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/no such table|external_mcp_servers/i.test(message)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export function insertExternalMcpServer(input: InsertExternalMcpServerInput): ExternalMcpServerRecord {
