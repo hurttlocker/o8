@@ -7,6 +7,11 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-04-17
+
+- `6f63758` feat(theme): shift light-mode glass family from white to paper base
+- `be12215` feat(theme): light-mode content surfaces use paper (#F4F2ED) — match o8-site
+
 ## 2026-04-16
 
 - `e336cd0` feat(cloud): standalone worker CLI reference implementation
