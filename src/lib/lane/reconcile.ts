@@ -101,6 +101,32 @@ function getLocalBranchSetForRepo(repoPath: string): Set<string> | null {
   }
 }
 
+// #558 — Verify the lane was actually merged into its base branch before
+// reconciling on the branch-gone signal. Without this check, the orchestrator's
+// cherry-pick-to-tmp-branch workflow looks identical to a real merge: original
+// branch deleted, but the lane work landed on tmp-* and never made it to main.
+// We look for a "Merge lane <branch>" commit on the base branch's recent history
+// — that's the verb=merge / bash-merge canonical pattern.
+function laneBranchWasMerged(repoPath: string, baseBranch: string, branch: string): boolean {
+  try {
+    const output = execFileSync(
+      'git',
+      ['log', '--format=%s', '-n', '50', baseBranch],
+      {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 2_000,
+      },
+    );
+    const branchToken = branch.replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`Merge\\s+(?:branch|lane)\\b.*\\b${branchToken}\\b`, 'i');
+    return output.split('\n').some((subject) => pattern.test(subject.trim()));
+  } catch {
+    return false;
+  }
+}
+
 export function reconcileOrphanedWorktrees(): number {
   const reconcilableLanes = listLanes().filter(
     (lane) =>
@@ -113,8 +139,11 @@ export function reconcileOrphanedWorktrees(): number {
   // Worktree-gone candidates (original #541 logic)
   const worktreeGone = reconcilableLanes.filter((lane) => !existsSync(lane.worktreePath!));
 
-  // Branch-gone candidates (#558) — worktree still on disk but branch removed.
-  // Probe once per repo to keep the cost bounded.
+  // Branch-gone candidates (#558) — worktree still on disk but branch removed
+  // AND the lane was actually merged into its base branch. The merge-verify
+  // step prevents the orchestrator's cherry-pick-to-tmp-* workflow from
+  // tripping a false-completion (branch deleted, work parked on tmp-*, main
+  // not yet updated). Probe once per repo to keep the cost bounded.
   const branchSetsByRepo = new Map<string, Set<string> | null>();
   const branchGone: Lane[] = [];
   for (const lane of reconcilableLanes) {
@@ -125,9 +154,9 @@ export function reconcileOrphanedWorktrees(): number {
     }
     const branches = branchSetsByRepo.get(lane.repoPath);
     if (!branches) continue; // probe failed — skip rather than false-positive
-    if (!branches.has(lane.branch)) {
-      branchGone.push(lane);
-    }
+    if (branches.has(lane.branch)) continue;
+    if (!laneBranchWasMerged(lane.repoPath, lane.baseBranch, lane.branch)) continue;
+    branchGone.push(lane);
   }
 
   const candidates = [...worktreeGone, ...branchGone];
