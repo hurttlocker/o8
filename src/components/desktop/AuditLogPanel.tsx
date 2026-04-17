@@ -441,7 +441,7 @@ export function AuditLogPanel() {
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      backgroundColor: '#ffffff',
+      backgroundColor: 'var(--t-canvas-bg)',
       overflow: 'hidden',
     }}>
       {/* ---- Header ---- */}
