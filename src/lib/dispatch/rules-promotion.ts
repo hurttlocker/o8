@@ -1,10 +1,10 @@
-const drizzle = require('drizzle-orm') as typeof import('drizzle-orm');
-const dbModule = require('@/lib/db') as typeof import('@/lib/db');
-const rulesStore = require('@/lib/dispatch/rules-store') as typeof import('@/lib/dispatch/rules-store');
-
-const { and, eq, gte, isNull, or, sql } = drizzle;
-const { approvals, dispatchRules, getDb, lanes } = dbModule;
-const { deleteRule, demoteRule, promoteRule } = rulesStore;
+// #569 — Standard ESM imports. The original CJS boundary was a workaround for
+// the #568 tsx -e interop quirk — that smoke-test pattern was retired in
+// CLAUDE.md (use `tsx <file>` instead of `tsx -e "import(...)"`). Plain ESM
+// matches every other module in the codebase.
+import { and, eq, gte, isNull, or, sql } from 'drizzle-orm';
+import { approvals, dispatchRules, getDb, lanes } from '@/lib/db';
+import { deleteRule, demoteRule, promoteRule } from '@/lib/dispatch/rules-store';
 
 const APPROVAL_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 const STALE_DECAY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -92,7 +92,7 @@ function countMatchingApprovals(
   return row?.count ?? 0;
 }
 
-async function runRulesPromotionCycle(options?: { now?: Date }): Promise<RulesPromotionCycleResult> {
+export async function runRulesPromotionCycle(options?: { now?: Date }): Promise<RulesPromotionCycleResult> {
   const db = getDb();
   if (!db) {
     throw new Error('[rules-promotion] SQLite database is unavailable');
@@ -174,4 +174,3 @@ async function runRulesPromotionCycle(options?: { now?: Date }): Promise<RulesPr
   };
 }
 
-module.exports = { runRulesPromotionCycle };
