@@ -1,3 +1,11 @@
+export interface ThoughtsOrchestratorBusyState {
+  active: boolean;
+  startedAt: number | null;
+  toolCallsStarted: number;
+  toolCallsCompleted: number;
+  latestToolLabel: string | null;
+}
+
 export interface ThoughtsChatPanelHandle {
   focusInput: () => void;
   reset: () => void;
@@ -15,6 +23,8 @@ export interface ThoughtsChatPanelChromeState {
   waitingForReply: boolean;
   hasMessages: boolean;
   threadId: string | null;
+  messageCount: number;
+  orchestratorBusyState: ThoughtsOrchestratorBusyState | null;
 }
 
 export type ThoughtsChatPermissionMode = 'full' | 'plan';

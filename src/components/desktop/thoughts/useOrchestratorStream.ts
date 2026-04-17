@@ -1,8 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type {
+  MobileTranscriptEntry,
+  MobileTranscriptToolCall,
+  MobileTranscriptToolLaunchLink,
+} from '@/lib/mobile/types';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
+import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
@@ -12,6 +17,7 @@ interface OrchestratorStreamResult {
   messages: MobileTranscriptEntry[];
   planText: string | null;
   status: OrchestratorStreamStatus;
+  busyState: ThoughtsOrchestratorBusyState;
   send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max' }) => void;
   reset: () => void;
   connected: boolean;
@@ -34,6 +40,130 @@ function getWsUrl(): string {
   return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
 }
 
+interface ActiveTurnState {
+  startedAt: number;
+  toolCallsStarted: number;
+  toolCallsCompleted: number;
+  latestToolLabel: string | null;
+  launches: MobileTranscriptToolLaunchLink[];
+}
+
+function createIdleBusyState(): ThoughtsOrchestratorBusyState {
+  return {
+    active: false,
+    startedAt: null,
+    toolCallsStarted: 0,
+    toolCallsCompleted: 0,
+    latestToolLabel: null,
+  };
+}
+
+function summarizeToolActivity(name: string, args?: Record<string, unknown>): string {
+  const normalized = name.trim() || 'tool';
+  const lower = normalized.toLowerCase();
+  const read = (...values: unknown[]) => values.find((value) => typeof value === 'string' && value.trim()) as string | undefined;
+
+  if (lower === 'exec' || lower === 'exec_command') {
+    return read(args?.command, args?.cmd)?.trim() ?? normalized;
+  }
+  if (lower === 'cortex_launch_agent' || lower === 'mcp__cortex__cortex_launch_agent') {
+    return read(args?.taskName, args?.task_name, args?.prompt)?.trim() ?? 'Launching agent';
+  }
+  if (lower === 'read_file' || lower === 'read') {
+    return read(args?.file_path, args?.path)?.trim() ?? 'Reading file';
+  }
+  if (lower === 'search_web' || lower === 'web_search') {
+    return read(args?.query, args?.q)?.trim() ?? 'Searching the web';
+  }
+  if (lower === 'list_files' || lower === 'glob' || lower === 'ls') {
+    return read(args?.path, args?.pattern)?.trim() ?? 'Listing workspace files';
+  }
+  return read(args?.path, args?.file_path, args?.url, args?.query, args?.taskName, args?.prompt)?.trim() ?? normalized;
+}
+
+function normalizeLaunchLabel(taskName?: string | null, prompt?: string | null, surfaceId?: string | null): string {
+  const issueRef = taskName?.match(/#\d+/)?.[0] ?? prompt?.match(/#\d+/)?.[0] ?? null;
+  if (issueRef) {
+    const suffix = taskName?.replace(/^.*?#\d+\s*/u, '').replace(/^[-:]\s*/, '').trim();
+    return suffix ? `${issueRef} ${suffix}` : issueRef;
+  }
+  const label = taskName?.trim() || prompt?.trim() || surfaceId?.trim() || 'agent session';
+  return label.length > 48 ? `${label.slice(0, 47)}…` : label;
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildLaunchLink(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  output: string,
+): MobileTranscriptToolLaunchLink | null {
+  const lower = name.toLowerCase();
+  if (lower !== 'cortex_launch_agent' && lower !== 'mcp__cortex__cortex_launch_agent') {
+    return null;
+  }
+
+  const payload = parseJsonObject(output);
+  const ok = payload?.ok;
+  const surfaceId = typeof payload?.surfaceId === 'string' ? payload.surfaceId : null;
+  if (ok === false || !surfaceId) {
+    return null;
+  }
+
+  return {
+    surfaceId,
+    repoPath: typeof payload?.worktreePath === 'string'
+      ? payload.worktreePath
+      : typeof args?.repoPath === 'string'
+        ? args.repoPath
+        : null,
+    laneId: typeof payload?.laneId === 'string' ? payload.laneId : null,
+    branch: typeof payload?.branch === 'string' ? payload.branch : null,
+    worktreePath: typeof payload?.worktreePath === 'string' ? payload.worktreePath : null,
+    label: normalizeLaunchLabel(
+      typeof args?.taskName === 'string' ? args.taskName : null,
+      typeof args?.prompt === 'string' ? args.prompt : null,
+      surfaceId,
+    ),
+  };
+}
+
+function buildToolResultPreview(output: string): string | undefined {
+  const payload = parseJsonObject(output);
+  const note = typeof payload?.note === 'string' ? payload.note.trim() : '';
+  if (note) return note.length > 160 ? `${note.slice(0, 159)}…` : note;
+  const firstLine = output.split('\n').map((line) => line.trim()).find(Boolean) ?? '';
+  return firstLine ? (firstLine.length > 160 ? `${firstLine.slice(0, 159)}…` : firstLine) : undefined;
+}
+
+function buildTurnAutoSummary(turn: ActiveTurnState | null): string | null {
+  if (!turn) return null;
+  if (turn.launches.length === 0) {
+    return turn.toolCallsStarted > 0
+      ? `Completed ${turn.toolCallsStarted} tool call${turn.toolCallsStarted === 1 ? '' : 's'}. No agents launched.`
+      : null;
+  }
+
+  const launchSummary = turn.launches
+    .map((launch) => `Launched ${launch.label}${launch.laneId ? ` (ref ${launch.laneId})` : ''}.`)
+    .join(' ');
+
+  if (turn.launches.length === 1) {
+    return `${launchSummary} No other agents launched.`;
+  }
+
+  return `${launchSummary} ${turn.launches.length} agents launched total.`;
+}
+
 /**
  * Hook that connects to the orchestrator WebSocket channel for real-time
  * Claude Code streaming. Replaces the poll-based orchestrator flow.
@@ -48,6 +178,7 @@ export function useOrchestratorStream(
   const [messages, setMessages] = useState<MobileTranscriptEntry[]>([]);
   const [planText, setPlanText] = useState<string | null>(null);
   const [status, setStatus] = useState<OrchestratorStreamStatus>('connecting');
+  const [busyState, setBusyState] = useState<ThoughtsOrchestratorBusyState>(() => createIdleBusyState());
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const currentAssistantRef = useRef<{ id: string; chunks: string[]; thinkingChunks: string[] } | null>(null);
@@ -66,6 +197,7 @@ export function useOrchestratorStream(
   const captureFirstTurnPlanRef = useRef(false);
   const firstTurnPlanStartedRef = useRef(false);
   const firstTurnPlanChunksRef = useRef<string[]>([]);
+  const activeTurnRef = useRef<ActiveTurnState | null>(null);
 
   // #539 — reconnect reconciliation. eventCountRef advances on every relevant
   // orchestrator event; lastEventAtRef tracks wall-clock time of the last
@@ -119,6 +251,59 @@ export function useOrchestratorStream(
     setPlanText(nextPlanText);
   }, [resetFirstTurnPlanCapture]);
 
+  const syncBusyState = useCallback(() => {
+    const turn = activeTurnRef.current;
+    if (!turn) {
+      setBusyState(createIdleBusyState());
+      return;
+    }
+    setBusyState({
+      active: true,
+      startedAt: turn.startedAt,
+      toolCallsStarted: turn.toolCallsStarted,
+      toolCallsCompleted: turn.toolCallsCompleted,
+      latestToolLabel: turn.latestToolLabel,
+    });
+  }, []);
+
+  const beginTurn = useCallback(() => {
+    if (!activeTurnRef.current) {
+      activeTurnRef.current = {
+        startedAt: Date.now(),
+        toolCallsStarted: 0,
+        toolCallsCompleted: 0,
+        latestToolLabel: null,
+        launches: [],
+      };
+    }
+    syncBusyState();
+  }, [syncBusyState]);
+
+  const endTurn = useCallback(() => {
+    activeTurnRef.current = null;
+    setBusyState(createIdleBusyState());
+  }, []);
+
+  const appendAutoSummary = useCallback((summary: string | null) => {
+    if (!summary) return;
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === 'assistant' && last.text.trim() === summary.trim()) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          id: `orch-summary-${Date.now()}`,
+          role: 'assistant',
+          text: summary,
+          timestamp: Date.now(),
+          timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ];
+    });
+  }, []);
+
   // #539 — clear any stale "running" state when the client's local view of
   // a busy turn no longer matches reality. Used by both the reconnect heal
   // and the heartbeat-based stall detector. Idempotent — safe to call when
@@ -134,6 +319,7 @@ export function useOrchestratorStream(
     console.warn(`[orchestrator-stream] Healing stale busy state: ${reason}`);
     if (hasStaleStatus) setStatus('ready');
     if (hasOrphanAssistant) currentAssistantRef.current = null;
+    endTurn();
     if (hasRunningTools) {
       setMessages((prev) =>
         prev.map((m) =>
@@ -143,7 +329,7 @@ export function useOrchestratorStream(
         ),
       );
     }
-  }, []);
+  }, [endTurn]);
 
   const flushCurrentAssistant = useCallback(() => {
     const current = currentAssistantRef.current;
@@ -151,23 +337,74 @@ export function useOrchestratorStream(
 
     const text = current.chunks.join('\n');
     const thinking = current.thinkingChunks.length > 0 ? current.thinkingChunks.join('\n') : undefined;
-    const entry: MobileTranscriptEntry = {
-      id: current.id,
-      role: 'assistant',
-      text: text || (thinking ? '' : ''),
-      thinking,
-      timestamp: Date.now(),
-      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
     setMessages(prev => {
       const idx = prev.findIndex(m => m.id === current.id);
       if (idx >= 0) {
         const next = [...prev];
-        next[idx] = entry;
+        next[idx] = {
+          ...next[idx],
+          text: text || (thinking ? '' : ''),
+          thinking,
+          timestamp: next[idx].timestamp ?? Date.now(),
+          timestampLabel: next[idx].timestampLabel ?? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
         return next;
       }
-      return [...prev, entry];
+      return [...prev, {
+        id: current.id,
+        role: 'assistant',
+        text: text || (thinking ? '' : ''),
+        thinking,
+        timestamp: Date.now(),
+        timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }];
+    });
+  }, []);
+
+  const upsertToolCall = useCallback((toolCall: MobileTranscriptToolCall) => {
+    if (!currentAssistantRef.current) {
+      currentAssistantRef.current = {
+        id: `orch-assistant-${Date.now()}`,
+        chunks: [],
+        thinkingChunks: [],
+      };
+    }
+
+    const current = currentAssistantRef.current;
+    setMessages((prev) => {
+      const idx = prev.findIndex((message) => message.id === current.id);
+      const baseEntry = idx >= 0
+        ? prev[idx]
+        : {
+            id: current.id,
+            role: 'assistant' as const,
+            text: '',
+            timestamp: Date.now(),
+            timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+      const existingTools = baseEntry.toolCalls ?? [];
+      const toolIndex = existingTools.findIndex((candidate) => (
+        (toolCall.id && candidate.id === toolCall.id)
+        || (!toolCall.id && candidate.name === toolCall.name && candidate.status !== 'done')
+      ));
+      const nextTools = toolIndex >= 0
+        ? existingTools.map((candidate, index) => (
+          index === toolIndex
+            ? { ...candidate, ...toolCall, args: toolCall.args ?? candidate.args }
+            : candidate
+        ))
+        : [...existingTools, toolCall];
+      const nextEntry: MobileTranscriptEntry = {
+        ...baseEntry,
+        toolCalls: nextTools,
+      };
+
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = nextEntry;
+        return next;
+      }
+      return [...prev, nextEntry];
     });
   }, []);
 
@@ -503,5 +740,5 @@ export function useOrchestratorStream(
     setStatus(connected ? 'ready' : 'connecting');
   }, [connected, resetFirstTurnPlanCapture]);
 
-  return { messages, planText, status, send, reset, connected };
+  return { messages, planText, status, busyState, send, reset, connected };
 }

@@ -220,6 +220,8 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     waitingForReply: false,
     hasMessages: false,
     threadId: null,
+    messageCount: 0,
+    orchestratorBusyState: null,
   });
   const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
   const [agentsOpen, setAgentsOpen] = useState(() => readBooleanPref(AGENTS_OPEN_KEY));
