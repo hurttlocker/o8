@@ -465,7 +465,158 @@ function MetaToolLine({ tool }: { tool: MobileTranscriptToolCall }) {
   );
 }
 
+// Rams rule: every tool call gets one italic line. Writes (real mutations to
+// the repo) get the full card because the operator must see them. Everything
+// else — shell commands, reads, searches, fetches, list ops — collapses to a
+// quiet italic line, batched when consecutive. Click the line to expand.
+function isBatchable(cls: ToolSideEffectClass, tool: MobileTranscriptToolCall) {
+  if (cls === 'read' || cls === 'meta') return true;
+  // Shell exec is batchable — the chat was drowning in `Run /bin/zsh -lc "sed..."`
+  // cards. A grep is not a mutation.
+  const n = tool.name.toLowerCase();
+  if (n === 'exec' || n === 'exec_command' || n === 'write_stdin') return true;
+  if (n === 'search_web' || n === 'web_search' || n === 'cortex_search' || n === 'memory_search') return true;
+  if (n === 'web_fetch' || n === 'fetch_url') return true;
+  if (n === 'list_files' || n === 'ls' || n === 'glob') return true;
+  return false;
+}
+
+function summarizeBatch(tools: MobileTranscriptToolCall[]): { verbs: string; anyRunning: boolean } {
+  const names = tools.map((t) => {
+    const n = t.name.toLowerCase();
+    if (n === 'exec' || n === 'exec_command') {
+      const cmd = String(t.args?.command ?? t.args?.cmd ?? '').trim().split(/\s+/)[0] ?? 'shell';
+      return cmd.replace(/^.*\//, '') || 'shell';
+    }
+    if (n === 'read' || n === 'read_file') return 'read';
+    if (n === 'search_web' || n === 'web_search' || n === 'cortex_search' || n === 'memory_search') return 'search';
+    if (n === 'web_fetch' || n === 'fetch_url') return 'fetch';
+    if (n === 'list_files' || n === 'ls' || n === 'glob') return 'list';
+    return n;
+  });
+  const shown = names.slice(0, 5);
+  const extra = names.length - shown.length;
+  const verbs = extra > 0 ? `${shown.join(', ')} +${extra}` : shown.join(', ');
+  const anyRunning = tools.some((t) => t.status === 'running' || t.status === 'calling');
+  return { verbs, anyRunning };
+}
+
+function BatchedToolLine({ tools }: { tools: MobileTranscriptToolCall[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const { verbs, anyRunning } = summarizeBatch(tools);
+  const count = tools.length;
+
+  return (
+    <div style={{ width: '100%' }}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        title={expanded ? 'Collapse commands' : 'Show commands'}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          paddingTop: 2,
+          paddingBottom: 2,
+          paddingLeft: 2,
+          paddingRight: 8,
+          borderWidth: 0,
+          background: 'transparent',
+          color: 'var(--t-text-muted)',
+          fontSize: 11.5,
+          fontStyle: 'italic',
+          fontWeight: 400,
+          letterSpacing: '-0.005em',
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        {anyRunning ? (
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#FF5A1F"
+            strokeWidth="3"
+            strokeLinecap="round"
+            style={{ animation: 'spin 0.9s linear infinite', flexShrink: 0 }}
+            aria-hidden="true"
+          >
+            <path d="M21 12a9 9 0 1 1-6.22-8.56" />
+          </svg>
+        ) : (
+          <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--t-text-faint)', flexShrink: 0, display: 'inline-block' }} aria-hidden="true" />
+        )}
+        <span>
+          {anyRunning ? 'running' : 'ran'} {count} {count === 1 ? 'command' : 'commands'}
+          <span style={{ color: 'var(--t-text-faint)', fontStyle: 'italic' }}>
+            {' — '}
+            {verbs}
+          </span>
+        </span>
+        <span style={{ fontSize: 9, fontStyle: 'normal', color: 'var(--t-text-faint)', opacity: 0.7 }}>
+          {expanded ? '▴' : '▾'}
+        </span>
+      </button>
+      {expanded ? (
+        <div style={{
+          marginTop: 6,
+          marginLeft: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          paddingLeft: 10,
+          borderLeftWidth: 1,
+          borderLeftStyle: 'solid',
+          borderLeftColor: 'var(--t-divider-subtle)',
+        }}>
+          {tools.map((tool, index) => {
+            const cls = resolveSideEffectClass(tool);
+            const key = `${tool.id ?? tool.name}-${index}`;
+            if (cls === 'read') return <ReadToolChip key={key} tool={tool} />;
+            return <MetaToolLine key={key} tool={tool} />;
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscriptToolCall[] }) {
+  // Group consecutive batchable (read/meta) tool calls into italic summary
+  // lines. Writes always render as full cards because they mutate the repo
+  // and the operator needs to see them clearly.
+  const groups: Array<
+    | { kind: 'batch'; tools: MobileTranscriptToolCall[] }
+    | { kind: 'write'; tool: MobileTranscriptToolCall; index: number }
+  > = [];
+  let pendingBatch: MobileTranscriptToolCall[] = [];
+
+  const flushBatch = () => {
+    if (pendingBatch.length === 0) return;
+    if (pendingBatch.length === 1) {
+      // Solo reads still render as the ReadToolChip, not collapsed — one call
+      // doesn't need batching ceremony.
+      groups.push({ kind: 'batch', tools: pendingBatch });
+    } else {
+      groups.push({ kind: 'batch', tools: pendingBatch });
+    }
+    pendingBatch = [];
+  };
+
+  toolCalls.forEach((tool, index) => {
+    const cls = resolveSideEffectClass(tool);
+    if (isBatchable(cls, tool)) {
+      pendingBatch.push(tool);
+    } else {
+      flushBatch();
+      groups.push({ kind: 'write', tool, index });
+    }
+  });
+  flushBatch();
+
   return (
     <div style={{
       display: 'flex',
@@ -474,12 +625,15 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
       width: '100%',
       maxWidth: '100%',
     }}>
-      {toolCalls.map((tool, index) => {
-        const cls = resolveSideEffectClass(tool);
-        const key = `${tool.id ?? tool.name}-${index}`;
-        if (cls === 'read') return <ReadToolChip key={key} tool={tool} />;
-        if (cls === 'meta') return <MetaToolLine key={key} tool={tool} />;
-        return <WriteToolCard key={key} tool={tool} />;
+      {groups.map((group, gi) => {
+        if (group.kind === 'write') {
+          const key = `write-${group.tool.id ?? group.tool.name}-${group.index}`;
+          return <WriteToolCard key={key} tool={group.tool} />;
+        }
+        // Every batchable group — single or multi — renders as the italic
+        // line. Single calls show "ran 1 command — rg"; multi show the count
+        // with the stacked verb list. Consistency > ceremony.
+        return <BatchedToolLine key={`batch-${gi}`} tools={group.tools} />;
       })}
     </div>
   );
