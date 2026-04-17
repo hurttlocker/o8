@@ -18,13 +18,8 @@ function formatTokenCount(value?: number) {
   return String(Math.round(value));
 }
 
-function headerLabel(compactedCount: number | undefined, trigger: CompactionTrigger | undefined) {
-  if (typeof compactedCount === 'number') {
-    return `${compactedCount} messages compressed`;
-  }
-  if (trigger === 'manual') return 'Context compacted manually';
-  if (trigger === 'auto') return 'Context auto-compacted';
-  return 'Context compacted';
+function readMeta(summary: string | undefined, field: string) {
+  return summary?.match(new RegExp(`${field}="([^"]+)"`, 'i'))?.[1];
 }
 
 function triggerLabel(trigger: CompactionTrigger | undefined) {
@@ -43,9 +38,12 @@ export function CompactionNode({
 }: CompactionNodeProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  const inferredCount = Number(readMeta(summary, 'turns'));
+  const compactedTurns = Number.isFinite(inferredCount) ? inferredCount : compactedCount;
+  const stamp = readMeta(summary, 'at') ?? timestampLabel;
   const displaySummary = useMemo(() => (
     (summary ?? '')
-      .replace(/<\/?compacted_context>/g, '')
+      .replace(/<\/?compacted_context\b[^>]*>/g, '')
       .trim()
   ), [summary]);
 
@@ -85,10 +83,8 @@ export function CompactionNode({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            paddingTop: 12,
-            paddingBottom: 12,
-            paddingLeft: 16,
-            paddingRight: 16,
+            minHeight: 18,
+            padding: '0 10px',
             border: 'none',
             background: 'transparent',
             cursor: hasDetails ? 'pointer' : 'default',
@@ -97,65 +93,32 @@ export function CompactionNode({
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 8,
             minWidth: 0,
           }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(59,130,246,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 6h16" />
-              <path d="M4 12h16" />
-              <path d="M4 18h16" />
-              <path d="M7 3l5 3 5-3" />
-              <path d="M7 21l5-3 5 3" />
-            </svg>
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-              minWidth: 0,
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: '#f97316', boxShadow: '0 0 0 3px rgba(249,115,22,0.12)', flexShrink: 0 }} />
+            <span style={{
+              fontSize: 10.5,
+              lineHeight: '18px',
+              color: '#9a3412',
+              letterSpacing: '0.04em',
+              fontFamily: '"SFMono-Regular", ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
             }}>
-              <span style={{
-                fontSize: 13,
-                fontWeight: 500,
-                color: '#94a3b8',
-                letterSpacing: '-0.01em',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}>
-                {headerLabel(compactedCount, trigger)}
-              </span>
-              {(formattedBefore || formattedAfter || trigger) ? (
-                <span style={{
-                  fontSize: 11,
-                  color: '#64748b',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}>
-                  {trigger ? `${triggerLabel(trigger)} compaction` : 'Compaction event'}
-                  {(formattedBefore || formattedAfter) ? ` • ${formattedBefore ?? '—'} → ${formattedAfter ?? '—'} tokens` : ''}
-                </span>
-              ) : null}
-            </div>
+              {`(COMPACTED · ${compactedTurns ?? 'AUTO'} TURNS${stamp ? ` · ${stamp}` : ''})`}
+            </span>
           </div>
 
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
             flexShrink: 0,
           }}>
-            {timestampLabel ? (
-              <span style={{
-                fontSize: 11,
-                color: '#64748b',
-              }}>
-                {timestampLabel}
-              </span>
-            ) : null}
             <svg
-              width="14"
-              height="14"
+              width="11"
+              height="11"
               viewBox="0 0 24 24"
               fill="none"
               stroke="#cbd5e1"
