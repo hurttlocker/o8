@@ -33,6 +33,28 @@ export interface CliChatSessionResult {
   needsPersist: boolean;
 }
 
+function findSupervisorRetryExistingTab(
+  currentTabs: TerminalTab[],
+  options: Parameters<TerminalTabHandle['openCliChatSession']>[0],
+  resolvedRuntime: 'codex' | 'claude-code',
+  normalizedTargetSessionKey: string | null,
+): TerminalTab | null {
+  if (!options.createNew || !options.targetSessionKey || options.initialText) return null;
+  if ((options.supervisorStatus ?? '').trim().toLowerCase() !== 'launched') return null;
+  const targetLabel = options.label?.trim();
+  if (!targetLabel) return null;
+
+  const candidates = currentTabs.filter((tab) => {
+    if (tab.kind !== 'chat' || tab.chatRuntime !== resolvedRuntime) return false;
+    if ((tab.supervisorStatus ?? '').trim().toLowerCase() !== 'retrying') return false;
+    if (tab.label.trim() !== targetLabel) return false;
+    if (options.repo && tab.repo?.localPath !== options.repo.localPath) return false;
+    return normalizeWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey) !== normalizedTargetSessionKey;
+  });
+
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 export function computeCliChatSession(
   options: Parameters<TerminalTabHandle['openCliChatSession']>[0],
   currentTabs: TerminalTab[],
@@ -53,6 +75,12 @@ export function computeCliChatSession(
   const normalizedTargetSessionKey = options.targetSessionKey
     ? normalizeWorkspaceChatSessionKey(resolvedRuntime, options.targetSessionKey)
     : null;
+  const supervisorRetryExisting = findSupervisorRetryExistingTab(
+    currentTabs,
+    options,
+    resolvedRuntime,
+    normalizedTargetSessionKey,
+  );
 
   const targetedExisting = options.createNew || !options.targetSessionKey
     ? null
@@ -87,17 +115,18 @@ export function computeCliChatSession(
   // never be able to view two running agents side by side. When no target
   // key is given (e.g. "new Codex chat" quick action), fall back to the
   // active chat tab of the same runtime so we don't stack duplicates.
-  const matchingExisting = options.createNew
-    ? null
-    : packetExisting
-      ?? (options.targetSessionKey
-        ? targetedExisting ?? null
-        : activeExisting
-          ?? currentTabs.find((tab) => (
-            tab.kind === 'chat'
-            && tab.chatRuntime === resolvedRuntime
-            && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-          )));
+  const matchingExisting = supervisorRetryExisting
+    ?? (options.createNew
+      ? null
+      : packetExisting
+        ?? (options.targetSessionKey
+          ? targetedExisting ?? null
+          : activeExisting
+            ?? currentTabs.find((tab) => (
+              tab.kind === 'chat'
+              && tab.chatRuntime === resolvedRuntime
+              && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+            ))));
   const injection = options.initialText ? {
     id: `workspace-chat-injection-${Date.now()}`,
     text: options.initialText,
