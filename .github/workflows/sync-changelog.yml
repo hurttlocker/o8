@@ -19,40 +19,61 @@ jobs:
           cat > /tmp/CHANGELOG.md << 'HEADER'
           # Changelog
 
-          Development activity for Rainwater IDE.
+          Development activity for o8 — the governance layer for autonomous engineering teams.
+
+          We ship high-signal entries only (features + performance wins). Bug fixes, refactors,
+          and internal chores live in the private engineering log.
 
           ---
           HEADER
 
+          # Keep the last 180 days of activity, and only high-signal prefixes.
+          # Public changelog ≠ engineering log — operators want to see what changed
+          # in the product, not every "fix: typo" scroll.
+          SINCE="180 days ago"
+
           current_date=""
-          git log --format="%as|%h|%s" --no-merges | while IFS='|' read -r date hash msg; do
-            if [ "$date" != "$current_date" ]; then
-              echo ""
-              echo "## $date"
-              echo ""
-              current_date="$date"
+          git log --since="$SINCE" --format="%as|%h|%s" --no-merges | while IFS='|' read -r date hash msg; do
+            # --- Filter: signal prefixes only ---
+            # Drop noise prefixes. `feat:` and `perf:` are the marketing-visible work.
+            # Everything else (fix / chore / refactor / test / docs / auto-commit / revert)
+            # is internal unless explicitly promoted.
+            if ! echo "$msg" | grep -qE '^(feat|perf|design)(\(.*\))?:'; then
+              continue
+            fi
+
+            # Drop Revert entries even if they feat-prefix
+            if echo "$msg" | grep -qiE '^Revert'; then
+              continue
+            fi
+
+            # Drop auto-commit entries
+            if echo "$msg" | grep -qiE '^auto-commit'; then
+              continue
+            fi
+
+            # Drop security-sensitive commits entirely
+            if echo "$msg" | grep -qiE 'injection|race.condition|vulnerability|xss|csrf|exploit|CVE|credential|password'; then
+              continue
             fi
 
             # --- Sanitize commit messages ---
 
-            # Drop security-sensitive commits entirely
-            if echo "$msg" | grep -qiE 'injection|race.condition|crash|vulnerability|xss|csrf|auth.fix|exploit|CVE|secret|credential|password'; then
-              msg="fix: Security hardening"
-            fi
-
-            # Strip internal project/codename references
+            # Strip internal project/codename references + rebrand to o8
             msg=$(echo "$msg" | sed -E \
-              -e 's/Cortex IDE/Rainwater/gi' \
+              -e 's/Cortex IDE/o8/gi' \
               -e 's/Cortex-aware/context-aware/gi' \
               -e 's/CortexClient/client/gi' \
               -e 's/\.cortexrules/project rules/gi' \
-              -e 's/Cortex ?[Mm]emory/Memory/gi' \
-              -e 's/Cortex/Rainwater/gi' \
+              -e 's/Cortex ?[Mm]emory/memory/gi' \
+              -e 's/Cortex/o8/gi' \
+              -e 's/Rainwater/o8/gi' \
               -e 's/OpenClaw/agent runtime/gi' \
               -e 's/NemoClaw/agent runtime/gi' \
               -e 's/PicoClaw/bundled runtime/gi' \
               -e 's/Codex/agent runtime/gi' \
               -e 's/Claude Code/agent runtime/gi' \
+              -e 's/opencode/agent runtime/gi' \
               -e 's/Tauri/native shell/gi' \
               -e 's/Drizzle/ORM/gi' \
               -e 's/better-sqlite3?/database/gi' \
@@ -60,6 +81,8 @@ jobs:
               -e 's/Claude/AI provider/gi' \
               -e 's/Anthropic/AI provider/gi' \
               -e 's/GPT-?[0-9.]*/AI model/gi' \
+              -e 's/Cursor/competing product/gi' \
+              -e 's/Conductor/competing product/gi' \
               -e 's/API [Kk]ey[s]?/configuration/gi' \
               -e 's/BYOK/bring-your-own/gi' \
               -e 's/tmux/terminal/gi')
@@ -71,7 +94,14 @@ jobs:
             msg=$(echo "$msg" | sed -E 's/ — .{40,}//g')
 
             # Clean up trailing prepositions left by stripping
-            msg=$(echo "$msg" | sed -E 's/ (of|for|via|from|with|in) *$//')
+            msg=$(echo "$msg" | sed -E 's/ (of|for|via|from|with|in|the) *$//')
+
+            if [ "$date" != "$current_date" ]; then
+              echo ""
+              echo "## $date"
+              echo ""
+              current_date="$date"
+            fi
 
             echo "- \`$hash\` $msg"
           done >> /tmp/CHANGELOG.md
@@ -82,10 +112,12 @@ jobs:
           # Add new internal codenames here when they're introduced.
           BLOCKLIST=(
             Cortex
+            Rainwater
             OpenClaw
             NemoClaw
             PicoClaw
             Codex
+            opencode
             Tauri
             Drizzle
             better-sqlite
@@ -96,6 +128,8 @@ jobs:
             GPT-4
             GPT-5
             BYOK
+            Cursor
+            Conductor
             "API key"
             "API keys"
             cortexrules
@@ -128,10 +162,10 @@ jobs:
           echo "" >> /tmp/STATS.md
           echo "| Metric | Value |" >> /tmp/STATS.md
           echo "|---|---|" >> /tmp/STATS.md
-          echo "| Total commits | $(git rev-list --count HEAD) |" >> /tmp/STATS.md
-          echo "| Days active | $(git log --format="%as" | sort -u | wc -l | tr -d ' ') |" >> /tmp/STATS.md
-          echo "| This week | $(git log --since='7 days ago' --oneline --no-merges | wc -l | tr -d ' ') commits |" >> /tmp/STATS.md
-          echo "| Today | $(git log --since='1 day ago' --oneline --no-merges | wc -l | tr -d ' ') commits |" >> /tmp/STATS.md
+          echo "| Features shipped (180d) | $(git log --since='180 days ago' --format='%s' --no-merges | grep -cE '^(feat|perf|design)(\(.*\))?:' || echo 0) |" >> /tmp/STATS.md
+          echo "| Days active | $(git log --format='%as' | sort -u | wc -l | tr -d ' ') |" >> /tmp/STATS.md
+          echo "| This week | $(git log --since='7 days ago' --format='%s' --no-merges | grep -cE '^(feat|perf|design)(\(.*\))?:' || echo 0) features |" >> /tmp/STATS.md
+          echo "| Today | $(git log --since='1 day ago' --format='%s' --no-merges | grep -cE '^(feat|perf|design)(\(.*\))?:' || echo 0) features |" >> /tmp/STATS.md
 
       - name: Push to public repo
         env:
