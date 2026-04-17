@@ -391,11 +391,14 @@ export function TitleBar({
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                padding: '6px 16px',
+                paddingTop: 6,
+                paddingBottom: 6,
+                paddingLeft: 16,
+                paddingRight: 16,
                 borderRadius: 10,
                 border: 'none',
-                background: 'rgba(0, 0, 0, 0.03)',
-                color: 'var(--t-text-muted)',
+                background: 'rgba(255, 255, 255, 0.06)',
+                color: 'rgba(255, 255, 255, 0.78)',
                 fontSize: 13,
                 fontWeight: 500,
                 letterSpacing: '-0.01em',
@@ -407,10 +410,10 @@ export function TitleBar({
                 ['WebkitAppRegion' as string]: 'no-drag',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.06)';
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.03)';
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
               }}
             >
               <IconSearch />
