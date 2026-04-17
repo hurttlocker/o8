@@ -91,7 +91,7 @@ function SplitTileIcon({
   active: boolean;
 }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="3.5" y="5" width="7" height="14" rx="2.2" />
       <rect x="13.5" y="5" width="7" height="14" rx="2.2" />
       {active ? (
@@ -286,27 +286,25 @@ function SessionVisualizerBase({
                 title={`${session.name} — ${session.headline}`}
                 style={{
                   position: 'relative',
-                  minWidth: 196,
-                  maxWidth: 252,
-                  borderRadius: 14,
+                  minWidth: 148,
+                  maxWidth: 188,
+                  borderRadius: 8,
                   borderWidth: 1,
                   borderStyle: 'solid',
                   borderColor: tiled ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)',
-                  background: tiled ? 'var(--t-panel)' : 'var(--t-bg-card)',
+                  background: tiled ? 'var(--t-panel)' : 'transparent',
                   color: 'var(--t-text)',
                   flexShrink: 0,
-                  boxShadow: tiled ? '0 14px 30px rgba(37, 99, 235, 0.08)' : '0 10px 24px rgba(15, 23, 42, 0.04)',
-                  transition: 'border-color 120ms ease, background 120ms ease, transform 120ms ease',
+                  boxShadow: 'none',
+                  transition: 'border-color 120ms ease, background 120ms ease',
                 }}
                 onMouseEnter={(event) => {
                   event.currentTarget.style.borderColor = 'var(--t-accent-border)';
-                  if (!tiled) event.currentTarget.style.background = 'var(--t-panel)';
-                  event.currentTarget.style.transform = 'translateY(-1px)';
+                  if (!tiled) event.currentTarget.style.background = 'var(--t-panel-hover)';
                 }}
                 onMouseLeave={(event) => {
                   event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)';
-                  event.currentTarget.style.background = tiled ? 'var(--t-panel)' : 'var(--t-bg-card)';
-                  event.currentTarget.style.transform = 'translateY(0)';
+                  event.currentTarget.style.background = tiled ? 'var(--t-panel)' : 'transparent';
                 }}
               >
                 <button
@@ -316,12 +314,12 @@ function SessionVisualizerBase({
                     width: '100%',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 5,
-                    paddingTop: 9,
-                    paddingRight: 52,
-                    paddingBottom: 9,
-                    paddingLeft: 12,
-                    borderRadius: 14,
+                    gap: 3,
+                    paddingTop: 6,
+                    paddingRight: 32,
+                    paddingBottom: 6,
+                    paddingLeft: 8,
+                    borderRadius: 8,
                     borderWidth: 0,
                     background: 'transparent',
                     color: 'inherit',
@@ -334,81 +332,45 @@ function SessionVisualizerBase({
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 6,
+                      gap: 5,
+                      minWidth: 0,
                     }}
                   >
                     <span
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 5,
-                        fontSize: 9.5,
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        background: statusColor,
+                        flexShrink: 0,
+                        boxShadow: session.status === 'running' ? `0 0 0 2px ${statusColor}22` : 'none',
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 9,
                         fontWeight: 700,
                         letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         color: tint,
+                        flexShrink: 0,
                       }}
                     >
-                      <span
-                        style={{
-                          width: 5,
-                          height: 5,
-                          borderRadius: '50%',
-                          background: tint,
-                        }}
-                      />
                       {runtimeLabel(session.runtime)}
                     </span>
                     <span
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        fontSize: 9,
-                        fontWeight: 600,
-                        color: statusColor,
+                        fontSize: 10.5,
+                        fontWeight: 500,
+                        color: 'var(--t-text-muted)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        minWidth: 0,
                       }}
                     >
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: statusColor,
-                          boxShadow: session.status === 'running'
-                            ? `0 0 0 3px ${statusColor}22`
-                            : 'none',
-                        }}
-                      />
-                      {STATUS_LABELS[session.status]}
+                      {session.workspace ?? session.name}
                     </span>
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: 'var(--t-text)',
-                      letterSpacing: '-0.01em',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {session.name}
-                    {session.workspace ? (
-                      <span
-                        style={{
-                          marginLeft: 6,
-                          fontSize: 10.5,
-                          fontWeight: 500,
-                          color: 'var(--t-text-muted)',
-                        }}
-                      >
-                        · {session.workspace}
-                      </span>
-                    ) : null}
                   </div>
 
                   <div
@@ -416,7 +378,7 @@ function SessionVisualizerBase({
                       fontSize: 10.5,
                       fontWeight: 500,
                       color: 'var(--t-text-muted)',
-                      lineHeight: 1.35,
+                      lineHeight: 1.3,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
@@ -428,9 +390,9 @@ function SessionVisualizerBase({
                   {session.contextPct !== null ? (
                     <div
                       style={{
-                        marginTop: 2,
-                        height: 3,
-                        borderRadius: 2,
+                        marginTop: 1,
+                        height: 2,
+                        borderRadius: 1,
                         background: 'var(--t-divider-subtle)',
                         overflow: 'hidden',
                       }}
@@ -460,16 +422,16 @@ function SessionVisualizerBase({
                   }}
                   style={{
                     position: 'absolute',
-                    top: 6,
-                    right: 6,
-                    width: 44,
-                    height: 44,
-                    borderRadius: 12,
+                    top: 4,
+                    right: 4,
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
                     borderWidth: 1,
                     borderStyle: 'solid',
                     borderColor: tiled ? 'var(--t-accent-border)' : 'transparent',
                     background: tiled ? 'var(--t-accent-soft)' : 'transparent',
-                    color: tiled ? 'var(--t-accent)' : 'var(--t-text-secondary)',
+                    color: tiled ? 'var(--t-accent)' : 'var(--t-text-faint)',
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
