@@ -1,27 +1,38 @@
-# Rainwater IDE
+# o8
 
-**The operating system for AI labor.**
+**The governance layer for autonomous engineering teams.**
 
-Manage your entire AI engineering team from one screen. See what every agent is working on, what it costs, and approve decisions — from your desk or the back of an Uber.
+Run a fleet of AI agents with review gates, approvals, and shared memory. Local-first. Any model.
 
-## What It Does
-
-- **See everything** — every agent, every task, every dollar spent, in real time
-- **One dashboard** — no switching between terminals, tabs, or chat windows
-- **Approve from anywhere** — agents ask permission before acting, you say yes or no
-- **Built-in memory** — your agents remember everything, search anything, forget nothing
-- **Works with what you have** — connects to your existing agent runtimes or ships its own out of the box
-
-## Status
-
-Active development. Code is private.
-
-See [CHANGELOG.md](./CHANGELOG.md) for daily progress.
-
-## Built By
-
-**Rainwater Labs / Hurttlocker**
+> Claude plans. Codex builds. o8 ships.
 
 ---
 
-*Not yet available for download. Follow this repo for updates.*
+## Quick links
+
+- 🌐 Landing: [hurttlocker/o8-site](https://github.com/hurttlocker/o8-site)
+- 📒 [CHANGELOG.md](./CHANGELOG.md) — what shipped, when
+- 📊 [STATS.md](./STATS.md) — build velocity
+
+This repo holds the public development log. Engineering source is private; we sync feature-grade commits here on every merge.
+
+## What's inside
+
+- **CHANGELOG.md** — features and perf wins, date-grouped, rebranded from the private log. Bug fixes and internal refactors stay private.
+- **STATS.md** — rolling snapshot of how much has shipped: last week, last day, all-time active days.
+
+## How entries make the cut
+
+The public feed is filtered, not a dump. An entry only lands here if:
+
+1. The commit prefix is `feat:` / `perf:` / `design:` (no `fix:` / `chore:` / `refactor:` / auto-commit noise)
+2. It's from the last 180 days
+3. It passes a blocklist for internal codenames, competitor mentions, and secret-sensitive terms
+4. A sed pass rewrites internal product names → `o8` before publication
+
+Every sync is gated on the blocklist — if a new codename ever slips in, the workflow fails closed. That keeps the public log honest.
+
+## Staying updated
+
+- ⭐ Star this repo to follow releases
+- 📺 See every feature land in near-real-time (auto-sync on push to the private main)
