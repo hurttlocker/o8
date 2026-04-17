@@ -21,6 +21,7 @@ import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
+import { ApprovalBanner } from '@/components/desktop/ApprovalBanner';
 import { DesignModeOverlay } from '@/components/desktop/DesignModeOverlay';
 import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
@@ -2134,6 +2135,8 @@ function DashboardInner() {
           />
         )}
       />
+
+      <ApprovalBanner />
 
       <DesignModeOverlay
         active={designMode.state.active}
