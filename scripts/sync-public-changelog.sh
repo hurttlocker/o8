@@ -33,6 +33,28 @@ git log --since="$SINCE" --format="%as|%h|%s" --no-merges | while IFS='|' read -
   if echo "$msg" | grep -qiE '^auto-commit'; then continue; fi
   if echo "$msg" | grep -qiE 'injection|race.condition|vulnerability|xss|csrf|exploit|CVE|credential|password'; then continue; fi
 
+  # --- Strategy / budget / model drop list ---
+  # Drop entire entries that reveal monetization plans, specific model choices,
+  # perf/token/cost budget numbers, or dogfood-specific tooling. These give a
+  # reader too much of our playbook. Losing a handful of entries is fine —
+  # the public changelog is for feature visibility, not architecture reveals.
+  if echo "$msg" | grep -qiE 'monetization|monetiz|pricing|paywall|freemium|subscription|revenue|waitlist|gtm|go-to-market|moat'; then continue; fi
+  if echo "$msg" | grep -qiE '\bopus\b|\bsonnet\b|\bhaiku\b|\bgpt-?[0-9.]+\b|\bo[134]-preview\b|xhigh|low.reason|high.reason|reasoning.effort|thinking.effort|chain.of.thought|thinking.x-?ray'; then continue; fi
+  if echo "$msg" | grep -qiE '\b[0-9]{2,4}\s*ms\b.*budget|\b[0-9]+\s*mb\b.*budget|\b[0-9]+.line.ceiling|\b800.line|budget|ceiling|line.cap|file.size.limit|token.budget|context.budget'; then continue; fi
+  if echo "$msg" | grep -qiE 'dogfood|dogfed'; then continue; fi
+
+  # --- Path + infra + arch-detail scrubs ---
+  # Internal paths reveal our data-dir layout. Architecture-detail phrases
+  # reveal our internal system design at a level a competitor could copy.
+  msg=$(echo "$msg" | sed -E \
+    -e 's#~/\.o8[a-zA-Z0-9._-]*#the user data dir#g' \
+    -e 's#~/\.cortex[a-zA-Z0-9._-]*#the user data dir#g' \
+    -e 's/lane (governance|review transition|lifecycle|reconcile)/workflow transition/gi' \
+    -e 's/verb=merge/workflow action/gi' \
+    -e 's/approve_and_merge/workflow action/gi' \
+    -e 's/rule-check/governance check/gi' \
+    -e 's/supervisor (watch|fleet|completion)/workflow watcher/gi')
+
   msg=$(echo "$msg" | sed -E \
     -e 's/Cortex IDE/o8/gi' \
     -e 's/Cortex-aware/context-aware/gi' \
@@ -75,7 +97,7 @@ git log --since="$SINCE" --format="%as|%h|%s" --no-merges | while IFS='|' read -
 done
 
 # Blocklist check
-BLOCKLIST=(Cortex Rainwater OpenClaw NemoClaw PicoClaw Codex opencode Tauri Drizzle better-sqlite tmux Anthropic Claude Gemini GPT-4 GPT-5 BYOK Cursor Conductor "API key" cortexrules CortexClient ".cortex")
+BLOCKLIST=(Cortex Rainwater OpenClaw NemoClaw PicoClaw Codex opencode Tauri Drizzle better-sqlite tmux Anthropic Claude Gemini GPT-4 GPT-5 Opus Sonnet Haiku xhigh BYOK Cursor Conductor monetization "API key" cortexrules CortexClient ".cortex" ".o8-ide")
 LEAKED=""
 for term in "${BLOCKLIST[@]}"; do
   if grep -qi "$term" "$OUT_CHANGELOG"; then
