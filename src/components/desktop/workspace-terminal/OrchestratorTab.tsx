@@ -36,6 +36,8 @@ import {
 import { OrchestratorHistorySidebar } from '@/components/desktop/OrchestratorHistorySidebar';
 import { SessionVisualizer } from '@/components/desktop/SessionVisualizer';
 import { UnifiedAgentsSidebar } from '@/components/desktop/UnifiedAgentsSidebar';
+import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
+import { ThreadsDropdown } from '@/components/desktop/orchestrator/ThreadsDropdown';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import {
   ThoughtsChatPanel,
@@ -43,6 +45,7 @@ import {
   type ThoughtsChatPanelHandle,
   type ThoughtsChatPermissionMode,
 } from '@/components/desktop/thoughts/ThoughtsChatPanel';
+import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/components/desktop/thoughts/useOrchestratorStream';
 import { ThoughtsMissionPanel } from '@/components/desktop/thoughts/ThoughtsMissionPanel';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
 import { AgentTileLayout } from './AgentTileLayout';
@@ -80,7 +83,6 @@ function persistPermissionMode(tabId: string, mode: ThoughtsChatPermissionMode):
 const HISTORY_OPEN_KEY = 'o8:orchestrator:history-open';
 const AGENTS_OPEN_KEY = 'o8:orchestrator:agents-open';
 const MISSION_OPEN_KEY = 'o8:orchestrator:mission-open';
-
 const USERS_THREE_ICON_PATH = 'M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z';
 
 function readBooleanPref(key: string): boolean {
@@ -223,6 +225,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     messageCount: 0,
     orchestratorBusyState: null,
   });
+  const [contextUsage, setContextUsage] = useState({ tokenCount: 0, runningTotal: 0 });
   const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
   const [agentsOpen, setAgentsOpen] = useState(() => readBooleanPref(AGENTS_OPEN_KEY));
   const [missionOpen, setMissionOpen] = useState(() => readBooleanPref(MISSION_OPEN_KEY));
@@ -238,6 +241,17 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     const timeout = window.setTimeout(() => chatPanelRef.current?.focusInput(), 60);
     return () => window.clearTimeout(timeout);
   }, [active]);
+
+  useEffect(() => {
+    setContextUsage({ tokenCount: 0, runningTotal: 0 });
+    const handleTokenUsage = (event: Event) => {
+      const detail = (event as CustomEvent<OrchestratorTokenUsageDetail>).detail;
+      if (!detail || detail.repoPath !== (repoPath ?? null)) return;
+      setContextUsage({ tokenCount: detail.tokenCount, runningTotal: detail.runningTotal });
+    };
+    window.addEventListener(ORCHESTRATOR_TOKEN_EVENT, handleTokenUsage);
+    return () => window.removeEventListener(ORCHESTRATOR_TOKEN_EVENT, handleTokenUsage);
+  }, [repoPath]);
 
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
   const comparisonGroups = useMemo(() => {
@@ -452,6 +466,11 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
   const thoughtsElevatedBorder = '1px solid var(--t-glass-border-strong)';
   const thoughtsElevatedShadow = 'var(--t-glass-shadow)';
   const thoughtsMutedGlass = 'var(--t-glass-muted-strong)';
+  const headerChipStyle = {
+    height: 26, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 9, borderRadius: 8, borderWidth: 1, borderStyle: 'solid',
+    borderColor: 'rgba(255, 255, 255, 0.18)', color: 'rgba(255, 255, 255, 0.78)', display: 'inline-flex', alignItems: 'center',
+    fontSize: 12, fontWeight: 500, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  } as const;
 
 
   const isFullAccess = permissionMode === 'full';
@@ -543,102 +562,37 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
         </div>
       ) : null}
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          paddingTop: 10,
-          paddingRight: 14,
-          paddingBottom: 10,
-          paddingLeft: 14,
-          borderBottomWidth: '0.5px',
-          borderBottomStyle: 'solid',
-          borderBottomColor: 'var(--t-divider-subtle)',
-          background: 'var(--t-panel)',
-          flexShrink: 0,
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            minWidth: 0,
-            flexWrap: 'wrap',
-          }}
-        >
-          <HeaderToggleButton
-            active={historyOpen}
-            label="History"
-            title={historyOpen ? 'Hide orchestrator history' : 'Show orchestrator history'}
-            onClick={handleToggleHistory}
-          >
-            <ClockIcon size={14} />
-          </HeaderToggleButton>
-          <HeaderToggleButton
-            active={agentsOpen}
-            label="Agents"
-            title={agentsOpen ? 'Hide live agents' : 'Show live agents'}
-            onClick={handleToggleAgents}
-          >
-            <UsersThreeIcon size={14} />
-          </HeaderToggleButton>
-          <HeaderToggleButton
-            active={missionOpen}
-            label="Mission"
-            title={missionOpen ? 'Hide Mission Control' : 'Show Mission Control'}
-            onClick={handleToggleMission}
-          >
-            <RocketIcon size={14} />
-          </HeaderToggleButton>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 32, paddingTop: 3, paddingRight: 12, paddingBottom: 3, paddingLeft: 12, borderBottomWidth: '0.5px', borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)', background: 'transparent', flexShrink: 0 }}>
+        <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center' }}>
+          <ContextMeter tokenCount={contextUsage.tokenCount} runningTotal={contextUsage.runningTotal} onClick={() => { console.info('[orchestrator] Context inspector is not wired yet.'); }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <span style={headerChipStyle}>Opus 4.7</span>
+          <span style={{ ...headerChipStyle, gap: 6 }}>thinking: max ▾</span>
         </div>
 
-        {hasMessages ? (
-          <button
-            type="button"
-            onClick={handleNewConversation}
-            aria-label="New orchestrator conversation"
-            title="New orchestrator conversation"
-            style={{
-              height: 44,
-              paddingTop: 0,
-              paddingRight: 14,
-              paddingBottom: 0,
-              paddingLeft: 14,
-              borderRadius: 14,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-border)',
-              background: 'var(--t-bg-card)',
-              color: 'var(--t-text-secondary)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              cursor: 'pointer',
-              flexShrink: 0,
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: '-0.01em',
-              transition: 'background 180ms ease, border-color 180ms ease, color 180ms ease',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-            }}
-            onMouseEnter={(event) => {
-              event.currentTarget.style.background = 'var(--t-panel)';
-              event.currentTarget.style.borderColor = 'var(--t-border)';
-              event.currentTarget.style.color = 'var(--t-text)';
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.background = 'var(--t-bg-card)';
-              event.currentTarget.style.borderColor = 'var(--t-border)';
-              event.currentTarget.style.color = 'var(--t-text-secondary)';
-            }}
-          >
-            <PlusIcon size={13} />
-            <span>New</span>
-          </button>
-        ) : null}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <ThreadsDropdown historyOpen={historyOpen} agentsOpen={agentsOpen} missionOpen={missionOpen} onToggleHistory={handleToggleHistory} onToggleAgents={handleToggleAgents} onToggleMission={handleToggleMission} />
+
+          {hasMessages ? (
+            <button
+              type="button"
+              onClick={handleNewConversation}
+              aria-label="New orchestrator conversation"
+              title="New orchestrator conversation"
+              style={{
+                background: 'transparent',
+                gap: 6,
+                cursor: 'pointer',
+                flexShrink: 0,
+                ...headerChipStyle,
+              }}
+            >
+              <PlusIcon size={13} />
+              <span>New</span>
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* Session visualizer — only when there are active sessions.
