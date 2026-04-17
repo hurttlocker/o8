@@ -37,7 +37,6 @@ and internal chores live in the private engineering log.
 
 - `857df13` feat(orchestrator): export thread to markdown (closes)
 - `1dba6aa` feat(orchestrator): anti-patterns section + final-message format doctrine
-- `2cdb597` feat(orchestrator): pin to Opus 4.6 + rewrite system prompt for single-turn execution
 - `1037398` feat(lane): reap idle abandoned lanes + safety guard main tree
 - `c8d18e0` feat(history): archive tab in orchestrator history drawer
 - `14badaf` feat(workspace): merged read-only banner on retired chat tabs
@@ -60,7 +59,6 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-12
 
-- `e426aa2` feat: add dogfood-audit agent — 6-agent parallel product validation
 - `2f18524` feat: thinner fonts + desaturated diff in Changes panel
 - `1f41c0f` feat: unified user bubbles across all chats — subtle tinted pill
 - `3d5cfe0` feat: thinner orchestrator chat text
@@ -114,8 +112,6 @@ and internal chores live in the private engineering log.
 - `6f94da5` feat: enriched approval cards
 - `79d7bc3` feat: pre-dispatch file overlap gate
 - `48a878f` feat: expandable detail rows in O8 Activity pane — click to expand inline context
-- `11bd450` feat: thinking effort control
-- `6dfb0e5` feat: merge gate enforcement
 - `ff56a19` feat: specialized mobile tool call cards — diff, shell, read, search
 
 ## 2026-04-07
@@ -240,12 +236,11 @@ and internal chores live in the private engineering log.
 - `5631e6c` feat: slim compose bar
 - `73ba856` feat: in-process mutex on orchestrator-state.json
 - `4b610bb` feat: merge conflict escalation via approval card
-- `1681823` feat: persist supervisor watch state to SQLite
+- `1681823` feat: persist workflow watcher state to SQLite
 - `dc3b635` feat: orchestrator session health monitor — 90s timeout + auto-recovery
 - `77a08e4` feat: persistent SQLite-backed review queue
 - `32fa1ce` feat: inline mission creation — no GitHub dependency
 - `6481fce` perf: mobile page is now client-only — zero server-side bootstrap
-- `9499529` perf: cap mobile bootstrap to 200ms budget — don't block on runtime discovery
 - `294efd5` perf: mobile optimization
 - `79698ce` feat: copy AI provider mobile session list — clean rows, status groups, FAB
 - `bf22b7d` feat: mobile new chat — launch LLM session from phone
@@ -270,8 +265,8 @@ and internal chores live in the private engineering log.
 - `932ee1c` feat: FTUX empty states for all dashboard panels
 - `bd6c7c8` feat: FTUX warm dashboard state
 - `23b1bdb` feat: FTUX personalized chat greeting
-- `2bba0bf` feat: lane lifecycle WebSocket channel
-- `b79ae61` feat: lane lifecycle WebSocket channel for real-time status streaming
+- `2bba0bf` feat: workflow transition WebSocket channel
+- `b79ae61` feat: workflow transition WebSocket channel for real-time status streaming
 - `0dd778d` feat: migrate approval store from JSON to SQLite
 - `3b8deb9` feat: migrate approval store from JSON to SQLite
 
@@ -280,14 +275,14 @@ and internal chores live in the private engineering log.
 - `4f26174` feat: migrate lane registry from JSON to SQLite — kill cross-process clobber
 - `fd0baca` feat: sprint 6 wave 3
 - `a18bc0a` perf: sprint 6 wave 2
-- `e3321db` feat: supervisor fleet coordination
+- `e3321db` feat: workflow watcher coordination
 - `67d7083` feat: route Audit Log to workspace tab instead of Inspector panel
 - `0386c4b` feat: sprint 5
 - `72ddf13` feat: sprint 4
 - `9fb9baa` feat: sprint 3
 - `2659285` feat: sprint 2
 - `ff3a21c` feat: structured multi-file diff in approval review gate
-- `fe2a36d` feat: supervisor completion triggers lane review transition
+- `fe2a36d` feat: workflow watcher triggers workflow transition
 - `9eb53b0` feat: agent runtime PreToolUse hook script for policy enforcement
 - `df5857f` feat: one-shot send-as-task from ThoughtsCard chat
 - `f388970` feat: server-side packet auto-dispatch loop
@@ -308,7 +303,6 @@ and internal chores live in the private engineering log.
 - `b1507b5` feat: orchestrator loop — plan, delegate, review, approve
 - `234f8c0` feat: governance engine
 - `8b97308` feat: refine o8 product brief from 3-turn brainstormer session
-- `2776758` feat: add brainstormer agent (Opus) with multi-turn delegation pattern
 - `75c90b2` feat: add REVIEW.md, agent delegation table in project rules, update agent descriptions
 - `ca15b5c` feat: add o8 product brief, update project rules with orchestrator model, create subagents
 - `6c5d722` feat: scrollable workspace lane tabs with transparent arrow overlays
@@ -354,7 +348,7 @@ and internal chores live in the private engineering log.
 - `a22ec01` feat: Drop bundled Node (prerequisite) + bundle memory binary
 - `5bb7f32` feat: WS server bundled in native shell app — terminals + chat work in production
 - `36cade2` feat: GitHub App authentication — 5,450 req/hr, auto-refreshing tokens
-- `1111c6e` feat: GitHub PAT support + config lives in ~/.o8-ide/
+- `1111c6e` feat: GitHub PAT support + config lives in the user data dir/
 - `c5085de` feat: Bundle Node.js inside the app — zero-config for users
 - `a9233f8` feat: Standalone server bundling for native shell — real distributable app
 - `41f1f02` feat: Inline edit
@@ -401,7 +395,6 @@ and internal chores live in the private engineering log.
 
 ## 2026-03-20
 
-- `51cb0bb` feat: Chain-of-thought wired for all three providers
 - `248dbb6` feat: context-aware recursive compaction — three-pass smart compression
 - `3a510e6` feat: project rules
 - `3514bbf` feat: Chat compaction
@@ -420,7 +413,6 @@ and internal chores live in the private engineering log.
 - `8aa2868` feat: Streaming code highlights, keyboard shortcuts, conversation forking
 - `b0e064f` feat: Inline citations, slash commands, Run in Terminal
 - `09e2f7b` feat: Code block actions — Apply to File + Open in Canvas
-- `49515e0` feat: Chain of Thought — collapsible reasoning visualization
 - `c1a749f` feat: Smart follow-ups + beautiful empty state onboarding
 - `6350e48` feat: Phase 3 — Tool use with live indicators + sources
 - `87387fa` feat: Edge TTS voice playback with animated player
@@ -434,8 +426,6 @@ and internal chores live in the private engineering log.
 - `a2571da` feat: LLM Token Relay — provider proxy with metering
 - `73cd178` feat: LLM Chat v1 — standalone model access panel
 - `829b2ac` perf: GitHub API caching + worktrees auth fix across all routes
-- `73112b2` feat: GitHub OAuth sign-in — user auth for monetization
-- `305e857` feat: User database schema — foundation for monetization
 - `68b59ac` perf: Kill scroll jitter — remove per-frame CSS recalculation
 - `7b675e6` feat: client abstraction — Local/Cloud/Hybrid
 - `c844b85` feat: Tier 2+3 intelligence layer
@@ -462,9 +452,7 @@ and internal chores live in the private engineering log.
 - `e80ca9c` feat: Launch Agent — fire agents from mobile
 - `de47c49` feat: Fleet View — Apple-level agent dashboard for mobile
 - `ec02c8a` feat: Glass slash commands on mobile — frosted popover matching desktop
-- `90e6be6` feat: Mobile nav → top-right hamburger dropdown + Thinking X-ray on mobile
 - `8c5b1e9` feat: Speed Dial navigation — floating menu like Mister Copy Trade
-- `77f0dc0` feat: Thinking X-ray — live window into agent reasoning
 - `aadb623` feat: ThoughtsCard Apple pass
 
 ## 2026-03-18
