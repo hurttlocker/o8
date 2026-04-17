@@ -418,17 +418,15 @@ async function getWaveMergeOrder(
   return ordered;
 }
 
-interface MergePacketResult {
-  merged: boolean;
-  note: string;
-  approvalId?: string;
-}
+export interface MergePacketResult { merged: boolean; note: string; approvalId?: string }
 
 async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise<MergePacketResult> {
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
   if (!packet) {
-    throw new Error(`Packet ${input.packetId} not found.`);
+    // #557 — Fall through to lane-only merge when the mission packet is missing.
+    const { mergeOrphanLaneByPacket } = await import('./orphan-lane-merge');
+    return mergeOrphanLaneByPacket(input.packetId, input.commitMessage);
   }
 
   if (packet.review && !packet.review.approved) {
@@ -743,9 +741,8 @@ export async function submitPacketReview(input: SubmitReviewInput) {
 export async function approveAndMergePacket(input: ApproveAndMergeInput) {
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
-  if (!packet) {
-    throw new Error(`Packet ${input.packetId} not found.`);
-  }
+  // #557 — Missing packet falls through to single-packet merge (lane fallback).
+  if (!packet) return approveAndMergeSinglePacket(input);
 
   const orderedWavePackets = await getWaveMergeOrder(state, packet.id);
   if (!orderedWavePackets) {
