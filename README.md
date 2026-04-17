@@ -1,45 +1,49 @@
 # o8
 
-**The governance layer for autonomous engineering teams.**
+An orchestrator that delegates, reviews, and ships.
 
-Run a fleet of AI agents with review gates, approvals, and shared memory. Local-first. Any model.
-
-> Claude plans. Codex builds. o8 ships.
+One primary orchestrator routes scoped work to specialized sub-agents. A governance layer reviews every output before it touches your main branch. Local-first. Any model.
 
 ---
 
-## Preview
+## 00 — Preview
 
 ![o8 landing page](./assets/landing-preview.png)
 
-Product screenshots coming soon.
+Product screenshots coming soon. Landing site source: [hurttlocker/o8-site](https://github.com/hurttlocker/o8-site).
 
-## Quick links
+## 01 — What this repo is
 
-- Landing: [hurttlocker/o8-site](https://github.com/hurttlocker/o8-site)
-- [CHANGELOG.md](./CHANGELOG.md) — what shipped, when
-- [STATS.md](./STATS.md) — build velocity
+This is the **public development log** for o8. The engineering source is private; feature-grade commits sync here on every merge to main.
 
-This repo holds the public development log. Engineering source is private; we sync feature-grade commits here on every merge.
+```
+/
+├── CHANGELOG.md   — what shipped, grouped by day
+├── STATS.md       — rolling build velocity
+└── assets/        — preview images
+```
 
-## What's inside
+## 02 — (FEAT · PERF · DESIGN) only
 
-- **CHANGELOG.md** — features and perf wins, date-grouped, rebranded from the private log. Bug fixes and internal refactors stay private.
-- **STATS.md** — rolling snapshot of how much has shipped: last week, last day, all-time active days.
-- **assets/** — marketing preview images.
+The feed is filtered, not dumped. An entry makes the cut only if —
 
-## How entries make the cut
+- The prefix is `feat:`, `perf:`, or `design:` (no `fix:` / `refactor:` / `chore:` noise)
+- It landed in the last 180 days
+- It passes a blocklist covering internal codenames, competitor mentions, architecture-level phrases, and strategy keywords
+- A sed pass generalizes implementation specifics into product-level language
 
-The public feed is filtered, not a dump. An entry only lands here if:
+The sync workflow fails closed if anything slips past. Every entry here has been through that gate.
 
-1. The commit prefix is `feat:` / `perf:` / `design:` (no `fix:` / `chore:` / `refactor:` / auto-commit noise)
-2. It's from the last 180 days
-3. It passes a blocklist for internal codenames, competitor mentions, architecture details, and strategy keywords
-4. A sed pass rewrites internal product names to `o8` and generalizes implementation phrases before publication
+## 03 — Staying current
 
-Every sync is gated on the blocklist — if a new codename or strategy term ever slips in, the workflow fails closed. That keeps the public log honest.
+- Star the repo to follow new entries
+- Watch the [CHANGELOG.md](./CHANGELOG.md) directly — it updates on every push to the private main
 
-## Staying updated
+---
 
-- Star this repo to follow releases
-- See every feature land in near-real-time (auto-sync on push to the private main)
+```
+(o8)          An orchestrator that delegates, reviews, and ships.
+(mirror)      hurttlocker/o8
+(landing)     hurttlocker/o8-site
+(build)       v0.1.7
+```
