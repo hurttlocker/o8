@@ -98,8 +98,24 @@ function RepoBranchRowBase({
       .map((packet) => packet.lane?.sessionKey ?? null)
       .filter((value): value is string => Boolean(value)),
   );
+  // Session keys can carry an optional "codex-owned:" prefix at different layers
+  // (MCP mission state vs runtime inventory). Normalize both sides so the dedupe
+  // holds across the seam. Drops the generic "Agent Waiting/Blocked" ghost rows
+  // that otherwise duplicate packets already shown as named lane pills above.
+  const stripSessionPrefix = (key: string) => key.replace(/^codex-owned:/, '');
+  const normalizedPacketKeys = new Set<string>();
+  for (const key of packetBoundSessionKeys) normalizedPacketKeys.add(stripSessionPrefix(key));
+  for (const key of allPacketBoundSessionKeys) normalizedPacketKeys.add(stripSessionPrefix(key));
   const orderedBranchAgents = [...branchAgents]
-    .filter((agent) => !packetBoundSessionKeys.has(agent.sessionKey) && !allPacketBoundSessionKeys.has(agent.sessionKey))
+    .filter((agent) => {
+      const normalized = stripSessionPrefix(agent.sessionKey);
+      if (normalizedPacketKeys.has(normalized)) return false;
+      // Drop orphaned ghost agents — sessions that died without a packet binding.
+      // #542 will fix the cleanup path properly; this is the narrow UI hide so the
+      // sidebar doesn't show stale "Agent Waiting" rows for dead dispatches.
+      if (agent.status === 'awaiting_input' || agent.status === 'failed') return false;
+      return true;
+    })
     .sort(compareBranchAgents);
   const sessionsExpanded = sessionDisclosureByBranch[branch.name] ?? true;
   const isActiveWorktree = Boolean(activeWorkspacePath && worktree?.path === activeWorkspacePath);
