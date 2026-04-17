@@ -44,3 +44,4 @@ branding/
 # Local settings
 .claude/settings.local.json
 .claude/settings.json
+.claude/scheduled_tasks.lock
