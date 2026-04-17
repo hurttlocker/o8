@@ -14,7 +14,30 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Skip runs where the push contains no feat/perf/design commits.
+      # Most pushes are fix/chore/refactor/docs and produce an identical
+      # CHANGELOG.md — running the full sync for those wastes Actions minutes.
+      - name: Gate — push contains signal commits?
+        id: signal
+        run: |
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          # On first push / new branch, BEFORE is all zeros — fall back to last commit
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || [ -z "$BEFORE" ]; then
+            RANGE="$AFTER~1..$AFTER"
+          else
+            RANGE="$BEFORE..$AFTER"
+          fi
+          if git log --format="%s" "$RANGE" | grep -qE '^(feat|perf|design)(\(.*\))?:'; then
+            echo "has_signal=true" >> $GITHUB_OUTPUT
+            echo "[gate] Signal commits found in $RANGE — proceeding."
+          else
+            echo "has_signal=false" >> $GITHUB_OUTPUT
+            echo "[gate] No feat/perf/design commits in $RANGE — skipping sync."
+          fi
+
       - name: Generate changelog
+        if: steps.signal.outputs.has_signal == 'true'
         run: |
           cat > /tmp/CHANGELOG.md << 'HEADER'
           # Changelog
