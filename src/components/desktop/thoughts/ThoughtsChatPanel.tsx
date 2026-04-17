@@ -652,8 +652,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       waitingForReply: displayWaiting,
       hasMessages: displayMessages.length > 0,
       threadId,
+      messageCount: displayMessages.length,
+      orchestratorBusyState: orchStream.busyState,
     });
-  }, [activeTargetLabel, displayMessages.length, displayWaiting, onChromeChange, threadId]);
+  }, [activeTargetLabel, displayMessages.length, displayWaiting, onChromeChange, orchStream.busyState, threadId]);
 
   // Ref used so sendNow() can flush the latest input value without a re-render.
   const latestInputRef = useRef('');

@@ -4,7 +4,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import Image from 'next/image';
 import { ChevronRight, SlidersHorizontal, Sparkles } from '../lucide-shims';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
-import { DesktopToolCallStack } from '../DesktopAgentMessage';
+import { DesktopToolCallStack } from '../DesktopToolCallStack';
 import { MessageActions } from '../MessageActions';
 import { isSlashCommandText } from '@/lib/slash-commands';
 import { ttsEngine } from '@/lib/tts/engine';

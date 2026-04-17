@@ -122,12 +122,24 @@ export interface MobileTranscriptMedia {
  */
 export type ToolSideEffectClass = 'read' | 'write' | 'meta';
 
+export interface MobileTranscriptToolLaunchLink {
+  surfaceId: string;
+  repoPath?: string | null;
+  laneId?: string | null;
+  branch?: string | null;
+  worktreePath?: string | null;
+  label: string;
+}
+
 export interface MobileTranscriptToolCall {
+  id?: string | null;
   name: string;
   args?: Record<string, unknown>;
   status?: 'calling' | 'running' | 'done';
   preview?: string;
+  result?: string;
   sideEffectClass?: ToolSideEffectClass;
+  launchLink?: MobileTranscriptToolLaunchLink | null;
 }
 
 export interface MobileTranscriptSource {
