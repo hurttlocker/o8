@@ -41,13 +41,24 @@ export class CustomerWorkerTransport implements Transport {
 
     const { getSqlite } = await import('@/lib/db');
     const sqlite = getSqlite();
+    // #566 — Prefer 'global' tokens (the default for solo operator) before
+    // falling back to 'repo' scope tokens. CASE expression orders by scope
+    // specificity so the most relevant token wins regardless of insert order.
+    // Proper per-repo scoping needs a `scope_value` column — tracked as a
+    // follow-up; this query tightens the multi-token case without a migration.
     const token = sqlite
       .prepare(`
         SELECT id
         FROM worker_tokens
         WHERE revoked_at IS NULL
           AND scope IN ('global', 'repo')
-        ORDER BY created_at DESC
+        ORDER BY
+          CASE scope
+            WHEN 'global' THEN 0
+            WHEN 'repo' THEN 1
+            ELSE 2
+          END,
+          created_at DESC
         LIMIT 1
       `)
       .get() as TokenRow | undefined;

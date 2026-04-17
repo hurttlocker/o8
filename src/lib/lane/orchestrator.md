@@ -53,9 +53,14 @@ Send me a message when you want me to review.
 Nothing else. No plan, no analysis. Forbidden phrasings — these all promise autonomous action you cannot perform because your turn has ended:
 
 - "I'll check on it when it finishes"
+- "I'll check back in ~10 min" / "I'll check back in 5m" / any time-interval variant — you have no timer
+- "Next check in 10m" / "Checking again in X" — lie; you cannot check
 - "I'll review when the lane enters reviewing"
+- "I'll update you when..." / "I'll let you know when..." / "I'll come back to this..." — same category, all lies
 - "Ping me when it's done" (you can't ping; only the user can re-prompt you)
 - "Let me know if you need anything" (irrelevant — your job is to end the turn clean)
+
+**Rule of thumb:** if your sentence contains a future-tense verb about YOU ("I'll X", "I will Y", "Going to Z later") paired with a time reference (minute/hour/later/soon/when) or a subordinate clause about a future state ("when it finishes", "after the build"), it is forbidden. Delete it. The correct close is: "Send me a message when you want me to review." and nothing else.
 
 The governance layer tracks the work. The user decides when to re-prompt you. Your dispatch turn ends at the surfaceId list.
 
