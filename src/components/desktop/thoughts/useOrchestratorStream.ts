@@ -18,12 +18,22 @@ interface OrchestratorStreamResult {
   planText: string | null;
   status: OrchestratorStreamStatus;
   busyState: ThoughtsOrchestratorBusyState;
+  tokenCount: number;
+  runningTotal: number;
   send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max' }) => void;
   reset: () => void;
   connected: boolean;
 }
 
 let agentUpdateSeq = 0;
+const ORCHESTRATOR_CONTEXT_LIMIT = 1_000_000;
+export const ORCHESTRATOR_TOKEN_EVENT = 'cortex:orchestrator-token-usage';
+
+export interface OrchestratorTokenUsageDetail {
+  repoPath: string | null;
+  tokenCount: number;
+  runningTotal: number;
+}
 
 function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
@@ -38,6 +48,26 @@ function getWsUrl(): string {
 
   const wsPort = port ? `:${port}` : '';
   return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
+}
+
+function normalizeTelemetryPath(value: string | null | undefined): string {
+  return (value ?? '').trim().replace(/\/+$/, '').replace(/^~(?=\/)/, '');
+}
+
+function scoreTelemetryPath(candidate: string | null | undefined, repoPath: string): number {
+  const normalizedCandidate = normalizeTelemetryPath(candidate);
+  const normalizedRepo = normalizeTelemetryPath(repoPath);
+  if (!normalizedCandidate || !normalizedRepo) return 0;
+  if (normalizedCandidate === normalizedRepo) return 4;
+  if (normalizedRepo.endsWith(normalizedCandidate) || normalizedCandidate.endsWith(normalizedRepo)) return 3;
+  const candidateName = normalizedCandidate.split('/').filter(Boolean).pop();
+  const repoName = normalizedRepo.split('/').filter(Boolean).pop();
+  return candidateName && candidateName === repoName ? 1 : 0;
+}
+
+function emitTokenUsage(detail: OrchestratorTokenUsageDetail): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent<OrchestratorTokenUsageDetail>(ORCHESTRATOR_TOKEN_EVENT, { detail }));
 }
 
 interface ActiveTurnState {
@@ -180,9 +210,14 @@ export function useOrchestratorStream(
   const [status, setStatus] = useState<OrchestratorStreamStatus>('connecting');
   const [busyState, setBusyState] = useState<ThoughtsOrchestratorBusyState>(() => createIdleBusyState());
   const [connected, setConnected] = useState(false);
+  const [tokenCount, setTokenCount] = useState(0);
+  const [runningTotal, setRunningTotal] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const currentAssistantRef = useRef<{ id: string; chunks: string[]; thinkingChunks: string[] } | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const telemetrySessionKeyRef = useRef<string | null>(null);
+  const telemetryTotalRef = useRef<number | null>(null);
   const statusRef = useRef(status);
   statusRef.current = status;
   const repoPathRef = useRef(repoPath);
@@ -264,6 +299,74 @@ export function useOrchestratorStream(
       toolCallsCompleted: turn.toolCallsCompleted,
       latestToolLabel: turn.latestToolLabel,
     });
+  }, []);
+
+  const refreshTokenTelemetry = useCallback(async () => {
+    const activeRepoPath = repoPathRef.current;
+    if (!activeRepoPath) return;
+
+    try {
+      let sessionKey = telemetrySessionKeyRef.current;
+      if (!sessionKey) {
+        const inventoryResponse = await fetch('/api/runtime/inventory?fresh=1', { cache: 'no-store' });
+        const inventory = inventoryResponse.ok
+          ? await inventoryResponse.json() as {
+            agents?: Array<{
+              runtime?: string;
+              sessionKey?: string;
+              sessionKind?: string;
+              status?: string;
+              isCurrentSession?: boolean;
+              workspace?: string;
+              runtimeSurface?: { cwd?: string | null };
+            }>;
+          }
+          : null;
+        sessionKey = (inventory?.agents ?? [])
+          .map((agent) => {
+            if (agent.runtime !== 'claude-code' || !agent.sessionKey) return { score: -1, sessionKey: null as string | null };
+            const pathScore = Math.max(
+              scoreTelemetryPath(agent.workspace, activeRepoPath),
+              scoreTelemetryPath(agent.runtimeSurface?.cwd, activeRepoPath),
+            );
+            if (pathScore === 0) return { score: -1, sessionKey: null as string | null };
+            return {
+              score: pathScore * 10
+                + (agent.sessionKind === 'owned' ? 6 : 0)
+                + (agent.isCurrentSession ? 3 : 0)
+                + (agent.status === 'running' || agent.status === 'reviewing' || agent.status === 'idle' ? 1 : 0),
+              sessionKey: agent.sessionKey,
+            };
+          })
+          .sort((left, right) => right.score - left.score)[0]?.sessionKey ?? null;
+        telemetrySessionKeyRef.current = sessionKey;
+      }
+      if (!sessionKey) return;
+
+      const response = await fetch(`/api/runtime/telemetry?sessionKey=${encodeURIComponent(sessionKey)}`, { cache: 'no-store' });
+      if (!response.ok) {
+        telemetrySessionKeyRef.current = null;
+        return;
+      }
+
+      const payload = await response.json() as { telemetry?: { totalTokens?: number | null } };
+      const totalTokens = typeof payload.telemetry?.totalTokens === 'number'
+        ? Math.max(0, Math.min(ORCHESTRATOR_CONTEXT_LIMIT, payload.telemetry.totalTokens))
+        : null;
+      if (totalTokens == null) return;
+
+      const previousTotal = telemetryTotalRef.current;
+      const nextTokenCount = previousTotal === null || totalTokens < previousTotal
+        ? 0
+        : Math.max(0, totalTokens - previousTotal);
+
+      telemetryTotalRef.current = totalTokens;
+      setTokenCount(nextTokenCount);
+      setRunningTotal(totalTokens);
+      emitTokenUsage({ repoPath: activeRepoPath, tokenCount: nextTokenCount, runningTotal: totalTokens });
+    } catch {
+      // silent
+    }
   }, []);
 
   const beginTurn = useCallback(() => {
@@ -641,10 +744,23 @@ export function useOrchestratorStream(
     if (!repoPath) return;
 
     mountedRef.current = true;
+    telemetrySessionKeyRef.current = null;
+    telemetryTotalRef.current = null;
+    setTokenCount(0);
+    setRunningTotal(0);
+    emitTokenUsage({ repoPath, tokenCount: 0, runningTotal: 0 });
     connect();
+    if (tokenRefreshTimerRef.current) clearTimeout(tokenRefreshTimerRef.current);
+    tokenRefreshTimerRef.current = setTimeout(() => {
+      void refreshTokenTelemetry();
+    }, 1200);
 
     return () => {
       mountedRef.current = false;
+      if (tokenRefreshTimerRef.current) {
+        clearTimeout(tokenRefreshTimerRef.current);
+        tokenRefreshTimerRef.current = null;
+      }
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -658,7 +774,21 @@ export function useOrchestratorStream(
         wsRef.current = null;
       }
     };
-  }, [repoPath, connect]);
+  }, [repoPath, connect, refreshTokenTelemetry]);
+
+  useEffect(() => {
+    if (!repoPath || status !== 'ready') return;
+    if (tokenRefreshTimerRef.current) clearTimeout(tokenRefreshTimerRef.current);
+    tokenRefreshTimerRef.current = setTimeout(() => {
+      void refreshTokenTelemetry();
+    }, 900);
+    return () => {
+      if (tokenRefreshTimerRef.current) {
+        clearTimeout(tokenRefreshTimerRef.current);
+        tokenRefreshTimerRef.current = null;
+      }
+    };
+  }, [repoPath, refreshTokenTelemetry, status]);
 
   // #539 — stall watchdog. If the UI stays in 'busy' state for > 5 minutes
   // without any events from the stream, the backend turn is almost certainly
@@ -734,11 +864,16 @@ export function useOrchestratorStream(
   const reset = useCallback(() => {
     setMessages([]);
     setPlanText(null);
+    setTokenCount(0);
+    setRunningTotal(0);
     currentAssistantRef.current = null;
     planTextRef.current = null;
+    telemetrySessionKeyRef.current = null;
+    telemetryTotalRef.current = null;
     resetFirstTurnPlanCapture();
     setStatus(connected ? 'ready' : 'connecting');
+    emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
   }, [connected, resetFirstTurnPlanCapture]);
 
-  return { messages, planText, status, busyState, send, reset, connected };
+  return { messages, planText, status, busyState, tokenCount, runningTotal, send, reset, connected };
 }
