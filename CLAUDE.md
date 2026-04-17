@@ -54,6 +54,8 @@ Runs on push/PR to `main`: TypeCheck → Lint → Build (Node 22, `npm ci`). Bui
 
 **Karpathy lens (Software 3.0).** Control plane, not an editor. Intent over instruction. Observable agents. Human oversight as a feature, not a bottleneck.
 
+**Design language.** See [`DESIGN.md`](./DESIGN.md) for the authoritative palette, typography, layout primitives, and motif vocabulary. Sister spec: `o8-site/THEME.md` for the marketing side. Read DESIGN.md before styling any new surface; read THEME.md before touching the landing.
+
 ## Architecture
 
 ### Desktop Layout (`src/app/dashboard/page.tsx`)
