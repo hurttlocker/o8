@@ -233,6 +233,8 @@ export function useOrchestratorStream(
   const firstTurnPlanStartedRef = useRef(false);
   const firstTurnPlanChunksRef = useRef<string[]>([]);
   const activeTurnRef = useRef<ActiveTurnState | null>(null);
+  const autoCompactInFlightRef = useRef(false);
+  const autoCompactArmedRef = useRef(true);
 
   // #539 — reconnect reconciliation. eventCountRef advances on every relevant
   // orchestrator event; lastEventAtRef tracks wall-clock time of the last
@@ -790,6 +792,50 @@ export function useOrchestratorStream(
     };
   }, [repoPath, refreshTokenTelemetry, status]);
 
+  useEffect(() => {
+    if (!repoPath) return;
+    const compactKey = `o8:orchestrator:auto-compact:${repoPath}`;
+    if (runningTotal < 250_000) autoCompactArmedRef.current = true;
+    if (status !== 'ready' || runningTotal < 300_000 || autoCompactInFlightRef.current || !autoCompactArmedRef.current) return;
+    if (typeof window !== 'undefined' && window.localStorage.getItem(compactKey)) return;
+    autoCompactInFlightRef.current = true;
+    autoCompactArmedRef.current = false;
+    let started = false;
+    const timer = window.setTimeout(() => {
+      started = true;
+      void (async () => {
+        try {
+          const response = await fetch('/api/orchestrator/compact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repoPath, runningTotal, messages: messagesRef.current }),
+          });
+          const payload = response.ok ? await response.json() as { ok?: boolean; applied?: boolean; transcript?: MobileTranscriptEntry[]; resumePrelude?: string | null; tokensAfter?: number } : null;
+          if (!payload?.ok || !payload.applied || !Array.isArray(payload.transcript) || statusRef.current !== 'ready') {
+            autoCompactArmedRef.current = true;
+            return;
+          }
+          setMessages(payload.transcript);
+          if (payload.resumePrelude && typeof window !== 'undefined') window.localStorage.setItem(compactKey, payload.resumePrelude);
+          const nextTotal = typeof payload.tokensAfter === 'number' ? payload.tokensAfter : 0;
+          telemetrySessionKeyRef.current = null;
+          telemetryTotalRef.current = nextTotal;
+          setTokenCount(0);
+          setRunningTotal(nextTotal);
+          emitTokenUsage({ repoPath, tokenCount: 0, runningTotal: nextTotal });
+        } catch {
+          autoCompactArmedRef.current = true;
+        } finally {
+          autoCompactInFlightRef.current = false;
+        }
+      })();
+    }, 800);
+    return () => {
+      window.clearTimeout(timer);
+      if (!started) autoCompactInFlightRef.current = false;
+    };
+  }, [repoPath, runningTotal, status]);
+
   // #539 — stall watchdog. If the UI stays in 'busy' state for > 5 minutes
   // without any events from the stream, the backend turn is almost certainly
   // dead even if the WS is still connected. Heal so the composer unlocks.
@@ -832,23 +878,35 @@ export function useOrchestratorStream(
     firstTurnPlanChunksRef.current = [];
     setStatus('busy');
 
-    const payload = JSON.stringify({
-      type: 'orchestrator-send',
-      repoPath: repoPathRef.current,
-      message,
-      permissionMode,
-      thinkingEffort,
-    });
-
-    // Send via WebSocket
-    const ws = wsRef.current;
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(payload);
-    } else {
-      // Fallback: try to reconnect and send
+    void (async () => {
+      let outboundMessage = message;
+      const compactKey = `o8:orchestrator:auto-compact:${repoPathRef.current}`;
+      const resumePrelude = typeof window !== 'undefined' ? window.localStorage.getItem(compactKey) : null;
+      if (resumePrelude) {
+        try {
+          await fetch('/api/orchestrator/reset-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repoPath: repoPathRef.current }),
+          });
+        } catch { /* best effort */ }
+        outboundMessage = `${resumePrelude}\n\nOperator message:\n${message}`;
+        window.localStorage.removeItem(compactKey);
+      }
+      const payload = JSON.stringify({
+        type: 'orchestrator-send',
+        repoPath: repoPathRef.current,
+        message: outboundMessage,
+        permissionMode,
+        thinkingEffort,
+      });
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+        return;
+      }
       console.warn('[orchestrator-stream] WS not open, attempting reconnect...');
       connect();
-      // Queue the send for after reconnect
       const waitAndSend = setInterval(() => {
         const currentWs = wsRef.current;
         if (currentWs?.readyState === WebSocket.OPEN) {
@@ -856,9 +914,8 @@ export function useOrchestratorStream(
           currentWs.send(payload);
         }
       }, 200);
-      // Give up after 5s
       setTimeout(() => clearInterval(waitAndSend), 5000);
-    }
+    })();
   }, [connect]);
 
   const reset = useCallback(() => {
@@ -872,6 +929,7 @@ export function useOrchestratorStream(
     telemetryTotalRef.current = null;
     resetFirstTurnPlanCapture();
     setStatus(connected ? 'ready' : 'connecting');
+    if (typeof window !== 'undefined' && repoPathRef.current) window.localStorage.removeItem(`o8:orchestrator:auto-compact:${repoPathRef.current}`);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
   }, [connected, resetFirstTurnPlanCapture]);
 
