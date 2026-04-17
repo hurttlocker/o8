@@ -3204,10 +3204,15 @@ async function bootstrapWsServer() {
         });
       },
       async relaunchAgent(prompt, repoPath, taskName) {
+        // Packet relaunch must ALWAYS isolate. Without isolate:true, shouldIsolate()
+        // falls through to "active worktree count > 0" — when the original lane's
+        // worktree was archived before relaunch, the check returns false and codex
+        // boots at the main repo root, writing agent changes directly into main.
+        // Every packet needs its own worktree, regardless of fleet state.
         const res = await fetchWithRetry(buildNextUrl('/api/runtime/launch'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName }),
+          body: JSON.stringify({ runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName, isolate: true }),
           signal: AbortSignal.timeout(15000),
         });
         const data = await res.json() as { ok?: boolean; surfaceId?: string };
