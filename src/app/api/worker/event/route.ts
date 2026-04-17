@@ -113,6 +113,10 @@ export async function POST(request: Request) {
         `)
         .run(runId, type, payloadJson, now);
 
+      // #561 — Guard status transitions against out-of-order events. Terminal
+      // statuses (completed/errored/cancelled) are immutable — a late
+      // branch_pushed after a completed event must not regress status.
+      // progress already had this guard; extend to branch_pushed/completed/errored.
       if (type === 'progress') {
         sqlite
           .prepare(`
@@ -133,6 +137,7 @@ export async function POST(request: Request) {
                 remote_branch = ?,
                 last_event_at = ?
             WHERE id = ?
+              AND status NOT IN ('completed', 'errored', 'cancelled')
           `)
           .run(remoteBranch, now, runId);
       } else if (type === 'completed') {
@@ -143,6 +148,7 @@ export async function POST(request: Request) {
                 completed_at = ?,
                 last_event_at = ?
             WHERE id = ?
+              AND status NOT IN ('completed', 'errored', 'cancelled')
           `)
           .run(now, now, runId);
       } else {
@@ -154,6 +160,7 @@ export async function POST(request: Request) {
                 last_event_at = ?,
                 error_json = ?
             WHERE id = ?
+              AND status NOT IN ('completed', 'errored', 'cancelled')
           `)
           .run(now, now, payloadJson, runId);
       }

@@ -3126,8 +3126,7 @@ async function bootstrapWsServer() {
 
   setInterval(async () => {
     try {
-      const rulesPromotionModulePath: string = './lib/dispatch/rules-promotion';
-      const { runRulesPromotionCycle } = await import(rulesPromotionModulePath) as {
+      const { runRulesPromotionCycle } = await import('@/lib/dispatch/rules-promotion') as {
         runRulesPromotionCycle: (options?: { now?: Date }) => Promise<{
           scanned: number;
           promoted: number;
