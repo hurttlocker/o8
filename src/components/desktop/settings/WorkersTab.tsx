@@ -42,6 +42,7 @@ interface WorkersResponse {
     enabled: boolean;
     source: RemoteFlagSource;
   };
+  remoteRuntimeRegistered: boolean;
 }
 
 const STATUS_META: Record<FleetStatusKind, { label: string; color: string; background: string; border: string }> = {
@@ -67,9 +68,9 @@ function buildBreakdown(counts: Record<FleetStatusKind, number>) {
 }
 
 function sourceCopy(source: RemoteFlagSource) {
-  if (source === 'env') return 'Set via O8_ENABLE_REMOTE_RUNTIME=1 in environment';
-  if (source === 'file') return 'Set in o8 preferences';
-  return 'Off';
+  if (source === 'env') return 'Environment override: O8_ENABLE_REMOTE_RUNTIME=1';
+  if (source === 'file') return 'Saved in o8 preferences for future launches';
+  return 'Using the default startup setting';
 }
 
 export function WorkersTab() {
@@ -87,6 +88,7 @@ export function WorkersTab() {
   const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [flagBusy, setFlagBusy] = useState(false);
+  const [draftRemoteEnabled, setDraftRemoteEnabled] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -107,6 +109,10 @@ export function WorkersTab() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    setDraftRemoteEnabled(data?.remoteFlag.enabled ?? false);
+  }, [data?.remoteFlag.enabled, data?.remoteFlag.source]);
 
   const submitCreate = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -200,7 +206,7 @@ export function WorkersTab() {
       if (!response.ok || !payload.remoteFlag) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to update remote runtime flag.');
       }
-      setData((current) => current ? { ...current, remoteFlag: payload.remoteFlag } : current);
+      setData(payload as WorkersResponse);
       setNotice(null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Failed to update remote runtime flag.');
@@ -218,9 +224,13 @@ export function WorkersTab() {
   }
 
   const remoteFlag = data?.remoteFlag ?? { enabled: false, source: 'off' as const };
+  const remoteRuntimeRegistered = data?.remoteRuntimeRegistered ?? false;
   const envControlled = remoteFlag.source === 'env';
   const tokens = data?.tokens ?? [];
   const fleetTokens = (data?.fleet.tokens ?? []).slice(0, 5);
+  const remoteFlagDirty = draftRemoteEnabled !== remoteFlag.enabled;
+  const restartRequired = remoteFlag.enabled !== remoteRuntimeRegistered;
+  const restartAction = remoteFlag.enabled ? 'load' : 'unload';
 
   return (
     <div style={{ paddingTop: 32, paddingRight: 32, paddingBottom: 32, paddingLeft: 32, maxWidth: 860, fontFamily: APP_FONT_STACK }}>
@@ -406,18 +416,50 @@ export function WorkersTab() {
 
           <label title={envControlled ? 'Controlled by environment variable; unset `O8_ENABLE_REMOTE_RUNTIME` to change from this UI.' : undefined} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, border: '1px solid var(--t-panel-border)', borderRadius: 16, background: 'var(--t-bg-card)', paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14, cursor: envControlled ? 'not-allowed' : 'pointer' }}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Enable remote runtime adapters</div>
-              <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>{sourceCopy(remoteFlag.source)}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Enable remote runtime adapters on next launch</div>
+              <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
+                {remoteFlagDirty ? `Pending change: ${draftRemoteEnabled ? 'enable' : 'disable'} after Apply.` : sourceCopy(remoteFlag.source)}
+              </div>
             </div>
-            <span style={{ position: 'relative', width: 48, height: 28, borderRadius: 999, background: remoteFlag.enabled ? THEME_ACCENT : 'var(--t-input-bg)', border: remoteFlag.enabled ? `1px solid ${THEME_ACCENT}` : '1px solid var(--t-panel-border)', flexShrink: 0, opacity: flagBusy ? 0.7 : 1 }}>
-              <input type="checkbox" checked={remoteFlag.enabled} disabled={envControlled || flagBusy} onChange={(event) => { void updateRemoteFlag(event.target.checked); }} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: envControlled ? 'not-allowed' : 'pointer' }} />
-              <span style={{ position: 'absolute', top: 3, left: remoteFlag.enabled ? 23 : 3, width: 20, height: 20, borderRadius: 999, background: '#ffffff', boxShadow: '0 4px 12px rgba(15, 23, 42, 0.18)', transition: 'left 180ms ease' }} />
+            <span style={{ position: 'relative', width: 48, height: 28, borderRadius: 999, background: draftRemoteEnabled ? THEME_ACCENT : 'var(--t-input-bg)', border: draftRemoteEnabled ? `1px solid ${THEME_ACCENT}` : '1px solid var(--t-panel-border)', flexShrink: 0, opacity: flagBusy ? 0.7 : 1 }}>
+              <input type="checkbox" checked={draftRemoteEnabled} disabled={envControlled || flagBusy} onChange={(event) => { setDraftRemoteEnabled(event.target.checked); setNotice(null); }} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: envControlled ? 'not-allowed' : 'pointer' }} />
+              <span style={{ position: 'absolute', top: 3, left: draftRemoteEnabled ? 23 : 3, width: 20, height: 20, borderRadius: 999, background: '#ffffff', boxShadow: '0 4px 12px rgba(15, 23, 42, 0.18)', transition: 'left 180ms ease' }} />
             </span>
           </label>
 
-          <div style={{ fontSize: 12, color: '#b45309', lineHeight: 1.5 }}>
-            Requires desktop restart to take effect. Hot-reload is tracked in #567.
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 999, border: remoteRuntimeRegistered ? '1px solid rgba(22, 163, 74, 0.2)' : '1px solid var(--t-panel-border)', background: remoteRuntimeRegistered ? 'rgba(22, 163, 74, 0.12)' : 'var(--t-bg-card)', color: remoteRuntimeRegistered ? '#15803d' : 'var(--t-text-secondary)', fontSize: 11, fontWeight: 700, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10 }}>
+              Current session: {remoteRuntimeRegistered ? 'loaded' : 'not loaded'}
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 999, border: remoteFlag.enabled ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)', background: remoteFlag.enabled ? THEME_ACCENT_SOFT : 'var(--t-bg-card)', color: remoteFlag.enabled ? THEME_ACCENT : 'var(--t-text-secondary)', fontSize: 11, fontWeight: 700, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10 }}>
+              Next launch: {remoteFlag.enabled ? 'enabled' : 'disabled'}
+            </span>
           </div>
+
+          {restartRequired ? (
+            <div style={{ border: '1px solid rgba(245, 158, 11, 0.24)', borderRadius: 14, background: 'rgba(245, 158, 11, 0.12)', color: '#b45309', fontSize: 12, lineHeight: 1.5, paddingTop: 12, paddingRight: 14, paddingBottom: 12, paddingLeft: 14 }}>
+              Restart o8 to {restartAction} remote runtime adapters. This desktop session stays {remoteRuntimeRegistered ? 'loaded' : 'unloaded'} until restart.
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
+              Changes here apply on the next desktop launch. Hot-reloadable adapter registration is follow-up work.
+            </div>
+          )}
+
+          {envControlled ? (
+            <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
+              The environment override owns this setting. Restart o8 without `O8_ENABLE_REMOTE_RUNTIME=1` to manage it from Settings.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
+                {remoteFlagDirty ? `Apply to ${draftRemoteEnabled ? 'enable' : 'disable'} remote runtime adapters for the next launch.` : 'No pending change.'}
+              </div>
+              <button type="button" onClick={() => { void updateRemoteFlag(draftRemoteEnabled); }} disabled={!remoteFlagDirty || flagBusy} style={{ minHeight: 36, paddingTop: 0, paddingRight: 14, paddingBottom: 0, paddingLeft: 14, border: `1px solid ${THEME_ACCENT}`, borderRadius: 999, background: THEME_ACCENT, color: '#ffffff', fontSize: 12, fontWeight: 700, cursor: !remoteFlagDirty || flagBusy ? 'default' : 'pointer', opacity: !remoteFlagDirty || flagBusy ? 0.6 : 1, fontFamily: APP_FONT_STACK }}>
+                {flagBusy ? 'Applying...' : 'Apply (requires restart)'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

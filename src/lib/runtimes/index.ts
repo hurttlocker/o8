@@ -36,6 +36,7 @@ export {
 // Import and register all known runtimes.
 // To add a new runtime: import it and call registerRuntime().
 
+import { getRemoteRuntimeFlagSync } from '../worker/feature-flags';
 import { registerRuntime } from './registry';
 import { codexRuntime } from './codex';
 import { claudeCodeRuntime } from './claude-code';
@@ -43,9 +44,9 @@ import { claudeCodeRuntime } from './claude-code';
 registerRuntime(codexRuntime);
 registerRuntime(claudeCodeRuntime);
 
-// Remote-customer runtime is behind an env flag for v1 — default builds don't
-// surface it. Set O8_ENABLE_REMOTE_RUNTIME=1 to wire it up.
-if (process.env.O8_ENABLE_REMOTE_RUNTIME === '1') {
+// Remote-customer stays startup-gated for v1. We honor the environment
+// override first, then the persisted Workers preference for the next launch.
+if (getRemoteRuntimeFlagSync().enabled) {
   // Dynamic import to avoid loading DB-coupled transport code unless enabled.
   const { CustomerWorkerAdapter } = require('./remote/customer-worker-adapter');
   registerRuntime(new CustomerWorkerAdapter());

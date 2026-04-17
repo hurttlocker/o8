@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,20 +21,53 @@ function getFeatureFlagsPath() {
   );
 }
 
-export async function getRemoteRuntimeFlag(): Promise<RemoteRuntimeFlagState> {
+function getEnvRemoteRuntimeFlag(): RemoteRuntimeFlagState | null {
   if (process.env.O8_ENABLE_REMOTE_RUNTIME === '1') {
     return { enabled: true, source: 'env' };
   }
+  return null;
+}
+
+function readRemoteRuntimeFlag(raw: string): RemoteRuntimeFlagState | null {
+  const parsed = JSON.parse(raw) as { remoteRuntime?: unknown };
+  if (typeof parsed.remoteRuntime === 'boolean') {
+    return { enabled: parsed.remoteRuntime, source: 'file' };
+  }
+  return null;
+}
+
+function isMissingFile(error: unknown) {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+export async function getRemoteRuntimeFlag(): Promise<RemoteRuntimeFlagState> {
+  const envFlag = getEnvRemoteRuntimeFlag();
+  if (envFlag) return envFlag;
 
   try {
     const raw = await readFile(getFeatureFlagsPath(), 'utf8');
-    const parsed = JSON.parse(raw) as { remoteRuntime?: unknown };
-    if (typeof parsed.remoteRuntime === 'boolean') {
-      return { enabled: parsed.remoteRuntime, source: 'file' };
-    }
+    const fileFlag = readRemoteRuntimeFlag(raw);
+    if (fileFlag) return fileFlag;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (!isMissingFile(error)) {
       console.error('[worker-flags] Failed to read feature flags:', error);
+    }
+  }
+
+  return { enabled: false, source: 'off' };
+}
+
+export function getRemoteRuntimeFlagSync(): RemoteRuntimeFlagState {
+  const envFlag = getEnvRemoteRuntimeFlag();
+  if (envFlag) return envFlag;
+
+  try {
+    const raw = readFileSync(getFeatureFlagsPath(), 'utf8');
+    const fileFlag = readRemoteRuntimeFlag(raw);
+    if (fileFlag) return fileFlag;
+  } catch (error) {
+    if (!isMissingFile(error)) {
+      console.error('[worker-flags] Failed to read feature flags during startup:', error);
     }
   }
 
@@ -42,6 +76,21 @@ export async function getRemoteRuntimeFlag(): Promise<RemoteRuntimeFlagState> {
 
 export async function setRemoteRuntimeFlag(enabled: boolean): Promise<void> {
   const filePath = getFeatureFlagsPath();
+  let nextFlags: Record<string, unknown> = {};
+
+  try {
+    const raw = await readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      nextFlags = parsed;
+    }
+  } catch (error) {
+    if (!isMissingFile(error)) {
+      console.error('[worker-flags] Failed to read existing feature flags before write:', error);
+    }
+  }
+
+  nextFlags.remoteRuntime = enabled;
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify({ remoteRuntime: enabled }, null, 2)}\n`, 'utf8');
+  await writeFile(filePath, `${JSON.stringify(nextFlags, null, 2)}\n`, 'utf8');
 }
