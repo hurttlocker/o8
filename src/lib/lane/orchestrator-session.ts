@@ -588,12 +588,19 @@ export async function sendToOrchestrator(
     // turn without emitting a VERDICT or Dispatched summary.
     let lastAssistantText = '';
     let sawToolUseAfterText = false;
+    let launchAgentCallCount = 0;
     const captureEvent = (e: OrchestratorEvent) => {
       if (e.type === 'text') {
         lastAssistantText += e.text;
         sawToolUseAfterText = false;
       } else if (e.type === 'tool_use') {
         sawToolUseAfterText = true;
+        // Track cortex_launch_agent specifically so we can catch the
+        // "claimed dispatch but didn't fire" failure mode distinctly from
+        // generic narrate-and-exit. See the runtime check on turn close.
+        if (e.name === 'cortex_launch_agent' || e.name === 'mcp__cortex__cortex_launch_agent') {
+          launchAgentCallCount += 1;
+        }
       }
       onEvent(e);
     };
@@ -659,6 +666,21 @@ export async function sendToOrchestrator(
             `[orchestrator-session] narrate-and-exit suspected for ${session.sessionName}: ` +
             `sawToolUseAfterText=${sawToolUseAfterText} hasSummaryMarker=${hasSummaryMarker} ` +
             `tailLen=${tail.length}`,
+          );
+        }
+
+        // Dispatch-word check: if the orchestrator claims it dispatched but no
+        // cortex_launch_agent actually fired, this is the failure mode from the
+        // 2026-04-16 session — operator reads "#X dispatched" and walks away
+        // while the lane never existed. Distinct from generic narrate-and-exit
+        // because the operator can't tell from the text alone. Log at WARN
+        // with a dedicated marker so telemetry and tail-readers spot it fast.
+        const dispatchClaimPattern = /\b(dispatched|launched|fired|launching|polling|kicked off)\b/i;
+        if (launchAgentCallCount === 0 && dispatchClaimPattern.test(lastAssistantText)) {
+          console.warn(
+            `[orchestrator-session] FALSE-DISPATCH suspected for ${session.sessionName}: ` +
+            `launchAgentCallCount=0 but text claims dispatch — text sample: ` +
+            JSON.stringify(lastAssistantText.slice(-200)),
           );
         }
       }
