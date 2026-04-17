@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getRuntime } from '@/lib/runtimes';
 import { getRemoteRuntimeFlag, setRemoteRuntimeFlag } from '@/lib/worker/feature-flags';
 import { createToken, getFleetStatus, listTokens, revokeToken } from '@/lib/worker/tokens';
 
@@ -31,13 +32,18 @@ function parsePositiveInteger(value: unknown): number | undefined {
   return undefined;
 }
 
+async function buildWorkersResponse() {
+  return {
+    tokens: listTokens(),
+    fleet: getFleetStatus(),
+    remoteFlag: await getRemoteRuntimeFlag(),
+    remoteRuntimeRegistered: Boolean(getRuntime('remote-customer')),
+  };
+}
+
 export async function GET() {
   try {
-    return response({
-      tokens: listTokens(),
-      fleet: getFleetStatus(),
-      remoteFlag: await getRemoteRuntimeFlag(),
-    });
+    return response(await buildWorkersResponse());
   } catch (error) {
     console.error('[panel-workers] Failed to load workers data:', error);
     return response({ error: 'Failed to load workers settings.' }, 500);
@@ -85,7 +91,7 @@ export async function POST(request: Request) {
       await setRemoteRuntimeFlag(body.enabled);
       return response({
         ok: true,
-        remoteFlag: await getRemoteRuntimeFlag(),
+        ...await buildWorkersResponse(),
       });
     }
 
