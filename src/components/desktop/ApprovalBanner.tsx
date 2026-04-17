@@ -29,11 +29,18 @@ const bannerShell: CSSProperties = {
 const summaryBar: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
-  height: 28,
+  gap: 12,
+  height: 32,
   paddingLeft: 14,
-  paddingRight: 10,
+  paddingRight: 8,
   background: 'var(--t-panel)',
+};
+
+const actions: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  flexShrink: 0,
 };
 
 const ledDot: CSSProperties = {
@@ -66,27 +73,32 @@ const summaryLead: CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
-const ghostButton: CSSProperties = {
-  height: 20,
-  paddingLeft: 8,
-  paddingRight: 8,
-  borderRadius: 5,
-  borderWidth: 0,
+const expandButton: CSSProperties = {
+  height: 24,
+  paddingLeft: 10,
+  paddingRight: 10,
+  borderRadius: 6,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'var(--t-border)',
   background: 'transparent',
   color: 'var(--t-text-muted)',
-  fontSize: 10.5,
+  fontSize: 11,
   fontWeight: 500,
-  letterSpacing: '0.02em',
+  letterSpacing: '-0.005em',
   cursor: 'pointer',
   flexShrink: 0,
   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
   lineHeight: 1,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 5,
 };
 
 const compactReject: CSSProperties = {
-  height: 22,
-  paddingLeft: 10,
-  paddingRight: 10,
+  height: 24,
+  paddingLeft: 12,
+  paddingRight: 12,
   borderRadius: 6,
   borderWidth: 1,
   borderStyle: 'solid',
@@ -105,8 +117,8 @@ const compactReject: CSSProperties = {
 const compactApprove: CSSProperties = {
   ...compactReject,
   borderColor: ACCENT_ORANGE,
-  background: ACCENT_ORANGE,
-  color: '#FFFFFF',
+  background: 'transparent',
+  color: ACCENT_ORANGE,
 };
 
 const listPane: CSSProperties = {
@@ -215,31 +227,35 @@ export function ApprovalBanner() {
           {leading.title}
           {extraCount > 0 ? ` · +${extraCount} more` : ''}
         </span>
-        {approvals.length > 1 ? (
+        <div style={actions}>
+          {approvals.length > 1 ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              style={expandButton}
+              title={expanded ? 'Collapse queue' : 'Show remaining approvals'}
+            >
+              {expanded ? `Hide ${extraCount}` : `Show ${extraCount} more`}
+              <span aria-hidden="true" style={{ fontSize: 8, opacity: 0.7 }}>{expanded ? '▴' : '▾'}</span>
+            </button>
+          ) : null}
           <button
             type="button"
-            onClick={() => setExpanded((value) => !value)}
-            style={ghostButton}
+            disabled={leadingBusy}
+            onClick={() => resolve(leading.id, 'reject')}
+            style={{ ...compactReject, opacity: leadingBusy ? 0.55 : 1, cursor: leadingBusy ? 'wait' : 'pointer' }}
           >
-            {expanded ? 'Collapse' : 'Expand'}
+            Reject
           </button>
-        ) : null}
-        <button
-          type="button"
-          disabled={leadingBusy}
-          onClick={() => resolve(leading.id, 'reject')}
-          style={{ ...compactReject, opacity: leadingBusy ? 0.55 : 1, cursor: leadingBusy ? 'wait' : 'pointer' }}
-        >
-          Reject
-        </button>
-        <button
-          type="button"
-          disabled={leadingBusy}
-          onClick={() => resolve(leading.id, 'approve')}
-          style={{ ...compactApprove, opacity: leadingBusy ? 0.7 : 1, cursor: leadingBusy ? 'wait' : 'pointer' }}
-        >
-          {leadingBusy ? '…' : 'Approve'}
-        </button>
+          <button
+            type="button"
+            disabled={leadingBusy}
+            onClick={() => resolve(leading.id, 'approve')}
+            style={{ ...compactApprove, opacity: leadingBusy ? 0.7 : 1, cursor: leadingBusy ? 'wait' : 'pointer' }}
+          >
+            {leadingBusy ? '…' : 'Approve'}
+          </button>
+        </div>
       </div>
 
       {expanded && approvals.length > 1 ? (
@@ -250,22 +266,24 @@ export function ApprovalBanner() {
               <div key={approval.id} style={listRow} data-approval-id={approval.id}>
                 <span style={rowEyebrow}>{eyebrowLabel(approval)}</span>
                 <span style={rowTitle}>{approval.title}</span>
-                <button
-                  type="button"
-                  disabled={isBusy}
-                  onClick={() => resolve(approval.id, 'reject')}
-                  style={{ ...compactReject, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'wait' : 'pointer' }}
-                >
-                  Reject
-                </button>
-                <button
-                  type="button"
-                  disabled={isBusy}
-                  onClick={() => resolve(approval.id, 'approve')}
-                  style={{ ...compactApprove, opacity: isBusy ? 0.7 : 1, cursor: isBusy ? 'wait' : 'pointer' }}
-                >
-                  {isBusy ? '…' : 'Approve'}
-                </button>
+                <div style={actions}>
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => resolve(approval.id, 'reject')}
+                    style={{ ...compactReject, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'wait' : 'pointer' }}
+                  >
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => resolve(approval.id, 'approve')}
+                    style={{ ...compactApprove, opacity: isBusy ? 0.7 : 1, cursor: isBusy ? 'wait' : 'pointer' }}
+                  >
+                    {isBusy ? '…' : 'Approve'}
+                  </button>
+                </div>
               </div>
             );
           })}
