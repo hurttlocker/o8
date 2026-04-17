@@ -201,16 +201,19 @@ function RepoRegistrySectionBase({
 
   // ── Agent ↔ Branch association (#168) ──
   const [agentBranchMap, setAgentBranchMap] = useState<Map<string, Map<string, BranchAgent[]>>>(new Map());
+  const [agentBranchMapLoaded, setAgentBranchMapLoaded] = useState(false);
   const ideAgentBranchMap = useMemo(
     () => buildBranchAgentMapFromIdeSessions(ideWorkspaceSessions ?? []),
     [ideWorkspaceSessions],
   );
-  const effectiveAgentBranchMap = ideWorkspaceSessions ? ideAgentBranchMap : agentBranchMap;
+  // Tile-local IDE sessions can lag lane archival; once the workspace API has
+  // loaded, prefer its repo/branch map because it already strips ghost lanes.
+  const effectiveAgentBranchMap = useMemo(() => {
+    if (!ideWorkspaceSessions) return agentBranchMap;
+    return agentBranchMapLoaded ? agentBranchMap : ideAgentBranchMap;
+  }, [agentBranchMap, agentBranchMapLoaded, ideAgentBranchMap, ideWorkspaceSessions]);
 
   useEffect(() => {
-    if (ideWorkspaceSessions) {
-      return;
-    }
     function fetchAgentBranches() {
       fetch('/api/panel/workspaces')
         .then(r => r.json())
@@ -262,6 +265,7 @@ function RepoRegistrySectionBase({
             }
           }
           setAgentBranchMap(map);
+          setAgentBranchMapLoaded(true);
         })
         .catch(() => {});
     }
