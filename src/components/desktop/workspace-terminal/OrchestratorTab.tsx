@@ -226,6 +226,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     orchestratorBusyState: null,
   });
   const [contextUsage, setContextUsage] = useState({ tokenCount: 0, runningTotal: 0 });
+  const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
   const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
   const [agentsOpen, setAgentsOpen] = useState(() => readBooleanPref(AGENTS_OPEN_KEY));
   const [missionOpen, setMissionOpen] = useState(() => readBooleanPref(MISSION_OPEN_KEY));
@@ -461,6 +462,18 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
   const hasActiveSessions = agents.length > 0;
   const hasMessages = chatChromeState.hasMessages;
 
+  const handleHeaderCopyMarkdown = useCallback(async () => {
+    const ok = await chatPanelRef.current?.copyAsMarkdown?.();
+    if (ok === false) {
+      setExportState('error');
+      setTimeout(() => setExportState('idle'), 1400);
+    } else {
+      setExportState('copying');
+      setTimeout(() => setExportState('copied'), 120);
+      setTimeout(() => setExportState('idle'), 1600);
+    }
+  }, []);
+
   const thoughtsBodyBackground = 'linear-gradient(180deg, var(--t-glass-muted) 0%, rgba(0, 0, 0, 0) 100%)';
   const thoughtsElevatedSurface = 'var(--t-glass-elevated)';
   const thoughtsElevatedBorder = '1px solid var(--t-glass-border-strong)';
@@ -468,7 +481,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
   const thoughtsMutedGlass = 'var(--t-glass-muted-strong)';
   const headerChipStyle = {
     height: 26, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 9, borderRadius: 8, borderWidth: 1, borderStyle: 'solid',
-    borderColor: 'rgba(255, 255, 255, 0.18)', color: 'rgba(255, 255, 255, 0.78)', display: 'inline-flex', alignItems: 'center',
+    borderColor: 'var(--t-border)', color: 'var(--t-text-muted)', display: 'inline-flex', alignItems: 'center',
     fontSize: 12, fontWeight: 500, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
   } as const;
 
@@ -515,6 +528,14 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
       onToggleMission={handleToggleMission}
       repoLabel={repoLabel}
       emptyStateOverride={emptyStateNode}
+      showInlineExport={false}
+      footerMeterSlot={(
+        <ContextMeter
+          tokenCount={contextUsage.tokenCount}
+          runningTotal={contextUsage.runningTotal}
+          onClick={() => { console.info('[orchestrator] Context inspector is not wired yet.'); }}
+        />
+      )}
       onMissionStateChange={data.onMissionStateChange}
       onLaunchPacket={data.onLaunchPacket}
       onChromeChange={setChatChromeState}
@@ -562,16 +583,31 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
         </div>
       ) : null}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 32, paddingTop: 3, paddingRight: 12, paddingBottom: 3, paddingLeft: 12, borderBottomWidth: '0.5px', borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)', background: 'transparent', flexShrink: 0 }}>
-        <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center' }}>
-          <ContextMeter tokenCount={contextUsage.tokenCount} runningTotal={contextUsage.runningTotal} onClick={() => { console.info('[orchestrator] Context inspector is not wired yet.'); }} />
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 32, paddingTop: 3, paddingRight: 12, paddingBottom: 3, paddingLeft: 12, borderBottomWidth: '0.5px', borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)', background: 'transparent', flexShrink: 0, justifyContent: 'flex-end' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <span style={headerChipStyle}>Opus 4.7</span>
-          <span style={{ ...headerChipStyle, gap: 6 }}>thinking: max ▾</span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {hasMessages ? (
+            <button
+              type="button"
+              onClick={() => { void handleHeaderCopyMarkdown(); }}
+              aria-label="Copy thread as Markdown"
+              title={exportState === 'copied' ? 'Copied' : 'Copy thread as Markdown'}
+              style={{
+                ...headerChipStyle,
+                background: 'transparent',
+                gap: 6,
+                cursor: 'pointer',
+                flexShrink: 0,
+                borderColor: exportState === 'copied' ? 'var(--t-accent-border)' : 'var(--t-border)',
+                color: exportState === 'copied' ? 'var(--t-accent)' : 'var(--t-text-muted)',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="11" height="11" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              <span>{exportState === 'copied' ? 'Copied' : 'Copy'}</span>
+            </button>
+          ) : null}
           <ThreadsDropdown historyOpen={historyOpen} agentsOpen={agentsOpen} missionOpen={missionOpen} onToggleHistory={handleToggleHistory} onToggleAgents={handleToggleAgents} onToggleMission={handleToggleMission} />
 
           {hasMessages ? (
