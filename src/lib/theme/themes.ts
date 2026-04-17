@@ -106,7 +106,7 @@ export const themes: ThemeTokens[] = [
       '--t-kbd-bg': 'rgba(255, 255, 255, 0.68)',
       '--t-kbd-border': 'rgba(15, 23, 42, 0.14)',
       '--t-kbd-color': '#334155',
-      '--t-canvas-bg': '#ffffff',
+      '--t-canvas-bg': '#F4F2ED',
       '--t-tab-active-text': '#0f172a',
       '--t-tab-text': '#64748b',
       '--t-timeline-bar': 'rgba(248, 250, 253, 0.6)',
@@ -116,21 +116,20 @@ export const themes: ThemeTokens[] = [
       '--t-glass-muted-strong': 'rgba(255, 255, 255, 0.62)',
       '--t-glass-border-strong': 'rgba(15, 23, 42, 0.1)',
       '--t-glass-shadow': '0 32px 72px rgba(15, 23, 42, 0.12), 0 12px 32px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
-      // Workspace / chat surface — stays SOLID white. Panels upstream are
-      // glass; the center content area where code and chat render is a
-      // clean paper surface so text is legible and matches the "light
-      // workspace" goal. Mirrors how midnight pins --t-chat-surface-* to a
-      // solid dark panel.
-      '--t-chat-surface-bg': '#ffffff',
+      // Workspace / chat surface — solid paper (#F4F2ED). Panels upstream
+      // are glass; the center content area where code and chat render is a
+      // solid paper surface matching o8-site's landing. Mirrors how midnight
+      // pins --t-chat-surface-* to a solid dark panel. See DESIGN.md §01.
+      '--t-chat-surface-bg': '#F4F2ED',
       '--t-chat-surface-text': '#0f172a',
       '--t-chat-surface-text-secondary': '#475569',
       '--t-chat-surface-text-muted': '#64748b',
       '--t-chat-surface-border': 'rgba(15, 23, 42, 0.08)',
-      '--t-chat-surface-input-bg': '#ffffff',
+      '--t-chat-surface-input-bg': '#F4F2ED',
       '--t-chat-surface-input-border': 'rgba(15, 23, 42, 0.12)',
       '--t-chat-surface-card-bg': 'rgba(15, 23, 42, 0.04)',
-      // Terminal palette — solid opaque (xterm canvas alpha bleeds).
-      '--t-terminal-bg': '#ffffff',
+      // Terminal palette — solid opaque paper (xterm canvas alpha bleeds).
+      '--t-terminal-bg': '#F4F2ED',
       '--t-terminal-fg': '#0f172a',
       '--t-terminal-cursor': '#2563eb',
       '--t-terminal-cursor-accent': '#ffffff',

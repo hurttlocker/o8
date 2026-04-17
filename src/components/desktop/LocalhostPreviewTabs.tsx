@@ -204,7 +204,7 @@ export function LocalhostPreviewTabs({
       flexBasis: '0%',
       minHeight: 0,
       minWidth: 0,
-      backgroundColor: '#ffffff',
+      backgroundColor: 'var(--t-canvas-bg)',
     }}>
       <div style={{
         display: 'flex',
@@ -410,7 +410,7 @@ export function LocalhostPreviewTabs({
           flexShrink: 1,
           flexBasis: '0%',
           minHeight: 0,
-          backgroundColor: '#ffffff',
+          backgroundColor: 'var(--t-canvas-bg)',
         }}
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
       />
