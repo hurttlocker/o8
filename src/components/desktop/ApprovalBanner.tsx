@@ -8,130 +8,161 @@ import type { ApprovalRecord } from '@/lib/approvals/types';
 // cards can't get buried in an alerts popover. Rendered only when there are
 // pending approvals — zero footprint when the queue is empty.
 //
-// Design language: o8 desktop spec (DESIGN.md). Single orange LED accent,
-// paper card surface over vibrancy chrome, mono bracketed micro-label,
-// Plus Jakarta Sans body, hairline reject + solid-orange approve.
+// Design language: o8 desktop spec (DESIGN.md). Rams discipline — a single
+// compressed status line when collapsed (≤28px tall), expanded on demand to
+// reveal the full list with per-row Approve / Reject. One orange LED for the
+// whole banner, not one per row.
 
 const ACCENT_ORANGE = '#FF5A1F';
 
 const bannerShell: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 1,
   width: '100%',
   background: 'var(--t-bg-card)',
-  borderBottom: '1px solid var(--t-border)',
+  borderBottomWidth: 1,
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'var(--t-border)',
+  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
 };
 
-const cardRow: CSSProperties = {
+const summaryBar: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 14,
-  paddingTop: 11,
-  paddingBottom: 11,
-  paddingLeft: 20,
-  paddingRight: 14,
-  borderLeftWidth: 3,
-  borderLeftStyle: 'solid',
-  borderLeftColor: ACCENT_ORANGE,
+  gap: 10,
+  height: 28,
+  paddingLeft: 14,
+  paddingRight: 10,
   background: 'var(--t-panel)',
 };
 
 const ledDot: CSSProperties = {
-  width: 6,
-  height: 6,
+  width: 5,
+  height: 5,
   borderRadius: 999,
   backgroundColor: ACCENT_ORANGE,
   flexShrink: 0,
 };
 
-const body: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 2,
-  minWidth: 0,
-  flex: 1,
-};
-
-const eyebrow: CSSProperties = {
+const summaryCount: CSSProperties = {
   fontSize: 10,
   fontWeight: 500,
-  letterSpacing: '0.18em',
+  letterSpacing: '0.16em',
   textTransform: 'uppercase',
   color: 'var(--t-text-muted)',
   fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
+  flexShrink: 0,
 };
 
-const titleLine: CSSProperties = {
-  fontSize: 14,
-  fontWeight: 500,
-  color: 'var(--t-text)',
-  letterSpacing: '-0.01em',
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-};
-
-const summaryLine: CSSProperties = {
+const summaryLead: CSSProperties = {
   fontSize: 11.5,
   fontWeight: 400,
-  color: 'var(--t-text-muted)',
+  color: 'var(--t-text)',
   letterSpacing: '-0.005em',
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  flex: 1,
+  minWidth: 0,
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
 };
 
-const buttonBase: CSSProperties = {
-  paddingTop: 8,
-  paddingBottom: 8,
-  paddingLeft: 16,
-  paddingRight: 16,
-  borderRadius: 8,
-  borderWidth: 1,
-  borderStyle: 'solid',
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-  fontSize: 12.5,
+const ghostButton: CSSProperties = {
+  height: 20,
+  paddingLeft: 8,
+  paddingRight: 8,
+  borderRadius: 5,
+  borderWidth: 0,
+  background: 'transparent',
+  color: 'var(--t-text-muted)',
+  fontSize: 10.5,
   fontWeight: 500,
-  letterSpacing: '-0.005em',
+  letterSpacing: '0.02em',
+  cursor: 'pointer',
   flexShrink: 0,
+  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
   lineHeight: 1,
-  transition: 'background 160ms ease, border-color 160ms ease, color 160ms ease, opacity 160ms ease',
 };
 
-const rejectButton: CSSProperties = {
-  ...buttonBase,
+const compactReject: CSSProperties = {
+  height: 22,
+  paddingLeft: 10,
+  paddingRight: 10,
+  borderRadius: 6,
+  borderWidth: 1,
+  borderStyle: 'solid',
   borderColor: 'var(--t-border)',
   background: 'transparent',
   color: 'var(--t-text-muted)',
+  fontSize: 11,
+  fontWeight: 500,
+  letterSpacing: '-0.005em',
+  cursor: 'pointer',
+  flexShrink: 0,
+  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  lineHeight: 1,
 };
 
-const approveButton: CSSProperties = {
-  ...buttonBase,
+const compactApprove: CSSProperties = {
+  ...compactReject,
   borderColor: ACCENT_ORANGE,
   background: ACCENT_ORANGE,
   color: '#FFFFFF',
 };
 
-function formatEyebrow(approval: ApprovalRecord): string {
-  const riskTag = approval.risk === 'high'
-    ? 'HIGH RISK'
-    : approval.risk === 'medium'
-      ? 'MEDIUM RISK'
-      : 'APPROVAL';
-  const toolTag = approval.toolName ? ` · ${approval.toolName}` : '';
-  const policyTag = approval.policyRuleId ? ` · ${approval.policyRuleId.replace(/_/g, ' ')}` : '';
-  return `(${riskTag})${toolTag}${policyTag}`;
+const listPane: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  maxHeight: 260,
+  overflowY: 'auto',
+  borderTopWidth: 1,
+  borderTopStyle: 'solid',
+  borderTopColor: 'var(--t-divider-subtle)',
+};
+
+const listRow: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  height: 32,
+  paddingLeft: 14,
+  paddingRight: 10,
+  borderBottomWidth: 1,
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'var(--t-divider-subtle)',
+};
+
+const rowEyebrow: CSSProperties = {
+  fontSize: 9.5,
+  fontWeight: 500,
+  letterSpacing: '0.14em',
+  textTransform: 'uppercase',
+  color: 'var(--t-text-faint)',
+  fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
+  flexShrink: 0,
+};
+
+const rowTitle: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 400,
+  color: 'var(--t-text)',
+  letterSpacing: '-0.005em',
+  flex: 1,
+  minWidth: 0,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
+function eyebrowLabel(approval: ApprovalRecord): string {
+  const risk = approval.risk === 'high' ? 'HIGH' : approval.risk === 'medium' ? 'MED' : 'LOW';
+  const tool = approval.toolName ? ` · ${approval.toolName}` : '';
+  return `(${risk})${tool}`;
 }
 
 export function ApprovalBanner() {
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -140,8 +171,7 @@ export function ApprovalBanner() {
       const data = (await res.json()) as { approvals?: ApprovalRecord[] };
       setApprovals(data.approvals ?? []);
     } catch {
-      // Silent — banner hides itself when the queue is empty so a dropped
-      // poll just means "no new data this tick".
+      // silent — poll ticks again in 3s
     }
   }, []);
 
@@ -170,47 +200,77 @@ export function ApprovalBanner() {
 
   if (approvals.length === 0) return null;
 
+  const leading = approvals[0]!;
+  const leadingBusy = pendingId === leading.id;
+  const extraCount = approvals.length - 1;
+
   return (
     <div style={bannerShell} data-approval-banner="">
-      {approvals.map((approval) => {
-        const isPending = pendingId === approval.id;
-        return (
-          <div key={approval.id} style={cardRow} data-approval-id={approval.id}>
-            <span style={ledDot} aria-hidden="true" />
-            <div style={body}>
-              <span style={eyebrow}>{formatEyebrow(approval)}</span>
-              <span style={titleLine}>{approval.title}</span>
-              {approval.summary && approval.summary !== approval.title ? (
-                <span style={summaryLine}>{approval.summary}</span>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={() => resolve(approval.id, 'reject')}
-              style={{
-                ...rejectButton,
-                opacity: isPending ? 0.55 : 1,
-                cursor: isPending ? 'wait' : 'pointer',
-              }}
-            >
-              Reject
-            </button>
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={() => resolve(approval.id, 'approve')}
-              style={{
-                ...approveButton,
-                opacity: isPending ? 0.65 : 1,
-                cursor: isPending ? 'wait' : 'pointer',
-              }}
-            >
-              {isPending ? 'Resolving' : 'Approve'}
-            </button>
-          </div>
-        );
-      })}
+      <div style={summaryBar}>
+        <span style={ledDot} aria-hidden="true" />
+        <span style={summaryCount}>
+          {approvals.length} PENDING
+        </span>
+        <span style={summaryLead}>
+          {leading.title}
+          {extraCount > 0 ? ` · +${extraCount} more` : ''}
+        </span>
+        {approvals.length > 1 ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            style={ghostButton}
+          >
+            {expanded ? 'Collapse' : 'Expand'}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          disabled={leadingBusy}
+          onClick={() => resolve(leading.id, 'reject')}
+          style={{ ...compactReject, opacity: leadingBusy ? 0.55 : 1, cursor: leadingBusy ? 'wait' : 'pointer' }}
+        >
+          Reject
+        </button>
+        <button
+          type="button"
+          disabled={leadingBusy}
+          onClick={() => resolve(leading.id, 'approve')}
+          style={{ ...compactApprove, opacity: leadingBusy ? 0.7 : 1, cursor: leadingBusy ? 'wait' : 'pointer' }}
+        >
+          {leadingBusy ? '…' : 'Approve'}
+        </button>
+      </div>
+
+      {expanded && approvals.length > 1 ? (
+        <div style={listPane}>
+          {approvals.slice(1).map((approval) => {
+            const isBusy = pendingId === approval.id;
+            return (
+              <div key={approval.id} style={listRow} data-approval-id={approval.id}>
+                <span style={rowEyebrow}>{eyebrowLabel(approval)}</span>
+                <span style={rowTitle}>{approval.title}</span>
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => resolve(approval.id, 'reject')}
+                  style={{ ...compactReject, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'wait' : 'pointer' }}
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => resolve(approval.id, 'approve')}
+                  style={{ ...compactApprove, opacity: isBusy ? 0.7 : 1, cursor: isBusy ? 'wait' : 'pointer' }}
+                >
+                  {isBusy ? '…' : 'Approve'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }
