@@ -16,6 +16,11 @@ import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
+import {
+  createToolCallTracker,
+  processStreamEvent,
+  type OrchestratorEvent,
+} from '@/lib/lane/orchestrator-stream-events';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -32,15 +37,6 @@ export interface OrchestratorSession {
   proc: ChildProcess | null;
   createdAt: number;
 }
-
-/** Structured events emitted from the JSON stream */
-export type OrchestratorEvent =
-  | { type: 'text'; text: string }
-  | { type: 'thinking'; text: string }
-  | { type: 'tool_use'; name: string; input: unknown }
-  | { type: 'tool_result'; name: string; output: string }
-  | { type: 'done'; sessionId: string | null; cost: number | null }
-  | { type: 'error'; error: string };
 
 // ── Constants ──
 
@@ -583,6 +579,7 @@ export async function sendToOrchestrator(
     let lineBuffer = '';
     let sessionId: string | null = session.claudeSessionId;
     let cost: number | null = null;
+    const toolTracker = createToolCallTracker();
     // Accumulate the tail of the assistant's final text so we can detect
     // narrate-and-exit turns — where the model runs tools and then ends the
     // turn without emitting a VERDICT or Dispatched summary.
@@ -614,7 +611,7 @@ export async function sendToOrchestrator(
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line) as Record<string, unknown>;
-          processStreamEvent(event, captureEvent, (id) => { sessionId = id; }, (c) => { cost = c; });
+          processStreamEvent(event, captureEvent, (id) => { sessionId = id; }, (c) => { cost = c; }, toolTracker);
         } catch {
           // Not JSON — ignore
         }
@@ -643,7 +640,7 @@ export async function sendToOrchestrator(
       if (lineBuffer.trim()) {
         try {
           const event = JSON.parse(lineBuffer) as Record<string, unknown>;
-          processStreamEvent(event, captureEvent, (id) => { sessionId = id; }, (c) => { cost = c; });
+          processStreamEvent(event, captureEvent, (id) => { sessionId = id; }, (c) => { cost = c; }, toolTracker);
         } catch {
           // ignore
         }
@@ -694,69 +691,4 @@ export async function sendToOrchestrator(
       resolve();
     });
   });
-}
-
-/** Parse a single stream-json event and emit structured events. */
-function processStreamEvent(
-  event: Record<string, unknown>,
-  onEvent: (e: OrchestratorEvent) => void,
-  onSessionId: (id: string) => void,
-  onCost: (cost: number) => void,
-): void {
-  const type = event.type as string | undefined;
-
-  switch (type) {
-    case 'system': {
-      const id = event.session_id as string | undefined;
-      if (id) onSessionId(id);
-      break;
-    }
-
-    case 'content_block_delta': {
-      const delta = event.delta as Record<string, unknown> | undefined;
-      if (!delta) break;
-      if (delta.type === 'text_delta' && typeof delta.text === 'string') {
-        onEvent({ type: 'text', text: delta.text });
-      } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-        onEvent({ type: 'thinking', text: delta.thinking });
-      }
-      break;
-    }
-
-    case 'content_block_start': {
-      const block = event.content_block as Record<string, unknown> | undefined;
-      if (block?.type === 'tool_use' && typeof block.name === 'string') {
-        onEvent({ type: 'tool_use', name: block.name, input: block.input ?? null });
-      }
-      break;
-    }
-
-    case 'assistant': {
-      // Full message — extract text content
-      const message = event.message as Record<string, unknown> | undefined;
-      const content = message?.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          const b = block as Record<string, unknown>;
-          if (b.type === 'text' && typeof b.text === 'string') {
-            onEvent({ type: 'text', text: b.text });
-          } else if (b.type === 'tool_use' && typeof b.name === 'string') {
-            onEvent({ type: 'tool_use', name: b.name as string, input: b.input ?? null });
-          } else if (b.type === 'tool_result') {
-            const resultText = typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
-            onEvent({ type: 'tool_result', name: '', output: resultText });
-          }
-        }
-      }
-      break;
-    }
-
-    case 'result': {
-      const id = event.session_id as string | undefined;
-      if (id) onSessionId(id);
-      const totalCost = event.total_cost_usd as number | undefined;
-      if (typeof totalCost === 'number') onCost(totalCost);
-      break;
-    }
-  }
 }

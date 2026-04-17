@@ -446,7 +446,24 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
           wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: event.text, repoPath: next.repoPath, thinking: true } });
           break;
         case 'tool_use':
-          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'tool-use', data: { name: event.name, repoPath: next.repoPath } });
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'tool-use',
+            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath: next.repoPath },
+          });
+          break;
+        case 'tool_result':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'tool-result',
+            data: {
+              name: event.name,
+              args: event.input,
+              output: event.output,
+              toolUseId: event.id ?? null,
+              repoPath: next.repoPath,
+            },
+          });
           break;
         case 'done':
           wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'status', data: { status: 'ready', repoPath: next.repoPath } });
@@ -1698,7 +1715,21 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'tool-use',
-            data: { name: event.name, repoPath },
+            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath },
+          });
+          break;
+
+        case 'tool_result':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'tool-result',
+            data: {
+              name: event.name,
+              args: event.input,
+              output: event.output,
+              toolUseId: event.id ?? null,
+              repoPath,
+            },
           });
           break;
 
