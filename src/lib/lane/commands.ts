@@ -781,6 +781,17 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           return { ok: true, laneId: command.laneId, note: 'Lane parked for manual conflict resolution.' };
         }
 
+        // Tag the tip commit with a [via-o8] suffix so the public changelog
+        // can render a "made by o8" pill on entries that shipped through the
+        // dispatch loop. Best-effort: any failure here must not block the merge.
+        try {
+          const { stdout: tipSubject } = await execFileAsync('git', ['log', '-1', '--pretty=%s'], { cwd: worktreePath });
+          const subject = tipSubject.trim();
+          if (subject && !subject.includes('[via-o8]')) {
+            await execFileAsync('git', ['commit', '--amend', '-m', `${subject} [via-o8]`, '--allow-empty'], { cwd: worktreePath });
+          }
+        } catch { /* best-effort — merge continues regardless */ }
+
         // Perform merge using the actual branch ref
         const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: lane.repoPath })).stdout.trim();
         await execFileAsync('git', ['checkout', lane.baseBranch], { cwd: lane.repoPath });
