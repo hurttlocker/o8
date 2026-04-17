@@ -266,6 +266,7 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 
 ### ALWAYS
 - **`npx tsc --noEmit` before every commit**
+- **Dispatch smoke-test pattern: use `tsx <script>`, never `tsx -e "import(...)"`.** `tsx -e` resolves local TS modules as a CommonJS namespace and only exposes `default` / `module.exports` — named exports silently return `undefined` at runtime. For fresh-DB verification: `cat > /tmp/smoke.ts <<'EOF' ... EOF` then `CORTEX_IDE_DATA_DIR=$(mktemp -d) npx tsx /tmp/smoke.ts`. Tracked in #568.
 - **Respect the 800-line file ceiling** — if your changes would push a file past 800 lines, decompose first. Extract helpers, hooks, or modules before adding new logic. Layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) are explicitly waived.
 - **Apple HIG**: 44px touch targets, 14px card radii, spring curves
 - **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props

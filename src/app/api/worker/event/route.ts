@@ -45,12 +45,20 @@ function badRequest(message: string) {
   );
 }
 
+// #562 — Workers can POST arbitrary payload.text via /api/worker/event. That
+// string must NOT be forwarded into the realtime publish, because workers are
+// a lower trust boundary than the panel UI. Progress text is authoritative
+// for the worker_events table (operator can read it via a read endpoint) but
+// never gets broadcast. Non-progress notes are synthetic server strings and
+// safe to publish.
 function mutationNote(type: PollEvent['type'], payload: unknown) {
-  if (type === 'progress' && isRecord(payload) && typeof payload.text === 'string' && payload.text.trim()) {
-    return payload.text.trim().slice(0, 160);
+  if (type === 'progress') {
+    return 'Remote worker progress update.';
   }
   if (type === 'branch_pushed' && isRecord(payload) && typeof payload.branch === 'string' && payload.branch.trim()) {
-    return `Remote branch pushed: ${payload.branch.trim()}`;
+    const branch = payload.branch.trim();
+    const safeBranch = /^[A-Za-z0-9._/-]{1,120}$/.test(branch) ? branch : 'remote branch';
+    return `Remote branch pushed: ${safeBranch}`;
   }
   if (type === 'completed') {
     return 'Remote worker completed the run.';

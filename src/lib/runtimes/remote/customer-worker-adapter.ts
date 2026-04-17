@@ -64,13 +64,18 @@ export class CustomerWorkerAdapter extends RemoteRuntimeAdapter {
 
   readonly displayName = 'Remote Worker (Customer)';
 
+  // #565 — reviewDiffs is declared false until getChangedFiles stops being a
+  // stub. The UI reads capabilities to decide whether to surface the diff tab;
+  // advertising reviewDiffs=true with a stub returning [] opens an empty panel
+  // the operator thinks is the actual review surface. Flip to true the moment
+  // getChangedFiles has a real gh/git-diff implementation.
   readonly capabilities: RuntimeCapabilities = {
     discover: false,
     readTranscript: true,
     launch: true,
     resume: false,
     interrupt: true,
-    reviewDiffs: true,
+    reviewDiffs: false,
     costTelemetry: false,
     streaming: false,
   };

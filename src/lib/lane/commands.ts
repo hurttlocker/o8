@@ -502,7 +502,23 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         });
         if (porcelain.trim().length > 0) {
           console.log(`[lane] request_review: dirty worktree detected in ${reviewCwd}, auto-committing`);
-          await execFileAsync('git', ['add', '-A'], { cwd: reviewCwd, maxBuffer: 10 * 1024 * 1024 });
+          await execFileAsync(
+            'git',
+            [
+              'add',
+              '-A',
+              '--',
+              '.',
+              ':!node_modules',
+              ':!.next',
+              ':!dist',
+              ':!out',
+              ':!coverage',
+              ':!artifacts',
+              ':!.cortex-worktrees',
+            ],
+            { cwd: reviewCwd, maxBuffer: 10 * 1024 * 1024 },
+          );
           await execFileAsync('git', ['commit', '-m', 'auto-commit: agent work before review'], {
             cwd: reviewCwd,
             maxBuffer: 10 * 1024 * 1024,

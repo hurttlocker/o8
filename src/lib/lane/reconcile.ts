@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
 import { createApproval } from '@/lib/approvals/store';
@@ -77,24 +78,76 @@ const RECONCILABLE_WORKTREE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStat
   'awaiting_input',
 ]);
 
+// #558 — Branch existence probe per repo. When the orchestrator bash-merges
+// and deletes the branch but leaves the worktree dir intact (or when the agent
+// push happens through an external tool), we need a second signal — branch
+// gone from the repo's ref list. Grouping by repoPath keeps this O(repos)
+// rather than O(lanes) on every reconcile tick.
+function getLocalBranchSetForRepo(repoPath: string): Set<string> | null {
+  try {
+    const output = execFileSync('git', ['branch', '--format=%(refname:short)'], {
+      cwd: repoPath,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2_000,
+    });
+    const names = output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    return new Set(names);
+  } catch {
+    return null;
+  }
+}
+
 export function reconcileOrphanedWorktrees(): number {
-  const candidates = listLanes().filter(
+  const reconcilableLanes = listLanes().filter(
     (lane) =>
       RECONCILABLE_WORKTREE_STATUSES.has(lane.status)
       && typeof lane.worktreePath === 'string'
-      && lane.worktreePath.length > 0
-      && !existsSync(lane.worktreePath),
+      && lane.worktreePath.length > 0,
   );
+  if (reconcilableLanes.length === 0) return 0;
+
+  // Worktree-gone candidates (original #541 logic)
+  const worktreeGone = reconcilableLanes.filter((lane) => !existsSync(lane.worktreePath!));
+
+  // Branch-gone candidates (#558) — worktree still on disk but branch removed.
+  // Probe once per repo to keep the cost bounded.
+  const branchSetsByRepo = new Map<string, Set<string> | null>();
+  const branchGone: Lane[] = [];
+  for (const lane of reconcilableLanes) {
+    if (!existsSync(lane.worktreePath!)) continue; // already caught by worktreeGone
+    if (!lane.branch) continue;
+    if (!branchSetsByRepo.has(lane.repoPath)) {
+      branchSetsByRepo.set(lane.repoPath, getLocalBranchSetForRepo(lane.repoPath));
+    }
+    const branches = branchSetsByRepo.get(lane.repoPath);
+    if (!branches) continue; // probe failed — skip rather than false-positive
+    if (!branches.has(lane.branch)) {
+      branchGone.push(lane);
+    }
+  }
+
+  const candidates = [...worktreeGone, ...branchGone];
   if (candidates.length === 0) return 0;
 
   let reconciled = 0;
   const decompositionScans = new Map<string, LaneRuntime>();
+  const worktreeGoneIds = new Set(worktreeGone.map((lane) => lane.id));
   for (const lane of candidates) {
-    const updated = setLaneStatus(lane.id, 'completed', 'system', 'worktree_missing_reconciled');
+    const reason = worktreeGoneIds.has(lane.id)
+      ? 'worktree_missing_reconciled'
+      : 'branch_merged_reconciled';
+    const updated = setLaneStatus(lane.id, 'completed', 'system', reason);
     if (updated) {
       reconciled += 1;
+      const signal = worktreeGoneIds.has(lane.id)
+        ? `worktree ${lane.worktreePath} is gone`
+        : `branch ${lane.branch} is gone (merged+deleted)`;
       console.log(
-        `[reconcile] Lane ${lane.id} (${lane.label || lane.branch}) worktree ${lane.worktreePath} is gone — transitioned ${lane.status} → completed`,
+        `[reconcile] Lane ${lane.id} (${lane.label || lane.branch}) ${signal} — transitioned ${lane.status} → completed`,
       );
       // #544 — When the orchestrator bash-merges and cleans up its worktree,
       // the verb=merge post-merge hook never fires. This catches that case
