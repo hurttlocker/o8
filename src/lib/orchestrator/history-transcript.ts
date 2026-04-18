@@ -58,7 +58,11 @@ function normalizeStoredMessage(value: unknown): MobileTranscriptEntry | null {
   };
 }
 
-export function serializeThoughtsHistoryMessages(messages: MobileTranscriptEntry[]) {
+export function serializeThoughtsHistoryMessages(
+  messages: MobileTranscriptEntry[],
+  options?: { timestampFallback?: 'now' | 'zero' },
+) {
+  const timestampFallback = options?.timestampFallback ?? 'now';
   return messages.map((message) => ({
     id: message.id,
     role: message.role,
@@ -66,7 +70,7 @@ export function serializeThoughtsHistoryMessages(messages: MobileTranscriptEntry
     type: message.type,
     media: message.media,
     toolCalls: message.toolCalls,
-    timestamp: message.timestamp ?? Date.now(),
+    timestamp: message.timestamp ?? (timestampFallback === 'zero' ? 0 : Date.now()),
     timestampLabel: message.timestampLabel,
     model: message.model,
     tokens: message.tokens,
@@ -93,8 +97,8 @@ export function transcriptMatchesStoredHistory(
     .map((message) => normalizeStoredMessage(message))
     .filter((message): message is MobileTranscriptEntry => message !== null);
 
-  return JSON.stringify(serializeThoughtsHistoryMessages(current))
-    === JSON.stringify(serializeThoughtsHistoryMessages(normalizedCandidate));
+  return JSON.stringify(serializeThoughtsHistoryMessages(current, { timestampFallback: 'zero' }))
+    === JSON.stringify(serializeThoughtsHistoryMessages(normalizedCandidate, { timestampFallback: 'zero' }));
 }
 
 function stripCompactionTags(value: string) {
