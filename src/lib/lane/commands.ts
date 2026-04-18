@@ -30,6 +30,7 @@ import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
 import { cleanupRemoteMergeWorktree, fetchWorkerBranch } from '@/lib/lane/remote-fetch';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES, FILE_SIZE_WAIVERS } from '@/lib/orchestrator/dispatch';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
+import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { fetchWorkerRun } from '@/lib/worker/runs';
@@ -752,25 +753,17 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         // can't detect in their isolated branches. Only run if rebase succeeded
         // (if rebase failed, we're about to try direct merge which has its own risks).
         if (!rebaseFailed) {
-          try {
-            await execFileAsync('npx', ['tsc', '--noEmit'], {
-              cwd: worktreePath,
-              timeout: 120_000,
-              maxBuffer: 4 * 1024 * 1024,
-            });
-            console.log(`[lane-merge] Typecheck passed for ${actualBranch}`);
-          } catch (tscErr) {
-            const tscOutput = tscErr instanceof Error && 'stdout' in tscErr
-              ? String((tscErr as { stdout: unknown }).stdout).slice(0, 2000)
-              : tscErr instanceof Error && 'stderr' in tscErr
-                ? String((tscErr as { stderr: unknown }).stderr).slice(0, 2000)
-                : 'Unknown typecheck error';
-            console.error(`[lane-merge] Typecheck failed for ${actualBranch}:\n${tscOutput}`);
+          const typecheck = await runLaneRebaseTypecheck({
+            cwd: worktreePath,
+            actualBranch,
+            logPrefix: 'lane-merge',
+          });
+          if (!typecheck.ok) {
             setLaneStatus(command.laneId, 'reviewing', 'system', 'typecheck_failed');
             return {
               ok: false,
               laneId: command.laneId,
-              note: `Typecheck failed after rebase onto ${lane.baseBranch}. Fix type errors before merging.\n\n${tscOutput}`,
+              note: `Typecheck failed after rebase onto ${lane.baseBranch}. Fix type errors before merging.\n\n${typecheck.output}`,
             };
           }
         }
@@ -1011,25 +1004,17 @@ async function performRemoteCustomerMerge(
     }
 
     if (!rebaseFailed) {
-      try {
-        await execFileAsync('npx', ['tsc', '--noEmit'], {
-          cwd: fetched.tempWorktreePath,
-          timeout: 120_000,
-          maxBuffer: 4 * 1024 * 1024,
-        });
-        console.log(`[remote-merge] Typecheck passed for ${actualBranch}`);
-      } catch (tscErr) {
-        const tscOutput = tscErr instanceof Error && 'stdout' in tscErr
-          ? String((tscErr as { stdout: unknown }).stdout).slice(0, 2000)
-          : tscErr instanceof Error && 'stderr' in tscErr
-            ? String((tscErr as { stderr: unknown }).stderr).slice(0, 2000)
-            : 'Unknown typecheck error';
-        console.error(`[remote-merge] Typecheck failed for ${actualBranch}:\n${tscOutput}`);
+      const typecheck = await runLaneRebaseTypecheck({
+        cwd: fetched.tempWorktreePath,
+        actualBranch,
+        logPrefix: 'remote-merge',
+      });
+      if (!typecheck.ok) {
         setLaneStatus(command.laneId, 'reviewing', 'system', 'typecheck_failed');
         return {
           ok: false,
           laneId: command.laneId,
-          note: `Typecheck failed after rebase onto ${lane.baseBranch}. Fix type errors before merging.\n\n${tscOutput}`,
+          note: `Typecheck failed after rebase onto ${lane.baseBranch}. Fix type errors before merging.\n\n${typecheck.output}`,
         };
       }
     }
