@@ -77,6 +77,12 @@ import {
   type SupervisorCallbacks,
   type AgentUpdateEvent,
 } from './lib/supervisor/agent-supervisor';
+import {
+  enqueueSupervisorInboxItem,
+  startHealBot,
+  type SupervisorInboxKind,
+  type SupervisorInboxPayload,
+} from './lib/supervisor/heal-bot';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import type {
   LaneLifecycleEventPayload,
@@ -275,6 +281,130 @@ async function enqueueAutoReview(laneId: string) {
     body: { action: 'enqueue', laneId },
     timeoutMs: 8_000,
   });
+}
+
+function truncateSupervisorText(value: string, limit = 300): string {
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  if (normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit)}...`;
+}
+
+async function readGitSummary(cwd: string, baseBranch?: string | null): Promise<{ lastCommit: string; diffStat: string }> {
+  let lastCommit = 'Unavailable.';
+  let diffStat = 'Unavailable.';
+
+  try {
+    const { stdout } = await execFileAsync('git', ['log', '-1', '--format=%H %s'], {
+      cwd,
+      timeout: 15_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    lastCommit = stdout.trim() || lastCommit;
+  } catch {
+    // Best effort only.
+  }
+
+  const diffArgs = baseBranch?.trim()
+    ? ['diff', '--stat', `${baseBranch.trim()}...HEAD`]
+    : ['diff', '--stat', 'HEAD~1'];
+  try {
+    const { stdout } = await execFileAsync('git', diffArgs, {
+      cwd,
+      timeout: 15_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    diffStat = stdout.trim() || 'No diff stat available.';
+  } catch {
+    try {
+      const { stdout } = await execFileAsync('git', ['diff', '--stat', 'HEAD~1'], {
+        cwd,
+        timeout: 15_000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      diffStat = stdout.trim() || diffStat;
+    } catch {
+      // Leave fallback text in place.
+    }
+  }
+
+  return { lastCommit, diffStat };
+}
+
+async function buildTranscriptTail(sessionKey: string, limit = 8): Promise<string> {
+  try {
+    const entries = await fetchRuntimeTranscript(sessionKey, limit);
+    const formatted = entries
+      .map((entry) => `[${entry.timestampLabel ?? '?'}] ${entry.role}: ${truncateSupervisorText(entry.text, 240)}`)
+      .join('\n');
+    return formatted || 'No transcript available.';
+  } catch {
+    return 'No transcript available.';
+  }
+}
+
+async function buildSupervisorInboxPayload(input: {
+  laneId: string;
+  worktreePath: string;
+  sessionKey: string;
+  baseBranch?: string | null;
+  packetTitle?: string | null;
+  packetReferenceLabel?: string | null;
+  verificationKind?: string | null;
+  attempts?: string | null;
+  error: string;
+  note?: string | null;
+  retryError?: string | null;
+}): Promise<SupervisorInboxPayload> {
+  const [transcriptTail, gitSummary] = await Promise.all([
+    buildTranscriptTail(input.sessionKey),
+    readGitSummary(input.worktreePath, input.baseBranch),
+  ]);
+
+  return {
+    laneId: input.laneId,
+    worktreePath: input.worktreePath,
+    sessionKey: input.sessionKey,
+    surfaceId: input.sessionKey,
+    baseBranch: input.baseBranch ?? null,
+    packetTitle: input.packetTitle ?? null,
+    packetReferenceLabel: input.packetReferenceLabel ?? null,
+    verificationKind: input.verificationKind ?? null,
+    attempts: input.attempts ?? null,
+    error: input.error,
+    diffStat: gitSummary.diffStat,
+    lastCommit: gitSummary.lastCommit,
+    transcriptTail,
+    note: input.note ?? null,
+    retryError: input.retryError ?? null,
+  };
+}
+
+async function enqueueVerificationFailureInboxItem(input: {
+  repoPath: string;
+  packetId?: string | null;
+  kind: SupervisorInboxKind;
+  laneId: string;
+  worktreePath: string;
+  sessionKey: string;
+  baseBranch?: string | null;
+  packetTitle?: string | null;
+  packetReferenceLabel?: string | null;
+  verificationKind?: string | null;
+  attempts?: string | null;
+  error: string;
+  note?: string | null;
+  retryError?: string | null;
+}): Promise<string> {
+  const payload = await buildSupervisorInboxPayload(input);
+  const inboxId = enqueueSupervisorInboxItem({
+    repoPath: input.repoPath,
+    packetId: input.packetId ?? null,
+    kind: input.kind,
+    payload,
+  });
+  console.log(`[supervisor] Enqueued inbox item ${inboxId} for ${input.repoPath} (${input.kind})`);
+  return inboxId;
 }
 
 function normalizeOrchestratorRepoPath(repoPath: string | null): string | null {
@@ -883,6 +1013,7 @@ const sessionHistoryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
+let stopHealBotLoop: (() => void) | null = null;
 
 const lastRealtimeFingerprint = {
   runtime: '',
@@ -3327,21 +3458,18 @@ async function bootstrapWsServer() {
               const packetId = lane.packetId?.trim();
               if (!packetId) {
                 setLaneStatus(lane.id, 'awaiting_input', 'system', 'post_completion_typecheck_packet_missing');
-                queueOrchestratorEscalation(
-                  lane.repoPath,
-                  [
-                    `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion ${verification.kind}, but lane ${lane.id} is no longer bound to a packet.`,
-                    '',
-                    'Cannot enter the bounded retry flow without a packet binding.',
-                    '',
-                    `Verification (${verification.kind}) output:`,
-                    '```',
-                    verification.output,
-                    '```',
-                    '',
-                    'Decide: inspect the lane/worktree manually and either re-queue the packet or request changes.',
-                  ].join('\n'),
-                );
+                await enqueueVerificationFailureInboxItem({
+                  repoPath: lane.repoPath,
+                  kind: 'packet_missing',
+                  laneId: lane.id,
+                  worktreePath: completionCwd,
+                  sessionKey: surfaceId,
+                  baseBranch: lane.baseBranch,
+                  packetTitle: lane.label,
+                  verificationKind: verification.kind,
+                  error: verification.output,
+                  note: 'Cannot enter the bounded retry flow without a packet binding.',
+                });
                 return {
                   block: true,
                   detail: `Post-completion ${verification.kind} failed, but the lane is not bound to a packet. Operator input is required.`,
@@ -3373,21 +3501,19 @@ async function bootstrapWsServer() {
 
                 if (!packetSnapshot) {
                   setLaneStatus(lane.id, 'awaiting_input', 'system', 'post_completion_typecheck_packet_not_found');
-                  queueOrchestratorEscalation(
-                    lane.repoPath,
-                    [
-                      `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) failed post-completion ${verification.kind}, but packet ${packetId} was not found in mission state.`,
-                      '',
-                      'Cannot enter the bounded retry flow because the packet metadata is missing.',
-                      '',
-                      `Verification (${verification.kind}) output:`,
-                      '```',
-                      verification.output,
-                      '```',
-                      '',
-                      'Decide: inspect the mission state, re-bind/reset the packet if needed, and then relaunch or request changes.',
-                    ].join('\n'),
-                  );
+                  await enqueueVerificationFailureInboxItem({
+                    repoPath: lane.repoPath,
+                    packetId,
+                    kind: 'packet_missing',
+                    laneId: lane.id,
+                    worktreePath: completionCwd,
+                    sessionKey: surfaceId,
+                    baseBranch: lane.baseBranch,
+                    packetTitle: lane.label,
+                    verificationKind: verification.kind,
+                    error: verification.output,
+                    note: 'Cannot enter the bounded retry flow because the packet metadata is missing.',
+                  });
                   return {
                     block: true,
                     detail: `Post-completion ${verification.kind} failed, but the packet could not be found in mission state. Operator input is required.`,
@@ -3446,27 +3572,21 @@ async function bootstrapWsServer() {
                 ].join('\n') || '- No attempt learnings recorded.';
 
                 setLaneStatus(lane.id, 'awaiting_input', 'system', 'ralph_retry_exhausted');
-                queueOrchestratorEscalation(
-                  lane.repoPath,
-                  [
-                    `[SUPERVISOR] Packet ${packetSnapshot.referenceLabel} (${packetId}) exhausted bounded retries after failing post-completion ${verification.kind}.`,
-                    '',
-                    `Lane: ${lane.id}`,
-                    `Agent: ${surfaceId}`,
-                    `Packet: ${packetSnapshot.title}`,
-                    `Attempts: ${attemptNumber}/${maxAttempts}`,
-                    '',
-                    'Learnings summary:',
-                    learningSummary,
-                    '',
-                    `Verification (${verification.kind}) output:`,
-                    '```',
-                    verification.output,
-                    '```',
-                    '',
-                    'Decide: inspect the worktree, apply the fix manually or reset/re-queue the packet with a new approach.',
-                  ].join('\n'),
-                );
+                await enqueueVerificationFailureInboxItem({
+                  repoPath: lane.repoPath,
+                  packetId,
+                  kind: 'bounded_retry_exhausted',
+                  laneId: lane.id,
+                  worktreePath: completionCwd,
+                  sessionKey: surfaceId,
+                  baseBranch: lane.baseBranch,
+                  packetTitle: packetSnapshot.title,
+                  packetReferenceLabel: packetSnapshot.referenceLabel,
+                  verificationKind: verification.kind,
+                  attempts: `${attemptNumber}/${maxAttempts}`,
+                  error: verification.output,
+                  note: `Learnings summary:\n${learningSummary}`,
+                });
                 console.warn(`[ralph-loop] Max attempts (${maxAttempts}) exhausted for packet ${packetId}, escalating to operator`);
                 return {
                   block: true,
@@ -3475,24 +3595,20 @@ async function bootstrapWsServer() {
               } catch (retryError) {
                 updateLane(lane.id, { packetId }, 'system');
                 setLaneStatus(lane.id, 'awaiting_input', 'system', 'ralph_retry_failed');
-                queueOrchestratorEscalation(
-                  lane.repoPath,
-                  [
-                    `[SUPERVISOR] Packet ${packetId} failed post-completion ${verification.kind}, and the bounded retry handoff failed.`,
-                    '',
-                    `Lane: ${lane.id}`,
-                    `Agent: ${surfaceId}`,
-                    '',
-                    `Retry handoff failure: ${retryError instanceof Error ? retryError.message : String(retryError)}`,
-                    '',
-                    `Verification (${verification.kind}) output:`,
-                    '```',
-                    verification.output,
-                    '```',
-                    '',
-                    'Decide: inspect the worktree and either repair/re-queue the packet manually or request changes.',
-                  ].join('\n'),
-                );
+                await enqueueVerificationFailureInboxItem({
+                  repoPath: lane.repoPath,
+                  packetId,
+                  kind: 'verification_failed',
+                  laneId: lane.id,
+                  worktreePath: completionCwd,
+                  sessionKey: surfaceId,
+                  baseBranch: lane.baseBranch,
+                  packetTitle: lane.label,
+                  verificationKind: verification.kind,
+                  error: verification.output,
+                  note: 'The bounded retry handoff failed after the verification error.',
+                  retryError: retryError instanceof Error ? retryError.message : String(retryError),
+                });
                 console.error('[ralph-loop] Failed to process bounded retry handoff:', retryError);
                 return {
                   block: true,
@@ -3554,6 +3670,7 @@ async function bootstrapWsServer() {
     startSupervisorLoop(supervisorCallbacks);
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
     startWorktreeReaper();
+    stopHealBotLoop = startHealBot();
 
     void ensureReviewDrainStarted().catch((error) => {
       console.error('[ws-server] Failed to start review queue drain:', error instanceof Error ? error.message : String(error));
@@ -3572,6 +3689,8 @@ function shutdown(signal: string) {
   stopSupervisorLoop();
   stopHeadlessLoop?.();
   stopHeadlessLoop = null;
+  stopHealBotLoop?.();
+  stopHealBotLoop = null;
   stopWorktreeReaper();
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
