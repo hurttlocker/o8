@@ -181,6 +181,7 @@ interface ComposerAreaProps {
   modelLabel: string;
   effort: ThinkingEffort;
   onEffortChange: (next: ThinkingEffort) => void;
+  adaptiveEnabled: boolean;
   permissionMode: ThoughtsChatPermissionMode;
   onTogglePermission?: () => void;
   missionOpen?: boolean;
@@ -209,6 +210,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   modelLabel,
   effort,
   onEffortChange,
+  adaptiveEnabled,
   permissionMode,
   onTogglePermission,
   missionOpen,
@@ -394,6 +396,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             modelLabel={modelLabel}
             effort={effort}
             onEffortChange={onEffortChange}
+            adaptiveEnabled={adaptiveEnabled}
             permissionMode={permissionMode}
             onTogglePermission={onTogglePermission}
             missionOpen={missionOpen}

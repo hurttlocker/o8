@@ -4,6 +4,13 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { formatModelLabel } from '@/lib/format';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
+import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import {
+  readAdaptiveThinkingEnabled,
+  readStoredOrchestratorThinkingOverride,
+  subscribeOrchestratorThinkingPreferences,
+  writeStoredOrchestratorThinkingOverride,
+} from '@/lib/orchestrator/thinking-preferences';
 import {
   queueOrchestratorSessionPrelude,
   readStoredOrchestratorModel,
@@ -19,7 +26,6 @@ import type {
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
 import { executeOrchestratorSlashCommand } from '@/lib/slash-commands';
-import { type ThinkingEffort } from './InputButtons';
 import type { AgentTarget, FleetAgent } from './types';
 import {
   entrySignature,
@@ -136,7 +142,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
-  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>('max');
+  const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(() => readAdaptiveThinkingEnabled());
+  const [thinkingOverride, setThinkingOverride] = useState<ManualThinkingEffort | null>(() => readStoredOrchestratorThinkingOverride());
   const [orchestratorModel, setOrchestratorModel] = useState(DEFAULT_ORCHESTRATOR_MODEL);
   const [chatMessages, setChatMessages] = useState<MobileTranscriptEntry[]>([]);
   const [planText, setPlanText] = useState<string | null>(null);
@@ -158,6 +165,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
   const { persistThread, persistThreadNow, cancelPendingPersist } = usePersistChatThread(resolvedRepoPath);
+  const thinkingEffort: ThinkingEffort = thinkingOverride ?? (adaptiveThinkingEnabled ? 'adaptive' : 'max');
 
   const isOrchestratorMode = targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey);
 
@@ -170,6 +178,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (!resolvedRepoPath) return;
     setOrchestratorModel(readStoredOrchestratorModel(resolvedRepoPath) ?? DEFAULT_ORCHESTRATOR_MODEL);
   }, [resolvedRepoPath]);
+
+  useEffect(() => subscribeOrchestratorThinkingPreferences(() => {
+    setAdaptiveThinkingEnabled(readAdaptiveThinkingEnabled());
+    setThinkingOverride(readStoredOrchestratorThinkingOverride());
+  }), []);
 
   useEffect(() => {
     if (!isOrchestratorMode) return;
@@ -784,6 +797,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [handleTaskSend]);
 
+  const handleEffortChange = useCallback((next: ThinkingEffort) => {
+    const nextOverride = next === 'adaptive' ? null : next;
+    setThinkingOverride(nextOverride);
+    writeStoredOrchestratorThinkingOverride(nextOverride);
+  }, []);
+
   const handleCopyMarkdown = useCallback(async (): Promise<boolean> => {
     if (displayMessages.length === 0) return false;
     if (!navigator.clipboard?.writeText) {
@@ -881,7 +900,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSlashCommand={handleSlashCommand}
         modelLabel={isOrchestratorMode ? formatModelLabel(orchestratorModel) : activeTargetLabel}
         effort={thinkingEffort}
-        onEffortChange={setThinkingEffort}
+        onEffortChange={handleEffortChange}
+        adaptiveEnabled={adaptiveThinkingEnabled}
         permissionMode={permissionMode}
         onTogglePermission={onTogglePermission}
         missionOpen={missionOpen}

@@ -4,6 +4,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import Image from 'next/image';
 import { ChevronRight, SlidersHorizontal, Sparkles } from '../lucide-shims';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
+import { ThinkingStrip } from '@/components/desktop/orchestrator/ThinkingStrip';
 import { DesktopToolCallStack } from '../DesktopToolCallStack';
 import { MessageActions } from '../MessageActions';
 import { isSlashCommandText } from '@/lib/slash-commands';
@@ -36,6 +37,8 @@ export const Bubble = memo(function Bubble({ entry, previousEntry, agentName, is
   const hasText = Boolean(displayText.trim());
   const hasMedia = Boolean(entry.media?.length);
   const hasToolCalls = Boolean(entry.toolCalls?.length);
+  const thinkingText = sanitizeTranscriptText(entry.thinking ?? '');
+  const hasThinking = Boolean(thinkingText.trim());
   const isSlashCommand = isSlashCommandText(entry.text);
   const runtimeEvent = useMemo(() => parseRuntimeEventSummary(entry.text), [entry.text]);
   const displayRuntimeEvent = useMemo(() => {
@@ -515,6 +518,13 @@ export const Bubble = memo(function Bubble({ entry, previousEntry, agentName, is
         <div className="remodex-message-head">
           <span>{roleLabel(entry.role, agentName)}</span>
         </div>
+      ) : null}
+      {hasThinking ? (
+        <ThinkingStrip
+          thinking={thinkingText}
+          live={!hasText || entry.toolCalls?.some((toolCall) => toolCall.status === 'running' || toolCall.status === 'calling')}
+          style={{ marginBottom: hasText || hasMedia || hasToolCalls ? 12 : 0 }}
+        />
       ) : null}
       {hasText ? (
         <div className="remodex-rich-text">

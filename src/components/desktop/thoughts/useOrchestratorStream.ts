@@ -19,13 +19,13 @@ import {
   subscribeOrchestratorMissionCompleted,
   type OrchestratorMissionCompletedDetail,
 } from '@/lib/orchestrator/store';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
 export type OrchestratorPermissionMode = 'full' | 'plan';
-type OrchestratorThinkingEffort = 'adaptive' | 'medium' | 'high' | 'max';
 export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-7';
 
 interface OrchestratorStreamResult {
@@ -36,7 +36,7 @@ interface OrchestratorStreamResult {
   tokenCount: number;
   runningTotal: number;
   estimateNextTurnTokens: (message: string) => number;
-  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: OrchestratorThinkingEffort; model?: string }) => void;
+  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: ThinkingEffort; model?: string }) => void;
   appendLocalEntries: (entries: MobileTranscriptEntry[]) => void;
   replaceTranscript: (entries: MobileTranscriptEntry[]) => void;
   fetchTelemetrySnapshot: () => Promise<{ totalTokens: number | null; estimatedCostUsd: number | null; model: string | null }>;
@@ -1017,11 +1017,11 @@ export function useOrchestratorStream(
     };
   }, [primeCompactedSession, requestCompaction]);
 
-  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: OrchestratorThinkingEffort; model?: string }) => {
+  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: ThinkingEffort; model?: string }) => {
     if (!repoPathRef.current) return;
 
     const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
-    const thinkingEffort = options?.thinkingEffort ?? 'max';
+    const thinkingEffort = options?.thinkingEffort;
     const model = options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
 
     void (async () => {
@@ -1109,7 +1109,7 @@ export function useOrchestratorStream(
         repoPath: activeRepoPath,
         message: outboundMessage,
         permissionMode,
-        thinkingEffort,
+        ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
         model,
       });
       const ws = wsRef.current;

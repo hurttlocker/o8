@@ -16,6 +16,7 @@ import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
 import { executeTool, type ToolResult } from '@/lib/llm/tools';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
+import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
   computeCost,
   isSupportedProvider,
@@ -113,6 +114,40 @@ function computeUsageCost(
     + usage.cacheReadTokens * pricing.input * ANTHROPIC_CACHE_READ_MULTIPLIER
     + usage.cacheWriteTokens * pricing.input * ANTHROPIC_CACHE_WRITE_MULTIPLIER
   ) / TOKENS_PER_MILLION;
+}
+
+function parseRequestedThinkingEffort(value: unknown): ThinkingEffort | null {
+  return isThinkingEffort(value) ? value : null;
+}
+
+function supportsAnthropicAdaptiveThinking(model: string): boolean {
+  const normalizedModel = model.trim().toLowerCase();
+  return normalizedModel.includes('claude-opus-4-7')
+    || normalizedModel.includes('claude-opus-4-6')
+    || normalizedModel.includes('claude-sonnet-4-6')
+    || normalizedModel.includes('claude-mythos-preview');
+}
+
+function applyAnthropicThinkingConfig(
+  upstreamBody: Record<string, unknown>,
+  model: string,
+  requestedThinkingEffort: ThinkingEffort | null,
+) {
+  if (requestedThinkingEffort === 'adaptive') {
+    delete upstreamBody.thinking;
+    return;
+  }
+  if (requestedThinkingEffort !== null || !supportsAnthropicAdaptiveThinking(model)) {
+    return;
+  }
+  const maxTokens = typeof upstreamBody.max_tokens === 'number' && Number.isFinite(upstreamBody.max_tokens)
+    ? upstreamBody.max_tokens
+    : 0;
+  upstreamBody.max_tokens = Math.max(maxTokens, 16_384);
+  upstreamBody.thinking = {
+    type: 'adaptive',
+    display: 'summarized',
+  };
 }
 
 function parseAnthropicStreamUsage(line: string) {
@@ -224,6 +259,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     disableTools,
     repoPath: rawRepoPath,
     toolOverrides: rawToolOverrides,
+    thinkingEffort: rawThinkingEffort,
   } = body as {
     model: string;
     provider: string;
@@ -232,7 +268,9 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     disableTools?: boolean;
     repoPath?: string;
     toolOverrides?: Record<string, Record<string, unknown>>;
+    thinkingEffort?: ThinkingEffort;
   };
+  const requestedThinkingEffort = parseRequestedThinkingEffort(rawThinkingEffort);
 
   if (!isSupportedProvider(provider)) {
     return jsonError(`Unsupported provider: ${provider}`, 400);
@@ -366,6 +404,9 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       config.buildBody(model, requestMessages) as Record<string, unknown>,
       provider,
     );
+    if (provider === 'anthropic') {
+      applyAnthropicThinkingConfig(upstreamBody, model, requestedThinkingEffort);
+    }
     if (provider === 'anthropic' && anthropicTaskBudget) {
       upstreamBody.task_budget = anthropicTaskBudget.taskBudget;
       console.info(
