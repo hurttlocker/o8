@@ -55,7 +55,7 @@ export interface GitHubDeviceFlowState {
 
 export type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'workers' | 'appearance' | 'diagnostics' | 'about';
+export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'operator-defaults' | 'workers' | 'appearance' | 'diagnostics' | 'about';
 
 // ── Constants ──
 
@@ -177,6 +177,22 @@ export function KeyIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+    </svg>
+  );
+}
+
+export function SlidersIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <line x1="4" y1="21" x2="4" y2="14"/>
+      <line x1="4" y1="10" x2="4" y2="3"/>
+      <line x1="12" y1="21" x2="12" y2="12"/>
+      <line x1="12" y1="8" x2="12" y2="3"/>
+      <line x1="20" y1="21" x2="20" y2="16"/>
+      <line x1="20" y1="12" x2="20" y2="3"/>
+      <line x1="1" y1="14" x2="7" y2="14"/>
+      <line x1="9" y1="8" x2="15" y2="8"/>
+      <line x1="17" y1="16" x2="23" y2="16"/>
     </svg>
   );
 }

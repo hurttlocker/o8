@@ -16,6 +16,7 @@ import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux
 import { anthropicPricingForModel } from '@/lib/llm/pricing';
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
 import { executeTool, type ToolResult } from '@/lib/llm/tools';
+import { resolvePromptCachingEnabledSync } from '@/lib/operator/defaults';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
@@ -161,6 +162,9 @@ function parseAnthropicStreamUsage(line: string) {
 
 function withAnthropicPromptCaching(body: Record<string, unknown>, provider: string) {
   if (provider !== 'anthropic') {
+    return body;
+  }
+  if (!resolvePromptCachingEnabledSync()) {
     return body;
   }
 
