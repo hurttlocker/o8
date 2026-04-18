@@ -15,7 +15,7 @@ import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { buildPacketPrompt } from './packet-prompt';
 import { computePredictedFiles, filterOverlappingPackets } from './preservation-envelope';
 
-export const MAX_PARALLEL_DISPATCHES = 4;
+export const MAX_PARALLEL_DISPATCHES = Number.parseInt(process.env.O8_MAX_PARALLEL_DISPATCHES ?? '8', 10);
 export const MAX_RECOVERY_DISPATCHES = 2;
 
 const RECOVERY_COOLDOWN_MS = 60_000;
@@ -296,10 +296,24 @@ export async function runDispatchTick(
     }),
   };
 
-  // #380 — Filter out packets that overlap with active work on the same files
+  // #380 — Predicted-file overlap is now ADVISORY ONLY by default. The dispatch
+  // loop fans every wave packet out in parallel; conflicts get resolved at
+  // rebase time (the merge gate already enforces clean rebases). This keeps
+  // parallelism a root behavior so the orchestrator can still merge while
+  // codex packets work in their isolated worktrees.
+  // Set O8_STRICT_OVERLAP_GATE=1 to restore the old serializing behavior.
   const activePackets = nextState.packets.filter((p) => p.status === 'running' || p.status === 'launching');
   const wavePackets = getDispatchableWave(nextState.packets);
-  const overlapFiltered = filterOverlappingPackets(wavePackets, activePackets);
+  const overlapFiltered = process.env.O8_STRICT_OVERLAP_GATE === '1'
+    ? filterOverlappingPackets(wavePackets, activePackets)
+    : wavePackets;
+  if (process.env.O8_STRICT_OVERLAP_GATE !== '1' && wavePackets.length > 1) {
+    const wouldFilter = filterOverlappingPackets(wavePackets, activePackets);
+    if (wouldFilter.length < wavePackets.length) {
+      const held = wavePackets.filter((p) => !wouldFilter.find((kept) => kept.id === p.id));
+      console.log(`[overlap-gate] Advisory only — would have held ${held.length} packets: ${held.map((p) => p.id).join(', ')}`);
+    }
+  }
 
   const dispatchablePackets = overlapFiltered
     .map((packet) => ({

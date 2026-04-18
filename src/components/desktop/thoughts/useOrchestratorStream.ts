@@ -714,7 +714,10 @@ export function useOrchestratorStream(
         }
 
         case 'agent-update': {
-          if (statusRef.current !== 'busy' && messagesRef.current.length === 0) break;
+          // Agent progress / supervisor narration belongs in the codex agent's
+          // own transcript tab and the SessionVisualizer card — NOT the
+          // orchestrator chat. Surface to dashboard listeners only; do not
+          // mutate the orchestrator's message stream.
           const update = msg.data as {
             surfaceId?: string;
             name?: string;
@@ -725,25 +728,6 @@ export function useOrchestratorStream(
             prompt?: string;
           } | undefined;
           if (!update?.surfaceId) break;
-
-          const detailText = update.detail ?? `Agent "${update.name ?? update.surfaceId}" is now ${update.status ?? 'unknown'}`;
-          setMessages(prev => {
-            // Dedup: skip if we already have an update for this surfaceId with the same detail
-            const isDupe = prev.some(m =>
-              m.id.startsWith(`agent-update-${update.surfaceId}`) &&
-              m.text === detailText
-            );
-            if (isDupe) return prev;
-            return [...prev, {
-              id: `agent-update-${update.surfaceId}-${++agentUpdateSeq}`,
-              role: 'system',
-              text: detailText,
-              timestamp: Date.now(),
-              timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            }];
-          });
-
-          // Dispatch to dashboard so it can auto-open workspace tabs
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('cortex:agent-supervisor-update', { detail: update }));
           }
