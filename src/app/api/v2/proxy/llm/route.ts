@@ -13,6 +13,7 @@ import {
 } from '@/lib/llm/anthropic-task-budget';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
+import { anthropicPricingForModel } from '@/lib/llm/pricing';
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
 import { executeTool, type ToolResult } from '@/lib/llm/tools';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
@@ -81,17 +82,6 @@ async function fetchWithTimeout(
 
 function asFiniteTokenCount(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
-}
-
-function anthropicPricingForModel(model: string) {
-  const normalizedModel = model.trim().toLowerCase();
-  if (!normalizedModel) return null;
-  if (normalizedModel.includes('claude-opus-4-7')) return { input: 5, output: 25 };
-  if (normalizedModel.includes('claude-opus-4-6')) return { input: 15, output: 75 };
-  if (normalizedModel.includes('claude-sonnet-4-6')) return { input: 3, output: 15 };
-  if (normalizedModel.includes('claude-sonnet-4-5') || normalizedModel.includes('claude-sonnet-4')) return { input: 3, output: 15 };
-  if (normalizedModel.includes('claude-haiku-4-5') || normalizedModel.includes('claude-haiku')) return { input: 0.8, output: 4 };
-  return null;
 }
 
 function computeUsageCost(
