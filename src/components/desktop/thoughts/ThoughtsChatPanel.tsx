@@ -591,6 +591,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           planText?: string | null;
         };
         const msgs = mapHistoryMessagesToTranscript(histData.messages ?? []);
+        // Hard cap: never auto-restore a thread above 100 messages — the user
+        // almost certainly didn't want yesterday's giant thread paged back in
+        // every reload. They can still pick it up explicitly from History.
+        if (msgs.length > 100) {
+          console.log(`[orchestrator] Skipping auto-restore — latest thread has ${msgs.length} messages (>100 cap)`);
+          return;
+        }
         setPlanText(histData.planText ?? null);
         if (msgs.length > 0) {
           setChatMessages(msgs);
