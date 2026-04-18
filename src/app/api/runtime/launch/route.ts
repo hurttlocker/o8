@@ -27,6 +27,8 @@ export async function POST(request: NextRequest) {
       baseBranch: payload?.baseBranch,
       isolate: payload?.isolate ?? (payload?.isolation === 'branch' ? true : payload?.isolation === 'main' ? false : undefined),
       skipSetup: payload?.skipSetup,
+      existingLaneId: payload?.existingLaneId,
+      packetId: payload?.packetId,
     });
 
     if (result.ok) {
