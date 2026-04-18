@@ -3,19 +3,46 @@
 import { useState } from 'react';
 import type { MobileTranscriptCommand, MobileTranscriptCommandChip } from '@/lib/mobile/types';
 
-function chipColors(tone: MobileTranscriptCommandChip['tone']) {
+const BODY_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const MONO_FONT = '"SF Mono", ui-monospace, monospace';
+const INLINE_CODEISH_SOURCE = '(`[^`]+`|(?:~?/)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+|/[A-Za-z0-9._-]+|\\b\\d[\\d,.]*(?:\\s*(?:->|→)\\s*\\d[\\d,.]*)?\\b)';
+const INLINE_CODEISH_PATTERN = new RegExp(`(${INLINE_CODEISH_SOURCE})`, 'g');
+const INLINE_CODEISH_MATCH = new RegExp(`^${INLINE_CODEISH_SOURCE}$`);
+
+function chipTone(tone: MobileTranscriptCommandChip['tone']) {
   switch (tone) {
     case 'blue':
-      return { color: '#1d4ed8', background: 'rgba(37, 99, 235, 0.08)', border: 'rgba(37, 99, 235, 0.16)' };
+      return 'var(--t-accent)';
     case 'amber':
-      return { color: '#b45309', background: 'rgba(249, 115, 22, 0.08)', border: 'rgba(249, 115, 22, 0.16)' };
+      return 'var(--t-warning, #f59e0b)';
     case 'emerald':
-      return { color: '#047857', background: 'rgba(16, 185, 129, 0.08)', border: 'rgba(16, 185, 129, 0.16)' };
+      return 'var(--t-success, #16a34a)';
     case 'red':
-      return { color: '#b91c1c', background: 'rgba(239, 68, 68, 0.08)', border: 'rgba(239, 68, 68, 0.16)' };
+      return 'var(--t-danger, #ef4444)';
     default:
-      return { color: '#475569', background: 'rgba(148, 163, 184, 0.08)', border: 'rgba(148, 163, 184, 0.16)' };
+      return 'var(--t-text-muted)';
   }
+}
+
+function renderInlineText(text: string, keyPrefix: string) {
+  return text.split(INLINE_CODEISH_PATTERN).filter(Boolean).map((part, index) => {
+    const content = part.startsWith('`') && part.endsWith('`') ? part.slice(1, -1) : part;
+    if (!INLINE_CODEISH_MATCH.test(part)) {
+      return <span key={`${keyPrefix}-${index}`}>{part}</span>;
+    }
+    return (
+      <span
+        key={`${keyPrefix}-${index}`}
+        style={{
+          fontFamily: MONO_FONT,
+          fontSize: '0.96em',
+          color: 'var(--t-text)',
+        }}
+      >
+        {content}
+      </span>
+    );
+  });
 }
 
 export function CommandStripNode({
@@ -25,170 +52,184 @@ export function CommandStripNode({
   command: MobileTranscriptCommand;
   timestampLabel?: string;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const details = command.details ?? [];
   const chips = command.chips ?? [];
   const hasDetails = details.length > 0 || chips.length > 0 || Boolean(timestampLabel);
 
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      width: '100%',
-      paddingTop: 12,
-      paddingBottom: 12,
-    }}>
-      <div style={{
-        width: '90%',
-        maxWidth: 680,
-        borderRadius: 16,
-        border: '1px solid rgba(148, 163, 184, 0.14)',
-        background: 'linear-gradient(180deg, rgba(255,255,255,0.74), rgba(248, 250, 252, 0.9))',
-        backdropFilter: 'blur(18px)',
-        boxShadow: '0 14px 30px rgba(15, 23, 42, 0.05)',
-        overflow: 'hidden',
-      }}>
-        <button
-          type="button"
-          onClick={() => {
-            if (!hasDetails) return;
-            setExpanded((value) => !value);
-          }}
-          aria-expanded={hasDetails ? expanded : undefined}
+    <div
+      style={{
+        width: '100%',
+        paddingTop: 6,
+        paddingBottom: 6,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          if (!hasDetails) return;
+          setExpanded((value) => !value);
+        }}
+        aria-expanded={hasDetails ? expanded : undefined}
+        title={command.summary}
+        style={{
+          width: '100%',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          paddingTop: 2,
+          paddingRight: 8,
+          paddingBottom: 2,
+          paddingLeft: 2,
+          border: 'none',
+          background: 'transparent',
+          color: 'var(--t-text-muted)',
+          cursor: hasDetails ? 'pointer' : 'default',
+          textAlign: 'left',
+          fontSize: 11.5,
+          lineHeight: 1.45,
+          fontStyle: 'italic',
+          fontWeight: 400,
+          letterSpacing: '-0.005em',
+          fontFamily: BODY_FONT,
+        }}
+      >
+        <span style={{ opacity: 0.5, flexShrink: 0 }} aria-hidden="true">
+          &middot;
+        </span>
+        <span
           style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 10,
-            padding: '10px 12px',
-            border: 'none',
-            background: 'transparent',
-            cursor: hasDetails ? 'pointer' : 'default',
-            textAlign: 'left',
+            flexShrink: 0,
+            color: 'var(--t-text)',
+            fontFamily: MONO_FONT,
+            fontSize: 10.75,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-            <span style={{
-              width: 8,
-              height: 8,
-              borderRadius: 999,
-              background: '#2563eb',
-              boxShadow: '0 0 0 4px rgba(37, 99, 235, 0.10)',
+          {`/${command.name}`}
+        </span>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ color: 'var(--t-text-faint)' }}> - </span>
+          {renderInlineText(command.summary, `summary-${command.name}`)}
+        </span>
+        {hasDetails ? (
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--t-text-faint)"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
               flexShrink: 0,
-            }} />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-              <span style={{
-                fontSize: 10.5,
-                color: '#2563eb',
-                letterSpacing: '0.04em',
-                fontFamily: '"SFMono-Regular", ui-monospace, Menlo, monospace',
-                whiteSpace: 'nowrap',
-              }}>
-                {`/${command.name}`}
-              </span>
-              <span style={{
-                fontSize: 12,
-                color: 'var(--t-text)',
-                fontWeight: 600,
-                lineHeight: 1.45,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}>
-                {command.summary}
-              </span>
-            </div>
-          </div>
-          {hasDetails ? (
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#94a3b8"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{
-                flexShrink: 0,
-                transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                transition: 'transform 180ms ease',
-              }}
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          ) : null}
-        </button>
+              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 180ms ease',
+            }}
+            aria-hidden="true"
+          >
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
+        ) : null}
+      </button>
 
-        {expanded && hasDetails ? (
-          <div style={{
+      {expanded && hasDetails ? (
+        <div
+          style={{
+            marginTop: 6,
+            marginLeft: 12,
+            paddingLeft: 10,
+            borderLeft: '1px solid var(--t-border)',
             display: 'flex',
             flexDirection: 'column',
-            gap: 10,
-            paddingTop: 0,
-            paddingRight: 12,
-            paddingBottom: 12,
-            paddingLeft: 30,
-            borderTop: '1px solid rgba(148, 163, 184, 0.08)',
-          }}>
-            {chips.length > 0 ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 12 }}>
-                {chips.map((chip) => {
-                  const colors = chipColors(chip.tone);
-                  return (
-                    <span
-                      key={`${chip.label}-${chip.tone ?? 'slate'}`}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        padding: '5px 9px',
-                        borderRadius: 999,
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        color: colors.color,
-                        background: colors.background,
-                        border: `1px solid ${colors.border}`,
-                        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                      }}
-                    >
-                      {chip.label}
-                    </span>
-                  );
-                })}
-              </div>
-            ) : null}
-
-            {details.length > 0 ? (
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-              }}>
-                {details.map((detail, index) => (
-                  <div
-                    key={`${detail}-${index}`}
+            gap: 6,
+          }}
+        >
+          {chips.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {chips.map((chip) => {
+                const tone = chipTone(chip.tone);
+                return (
+                  <span
+                    key={`${chip.label}-${chip.tone ?? 'slate'}`}
                     style={{
-                      fontSize: 11.5,
-                      lineHeight: 1.55,
-                      color: 'var(--t-text-secondary)',
-                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      minHeight: 22,
+                      paddingTop: 0,
+                      paddingRight: 8,
+                      paddingBottom: 0,
+                      paddingLeft: 8,
+                      borderRadius: 8,
+                      border: `1px solid color-mix(in srgb, ${tone} 22%, var(--t-border))`,
+                      background: `color-mix(in srgb, ${tone} 10%, transparent)`,
+                      color: tone,
+                      fontSize: 10.5,
+                      fontWeight: 600,
+                      fontFamily: BODY_FONT,
                     }}
                   >
-                    {detail}
-                  </div>
-                ))}
-              </div>
-            ) : null}
+                    {chip.label}
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
 
-            {timestampLabel ? (
-              <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
-                {timestampLabel}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+          {details.length > 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              {details.map((detail, index) => (
+                <div
+                  key={`${detail}-${index}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 6,
+                    fontSize: 11.5,
+                    lineHeight: 1.5,
+                    color: 'var(--t-text-muted)',
+                    fontFamily: BODY_FONT,
+                  }}
+                >
+                  <span style={{ color: 'var(--t-text-faint)', flexShrink: 0 }} aria-hidden="true">
+                    &middot;
+                  </span>
+                  <span style={{ minWidth: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {renderInlineText(detail, `detail-${index}`)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {timestampLabel ? (
+            <span
+              style={{
+                fontSize: 10,
+                color: 'var(--t-text-faint)',
+                fontFamily: MONO_FONT,
+              }}
+            >
+              {timestampLabel}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
