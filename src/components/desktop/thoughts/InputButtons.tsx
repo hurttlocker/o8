@@ -2,27 +2,28 @@ import { SparklesIcon } from './ThoughtsIcons';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 const EFFORT_LABELS: Record<ThinkingEffort, string> = {
-  adaptive: 'Adaptive',
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  max: 'Max',
-  xhigh: 'XHigh',
+  adaptive: 'adaptive',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  max: 'max',
+  xhigh: 'xhigh',
 };
 const EFFORT_OPTIONS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'];
-const EFFORT_GLYPHS: Record<ThinkingEffort, [string, number, string]> = {
-  adaptive: ['~', 12.5, 'var(--t-accent)'],
-  low: ['○', 11.5, 'var(--t-text-secondary)'],
-  medium: ['◐', 12, 'var(--t-text-secondary)'],
-  high: ['◑', 12.5, 'var(--t-accent)'],
-  max: ['●', 13, 'var(--t-accent)'],
-  xhigh: ['●', 13.5, 'var(--t-warning, #f97316)'],
+const EFFORT_DOT: Record<ThinkingEffort, string> = {
+  adaptive: 'var(--t-text-faint)',
+  low: 'var(--t-text-faint)',
+  medium: 'var(--t-text-muted)',
+  high: 'var(--t-text-muted)',
+  max: 'var(--t-text)',
+  xhigh: '#FF5A1F',
 };
 
 /**
- * Thinking effort control — compact chip that cycles the available effort
- * levels without opening a menu. Kept intentionally small so #588 can drop in
- * a richer selector later without reworking the composer layout again.
+ * Thinking effort control — matches the ContextMeter pill aesthetic.
+ * Transparent background, hairline border, monospace, subtle status dot
+ * on the left. Click to open the native dropdown (keeps it a single
+ * focusable surface without a popover menu).
  */
 export function ThinkingChip({
   effort = 'adaptive',
@@ -33,70 +34,60 @@ export function ThinkingChip({
   adaptiveEnabled?: boolean;
   onChange?: (next: ThinkingEffort) => void;
 }) {
-  const eyeBrow = EFFORT_LABELS[effort].toLowerCase();
-  const accent = effort === 'adaptive' ? 'var(--t-accent)' : 'var(--t-text-faint)';
-  const background = effort === 'adaptive' ? 'var(--t-accent-soft)' : 'var(--t-bg-card)';
-  const [glyph, glyphSize, glyphColor] = EFFORT_GLYPHS[effort];
+  const label = EFFORT_LABELS[effort];
+  const dotColor = EFFORT_DOT[effort];
   const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
 
   return (
     <label
-      title={`Thinking: ${eyeBrow}`}
+      title={`Thinking ${label}`}
       style={{
         position: 'relative',
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 7,
-        minHeight: 26,
-        padding: '0 10px',
-        border: effort === 'adaptive'
-          ? '1px solid var(--t-accent-border)'
-          : '1px solid var(--t-border)',
-        borderRadius: 999,
-        background,
+        gap: 8,
+        height: 26,
+        paddingLeft: 8,
+        paddingRight: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--t-border)',
+        background: 'transparent',
+        color: 'var(--t-text-muted)',
         cursor: 'pointer',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        minWidth: 0,
+        fontSize: 11.5,
+        fontWeight: 400,
+        letterSpacing: '0.01em',
         whiteSpace: 'nowrap',
+        fontVariantNumeric: 'tabular-nums',
+        fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
       }}
     >
       <span
         aria-hidden="true"
         style={{
-          width: 11,
-          fontSize: glyphSize,
-          lineHeight: 1,
-          textAlign: 'center',
-          color: glyphColor,
-          fontFamily: '"SF Mono", ui-monospace, monospace',
+          width: 6,
+          height: 6,
+          borderRadius: 999,
           flexShrink: 0,
+          background: dotColor,
         }}
+      />
+      <span style={{ color: 'var(--t-text-muted)' }}>thinking</span>
+      <span style={{ color: 'var(--t-text)' }}>{label}</span>
+      <select
+        value={effort}
+        onChange={(event) => onChange?.(event.target.value as ThinkingEffort)}
+        aria-label="Thinking effort"
+        style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
       >
-        {glyph}
-      </span>
-      <span
-        style={{
-          fontSize: 10.5,
-          fontWeight: 600,
-          letterSpacing: '0.02em',
-          color: accent,
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-        }}
-      >
-        thinking:
-      </span>
-      <span
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: '-0.01em',
-          color: 'var(--t-text)',
-        }}
-      >
-        {eyeBrow}
-      </span>
-      <span aria-hidden="true" style={{ fontSize: 10, color: 'var(--t-text-faint)', flexShrink: 0 }}>▾</span>
-      <select value={effort} onChange={(event) => onChange?.(event.target.value as ThinkingEffort)} aria-label="Thinking effort" style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}>
-        {options.map((option) => <option key={option} value={option}>{EFFORT_LABELS[option]}</option>)}
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {EFFORT_LABELS[option]}
+          </option>
+        ))}
       </select>
     </label>
   );
