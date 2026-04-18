@@ -1,10 +1,11 @@
 /**
  * Merge gate — hard enforcement layer for lane merges.
  *
- * Runs three checks before any merge can proceed:
+ * Runs four checks before any merge can proceed:
  * 1. Security pattern hard-blocks (code injection, eval, etc.)
  * 2. Diff budget validation (actual diff vs preservation envelope)
- * 3. Self-review integrity (catches agents lying about results)
+ * 3. Untracked import validation (catches imports pointing to files outside git)
+ * 4. Self-review integrity (catches agents lying about results)
  *
  * Unlike the advisory mechanical checks in auto-review.ts, these are
  * enforcement gates: violations with severity 'block' prevent merge
@@ -18,6 +19,7 @@
 
 import { execSync } from 'node:child_process';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
+import { checkUntrackedImports } from './check-untracked-imports';
 import type { Lane } from './types';
 
 // ── Budget Constants (shared with dispatch.ts preservation envelope) ──
@@ -149,8 +151,7 @@ function checkDiffBudgets(cwd: string, baseBranch: string, repoPath: string): Me
   const numstat = getDiffNumstat(cwd, baseBranch);
   if (numstat.length === 0) return [];
 
-  // Lazy-load skeleton to avoid circular deps at module level
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // Lazy-load skeleton to avoid circular deps at module level.
   const { getAllCached } = require('@/lib/skeleton') as { getAllCached: (path: string) => Array<{ relativePath: string; lineCount: number }> };
   const skeleton = getAllCached(repoPath);
   const violations: MergeViolation[] = [];
@@ -189,17 +190,36 @@ function checkDiffBudgets(cwd: string, baseBranch: string, repoPath: string): Me
   return violations;
 }
 
-// ── Check 3: Self-Review Integrity ──
+// ── Check 3: Untracked Imported Files ──
+
+function checkUntrackedImportViolations(cwd: string, baseBranch: string): MergeViolation[] {
+  const result = checkUntrackedImports(cwd, baseBranch);
+  if (result.ok) return [];
+
+  const fileCount = result.untrackedFiles.length;
+  const importedBy = result.importingFiles.length === 1
+    ? ` Imported by ${result.importingFiles[0]}.`
+    : result.importingFiles.length > 1
+      ? ` Imported by changed files: ${result.importingFiles.join(', ')}.`
+      : '';
+
+  return [{
+    category: 'integrity',
+    severity: 'block',
+    label: 'Untracked imported files',
+    detail: `Imports point to ${fileCount} untracked file${fileCount === 1 ? '' : 's'}: ${result.untrackedFiles.join(', ')}. Run \`git add\` and amend.${importedBy}`,
+  }];
+}
+
+// ── Check 4: Self-Review Integrity ──
 
 function checkSelfReviewIntegrity(
   selfReview: PacketSelfReview | undefined,
-  securityViolations: MergeViolation[],
-  budgetViolations: MergeViolation[],
+  priorViolations: MergeViolation[],
 ): MergeViolation[] {
   if (!selfReview) return [];
 
-  const blockCount = [...securityViolations, ...budgetViolations]
-    .filter((v) => v.severity === 'block').length;
+  const blockCount = priorViolations.filter((v) => v.severity === 'block').length;
 
   if (blockCount === 0) return [];
 
@@ -233,9 +253,13 @@ export function runMergeGate(lane: Lane, selfReview?: PacketSelfReview): MergeGa
   const addedLines = getAddedLines(cwd, baseBranch);
   const securityViolations = checkSecurityPatterns(addedLines);
   const budgetViolations = checkDiffBudgets(cwd, baseBranch, lane.repoPath);
-  const integrityViolations = checkSelfReviewIntegrity(selfReview, securityViolations, budgetViolations);
+  const importViolations = checkUntrackedImportViolations(cwd, baseBranch);
+  const integrityViolations = checkSelfReviewIntegrity(
+    selfReview,
+    [...securityViolations, ...budgetViolations, ...importViolations],
+  );
 
-  const violations = [...securityViolations, ...budgetViolations, ...integrityViolations];
+  const violations = [...securityViolations, ...budgetViolations, ...importViolations, ...integrityViolations];
   const hasBlocks = violations.some((v) => v.severity === 'block');
 
   if (violations.length > 0) {
