@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { access, mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { LaneEvent } from './types';
 
 export interface LaneReviewScreenshot {
@@ -8,6 +12,12 @@ export interface LaneReviewScreenshot {
   height?: number;
   capturedAt?: string;
 }
+
+export interface LaneReviewScreenshotReference extends LaneReviewScreenshot {
+  path: string;
+}
+
+const REVIEW_SCREENSHOT_FALLBACK_DIR = join(tmpdir(), 'o8-lane-review-screenshots');
 
 function stringValue(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -20,6 +30,56 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function screenshotExtension(mimeType?: string): string {
+  const normalized = mimeType?.trim().toLowerCase();
+  if (normalized === 'image/jpeg' || normalized === 'image/jpg') {
+    return 'jpg';
+  }
+  if (normalized === 'image/webp') {
+    return 'webp';
+  }
+  if (normalized === 'image/gif') {
+    return 'gif';
+  }
+  return 'png';
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildFallbackScreenshotPath(
+  laneId: string,
+  screenshot: LaneReviewScreenshot,
+): string {
+  const digest = createHash('sha1')
+    .update(laneId)
+    .update(':')
+    .update(screenshot.capturedAt ?? '')
+    .update(':')
+    .update(String(screenshot.width ?? ''))
+    .update('x')
+    .update(String(screenshot.height ?? ''))
+    .update(':')
+    .update(screenshot.mimeType ?? 'image/png')
+    .update(':')
+    .update(String(screenshot.base64?.length ?? 0))
+    .update(':')
+    .update((screenshot.base64 ?? '').slice(0, 4096))
+    .digest('hex')
+    .slice(0, 12);
+
+  return join(
+    REVIEW_SCREENSHOT_FALLBACK_DIR,
+    `${laneId}-${digest}.${screenshotExtension(screenshot.mimeType)}`,
+  );
 }
 
 export function extractLaneReviewScreenshot(payload?: Record<string, unknown> | null): LaneReviewScreenshot | null {
@@ -89,4 +149,33 @@ export function laneReviewScreenshotSrc(screenshot: LaneReviewScreenshot): strin
   }
 
   return null;
+}
+
+export async function resolveLaneReviewScreenshotReference(
+  laneId: string,
+  screenshot: LaneReviewScreenshot | null,
+): Promise<LaneReviewScreenshotReference | null> {
+  if (!screenshot) {
+    return null;
+  }
+
+  const existingPath = stringValue(screenshot.path);
+  if (existingPath && await fileExists(existingPath)) {
+    return { ...screenshot, path: existingPath };
+  }
+
+  if (!screenshot.base64) {
+    return null;
+  }
+
+  await mkdir(REVIEW_SCREENSHOT_FALLBACK_DIR, { recursive: true });
+  const fallbackPath = buildFallbackScreenshotPath(laneId, screenshot);
+  if (!await fileExists(fallbackPath)) {
+    await writeFile(fallbackPath, Buffer.from(screenshot.base64, 'base64'));
+  }
+
+  return {
+    ...screenshot,
+    path: fallbackPath,
+  };
 }
