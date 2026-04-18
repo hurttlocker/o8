@@ -9,62 +9,91 @@ const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   max: 'Max',
   xhigh: 'XHigh',
 };
+const EFFORT_OPTIONS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'];
+const EFFORT_GLYPHS: Record<ThinkingEffort, [string, number, string]> = { adaptive: ['~', 12.5, '#2563eb'], low: ['○', 11.5, 'rgba(71, 85, 105, 0.72)'], medium: ['◐', 12, 'rgba(51, 65, 85, 0.78)'], high: ['◑', 12.5, '#3b82f6'], max: ['●', 13, '#2563eb'], xhigh: ['●', 13.5, '#f97316'] };
 
 /**
  * Thinking effort control — compact chip that cycles the available effort
  * levels without opening a menu. Kept intentionally small so #588 can drop in
  * a richer selector later without reworking the composer layout again.
  */
-function ThinkingChip({
-  effort,
-  adaptiveEnabled,
-  onClick,
+export function ThinkingChip({
+  effort = 'adaptive',
+  adaptiveEnabled = true,
+  onChange,
 }: {
-  effort: ThinkingEffort;
-  adaptiveEnabled: boolean;
-  onClick: () => void;
+  effort?: ThinkingEffort;
+  adaptiveEnabled?: boolean;
+  onChange?: (next: ThinkingEffort) => void;
 }) {
-  const eyeBrow = adaptiveEnabled
-    ? EFFORT_LABELS[effort]
-    : `${EFFORT_LABELS[effort]} · fixed`;
-  const accent = effort === 'adaptive' ? '#2563eb' : 'var(--t-text-secondary)';
-  const background = effort === 'adaptive'
-    ? 'linear-gradient(180deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0.05))'
-    : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
+  const eyeBrow = EFFORT_LABELS[effort].toLowerCase();
+  const accent = effort === 'adaptive' ? '#2563eb' : 'var(--t-text-faint)';
+  const background = effort === 'adaptive' ? 'linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.92))' : 'linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.78))';
+  const [glyph, glyphSize, glyphColor] = EFFORT_GLYPHS[effort];
+  const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <label
       title={`Thinking: ${eyeBrow}`}
       style={{
+        position: 'relative',
         display: 'inline-flex',
         alignItems: 'center',
         gap: 7,
-        minHeight: 24,
-        padding: '0 8px',
+        minHeight: 26,
+        padding: '0 10px',
         border: effort === 'adaptive'
           ? '1px solid rgba(37, 99, 235, 0.24)'
-          : '1px solid var(--t-panel-border)',
-        borderRadius: 8,
+          : '1px solid rgba(148, 163, 184, 0.28)',
+        borderRadius: 999,
         background,
         cursor: 'pointer',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        boxShadow: '0 6px 16px rgba(15, 23, 42, 0.06)',
+        backdropFilter: 'blur(16px)',
+        whiteSpace: 'nowrap',
       }}
     >
       <span
+        aria-hidden="true"
         style={{
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: '0.04em',
+          width: 11,
+          fontSize: glyphSize,
+          lineHeight: 1,
+          textAlign: 'center',
+          color: glyphColor,
+          fontFamily: '"SF Mono", ui-monospace, monospace',
+          flexShrink: 0,
+        }}
+      >
+        {glyph}
+      </span>
+      <span
+        style={{
+          fontSize: 10.5,
+          fontWeight: 600,
+          letterSpacing: '0.02em',
           color: accent,
-          textTransform: 'uppercase',
-          whiteSpace: 'nowrap',
+          fontFamily: '"SF Mono", ui-monospace, monospace',
+        }}
+      >
+        thinking:
+      </span>
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '-0.01em',
+          color: 'var(--t-text)',
         }}
       >
         {eyeBrow}
       </span>
-    </button>
+      <span aria-hidden="true" style={{ fontSize: 10, color: 'var(--t-text-faint)', flexShrink: 0 }}>▾</span>
+      <select value={effort} onChange={(event) => onChange?.(event.target.value as ThinkingEffort)} aria-label="Thinking effort" style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}>
+        {options.map((option) => <option key={option} value={option}>{EFFORT_LABELS[option]}</option>)}
+      </select>
+    </label>
   );
 }
 
@@ -115,9 +144,7 @@ export function InputButtons({
     ? ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh']
     : ['low', 'medium', 'high', 'max', 'xhigh'];
 
-  const cycleEffort = () => {
-    const idx = effortCycle.indexOf(effort);
-    const next = effortCycle[(idx >= 0 ? idx : 0) + 1] ?? effortCycle[0];
+  const cycleEffort = (next = effortCycle[(Math.max(effortCycle.indexOf(effort), 0)) + 1] ?? effortCycle[0]) => {
     onEffortChange?.(next);
   };
 
@@ -131,8 +158,9 @@ export function InputButtons({
       paddingBottom: 6,
       paddingLeft: 10,
     }}>
-      {/* Thinking effort chip — click to cycle */}
-      <ThinkingChip effort={effort} adaptiveEnabled={adaptiveEnabled} onClick={cycleEffort} />
+      <div style={{ display: 'none' }} aria-hidden="true">
+        <ThinkingChip effort={effort} adaptiveEnabled={adaptiveEnabled} onChange={cycleEffort} />
+      </div>
 
       {/* Model label */}
       {modelLabel ? (
