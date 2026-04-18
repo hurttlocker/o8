@@ -563,12 +563,11 @@ export async function createMission(input: CreateMissionInput) {
     updatedAt: new Date().toISOString(),
   });
 
-  const reconciled = reconcileOrchestratorMissionState(mission, {
-    laneSnapshots: [],
-    runtimeTruth: [],
-    domainLanes: buildDomainLaneSummaries(),
+  const { state: persisted } = await withLockedState((current) => {
+    // Replace the mission under the control-plane lock so a concurrent
+    // headless tick cannot restore a stale mission after createMission returns.
+    Object.assign(current, mission);
   });
-  const persisted = writeOrchestratorControlPlaneState(reconciled);
   const waves = new Map(buildDependencyGraph(persisted.packets).map((node) => [node.packetId, node.wave] as const));
 
   log(`Created mission ${missionId} with ${persisted.packets.length} packets.`);
