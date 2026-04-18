@@ -20,6 +20,7 @@ interface OrchestratorStreamResult {
   busyState: ThoughtsOrchestratorBusyState;
   tokenCount: number;
   runningTotal: number;
+  estimateNextTurnTokens: (message: string) => number;
   send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max' }) => void;
   reset: () => void;
   connected: boolean;
@@ -27,12 +28,30 @@ interface OrchestratorStreamResult {
 
 let agentUpdateSeq = 0;
 const ORCHESTRATOR_CONTEXT_LIMIT = 1_000_000;
+const ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR = 250_000;
+const ORCHESTRATOR_AUTO_COMPACT_THRESHOLD = 300_000;
+const ORCHESTRATOR_FORCE_COMPACT_THRESHOLD = Math.floor(ORCHESTRATOR_CONTEXT_LIMIT * 0.85);
+const ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS = 4_000;
+const ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS = 8_000;
+const ORCHESTRATOR_COMPACTION_STATUS_MIN_MS = 1_200;
 export const ORCHESTRATOR_TOKEN_EVENT = 'cortex:orchestrator-token-usage';
 
 export interface OrchestratorTokenUsageDetail {
   repoPath: string | null;
   tokenCount: number;
   runningTotal: number;
+}
+
+interface CompactResponsePayload {
+  ok?: boolean;
+  applied?: boolean;
+  transcript?: MobileTranscriptEntry[];
+  resumePrelude?: string | null;
+  tokensAfter?: number;
+}
+
+function approxTokens(value: string): number {
+  return Math.max(0, Math.ceil(value.trim().length / 4));
 }
 
 function getWsUrl(): string {
@@ -222,6 +241,8 @@ export function useOrchestratorStream(
   statusRef.current = status;
   const repoPathRef = useRef(repoPath);
   repoPathRef.current = repoPath;
+  const runningTotalRef = useRef(runningTotal);
+  runningTotalRef.current = runningTotal;
   const mountedRef = useRef(false);
   const messagesRef = useRef<MobileTranscriptEntry[]>([]);
   const planTextRef = useRef<string | null>(null);
@@ -370,6 +391,54 @@ export function useOrchestratorStream(
       // silent
     }
   }, []);
+
+  const requestCompaction = useCallback(async (
+    activeRepoPath: string,
+    nextRunningTotal: number,
+    nextMessages: MobileTranscriptEntry[],
+  ): Promise<CompactResponsePayload | null> => {
+    const response = await fetch('/api/orchestrator/compact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoPath: activeRepoPath, runningTotal: nextRunningTotal, messages: nextMessages }),
+    });
+    if (!response.ok) return null;
+    return await response.json() as CompactResponsePayload;
+  }, []);
+
+  const primeCompactedSession = useCallback(async (
+    activeRepoPath: string,
+    payload: CompactResponsePayload,
+    options?: { setTranscript?: boolean },
+  ) => {
+    if (!payload.ok || !payload.applied || !Array.isArray(payload.transcript)) return null;
+    await fetch('/api/orchestrator/reset-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoPath: activeRepoPath }),
+    }).catch(() => null);
+    const compactKey = `o8:orchestrator:auto-compact:${activeRepoPath}`;
+    if (payload.resumePrelude && typeof window !== 'undefined') window.localStorage.setItem(compactKey, payload.resumePrelude);
+    const nextTotal = typeof payload.tokensAfter === 'number' ? payload.tokensAfter : 0;
+    telemetrySessionKeyRef.current = null;
+    telemetryTotalRef.current = nextTotal;
+    if (options?.setTranscript !== false) setMessages(payload.transcript);
+    setTokenCount(0);
+    setRunningTotal(nextTotal);
+    emitTokenUsage({ repoPath: activeRepoPath, tokenCount: 0, runningTotal: nextTotal });
+    return {
+      nextTotal,
+      resumePrelude: payload.resumePrelude ?? null,
+      transcript: payload.transcript,
+    };
+  }, []);
+
+  const estimateNextTurnTokens = useCallback((message: string) => (
+    runningTotalRef.current
+    + ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS
+    + ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS
+    + approxTokens(message)
+  ), []);
 
   const beginTurn = useCallback(() => {
     if (!activeTurnRef.current) {
@@ -795,8 +864,8 @@ export function useOrchestratorStream(
   useEffect(() => {
     if (!repoPath) return;
     const compactKey = `o8:orchestrator:auto-compact:${repoPath}`;
-    if (runningTotal < 250_000) autoCompactArmedRef.current = true;
-    if (status !== 'ready' || runningTotal < 300_000 || autoCompactInFlightRef.current || !autoCompactArmedRef.current) return;
+    if (runningTotal < ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR) autoCompactArmedRef.current = true;
+    if (status !== 'ready' || runningTotal < ORCHESTRATOR_AUTO_COMPACT_THRESHOLD || autoCompactInFlightRef.current || !autoCompactArmedRef.current) return;
     if (typeof window !== 'undefined' && window.localStorage.getItem(compactKey)) return;
     autoCompactInFlightRef.current = true;
     autoCompactArmedRef.current = false;
@@ -805,29 +874,12 @@ export function useOrchestratorStream(
       started = true;
       void (async () => {
         try {
-          const response = await fetch('/api/orchestrator/compact', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ repoPath, runningTotal, messages: messagesRef.current }),
-          });
-          const payload = response.ok ? await response.json() as { ok?: boolean; applied?: boolean; transcript?: MobileTranscriptEntry[]; resumePrelude?: string | null; tokensAfter?: number } : null;
+          const payload = await requestCompaction(repoPath, runningTotal, messagesRef.current);
           if (!payload?.ok || !payload.applied || !Array.isArray(payload.transcript) || statusRef.current !== 'ready') {
             autoCompactArmedRef.current = true;
             return;
           }
-          await fetch('/api/orchestrator/reset-session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ repoPath }),
-          }).catch(() => null);
-          setMessages(payload.transcript);
-          if (payload.resumePrelude && typeof window !== 'undefined') window.localStorage.setItem(compactKey, payload.resumePrelude);
-          const nextTotal = typeof payload.tokensAfter === 'number' ? payload.tokensAfter : 0;
-          telemetrySessionKeyRef.current = null;
-          telemetryTotalRef.current = nextTotal;
-          setTokenCount(0);
-          setRunningTotal(nextTotal);
-          emitTokenUsage({ repoPath, tokenCount: 0, runningTotal: nextTotal });
+          await primeCompactedSession(repoPath, payload);
         } catch {
           autoCompactArmedRef.current = true;
         } finally {
@@ -839,7 +891,7 @@ export function useOrchestratorStream(
       window.clearTimeout(timer);
       if (!started) autoCompactInFlightRef.current = false;
     };
-  }, [repoPath, runningTotal, status]);
+  }, [primeCompactedSession, repoPath, requestCompaction, runningTotal, status]);
 
   // #539 — stall watchdog. If the UI stays in 'busy' state for > 5 minutes
   // without any events from the stream, the backend turn is almost certainly
@@ -864,28 +916,79 @@ export function useOrchestratorStream(
     const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
     const thinkingEffort = options?.thinkingEffort ?? 'max';
 
-    // Add user message to local state immediately
-    const userEntry: MobileTranscriptEntry = {
-      id: `orch-user-${Date.now()}`,
-      role: 'user',
-      text: message,
-      timestamp: Date.now(),
-      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setMessages(prev => [...prev, userEntry]);
-
-    // Reset current assistant accumulator for the new response
-    currentAssistantRef.current = null;
-    captureFirstTurnPlanRef.current = !planTextRef.current
-      && !hasHistoryRef.current
-      && !messagesRef.current.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
-    firstTurnPlanStartedRef.current = false;
-    firstTurnPlanChunksRef.current = [];
-    setStatus('busy');
-
     void (async () => {
+      const activeRepoPath = repoPathRef.current;
+      if (!activeRepoPath) return;
+      const transcriptSnapshot = messagesRef.current;
+      let planCaptureSource = transcriptSnapshot;
+      const compactKey = `o8:orchestrator:auto-compact:${activeRepoPath}`;
+      const projectedTokens = estimateNextTurnTokens(message);
+      if (projectedTokens >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
+        const compactingId = `orch-compacting-${Date.now()}`;
+        const compactingAt = Date.now();
+        setStatus('busy');
+        setMessages((prev) => [...prev, {
+          id: compactingId,
+          role: 'system',
+          text: 'Compacting to keep turn fast…',
+          timestamp: compactingAt,
+          timestampLabel: new Date(compactingAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }]);
+        try {
+          const payload = await requestCompaction(activeRepoPath, runningTotalRef.current, transcriptSnapshot);
+          const primed = payload ? await primeCompactedSession(activeRepoPath, payload, { setTranscript: false }) : null;
+          const remaining = ORCHESTRATOR_COMPACTION_STATUS_MIN_MS - (Date.now() - compactingAt);
+          if (remaining > 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, remaining));
+          }
+          if (!primed) {
+            throw new Error(`Compaction failed before send. Re-send this message:\n\n${message}`);
+          }
+          if (!primed.resumePrelude) {
+            throw new Error(`Compaction finished without a resume prelude. Re-send this message:\n\n${message}`);
+          }
+          const postCompactProjection = primed.nextTotal
+            + ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS
+            + ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS
+            + approxTokens(message);
+          if (postCompactProjection >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
+            if (typeof window !== 'undefined') window.localStorage.removeItem(compactKey);
+            throw new Error(`Context is still above the 85% safety cap after compaction. Re-send this message:\n\n${message}`);
+          }
+          planCaptureSource = primed.transcript;
+          setMessages(primed.transcript);
+        } catch (error) {
+          setMessages((prev) => [
+            ...prev.filter((entry) => entry.id !== compactingId),
+            {
+              id: `orch-compacting-error-${Date.now()}`,
+              role: 'system',
+              text: error instanceof Error ? error.message : `Compaction failed before send. Re-send this message:\n\n${message}`,
+              timestamp: Date.now(),
+              timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          setStatus(connected ? 'ready' : 'connecting');
+          return;
+        }
+      }
+      const userEntry: MobileTranscriptEntry = {
+        id: `orch-user-${Date.now()}`,
+        role: 'user',
+        text: message,
+        timestamp: Date.now(),
+        timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages((prev) => [...prev, userEntry]);
+      currentAssistantRef.current = null;
+      captureFirstTurnPlanRef.current = !planTextRef.current
+        && !hasHistoryRef.current
+        && !planCaptureSource.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
+      firstTurnPlanStartedRef.current = false;
+      firstTurnPlanChunksRef.current = [];
+      setStatus('busy');
+
       let outboundMessage = message;
-      const compactKey = `o8:orchestrator:auto-compact:${repoPathRef.current}`;
       const resumePrelude = typeof window !== 'undefined' ? window.localStorage.getItem(compactKey) : null;
       if (resumePrelude) {
         outboundMessage = `${resumePrelude}\n\nOperator message:\n${message}`;
@@ -893,7 +996,7 @@ export function useOrchestratorStream(
       }
       const payload = JSON.stringify({
         type: 'orchestrator-send',
-        repoPath: repoPathRef.current,
+        repoPath: activeRepoPath,
         message: outboundMessage,
         permissionMode,
         thinkingEffort,
@@ -914,7 +1017,7 @@ export function useOrchestratorStream(
       }, 200);
       setTimeout(() => clearInterval(waitAndSend), 5000);
     })();
-  }, [connect]);
+  }, [connect, connected, estimateNextTurnTokens, primeCompactedSession, requestCompaction]);
 
   const reset = useCallback(() => {
     setMessages([]);
@@ -931,5 +1034,5 @@ export function useOrchestratorStream(
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
   }, [connected, resetFirstTurnPlanCapture]);
 
-  return { messages, planText, status, busyState, tokenCount, runningTotal, send, reset, connected };
+  return { messages, planText, status, busyState, tokenCount, runningTotal, estimateNextTurnTokens, send, reset, connected };
 }
