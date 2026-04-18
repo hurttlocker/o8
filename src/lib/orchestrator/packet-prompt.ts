@@ -1,6 +1,4 @@
-import { basename } from 'node:path';
-import { getTopRulesForPacket } from '@/lib/dispatch/rules-store';
-import { derivePacketType } from '@/lib/lane/registry';
+import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
@@ -125,41 +123,45 @@ function buildAttemptLearningSections(learnings: AttemptLearning[]): string[] {
     });
 }
 
-function buildLearnedRuleSections(
+function buildLearnedRuleSection(
   packet: OrchestratorPacket,
   packetType: string,
-): string[] {
+): string | null {
   const repoPath = packet.workspaceTargetPath?.trim();
   if (!repoPath) {
-    return [];
+    return null;
   }
 
   try {
     const seen = new Set<string>();
-    const rules = getTopRulesForPacket({
-      repoPath,
-      packetType,
-      limit: 5,
-    }).filter((rule) => {
-      const normalizedRuleText = rule.ruleText.trim().toLowerCase();
-      if (!normalizedRuleText || seen.has(normalizedRuleText)) {
-        return false;
+    const rules = [
+      ...readRepoScopedRules(repoPath).map((ruleText) => ({ ruleText, source: 'file' as const })),
+      ...getTopRulesForPacket({
+        repoPath,
+        packetType,
+        limit: 5,
+      }),
+    ].flatMap((rule) => {
+      const ruleText = truncateText(rule.ruleText, 200, { normalizeWhitespace: true });
+      const normalizedRuleText = ruleText.toLowerCase();
+      if (!ruleText || seen.has(normalizedRuleText)) {
+        return [];
       }
       seen.add(normalizedRuleText);
-      return true;
+      return [`- ${ruleText}`];
     });
 
     if (rules.length === 0) {
-      return [];
+      return null;
     }
 
-    return [
-      `Learned rules for ${packetType} in ${basename(repoPath)}:`,
-      ...rules.map((rule) => `- ${truncateText(rule.ruleText, 200)}`),
-    ];
+    return truncateText([
+      'Learned guardrails for this repo (from past reviews):',
+      ...rules,
+    ].join('\n'), 800);
   } catch (error) {
     console.warn('[learned-rules] fetch failed:', error);
-    return [];
+    return null;
   }
 }
 
@@ -225,8 +227,8 @@ export async function buildPacketPrompt(
     : [];
   const fileSizeSections = checkFileSizeThresholds(packet);
   const preservationSections = buildPreservationEnvelope(packet);
-  const packetType = derivePacketType({ label: packet.title });
-  const learnedRuleSections = buildLearnedRuleSections(packet, packetType);
+  const packetType = packet.title.trim().split(/\s+/)[0]?.toLowerCase() || 'feat';
+  const learnedRuleSection = buildLearnedRuleSection(packet, packetType);
   if (dependencySections.length > 0) {
     console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
   }
@@ -239,8 +241,8 @@ export async function buildPacketPrompt(
   if (preservationSections.length > 0) {
     console.log(`[dispatch] Injected preservation envelope for packet ${packet.id} (${preservationSections.length - 2} files)`);
   }
-  if (learnedRuleSections.length > 0) {
-    console.log(`[learned-rules] Injected ${learnedRuleSections.length - 1} rules for packet ${packet.id} (${packetType})`);
+  if (learnedRuleSection) {
+    console.log(`[learned-rules] Injected learned guardrails for packet ${packet.id} (${packetType})`);
   }
 
   return [
@@ -254,8 +256,8 @@ export async function buildPacketPrompt(
     ...priorAttemptLearningSections,
     ...fileSizeSections,
     ...preservationSections,
-    ...learnedRuleSections,
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
+    learnedRuleSection,
     ...buildPacketSelfReviewInstructions(baseBranch),
     'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
