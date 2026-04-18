@@ -18,6 +18,7 @@ interface ChatHistoryEntry {
   tabId: string;
   title: string;
   preview: string;
+  empty: boolean;
   messageCount: number;
   model: string;
   savedAt: string;
@@ -45,22 +46,31 @@ export async function GET(request: NextRequest) {
         const raw = readFileSync(filePath, 'utf-8');
         const data = JSON.parse(raw);
 
-        if (!data.messages || data.messages.length === 0) continue;
+        if (!data.messages) continue;
 
         // Skip orchestrator threads unless explicitly requested
         const tabId = basename(file, '.json');
         if (!includeOrchestrator && tabId.startsWith('thoughts-')) continue;
 
-        const messages = data.messages as { role: string; content: string }[];
+        const messages = (data.messages ?? []) as { role: string; content: string }[];
         const firstUserMsg = messages.find(m => m.role === 'user');
         const lastMsg = messages[messages.length - 1];
+        const isEmpty = messages.length === 0;
 
-        // Generate title from first user message
+        // Placeholder title for empty threads (created via + New but not typed into yet).
+        // Gets replaced by the first user message once the operator types.
+        const placeholderTitle = (() => {
+          const saved = data.savedAt ? new Date(data.savedAt) : stat.birthtime ?? stat.mtime;
+          const hh = String(saved.getHours()).padStart(2, '0');
+          const mm = String(saved.getMinutes()).padStart(2, '0');
+          return `New thread · ${hh}:${mm}`;
+        })();
+
         const title = data.title || (firstUserMsg
           ? firstUserMsg.content.slice(0, 60).replace(/\n/g, ' ') + (firstUserMsg.content.length > 60 ? '...' : '')
-          : 'Untitled conversation');
+          : isEmpty ? placeholderTitle : 'Untitled conversation');
 
-        // Preview from last message
+        // Preview from last message (empty threads show nothing).
         const preview = lastMsg
           ? lastMsg.content.slice(0, 100).replace(/\n/g, ' ') + (lastMsg.content.length > 100 ? '...' : '')
           : '';
@@ -78,6 +88,7 @@ export async function GET(request: NextRequest) {
           tabId: basename(file, '.json'),
           title,
           preview,
+          empty: isEmpty,
           messageCount: messages.length,
           model: data.model || 'unknown',
           savedAt: data.savedAt || stat.mtime.toISOString(),
