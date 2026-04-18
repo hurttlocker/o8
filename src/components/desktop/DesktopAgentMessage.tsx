@@ -4,6 +4,7 @@ import { memo, useCallback } from 'react';
 import { FileText } from './lucide-shims';
 import { CommandStripNode } from '@/components/desktop/CommandStripNode';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
+import { ThinkingStrip } from '@/components/desktop/orchestrator/ThinkingStrip';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
@@ -265,6 +266,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   }
 
   const hasThinking = Boolean(entry.thinking?.trim());
+  const thinkingLive = (
+    !displayText.trim()
+    || entry.toolCalls?.some((toolCall) => toolCall.status === 'running' || toolCall.status === 'calling')
+  );
 
   return (
     <div style={{
@@ -275,25 +280,11 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       animation: isLast ? 'llmFadeIn 180ms ease-out' : undefined,
     }}>
       {hasThinking ? (
-        <div style={{
-          maxWidth: '100%',
-          fontSize: 11,
-          lineHeight: 1.5,
-          color: 'var(--t-text-muted, #94a3b8)',
-          fontStyle: 'italic',
-          fontWeight: 400,
-          letterSpacing: '-0.005em',
-          padding: '6px 10px',
-          borderRadius: 10,
-          background: 'var(--t-hover, rgba(148, 163, 184, 0.06))',
-          border: '1px solid var(--t-divider-subtle, rgba(148, 163, 184, 0.10))',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          overflow: 'hidden',
-          maxHeight: 120,
-        }}>
-          {sanitizeTranscriptText(entry.thinking!)}
-        </div>
+        <ThinkingStrip
+          thinking={sanitizeTranscriptText(entry.thinking!)}
+          live={thinkingLive}
+          style={{ maxWidth: '100%' }}
+        />
       ) : null}
 
       {hasText ? (

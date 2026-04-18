@@ -22,6 +22,7 @@ import {
   type OrchestratorEvent,
 } from '@/lib/lane/orchestrator-stream-events';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
@@ -477,8 +478,6 @@ export function ensureOrchestratorSession(repoPath: string): OrchestratorSession
  *   chip is toggled to "Read-only" — the safe-mode orchestrator.
  */
 export type OrchestratorPermissionMode = 'full' | 'plan';
-
-export type ThinkingEffort = 'medium' | 'high' | 'max';
 export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-7';
 
 export interface SendToOrchestratorOptions {
@@ -499,7 +498,7 @@ export async function sendToOrchestrator(
   options: SendToOrchestratorOptions = {},
 ): Promise<void> {
   const permissionMode: OrchestratorPermissionMode = options.permissionMode ?? 'full';
-  const thinkingEffort: ThinkingEffort = options.thinkingEffort ?? 'max';
+  const thinkingEffort = options.thinkingEffort;
   const model = options.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
 
   // #457 — Auto-recover dead sessions by creating a fresh one
@@ -522,12 +521,15 @@ export async function sendToOrchestrator(
   // Generate MCP config so Claude Code can use Cortex tools
   const mcpConfigPath = ensureMcpConfig(session.repoPath);
 
-  // Map thinking effort to Claude Code CLI's --effort flag.
-  const effortMap: Record<ThinkingEffort, string> = {
+  // Map manual thinking effort to Claude Code CLI's --effort flag. Adaptive
+  // is represented by omitting the flag entirely so Claude Code self-regulates.
+  const effortMap = {
+    low: 'low',
     medium: 'medium',
     high: 'high',
     max: 'max',
-  };
+    xhigh: 'xhigh',
+  } as const;
 
   const args: string[] = [
     '-p', message,
@@ -537,9 +539,11 @@ export async function sendToOrchestrator(
       : ['--dangerously-skip-permissions']),
     '--verbose',
     '--mcp-config', mcpConfigPath,
-    '--effort', effortMap[thinkingEffort],
     '--model', model,
   ];
+  if (thinkingEffort && thinkingEffort !== 'adaptive') {
+    args.push('--effort', effortMap[thinkingEffort]);
+  }
 
   // Resume existing conversation if we have a session ID
   if (session.claudeSessionId) {
