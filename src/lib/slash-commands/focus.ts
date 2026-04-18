@@ -10,16 +10,24 @@ export async function handleFocusSlashCommand(
     context.appendEntries([
       buildSlashCommandEntry({
         name: 'focus',
-        summary: 'Focus needs a file path or issue reference.',
-        details: ['Example: /focus src/lib/orchestrator/store.ts', 'Example: /focus #583'],
+        summary: 'Focus needs a packet label or packet id.',
+        details: ['Example: /focus P1', 'Example: /focus pkt-abc123'],
         chips: [{ label: 'argument required', tone: 'amber' }],
       }),
     ]);
     return { handled: true };
   }
 
-  const liveMatches = collectFocusedTranscript(context.transcript, scope);
-  const archiveMatches = await context.searchArchive(scope, 3);
+  const scopeKey = scope.toLowerCase();
+  const packet = context.missionState.packets.find((candidate) => candidate.referenceLabel.toLowerCase() === scopeKey || candidate.id.toLowerCase() === scopeKey);
+  if (!packet) {
+    context.appendEntries([buildSlashCommandEntry({ name: 'focus', summary: `No packet matched "${scope}".`, chips: [{ label: 'unknown packet', tone: 'amber' }] })]);
+    return { handled: true };
+  }
+
+  const focusQuery = [packet.referenceLabel, packet.id, packet.title, packet.summary, packet.workspaceTargetPath].filter(Boolean).join(' ');
+  const liveMatches = collectFocusedTranscript(context.transcript, focusQuery);
+  const archiveMatches = await context.searchArchive(focusQuery, 3);
 
   if (liveMatches.length === 0 && archiveMatches.length === 0) {
     context.appendEntries([

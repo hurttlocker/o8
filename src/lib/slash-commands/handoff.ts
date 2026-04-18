@@ -6,7 +6,7 @@ export async function handleHandoffSlashCommand(
   command: ParsedOrchestratorSlashCommand,
   context: SlashCommandContext,
 ): Promise<SlashCommandExecutionResult> {
-  const nextModel = command.args.trim();
+  const nextModel = command.args.trim() || 'fresh session';
   if (!nextModel) {
     context.appendEntries([
       buildSlashCommandEntry({
@@ -23,21 +23,20 @@ export async function handleHandoffSlashCommand(
   const resumePrelude = compacted?.resumePrelude?.trim()
     ? compacted.resumePrelude.trim()
     : [
-      `Model handoff target: ${nextModel}`,
+      'Fresh-session handoff',
       excerptTranscriptEntries(context.transcript.slice(-8), 8, 2600) || 'No existing transcript context is available.',
       'Continue from that context using the next operator message as the active instruction.',
     ].join('\n\n');
 
   context.queuePrelude(resumePrelude, 'replace');
   await context.resetRemoteSession();
-  context.setCurrentModel(nextModel);
   if (compacted?.applied) {
     context.replaceTranscript([
       ...compacted.transcript,
       buildSlashCommandEntry({
         name: 'handoff',
-        summary: `Orchestrator handoff queued for ${formatModelLabel(nextModel)}.`,
-        details: ['The remote session was reset and will resume from the compacted summary on the next turn.'],
+        summary: 'Prepared a compacted handoff for a fresh orchestrator session.',
+        details: ['The remote session was reset and will resume from the queued handoff prelude on the next turn.'],
         chips: [
           { label: formatModelLabel(nextModel), tone: 'blue' },
           { label: 'rehydrated', tone: 'emerald' },
@@ -50,8 +49,8 @@ export async function handleHandoffSlashCommand(
   context.appendEntries([
     buildSlashCommandEntry({
       name: 'handoff',
-      summary: `Orchestrator handoff queued for ${formatModelLabel(nextModel)}.`,
-      details: ['The remote session was reset. The next turn will replay a lightweight thread summary into the new model.'],
+      summary: 'Prepared a fresh-session handoff from the current transcript.',
+      details: ['The remote session was reset. The next turn will replay the queued handoff prelude before the operator message.'],
       chips: [
         { label: formatModelLabel(nextModel), tone: 'blue' },
         { label: 'rehydrated', tone: 'emerald' },
