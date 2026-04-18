@@ -8,7 +8,8 @@ export type SupervisorInboxKind =
   | 'session_lost'
   | 'packet_missing'
   | 'bounded_retry_exhausted'
-  | 'merge_blocked';
+  | 'merge_blocked'
+  | 'fetch_unreachable';
 
 export type SupervisorInboxStatus =
   | 'pending'
