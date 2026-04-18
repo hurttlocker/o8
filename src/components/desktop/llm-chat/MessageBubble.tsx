@@ -4,7 +4,7 @@ import { Bookmark, Brain, Check, ChevronRight, Copy, FileText, GitBranch, Loader
 import { DesktopToolCallStack } from '../DesktopToolCallStack';
 import { renderLLMMarkdown } from '../LLMMarkdown';
 import { ChainOfThought } from './ChainOfThought';
-import { deriveFileChangesFromTools, THEME_ACCENT, THEME_ACCENT_BORDER, THEME_ACCENT_SOFT, THEME_ACCENT_SOFT_STRONG, THEME_BG_CARD, THEME_PANEL_GLASS, type FileChangePreview, type LLMMessage } from './shared';
+import { deriveFileChangesFromTools, THEME_ACCENT, THEME_ACCENT_BORDER, THEME_ACCENT_SOFT, THEME_ACCENT_SOFT_STRONG, THEME_BG_CARD, THEME_PANEL_GLASS, type FileChangePreview, type LLMMessage, type ToolCallInfo } from './shared';
 
 const ACTION_BTN_STYLE: React.CSSProperties = {
   display: 'flex',
@@ -23,6 +23,62 @@ const ACTION_BTN_STYLE: React.CSSProperties = {
   paddingBottom: 0,
   paddingLeft: 0,
 };
+
+const STACK_HIDDEN_TOOL_NAMES = new Set([
+  'edit',
+  'write',
+  'multiedit',
+  'multi_edit',
+  'notebookedit',
+  'notebook_edit',
+  'edit_file',
+  'write_file',
+  'apply_patch',
+]);
+
+const NARRATIVE_COMMAND_HINT = /\/| -[A-Za-z]|[`'"]|^(?:bash|zsh|sh|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh|git|npm|npx|pnpm|yarn|node|python(?:3)?|uv|pytest|rg|grep|sed|cat|ls|find|make|cargo|go|docker|kubectl)\b/i;
+
+function normalizeExecToolCall(tool: ToolCallInfo): ToolCallInfo {
+  const name = tool.name.toLowerCase();
+  if (name !== 'exec' && name !== 'exec_command') return tool;
+  if (!tool.args || typeof tool.args !== 'object') return tool;
+
+  const existingCommand = typeof tool.args.command === 'string'
+    ? tool.args.command.trim()
+    : typeof tool.args.cmd === 'string'
+      ? tool.args.cmd.trim()
+      : '';
+  if (existingCommand) return tool;
+
+  const rawInput = typeof tool.args.input === 'string' ? tool.args.input.trim() : '';
+  if (!rawInput) return tool;
+
+  const command = rawInput.replace(/^Run\s+/i, '').trim();
+  if (!command || command === rawInput) return tool;
+
+  return {
+    ...tool,
+    args: {
+      ...tool.args,
+      command,
+    },
+  };
+}
+
+function toolCallFromNarrative(content: string): ToolCallInfo | null {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.includes('\n')) return null;
+
+  const match = trimmed.match(/^Run\s+(.+)$/i);
+  const command = match?.[1]?.trim();
+  if (!command || !NARRATIVE_COMMAND_HINT.test(command)) return null;
+
+  return {
+    name: 'exec_command',
+    status: 'done',
+    args: { command },
+  };
+}
 
 function ActionButton({ active, activeColor, icon, label, onClick }: { active?: boolean; activeColor?: string; icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
@@ -130,8 +186,14 @@ function MessageBubbleBase({
   const [ttsProgress, setTtsProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isUser = message.role === 'user';
+  const syntheticNarrativeToolCall = !isUser && !(message.toolCalls?.length) ? toolCallFromNarrative(message.content) : null;
+  const visibleContent = !isUser && syntheticNarrativeToolCall ? '' : message.content;
+  const hasVisibleContent = visibleContent.trim().length > 0;
   const fileChanges = !isUser ? deriveFileChangesFromTools(message.toolCalls) : [];
-  const visibleToolCalls = !isUser ? (message.toolCalls ?? []).filter((tool) => !['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'edit_file', 'write_file', 'apply_patch'].includes(tool.name)) : [];
+  const visibleToolCalls = !isUser
+    ? [...(message.toolCalls ?? []).map(normalizeExecToolCall), ...(syntheticNarrativeToolCall ? [syntheticNarrativeToolCall] : [])]
+      .filter((tool) => !STACK_HIDDEN_TOOL_NAMES.has(tool.name.toLowerCase()))
+    : [];
 
   useEffect(() => () => {
     if (audioRef.current) {
@@ -153,7 +215,7 @@ function MessageBubbleBase({
     if (ttsState === 'loading') return;
     setTtsState('loading');
     try {
-      const cleanText = message.content.replace(/```[\s\S]*?```/g, ' code block ').replace(/`([^`]+)`/g, '$1').replace(/!\[[^\]]*\]\([^)]+\)/g, ' image ').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[#*_~|>/]/g, '').replace(/\n{2,}/g, '. ').replace(/\n/g, ' ').trim();
+      const cleanText = visibleContent.replace(/```[\s\S]*?```/g, ' code block ').replace(/`([^`]+)`/g, '$1').replace(/!\[[^\]]*\]\([^)]+\)/g, ' image ').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[#*_~|>/]/g, '').replace(/\n{2,}/g, '. ').replace(/\n/g, ' ').trim();
       const response = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: cleanText }) });
       if (!response.ok) throw new Error('TTS failed');
       const blob = await response.blob();
@@ -182,38 +244,32 @@ function MessageBubbleBase({
       setTtsState('idle');
       setTtsProgress(0);
     }
-  }, [message.content, ttsState]);
+  }, [ttsState, visibleContent]);
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(message.content);
+    navigator.clipboard.writeText(visibleContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [message.content]);
-
-  const toolCallsForStack = (() => {
-    const groups: typeof visibleToolCalls = [];
-    for (const toolCall of visibleToolCalls) {
-      groups.push(toolCall);
-    }
-    return groups;
-  })();
+  }, [visibleContent]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 4, animation: isLast ? 'llmFadeIn 200ms ease-out' : undefined }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <div style={{ maxWidth: isUser ? '85%' : '90%', paddingTop: isUser ? 8 : 16, paddingRight: isUser ? 14 : 0, paddingBottom: isUser ? 8 : 16, paddingLeft: isUser ? 14 : 0, borderRadius: isUser ? '14px 14px 4px 14px' : 0, background: isUser ? 'rgba(99, 138, 255, 0.13)' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent', color: isUser ? 'var(--t-text)' : message.isError ? '#dc2626' : 'var(--t-text)', fontSize: 13, fontWeight: isUser ? 380 : 360, lineHeight: '1.55', letterSpacing: '-0.005em', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', wordBreak: 'break-word', ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}) }}>
-        {isUser ? (
-          <>
-            {message.content}
-            {message.images && message.images.length > 0 ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {message.images.map((image, index) => (
-                  <img key={`${image}-${index}`} src={image} alt={`Attached ${index + 1}`} style={{ maxWidth: 200, maxHeight: 200, borderRadius: 10, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.2)' }} />
-                ))}
-              </div>
-            ) : null}
-          </>
-        ) : renderLLMMarkdown(message.content, { onApplyToFile, onApplyDiff, onOpenInCanvas, onRunInTerminal })}
-      </div>
+      {isUser || hasVisibleContent ? (
+        <div style={{ maxWidth: isUser ? '85%' : '90%', paddingTop: isUser ? 8 : 16, paddingRight: isUser ? 14 : 0, paddingBottom: isUser ? 8 : 16, paddingLeft: isUser ? 14 : 0, borderRadius: isUser ? '14px 14px 4px 14px' : 0, background: isUser ? 'rgba(99, 138, 255, 0.13)' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent', color: isUser ? 'var(--t-text)' : message.isError ? '#dc2626' : 'var(--t-text)', fontSize: 13, fontWeight: isUser ? 380 : 360, lineHeight: '1.55', letterSpacing: '-0.005em', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', wordBreak: 'break-word', ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}) }}>
+          {isUser ? (
+            <>
+              {visibleContent}
+              {message.images && message.images.length > 0 ? (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  {message.images.map((image, index) => (
+                    <img key={`${image}-${index}`} src={image} alt={`Attached ${index + 1}`} style={{ maxWidth: 200, maxHeight: 200, borderRadius: 10, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.2)' }} />
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : renderLLMMarkdown(visibleContent, { onApplyToFile, onApplyDiff, onOpenInCanvas, onRunInTerminal })}
+        </div>
+      ) : null}
 
       {!isUser && message.fallbackNotice ? (
         <div style={{ maxWidth: '90%', paddingTop: 2, paddingBottom: 6, paddingLeft: 2, fontSize: 11, color: 'var(--t-text-muted)', fontStyle: 'italic', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -227,9 +283,9 @@ function MessageBubbleBase({
       {!isUser && message.isPartial ? <div style={{ maxWidth: '90%', paddingLeft: 2, fontSize: 11, color: 'var(--t-text-muted)', fontStyle: 'italic' }}>Recovered after reload</div> : null}
       {!isUser && (message.thinkingSteps || message.thinking) ? <ChainOfThought steps={message.thinkingSteps || []} thinking={message.thinking} durationMs={message.thinkingDurationMs} /> : null}
       {!isUser && fileChanges.length > 0 ? <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: '90%', marginTop: 4 }}>{fileChanges.map((change) => <FileChangeCard key={change.id} change={change} />)}</div> : null}
-      {!isUser && toolCallsForStack.length > 0 ? (
+      {!isUser && visibleToolCalls.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '90%', marginTop: 4 }}>
-          <DesktopToolCallStack toolCalls={toolCallsForStack} />
+          <DesktopToolCallStack toolCalls={visibleToolCalls} />
         </div>
       ) : null}
       {!isUser && message.sources && message.sources.length > 0 ? (
@@ -268,7 +324,7 @@ function MessageBubbleBase({
         </div>
       ) : null}
 
-      {!isUser && message.content ? (
+      {!isUser && hasVisibleContent ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, paddingTop: 2, paddingBottom: 4, opacity: hovered || isLast ? 1 : 0, transition: 'opacity 150ms' }}>
           {message.model ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)', marginRight: 4, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>{message.model}</span> : null}
           {message.tokens ? <span style={{ fontSize: 10, color: 'var(--t-text-faint)', marginRight: 4, fontFamily: 'ui-monospace, monospace' }}>{message.tokens.input + message.tokens.output} tok</span> : null}
@@ -290,7 +346,7 @@ function MessageBubbleBase({
 
       {isUser && hovered ? (
         <div style={{ display: 'flex', gap: 2, paddingTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 150ms' }}>
-          <ActionButton icon={<Pencil size={13} />} label="Edit message" onClick={() => onEdit?.(message.content)} />
+          <ActionButton icon={<Pencil size={13} />} label="Edit message" onClick={() => onEdit?.(visibleContent)} />
           <ActionButton icon={copied ? <Check size={13} /> : <Copy size={13} />} label="Copy" active={copied} onClick={handleCopy} />
           {onDelete ? <ActionButton icon={<Trash2 size={13} />} label="Delete" onClick={onDelete} /> : null}
         </div>
