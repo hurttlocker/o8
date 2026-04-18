@@ -24,11 +24,18 @@ export type StreamEvent =
   | { type: 'tool_call'; toolName: string; toolId: string; args: Record<string, unknown> }
   | { type: 'thinking'; text: string };
 
+export interface ProviderBuildOptions {
+  /** Whether to apply Anthropic prompt-cache breakpoint on the tools array (last tool). Default: true. */
+  cacheBreakpoint?: boolean;
+  /** Override extended-thinking budget_tokens for Anthropic explicit-effort requests (low/medium/high/max/xhigh). */
+  thinkingBudgetTokens?: number;
+}
+
 export interface ProviderConfig {
   url: string;
   envKey: string;
   buildHeaders: (apiKey: string) => Record<string, string>;
-  buildBody: (model: string, messages: Message[]) => Record<string, unknown>;
+  buildBody: (model: string, messages: Message[], options?: ProviderBuildOptions) => Record<string, unknown>;
   parseStream: (line: string) => StreamEvent | null;
 }
 
@@ -69,15 +76,19 @@ export const PROVIDERS: Record<Exclude<Provider, 'google' | 'operator'>, Provide
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     }),
-    buildBody: (model, messages) => {
+    buildBody: (model, messages, options) => {
       const isThinkingModel = THINKING_MODELS.has(model);
       const maxTokens = isThinkingModel ? 16384 : 4096;
+      const explicitBudget = options?.thinkingBudgetTokens;
+      const budgetTokens = explicitBudget != null && Number.isFinite(explicitBudget) && explicitBudget > 0
+        ? Math.floor(explicitBudget)
+        : 10000;
 
       return {
         model,
         max_tokens: maxTokens,
         stream: true,
-        ...(isThinkingModel ? { thinking: { type: 'enabled', budget_tokens: 10000 } } : {}),
+        ...(isThinkingModel ? { thinking: { type: 'enabled', budget_tokens: budgetTokens } } : {}),
         messages: messages
           .filter((message) => message.role !== 'system')
           .map((message) => {
@@ -104,7 +115,7 @@ export const PROVIDERS: Record<Exclude<Provider, 'google' | 'operator'>, Provide
         ...(messages.find((message) => message.role === 'system')
           ? { system: messages.find((message) => message.role === 'system')!.content }
           : {}),
-        tools: toolsForAnthropic(),
+        tools: toolsForAnthropic({ cacheBreakpoint: options?.cacheBreakpoint }),
       };
     },
     parseStream: (line) => {
@@ -161,7 +172,8 @@ export const PROVIDERS: Record<Exclude<Provider, 'google' | 'operator'>, Provide
       Authorization: `Bearer ${apiKey}`,
       'content-type': 'application/json',
     }),
-    buildBody: (model, messages) => {
+    buildBody: (model, messages, _options) => {
+      void _options;
       const isReasoningModel = THINKING_MODELS.has(model);
 
       return {

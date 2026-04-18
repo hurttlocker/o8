@@ -119,6 +119,28 @@ function supportsAnthropicAdaptiveThinking(model: string): boolean {
     || normalizedModel.includes('claude-mythos-preview');
 }
 
+/**
+ * Map an explicit ThinkingEffort tier (low/medium/high/max/xhigh) to an Anthropic
+ * `budget_tokens` value. `adaptive` returns null because the model self-regulates.
+ */
+function thinkingBudgetForEffort(effort: ThinkingEffort | null): number | null {
+  switch (effort) {
+    case 'low':
+      return 4_000;
+    case 'medium':
+      return 10_000;
+    case 'high':
+      return 24_000;
+    case 'max':
+      return 48_000;
+    case 'xhigh':
+      return 64_000;
+    case 'adaptive':
+    default:
+      return null;
+  }
+}
+
 function applyAnthropicThinkingConfig(
   upstreamBody: Record<string, unknown>,
   model: string,
@@ -128,7 +150,12 @@ function applyAnthropicThinkingConfig(
     delete upstreamBody.thinking;
     return;
   }
-  if (requestedThinkingEffort !== null || !supportsAnthropicAdaptiveThinking(model)) {
+  if (requestedThinkingEffort !== null) {
+    // Explicit effort tier — buildBody already wired the matching budget_tokens via
+    // ProviderBuildOptions; nothing further to do here.
+    return;
+  }
+  if (!supportsAnthropicAdaptiveThinking(model)) {
     return;
   }
   const maxTokens = typeof upstreamBody.max_tokens === 'number' && Number.isFinite(upstreamBody.max_tokens)
@@ -393,9 +420,16 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
   const config = PROVIDERS[provider];
   const headers = config.buildHeaders(apiKey);
+  const cacheBreakpointEnabled = provider === 'anthropic' ? resolvePromptCachingEnabledSync() : false;
+  const explicitThinkingBudget = provider === 'anthropic'
+    ? thinkingBudgetForEffort(requestedThinkingEffort)
+    : null;
   const buildUpstreamBody = (requestMessages: Message[]) => {
     const upstreamBody = withAnthropicPromptCaching(
-      config.buildBody(model, requestMessages) as Record<string, unknown>,
+      config.buildBody(model, requestMessages, {
+        cacheBreakpoint: cacheBreakpointEnabled,
+        thinkingBudgetTokens: explicitThinkingBudget ?? undefined,
+      }) as Record<string, unknown>,
       provider,
     );
     if (provider === 'anthropic') {

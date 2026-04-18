@@ -8,14 +8,14 @@ context.
 
 | Feature | Status | Cost Impact | Moat | Priority |
 |---------|--------|-------------|------|----------|
-| Prompt Caching | GA | 3–4× savings on governance loops | CRITICAL | #1 wire now |
-| Adaptive Thinking + Summarized Display | GA | No premium; full thinking still billed | HIGH | #2 after caching |
-| Task Budgets | Beta | Advisory per-loop cap | MEDIUM | #3 per-phase |
-| Managed Agents | Beta | Could offload agent loop | STRATEGIC | #4 arch spike |
-| High-Res Vision (4.7) | GA | ~(w×h)/750 tokens per image | LOWER | #5 for debugging |
-| MCP Native | GA | No changes needed | MEDIUM | monitor |
-| Computer Use | Beta | Circular-control risk | LOWER | skip |
-| Memory / Pinning | Partial | Part of Managed Agents | MEDIUM | re-eval with MA |
+| Prompt Caching | SHIPPED (#590) — system + tools breakpoints, gated by `O8_PROMPT_CACHING` | 3–4× savings on governance loops | CRITICAL | done |
+| Adaptive Thinking + Summarized Display | SHIPPED (#592) — adaptive default, summarized stream → `ThinkingStrip` | No premium; full thinking still billed | HIGH | done |
+| Task Budgets | SHIPPED (#591) — pass-through `task_budget` + phase defaults | Advisory per-loop cap | MEDIUM | done |
+| Managed Agents | SKIP (#593) — see `docs/managed-agents-decision.md` | Could offload agent loop | STRATEGIC | re-spike Q3 2026 |
+| High-Res Vision (4.7) | SHIPPED (#594) — base64 pass-through, no client-side resize | ~(w×h)/750 tokens per image | LOWER | done |
+| MCP Native | GA — operator + cortex servers wired | No changes needed | MEDIUM | monitor |
+| Computer Use | Skip — `o8_view_*` MCP tools cover the use case | Circular-control risk | LOWER | skip |
+| Memory / Pinning | Cortex v2 (directives + ledger) — re-eval with Managed Agents | Part of Managed Agents | MEDIUM | re-eval with MA |
 | Safety / Refusals | GA | No changes | LOWER | monitor |
 
 ---
