@@ -1663,6 +1663,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const thinkingEffort = msg.thinkingEffort === 'medium' ? 'medium'
     : msg.thinkingEffort === 'high' ? 'high'
     : 'max' as const;
+  const model = typeof msg.model === 'string' && msg.model.trim()
+    ? msg.model.trim()
+    : undefined;
 
   try {
     let session = getOrchestratorSession(repoPath);
@@ -1765,7 +1768,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           if (c) sendRaw(c, wsMsg);
         }
       }
-    }, { permissionMode, thinkingEffort });
+    }, { permissionMode, thinkingEffort, model });
 
     // After user message completes, drain any queued supervisor escalations
     void drainOrchestratorAutoQueue();

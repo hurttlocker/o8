@@ -164,6 +164,7 @@ export function entrySignature(entry: MobileTranscriptEntry) {
       args: tool.args,
       status: tool.status,
     })),
+    command: entry.command,
     timestamp: entry.timestamp,
     timestampLabel: entry.timestampLabel,
   });
@@ -173,7 +174,8 @@ export function isRenderableThoughtEntry(entry: MobileTranscriptEntry) {
   return Boolean(
     entry.text.trim()
     || entry.media?.length
-    || entry.toolCalls?.length,
+    || entry.toolCalls?.length
+    || entry.command,
   );
 }
 

@@ -15,6 +15,8 @@ export async function POST(request: NextRequest) {
     repoPath?: unknown;
     runningTotal?: unknown;
     messages?: unknown;
+    keepTailCount?: unknown;
+    trigger?: unknown;
   } | null;
   const repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
   if (!repoPath) {
@@ -31,6 +33,8 @@ export async function POST(request: NextRequest) {
       repoPath: resolved.repoRoot,
       runningTotal: typeof body?.runningTotal === 'number' ? body.runningTotal : undefined,
       liveMessages: Array.isArray(body?.messages) ? body.messages as MobileTranscriptEntry[] : undefined,
+      keepTailCount: typeof body?.keepTailCount === 'number' ? body.keepTailCount : undefined,
+      trigger: body?.trigger === 'manual' || body?.trigger === 'handoff' ? body.trigger : 'auto',
     });
     return NextResponse.json({ ok: true, ...result }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },

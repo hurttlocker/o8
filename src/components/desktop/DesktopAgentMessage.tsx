@@ -2,6 +2,7 @@
 
 import { memo, useCallback } from 'react';
 import { FileText } from './lucide-shims';
+import { CommandStripNode } from '@/components/desktop/CommandStripNode';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
 import type {
   MobileTranscriptEntry,
@@ -216,6 +217,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         timestampLabel={entry.timestampLabel}
       />
     );
+  }
+
+  if (entry.type === 'command' && entry.command) {
+    return <CommandStripNode command={entry.command} timestampLabel={entry.timestampLabel} />;
   }
 
   if (isUser) {
