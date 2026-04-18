@@ -2,13 +2,15 @@
  * compactPacketLabel — turn a conventional-commit packet title into a
  * scannable 3-word tab label.
  *
- *   feat(orchestrator): slash commands — /compact /clear /focus   →  Slash commands
- *   feat(orchestrator): auto-thread-rotation when packets merge   →  Auto thread rotation
- *   design(orchestrator): redesign Edit File cards in Rams style  →  Redesign edit file
+ *   feat(orchestrator): slash commands — /compact /clear /focus           →  Slash commands
+ *   feat(orchestrator): auto-thread-rotation when packets merge           →  Auto-thread-rotation when packets
+ *   feat(orchestrator): thinking-effort per-turn knob in composer footer  →  Thinking-effort per-turn knob
+ *   design(orchestrator): redesign Edit File cards in Rams style          →  Redesign Edit File
  *
  * Rules:
  *   1. Strip conventional-commit prefix: `feat(...):`, `fix:`, `design(scope):`, etc.
- *   2. Split on whitespace AND hyphens — `auto-thread-rotation` becomes 3 words.
+ *   2. Hyphens stay intact — `per-turn` is one word. Prevents orphan
+ *      fragments like "Thinking effort per" or "Enable high res".
  *   3. Drop pure-punctuation tokens like `—`, `/`, `+`, `·`.
  *   4. Keep at most `maxWords` (default 3) meaningful words.
  *   5. Sentence case: first letter upper, rest lower. Acronyms are not preserved
@@ -39,7 +41,6 @@ export function compactPacketLabel(title: string | null | undefined, maxWords = 
   const firstClause = source.split(CLAUSE_SEPARATORS)[0]?.trim() || source;
 
   const words = firstClause
-    .replace(/-/g, ' ')
     .split(/\s+/)
     .map((word) => word.replace(LEADING_TRAILING_PUNCT, ''))
     .filter((word) => word.length > 0 && !PUNCT_ONLY.test(word))
