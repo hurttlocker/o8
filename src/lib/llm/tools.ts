@@ -775,8 +775,14 @@ function searchCode(query: string, filePattern?: string, maxResults?: number, re
 
 const ANTHROPIC_EPHEMERAL_CACHE_CONTROL = { type: 'ephemeral' } as const;
 
-export function toolsForAnthropic(): Array<{ name: string; description: string; input_schema: Record<string, unknown>; cache_control?: typeof ANTHROPIC_EPHEMERAL_CACHE_CONTROL }> {
-  return TOOLS.map((tool, index) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters, ...(index === TOOLS.length - 1 ? { cache_control: ANTHROPIC_EPHEMERAL_CACHE_CONTROL } : {}) }));
+export function toolsForAnthropic(options?: { cacheBreakpoint?: boolean }): Array<{ name: string; description: string; input_schema: Record<string, unknown>; cache_control?: typeof ANTHROPIC_EPHEMERAL_CACHE_CONTROL }> {
+  const cacheBreakpoint = options?.cacheBreakpoint !== false;
+  return TOOLS.map((tool, index) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.parameters,
+    ...(cacheBreakpoint && index === TOOLS.length - 1 ? { cache_control: ANTHROPIC_EPHEMERAL_CACHE_CONTROL } : {}),
+  }));
 }
 
 export function toolsForOpenAI(): { type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }[] {
