@@ -31,6 +31,7 @@ import { parseSessionCost } from '@/lib/runtimes/cost-parser';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { getRuntimeTerminalSession, registerRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { monitorUsageDispatch, readClaudeUsageSnapshot, type UsageSnapshot } from '@/lib/usage-log';
 
 const execFileAsync = promisify(execFile);
 
@@ -260,6 +261,50 @@ async function waitForLaunchSessionId(
   }
 
   return null;
+}
+
+async function waitForClaudeRunToFinish(sessionId: string, startedAtMs: number) {
+  let lastMtimeMs = 0;
+  let settledPolls = 0;
+
+  for (let attempt = 0; attempt < 7200; attempt += 1) {
+    const sessionProject = await resolveSessionProjectPath(sessionId).catch(() => null);
+    const sessionCwd = normalizeFsPath(sessionProject?.cwd ?? sessionProject?.projectPath);
+    const liveProcesses = sessionCwd ? await findLiveClaudeProcesses().catch(() => []) : [];
+    const runningInSessionCwd = sessionCwd
+      ? liveProcesses.some((proc) => {
+          const procCwd = normalizeFsPath(proc.cwd);
+          return Boolean(procCwd) && (
+            procCwd === sessionCwd
+            || procCwd.startsWith(`${sessionCwd}/`)
+            || sessionCwd.startsWith(`${procCwd}/`)
+          );
+        })
+      : false;
+    const fileStat = sessionProject?.jsonlPath ? await stat(sessionProject.jsonlPath).catch(() => null) : null;
+    const nextMtimeMs = fileStat?.mtimeMs ?? lastMtimeMs;
+
+    if (nextMtimeMs !== lastMtimeMs) {
+      lastMtimeMs = nextMtimeMs;
+      settledPolls = 0;
+    } else if (!runningInSessionCwd && sessionProject?.jsonlPath) {
+      settledPolls += 1;
+      if (settledPolls >= 2) {
+        return {
+          finishedAtMs: Math.max(startedAtMs, lastMtimeMs || Date.now()),
+          snapshot: sessionProject?.jsonlPath ? await readClaudeUsageSnapshot(sessionProject.jsonlPath).catch(() => null) : null,
+        };
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  const sessionProject = await resolveSessionProjectPath(sessionId).catch(() => null);
+  return {
+    finishedAtMs: Math.max(startedAtMs, Date.now()),
+    snapshot: sessionProject?.jsonlPath ? await readClaudeUsageSnapshot(sessionProject.jsonlPath).catch(() => null) : null,
+  };
 }
 
 /**
@@ -1064,6 +1109,7 @@ export const claudeCodeRuntime: AgentRuntime = {
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
     try {
+      const startedAtMs = Date.now();
       const launchId = `launched-${Date.now()}`;
       const projectPaths = Array.from(new Set(
         [opts.worktreePath, opts.cwd]
@@ -1103,6 +1149,15 @@ export const claudeCodeRuntime: AgentRuntime = {
             runtime: 'claude-code',
             cwd: opts.cwd,
           });
+          monitorUsageDispatch({
+            dispatchKey: `claude-code:${sessionId}:${startedAtMs}`,
+            runtime: 'claude-code',
+            laneId: opts.laneId,
+            sessionKey: `claude-code:${sessionId}`,
+            model: opts.model,
+            startedAtMs,
+            awaitCompletion: async () => waitForClaudeRunToFinish(sessionId, startedAtMs),
+          });
           return {
             ok: true,
             note: `Claude Code session launched in terminal:${bridgeSessionName} at ${shortenPath(opts.cwd)}`,
@@ -1141,6 +1196,16 @@ export const claudeCodeRuntime: AgentRuntime = {
         };
       }
 
+      monitorUsageDispatch({
+        dispatchKey: `claude-code:${sessionId}:${startedAtMs}`,
+        runtime: 'claude-code',
+        laneId: opts.laneId,
+        sessionKey: `claude-code:${sessionId}`,
+        model: opts.model,
+        startedAtMs,
+        awaitCompletion: async () => waitForClaudeRunToFinish(sessionId, startedAtMs),
+      });
+
       return {
         ok: true,
         note: `Claude Code session launched in ${shortenPath(opts.cwd)}`,
@@ -1155,6 +1220,7 @@ export const claudeCodeRuntime: AgentRuntime = {
   },
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
+    const startedAtMs = Date.now();
     let sessionId = sessionKey.replace('claude-code:', '');
 
     // If sessionId is a synthetic live-PID key, try to resolve to a real session ID
@@ -1172,6 +1238,9 @@ export const claudeCodeRuntime: AgentRuntime = {
     // Claude's internal conversation store, which has different retention)
     const sessionProject = await resolveSessionProjectPath(sessionId);
     const sessionCwd = sessionProject?.cwd ?? sessionProject?.projectPath;
+    const baseline: UsageSnapshot | null = sessionProject?.jsonlPath
+      ? await readClaudeUsageSnapshot(sessionProject.jsonlPath).catch(() => null)
+      : null;
 
     // Use --continue with the correct CWD (picks up most recent conversation
     // in that directory). Falls back to --resume <id> if CWD unknown.
@@ -1200,6 +1269,15 @@ export const claudeCodeRuntime: AgentRuntime = {
       // tmux session name can silently no-op on later sends, so resume runs
       // detached instead of through the tmux session helper.
       await spawnDetached(CLAUDE_BIN, cliArgs, spawnCwd);
+      monitorUsageDispatch({
+        dispatchKey: `claude-code:${sessionId}:${startedAtMs}`,
+        runtime: 'claude-code',
+        sessionKey: `claude-code:${sessionId}`,
+        model: baseline?.model ?? null,
+        startedAtMs,
+        baseline,
+        awaitCompletion: async () => waitForClaudeRunToFinish(sessionId, startedAtMs),
+      });
 
       return {
         ok: true,
