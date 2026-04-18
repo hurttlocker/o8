@@ -141,8 +141,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const threadIdRef = useRef<string | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exportFeedbackTimerRef = useRef<number | null>(null);
+  const clearToastTimerRef = useRef<number | null>(null);
+  const handleClearCommandRef = useRef<() => Promise<void>>(async () => {});
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
+  const [showClearToast, setShowClearToast] = useState(false);
 
   const isOrchestratorMode = targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey);
 
@@ -260,6 +263,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       if (pollRef.current !== null) window.clearInterval(pollRef.current);
       if (pollDelayRef.current !== null) window.clearTimeout(pollDelayRef.current);
       if (exportFeedbackTimerRef.current !== null) window.clearTimeout(exportFeedbackTimerRef.current);
+      if (clearToastTimerRef.current !== null) window.clearTimeout(clearToastTimerRef.current);
     };
   }, []);
 
@@ -286,6 +290,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         exportFeedbackTimerRef.current = null;
       }, 1800);
     }
+  }, []);
+
+  const showArchivedToast = useCallback(() => {
+    setShowClearToast(true);
+    if (clearToastTimerRef.current !== null) {
+      window.clearTimeout(clearToastTimerRef.current);
+    }
+    clearToastTimerRef.current = window.setTimeout(() => {
+      setShowClearToast(false);
+      clearToastTimerRef.current = null;
+    }, 1800);
   }, []);
 
   const transcriptUrl = useCallback((sessionKey: string) => {
@@ -386,9 +401,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [isOrchestratorMode, startPollingForSession, targetSessionKey]);
 
   const handleTaskSend = useCallback(async () => {
-    const effectiveWaiting = isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
-    if (!input.trim() || effectiveWaiting) return;
     const msg = input.trim();
+    if (!msg) return;
+    if (isOrchestratorMode && msg === '/clear') {
+      setInput('');
+      await handleClearCommandRef.current();
+      return;
+    }
+
+    const effectiveWaiting = isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
+    if (effectiveWaiting) return;
     setInput('');
 
     if (isOrchestratorMode) {
@@ -493,30 +515,29 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   // ── Thread persistence ──
 
-  const persistThread = useCallback((msgs: MobileTranscriptEntry[], tid: string | null, nextPlanText: string | null) => {
+  const persistThreadNow = useCallback(async (msgs: MobileTranscriptEntry[], tid: string | null, nextPlanText: string | null) => {
     if (!tid || msgs.length === 0) return;
-    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-    persistTimerRef.current = setTimeout(() => {
-      const messages = msgs.map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.text,
-        type: m.type,
-        media: m.media,
-        toolCalls: m.toolCalls,
-        timestamp: m.timestamp ?? Date.now(),
-        timestampLabel: m.timestampLabel,
-        model: m.model,
-        tokens: m.tokens,
-        costUsd: m.costUsd,
-        sources: m.sources,
-        thinking: m.thinking,
-        thinkingSteps: m.thinkingSteps,
-        thinkingDurationMs: m.thinkingDurationMs,
-        recalledFacts: m.recalledFacts,
-        compaction: m.compaction,
-      }));
-      void fetch('/api/v2/chat-history', {
+    const messages = msgs.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.text,
+      type: m.type,
+      media: m.media,
+      toolCalls: m.toolCalls,
+      timestamp: m.timestamp ?? Date.now(),
+      timestampLabel: m.timestampLabel,
+      model: m.model,
+      tokens: m.tokens,
+      costUsd: m.costUsd,
+      sources: m.sources,
+      thinking: m.thinking,
+      thinkingSteps: m.thinkingSteps,
+      thinkingDurationMs: m.thinkingDurationMs,
+      recalledFacts: m.recalledFacts,
+      compaction: m.compaction,
+    }));
+    try {
+      await fetch('/api/v2/chat-history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -526,9 +547,20 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           planText: nextPlanText ?? undefined,
           repoPath: resolvedRepoPath,
         }),
-      }).catch(() => { /* silent */ });
-    }, 800);
+      });
+    } catch {
+      // silent
+    }
   }, [resolvedRepoPath]);
+
+  const persistThread = useCallback((msgs: MobileTranscriptEntry[], tid: string | null, nextPlanText: string | null) => {
+    if (!tid || msgs.length === 0) return;
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null;
+      void persistThreadNow(msgs, tid, nextPlanText);
+    }, 800);
+  }, [persistThreadNow]);
 
   useEffect(() => {
     let msgs: typeof chatMessages;
@@ -600,6 +632,41 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       }
     })();
   }, [isOrchestratorMode, orchStream.messages.length, chatMessages.length]);
+
+  const handleClearCommand = useCallback(async () => {
+    const liveTimestamps = new Set(orchStream.messages.map((entry) => entry.timestamp));
+    const archiveMessages = isOrchestratorMode
+      ? (orchStream.messages.length > 0 && chatMessages.length > 0
+        ? [...chatMessages.filter((message) => !liveTimestamps.has(message.timestamp)), ...orchStream.messages]
+        : orchStream.messages.length > 0
+          ? orchStream.messages
+          : chatMessages)
+      : chatMessages;
+    const hasArchivableMessages = archiveMessages.some((message) => message.role === 'user');
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    if (hasArchivableMessages) {
+      await persistThreadNow(archiveMessages, threadIdRef.current ?? `thoughts-${Date.now()}`, planText);
+    }
+
+    try {
+      const response = await fetch('/api/orchestrator/reset-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(resolvedRepoPath ? { repoPath: resolvedRepoPath } : {}),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(payload?.error?.message ?? 'Unable to reset orchestrator session.');
+      }
+      handleReset();
+      showArchivedToast();
+    } catch (error) {
+      console.error('[orchestrator] Failed to clear orchestrator conversation.', error);
+    }
+  }, [chatMessages, handleReset, isOrchestratorMode, orchStream.messages, persistThreadNow, planText, resolvedRepoPath, showArchivedToast]);
 
   const handleLoadThread = useCallback(async (tabId: string) => {
     try {
@@ -677,6 +744,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
     if (!msg) return;
+    if (isOrchestratorMode && msg === '/clear') {
+      setInput('');
+      latestInputRef.current = '';
+      void handleClearCommand();
+      return;
+    }
 
     if (isOrchestratorMode) {
       if (orchStream.status === 'busy') return;
@@ -689,7 +762,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(); }, 0);
-  }, [handleTaskSend, isOrchestratorMode, orchStream, permissionMode, thinkingEffort]);
+  }, [handleClearCommand, handleTaskSend, isOrchestratorMode, orchStream, permissionMode, thinkingEffort]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
@@ -722,6 +795,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   );
 
   const handleSlashCommand = useCallback((cmd: string) => {
+    if (cmd === '/clear') {
+      setInput('');
+      void handleClearCommand();
+      return;
+    }
     if (useStream) {
       orchStream.send(cmd, { permissionMode });
       setInput('');
@@ -729,7 +807,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setInput(cmd);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [orchStream, permissionMode, useStream]);
+  }, [handleClearCommand, orchStream, permissionMode, useStream]);
 
   const handleCopyMarkdown = useCallback(async (): Promise<boolean> => {
     if (displayMessages.length === 0) return false;
@@ -752,6 +830,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       return false;
     }
   }, [displayMessages, setExportFeedback, threadId]);
+
+  useEffect(() => {
+    handleClearCommandRef.current = handleClearCommand;
+  }, [handleClearCommand]);
 
   useEffect(() => {
     handleCopyMarkdownRef.current = handleCopyMarkdown;
@@ -791,6 +873,34 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         topContent={transcriptTopContent}
         isOrchestratorMode={isOrchestratorMode}
       />
+
+      {showClearToast ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            paddingTop: 0,
+            paddingRight: 12,
+            paddingBottom: 8,
+            paddingLeft: 12,
+            background: thoughtsBodyBackground,
+            flexShrink: 0,
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{
+            padding: '6px 10px',
+            borderRadius: 10,
+            border: '1px solid var(--t-divider-subtle)',
+            background: 'var(--t-panel-translucent)',
+            color: 'var(--t-text-muted)',
+            fontSize: 11,
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}>
+            Thread archived · Orchestrator ready.
+          </div>
+        </div>
+      ) : null}
 
       <ComposerArea
         ref={inputRef}
