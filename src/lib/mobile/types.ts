@@ -157,12 +157,24 @@ export interface MobileTranscriptThinkingStep {
   detail?: string;
 }
 
+export interface MobileTranscriptCommandChip {
+  label: string;
+  tone?: 'blue' | 'amber' | 'emerald' | 'slate' | 'red';
+}
+
+export interface MobileTranscriptCommand {
+  name: string;
+  summary: string;
+  details?: string[];
+  chips?: MobileTranscriptCommandChip[];
+}
+
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
-  type?: 'message' | 'compaction';
+  type?: 'message' | 'compaction' | 'command';
   media?: MobileTranscriptMedia[];
   toolCalls?: MobileTranscriptToolCall[];
   timestamp?: number;
@@ -175,6 +187,7 @@ export interface MobileTranscriptEntry {
   thinkingSteps?: MobileTranscriptThinkingStep[];
   thinkingDurationMs?: number;
   recalledFacts?: number;
+  command?: MobileTranscriptCommand;
   compaction?: {
     timestamp: number;
     tokensBefore?: number;

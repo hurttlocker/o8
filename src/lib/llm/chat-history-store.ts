@@ -29,6 +29,7 @@ export interface PersistedLlmChatMessage {
   thinkingDurationMs?: number;
   isError?: boolean;
   recalledFacts?: number;
+  command?: MobileTranscriptEntry['command'];
   isCompaction?: boolean;
   compactedCount?: number;
   isPartial?: boolean;
@@ -162,6 +163,7 @@ export function mapLlmHistoryToMobileTranscript(messages: PersistedLlmChatMessag
     thinkingSteps: message.thinkingSteps,
     thinkingDurationMs: message.thinkingDurationMs,
     recalledFacts: message.recalledFacts,
+    command: message.command,
     compaction: message.compaction,
   }));
 }

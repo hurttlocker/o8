@@ -479,10 +479,12 @@ export function ensureOrchestratorSession(repoPath: string): OrchestratorSession
 export type OrchestratorPermissionMode = 'full' | 'plan';
 
 export type ThinkingEffort = 'medium' | 'high' | 'max';
+export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-7';
 
 export interface SendToOrchestratorOptions {
   permissionMode?: OrchestratorPermissionMode;
   thinkingEffort?: ThinkingEffort;
+  model?: string;
 }
 
 /**
@@ -498,6 +500,7 @@ export async function sendToOrchestrator(
 ): Promise<void> {
   const permissionMode: OrchestratorPermissionMode = options.permissionMode ?? 'full';
   const thinkingEffort: ThinkingEffort = options.thinkingEffort ?? 'max';
+  const model = options.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
 
   // #457 — Auto-recover dead sessions by creating a fresh one
   if (session.status === 'dead') {
@@ -535,10 +538,7 @@ export async function sendToOrchestrator(
     '--verbose',
     '--mcp-config', mcpConfigPath,
     '--effort', effortMap[thinkingEffort],
-    // Pin the orchestrator to Opus 4.7. Claude Code's CLI default is often
-    // Sonnet for speed, which makes the orchestrator narrate + exit instead
-    // of executing full multi-step flows in a single turn.
-    '--model', 'claude-opus-4-7',
+    '--model', model,
   ];
 
   // Resume existing conversation if we have a session ID

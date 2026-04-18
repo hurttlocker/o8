@@ -113,6 +113,8 @@ export async function autoCompactOrchestratorThread(input: {
   repoPath: string;
   liveMessages?: MobileTranscriptEntry[];
   runningTotal?: number;
+  keepTailCount?: number;
+  trigger?: 'auto' | 'manual' | 'handoff';
 }): Promise<AutoCompactResult> {
   const repoPath = input.repoPath.trim();
   const snapshot = Array.isArray(input.liveMessages) ? input.liveMessages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[] : [];
@@ -123,7 +125,15 @@ export async function autoCompactOrchestratorThread(input: {
     const thread = await readLatestThread(repoPath);
     const transcript = mergeSnapshots(thread?.messages ?? [], snapshot);
     if (transcript.length < 2) return { applied: false, transcript, resumePrelude: null, tokensAfter: 0 };
-    const compactedCount = Math.max(1, Math.floor(transcript.length * 0.6));
+    const keepTailCount = typeof input.keepTailCount === 'number' && Number.isFinite(input.keepTailCount)
+      ? Math.max(1, Math.floor(input.keepTailCount))
+      : null;
+    if (keepTailCount !== null && transcript.length <= keepTailCount + 1) {
+      return { applied: false, transcript, resumePrelude: null, tokensAfter: 0 };
+    }
+    const compactedCount = keepTailCount !== null
+      ? Math.max(1, transcript.length - keepTailCount)
+      : Math.max(1, Math.floor(transcript.length * 0.6));
     const compactedTurns = transcript.slice(0, compactedCount);
     const liveTurns = transcript.slice(compactedCount);
     const compactedAt = new Date();
@@ -141,7 +151,7 @@ export async function autoCompactOrchestratorThread(input: {
         timestamp: compactedAt.getTime(),
         tokensBefore: typeof input.runningTotal === 'number' ? input.runningTotal : undefined,
         tokensAfter: undefined,
-        trigger: 'auto',
+        trigger: input.trigger === 'handoff' ? 'manual' : input.trigger ?? 'auto',
         source: 'summary',
         summary: displaySummary,
       },
