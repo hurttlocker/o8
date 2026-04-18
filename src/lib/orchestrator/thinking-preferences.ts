@@ -1,6 +1,7 @@
 import {
   isManualThinkingEffort,
   type ManualThinkingEffort,
+  type ThinkingEffort,
 } from './thinking-effort';
 
 export const ORCHESTRATOR_THINKING_OVERRIDE_STORAGE_KEY = 'o8:orchestrator:thinking-effort';
@@ -48,6 +49,32 @@ export function writeAdaptiveThinkingEnabled(enabled: boolean) {
     // ignore storage failures
   }
   dispatchThinkingPreferenceChange();
+}
+
+export function hasStoredOrchestratorThinkingPreference(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return (
+      window.localStorage.getItem(ORCHESTRATOR_THINKING_OVERRIDE_STORAGE_KEY) !== null
+      || window.localStorage.getItem(ORCHESTRATOR_ADAPTIVE_THINKING_STORAGE_KEY) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function resolveInitialOrchestratorThinkingPreferences(defaultEffort: ThinkingEffort) {
+  if (hasStoredOrchestratorThinkingPreference()) {
+    return {
+      adaptiveThinkingEnabled: readAdaptiveThinkingEnabled(),
+      thinkingOverride: readStoredOrchestratorThinkingOverride(),
+    };
+  }
+
+  return {
+    adaptiveThinkingEnabled: true,
+    thinkingOverride: isManualThinkingEffort(defaultEffort) ? defaultEffort : null,
+  };
 }
 
 export function subscribeOrchestratorThinkingPreferences(listener: () => void) {

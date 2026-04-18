@@ -8,6 +8,7 @@ import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/th
 import {
   readAdaptiveThinkingEnabled,
   readStoredOrchestratorThinkingOverride,
+  resolveInitialOrchestratorThinkingPreferences,
   subscribeOrchestratorThinkingPreferences,
   writeStoredOrchestratorThinkingOverride,
 } from '@/lib/orchestrator/thinking-preferences';
@@ -34,7 +35,7 @@ import {
   isRunnableCliSession,
   mergeTranscriptEntries,
 } from './utils';
-import { DEFAULT_ORCHESTRATOR_MODEL, useOrchestratorStream } from './useOrchestratorStream';
+import { useOrchestratorStream } from './useOrchestratorStream';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { ClearToast } from './chat-panel/ClearToast';
@@ -48,6 +49,10 @@ import type {
   ThoughtsChatPanelHandle,
   ThoughtsChatPermissionMode,
 } from './chat-panel/types';
+import {
+  fetchThoughtsOperatorDefaults,
+  THOUGHTS_OPERATOR_DEFAULTS_FALLBACK,
+} from './operator-defaults';
 
 export type { ThoughtsChatPanelHandle, ThoughtsChatPanelChromeState, ThoughtsChatPermissionMode };
 
@@ -143,13 +148,19 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
-  const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(() => readAdaptiveThinkingEnabled());
-  const [thinkingOverride, setThinkingOverride] = useState<ManualThinkingEffort | null>(() => readStoredOrchestratorThinkingOverride());
-  const [orchestratorModel, setOrchestratorModel] = useState(DEFAULT_ORCHESTRATOR_MODEL);
+  const [operatorDefaults, setOperatorDefaults] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
+  const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
+    () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
+  );
+  const [thinkingOverride, setThinkingOverride] = useState<ManualThinkingEffort | null>(
+    () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).thinkingOverride,
+  );
+  const [orchestratorModel, setOrchestratorModel] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.orchestratorModel);
   const [chatMessages, setChatMessages] = useState<MobileTranscriptEntry[]>([]);
   const [planText, setPlanText] = useState<string | null>(null);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [targetAgentKey, setTargetAgentKey] = useState<string>('__claude__');
+  const thinkingPreferenceTouchedRef = useRef(false);
   const pollRef = useRef<number | null>(null);
   const pollDelayRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -176,9 +187,28 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   });
 
   useEffect(() => {
-    if (!resolvedRepoPath) return;
-    setOrchestratorModel(readStoredOrchestratorModel(resolvedRepoPath) ?? DEFAULT_ORCHESTRATOR_MODEL);
-  }, [resolvedRepoPath]);
+    const controller = new AbortController();
+
+    void (async () => {
+      const defaults = await fetchThoughtsOperatorDefaults(controller.signal);
+      if (controller.signal.aborted) return;
+      setOperatorDefaults(defaults);
+      if (thinkingPreferenceTouchedRef.current) return;
+      const nextThinkingPreferences = resolveInitialOrchestratorThinkingPreferences(defaults.thinkingEffort);
+      setAdaptiveThinkingEnabled(nextThinkingPreferences.adaptiveThinkingEnabled);
+      setThinkingOverride(nextThinkingPreferences.thinkingOverride);
+    })();
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!resolvedRepoPath) {
+      setOrchestratorModel(operatorDefaults.orchestratorModel);
+      return;
+    }
+    setOrchestratorModel(readStoredOrchestratorModel(resolvedRepoPath) ?? operatorDefaults.orchestratorModel);
+  }, [operatorDefaults.orchestratorModel, resolvedRepoPath]);
 
   useEffect(() => subscribeOrchestratorThinkingPreferences(() => {
     setAdaptiveThinkingEnabled(readAdaptiveThinkingEnabled());
@@ -836,6 +866,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [handleTaskSend]);
 
   const handleEffortChange = useCallback((next: ThinkingEffort) => {
+    thinkingPreferenceTouchedRef.current = true;
     const nextOverride = next === 'adaptive' ? null : next;
     setThinkingOverride(nextOverride);
     writeStoredOrchestratorThinkingOverride(nextOverride);
