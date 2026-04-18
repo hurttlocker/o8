@@ -191,13 +191,14 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     ? packet.referenceLabel.trim()
     : nextPacketReferenceLabel(existing);
   const queueState = normalizeQueueState(packet.queueState, packet.status === 'queued' ? 'queued' : packet.status === 'running' || packet.status === 'awaiting_review' ? 'queued' : packet.status === 'blocked' ? 'held' : 'draft');
+  const branchTarget = typeof packet.branchTarget === 'string' ? packet.branchTarget.trim() : '';
   return {
     id: typeof packet.id === 'string' && packet.id.trim() ? packet.id.trim() : `pkt-${Date.now()}-${index + 1}`,
     referenceLabel,
     title: typeof packet.title === 'string' && packet.title.trim() ? packet.title : `Packet ${index + 1}`,
     summary: typeof packet.summary === 'string' ? packet.summary : '',
     workspaceTargetPath: typeof packet.workspaceTargetPath === 'string' && packet.workspaceTargetPath.trim() ? packet.workspaceTargetPath : null,
-    branchTarget: typeof packet.branchTarget === 'string' && packet.branchTarget.trim() ? packet.branchTarget : 'main',
+    branchTarget: branchTarget || (queueState === 'draft' ? '' : 'main'),
     runtime: packet.runtime === 'claude-code' ? 'claude-code' : 'codex',
     dependencyLabels: Array.isArray(packet.dependencyLabels)
       ? packet.dependencyLabels.map((label) => String(label).trim()).filter(Boolean).slice(0, 8)
