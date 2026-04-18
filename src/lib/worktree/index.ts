@@ -4,7 +4,7 @@
  * @see https://github.com/hurttlocker/cortex-ide/issues/65
  */
 
-export { WorktreeManager } from './manager';
+export { WorktreeManager, WorktreeRebaseConflictError } from './manager';
 
 export {
   prepareLaunchWorktree,

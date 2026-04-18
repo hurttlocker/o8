@@ -2,7 +2,11 @@ import type { AgentSummary } from '@/lib/fleet/types';
 import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
-import { linkSessionToWorktree, prepareLaunchWorktree } from '@/lib/worktree';
+import {
+  linkSessionToWorktree,
+  prepareLaunchWorktree,
+  WorktreeRebaseConflictError,
+} from '@/lib/worktree';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
@@ -116,8 +120,10 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   const repoEntry = shouldCreateWorktree
     ? await import('@/lib/repos/registry').then((m) => m.findRepoByLocalPath(repoPath)).catch(() => null)
     : null;
-  const launchWorktree = shouldCreateWorktree
-    ? await prepareLaunchWorktree({
+  let launchWorktree: Awaited<ReturnType<typeof prepareLaunchWorktree>> = null;
+  if (shouldCreateWorktree) {
+    try {
+      launchWorktree = await prepareLaunchWorktree({
         repoRoot: repoPath,
         agentType: runtimeId,
         taskName: payload.taskName?.trim() || summarizeTaskName(prompt),
@@ -126,8 +132,60 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         skipSetup: payload.skipSetup,
         envMode: repoEntry?.setup.envMode,
         envFiles: repoEntry?.setup.envFiles,
-      })
-    : null;
+      });
+    } catch (err) {
+      // Rebase-before-launch failed. Don't spawn codex into a broken tree —
+      // instead, mark any existing lane as awaiting_input so the operator
+      // sees it, and enqueue a supervisor inbox item describing the conflict.
+      if (err instanceof WorktreeRebaseConflictError) {
+        const baseBranchForInbox = err.baseBranch;
+        const conflictFiles = err.conflictFiles;
+        const conflictBranch = err.branch;
+
+        if (payload.existingLaneId) {
+          try {
+            const { setLaneStatus } = await import('@/lib/lane/registry');
+            setLaneStatus(payload.existingLaneId, 'awaiting_input', 'system', 'rebase_conflict');
+          } catch (laneErr) {
+            console.warn(
+              `[worktree-rebase] Failed to mark lane ${payload.existingLaneId} as awaiting_input: ${laneErr instanceof Error ? laneErr.message : laneErr}`,
+            );
+          }
+        }
+
+        try {
+          const { enqueueInboxItem } = await import('@/lib/supervisor/inbox');
+          enqueueInboxItem({
+            repoPath,
+            packetId: null,
+            kind: 'merge_blocked',
+            payload: {
+              stage: 'pre_launch_rebase',
+              baseBranch: baseBranchForInbox,
+              branch: conflictBranch,
+              conflictFiles,
+              laneId: payload.existingLaneId ?? null,
+              runtime: runtimeId,
+              errorMessage: err.message,
+              errorExcerpt: conflictFiles.length > 0
+                ? `Rebase onto origin/${baseBranchForInbox} failed. ${conflictFiles.length} conflicting file${conflictFiles.length === 1 ? '' : 's'}: ${conflictFiles.slice(0, 5).join(', ')}${conflictFiles.length > 5 ? '…' : ''}`
+                : `Rebase onto origin/${baseBranchForInbox} failed. ${err.message}`,
+            },
+            status: 'human_required',
+          });
+        } catch (inboxErr) {
+          console.warn(
+            `[worktree-rebase] Failed to enqueue supervisor inbox item: ${inboxErr instanceof Error ? inboxErr.message : inboxErr}`,
+          );
+        }
+
+        throw new Error(
+          `Rebase onto origin/${baseBranchForInbox} failed before launching ${runtimeId}. Resolve the conflict manually and retry.${conflictFiles.length > 0 ? ` Conflicting files: ${conflictFiles.join(', ')}` : ''}`,
+        );
+      }
+      throw err;
+    }
+  }
 
   const cwd = launchWorktree?.cwd ?? repoPath;
   const result = await runtime.launch({
