@@ -28,6 +28,10 @@ export async function handleCompactSlashCommand(
     return { handled: true };
   }
 
-  context.replaceTranscript(compacted.transcript);
+  context.replaceTranscript([...compacted.transcript, buildSlashCommandEntry({
+    name: 'compact',
+    summary: 'Compacted the orchestrator context and kept the live tail visible.',
+    chips: [{ label: 'manual', tone: 'emerald' }],
+  })]);
   return { handled: true };
 }
