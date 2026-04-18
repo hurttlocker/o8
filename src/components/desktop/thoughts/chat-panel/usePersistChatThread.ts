@@ -21,6 +21,7 @@ function serializeMessages(msgs: MobileTranscriptEntry[]) {
     thinkingSteps: m.thinkingSteps,
     thinkingDurationMs: m.thinkingDurationMs,
     recalledFacts: m.recalledFacts,
+    command: m.command,
     compaction: m.compaction,
   }));
 }

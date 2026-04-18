@@ -6,12 +6,19 @@ import type {
   MobileTranscriptToolCall,
   MobileTranscriptToolLaunchLink,
 } from '@/lib/mobile/types';
+import {
+  clearQueuedOrchestratorSessionPrelude,
+  consumeOrchestratorSessionPrelude,
+  hasQueuedOrchestratorSessionPrelude,
+  queueOrchestratorSessionPrelude,
+} from '@/lib/orchestrator/store';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
 export type OrchestratorPermissionMode = 'full' | 'plan';
+export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-7';
 
 interface OrchestratorStreamResult {
   messages: MobileTranscriptEntry[];
@@ -21,7 +28,16 @@ interface OrchestratorStreamResult {
   tokenCount: number;
   runningTotal: number;
   estimateNextTurnTokens: (message: string) => number;
-  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max' }) => void;
+  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max'; model?: string }) => void;
+  appendLocalEntries: (entries: MobileTranscriptEntry[]) => void;
+  replaceTranscript: (entries: MobileTranscriptEntry[]) => void;
+  fetchTelemetrySnapshot: () => Promise<{ totalTokens: number | null; estimatedCostUsd: number | null; model: string | null }>;
+  compactNow: (options?: { keepTailCount?: number; source?: 'manual' | 'handoff' }) => Promise<{
+    applied: boolean;
+    transcript: MobileTranscriptEntry[];
+    resumePrelude: string | null;
+    tokensAfter: number;
+  } | null>;
   reset: () => void;
   connected: boolean;
 }
@@ -52,6 +68,10 @@ interface CompactResponsePayload {
 
 function approxTokens(value: string): number {
   return Math.max(0, Math.ceil(value.trim().length / 4));
+}
+
+function sortTranscriptEntries(entries: MobileTranscriptEntry[]) {
+  return [...entries].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
 }
 
 function getWsUrl(): string {
@@ -327,7 +347,7 @@ export function useOrchestratorStream(
 
   const refreshTokenTelemetry = useCallback(async () => {
     const activeRepoPath = repoPathRef.current;
-    if (!activeRepoPath) return;
+    if (!activeRepoPath) return null;
 
     try {
       let sessionKey = telemetrySessionKeyRef.current;
@@ -365,19 +385,31 @@ export function useOrchestratorStream(
           .sort((left, right) => right.score - left.score)[0]?.sessionKey ?? null;
         telemetrySessionKeyRef.current = sessionKey;
       }
-      if (!sessionKey) return;
+      if (!sessionKey) return null;
 
       const response = await fetch(`/api/runtime/telemetry?sessionKey=${encodeURIComponent(sessionKey)}`, { cache: 'no-store' });
       if (!response.ok) {
         telemetrySessionKeyRef.current = null;
-        return;
+        return null;
       }
 
-      const payload = await response.json() as { telemetry?: { totalTokens?: number | null } };
+      const payload = await response.json() as {
+        telemetry?: {
+          totalTokens?: number | null;
+          estimatedCostUsd?: number | null;
+          model?: string | null;
+        };
+      };
       const totalTokens = typeof payload.telemetry?.totalTokens === 'number'
         ? Math.max(0, Math.min(ORCHESTRATOR_CONTEXT_LIMIT, payload.telemetry.totalTokens))
         : null;
-      if (totalTokens == null) return;
+      const estimatedCostUsd = typeof payload.telemetry?.estimatedCostUsd === 'number'
+        ? payload.telemetry.estimatedCostUsd
+        : null;
+      const telemetryModel = typeof payload.telemetry?.model === 'string' ? payload.telemetry.model : null;
+      if (totalTokens == null) {
+        return { totalTokens: null, estimatedCostUsd, model: telemetryModel };
+      }
 
       const previousTotal = telemetryTotalRef.current;
       const nextTokenCount = previousTotal === null || totalTokens < previousTotal
@@ -388,8 +420,9 @@ export function useOrchestratorStream(
       setTokenCount(nextTokenCount);
       setRunningTotal(totalTokens);
       emitTokenUsage({ repoPath: activeRepoPath, tokenCount: nextTokenCount, runningTotal: totalTokens });
+      return { totalTokens, estimatedCostUsd, model: telemetryModel };
     } catch {
-      // silent
+      return null;
     }
   }, []);
 
@@ -397,11 +430,18 @@ export function useOrchestratorStream(
     activeRepoPath: string,
     nextRunningTotal: number,
     nextMessages: MobileTranscriptEntry[],
+    options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff' },
   ): Promise<CompactResponsePayload | null> => {
     const response = await fetch('/api/orchestrator/compact', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repoPath: activeRepoPath, runningTotal: nextRunningTotal, messages: nextMessages }),
+      body: JSON.stringify({
+        repoPath: activeRepoPath,
+        runningTotal: nextRunningTotal,
+        messages: nextMessages,
+        keepTailCount: options?.keepTailCount,
+        trigger: options?.trigger,
+      }),
     });
     if (!response.ok) return null;
     return await response.json() as CompactResponsePayload;
@@ -418,12 +458,16 @@ export function useOrchestratorStream(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repoPath: activeRepoPath }),
     }).catch(() => null);
-    const compactKey = `o8:orchestrator:auto-compact:${activeRepoPath}`;
-    if (payload.resumePrelude && typeof window !== 'undefined') window.localStorage.setItem(compactKey, payload.resumePrelude);
+    if (payload.resumePrelude) {
+      queueOrchestratorSessionPrelude(activeRepoPath, payload.resumePrelude, 'replace');
+    }
     const nextTotal = typeof payload.tokensAfter === 'number' ? payload.tokensAfter : 0;
     telemetrySessionKeyRef.current = null;
     telemetryTotalRef.current = nextTotal;
-    if (options?.setTranscript !== false) setMessages(payload.transcript);
+    if (options?.setTranscript !== false) {
+      messagesRef.current = payload.transcript;
+      setMessages(payload.transcript);
+    }
     setTokenCount(0);
     setRunningTotal(nextTotal);
     emitTokenUsage({ repoPath: activeRepoPath, tokenCount: 0, runningTotal: nextTotal });
@@ -440,6 +484,32 @@ export function useOrchestratorStream(
     + ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS
     + approxTokens(message)
   ), []);
+
+  const replaceTranscript = useCallback((entries: MobileTranscriptEntry[]) => {
+    const next = sortTranscriptEntries(entries);
+    messagesRef.current = next;
+    setMessages(next);
+  }, []);
+
+  const appendLocalEntries = useCallback((entries: MobileTranscriptEntry[]) => {
+    if (entries.length === 0) return;
+    setMessages((prev) => {
+      const next = [...prev];
+      const indexById = new Map(next.map((entry, index) => [entry.id, index] as const));
+      for (const entry of entries) {
+        const existingIndex = indexById.get(entry.id);
+        if (existingIndex == null) {
+          indexById.set(entry.id, next.length);
+          next.push(entry);
+        } else {
+          next[existingIndex] = entry;
+        }
+      }
+      const sorted = sortTranscriptEntries(next);
+      messagesRef.current = sorted;
+      return sorted;
+    });
+  }, []);
 
   const beginTurn = useCallback(() => {
     if (!activeTurnRef.current) {
@@ -869,10 +939,9 @@ export function useOrchestratorStream(
 
   useEffect(() => {
     if (!repoPath) return;
-    const compactKey = `o8:orchestrator:auto-compact:${repoPath}`;
     if (runningTotal < ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR) autoCompactArmedRef.current = true;
     if (status !== 'ready' || runningTotal < ORCHESTRATOR_AUTO_COMPACT_THRESHOLD || autoCompactInFlightRef.current || !autoCompactArmedRef.current) return;
-    if (typeof window !== 'undefined' && window.localStorage.getItem(compactKey)) return;
+    if (hasQueuedOrchestratorSessionPrelude(repoPath)) return;
     autoCompactInFlightRef.current = true;
     autoCompactArmedRef.current = false;
     let started = false;
@@ -916,18 +985,44 @@ export function useOrchestratorStream(
     return () => clearInterval(interval);
   }, [repoPath, healStaleBusyState]);
 
-  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max' }) => {
+  const compactNow = useCallback(async (_options?: { keepTailCount?: number; source?: 'manual' | 'handoff' }) => {
+    const activeRepoPath = repoPathRef.current;
+    if (!activeRepoPath) return null;
+    const payload = await requestCompaction(activeRepoPath, runningTotalRef.current, messagesRef.current, {
+      keepTailCount: _options?.keepTailCount,
+      trigger: _options?.source ?? 'manual',
+    });
+    if (!payload?.ok) return null;
+    if (!payload.applied || !Array.isArray(payload.transcript)) {
+      return {
+        applied: false,
+        transcript: messagesRef.current,
+        resumePrelude: null,
+        tokensAfter: runningTotalRef.current,
+      };
+    }
+    const primed = await primeCompactedSession(activeRepoPath, payload, { setTranscript: false });
+    if (!primed) return null;
+    return {
+      applied: true,
+      transcript: payload.transcript,
+      resumePrelude: primed.resumePrelude,
+      tokensAfter: primed.nextTotal,
+    };
+  }, [primeCompactedSession, requestCompaction]);
+
+  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max'; model?: string }) => {
     if (!repoPathRef.current) return;
 
     const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
     const thinkingEffort = options?.thinkingEffort ?? 'max';
+    const model = options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
 
     void (async () => {
       const activeRepoPath = repoPathRef.current;
       if (!activeRepoPath) return;
       const transcriptSnapshot = messagesRef.current;
       let planCaptureSource = transcriptSnapshot;
-      const compactKey = `o8:orchestrator:auto-compact:${activeRepoPath}`;
       const projectedTokens = estimateNextTurnTokens(message);
       if (projectedTokens >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
         const compactingId = `orch-compacting-${Date.now()}`;
@@ -959,7 +1054,7 @@ export function useOrchestratorStream(
             + ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS
             + approxTokens(message);
           if (postCompactProjection >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
-            if (typeof window !== 'undefined') window.localStorage.removeItem(compactKey);
+            clearQueuedOrchestratorSessionPrelude(activeRepoPath);
             throw new Error(`Context is still above the 85% safety cap after compaction. Re-send this message:\n\n${message}`);
           }
           planCaptureSource = primed.transcript;
@@ -999,10 +1094,9 @@ export function useOrchestratorStream(
       setStatus('busy');
 
       let outboundMessage = message;
-      const resumePrelude = typeof window !== 'undefined' ? window.localStorage.getItem(compactKey) : null;
+      const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath);
       if (resumePrelude) {
         outboundMessage = `${resumePrelude}\n\nOperator message:\n${message}`;
-        window.localStorage.removeItem(compactKey);
       }
       const payload = JSON.stringify({
         type: 'orchestrator-send',
@@ -1010,6 +1104,7 @@ export function useOrchestratorStream(
         message: outboundMessage,
         permissionMode,
         thinkingEffort,
+        model,
       });
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
@@ -1051,9 +1146,26 @@ export function useOrchestratorStream(
     statusRef.current = nextStatus;
     lastEventAtRef.current = Date.now();
     setStatus(nextStatus);
-    if (typeof window !== 'undefined' && repoPathRef.current) window.localStorage.removeItem(`o8:orchestrator:auto-compact:${repoPathRef.current}`);
+    clearQueuedOrchestratorSessionPrelude(repoPathRef.current);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
   }, [connected, resetFirstTurnPlanCapture]);
 
-  return { messages, planText, status, busyState, tokenCount, runningTotal, estimateNextTurnTokens, send, reset, connected };
+  return {
+    messages,
+    planText,
+    status,
+    busyState,
+    tokenCount,
+    runningTotal,
+    estimateNextTurnTokens,
+    send,
+    appendLocalEntries,
+    replaceTranscript,
+    fetchTelemetrySnapshot: async () => (
+      await refreshTokenTelemetry() ?? { totalTokens: runningTotalRef.current, estimatedCostUsd: null, model: null }
+    ),
+    compactNow,
+    reset,
+    connected,
+  };
 }
