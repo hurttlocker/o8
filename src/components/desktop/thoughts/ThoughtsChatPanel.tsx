@@ -571,22 +571,32 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         const thoughtsThreads = (data.conversations ?? [])
           .filter((t) => t.tabId.startsWith('thoughts-'))
           .sort((a, b) => new Date(b.modifiedAt ?? 0).getTime() - new Date(a.modifiedAt ?? 0).getTime());
-        if (thoughtsThreads.length > 0) {
-          const latest = thoughtsThreads[0];
-          const histRes = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(latest.tabId)}`);
-          if (!histRes.ok) return;
-          const histData = await histRes.json() as {
-            messages?: ThoughtsHistoryMessage[];
-            planText?: string | null;
-          };
-          const msgs = mapHistoryMessagesToTranscript(histData.messages ?? []);
-          setPlanText(histData.planText ?? null);
-          if (msgs.length > 0) {
-            setChatMessages(msgs);
-            orchStream.replaceTranscript(msgs);
-            threadIdRef.current = latest.tabId;
-            setThreadId(latest.tabId);
-          }
+        if (thoughtsThreads.length === 0) return;
+
+        const latest = thoughtsThreads[0];
+        // Recovery window: only auto-restore if the thread was modified within
+        // the last 60s (i.e. accidental reload mid-conversation). Anything
+        // older = fresh start; the History sidebar handles intentional resume.
+        const modifiedAt = latest.modifiedAt ? new Date(latest.modifiedAt).getTime() : 0;
+        const ageMs = Date.now() - modifiedAt;
+        if (!modifiedAt || ageMs > 60_000) {
+          console.log(`[orchestrator] Skipping auto-restore — latest thread is ${Math.round(ageMs / 1000)}s old (>60s threshold)`);
+          return;
+        }
+
+        const histRes = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(latest.tabId)}`);
+        if (!histRes.ok) return;
+        const histData = await histRes.json() as {
+          messages?: ThoughtsHistoryMessage[];
+          planText?: string | null;
+        };
+        const msgs = mapHistoryMessagesToTranscript(histData.messages ?? []);
+        setPlanText(histData.planText ?? null);
+        if (msgs.length > 0) {
+          setChatMessages(msgs);
+          orchStream.replaceTranscript(msgs);
+          threadIdRef.current = latest.tabId;
+          setThreadId(latest.tabId);
         }
       } catch {
         // silent
