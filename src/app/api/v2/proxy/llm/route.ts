@@ -5,6 +5,12 @@ import { createApproval } from '@/lib/approvals/store';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
+import {
+  parseAnthropicStopMetadata,
+  resolveAnthropicTaskBudget,
+  type AnthropicStopMetadata,
+  type ResolvedAnthropicTaskBudget,
+} from '@/lib/llm/anthropic-task-budget';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
@@ -144,10 +150,31 @@ function withAnthropicPromptCaching(body: Record<string, unknown>, provider: str
   return nextBody;
 }
 
+function mergeAnthropicStopState(
+  current: AnthropicStopMetadata | null,
+  next: AnthropicStopMetadata | null,
+): AnthropicStopMetadata | null {
+  if (!current) return next;
+  if (!next) return current;
+
+  return {
+    stopReason: next.stopReason ?? current.stopReason,
+    ...(next.stopSequence !== undefined
+      ? { stopSequence: next.stopSequence }
+      : current.stopSequence !== undefined
+        ? { stopSequence: current.stopSequence }
+        : {}),
+  };
+}
+
 function buildUsageEvent(
   provider: string,
   model: string,
   usage: AnthropicUsageTotals,
+  options?: {
+    stopMetadata?: AnthropicStopMetadata | null;
+    taskBudget?: ResolvedAnthropicTaskBudget | null;
+  },
 ) {
   const event: Record<string, unknown> = {
     type: 'usage',
@@ -165,6 +192,19 @@ function buildUsageEvent(
       cache_read_input_tokens: usage.cacheReadTokens,
       cache_creation_input_tokens: usage.cacheWriteTokens,
     };
+    if (options?.stopMetadata?.stopReason) {
+      event.stopReason = options.stopMetadata.stopReason;
+    }
+    if (options?.stopMetadata?.stopSequence !== undefined) {
+      event.stopSequence = options.stopMetadata.stopSequence;
+    }
+    if (options?.taskBudget) {
+      event.taskBudget = options.taskBudget.taskBudget;
+      event.taskBudgetSource = options.taskBudget.source;
+      if (options.taskBudget.phase) {
+        event.taskPhase = options.taskBudget.phase;
+      }
+    }
   }
 
   return event;
@@ -197,6 +237,14 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   if (!isSupportedProvider(provider)) {
     return jsonError(`Unsupported provider: ${provider}`, 400);
   }
+
+  const anthropicTaskBudgetResult = provider === 'anthropic'
+    ? resolveAnthropicTaskBudget(body as Record<string, unknown>)
+    : { value: null as ResolvedAnthropicTaskBudget | null };
+  if (anthropicTaskBudgetResult.error) {
+    return jsonError(anthropicTaskBudgetResult.error, 400);
+  }
+  const anthropicTaskBudget = anthropicTaskBudgetResult.value;
 
   const approvedTools = new Set(approvedToolsList ?? []);
   const toolOverrides = rawToolOverrides ?? {};
@@ -318,6 +366,14 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       config.buildBody(model, requestMessages) as Record<string, unknown>,
       provider,
     );
+    if (provider === 'anthropic' && anthropicTaskBudget) {
+      upstreamBody.task_budget = anthropicTaskBudget.taskBudget;
+      console.info(
+        `[llm-proxy] Anthropic task_budget=${anthropicTaskBudget.taskBudget}`
+        + `${anthropicTaskBudget.phase ? ` phase=${anthropicTaskBudget.phase}` : ''}`
+        + ` source=${anthropicTaskBudget.source}`,
+      );
+    }
     if (disableTools) {
       delete upstreamBody.tools;
     }
@@ -343,7 +399,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
   };
-  let fullResponseText = '';
+  let latestAnthropicStopMetadata: AnthropicStopMetadata | null = null;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -355,6 +411,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       async function processStream(response: globalThis.Response): Promise<{
         toolCalls: Array<{ name: string; id: string; args: Record<string, unknown> }>;
         usage: AnthropicUsageTotals;
+        stopMetadata: AnthropicStopMetadata | null;
       }> {
         const reader = response.body?.getReader();
         if (!reader) {
@@ -366,6 +423,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
             },
+            stopMetadata: null,
           };
         }
 
@@ -381,6 +439,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
         };
+        let stopMetadata: AnthropicStopMetadata | null = null;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -397,6 +456,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                 usage.cacheReadTokens = Math.max(usage.cacheReadTokens, anthropicUsage.cacheReadTokens);
                 usage.cacheWriteTokens = Math.max(usage.cacheWriteTokens, anthropicUsage.cacheWriteTokens);
               }
+              stopMetadata = mergeAnthropicStopState(stopMetadata, parseAnthropicStopMetadata(line));
             }
             const parsed = config.parseStream(line);
             if (!parsed) continue;
@@ -406,7 +466,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               continue;
             }
             if (parsed.type === 'content') {
-              fullResponseText += parsed.text;
               enqueue(JSON.stringify({ type: 'content', text: parsed.text }));
               continue;
             }
@@ -442,17 +501,23 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           }
         }
 
-        return { toolCalls, usage };
+        return { toolCalls, usage, stopMetadata };
       }
 
       try {
-        let { toolCalls, usage } = await processStream(upstream);
+        const initialResult = await processStream(upstream);
+        let toolCalls = initialResult.toolCalls;
+        const { usage, stopMetadata } = initialResult;
         totalUsage = {
           inputTokens: totalUsage.inputTokens + usage.inputTokens,
           outputTokens: totalUsage.outputTokens + usage.outputTokens,
           cacheReadTokens: totalUsage.cacheReadTokens + usage.cacheReadTokens,
           cacheWriteTokens: totalUsage.cacheWriteTokens + usage.cacheWriteTokens,
         };
+        latestAnthropicStopMetadata = mergeAnthropicStopState(latestAnthropicStopMetadata, stopMetadata);
+        if (stopMetadata?.stopReason === 'budget_exhausted') {
+          console.info(`[llm-proxy] Anthropic stop_reason=budget_exhausted model=${model}`);
+        }
         let loopCount = 0;
         const allSources: Array<{ title: string; url?: string; path?: string }> = [];
 
@@ -562,7 +627,10 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                 diff,
               }));
               enqueue(JSON.stringify({ type: 'content', text: '' }));
-              enqueue(JSON.stringify(buildUsageEvent(provider, model, totalUsage)));
+              enqueue(JSON.stringify(buildUsageEvent(provider, model, totalUsage, {
+                stopMetadata: latestAnthropicStopMetadata,
+                taskBudget: anthropicTaskBudget,
+              })));
               enqueue('[DONE]');
               controller.close();
               return;
@@ -619,6 +687,13 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             cacheReadTokens: totalUsage.cacheReadTokens + followResult.usage.cacheReadTokens,
             cacheWriteTokens: totalUsage.cacheWriteTokens + followResult.usage.cacheWriteTokens,
           };
+          latestAnthropicStopMetadata = mergeAnthropicStopState(
+            latestAnthropicStopMetadata,
+            followResult.stopMetadata,
+          );
+          if (followResult.stopMetadata?.stopReason === 'budget_exhausted') {
+            console.info(`[llm-proxy] Anthropic stop_reason=budget_exhausted model=${model}`);
+          }
         }
 
         const seen = new Set<string>();
@@ -635,7 +710,10 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           }));
         }
 
-        const usageEvent = buildUsageEvent(provider, model, totalUsage);
+        const usageEvent = buildUsageEvent(provider, model, totalUsage, {
+          stopMetadata: latestAnthropicStopMetadata,
+          taskBudget: anthropicTaskBudget,
+        });
         enqueue(JSON.stringify(usageEvent));
         enqueue('[DONE]');
 
