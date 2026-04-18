@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
@@ -72,6 +73,11 @@ export async function POST(request: NextRequest) {
       ? (m.content as string).replace(/!\[[^\]]*\]\(data:[^)]+\)/g, '[image]')
       : m.content,
   }));
+  const extractedPlanText = extractPlanFromTranscript(messages.map((m: Record<string, unknown>) => ({
+    role: typeof m.role === 'string' ? m.role : undefined,
+    content: m.content,
+    toolCalls: m.toolCalls,
+  })));
 
   // Preserve starred status from existing file
   let starred = false;
@@ -98,7 +104,7 @@ export async function POST(request: NextRequest) {
     savedAt: new Date().toISOString(),
     starred: body.starred ?? starred,
     title: body.title ?? title,
-    planText: normalizePlanText(body.planText) ?? planText,
+    planText: normalizePlanText(body.planText) ?? planText ?? extractedPlanText,
     repoName: body.repoName ?? repoName,
     repoPath: body.repoPath ?? repoPath,
     repoBranch: body.repoBranch ?? repoBranch,
