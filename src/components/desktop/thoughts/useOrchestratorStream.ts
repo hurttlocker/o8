@@ -3,14 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   MobileTranscriptEntry,
-  MobileTranscriptToolCall,
   MobileTranscriptToolLaunchLink,
 } from '@/lib/mobile/types';
+import {
+  buildMissionArchiveTitle,
+  extractLatestCompactionSummary,
+  serializeThoughtsHistoryMessages,
+  transcriptMatchesStoredHistory,
+} from '@/lib/orchestrator/history-transcript';
 import {
   clearQueuedOrchestratorSessionPrelude,
   consumeOrchestratorSessionPrelude,
   hasQueuedOrchestratorSessionPrelude,
   queueOrchestratorSessionPrelude,
+  subscribeOrchestratorMissionCompleted,
+  type OrchestratorMissionCompletedDetail,
 } from '@/lib/orchestrator/store';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
@@ -18,6 +25,7 @@ import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thought
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
 export type OrchestratorPermissionMode = 'full' | 'plan';
+type OrchestratorThinkingEffort = 'adaptive' | 'medium' | 'high' | 'max';
 export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-7';
 
 interface OrchestratorStreamResult {
@@ -28,7 +36,7 @@ interface OrchestratorStreamResult {
   tokenCount: number;
   runningTotal: number;
   estimateNextTurnTokens: (message: string) => number;
-  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max'; model?: string }) => void;
+  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: OrchestratorThinkingEffort; model?: string }) => void;
   appendLocalEntries: (entries: MobileTranscriptEntry[]) => void;
   replaceTranscript: (entries: MobileTranscriptEntry[]) => void;
   fetchTelemetrySnapshot: () => Promise<{ totalTokens: number | null; estimatedCostUsd: number | null; model: string | null }>;
@@ -42,7 +50,6 @@ interface OrchestratorStreamResult {
   connected: boolean;
 }
 
-let agentUpdateSeq = 0;
 const ORCHESTRATOR_CONTEXT_LIMIT = 1_000_000;
 const ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR = 250_000;
 const ORCHESTRATOR_AUTO_COMPACT_THRESHOLD = 300_000;
@@ -66,12 +73,31 @@ interface CompactResponsePayload {
   tokensAfter?: number;
 }
 
+interface ThoughtsHistoryListEntry {
+  tabId: string;
+  messageCount: number;
+  modifiedAt?: string;
+  repoPath?: string | null;
+}
+
 function approxTokens(value: string): number {
   return Math.max(0, Math.ceil(value.trim().length / 4));
 }
 
 function sortTranscriptEntries(entries: MobileTranscriptEntry[]) {
   return [...entries].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
+}
+
+function normalizeRepoPath(value: string | null | undefined) {
+  return (value ?? '').trim().replace(/\/+$/, '');
+}
+
+function missionMergeLabel(count: number) {
+  return `${count} MERGE${count === 1 ? '' : 'S'}`;
+}
+
+function buildMissionTransitionEntry(id: string, text: string, timestamp: number): MobileTranscriptEntry {
+  return { id, role: 'system', text, timestamp };
 }
 
 function getWsUrl(): string {
@@ -127,112 +153,6 @@ function createIdleBusyState(): ThoughtsOrchestratorBusyState {
   };
 }
 
-function summarizeToolActivity(name: string, args?: Record<string, unknown>): string {
-  const normalized = name.trim() || 'tool';
-  const lower = normalized.toLowerCase();
-  const read = (...values: unknown[]) => values.find((value) => typeof value === 'string' && value.trim()) as string | undefined;
-
-  if (lower === 'exec' || lower === 'exec_command') {
-    return read(args?.command, args?.cmd)?.trim() ?? normalized;
-  }
-  if (lower === 'cortex_launch_agent' || lower === 'mcp__cortex__cortex_launch_agent') {
-    return read(args?.taskName, args?.task_name, args?.prompt)?.trim() ?? 'Launching agent';
-  }
-  if (lower === 'read_file' || lower === 'read') {
-    return read(args?.file_path, args?.path)?.trim() ?? 'Reading file';
-  }
-  if (lower === 'search_web' || lower === 'web_search') {
-    return read(args?.query, args?.q)?.trim() ?? 'Searching the web';
-  }
-  if (lower === 'list_files' || lower === 'glob' || lower === 'ls') {
-    return read(args?.path, args?.pattern)?.trim() ?? 'Listing workspace files';
-  }
-  return read(args?.path, args?.file_path, args?.url, args?.query, args?.taskName, args?.prompt)?.trim() ?? normalized;
-}
-
-function normalizeLaunchLabel(taskName?: string | null, prompt?: string | null, surfaceId?: string | null): string {
-  const issueRef = taskName?.match(/#\d+/)?.[0] ?? prompt?.match(/#\d+/)?.[0] ?? null;
-  if (issueRef) {
-    const suffix = taskName?.replace(/^.*?#\d+\s*/u, '').replace(/^[-:]\s*/, '').trim();
-    return suffix ? `${issueRef} ${suffix}` : issueRef;
-  }
-  const label = taskName?.trim() || prompt?.trim() || surfaceId?.trim() || 'agent session';
-  return label.length > 48 ? `${label.slice(0, 47)}…` : label;
-}
-
-function parseJsonObject(text: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function buildLaunchLink(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  output: string,
-): MobileTranscriptToolLaunchLink | null {
-  const lower = name.toLowerCase();
-  if (lower !== 'cortex_launch_agent' && lower !== 'mcp__cortex__cortex_launch_agent') {
-    return null;
-  }
-
-  const payload = parseJsonObject(output);
-  const ok = payload?.ok;
-  const surfaceId = typeof payload?.surfaceId === 'string' ? payload.surfaceId : null;
-  if (ok === false || !surfaceId) {
-    return null;
-  }
-
-  return {
-    surfaceId,
-    repoPath: typeof payload?.worktreePath === 'string'
-      ? payload.worktreePath
-      : typeof args?.repoPath === 'string'
-        ? args.repoPath
-        : null,
-    laneId: typeof payload?.laneId === 'string' ? payload.laneId : null,
-    branch: typeof payload?.branch === 'string' ? payload.branch : null,
-    worktreePath: typeof payload?.worktreePath === 'string' ? payload.worktreePath : null,
-    label: normalizeLaunchLabel(
-      typeof args?.taskName === 'string' ? args.taskName : null,
-      typeof args?.prompt === 'string' ? args.prompt : null,
-      surfaceId,
-    ),
-  };
-}
-
-function buildToolResultPreview(output: string): string | undefined {
-  const payload = parseJsonObject(output);
-  const note = typeof payload?.note === 'string' ? payload.note.trim() : '';
-  if (note) return note.length > 160 ? `${note.slice(0, 159)}…` : note;
-  const firstLine = output.split('\n').map((line) => line.trim()).find(Boolean) ?? '';
-  return firstLine ? (firstLine.length > 160 ? `${firstLine.slice(0, 159)}…` : firstLine) : undefined;
-}
-
-function buildTurnAutoSummary(turn: ActiveTurnState | null): string | null {
-  if (!turn) return null;
-  if (turn.launches.length === 0) {
-    return turn.toolCallsStarted > 0
-      ? `Completed ${turn.toolCallsStarted} tool call${turn.toolCallsStarted === 1 ? '' : 's'}. No agents launched.`
-      : null;
-  }
-
-  const launchSummary = turn.launches
-    .map((launch) => `Launched ${launch.label}${launch.laneId ? ` (ref ${launch.laneId})` : ''}.`)
-    .join(' ');
-
-  if (turn.launches.length === 1) {
-    return `${launchSummary} No other agents launched.`;
-  }
-
-  return `${launchSummary} ${turn.launches.length} agents launched total.`;
-}
-
 /**
  * Hook that connects to the orchestrator WebSocket channel for real-time
  * Claude Code streaming. Replaces the poll-based orchestrator flow.
@@ -277,6 +197,9 @@ export function useOrchestratorStream(
   const activeTurnRef = useRef<ActiveTurnState | null>(null);
   const autoCompactInFlightRef = useRef(false);
   const autoCompactArmedRef = useRef(true);
+  const missionRotationInFlightRef = useRef(false);
+  const pendingMissionCompletionRef = useRef<OrchestratorMissionCompletedDetail | null>(null);
+  const transitionStripTimerRef = useRef<number | null>(null);
 
   // #539 — reconnect reconciliation. eventCountRef advances on every relevant
   // orchestrator event; lastEventAtRef tracks wall-clock time of the last
@@ -329,21 +252,6 @@ export function useOrchestratorStream(
     planTextRef.current = nextPlanText;
     setPlanText(nextPlanText);
   }, [resetFirstTurnPlanCapture]);
-
-  const syncBusyState = useCallback(() => {
-    const turn = activeTurnRef.current;
-    if (!turn) {
-      setBusyState(createIdleBusyState());
-      return;
-    }
-    setBusyState({
-      active: true,
-      startedAt: turn.startedAt,
-      toolCallsStarted: turn.toolCallsStarted,
-      toolCallsCompleted: turn.toolCallsCompleted,
-      latestToolLabel: turn.latestToolLabel,
-    });
-  }, []);
 
   const refreshTokenTelemetry = useCallback(async () => {
     const activeRepoPath = repoPathRef.current;
@@ -511,42 +419,169 @@ export function useOrchestratorStream(
     });
   }, []);
 
-  const beginTurn = useCallback(() => {
-    if (!activeTurnRef.current) {
-      activeTurnRef.current = {
-        startedAt: Date.now(),
-        toolCallsStarted: 0,
-        toolCallsCompleted: 0,
-        latestToolLabel: null,
-        launches: [],
-      };
+  const reset = useCallback(() => {
+    const nextStatus = connected ? 'ready' : 'connecting';
+    resetEpochRef.current += 1;
+    messagesRef.current = [];
+    setMessages([]);
+    planTextRef.current = null;
+    setPlanText(null);
+    setBusyState(createIdleBusyState());
+    activeTurnRef.current = null;
+    setTokenCount(0);
+    runningTotalRef.current = 0;
+    setRunningTotal(0);
+    currentAssistantRef.current = null;
+    hasHistoryRef.current = false;
+    telemetrySessionKeyRef.current = null;
+    telemetryTotalRef.current = null;
+    autoCompactInFlightRef.current = false;
+    autoCompactArmedRef.current = true;
+    resetFirstTurnPlanCapture();
+    statusRef.current = nextStatus;
+    lastEventAtRef.current = Date.now();
+    setStatus(nextStatus);
+    if (transitionStripTimerRef.current) {
+      clearTimeout(transitionStripTimerRef.current);
+      transitionStripTimerRef.current = null;
     }
-    syncBusyState();
-  }, [syncBusyState]);
+    clearQueuedOrchestratorSessionPrelude(repoPathRef.current);
+    emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
+  }, [connected, resetFirstTurnPlanCapture]);
+
+  const findStoredThoughtsThreadTabId = useCallback(async (transcript: MobileTranscriptEntry[]) => {
+    if (transcript.length === 0) return null;
+
+    try {
+      const listResponse = await fetch('/api/v2/chat-history/list?include=orchestrator', { cache: 'no-store' });
+      if (!listResponse.ok) return null;
+      const payload = await listResponse.json() as { conversations?: ThoughtsHistoryListEntry[] };
+      const repoPathKey = normalizeRepoPath(repoPathRef.current);
+      const candidates = (payload.conversations ?? [])
+        .filter((thread) => thread.tabId.startsWith('thoughts-') && thread.messageCount === transcript.length)
+        .filter((thread) => {
+          const candidateRepoPath = normalizeRepoPath(thread.repoPath);
+          return !repoPathKey || !candidateRepoPath || candidateRepoPath === repoPathKey;
+        })
+        .sort((left, right) => new Date(right.modifiedAt ?? 0).getTime() - new Date(left.modifiedAt ?? 0).getTime())
+        .slice(0, 8);
+
+      for (const candidate of candidates) {
+        const historyResponse = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(candidate.tabId)}`, { cache: 'no-store' });
+        if (!historyResponse.ok) continue;
+        const history = await historyResponse.json() as { messages?: unknown[] };
+        if (transcriptMatchesStoredHistory(transcript, history.messages)) {
+          return candidate.tabId;
+        }
+      }
+    } catch {
+      // silent
+    }
+
+    return null;
+  }, []);
+
+  const showMissionThreadTransition = useCallback((detail: OrchestratorMissionCompletedDetail) => {
+    if (transitionStripTimerRef.current) {
+      clearTimeout(transitionStripTimerRef.current);
+      transitionStripTimerRef.current = null;
+    }
+
+    const startedAt = Date.now();
+    replaceTranscript([
+      buildMissionTransitionEntry(
+        `orch-mission-complete-${startedAt}`,
+        `(MISSION COMPLETE · ${missionMergeLabel(detail.mergedCount)} · ARCHIVED)`,
+        startedAt,
+      ),
+    ]);
+    transitionStripTimerRef.current = window.setTimeout(() => {
+      transitionStripTimerRef.current = null;
+      appendLocalEntries([
+        buildMissionTransitionEntry(`orch-mission-ready-${startedAt}`, '(NEW THREAD · READY)', startedAt + 220),
+      ]);
+    }, 220);
+  }, [appendLocalEntries, replaceTranscript]);
+
+  const archiveMissionThread = useCallback(async (detail: OrchestratorMissionCompletedDetail) => {
+    const activeRepoPath = repoPathRef.current;
+    if (!activeRepoPath) return;
+
+    const transcript = messagesRef.current;
+    const planSnapshot = planTextRef.current;
+    const hasArchivableMessages = transcript.some((entry) => entry.role === 'user');
+    if (hasArchivableMessages) {
+      const currentTabId = await findStoredThoughtsThreadTabId(transcript);
+      const archiveTabId = `thoughts-${Date.now()}-archive`;
+      const archiveResponse = await fetch('/api/v2/chat-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tabId: archiveTabId,
+          messages: serializeThoughtsHistoryMessages(transcript),
+          model: 'claude-code',
+          title: buildMissionArchiveTitle({
+            missionSummary: detail.summary,
+            compactionSummary: extractLatestCompactionSummary(transcript),
+            mergedCount: detail.mergedCount,
+            completedAt: detail.completedAt,
+          }),
+          planText: planSnapshot ?? undefined,
+          repoPath: activeRepoPath,
+        }),
+      });
+      if (!archiveResponse.ok) {
+        throw new Error('Unable to archive the completed mission thread.');
+      }
+      if (currentTabId) {
+        await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(currentTabId)}`, { method: 'DELETE' }).catch(() => null);
+      }
+    }
+
+    await fetch('/api/orchestrator/reset-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoPath: activeRepoPath }),
+    }).catch(() => null);
+
+    reset();
+    showMissionThreadTransition(detail);
+  }, [findStoredThoughtsThreadTabId, reset, showMissionThreadTransition]);
+
+  const rotateMissionThread = useCallback(async (detail: OrchestratorMissionCompletedDetail) => {
+    const activeRepoPath = normalizeRepoPath(repoPathRef.current);
+    const eventRepoPath = normalizeRepoPath(detail.repoPath);
+    if (!activeRepoPath || (eventRepoPath && eventRepoPath !== activeRepoPath)) {
+      return;
+    }
+    if (missionRotationInFlightRef.current) {
+      pendingMissionCompletionRef.current = detail;
+      return;
+    }
+
+    missionRotationInFlightRef.current = true;
+    try {
+      await archiveMissionThread(detail);
+      if (pendingMissionCompletionRef.current === detail) {
+        pendingMissionCompletionRef.current = null;
+      }
+    } catch (error) {
+      console.error('[orchestrator-stream] Failed to rotate completed mission thread.', error);
+    } finally {
+      missionRotationInFlightRef.current = false;
+      const pending = pendingMissionCompletionRef.current;
+      if (pending && pending !== detail && statusRef.current !== 'busy') {
+        pendingMissionCompletionRef.current = null;
+        queueMicrotask(() => {
+          void rotateMissionThread(pending);
+        });
+      }
+    }
+  }, [archiveMissionThread]);
 
   const endTurn = useCallback(() => {
     activeTurnRef.current = null;
     setBusyState(createIdleBusyState());
-  }, []);
-
-  const appendAutoSummary = useCallback((summary: string | null) => {
-    if (!summary) return;
-    setMessages((prev) => {
-      const last = prev[prev.length - 1];
-      if (last?.role === 'assistant' && last.text.trim() === summary.trim()) {
-        return prev;
-      }
-      return [
-        ...prev,
-        {
-          id: `orch-summary-${Date.now()}`,
-          role: 'assistant',
-          text: summary,
-          timestamp: Date.now(),
-          timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ];
-    });
   }, []);
 
   // #539 — clear any stale "running" state when the client's local view of
@@ -603,54 +638,6 @@ export function useOrchestratorStream(
         timestamp: Date.now(),
         timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       }];
-    });
-  }, []);
-
-  const upsertToolCall = useCallback((toolCall: MobileTranscriptToolCall) => {
-    if (!currentAssistantRef.current) {
-      currentAssistantRef.current = {
-        id: `orch-assistant-${Date.now()}`,
-        chunks: [],
-        thinkingChunks: [],
-        epoch: resetEpochRef.current,
-      };
-    }
-
-    const current = currentAssistantRef.current;
-    setMessages((prev) => {
-      const idx = prev.findIndex((message) => message.id === current.id);
-      const baseEntry = idx >= 0
-        ? prev[idx]
-        : {
-            id: current.id,
-            role: 'assistant' as const,
-            text: '',
-            timestamp: Date.now(),
-            timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          };
-      const existingTools = baseEntry.toolCalls ?? [];
-      const toolIndex = existingTools.findIndex((candidate) => (
-        (toolCall.id && candidate.id === toolCall.id)
-        || (!toolCall.id && candidate.name === toolCall.name && candidate.status !== 'done')
-      ));
-      const nextTools = toolIndex >= 0
-        ? existingTools.map((candidate, index) => (
-          index === toolIndex
-            ? { ...candidate, ...toolCall, args: toolCall.args ?? candidate.args }
-            : candidate
-        ))
-        : [...existingTools, toolCall];
-      const nextEntry: MobileTranscriptEntry = {
-        ...baseEntry,
-        toolCalls: nextTools,
-      };
-
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = nextEntry;
-        return next;
-      }
-      return [...prev, nextEntry];
     });
   }, []);
 
@@ -884,7 +871,7 @@ export function useOrchestratorStream(
     ws.onerror = () => {
       // onclose will fire after this
     };
-  }, [flushCurrentAssistant]);
+  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, healStaleBusyState]);
 
   // Connect on mount / repoPath change
   useEffect(() => {
@@ -924,6 +911,20 @@ export function useOrchestratorStream(
   }, [repoPath, connect, refreshTokenTelemetry]);
 
   useEffect(() => {
+    if (!repoPath) return () => {};
+
+    return subscribeOrchestratorMissionCompleted((detail) => {
+      const activeRepoPath = normalizeRepoPath(repoPathRef.current);
+      const eventRepoPath = normalizeRepoPath(detail.repoPath);
+      if (!activeRepoPath || (eventRepoPath && eventRepoPath !== activeRepoPath)) return;
+      pendingMissionCompletionRef.current = detail;
+      if (statusRef.current !== 'busy') {
+        void rotateMissionThread(detail);
+      }
+    });
+  }, [repoPath, rotateMissionThread]);
+
+  useEffect(() => {
     if (!repoPath || status !== 'ready') return;
     if (tokenRefreshTimerRef.current) clearTimeout(tokenRefreshTimerRef.current);
     tokenRefreshTimerRef.current = setTimeout(() => {
@@ -936,6 +937,11 @@ export function useOrchestratorStream(
       }
     };
   }, [repoPath, refreshTokenTelemetry, status]);
+
+  useEffect(() => {
+    if (status === 'busy' || missionRotationInFlightRef.current || !pendingMissionCompletionRef.current) return;
+    void rotateMissionThread(pendingMissionCompletionRef.current);
+  }, [rotateMissionThread, status]);
 
   useEffect(() => {
     if (!repoPath) return;
@@ -1011,7 +1017,7 @@ export function useOrchestratorStream(
     };
   }, [primeCompactedSession, requestCompaction]);
 
-  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: 'medium' | 'high' | 'max'; model?: string }) => {
+  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: OrchestratorThinkingEffort; model?: string }) => {
     if (!repoPathRef.current) return;
 
     const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
@@ -1123,32 +1129,6 @@ export function useOrchestratorStream(
       setTimeout(() => clearInterval(waitAndSend), 5000);
     })();
   }, [connect, connected, estimateNextTurnTokens, primeCompactedSession, requestCompaction]);
-
-  const reset = useCallback(() => {
-    const nextStatus = connected ? 'ready' : 'connecting';
-    resetEpochRef.current += 1;
-    messagesRef.current = [];
-    setMessages([]);
-    planTextRef.current = null;
-    setPlanText(null);
-    setBusyState(createIdleBusyState());
-    activeTurnRef.current = null;
-    setTokenCount(0);
-    runningTotalRef.current = 0;
-    setRunningTotal(0);
-    currentAssistantRef.current = null;
-    hasHistoryRef.current = false;
-    telemetrySessionKeyRef.current = null;
-    telemetryTotalRef.current = null;
-    autoCompactInFlightRef.current = false;
-    autoCompactArmedRef.current = true;
-    resetFirstTurnPlanCapture();
-    statusRef.current = nextStatus;
-    lastEventAtRef.current = Date.now();
-    setStatus(nextStatus);
-    clearQueuedOrchestratorSessionPrelude(repoPathRef.current);
-    emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
-  }, [connected, resetFirstTurnPlanCapture]);
 
   return {
     messages,
