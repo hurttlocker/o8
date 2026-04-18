@@ -14,6 +14,7 @@ import { execSync } from 'node:child_process';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
+import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReference } from './review-screenshot';
 import type { Lane } from './types';
 
 const MAX_REVIEW_ATTEMPTS = 5;
@@ -36,7 +37,6 @@ export function isLaneAutoReviewActive(laneId: string): boolean {
 // ── Queue Operations (SQLite-backed) ──
 
 function getDb() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getSqlite } = require('@/lib/db') as { getSqlite: () => import('better-sqlite3').Database };
   return getSqlite();
 }
@@ -406,12 +406,23 @@ function buildReviewPrompt(
   depth: ReviewDepth,
   mechanicalChecksSummary?: string,
   mergeGateResult?: MergeGateResult,
+  reviewScreenshot?: LaneReviewScreenshotReference | null,
 ): string {
   const depthGuidance = depth === 'deep-dive'
     ? 'This lane has low-confidence or missing self-review context. Perform a deep-dive review and challenge assumptions, edge cases, and missing validation.'
     : 'This lane reports medium-confidence self-review. Do a normal review with independent verification of the claimed changes.';
 
   const mergeGateSection = mergeGateResult ? formatMergeGateForReview(mergeGateResult) : null;
+  const reviewScreenshotMetadata = reviewScreenshot
+    ? [
+        typeof reviewScreenshot.width === 'number' && reviewScreenshot.width > 0
+          && typeof reviewScreenshot.height === 'number' && reviewScreenshot.height > 0
+          ? `${reviewScreenshot.width}x${reviewScreenshot.height}`
+          : null,
+        reviewScreenshot.mimeType ?? null,
+        reviewScreenshot.capturedAt ? `captured ${reviewScreenshot.capturedAt}` : null,
+      ].filter((value): value is string => Boolean(value)).join(' • ')
+    : '';
 
   return [
     `An agent has completed work on lane "${lane.label}" (branch: ${lane.branch}).`,
@@ -428,6 +439,11 @@ function buildReviewPrompt(
     mechanicalChecksSummary ? `` : null,
     formatSelfReview(selfReview, depth),
     ``,
+    reviewScreenshot ? '## Attached review screenshot' : null,
+    reviewScreenshot ? 'A screenshot was auto-captured when this lane entered review. Inspect the image file directly at native resolution instead of asking for a reduced copy.' : null,
+    reviewScreenshot ? `Image path: ${reviewScreenshot.path}` : null,
+    reviewScreenshotMetadata ? `Image metadata: ${reviewScreenshotMetadata}` : null,
+    reviewScreenshot ? `` : null,
     diffSummary,
     ``,
     `## Your review should include:`,
@@ -445,7 +461,7 @@ function buildReviewPrompt(
 }
 
 async function performAutoReview(review: QueuedReview): Promise<void> {
-  const { getLane } = await import('@/lib/lane/registry');
+  const { getLane, getLatestLaneReviewScreenshot } = await import('@/lib/lane/registry');
   const lane = getLane(review.lane_id);
   if (!lane) {
     throw new Error(`Lane ${review.lane_id} not found`);
@@ -472,7 +488,26 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   const mechanicalChecks = runMechanicalChecks(lane);
   const mergeGateResult = runMergeGate(lane, completionContext?.selfReview);
   const diffSummary = getDiffSummary(lane, depth);
-  const reviewPrompt = buildReviewPrompt(lane, diffSummary, completionContext?.selfReview, depth, mechanicalChecks.summary || undefined, mergeGateResult);
+  let reviewScreenshot: LaneReviewScreenshotReference | null = null;
+  if (lane.runtime === 'codex') {
+    try {
+      reviewScreenshot = await resolveLaneReviewScreenshotReference(
+        lane.id,
+        getLatestLaneReviewScreenshot(lane.id),
+      );
+    } catch (error) {
+      console.warn(`[auto-review] Failed to prepare review screenshot for lane ${lane.id}:`, error);
+    }
+  }
+  const reviewPrompt = buildReviewPrompt(
+    lane,
+    diffSummary,
+    completionContext?.selfReview,
+    depth,
+    mechanicalChecks.summary || undefined,
+    mergeGateResult,
+    reviewScreenshot,
+  );
 
   const { ensureOrchestratorSession, sendToOrchestrator } = await import('./orchestrator-session');
   const session = ensureOrchestratorSession(lane.repoPath);
