@@ -11,6 +11,11 @@ import {
   THEME_ACCENT_RING,
   THEME_ACCENT_SOFT,
 } from './shared';
+import {
+  readAdaptiveThinkingEnabled,
+  subscribeOrchestratorThinkingPreferences,
+  writeAdaptiveThinkingEnabled,
+} from '@/lib/orchestrator/thinking-preferences';
 
 // ── Types ──
 
@@ -40,6 +45,7 @@ export function APIKeysTab() {
   const [keyInput, setKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ provider: string; type: 'success' | 'error'; message: string } | null>(null);
+  const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(() => readAdaptiveThinkingEnabled());
 
   const loadKeys = useCallback(async () => {
     try {
@@ -74,6 +80,10 @@ export function APIKeysTab() {
       active = false;
     };
   }, []);
+
+  useEffect(() => subscribeOrchestratorThinkingPreferences(() => {
+    setAdaptiveThinkingEnabled(readAdaptiveThinkingEnabled());
+  }), []);
 
   const handleSave = useCallback(async (providerId: string) => {
     if (!keyInput.trim()) return;
@@ -514,6 +524,101 @@ export function APIKeysTab() {
             </div>
           );
         })}
+      </div>
+
+      <div style={{
+        marginTop: 24,
+        paddingTop: 18,
+        paddingBottom: 18,
+        paddingLeft: 18,
+        paddingRight: 18,
+        borderRadius: 16,
+        border: '1px solid var(--t-panel-border)',
+        background: 'var(--t-panel)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 16,
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0, flex: '1 1 420px' }}>
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: 'var(--t-text-muted)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+          }}>
+            LLM behavior
+          </div>
+          <div style={{
+            fontSize: 16,
+            fontWeight: 700,
+            color: 'var(--t-text)',
+            letterSpacing: '-0.03em',
+          }}>
+            Adaptive orchestrator thinking
+          </div>
+          <div style={{
+            fontSize: 13,
+            color: 'var(--t-text-secondary)',
+            lineHeight: 1.55,
+            maxWidth: 560,
+          }}>
+            When enabled, new orchestrator turns default to adaptive thinking and can stream summarized reasoning above the reply.
+            Turn it off to fall back to the fixed manual effort path.
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => writeAdaptiveThinkingEnabled(!adaptiveThinkingEnabled)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 10,
+            minHeight: 40,
+            padding: '0 12px 0 10px',
+            borderRadius: 999,
+            border: adaptiveThinkingEnabled
+              ? `1px solid ${THEME_ACCENT_BORDER}`
+              : '1px solid var(--t-panel-border)',
+            background: adaptiveThinkingEnabled ? THEME_ACCENT_SOFT : 'var(--t-bg-card)',
+            color: adaptiveThinkingEnabled ? THEME_ACCENT : 'var(--t-text-secondary)',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer',
+            letterSpacing: '0.01em',
+          }}
+          aria-pressed={adaptiveThinkingEnabled}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'relative',
+              width: 30,
+              height: 18,
+              borderRadius: 999,
+              background: adaptiveThinkingEnabled ? THEME_ACCENT : 'var(--t-divider)',
+              transition: 'background 180ms ease',
+            }}
+          >
+            <span
+              style={{
+                position: 'absolute',
+                top: 2,
+                left: adaptiveThinkingEnabled ? 14 : 2,
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                background: 'var(--t-panel)',
+                border: '1px solid var(--t-panel-border)',
+                transition: 'left 180ms ease',
+              }}
+            />
+          </span>
+          {adaptiveThinkingEnabled ? 'Enabled' : 'Disabled'}
+        </button>
       </div>
 
       <div style={{

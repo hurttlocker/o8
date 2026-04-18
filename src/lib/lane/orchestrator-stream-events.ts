@@ -9,6 +9,8 @@ export type OrchestratorEvent =
 type ContentBlock = {
   type?: string;
   text?: string;
+  thinking?: string;
+  summary?: string;
   name?: string;
   input?: unknown;
   id?: string;
@@ -95,6 +97,17 @@ export function processStreamEvent(
         onEvent({ type: 'text', text: delta.text });
       } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
         onEvent({ type: 'thinking', text: delta.thinking });
+      } else if (delta.type === 'thinking_summary') {
+        const summary = typeof delta.summary === 'string'
+          ? delta.summary
+          : typeof delta.thinking === 'string'
+            ? delta.thinking
+            : typeof delta.text === 'string'
+              ? delta.text
+              : '';
+        if (summary) {
+          onEvent({ type: 'thinking', text: summary });
+        }
       }
       break;
     }
@@ -120,6 +133,8 @@ export function processStreamEvent(
       for (const block of content as ContentBlock[]) {
         if (block.type === 'text' && typeof block.text === 'string') {
           onEvent({ type: 'text', text: block.text });
+        } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
+          onEvent({ type: 'thinking', text: block.thinking });
         } else if (block.type === 'tool_use' && typeof block.name === 'string') {
           const nextTool = {
             id: typeof block.id === 'string' ? block.id : null,
