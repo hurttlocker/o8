@@ -635,6 +635,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const handleClearCommand = useCallback(async () => {
     const liveTimestamps = new Set(orchStream.messages.map((entry) => entry.timestamp));
+    const archivedPlanText = planText ?? orchStream.planText ?? null;
     const archiveMessages = isOrchestratorMode
       ? (orchStream.messages.length > 0 && chatMessages.length > 0
         ? [...chatMessages.filter((message) => !liveTimestamps.has(message.timestamp)), ...orchStream.messages]
@@ -648,7 +649,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       persistTimerRef.current = null;
     }
     if (hasArchivableMessages) {
-      await persistThreadNow(archiveMessages, threadIdRef.current ?? `thoughts-${Date.now()}`, planText);
+      await persistThreadNow(archiveMessages, threadIdRef.current ?? `thoughts-${Date.now()}`, archivedPlanText);
     }
 
     try {
@@ -666,7 +667,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     } catch (error) {
       console.error('[orchestrator] Failed to clear orchestrator conversation.', error);
     }
-  }, [chatMessages, handleReset, isOrchestratorMode, orchStream.messages, persistThreadNow, planText, resolvedRepoPath, showArchivedToast]);
+  }, [chatMessages, handleReset, isOrchestratorMode, orchStream.messages, orchStream.planText, persistThreadNow, planText, resolvedRepoPath, showArchivedToast]);
 
   const handleLoadThread = useCallback(async (tabId: string) => {
     try {
