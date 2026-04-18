@@ -405,6 +405,15 @@ const orchestratorAutoQueue: OrchestratorAutoMessage[] = [];
 const MAX_AUTO_QUEUE = 20;
 
 function queueOrchestratorEscalation(repoPath: string, message: string): void {
+  // Supervisor escalations spawn fresh orchestrator turns into the user's
+  // chat — that's how codex agent narrative + bash runs end up bleeding into
+  // the orchestrator transcript. Default OFF: supervisor failures surface via
+  // lane status + activity feed instead, leaving the chat clean.
+  // Set O8_SUPERVISOR_AUTO_ESCALATE=1 to restore the old auto-investigation.
+  if (process.env.O8_SUPERVISOR_AUTO_ESCALATE !== '1') {
+    console.log(`[supervisor] Escalation suppressed (auto-escalate disabled): ${repoPath} — ${message.slice(0, 80)}`);
+    return;
+  }
   if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) {
     orchestratorAutoQueue.shift(); // Drop oldest
     console.warn('[supervisor] Auto-message queue overflow — dropped oldest');
