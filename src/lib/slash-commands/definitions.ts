@@ -17,8 +17,8 @@ export const ORCHESTRATOR_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] =
     command: '/focus',
     name: 'focus',
     title: 'Focus scope',
-    description: 'Keep only turns tied to one issue ref or file path.',
-    argHint: '<issue-ref | file-path>',
+    description: 'Keep only turns tied to one mission packet and its lane.',
+    argHint: '<packet>',
     requiresArgument: true,
   },
   {
@@ -39,8 +39,6 @@ export const ORCHESTRATOR_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] =
     command: '/handoff',
     name: 'handoff',
     title: 'Switch model',
-    description: 'Compact, reset, and move the orchestrator onto a new model.',
-    argHint: '<model-id>',
-    requiresArgument: true,
+    description: 'Prepare a compacted handoff prelude for a fresh session.',
   },
 ];
