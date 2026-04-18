@@ -136,6 +136,43 @@ export const sessions = sqliteTable('sessions', {
 });
 
 // ══════════════════════════════════════════════════════════════════
+//  Session Outcomes — durable session ledger entries
+// ══════════════════════════════════════════════════════════════════
+
+export const sessionOutcomes = sqliteTable('session_outcomes', {
+  id: text('id').primaryKey(),
+  repoPath: text('repo_path').notNull(),
+  branch: text('branch'),
+  runtime: text('runtime', { enum: ['codex', 'claude-code'] }).notNull(),
+  sessionKey: text('session_key'),
+  laneId: text('lane_id'),
+  packetId: text('packet_id'),
+  outcome: text('outcome', { enum: ['succeeded', 'failed', 'partial', 'interrupted'] }).notNull(),
+  summary: text('summary').notNull(),
+  planText: text('plan_text'),
+  attempts: integer('attempts').notNull().default(1),
+  retryHistoryJson: text('retry_history_json').notNull().default('[]'),
+  durationMs: integer('duration_ms'),
+  totalTokens: integer('total_tokens').notNull().default(0),
+  costUsd: real('cost_usd').notNull().default(0),
+  model: text('model'),
+  patternsJson: text('patterns_json').notNull().default('[]'),
+  conflictZonesJson: text('conflict_zones_json').notNull().default('[]'),
+  changedFilesJson: text('changed_files_json').notNull().default('[]'),
+  reviewApproved: integer('review_approved', { mode: 'boolean' }),
+  reviewFindingsCount: integer('review_findings_count').notNull().default(0),
+  transcriptPath: text('transcript_path'),
+  startedAt: text('started_at').notNull(),
+  completedAt: text('completed_at').notNull(),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  repoRuntimeIdx: index('idx_so_repo_runtime').on(table.repoPath, table.runtime, table.completedAt),
+  repoCompletedIdx: index('idx_so_repo_completed').on(table.repoPath, table.completedAt),
+  laneIdIdx: index('idx_so_lane_id').on(table.laneId),
+  packetIdIdx: index('idx_so_packet_id').on(table.packetId),
+}));
+
+// ══════════════════════════════════════════════════════════════════
 //  Chat History — mirrored session ledger for persisted transcripts
 // ══════════════════════════════════════════════════════════════════
 
