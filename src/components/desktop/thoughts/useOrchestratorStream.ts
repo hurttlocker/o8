@@ -232,7 +232,8 @@ export function useOrchestratorStream(
   const [tokenCount, setTokenCount] = useState(0);
   const [runningTotal, setRunningTotal] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
-  const currentAssistantRef = useRef<{ id: string; chunks: string[]; thinkingChunks: string[] } | null>(null);
+  const resetEpochRef = useRef(0);
+  const currentAssistantRef = useRef<{ id: string; chunks: string[]; thinkingChunks: string[]; epoch: number } | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const telemetrySessionKeyRef = useRef<string | null>(null);
@@ -541,6 +542,7 @@ export function useOrchestratorStream(
         id: `orch-assistant-${Date.now()}`,
         chunks: [],
         thinkingChunks: [],
+        epoch: resetEpochRef.current,
       };
     }
 
@@ -648,13 +650,19 @@ export function useOrchestratorStream(
             }
           }
 
-          // Start a new assistant message if we don't have one
+          // Start a new assistant message if we don't have one — but only if
+          // this output isn't a stale chunk from before a +New / reset.
           if (!currentAssistantRef.current) {
+            if (statusRef.current !== 'busy') break;
             currentAssistantRef.current = {
               id: `orch-assistant-${Date.now()}`,
               chunks: [],
               thinkingChunks: [],
+              epoch: resetEpochRef.current,
             };
+          } else if (currentAssistantRef.current.epoch !== resetEpochRef.current) {
+            currentAssistantRef.current = null;
+            break;
           }
 
           if (isThinking) {
@@ -741,6 +749,7 @@ export function useOrchestratorStream(
               id: `orch-assistant-${Date.now()}`,
               chunks: [],
               thinkingChunks: [],
+              epoch: resetEpochRef.current,
             };
           }
 
@@ -1020,6 +1029,7 @@ export function useOrchestratorStream(
   }, [connect, connected, estimateNextTurnTokens, primeCompactedSession, requestCompaction]);
 
   const reset = useCallback(() => {
+    resetEpochRef.current += 1;
     setMessages([]);
     setPlanText(null);
     setTokenCount(0);
