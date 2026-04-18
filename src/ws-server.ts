@@ -3313,18 +3313,12 @@ async function bootstrapWsServer() {
     try {
       const { runRulesPromotionCycle } = await import('@/lib/dispatch/rules-promotion') as {
         runRulesPromotionCycle: (options?: { now?: Date }) => Promise<{
-          scanned: number;
           promoted: number;
           demoted: number;
-          dropped: number;
         }>;
       };
       const result = await runRulesPromotionCycle();
-      if (result.promoted + result.demoted + result.dropped > 0) {
-        console.log(
-          `[rules-promotion] scanned=${result.scanned} promoted=${result.promoted} demoted=${result.demoted} dropped=${result.dropped}`,
-        );
-      }
+      console.log(`[rules-promotion] promoted=${result.promoted} demoted=${result.demoted}`);
     } catch (error) {
       console.warn(
         `[rules-promotion] cycle failed: ${error instanceof Error ? error.message : String(error)}`,
