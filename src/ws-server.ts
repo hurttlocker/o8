@@ -84,6 +84,10 @@ import {
   type SupervisorInboxPayload,
 } from './lib/supervisor/heal-bot';
 import {
+  isSilentExitDetectorEnabled,
+  startSilentExitDetector,
+} from './lib/supervisor/silent-exit-detector';
+import {
   resolveHealBotEnabledSync,
   resolveSupervisorAutoEscalateSync,
 } from './lib/operator/defaults';
@@ -1019,6 +1023,7 @@ let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
 let stopHealBotLoop: (() => void) | null = null;
+let stopSilentExitDetectorLoop: (() => void) | null = null;
 
 const lastRealtimeFingerprint = {
   runtime: '',
@@ -3681,6 +3686,12 @@ async function bootstrapWsServer() {
       console.log('[heal-bot] Start skipped — disabled via operator defaults');
     }
 
+    if (isSilentExitDetectorEnabled()) {
+      stopSilentExitDetectorLoop = startSilentExitDetector();
+    } else {
+      console.log('[silent-exit] Start skipped — disabled via O8_SILENT_EXIT_DETECTOR_ENABLED');
+    }
+
     void ensureReviewDrainStarted().catch((error) => {
       console.error('[ws-server] Failed to start review queue drain:', error instanceof Error ? error.message : String(error));
     });
@@ -3700,6 +3711,8 @@ function shutdown(signal: string) {
   stopHeadlessLoop = null;
   stopHealBotLoop?.();
   stopHealBotLoop = null;
+  stopSilentExitDetectorLoop?.();
+  stopSilentExitDetectorLoop = null;
   stopWorktreeReaper();
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
