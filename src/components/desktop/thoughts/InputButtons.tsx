@@ -10,7 +10,14 @@ const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   xhigh: 'XHigh',
 };
 const EFFORT_OPTIONS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'];
-const EFFORT_GLYPHS: Record<ThinkingEffort, [string, number, string]> = { adaptive: ['~', 12.5, '#2563eb'], low: ['○', 11.5, 'rgba(71, 85, 105, 0.72)'], medium: ['◐', 12, 'rgba(51, 65, 85, 0.78)'], high: ['◑', 12.5, '#3b82f6'], max: ['●', 13, '#2563eb'], xhigh: ['●', 13.5, '#f97316'] };
+const EFFORT_GLYPHS: Record<ThinkingEffort, [string, number, string]> = {
+  adaptive: ['~', 12.5, 'var(--t-accent)'],
+  low: ['○', 11.5, 'var(--t-text-secondary)'],
+  medium: ['◐', 12, 'var(--t-text-secondary)'],
+  high: ['◑', 12.5, 'var(--t-accent)'],
+  max: ['●', 13, 'var(--t-accent)'],
+  xhigh: ['●', 13.5, 'var(--t-warning, #f97316)'],
+};
 
 /**
  * Thinking effort control — compact chip that cycles the available effort
@@ -27,8 +34,8 @@ export function ThinkingChip({
   onChange?: (next: ThinkingEffort) => void;
 }) {
   const eyeBrow = EFFORT_LABELS[effort].toLowerCase();
-  const accent = effort === 'adaptive' ? '#2563eb' : 'var(--t-text-faint)';
-  const background = effort === 'adaptive' ? 'linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.92))' : 'linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.78))';
+  const accent = effort === 'adaptive' ? 'var(--t-accent)' : 'var(--t-text-faint)';
+  const background = effort === 'adaptive' ? 'var(--t-accent-soft)' : 'var(--t-bg-card)';
   const [glyph, glyphSize, glyphColor] = EFFORT_GLYPHS[effort];
   const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
 
@@ -43,14 +50,12 @@ export function ThinkingChip({
         minHeight: 26,
         padding: '0 10px',
         border: effort === 'adaptive'
-          ? '1px solid rgba(37, 99, 235, 0.24)'
-          : '1px solid rgba(148, 163, 184, 0.28)',
+          ? '1px solid var(--t-accent-border)'
+          : '1px solid var(--t-border)',
         borderRadius: 999,
         background,
         cursor: 'pointer',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-        boxShadow: '0 6px 16px rgba(15, 23, 42, 0.06)',
-        backdropFilter: 'blur(16px)',
         whiteSpace: 'nowrap',
       }}
     >
