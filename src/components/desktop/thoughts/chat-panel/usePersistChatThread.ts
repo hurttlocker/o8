@@ -38,7 +38,7 @@ export function usePersistChatThread(resolvedRepoPath: string | null) {
 
   const persistThreadNow = useCallback(
     async (msgs: MobileTranscriptEntry[], tid: string | null, nextPlanText: string | null) => {
-      if (!tid || msgs.length === 0) return;
+      if (!tid) return;
       try {
         await fetch('/api/v2/chat-history', {
           method: 'POST',
@@ -60,7 +60,7 @@ export function usePersistChatThread(resolvedRepoPath: string | null) {
 
   const persistThread = useCallback(
     (msgs: MobileTranscriptEntry[], tid: string | null, nextPlanText: string | null) => {
-      if (!tid || msgs.length === 0) return;
+      if (!tid) return;
       cancelPending();
       timerRef.current = setTimeout(() => {
         timerRef.current = null;

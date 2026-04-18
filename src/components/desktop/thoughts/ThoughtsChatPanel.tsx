@@ -35,6 +35,7 @@ import {
   mergeTranscriptEntries,
 } from './utils';
 import { DEFAULT_ORCHESTRATOR_MODEL, useOrchestratorStream } from './useOrchestratorStream';
+import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { ClearToast } from './chat-panel/ClearToast';
 import { ComposerArea } from './chat-panel/ComposerArea';
@@ -505,16 +506,24 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     responseSeenRef.current = false;
     idlePollsRef.current = 0;
     orchStream.reset();
-    threadIdRef.current = null;
-    setThreadId(null);
+    // #597 — immediately mint a fresh threadId and persist an empty
+    // placeholder row so History shows the slot even before the first
+    // message. The title becomes `New thread · HH:MM` server-side until
+    // the first user message replaces it.
+    const placeholderId = isOrchestratorMode ? `thoughts-${Date.now()}` : `chat-${Date.now()}`;
+    threadIdRef.current = placeholderId;
+    setThreadId(placeholderId);
     autoRestoreAttemptedRef.current = true;
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('o8:orchestrator:auto-restore-suppressed', '1');
     }
     cancelPendingPersist();
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
+    if (isOrchestratorMode) {
+      void persistThreadNow([], placeholderId, null);
+    }
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [cancelPendingPersist, clearPolling, orchStream]);
+  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, persistThreadNow]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
@@ -547,22 +556,25 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // ── Thread persistence ──
 
   useEffect(() => {
-    const msgs = isOrchestratorMode
-      ? (orchStream.messages.length > 0 ? orchStream.messages : chatMessages)
-      : chatMessages;
-    if (msgs.length === 0 || !isOrchestratorMode) return;
+    if (!isOrchestratorMode) return;
 
-    const hasUserMessage = msgs.some((m) => m.role === 'user');
-    if (!hasUserMessage) return;
+    const msgs = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
 
+    // If a thread already has a placeholder row (minted on + New), keep
+    // writing even while empty so History reflects reality. Once a user
+    // message arrives, the title auto-upgrades on the list endpoint.
     if (!threadIdRef.current) {
+      if (msgs.length === 0) return;
+      const hasUserMessage = msgs.some((m) => m.role === 'user');
+      if (!hasUserMessage) return;
       const newId = `thoughts-${Date.now()}`;
       threadIdRef.current = newId;
       setThreadId(newId);
       persistThread(msgs, newId, planText);
-    } else {
-      persistThread(msgs, threadIdRef.current, planText);
+      return;
     }
+
+    persistThread(msgs, threadIdRef.current, planText);
   }, [chatMessages, orchStream.messages, isOrchestratorMode, persistThread, planText]);
 
   const autoRestoreAttemptedRef = useRef(false);
@@ -697,6 +709,32 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       orchestratorBusyState: orchStream.busyState,
     });
   }, [activeTargetLabel, displayMessages.length, displayWaiting, onChromeChange, orchStream.busyState, threadId]);
+
+  // #587 — publish live transcript + running token total into the context
+  // residency provider so the ContextInspector side panel (mounted at the
+  // OrchestratorTab level) can render rows without prop-drilling.
+  const residency = useOrchestratorContextResidency();
+  useEffect(() => {
+    if (!residency) return;
+    if (!isOrchestratorMode) {
+      residency.publish({ messages: [], runningTotal: 0, activeAssistantId: null });
+      return;
+    }
+    let activeAssistantId: string | null = null;
+    if (orchStream.status === 'busy') {
+      for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
+        if (displayMessages[index]?.role === 'assistant') {
+          activeAssistantId = displayMessages[index].id;
+          break;
+        }
+      }
+    }
+    residency.publish({
+      messages: displayMessages,
+      runningTotal: orchStream.runningTotal,
+      activeAssistantId,
+    });
+  }, [displayMessages, isOrchestratorMode, orchStream.runningTotal, orchStream.status, residency]);
 
   // Ref used so sendNow() can flush the latest input value without a re-render.
   const latestInputRef = useRef('');
