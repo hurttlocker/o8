@@ -138,6 +138,24 @@ function compactTitle(value: string) {
   return normalized.slice(0, 42).replace(/\s+\S*$/u, '').trim() || normalized.slice(0, 42).trim();
 }
 
+function firstMeaningfulTranscriptLine(
+  messages: MobileTranscriptEntry[],
+  roles?: MobileTranscriptEntry['role'][],
+) {
+  for (const message of messages) {
+    if (message.type === 'command') continue;
+    if (roles && !roles.includes(message.role)) continue;
+    const source = message.type === 'compaction'
+      ? message.compaction?.summary ?? message.text
+      : message.text;
+    const line = firstMeaningfulCompactionLine(source);
+    if (line) {
+      return line;
+    }
+  }
+  return '';
+}
+
 export function extractLatestCompactionSummary(messages: MobileTranscriptEntry[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const summary = messages[index]?.compaction?.summary;
@@ -162,4 +180,15 @@ export function buildMissionArchiveTitle(input: {
   const mergedCount = Math.max(0, Math.floor(input.mergedCount));
   const date = new Date(input.completedAt).toISOString().slice(0, 10);
   return `${base} · ${mergedCount} merge${mergedCount === 1 ? '' : 's'} · ${date}`;
+}
+
+export function buildOrchestratorArchiveTitle(input: {
+  messages: MobileTranscriptEntry[];
+  planText?: string | null;
+}) {
+  const compactionSeed = firstMeaningfulCompactionLine(extractLatestCompactionSummary(input.messages));
+  const userSeed = firstMeaningfulTranscriptLine(input.messages, ['user']);
+  const activitySeed = firstMeaningfulTranscriptLine(input.messages);
+  const planSeed = firstMeaningfulCompactionLine(input.planText);
+  return compactTitle(compactionSeed || userSeed || activitySeed || planSeed || 'Thread archive');
 }

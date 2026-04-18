@@ -26,7 +26,7 @@ import type {
 } from '@/lib/orchestrator/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
-import { executeOrchestratorSlashCommand } from '@/lib/slash-commands';
+import { executeOrchestratorSlashCommand, parseOrchestratorSlashCommand } from '@/lib/slash-commands';
 import type { AgentTarget, FleetAgent } from './types';
 import {
   entrySignature,
@@ -461,70 +461,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [resolvedRepoPath]);
 
-  const handleTaskSend = useCallback(async (explicitText?: string) => {
-    const msg = (explicitText ?? input).trim();
-    if (!msg) return;
-
-    const effectiveWaiting = isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
-    if (effectiveWaiting) return;
-
-    if (isOrchestratorMode && await runLocalOrchestratorSlash(msg)) {
-      setInput('');
-      return;
-    }
-
-    setInput('');
-
-    if (isOrchestratorMode) {
-      orchStream.send(msg, { permissionMode, thinkingEffort, model: orchestratorModel });
-      return;
-    }
-
-    const userMsg: MobileTranscriptEntry = {
-      id: `local-user-${Date.now()}`,
-      role: 'user',
-      text: msg,
-      timestamp: Date.now(),
-      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setChatMessages((prev) => [...prev, userMsg]);
-
-    const sessionKey = targetSessionKey;
-    if (!sessionKey) return;
-    setWaitingForReply(true);
-
-    try {
-      await captureServerSnapshot(sessionKey);
-
-      const isRuntimeSession = sessionKey.startsWith('claude-code:') || sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-owned:');
-      const response = await fetch(isRuntimeSession ? '/api/runtime/action' : '/api/mobile/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: isRuntimeSession
-          ? JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: msg })
-          : JSON.stringify({ action: 'resume', sessionKey, message: msg }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Send failed');
-      }
-
-      startPolling();
-    } catch {
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: `local-error-${Date.now()}`,
-          role: 'system',
-          text: 'Unable to reach the selected CLI lane. Make sure the Codex or Claude Code session is available.',
-          timestamp: Date.now(),
-          timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-      setWaitingForReply(false);
-    }
-  }, [captureServerSnapshot, input, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, startPolling, targetSessionKey, thinkingEffort, waitingForReply]);
-
   const handleReset = useCallback(() => {
     setInput('');
     setPreEnhanceInput(null);
@@ -770,9 +706,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const latestInputRef = useRef('');
   useEffect(() => { latestInputRef.current = input; }, [input]);
 
-  async function runLocalOrchestratorSlash(rawInput: string) {
+  const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
     if (!isOrchestratorMode) return false;
 
+    const parsedCommand = parseOrchestratorSlashCommand(rawInput);
+    const suppressCommandEntries = parsedCommand?.command.name === 'clear';
     const handled = await executeOrchestratorSlashCommand(rawInput, {
       repoPath: resolvedRepoPath,
       transcript: displayMessages,
@@ -783,7 +721,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setOrchestratorModel(model);
         writeStoredOrchestratorModel(resolvedRepoPath, model);
       },
-      appendEntries: orchStream.appendLocalEntries,
       replaceTranscript: orchStream.replaceTranscript,
       compactNow: orchStream.compactNow,
       resetRemoteSession,
@@ -797,12 +734,86 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           model: snapshot.model,
         };
       },
+      appendEntries: suppressCommandEntries ? () => {} : orchStream.appendLocalEntries,
       clearThread: handleClearCommand,
     });
     if (!handled.handled) return false;
     latestInputRef.current = '';
     return true;
-  }
+  }, [
+    displayMessages,
+    handleClearCommand,
+    isOrchestratorMode,
+    missionState,
+    orchStream,
+    orchestratorModel,
+    resetRemoteSession,
+    resolvedRepoPath,
+  ]);
+
+  const handleTaskSend = useCallback(async (explicitText?: string) => {
+    const msg = (explicitText ?? input).trim();
+    if (!msg) return;
+
+    const effectiveWaiting = isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
+    if (effectiveWaiting) return;
+
+    if (isOrchestratorMode && await runLocalOrchestratorSlash(msg)) {
+      setInput('');
+      return;
+    }
+
+    setInput('');
+
+    if (isOrchestratorMode) {
+      orchStream.send(msg, { permissionMode, thinkingEffort, model: orchestratorModel });
+      return;
+    }
+
+    const userMsg: MobileTranscriptEntry = {
+      id: `local-user-${Date.now()}`,
+      role: 'user',
+      text: msg,
+      timestamp: Date.now(),
+      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setChatMessages((prev) => [...prev, userMsg]);
+
+    const sessionKey = targetSessionKey;
+    if (!sessionKey) return;
+    setWaitingForReply(true);
+
+    try {
+      await captureServerSnapshot(sessionKey);
+
+      const isRuntimeSession = sessionKey.startsWith('claude-code:') || sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-owned:');
+      const response = await fetch(isRuntimeSession ? '/api/runtime/action' : '/api/mobile/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: isRuntimeSession
+          ? JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: msg })
+          : JSON.stringify({ action: 'resume', sessionKey, message: msg }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Send failed');
+      }
+
+      startPolling();
+    } catch {
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `local-error-${Date.now()}`,
+          role: 'system',
+          text: 'Unable to reach the selected CLI lane. Make sure the Codex or Claude Code session is available.',
+          timestamp: Date.now(),
+          timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+      setWaitingForReply(false);
+    }
+  }, [captureServerSnapshot, input, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, startPolling, targetSessionKey, thinkingEffort, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
