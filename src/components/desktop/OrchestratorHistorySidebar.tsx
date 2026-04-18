@@ -665,6 +665,18 @@ function OrchestratorHistorySidebarBase({
                                 >
                                   {thread.messageCount} msg{thread.messageCount !== 1 ? 's' : ''}
                                 </div>
+                              ) : thread.messageCount === 0 ? (
+                                <div
+                                  style={{
+                                    fontSize: 9.5,
+                                    color: 'var(--t-text-faint)',
+                                    marginTop: 2,
+                                    fontWeight: 500,
+                                    fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
+                                  }}
+                                >
+                                  (empty)
+                                </div>
                               ) : null}
                             </div>
                           </button>
