@@ -330,6 +330,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           isolate: !lane.worktreePath,
           skipSetup: true,
           existingLaneId: command.laneId,
+          packetId: lane.packetId ?? undefined,
         });
 
         if (!result.ok) {
@@ -461,6 +462,8 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           baseBranch: lane.baseBranch,
           isolate: false,
           skipSetup: true,
+          existingLaneId: command.laneId,
+          packetId: lane.packetId ?? undefined,
         });
 
         if (!result.ok) {
