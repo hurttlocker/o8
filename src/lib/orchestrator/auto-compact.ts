@@ -18,7 +18,12 @@ function coerceEntry(value: unknown): MobileTranscriptEntry | null {
   const record = value as Record<string, unknown> | null;
   const role = record?.role;
   return record && typeof record.id === 'string' && (role === 'user' || role === 'assistant' || role === 'system' || role === 'tool')
-    ? { ...(record as unknown as MobileTranscriptEntry), role, text: typeof record.text === 'string' ? record.text : typeof record.content === 'string' ? record.content : '' }
+    ? {
+      ...(record as unknown as MobileTranscriptEntry),
+      pinned: record.pinned === true,
+      role,
+      text: typeof record.text === 'string' ? record.text : typeof record.content === 'string' ? record.content : '',
+    }
     : null;
 }
 async function readLatestThread(repoPath: string): Promise<PersistedThread | null> {
@@ -76,6 +81,19 @@ function buildExcerpt(messages: MobileTranscriptEntry[], maxChars: number) {
   }).join('\n\n');
 }
 const toStoredMessage = (entry: MobileTranscriptEntry) => ({ ...entry, content: entry.text });
+
+function splitCompactionWindow(transcript: MobileTranscriptEntry[], compactedCount: number) {
+  const compactedWindow = transcript.slice(0, compactedCount);
+  const compactedTurns = compactedWindow.filter((entry) => entry.pinned !== true);
+  const pinnedTurns = compactedWindow.filter((entry) => entry.pinned === true);
+  const liveTurns = transcript.slice(compactedCount);
+  return {
+    compactedTurns,
+    pinnedTurns,
+    liveTurns,
+    retainedTurns: [...pinnedTurns, ...liveTurns],
+  };
+}
 async function summarizeWithHaiku(repoPath: string, prompt: string) {
   return await new Promise<string>((resolve, reject) => {
     const child = spawn(CLAUDE_BIN, ['--print', '--output-format', 'stream-json', '--verbose', '--model', 'haiku', prompt], {
@@ -134,12 +152,14 @@ export async function autoCompactOrchestratorThread(input: {
     const compactedCount = keepTailCount !== null
       ? Math.max(1, transcript.length - keepTailCount)
       : Math.max(1, Math.floor(transcript.length * 0.6));
-    const compactedTurns = transcript.slice(0, compactedCount);
-    const liveTurns = transcript.slice(compactedCount);
+    const { compactedTurns, pinnedTurns, liveTurns, retainedTurns } = splitCompactionWindow(transcript, compactedCount);
+    if (compactedTurns.length === 0) {
+      return { applied: false, transcript, resumePrelude: null, tokensAfter: 0 };
+    }
     const compactedAt = new Date();
     const compactedStamp = fmtStamp(compactedAt);
     const summary = await summarizeWithHaiku(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
-    const displaySummary = `<compacted_context turns="${compactedCount}" at="${compactedStamp}">\n${summary}\n</compacted_context>`;
+    const displaySummary = `<compacted_context turns="${compactedTurns.length}" at="${compactedStamp}">\n${summary}\n</compacted_context>`;
     const compactionEntry: MobileTranscriptEntry = {
       id: `orch-compaction-${compactedAt.getTime()}`,
       role: 'system',
@@ -156,8 +176,8 @@ export async function autoCompactOrchestratorThread(input: {
         summary: displaySummary,
       },
     };
-    const nextTranscript = [compactionEntry, ...liveTurns];
-    const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(liveTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
+    const nextTranscript = [compactionEntry, ...pinnedTurns, ...liveTurns];
+    const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retainedTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
     const tokensAfter = approxTokens(resumePrelude);
     compactionEntry.compaction!.tokensAfter = tokensAfter;
     await mkdir(ARCHIVE_DIR, { recursive: true });
@@ -165,7 +185,7 @@ export async function autoCompactOrchestratorThread(input: {
       repoPath,
       tabId: thread?.tabId ?? null,
       archivedAt: compactedAt.toISOString(),
-      compactedCount,
+      compactedCount: compactedTurns.length,
       turns: compactedTurns.map(toStoredMessage),
       summary,
     }));
