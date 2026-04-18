@@ -454,6 +454,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     orchStream.reset();
     threadIdRef.current = null;
     setThreadId(null);
+    autoRestoreAttemptedRef.current = true;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('o8:orchestrator:auto-restore-suppressed', '1');
+    }
     if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null; }
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -557,11 +561,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [chatMessages, orchStream.messages, isOrchestratorMode, persistThread, planText]);
 
   const autoRestoreAttemptedRef = useRef(false);
+  const AUTO_RESTORE_SUPPRESSED_KEY = 'o8:orchestrator:auto-restore-suppressed';
   useEffect(() => {
     if (!isOrchestratorMode) return;
     if (autoRestoreAttemptedRef.current) return;
     if (orchStream.messages.length > 0 || chatMessages.length > 0) return;
     autoRestoreAttemptedRef.current = true;
+    if (typeof window !== 'undefined' && window.localStorage.getItem(AUTO_RESTORE_SUPPRESSED_KEY) === '1') {
+      window.localStorage.removeItem(AUTO_RESTORE_SUPPRESSED_KEY);
+      return;
+    }
     void (async () => {
       try {
         const res = await fetch('/api/v2/chat-history/list?include=orchestrator');
