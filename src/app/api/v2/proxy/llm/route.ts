@@ -400,7 +400,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     cacheWriteTokens: 0,
   };
   let latestAnthropicStopMetadata: AnthropicStopMetadata | null = null;
-  let fullResponseText = '';
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -467,7 +466,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               continue;
             }
             if (parsed.type === 'content') {
-              fullResponseText += parsed.text;
               enqueue(JSON.stringify({ type: 'content', text: parsed.text }));
               continue;
             }
@@ -507,7 +505,9 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       }
 
       try {
-        let { toolCalls, usage, stopMetadata } = await processStream(upstream);
+        const initialResult = await processStream(upstream);
+        let toolCalls = initialResult.toolCalls;
+        const { usage, stopMetadata } = initialResult;
         totalUsage = {
           inputTokens: totalUsage.inputTokens + usage.inputTokens,
           outputTokens: totalUsage.outputTokens + usage.outputTokens,
