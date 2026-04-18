@@ -156,6 +156,13 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
               `[worktree-rebase] Failed to mark lane ${payload.existingLaneId} as awaiting_input: ${laneErr instanceof Error ? laneErr.message : laneErr}`,
             );
           }
+        } else {
+          // Scratch launches have no lane — log explicitly so the trail is
+          // obvious. The supervisor inbox row (below) + thrown error (further
+          // down) are the only surfaces operators will see.
+          console.warn(
+            `[worktree-rebase] Scratch ${runtimeId} launch blocked by rebase conflict onto origin/${baseBranchForInbox} (no lane to mark, branch ${conflictBranch}).`,
+          );
         }
 
         try {
