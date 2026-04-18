@@ -18,7 +18,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { GitBranch } from './lucide-shims';
-import { ChartBar, FolderPlus, GearSix } from '@phosphor-icons/react';
+import { ChartBar, FolderPlus, GearSix, WarningCircle } from '@phosphor-icons/react';
 import { ChromeButton } from './chrome/ChromeButton';
 import { formatBranchDisplayName } from './repo-registry/shared';
 
@@ -231,6 +231,85 @@ function FooterPorts({ onPortPreview }: { onPortPreview?: DesktopStatusBarProps[
   );
 }
 
+function SupervisorInboxBadge() {
+  const [humanRequiredCount, setHumanRequiredCount] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ data?: { humanRequiredCount?: unknown } }>).detail;
+      const nextCount = detail?.data?.humanRequiredCount;
+      if (typeof nextCount === 'number' && Number.isFinite(nextCount)) {
+        setHumanRequiredCount(Math.max(0, Math.floor(nextCount)));
+      }
+    };
+
+    window.addEventListener('o8:supervisor-inbox', handleUpdate);
+    return () => {
+      window.removeEventListener('o8:supervisor-inbox', handleUpdate);
+    };
+  }, []);
+
+  const active = humanRequiredCount > 0;
+  const borderColor = active ? 'rgba(249,115,22,0.2)' : 'rgba(148,163,184,0.16)';
+  const background = active ? 'rgba(249,115,22,0.11)' : 'rgba(255,255,255,0.42)';
+  const countBackground = active ? '#f97316' : 'rgba(148,163,184,0.18)';
+  const countColor = active ? '#fff7ed' : 'var(--t-text-faint)';
+
+  return (
+    <a
+      href="/dashboard/inbox"
+      aria-label={`Supervisor inbox${active ? `, ${humanRequiredCount} human-required item${humanRequiredCount === 1 ? '' : 's'}` : ''}`}
+      title={active ? `${humanRequiredCount} human-required inbox item${humanRequiredCount === 1 ? '' : 's'}` : 'Supervisor inbox'}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        height: 18,
+        paddingLeft: 7,
+        paddingRight: 7,
+        borderRadius: 9,
+        textDecoration: 'none',
+        border: `1px solid ${borderColor}`,
+        background,
+        color: active ? '#c2410c' : 'var(--t-text-faint)',
+        boxShadow: active ? '0 8px 20px rgba(249, 115, 22, 0.12)' : 'none',
+        transition: 'background 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+      }}
+    >
+      <WarningCircle size={11} weight={active ? 'fill' : 'bold'} />
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '-0.01em',
+        }}
+      >
+        Inbox
+      </span>
+      <span
+        style={{
+          minWidth: 14,
+          height: 14,
+          paddingLeft: 4,
+          paddingRight: 4,
+          borderRadius: 7,
+          background: countBackground,
+          color: countColor,
+          fontSize: 9,
+          fontWeight: 800,
+          lineHeight: 1,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {humanRequiredCount > 99 ? '99+' : humanRequiredCount}
+      </span>
+    </a>
+  );
+}
+
 function DesktopStatusBarBase({
   branchName,
   repoName,
@@ -290,6 +369,7 @@ function DesktopStatusBarBase({
         radius={6}
       />
       <FooterPorts onPortPreview={onPortPreview} />
+      <SupervisorInboxBadge />
 
       <div style={{ flex: 1 }} />
 
