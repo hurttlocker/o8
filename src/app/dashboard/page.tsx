@@ -215,6 +215,8 @@ function DashboardInner() {
 
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
+  const [latestDispatchedTabId, setLatestDispatchedTabId] = useState<string | null>(null);
+  const [latestDispatchedAt, setLatestDispatchedAt] = useState<number | null>(null);
   const lastMarkedWorkspaceReadRef = useRef<string>('');
 
   const {
@@ -908,6 +910,8 @@ function DashboardInner() {
     enqueueFtuxMilestone('firstAgentSpawned');
 
     setActiveTileId(workspaceTarget.tileId);
+    setLatestDispatchedTabId(tabId);
+    setLatestDispatchedAt(Date.now());
 
     // ── Notify the lane that a session was created ──
     if (laneId) {
@@ -2420,6 +2424,8 @@ function DashboardInner() {
             onLaunchPacket={launchOrchestrationPacket}
             draftInjection={thoughtsDraftInjection}
             onSelectSession={handleSelectSession}
+            latestDispatchedTabId={latestDispatchedTabId}
+            latestDispatchedAt={latestDispatchedAt}
           >
             <TileContainer
               layout={tileLayout}

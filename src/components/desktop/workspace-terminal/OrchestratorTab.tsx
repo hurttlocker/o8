@@ -34,7 +34,6 @@ import {
   timeOfDayGreeting,
 } from '@/components/desktop/OrchestratorEmptyState';
 import { OrchestratorHistorySidebar } from '@/components/desktop/OrchestratorHistorySidebar';
-import { SessionVisualizer } from '@/components/desktop/SessionVisualizer';
 import { UnifiedAgentsSidebar } from '@/components/desktop/UnifiedAgentsSidebar';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
 import { ThreadsDropdown } from '@/components/desktop/orchestrator/ThreadsDropdown';
@@ -355,22 +354,8 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     });
   }, []);
 
-  const handleToggleTileSession = useCallback((sessionKey: string) => {
-    setTiledSessions((current) => {
-      if (current.includes(sessionKey)) {
-        return current.filter((key) => key !== sessionKey);
-      }
-      const appended = [...current, sessionKey];
-      return appended.length > 4 ? appended.slice(appended.length - 4) : appended;
-    });
-  }, []);
-
   const handleCloseTileSession = useCallback((sessionKey: string) => {
     setTiledSessions((current) => current.filter((key) => key !== sessionKey));
-  }, []);
-
-  const handleClearTiles = useCallback(() => {
-    setTiledSessions([]);
   }, []);
 
   const handleToggleTileDock = useCallback(() => {
@@ -459,7 +444,6 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     [greeting, runtimeLabel, handleQuickAction],
   );
 
-  const hasActiveSessions = agents.length > 0;
   const hasMessages = chatChromeState.hasMessages;
 
   const handleHeaderCopyMarkdown = useCallback(async () => {
@@ -631,18 +615,8 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
         </div>
       </div>
 
-      {/* Session visualizer — only when there are active sessions.
-          Clicking a card opens that agent's live transcript in a workspace
-          terminal tab instead of spilling the running output inline. */}
-      {hasActiveSessions ? (
-        <SessionVisualizer
-          agents={agents}
-          tiledSessions={tiledSessions}
-          onSelectSession={data.onSelectSession}
-          onToggleTileSession={handleToggleTileSession}
-          onClearTiles={handleClearTiles}
-        />
-      ) : null}
+      {/* SESSIONS strip retired — the workspace tab strip above already
+          represents active agents. See issue #604. */}
 
       {readyComparisonGroups.length > 0 ? (
         <div

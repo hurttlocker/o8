@@ -28,6 +28,10 @@ export interface OrchestratorDataValue {
   draftInjection?: ThoughtsCardProps['draftInjection'];
   /** Open the given agent session in a workspace terminal tab. */
   onSelectSession?: (sessionKey: string) => void;
+  /** Tab id of the most-recently dispatched packet, for soft-orange highlight. */
+  latestDispatchedTabId?: string | null;
+  /** Epoch ms timestamp of the most-recent dispatch — surfaced in tab tooltips. */
+  latestDispatchedAt?: number | null;
 }
 
 const OrchestratorDataContext = createContext<OrchestratorDataValue | null>(null);
