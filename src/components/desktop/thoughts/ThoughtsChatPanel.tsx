@@ -22,9 +22,12 @@ import {
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
+import { ClearToast } from './chat-panel/ClearToast';
 import { ComposerArea } from './chat-panel/ComposerArea';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
+import { useClearCommand } from './chat-panel/useClearCommand';
+import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import type {
   ThoughtsChatPanelChromeState,
   ThoughtsChatPanelHandle,
@@ -139,13 +142,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [orchestratorSpawning, setOrchestratorSpawning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
-  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exportFeedbackTimerRef = useRef<number | null>(null);
-  const clearToastTimerRef = useRef<number | null>(null);
   const handleClearCommandRef = useRef<() => Promise<void>>(async () => {});
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
-  const [showClearToast, setShowClearToast] = useState(false);
+  const { persistThread, persistThreadNow, cancelPendingPersist } = usePersistChatThread(resolvedRepoPath);
 
   const isOrchestratorMode = targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey);
 
@@ -263,7 +264,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       if (pollRef.current !== null) window.clearInterval(pollRef.current);
       if (pollDelayRef.current !== null) window.clearTimeout(pollDelayRef.current);
       if (exportFeedbackTimerRef.current !== null) window.clearTimeout(exportFeedbackTimerRef.current);
-      if (clearToastTimerRef.current !== null) window.clearTimeout(clearToastTimerRef.current);
     };
   }, []);
 
@@ -290,17 +290,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         exportFeedbackTimerRef.current = null;
       }, 1800);
     }
-  }, []);
-
-  const showArchivedToast = useCallback(() => {
-    setShowClearToast(true);
-    if (clearToastTimerRef.current !== null) {
-      window.clearTimeout(clearToastTimerRef.current);
-    }
-    clearToastTimerRef.current = window.setTimeout(() => {
-      setShowClearToast(false);
-      clearToastTimerRef.current = null;
-    }, 1800);
   }, []);
 
   const transcriptUrl = useCallback((sessionKey: string) => {
@@ -480,10 +469,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('o8:orchestrator:auto-restore-suppressed', '1');
     }
-    if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null; }
+    cancelPendingPersist();
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [clearPolling, orchStream]);
+  }, [cancelPendingPersist, clearPolling, orchStream]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
@@ -514,53 +503,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [preEnhanceInput]);
 
   // ── Thread persistence ──
-
-  const persistThreadNow = useCallback(async (msgs: MobileTranscriptEntry[], tid: string | null, nextPlanText: string | null) => {
-    if (!tid || msgs.length === 0) return;
-    const messages = msgs.map((m) => ({
-      id: m.id,
-      role: m.role,
-      content: m.text,
-      type: m.type,
-      media: m.media,
-      toolCalls: m.toolCalls,
-      timestamp: m.timestamp ?? Date.now(),
-      timestampLabel: m.timestampLabel,
-      model: m.model,
-      tokens: m.tokens,
-      costUsd: m.costUsd,
-      sources: m.sources,
-      thinking: m.thinking,
-      thinkingSteps: m.thinkingSteps,
-      thinkingDurationMs: m.thinkingDurationMs,
-      recalledFacts: m.recalledFacts,
-      compaction: m.compaction,
-    }));
-    try {
-      await fetch('/api/v2/chat-history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tabId: tid,
-          messages,
-          model: 'claude-code',
-          planText: nextPlanText ?? undefined,
-          repoPath: resolvedRepoPath,
-        }),
-      });
-    } catch {
-      // silent
-    }
-  }, [resolvedRepoPath]);
-
-  const persistThread = useCallback((msgs: MobileTranscriptEntry[], tid: string | null, nextPlanText: string | null) => {
-    if (!tid || msgs.length === 0) return;
-    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-    persistTimerRef.current = setTimeout(() => {
-      persistTimerRef.current = null;
-      void persistThreadNow(msgs, tid, nextPlanText);
-    }, 800);
-  }, [persistThreadNow]);
 
   useEffect(() => {
     let msgs: typeof chatMessages;
@@ -633,41 +575,18 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     })();
   }, [isOrchestratorMode, orchStream.messages.length, chatMessages.length]);
 
-  const handleClearCommand = useCallback(async () => {
-    const liveTimestamps = new Set(orchStream.messages.map((entry) => entry.timestamp));
-    const archivedPlanText = planText ?? orchStream.planText ?? null;
-    const archiveMessages = isOrchestratorMode
-      ? (orchStream.messages.length > 0 && chatMessages.length > 0
-        ? [...chatMessages.filter((message) => !liveTimestamps.has(message.timestamp)), ...orchStream.messages]
-        : orchStream.messages.length > 0
-          ? orchStream.messages
-          : chatMessages)
-      : chatMessages;
-    const hasArchivableMessages = archiveMessages.some((message) => message.role === 'user');
-    if (persistTimerRef.current) {
-      clearTimeout(persistTimerRef.current);
-      persistTimerRef.current = null;
-    }
-    if (hasArchivableMessages) {
-      await persistThreadNow(archiveMessages, threadIdRef.current ?? `thoughts-${Date.now()}`, archivedPlanText);
-    }
-
-    try {
-      const response = await fetch('/api/orchestrator/reset-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resolvedRepoPath ? { repoPath: resolvedRepoPath } : {}),
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-        throw new Error(payload?.error?.message ?? 'Unable to reset orchestrator session.');
-      }
-      handleReset();
-      showArchivedToast();
-    } catch (error) {
-      console.error('[orchestrator] Failed to clear orchestrator conversation.', error);
-    }
-  }, [chatMessages, handleReset, isOrchestratorMode, orchStream.messages, orchStream.planText, persistThreadNow, planText, resolvedRepoPath, showArchivedToast]);
+  const { showClearToast, handleClearCommand } = useClearCommand({
+    isOrchestratorMode,
+    orchStreamMessages: orchStream.messages,
+    orchStreamPlanText: orchStream.planText,
+    chatMessages,
+    planText,
+    threadIdRef,
+    resolvedRepoPath,
+    persistThreadNow,
+    cancelPendingPersist,
+    handleReset,
+  });
 
   const handleLoadThread = useCallback(async (tabId: string) => {
     try {
@@ -889,17 +808,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             pointerEvents: 'none',
           }}
         >
-          <div style={{
-            padding: '6px 10px',
-            borderRadius: 10,
-            border: '1px solid var(--t-divider-subtle)',
-            background: 'var(--t-panel-translucent)',
-            color: 'var(--t-text-muted)',
-            fontSize: 11,
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-          }}>
-            Thread archived · Orchestrator ready.
-          </div>
+          <ClearToast />
         </div>
       ) : null}
 
