@@ -1,55 +1,69 @@
-import { useState } from 'react';
 import { SparklesIcon } from './ThoughtsIcons';
-
-type ThinkingEffort = 'medium' | 'high' | 'max';
+import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 const EFFORT_LABELS: Record<ThinkingEffort, string> = {
-  medium: 'Medium thinking',
-  high: 'High thinking',
-  max: 'Max effort',
+  adaptive: 'Adaptive',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  max: 'Max',
+  xhigh: 'XHigh',
 };
 
-const EFFORT_CYCLE: ThinkingEffort[] = ['medium', 'high', 'max'];
-
 /**
- * Signal bars icon — 3 bars that light up based on thinking effort level.
- * Clickable: cycles medium → high → max → medium.
- *   medium = 1 bar lit
- *   high   = 2 bars lit
- *   max    = 3 bars lit (default)
+ * Thinking effort control — compact chip that cycles the available effort
+ * levels without opening a menu. Kept intentionally small so #588 can drop in
+ * a richer selector later without reworking the composer layout again.
  */
-function ThinkingBars({
+function ThinkingChip({
   effort,
+  adaptiveEnabled,
   onClick,
 }: {
   effort: ThinkingEffort;
+  adaptiveEnabled: boolean;
   onClick: () => void;
 }) {
-  const litColor = '#2563eb';
-  const dimColor = 'var(--t-text-faint)';
-  const lit1 = true; // always at least 1
-  const lit2 = effort === 'high' || effort === 'max';
-  const lit3 = effort === 'max';
+  const eyeBrow = adaptiveEnabled
+    ? EFFORT_LABELS[effort]
+    : `${EFFORT_LABELS[effort]} · fixed`;
+  const accent = effort === 'adaptive' ? '#2563eb' : 'var(--t-text-secondary)';
+  const background = effort === 'adaptive'
+    ? 'linear-gradient(180deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0.05))'
+    : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 
   return (
     <button
       type="button"
       onClick={onClick}
-      title={EFFORT_LABELS[effort]}
+      title={`Thinking: ${eyeBrow}`}
       style={{
         display: 'inline-flex',
-        alignItems: 'flex-end',
-        gap: 1.5,
-        padding: 2,
-        borderWidth: 0,
-        background: 'transparent',
+        alignItems: 'center',
+        gap: 7,
+        minHeight: 24,
+        padding: '0 8px',
+        border: effort === 'adaptive'
+          ? '1px solid rgba(37, 99, 235, 0.24)'
+          : '1px solid var(--t-panel-border)',
+        borderRadius: 8,
+        background,
         cursor: 'pointer',
-        height: 16,
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}
     >
-      <span style={{ width: 3, height: 5, borderRadius: 1, background: lit1 ? litColor : dimColor, transition: 'background 150ms' }} />
-      <span style={{ width: 3, height: 9, borderRadius: 1, background: lit2 ? litColor : dimColor, transition: 'background 150ms' }} />
-      <span style={{ width: 3, height: 13, borderRadius: 1, background: lit3 ? litColor : dimColor, transition: 'background 150ms' }} />
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          color: accent,
+          textTransform: 'uppercase',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {eyeBrow}
+      </span>
     </button>
   );
 }
@@ -69,8 +83,9 @@ export function InputButtons({
   onUndoEnhance,
   onSubmit,
   modelLabel,
-  effort = 'max',
+  effort = 'adaptive',
   onEffortChange,
+  adaptiveEnabled = true,
   permissionMode,
   onTogglePermission,
   missionOpen,
@@ -88,6 +103,7 @@ export function InputButtons({
   modelLabel?: string;
   effort?: ThinkingEffort;
   onEffortChange?: (effort: ThinkingEffort) => void;
+  adaptiveEnabled?: boolean;
   permissionMode?: 'full' | 'plan';
   onTogglePermission?: () => void;
   missionOpen?: boolean;
@@ -95,10 +111,13 @@ export function InputButtons({
   repoLabel?: string | null;
 }) {
   const canSubmit = Boolean(input.trim());
+  const effortCycle: ThinkingEffort[] = adaptiveEnabled
+    ? ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh']
+    : ['low', 'medium', 'high', 'max', 'xhigh'];
 
   const cycleEffort = () => {
-    const idx = EFFORT_CYCLE.indexOf(effort);
-    const next = EFFORT_CYCLE[(idx + 1) % EFFORT_CYCLE.length];
+    const idx = effortCycle.indexOf(effort);
+    const next = effortCycle[(idx >= 0 ? idx : 0) + 1] ?? effortCycle[0];
     onEffortChange?.(next);
   };
 
@@ -112,8 +131,8 @@ export function InputButtons({
       paddingBottom: 6,
       paddingLeft: 10,
     }}>
-      {/* Thinking effort bars — click to cycle */}
-      <ThinkingBars effort={effort} onClick={cycleEffort} />
+      {/* Thinking effort chip — click to cycle */}
+      <ThinkingChip effort={effort} adaptiveEnabled={adaptiveEnabled} onClick={cycleEffort} />
 
       {/* Model label */}
       {modelLabel ? (

@@ -62,6 +62,7 @@ import { getBrowserProvider } from './lib/browser/inventory';
 import type { CommandCenterSnapshot } from './lib/command-center/snapshot';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from './lib/mobile/types';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
+import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import {
   ensureOrchestratorSession,
   sendToOrchestrator,
@@ -1660,9 +1661,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   // match legacy behavior for clients that haven't been updated yet.
   const permissionMode: 'full' | 'plan' =
     msg.permissionMode === 'plan' ? 'plan' : 'full';
-  const thinkingEffort = msg.thinkingEffort === 'medium' ? 'medium'
-    : msg.thinkingEffort === 'high' ? 'high'
-    : 'max' as const;
+  const thinkingEffort: ManualThinkingEffort | undefined = isManualThinkingEffort(msg.thinkingEffort)
+    ? msg.thinkingEffort
+    : undefined;
   const model = typeof msg.model === 'string' && msg.model.trim()
     ? msg.model.trim()
     : undefined;
