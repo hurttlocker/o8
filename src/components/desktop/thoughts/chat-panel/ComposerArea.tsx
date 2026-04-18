@@ -1,11 +1,25 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
 import { InputButtons, ThinkingChip, type ThinkingEffort } from '../InputButtons';
+import { useTokenEstimate } from '../useTokenEstimate';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import type { ThoughtsChatPermissionMode } from './types';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
+import { formatTokens } from '@/lib/util/format-tokens';
+
+const compactUsdFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+interface FooterMeterSlotProps {
+  onClick?: () => void;
+  runningTotal?: number;
+}
 
 function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -256,6 +270,13 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const footerLeadingSlot = isOrchestratorMode ? (
     <ThinkingChip effort={effort} adaptiveEnabled={adaptiveEnabled} onChange={onEffortChange} />
   ) : hasAssistantActivity ? <span>{displayMessagesCount} messages</span> : null;
+  const footerMeterProps = isValidElement<FooterMeterSlotProps>(footerMeterSlot) ? footerMeterSlot.props : null;
+  const tokenEstimate = useTokenEstimate({
+    enabled: isOrchestratorMode,
+    input,
+    model: modelLabel,
+    runningTotal: footerMeterProps?.runningTotal ?? 0,
+  });
 
   const updateInput = (nextValue: string) => {
     if (dismissedSlashInput !== null && dismissedSlashInput !== nextValue) {
@@ -422,7 +443,39 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       {footerLeadingSlot || footerMeterSlot ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, paddingLeft: 2, paddingRight: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
           <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>{footerLeadingSlot}</div>
-          {footerMeterSlot ? <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{footerMeterSlot}</div> : null}
+          {tokenEstimate || footerMeterSlot ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, minWidth: 0, flexWrap: 'wrap' }}>
+              {tokenEstimate ? (
+                <button
+                  type="button"
+                  onClick={() => { footerMeterProps?.onClick?.(); }}
+                  title={`Projected next turn: ${formatTokens(tokenEstimate.projectedTokens).replace(/K$/u, 'k')} tokens · ${tokenEstimate.projectedPercent}% of context`}
+                  style={{
+                    padding: 0,
+                    borderWidth: 0,
+                    background: 'transparent',
+                    color: tokenEstimate.warnAtContextThreshold ? '#FF5A1F' : 'var(--t-text-faint)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    cursor: footerMeterProps?.onClick ? 'pointer' : 'default',
+                    minWidth: 0,
+                    fontSize: 11,
+                    fontWeight: 500,
+                    whiteSpace: 'nowrap',
+                    fontVariantNumeric: 'tabular-nums',
+                    fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {`~${formatTokens(tokenEstimate.projectedTokens).replace(/K$/u, 'k')} tokens`}
+                    {tokenEstimate.costUsd !== null ? ` · ~${compactUsdFormatter.format(tokenEstimate.costUsd)}` : ''}
+                  </span>
+                </button>
+              ) : null}
+              {footerMeterSlot ? <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{footerMeterSlot}</div> : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
