@@ -23,6 +23,16 @@ import { createGoogleToolResponseStream } from './google-native-tools';
 import { streamOpenRouterFallback } from './operator-fallback';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
+const TOKENS_PER_MILLION = 1_000_000;
+const ANTHROPIC_CACHE_READ_MULTIPLIER = 0.1;
+const ANTHROPIC_CACHE_WRITE_MULTIPLIER = 1.25;
+
+type AnthropicUsageTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+};
 
 function jsonError(message: string, status: number) {
   return new Response(
@@ -60,6 +70,104 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function asFiniteTokenCount(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function anthropicPricingForModel(model: string) {
+  const normalizedModel = model.trim().toLowerCase();
+  if (!normalizedModel) return null;
+  if (normalizedModel.includes('claude-opus-4-7')) return { input: 5, output: 25 };
+  if (normalizedModel.includes('claude-opus-4-6')) return { input: 15, output: 75 };
+  if (normalizedModel.includes('claude-sonnet-4-6')) return { input: 3, output: 15 };
+  if (normalizedModel.includes('claude-sonnet-4-5') || normalizedModel.includes('claude-sonnet-4')) return { input: 3, output: 15 };
+  if (normalizedModel.includes('claude-haiku-4-5') || normalizedModel.includes('claude-haiku')) return { input: 0.8, output: 4 };
+  return null;
+}
+
+function computeUsageCost(
+  provider: string,
+  model: string,
+  usage: AnthropicUsageTotals,
+) {
+  if (provider !== 'anthropic') {
+    return computeCost(model, usage.inputTokens, usage.outputTokens);
+  }
+
+  const pricing = anthropicPricingForModel(model);
+  if (!pricing) {
+    return computeCost(model, usage.inputTokens, usage.outputTokens);
+  }
+
+  return (
+    usage.inputTokens * pricing.input
+    + usage.outputTokens * pricing.output
+    + usage.cacheReadTokens * pricing.input * ANTHROPIC_CACHE_READ_MULTIPLIER
+    + usage.cacheWriteTokens * pricing.input * ANTHROPIC_CACHE_WRITE_MULTIPLIER
+  ) / TOKENS_PER_MILLION;
+}
+
+function parseAnthropicStreamUsage(line: string) {
+  if (!line.startsWith('data: ')) return null;
+
+  try {
+    const payload = JSON.parse(line.slice(6).trim()) as {
+      usage?: Record<string, unknown>;
+      message?: { usage?: Record<string, unknown> };
+    };
+    const usage = payload.message?.usage ?? payload.usage;
+    if (!usage) return null;
+    return {
+      cacheReadTokens: asFiniteTokenCount(usage.cache_read_input_tokens),
+      cacheWriteTokens: asFiniteTokenCount(usage.cache_creation_input_tokens),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function withAnthropicPromptCaching(body: Record<string, unknown>, provider: string) {
+  if (provider !== 'anthropic') {
+    return body;
+  }
+
+  const nextBody = { ...body };
+  if (typeof nextBody.system === 'string' && nextBody.system.trim()) {
+    nextBody.system = [{
+      type: 'text',
+      text: nextBody.system,
+      cache_control: { type: 'ephemeral' as const },
+    }];
+  }
+  return nextBody;
+}
+
+function buildUsageEvent(
+  provider: string,
+  model: string,
+  usage: AnthropicUsageTotals,
+) {
+  const event: Record<string, unknown> = {
+    type: 'usage',
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    costUsd: computeUsageCost(provider, model, usage),
+  };
+
+  if (provider === 'anthropic') {
+    event.cacheReadTokens = usage.cacheReadTokens;
+    event.cacheWriteTokens = usage.cacheWriteTokens;
+    event.usage = {
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      cache_read_input_tokens: usage.cacheReadTokens,
+      cache_creation_input_tokens: usage.cacheWriteTokens,
+    };
+  }
+
+  return event;
 }
 
 export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthContext | null) => {
@@ -205,10 +313,17 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
   const config = PROVIDERS[provider];
   const headers = config.buildHeaders(apiKey);
-  const upstreamBody = config.buildBody(model, messages) as Record<string, unknown>;
-  if (disableTools) {
-    delete upstreamBody.tools;
-  }
+  const buildUpstreamBody = (requestMessages: Message[]) => {
+    const upstreamBody = withAnthropicPromptCaching(
+      config.buildBody(model, requestMessages) as Record<string, unknown>,
+      provider,
+    );
+    if (disableTools) {
+      delete upstreamBody.tools;
+    }
+    return upstreamBody;
+  };
+  const upstreamBody = buildUpstreamBody(messages);
 
   let upstream: globalThis.Response;
   try {
@@ -222,8 +337,12 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     return jsonError(`${provider} API error (${upstream.status}): ${errText.slice(0, 500)}`, upstream.status);
   }
 
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
+  let totalUsage: AnthropicUsageTotals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
   let fullResponseText = '';
 
   const encoder = new TextEncoder();
@@ -235,9 +354,20 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
       async function processStream(response: globalThis.Response): Promise<{
         toolCalls: Array<{ name: string; id: string; args: Record<string, unknown> }>;
+        usage: AnthropicUsageTotals;
       }> {
         const reader = response.body?.getReader();
-        if (!reader) return { toolCalls: [] };
+        if (!reader) {
+          return {
+            toolCalls: [],
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          };
+        }
 
         const decoder = new TextDecoder();
         let buffer = '';
@@ -245,6 +375,12 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
         let currentToolName = '';
         let currentToolId = '';
         let currentToolArgs = '';
+        const usage: AnthropicUsageTotals = {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        };
 
         while (true) {
           const { done, value } = await reader.read();
@@ -255,6 +391,13 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           buffer = lines.pop() ?? '';
 
           for (const line of lines) {
+            if (provider === 'anthropic') {
+              const anthropicUsage = parseAnthropicStreamUsage(line);
+              if (anthropicUsage) {
+                usage.cacheReadTokens = Math.max(usage.cacheReadTokens, anthropicUsage.cacheReadTokens);
+                usage.cacheWriteTokens = Math.max(usage.cacheWriteTokens, anthropicUsage.cacheWriteTokens);
+              }
+            }
             const parsed = config.parseStream(line);
             if (!parsed) continue;
 
@@ -268,8 +411,8 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               continue;
             }
             if (parsed.type === 'usage') {
-              totalInputTokens += parsed.inputTokens;
-              totalOutputTokens += parsed.outputTokens;
+              usage.inputTokens += parsed.inputTokens;
+              usage.outputTokens += parsed.outputTokens;
               continue;
             }
             if (parsed.type === 'tool_call_start') {
@@ -299,11 +442,17 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           }
         }
 
-        return { toolCalls };
+        return { toolCalls, usage };
       }
 
       try {
-        let { toolCalls } = await processStream(upstream);
+        let { toolCalls, usage } = await processStream(upstream);
+        totalUsage = {
+          inputTokens: totalUsage.inputTokens + usage.inputTokens,
+          outputTokens: totalUsage.outputTokens + usage.outputTokens,
+          cacheReadTokens: totalUsage.cacheReadTokens + usage.cacheReadTokens,
+          cacheWriteTokens: totalUsage.cacheWriteTokens + usage.cacheWriteTokens,
+        };
         let loopCount = 0;
         const allSources: Array<{ title: string; url?: string; path?: string }> = [];
 
@@ -413,12 +562,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                 diff,
               }));
               enqueue(JSON.stringify({ type: 'content', text: '' }));
-              enqueue(JSON.stringify({
-                type: 'usage',
-                inputTokens: totalInputTokens,
-                outputTokens: totalOutputTokens,
-                costUsd: 0,
-              }));
+              enqueue(JSON.stringify(buildUsageEvent(provider, model, totalUsage)));
               enqueue('[DONE]');
               controller.close();
               return;
@@ -459,7 +603,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             followResponse = await fetchWithTimeout(
               config.url,
               headers,
-              JSON.stringify(config.buildBody(model, messages)),
+              JSON.stringify(buildUpstreamBody(messages)),
             );
           } catch {
             break;
@@ -469,6 +613,12 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           }
           const followResult = await processStream(followResponse);
           toolCalls = followResult.toolCalls;
+          totalUsage = {
+            inputTokens: totalUsage.inputTokens + followResult.usage.inputTokens,
+            outputTokens: totalUsage.outputTokens + followResult.usage.outputTokens,
+            cacheReadTokens: totalUsage.cacheReadTokens + followResult.usage.cacheReadTokens,
+            cacheWriteTokens: totalUsage.cacheWriteTokens + followResult.usage.cacheWriteTokens,
+          };
         }
 
         const seen = new Set<string>();
@@ -485,23 +635,21 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           }));
         }
 
-        const costUsd = computeCost(model, totalInputTokens, totalOutputTokens);
-        enqueue(JSON.stringify({
-          type: 'usage',
-          inputTokens: totalInputTokens,
-          outputTokens: totalOutputTokens,
-          costUsd,
-        }));
+        const usageEvent = buildUsageEvent(provider, model, totalUsage);
+        enqueue(JSON.stringify(usageEvent));
         enqueue('[DONE]');
 
-        if (auth?.user && totalOutputTokens > 0) {
+        if (auth?.user && totalUsage.outputTokens > 0) {
           try {
+            const costUsd = typeof usageEvent.costUsd === 'number' ? usageEvent.costUsd : 0;
             logUsage({
               userId: auth.user.id,
               model,
               provider,
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
+              inputTokens: totalUsage.inputTokens,
+              outputTokens: totalUsage.outputTokens,
+              cacheReadTokens: totalUsage.cacheReadTokens,
+              cacheWriteTokens: totalUsage.cacheWriteTokens,
               costUsd,
               agentName: 'llm-chat',
               requestType: 'chat',
