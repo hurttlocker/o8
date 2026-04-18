@@ -1,29 +1,33 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Check,
-  FileCode2,
-  FolderOpen,
-  Globe,
-  Image as ImageIcon,
-  Search,
-  TerminalSquare,
-  Wrench,
+  ChevronRight,
 } from '@/components/desktop/lucide-shims';
 import type {
   MobileTranscriptToolCall,
   ToolSideEffectClass,
 } from '@/lib/mobile/types';
+import { renderDiffLines } from '@/components/desktop/diff-utils';
 import { publishO8PanelFocus } from '@/lib/events/o8-panel-focus';
 import { requestRuntimeSessionFocus } from '@/lib/runtime/session-focus';
 import {
   classifyToolCall,
-  writeTargetsFile,
 } from '@/components/desktop/thoughts/toolClassifier';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
 
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+const FILE_MUTATION_TOOL_NAMES = new Set([
+  'write',
+  'write_file',
+  'create_file',
+  'edit',
+  'edit_file',
+  'multi_edit',
+  'notebookedit',
+  'notebook_edit',
+]);
 
 function firstString(...values: unknown[]) {
   for (const value of values) {
@@ -70,8 +74,8 @@ function toolDetail(tool: MobileTranscriptToolCall) {
   if (name === 'read' || name === 'read_file') {
     return sanitizeTranscriptText(firstString(args.file_path, args.path) ?? '') || 'File read';
   }
-  if (name === 'write' || name === 'write_file' || name === 'edit' || name === 'edit_file') {
-    return sanitizeTranscriptText(firstString(args.file_path, args.path) ?? '') || 'File edit';
+  if (FILE_MUTATION_TOOL_NAMES.has(name)) {
+    return sanitizeTranscriptText(firstString(args.file_path, args.path, args.notebook_path) ?? '') || 'File edit';
   }
   if (name === 'search_web' || name === 'web_search' || name === 'cortex_search' || name === 'memory_search') {
     return sanitizeTranscriptText(firstString(args.query, args.q) ?? '') || 'Search';
@@ -95,6 +99,7 @@ function toolDetail(tool: MobileTranscriptToolCall) {
   const fallback = firstString(
     args.path,
     args.file_path,
+    args.notebook_path,
     args.url,
     args.query,
     args.command,
@@ -109,7 +114,10 @@ function toolLabel(tool: MobileTranscriptToolCall) {
   if (name === 'exec' || name === 'exec_command' || name === 'write_stdin') return 'Terminal';
   if (name === 'read' || name === 'read_file') return 'Read File';
   if (name === 'write' || name === 'write_file') return 'Write File';
+  if (name === 'create_file') return 'Create File';
   if (name === 'edit' || name === 'edit_file') return 'Edit File';
+  if (name === 'multi_edit') return 'Multi Edit';
+  if (name === 'notebookedit' || name === 'notebook_edit') return 'Notebook Edit';
   if (name === 'search_web' || name === 'web_search') return 'Web Search';
   if (name === 'web_fetch' || name === 'fetch_url') return 'Fetch';
   if (name === 'browser') return 'Browser';
@@ -120,228 +128,357 @@ function toolLabel(tool: MobileTranscriptToolCall) {
   return tool.name;
 }
 
-function toolStatusLabel(status: MobileTranscriptToolCall['status']) {
-  if (status === 'calling') return 'Queued';
-  if (status === 'running') return 'Running';
-  return 'Done';
-}
-
-function ToolIcon({ tool }: { tool: MobileTranscriptToolCall }) {
-  const name = tool.name.toLowerCase();
-  if (name === 'exec' || name === 'exec_command' || name === 'write_stdin') {
-    return <TerminalSquare size={14} strokeWidth={2} />;
-  }
-  if (name === 'read' || name === 'read_file' || name === 'write' || name === 'write_file' || name === 'edit' || name === 'edit_file') {
-    return <FileCode2 size={14} strokeWidth={2} />;
-  }
-  if (name === 'search_web' || name === 'web_search' || name === 'cortex_search' || name === 'memory_search') {
-    return <Search size={14} strokeWidth={2} />;
-  }
-  if (name === 'web_fetch' || name === 'fetch_url' || name === 'browser') {
-    return <Globe size={14} strokeWidth={2} />;
-  }
-  if (name === 'list_files' || name === 'ls' || name === 'glob') {
-    return <FolderOpen size={14} strokeWidth={2} />;
-  }
-  if (name === 'image') {
-    return <ImageIcon size={14} strokeWidth={2} />;
-  }
-  return <Wrench size={14} strokeWidth={2} />;
-}
-
 function resolveSideEffectClass(tool: MobileTranscriptToolCall): ToolSideEffectClass {
   return tool.sideEffectClass ?? classifyToolCall(tool.name, tool.args);
 }
 
-function ToolStatusBadge({ status, tone }: { status: MobileTranscriptToolCall['status']; tone: string }) {
-  const done = status === 'done' || !status;
-  return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 5,
-      fontSize: 10,
-      fontWeight: 700,
-      color: done ? '#10b981' : tone,
-      textTransform: 'uppercase',
-      letterSpacing: '0.04em',
-      flexShrink: 0,
-    }}>
-      {done ? (
-        <Check size={12} strokeWidth={2.3} />
-      ) : (
-        <svg
-          width="11"
-          height="11"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={tone}
-          strokeWidth="3"
-          strokeLinecap="round"
-          style={{ animation: 'spin 0.9s linear infinite', display: 'block' }}
-          aria-hidden="true"
-        >
-          <path d="M21 12a9 9 0 1 1-6.22-8.56" />
-        </svg>
-      )}
-      {toolStatusLabel(status)}
-    </span>
-  );
+function lineCount(text: string) {
+  return text.length === 0 ? 0 : text.split('\n').length;
 }
 
-function WriteToolCard({ tool }: { tool: MobileTranscriptToolCall }) {
-  const label = toolLabel(tool);
-  const detail = toolDetail(tool);
-  const targetFile = writeTargetsFile(tool.name, tool.args);
+function truncateMiddle(text: string, max = 56) {
+  if (text.length <= max) return text;
+  const normalized = text.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.length >= 3) {
+    const first = segments[0];
+    const penultimate = segments[segments.length - 2];
+    const last = segments[segments.length - 1];
+    const withParent = `${first}/.../${penultimate}/${last}`;
+    if (withParent.length <= max) return withParent;
+    const shortened = `${first}/.../${last}`;
+    if (shortened.length <= max) return shortened;
+  }
+
+  const head = Math.max(12, Math.floor((max - 1) * 0.42));
+  const tail = Math.max(12, max - head - 1);
+  return `${text.slice(0, head)}…${text.slice(-tail)}`;
+}
+
+function buildSyntheticDiffBody(before: string, after: string) {
+  const beforeLines = before.length > 0 ? before.split('\n') : [];
+  const afterLines = after.length > 0 ? after.split('\n') : [];
+  if (beforeLines.length === 0 && afterLines.length === 0) return [];
+
+  const oldHeader = beforeLines.length > 0 ? `1,${beforeLines.length}` : '0,0';
+  const newHeader = afterLines.length > 0 ? `1,${afterLines.length}` : '0,0';
+  return [
+    `@@ -${oldHeader} +${newHeader} @@`,
+    ...beforeLines.map((line) => `-${line}`),
+    ...afterLines.map((line) => `+${line}`),
+  ];
+}
+
+function buildSyntheticDiff(path: string, before: string, after: string) {
+  const body = buildSyntheticDiffBody(before, after);
+  if (body.length === 0) return '';
+
+  const beforeLines = before.length > 0 ? before.split('\n') : [];
+  const afterLines = after.length > 0 ? after.split('\n') : [];
+  const oldPath = beforeLines.length > 0 ? `a/${path}` : '/dev/null';
+  const newPath = afterLines.length > 0 ? `b/${path}` : '/dev/null';
+
+  return [
+    `diff --git a/${path} b/${path}`,
+    `--- ${oldPath}`,
+    `+++ ${newPath}`,
+    ...body,
+  ].join('\n');
+}
+
+function isDiffText(text: string) {
+  return text
+    .split('\n')
+    .some((line) => ['+', '-', '@@', 'diff --git', 'index ', '---', '+++'].some((token) => line.startsWith(token)));
+}
+
+function getDiffStats(diff: string) {
+  return diff.split('\n').reduce((totals, line) => {
+    if (line.startsWith('+++') || line.startsWith('---')) return totals;
+    if (line.startsWith('+')) return { additions: totals.additions + 1, deletions: totals.deletions };
+    if (line.startsWith('-')) return { additions: totals.additions, deletions: totals.deletions + 1 };
+    return totals;
+  }, { additions: 0, deletions: 0 });
+}
+
+function fileMutationPath(tool: MobileTranscriptToolCall) {
+  const args = tool.args ?? {};
+  return sanitizeTranscriptText(firstString(args.file_path, args.path, args.notebook_path) ?? '');
+}
+
+function fileMutationPreview(tool: MobileTranscriptToolCall) {
+  const name = tool.name.toLowerCase();
+  if (!FILE_MUTATION_TOOL_NAMES.has(name)) return null;
+
+  const args = tool.args ?? {};
+  const path = fileMutationPath(tool);
+  if (!path) return null;
+
+  const fallbackDiff = typeof tool.preview === 'string' && isDiffText(tool.preview)
+    ? tool.preview
+    : typeof tool.result === 'string' && isDiffText(tool.result)
+      ? tool.result
+      : '';
+
+  if (name === 'multi_edit') {
+    const edits = Array.isArray(args.edits) ? args.edits as Array<Record<string, unknown>> : [];
+    const hunks = edits.flatMap((edit) => buildSyntheticDiffBody(
+      typeof edit.old_string === 'string' ? edit.old_string : typeof edit.oldText === 'string' ? edit.oldText : '',
+      typeof edit.new_string === 'string' ? edit.new_string : typeof edit.newText === 'string' ? edit.newText : '',
+    ));
+    const diff = hunks.length > 0
+      ? [
+          `diff --git a/${path} b/${path}`,
+          `--- a/${path}`,
+          `+++ b/${path}`,
+          ...hunks,
+        ].join('\n')
+      : fallbackDiff;
+    const stats = diff ? getDiffStats(diff) : { additions: 0, deletions: 0 };
+    return {
+      diff,
+      path,
+      additions: stats.additions,
+      deletions: stats.deletions,
+    };
+  }
+
+  if (name === 'edit' || name === 'edit_file') {
+    const before = typeof args.old_string === 'string' ? args.old_string : typeof args.oldText === 'string' ? args.oldText : '';
+    const after = typeof args.new_string === 'string' ? args.new_string : typeof args.newText === 'string' ? args.newText : '';
+    const diff = buildSyntheticDiff(path, before, after) || fallbackDiff;
+    const stats = diff
+      ? getDiffStats(diff)
+      : { additions: lineCount(after), deletions: lineCount(before) };
+    return {
+      diff,
+      path,
+      additions: stats.additions,
+      deletions: stats.deletions,
+    };
+  }
+
+  const content = typeof args.content === 'string' ? args.content : '';
+  const diff = buildSyntheticDiff(path, '', content) || fallbackDiff;
+  const stats = diff
+    ? getDiffStats(diff)
+    : { additions: lineCount(content), deletions: 0 };
+  return {
+    diff,
+    path,
+    additions: stats.additions,
+    deletions: stats.deletions,
+  };
+}
+
+function FileMutationLine({ tool }: { tool: MobileTranscriptToolCall }) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = useMemo(() => fileMutationPreview(tool), [tool]);
+  const path = preview?.path ?? toolDetail(tool);
+  const compactPath = truncateMiddle(path, 58);
+  const canExpand = Boolean(preview?.diff);
+  const isRunning = tool.status === 'running' || tool.status === 'calling';
+  const isDone = tool.status === 'done' || !tool.status;
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        paddingTop: 10,
-        paddingRight: 12,
-        paddingBottom: 10,
-        paddingLeft: 14,
-        background: THEME_PANEL_GLASS,
-        borderTopWidth: 1,
-        borderRightWidth: 1,
-        borderBottomWidth: 1,
-        borderLeftWidth: 3,
-        borderTopStyle: 'solid',
-        borderRightStyle: 'solid',
-        borderBottomStyle: 'solid',
-        borderLeftStyle: 'solid',
-        borderTopColor: 'var(--t-panel-border)',
-        borderRightColor: 'var(--t-panel-border)',
-        borderBottomColor: 'var(--t-panel-border)',
-        borderLeftColor: 'rgba(245, 158, 11, 0.7)',
-        borderRadius: 12,
-        boxShadow: 'var(--t-panel-shadow)',
-        width: '100%',
-        maxWidth: '92%',
-      }}
-    >
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-      }}>
-        <span style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          borderRadius: 8,
-          background: 'rgba(245, 158, 11, 0.12)',
-          color: '#b45309',
-          flexShrink: 0,
-        }}>
-          <ToolIcon tool={tool} />
-        </span>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{
-            fontSize: 12,
-            fontWeight: 700,
-            color: 'var(--t-text)',
-            letterSpacing: '-0.01em',
-          }}>
-            {label}
-          </div>
-          <div style={{
-            fontSize: 10,
-            color: 'var(--t-text-muted)',
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-            textTransform: 'lowercase',
-          }}>
-            {tool.name}
-          </div>
-        </div>
-        <ToolStatusBadge status={tool.status} tone="#b45309" />
-      </div>
-      <div
-        title={detail}
+    <div style={{ width: '100%', maxWidth: '92%' }}>
+      <button
+        type="button"
+        onClick={() => {
+          if (!canExpand) return;
+          setExpanded((value) => !value);
+        }}
+        title={path}
+        aria-expanded={canExpand ? expanded : undefined}
         style={{
-          fontSize: 12,
-          lineHeight: 1.55,
-          color: 'var(--t-text-secondary)',
-          wordBreak: 'break-word',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          width: '100%',
+          minHeight: 26,
+          paddingTop: 4,
+          paddingRight: 10,
+          paddingBottom: 4,
+          paddingLeft: 10,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'var(--t-border)',
+          borderRadius: 14,
+          background: expanded ? 'var(--t-hover)' : THEME_PANEL_GLASS,
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          textAlign: 'left',
+          cursor: canExpand ? 'pointer' : 'default',
         }}
       >
-        {truncate(detail, 180)}
-      </div>
-      {(targetFile || tool.launchLink) ? (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
-          {tool.launchLink ? (
-            <button
-              type="button"
-              onClick={() => {
-                requestRuntimeSessionFocus({
-                  sessionKey: tool.launchLink!.surfaceId,
-                  repoPath: tool.launchLink!.repoPath,
-                  label: tool.launchLink!.label,
-                });
-              }}
+        <span
+          aria-hidden="true"
+          style={{
+            width: 12,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            color: isDone ? 'var(--t-success, #16a34a)' : 'var(--t-text-faint)',
+          }}
+        >
+          {isRunning ? (
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              style={{ animation: 'spin 0.9s linear infinite', display: 'block' }}
+            >
+              <path d="M21 12a9 9 0 1 1-6.22-8.56" />
+            </svg>
+          ) : isDone ? (
+            <Check size={11} strokeWidth={2.6} />
+          ) : (
+            <span style={{ width: 4, height: 4, borderRadius: 999, background: 'var(--t-text-faint)', display: 'inline-block' }} />
+          )}
+        </span>
+        <span
+          style={{
+            minWidth: 0,
+            flex: 1,
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            textOverflow: 'ellipsis',
+            fontSize: 11.5,
+            lineHeight: 1.2,
+            color: 'var(--t-text)',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}
+        >
+          {compactPath || toolLabel(tool)}
+        </span>
+        {preview ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              flexShrink: 0,
+              fontSize: 10.5,
+              lineHeight: 1,
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+            }}
+          >
+            <span style={{ color: 'var(--t-success, #16a34a)' }}>+{preview.additions}</span>
+            <span style={{ color: 'var(--t-danger, #ef4444)' }}>-{preview.deletions}</span>
+          </span>
+        ) : null}
+        {canExpand ? (
+          <ChevronRight
+            size={12}
+            strokeWidth={2.1}
+            style={{
+              color: 'var(--t-text-faint)',
+              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 180ms ease',
+              flexShrink: 0,
+            }}
+          />
+        ) : null}
+      </button>
+      {expanded && preview?.diff ? (
+        <div
+          style={{
+            marginTop: 4,
+            marginLeft: 18,
+            overflow: 'hidden',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-border)',
+            borderRadius: 14,
+            background: THEME_PANEL_GLASS,
+          }}
+        >
+          <div style={{ paddingTop: 8, paddingRight: 0, paddingBottom: 8, paddingLeft: 0 }}>
+            {renderDiffLines(preview.diff)}
+          </div>
+          {(preview.path || tool.launchLink) ? (
+            <div
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                minHeight: 24,
-                paddingTop: 0,
+                display: 'flex',
+                justifyContent: 'flex-end',
+                flexWrap: 'wrap',
+                gap: 8,
+                paddingTop: 8,
                 paddingRight: 10,
-                paddingBottom: 0,
+                paddingBottom: 10,
                 paddingLeft: 10,
-                borderRadius: 999,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: 'rgba(37, 99, 235, 0.24)',
-                background: 'rgba(37, 99, 235, 0.09)',
-                color: '#1d4ed8',
-                fontSize: 10.5,
-                fontWeight: 700,
-                letterSpacing: '0.01em',
-                cursor: 'pointer',
+                borderTop: '1px solid var(--t-divider-subtle)',
               }}
             >
-              <span aria-hidden="true">→</span>
-              <span>{`Open ${tool.launchLink.label} tab`}</span>
-            </button>
-          ) : null}
-          {targetFile ? (
-            <button
-              type="button"
-              onClick={() => {
-                publishO8PanelFocus({ tab: 'changes', artifactId: targetFile });
-              }}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                height: 24,
-                paddingTop: 0,
-                paddingRight: 10,
-                paddingBottom: 0,
-                paddingLeft: 10,
-                borderRadius: 8,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: 'rgba(245, 158, 11, 0.28)',
-                background: 'rgba(245, 158, 11, 0.10)',
-                color: '#b45309',
-                fontSize: 10.5,
-                fontWeight: 700,
-                letterSpacing: '0.02em',
-                cursor: 'pointer',
-              }}
-            >
-              View in Changes
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14" />
-                <polyline points="12 5 19 12 12 19" />
-              </svg>
-            </button>
+              {tool.launchLink ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    requestRuntimeSessionFocus({
+                      sessionKey: tool.launchLink!.surfaceId,
+                      repoPath: tool.launchLink!.repoPath,
+                      label: tool.launchLink!.label,
+                    });
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    minHeight: 24,
+                    paddingTop: 0,
+                    paddingRight: 10,
+                    paddingBottom: 0,
+                    paddingLeft: 10,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: 'var(--t-border)',
+                    background: 'transparent',
+                    color: 'var(--t-text-muted)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  {`Open ${tool.launchLink.label}`}
+                </button>
+              ) : null}
+              {preview.path ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    publishO8PanelFocus({ tab: 'changes', artifactId: preview.path });
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    minHeight: 24,
+                    paddingTop: 0,
+                    paddingRight: 10,
+                    paddingBottom: 0,
+                    paddingLeft: 10,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: 'var(--t-border)',
+                    background: 'transparent',
+                    color: 'var(--t-text-muted)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  Open in Changes
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -418,16 +555,17 @@ function InlineToolLine({ tool }: { tool: MobileTranscriptToolCall }) {
   );
 }
 
-// Rams rule: every tool call gets one italic line. Only real mutations to the
-// repo — file writes, file edits — earn the full card. Everything else (shell
-// commands, reads, searches, MCP calls, ToolSearch, unknown tools) collapses
-// to a quiet italic line, batched when consecutive. Click the line to expand.
+// Rams rule: every tool call gets one compact line. Real file mutations stay
+// slightly heavier than shell commands, but only as a single-line paper row.
+// Everything else (shell commands, reads, searches, MCP calls, unknown tools)
+// collapses to a quiet italic line, batched when consecutive. Click to expand.
 // The inverse list keeps us from re-whitelisting every new MCP tool Anthropic
 // ships.
 function isBatchable(_cls: ToolSideEffectClass, tool: MobileTranscriptToolCall) {
   const n = tool.name.toLowerCase();
   if (n === 'write' || n === 'write_file' || n === 'create_file') return false;
   if (n === 'edit' || n === 'edit_file' || n === 'multi_edit') return false;
+  if (n === 'notebookedit' || n === 'notebook_edit') return false;
   return true;
 }
 
@@ -523,7 +661,6 @@ function BatchedToolLine({ tools }: { tools: MobileTranscriptToolCall[] }) {
           borderLeftColor: 'var(--t-divider-subtle)',
         }}>
           {tools.map((tool, index) => {
-            const cls = resolveSideEffectClass(tool);
             const key = `${tool.id ?? tool.name}-${index}`;
             return <InlineToolLine key={key} tool={tool} />;
           })}
@@ -535,8 +672,8 @@ function BatchedToolLine({ tools }: { tools: MobileTranscriptToolCall[] }) {
 
 export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscriptToolCall[] }) {
   // Group consecutive batchable (read/meta) tool calls into italic summary
-  // lines. Writes always render as full cards because they mutate the repo
-  // and the operator needs to see them clearly.
+  // lines. File mutations render as compact expandable rows so they stay
+  // visible without breaking transcript density.
   const groups: Array<
     | { kind: 'batch'; tools: MobileTranscriptToolCall[] }
     | { kind: 'write'; tool: MobileTranscriptToolCall; index: number }
@@ -564,14 +701,14 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      gap: 6,
+      gap: 2,
       width: '100%',
       maxWidth: '100%',
     }}>
       {groups.map((group, gi) => {
         if (group.kind === 'write') {
           const key = `write-${group.tool.id ?? group.tool.name}-${group.index}`;
-          return <WriteToolCard key={key} tool={group.tool} />;
+          return <FileMutationLine key={key} tool={group.tool} />;
         }
         // Every batchable group — single or multi — renders as the italic
         // line. Single calls show "ran 1 command — rg"; multi show the count
