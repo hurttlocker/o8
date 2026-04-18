@@ -679,6 +679,15 @@ export function useOrchestratorStream(
         case 'status': {
           const newStatus = msg.data?.status as string | undefined;
           if (newStatus === 'ready' || newStatus === 'busy' || newStatus === 'dead') {
+            if (
+              newStatus === 'busy'
+              && statusRef.current !== 'busy'
+              && currentAssistantRef.current === null
+              && messagesRef.current.length === 0
+            ) {
+              break;
+            }
+            statusRef.current = newStatus;
             setStatus(newStatus);
 
             // When agent goes ready, finalize current assistant message
@@ -698,12 +707,14 @@ export function useOrchestratorStream(
               finalizeFirstTurnPlanCapture();
             }
           } else if (newStatus === 'starting') {
+            statusRef.current = 'connecting';
             setStatus('connecting');
           }
           break;
         }
 
         case 'agent-update': {
+          if (statusRef.current !== 'busy' && messagesRef.current.length === 0) break;
           const update = msg.data as {
             surfaceId?: string;
             name?: string;
@@ -745,6 +756,7 @@ export function useOrchestratorStream(
 
           // Ensure we have a current assistant message to attach the tool call to
           if (!currentAssistantRef.current) {
+            if (statusRef.current !== 'busy') break;
             currentAssistantRef.current = {
               id: `orch-assistant-${Date.now()}`,
               chunks: [],
@@ -785,6 +797,7 @@ export function useOrchestratorStream(
         }
 
         case 'error': {
+          if (statusRef.current !== 'busy' && messagesRef.current.length === 0) break;
           const error = typeof msg.data?.error === 'string' ? msg.data.error : 'Unknown error';
           console.error('[orchestrator-stream] Error:', error);
           finalizeFirstTurnPlanCapture();
@@ -935,6 +948,7 @@ export function useOrchestratorStream(
       if (projectedTokens >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
         const compactingId = `orch-compacting-${Date.now()}`;
         const compactingAt = Date.now();
+        statusRef.current = 'busy';
         setStatus('busy');
         setMessages((prev) => [...prev, {
           id: compactingId,
@@ -977,6 +991,7 @@ export function useOrchestratorStream(
               timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             },
           ]);
+          statusRef.current = connected ? 'ready' : 'connecting';
           setStatus(connected ? 'ready' : 'connecting');
           return;
         }
@@ -988,6 +1003,7 @@ export function useOrchestratorStream(
         timestamp: Date.now(),
         timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
+      messagesRef.current = [...messagesRef.current, userEntry];
       setMessages((prev) => [...prev, userEntry]);
       currentAssistantRef.current = null;
       captureFirstTurnPlanRef.current = !planTextRef.current
@@ -995,6 +1011,7 @@ export function useOrchestratorStream(
         && !planCaptureSource.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
       firstTurnPlanStartedRef.current = false;
       firstTurnPlanChunksRef.current = [];
+      statusRef.current = 'busy';
       setStatus('busy');
 
       let outboundMessage = message;
@@ -1029,17 +1046,27 @@ export function useOrchestratorStream(
   }, [connect, connected, estimateNextTurnTokens, primeCompactedSession, requestCompaction]);
 
   const reset = useCallback(() => {
+    const nextStatus = connected ? 'ready' : 'connecting';
     resetEpochRef.current += 1;
+    messagesRef.current = [];
     setMessages([]);
+    planTextRef.current = null;
     setPlanText(null);
+    setBusyState(createIdleBusyState());
+    activeTurnRef.current = null;
     setTokenCount(0);
+    runningTotalRef.current = 0;
     setRunningTotal(0);
     currentAssistantRef.current = null;
-    planTextRef.current = null;
+    hasHistoryRef.current = false;
     telemetrySessionKeyRef.current = null;
     telemetryTotalRef.current = null;
+    autoCompactInFlightRef.current = false;
+    autoCompactArmedRef.current = true;
     resetFirstTurnPlanCapture();
-    setStatus(connected ? 'ready' : 'connecting');
+    statusRef.current = nextStatus;
+    lastEventAtRef.current = Date.now();
+    setStatus(nextStatus);
     if (typeof window !== 'undefined' && repoPathRef.current) window.localStorage.removeItem(`o8:orchestrator:auto-compact:${repoPathRef.current}`);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
   }, [connected, resetFirstTurnPlanCapture]);
