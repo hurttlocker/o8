@@ -262,7 +262,7 @@ function MessageBubbleBase({
               {message.images && message.images.length > 0 ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                   {message.images.map((image, index) => (
-                    <img key={`${image}-${index}`} src={image} alt={`Attached ${index + 1}`} style={{ maxWidth: 200, maxHeight: 200, borderRadius: 10, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.2)' }} />
+                    <img key={`${image}-${index}`} src={image} alt={`Attached ${index + 1}`} style={{ maxWidth: 200, maxHeight: 200, borderRadius: 10, objectFit: 'cover', border: '1px solid var(--t-border)' }} />
                   ))}
                 </div>
               ) : null}
