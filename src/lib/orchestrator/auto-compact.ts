@@ -122,7 +122,7 @@ export async function autoCompactOrchestratorThread(input: {
   const job = (async () => {
     const thread = await readLatestThread(repoPath);
     const transcript = mergeSnapshots(thread?.messages ?? [], snapshot);
-    if (transcript.length < 4) return { applied: false, transcript, resumePrelude: null, tokensAfter: 0 };
+    if (transcript.length < 2) return { applied: false, transcript, resumePrelude: null, tokensAfter: 0 };
     const compactedCount = Math.max(1, Math.floor(transcript.length * 0.6));
     const compactedTurns = transcript.slice(0, compactedCount);
     const liveTurns = transcript.slice(compactedCount);
