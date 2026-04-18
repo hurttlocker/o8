@@ -221,6 +221,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   footerMeterSlot,
 }, inputRef) {
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
+  const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
     if (!isOrchestratorMode) return [];
     // Scan the latest assistant message for any tool calls still marked as
@@ -245,16 +246,27 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     return null;
   }, [chatMessages]);
   const slashSuggestions = useMemo(() => (
-    isOrchestratorMode ? getOrchestratorSlashCommandSuggestions(input) : []
-  ), [input, isOrchestratorMode]);
+    isOrchestratorMode && dismissedSlashInput !== input
+      ? getOrchestratorSlashCommandSuggestions(input)
+      : []
+  ), [dismissedSlashInput, input, isOrchestratorMode]);
   const isDisabled = (displayWaiting || runningTools.length > 0) || (!isOrchestratorMode && !targetAgentExists);
 
   const activeSlashCommand = slashSuggestions[Math.min(activeSlashIndex, Math.max(0, slashSuggestions.length - 1))] ?? null;
 
+  const updateInput = (nextValue: string) => {
+    if (dismissedSlashInput !== null && dismissedSlashInput !== nextValue) {
+      setDismissedSlashInput(null);
+    }
+    setActiveSlashIndex(0);
+    onInputChange(nextValue);
+  };
+
   const handleSelectSlashCommand = (definition: OrchestratorSlashCommandDefinition) => {
+    setDismissedSlashInput(null);
     if (definition.requiresArgument) {
       const nextValue = `${definition.command} `;
-      onInputChange(nextValue);
+      updateInput(nextValue);
       requestAnimationFrame(() => {
         const node = inputRef && 'current' in inputRef ? inputRef.current : null;
         node?.focus();
@@ -301,7 +313,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             className={isOrchestratorMode ? 'thoughts-orchestrate-input' : undefined}
             value={input}
             onChange={(event) => {
-              onInputChange(event.target.value);
+              updateInput(event.target.value);
               const el = event.target;
               el.style.height = 'auto';
               el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
@@ -320,17 +332,15 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 }
                 if (event.key === 'Escape') {
                   event.preventDefault();
-                  onInputChange('');
-                  if (event.currentTarget) {
-                    event.currentTarget.style.height = 'auto';
-                  }
+                  setDismissedSlashInput(input);
+                  setActiveSlashIndex(0);
                   return;
                 }
               }
               if (event.key === 'ArrowUp' && !input.trim()) {
                 event.preventDefault();
                 const lastUserMsg = [...chatMessages].reverse().find((message) => message.role === 'user');
-                if (lastUserMsg) onInputChange(lastUserMsg.text);
+                if (lastUserMsg) updateInput(lastUserMsg.text);
                 return;
               }
               if (event.key === 'Enter' && !event.shiftKey) {
@@ -339,7 +349,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                   const normalized = input.trim();
                   const [commandToken] = normalized.split(/\s+/, 1);
                   if (activeSlashCommand.requiresArgument && normalized === commandToken) {
-                    onInputChange(`${activeSlashCommand.command} `);
+                    updateInput(`${activeSlashCommand.command} `);
                     return;
                   }
                   const nextCommand = normalized.startsWith(activeSlashCommand.command)
