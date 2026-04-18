@@ -174,6 +174,7 @@ export interface MobileTranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
+  pinned?: boolean;
   type?: 'message' | 'compaction' | 'command';
   media?: MobileTranscriptMedia[];
   toolCalls?: MobileTranscriptToolCall[];
