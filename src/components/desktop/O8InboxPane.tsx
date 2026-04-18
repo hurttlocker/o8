@@ -9,6 +9,7 @@ const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
   packet_missing: 'Packet Missing',
   bounded_retry_exhausted: 'Retry Exhausted',
   merge_blocked: 'Merge Blocked',
+  fetch_unreachable: 'Fetch Unreachable',
 };
 
 const STATUS_LABELS: Record<SupervisorInboxItem['status'], string> = {
