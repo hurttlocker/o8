@@ -36,3 +36,5 @@ export function autocompleteSlashCommand(value: string) {
 export function buildSlashTerminalInput(value: string) {
   return `${normalizeSlashInput(value).trim()}\r`;
 }
+
+export * from './slash-commands/index';

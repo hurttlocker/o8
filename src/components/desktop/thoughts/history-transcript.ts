@@ -18,6 +18,7 @@ export type ThoughtsHistoryMessage = {
   thinkingSteps?: MobileTranscriptEntry['thinkingSteps'];
   thinkingDurationMs?: MobileTranscriptEntry['thinkingDurationMs'];
   recalledFacts?: MobileTranscriptEntry['recalledFacts'];
+  command?: MobileTranscriptEntry['command'];
   compaction?: MobileTranscriptEntry['compaction'];
   isPartial?: boolean;
   isCompaction?: boolean;
@@ -45,6 +46,7 @@ export function mapHistoryMessagesToTranscript(messages: ThoughtsHistoryMessage[
       thinkingSteps: message.thinkingSteps,
       thinkingDurationMs: message.thinkingDurationMs,
       recalledFacts: message.recalledFacts,
+      command: message.command,
       compaction: message.compaction,
     }));
 }
