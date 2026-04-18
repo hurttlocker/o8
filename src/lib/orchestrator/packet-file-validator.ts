@@ -30,7 +30,7 @@ export function appendPacketFileValidationWarning(text: string, repoPath: string
   return [
     text,
     [
-      'Missing file references to verify:',
+      '⚠ File references to verify:',
       ...missingPaths.map((relativePath) => `- ${relativePath}`),
     ].join('\n'),
   ].join('\n\n');
