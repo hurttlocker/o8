@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
+import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type {
@@ -15,7 +16,9 @@ import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { buildPacketPrompt } from './packet-prompt';
 import { computePredictedFiles, filterOverlappingPackets } from './preservation-envelope';
 
-export const MAX_PARALLEL_DISPATCHES = Number.parseInt(process.env.O8_MAX_PARALLEL_DISPATCHES ?? '8', 10);
+// Back-compat export — resolves env var, then the persisted operator default,
+// then the locked fallback (5). Existing imports keep working.
+export const MAX_PARALLEL_DISPATCHES = resolveParallelCapSync();
 export const MAX_RECOVERY_DISPATCHES = 2;
 
 const RECOVERY_COOLDOWN_MS = 60_000;
@@ -301,13 +304,15 @@ export async function runDispatchTick(
   // rebase time (the merge gate already enforces clean rebases). This keeps
   // parallelism a root behavior so the orchestrator can still merge while
   // codex packets work in their isolated worktrees.
-  // Set O8_STRICT_OVERLAP_GATE=1 to restore the old serializing behavior.
+  // Set O8_STRICT_OVERLAP_GATE=1 (or flip Settings → Dispatch & Supervision →
+  // Overlap gate to "strict") to restore the old serializing behavior.
+  const overlapGate = resolveOverlapGateSync();
   const activePackets = nextState.packets.filter((p) => p.status === 'running' || p.status === 'launching');
   const wavePackets = getDispatchableWave(nextState.packets);
-  const overlapFiltered = process.env.O8_STRICT_OVERLAP_GATE === '1'
+  const overlapFiltered = overlapGate === 'strict'
     ? filterOverlappingPackets(wavePackets, activePackets)
     : wavePackets;
-  if (process.env.O8_STRICT_OVERLAP_GATE !== '1' && wavePackets.length > 1) {
+  if (overlapGate !== 'strict' && wavePackets.length > 1) {
     const wouldFilter = filterOverlappingPackets(wavePackets, activePackets);
     if (wouldFilter.length < wavePackets.length) {
       const held = wavePackets.filter((p) => !wouldFilter.find((kept) => kept.id === p.id));
@@ -339,9 +344,10 @@ export async function runDispatchTick(
     return nextState;
   }
 
-  for (let index = 0; index < dispatchablePackets.length; index += MAX_PARALLEL_DISPATCHES) {
-    const batch = dispatchablePackets.slice(index, index + MAX_PARALLEL_DISPATCHES);
-    console.log(`[dag-scheduler] Dispatching ${batch.length} packets in parallel: ${batch.map(({ packet }) => packet.id).join(', ')}`);
+  const parallelCap = resolveParallelCapSync();
+  for (let index = 0; index < dispatchablePackets.length; index += parallelCap) {
+    const batch = dispatchablePackets.slice(index, index + parallelCap);
+    console.log(`[dag-scheduler] Dispatching ${batch.length} packets in parallel (cap ${parallelCap}): ${batch.map(({ packet }) => packet.id).join(', ')}`);
 
     const results = await Promise.allSettled(
       batch.map(({ packet, recoveryContext }) => dispatchOrRecoverPacket(packet, nextState.packets, recoveryContext)),

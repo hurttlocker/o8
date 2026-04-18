@@ -83,6 +83,10 @@ import {
   type SupervisorInboxKind,
   type SupervisorInboxPayload,
 } from './lib/supervisor/heal-bot';
+import {
+  resolveHealBotEnabledSync,
+  resolveSupervisorAutoEscalateSync,
+} from './lib/operator/defaults';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import type {
   LaneLifecycleEventPayload,
@@ -540,8 +544,9 @@ function queueOrchestratorEscalation(repoPath: string, message: string): void {
   // chat — that's how codex agent narrative + bash runs end up bleeding into
   // the orchestrator transcript. Default OFF: supervisor failures surface via
   // lane status + activity feed instead, leaving the chat clean.
-  // Set O8_SUPERVISOR_AUTO_ESCALATE=1 to restore the old auto-investigation.
-  if (process.env.O8_SUPERVISOR_AUTO_ESCALATE !== '1') {
+  // Set O8_SUPERVISOR_AUTO_ESCALATE=1 (or flip Settings → Dispatch &
+  // Supervision → Auto-escalate) to restore the old auto-investigation.
+  if (!resolveSupervisorAutoEscalateSync()) {
     console.log(`[supervisor] Escalation suppressed (auto-escalate disabled): ${repoPath} — ${message.slice(0, 80)}`);
     return;
   }
@@ -3670,7 +3675,11 @@ async function bootstrapWsServer() {
     startSupervisorLoop(supervisorCallbacks);
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
     startWorktreeReaper();
-    stopHealBotLoop = startHealBot();
+    if (resolveHealBotEnabledSync()) {
+      stopHealBotLoop = startHealBot();
+    } else {
+      console.log('[heal-bot] Start skipped — disabled via operator defaults');
+    }
 
     void ensureReviewDrainStarted().catch((error) => {
       console.error('[ws-server] Failed to start review queue drain:', error instanceof Error ? error.message : String(error));
