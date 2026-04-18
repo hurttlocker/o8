@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
-import { createApproval, recordApprovalAudit, resolveApproval } from '@/lib/approvals/store';
+import { createApproval, listApprovalsForContext, recordApprovalAudit, resolveApproval } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { archiveLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
@@ -420,22 +420,19 @@ async function getWaveMergeOrder(
 
 export interface MergePacketResult { merged: boolean; note: string; approvalId?: string }
 
-async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise<MergePacketResult> {
-  const state = currentMissionState();
-  const packet = state.packets.find((candidate) => candidate.id === input.packetId);
-  if (!packet) {
-    // #557 — Fall through to lane-only merge when the mission packet is missing.
-    const { mergeOrphanLaneByPacket } = await import('./orphan-lane-merge');
-    return mergeOrphanLaneByPacket(input.packetId, input.commitMessage);
-  }
+function findLatestMergeApproval(packetId: string, laneId: string, sessionKey?: string | null) {
+  return listApprovalsForContext({
+    packetId,
+    laneId,
+    sessionKey: sessionKey ?? undefined,
+  }).find((approval) => approval.continuation?.kind === 'lane' && approval.continuation.verb === 'merge') ?? null;
+}
 
-  if (packet.review && !packet.review.approved) {
-    return {
-      merged: false,
-      note: 'Packet review is not approved. Resolve findings before merging.',
-    };
-  }
-
+async function dispatchPacketMerge(
+  packet: OrchestratorPacket,
+  input: ApproveAndMergeInput,
+  actor: 'orchestrator' | 'user',
+): Promise<MergePacketResult> {
   const lane = findLaneByPacket(packet.id);
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
@@ -447,7 +444,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     commitMessage: input.commitMessage?.trim() || undefined,
     reviewSummary: mapReviewSummary(packet),
     orchestratorReviewed: packet.review?.approved === true,
-    actor: 'orchestrator',
+    actor,
   });
 
   // Sync first so reconciliation runs, then apply the release on top.
@@ -477,6 +474,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
   log(`Merge command finished for packet ${packet.id}.`, {
     ok: result.ok,
     approvalId: result.approvalId ?? null,
+    actor,
   });
 
   return {
@@ -484,6 +482,54 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     note: result.note,
     ...(result.approvalId ? { approvalId: result.approvalId } : {}),
   };
+}
+
+async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise<MergePacketResult> {
+  const state = currentMissionState();
+  const packet = state.packets.find((candidate) => candidate.id === input.packetId);
+  if (!packet) {
+    // #557 — Fall through to lane-only merge when the mission packet is missing.
+    const { mergeOrphanLaneByPacket } = await import('./orphan-lane-merge');
+    return mergeOrphanLaneByPacket(input.packetId, input.commitMessage);
+  }
+
+  if (packet.review && !packet.review.approved) {
+    return {
+      merged: false,
+      note: 'Packet review is not approved. Resolve findings before merging.',
+    };
+  }
+  if (packet.releaseState === 'released' || packet.status === 'released') {
+    return {
+      merged: true,
+      note: `Packet ${packet.referenceLabel} is already released.`,
+    };
+  }
+
+  const lane = findLaneByPacket(packet.id);
+  if (!lane) {
+    throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
+  }
+  const latestMergeApproval = findLatestMergeApproval(packet.id, lane.id, lane.sessionKey);
+  if (latestMergeApproval?.status === 'pending') {
+    return {
+      merged: false,
+      note: latestMergeApproval.policyRuleId === 'merge-gate-violation'
+        ? 'Merge gate enforcement: human review required.'
+        : `Approval required: ${latestMergeApproval.title}`,
+      approvalId: latestMergeApproval.id,
+    };
+  }
+  if (latestMergeApproval?.status === 'approved' && (lane.status === 'completed' || lane.status === 'archived')) {
+    await syncOrchestratorControlPlaneState();
+    return {
+      merged: true,
+      note: `Packet ${packet.referenceLabel} was already merged after approval.`,
+    };
+  }
+
+  const mergeActor = latestMergeApproval?.status === 'approved' ? 'user' : 'orchestrator';
+  return dispatchPacketMerge(packet, input, mergeActor);
 }
 
 export async function createMission(input: CreateMissionInput) {
