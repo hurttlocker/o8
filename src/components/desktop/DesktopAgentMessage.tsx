@@ -14,6 +14,7 @@ import { renderLLMMarkdown } from './LLMMarkdown';
 import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
+import { useOrchestratorEntryEvicted } from '@/components/desktop/orchestrator/context-residency';
 
 interface DesktopAgentMessageProps {
   entry: MobileTranscriptEntry;
@@ -172,6 +173,22 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   const hasToolCalls = Boolean(entry.toolCalls?.length);
   const isCompaction = entry.type === 'compaction'
     || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
+  const isEvicted = useOrchestratorEntryEvicted(entry.id);
+  const evictedEyebrow = isEvicted ? (
+    <span
+      style={{
+        fontSize: 9.5,
+        fontWeight: 600,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        color: 'var(--t-text-faint)',
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+      }}
+    >
+      (evicted from context)
+    </span>
+  ) : null;
+  const evictedOpacity = isEvicted ? 0.55 : 1;
 
   // Pretext: pre-calculate user message height (plain text, pre-wrap).
   // The orchestrator chat tile is render-hot during streaming — avoiding
@@ -231,7 +248,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         flexDirection: 'column',
         alignItems: 'flex-end',
         gap: 8,
+        opacity: evictedOpacity,
+        transition: 'opacity 180ms ease',
       }}>
+        {evictedEyebrow}
         {hasMedia ? <MediaGrid media={entry.media ?? []} tint="user" /> : null}
         {hasText ? (
           <div style={{
@@ -278,7 +298,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       alignItems: 'flex-start',
       gap: 8,
       animation: isLast ? 'llmFadeIn 180ms ease-out' : undefined,
+      opacity: evictedOpacity,
+      transition: 'opacity 180ms ease',
     }}>
+      {evictedEyebrow}
       {hasThinking ? (
         <ThinkingStrip
           thinking={sanitizeTranscriptText(entry.thinking!)}
