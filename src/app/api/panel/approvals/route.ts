@@ -7,6 +7,7 @@ import {
   createTestApproval,
   getApproval,
   listApprovals,
+  listApprovalsForContext,
   resolveApproval,
 } from '@/lib/approvals/store';
 import type { CreateApprovalInput } from '@/lib/approvals/types';
@@ -34,9 +35,14 @@ function mergeDecisionNotes(...notes: Array<string | null | undefined>) {
  */
 export async function GET(request: NextRequest) {
   const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim() || undefined;
+  const packetId = request.nextUrl.searchParams.get('packetId')?.trim() || undefined;
+  const laneId = request.nextUrl.searchParams.get('laneId')?.trim() || undefined;
   const statusParam = request.nextUrl.searchParams.get('status')?.trim() || 'pending';
   const status = statusParam === 'all' ? 'all' : 'pending';
-  const approvals = listApprovals({ status, sessionKey });
+  const approvals = (packetId || laneId)
+    ? listApprovalsForContext({ packetId, laneId, sessionKey })
+      .filter((approval) => status === 'all' || approval.status === status)
+    : listApprovals({ status, sessionKey });
 
   return NextResponse.json({ approvals }, {
     headers: { 'Cache-Control': 'no-store, max-age=0' },
