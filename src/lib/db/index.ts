@@ -33,7 +33,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 6;
+const DB_SCHEMA_VERSION = 7;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -198,6 +198,34 @@ function ensureTables(sqlite: Database.Database): void {
       repo_path TEXT,
       repo_branch TEXT,
       remote_url TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS session_outcomes (
+      id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      branch TEXT,
+      runtime TEXT NOT NULL,
+      session_key TEXT,
+      lane_id TEXT,
+      packet_id TEXT,
+      outcome TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      plan_text TEXT,
+      attempts INTEGER NOT NULL DEFAULT 1,
+      retry_history_json TEXT NOT NULL DEFAULT '[]',
+      duration_ms INTEGER,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      model TEXT,
+      patterns_json TEXT NOT NULL DEFAULT '[]',
+      conflict_zones_json TEXT NOT NULL DEFAULT '[]',
+      changed_files_json TEXT NOT NULL DEFAULT '[]',
+      review_approved INTEGER,
+      review_findings_count INTEGER NOT NULL DEFAULT 0,
+      transcript_path TEXT,
+      started_at TEXT NOT NULL,
+      completed_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS teams (
@@ -431,6 +459,10 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_chat_history_modified_at ON chat_history(modified_at);
     CREATE INDEX IF NOT EXISTS idx_chat_history_repo_path ON chat_history(repo_path);
+    CREATE INDEX IF NOT EXISTS idx_so_repo_runtime ON session_outcomes(repo_path, runtime, completed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_so_repo_completed ON session_outcomes(repo_path, completed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_so_lane_id ON session_outcomes(lane_id);
+    CREATE INDEX IF NOT EXISTS idx_so_packet_id ON session_outcomes(packet_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
     CREATE INDEX IF NOT EXISTS idx_github_repositories_installation ON github_repositories(installation_id);
@@ -482,6 +514,7 @@ function ensureTables(sqlite: Database.Database): void {
   ensureApprovalContextColumns(sqlite);
   ensureWatchedAgentColumns(sqlite);
   ensureChatHistoryColumns(sqlite);
+  ensureSessionOutcomeColumns(sqlite);
   ensureUsageLogSchema(sqlite);
   ensureApprovalEventsTable(sqlite);
   migrateLegacyApprovalStoreIfNeeded(sqlite, { approvalsTablePreviouslyMissing });
@@ -537,6 +570,12 @@ function ensureWatchedAgentColumns(sqlite: Database.Database): void {
 function ensureChatHistoryColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'chat_history', 'plan_text')) {
     sqlite.exec('ALTER TABLE chat_history ADD COLUMN plan_text TEXT');
+  }
+}
+
+function ensureSessionOutcomeColumns(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'session_outcomes', 'plan_text')) {
+    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN plan_text TEXT');
   }
 }
 
