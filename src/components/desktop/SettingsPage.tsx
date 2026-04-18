@@ -26,10 +26,12 @@ import {
   PaletteIcon,
   ActivityIcon,
   InfoIcon,
+  SlidersIcon,
 } from './settings/shared';
 import { GitHubTab } from './settings/GitHubTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
+import { OperatorDefaultsTab } from './settings/OperatorDefaultsTab';
 import { WorkersTab } from './settings/WorkersTab';
 import { AppearanceTab } from './settings/AppearanceTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
@@ -265,6 +267,7 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         <TabButton label="Connectors" icon={<PlugIcon />} active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} />
         <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
+        <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
         <TabButton label="Workers" icon={<UsersIcon />} active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
         <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
@@ -300,6 +303,9 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         )}
         {activeTab === 'mcp' && (
           <MCPTab />
+        )}
+        {activeTab === 'operator-defaults' && (
+          <OperatorDefaultsTab />
         )}
         {activeTab === 'workers' && (
           <WorkersTab />
