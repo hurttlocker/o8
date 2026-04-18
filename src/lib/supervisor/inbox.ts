@@ -9,7 +9,12 @@ export type SupervisorInboxKind =
   | 'packet_missing'
   | 'bounded_retry_exhausted'
   | 'merge_blocked'
-  | 'fetch_unreachable';
+  | 'fetch_unreachable'
+  // #613 — silent-exit detector kinds. See
+  // `src/lib/supervisor/silent-exit-detector.ts` for the triage flow.
+  | 'silent_exit_verification_failed'
+  | 'silent_exit_no_work'
+  | 'silent_exit_but_work_present';
 
 export type SupervisorInboxStatus =
   | 'pending'

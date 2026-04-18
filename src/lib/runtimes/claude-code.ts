@@ -812,12 +812,12 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
 
 // ── Live process detection ──
 
-interface LiveClaudeProcess {
+export interface LiveClaudeProcess {
   pid: number;
   cwd?: string;
 }
 
-async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
+export async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
   try {
     // Find Claude Code CLI processes (not Claude Desktop app)
     const { stdout } = await execFileAsync(
