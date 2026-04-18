@@ -6,9 +6,11 @@ export function ThreadsDropdown(props: {
   historyOpen: boolean;
   agentsOpen: boolean;
   missionOpen: boolean;
+  contextOpen?: boolean;
   onToggleHistory: () => void;
   onToggleAgents: () => void;
   onToggleMission: () => void;
+  onToggleContext?: () => void;
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const menuItem = (label: string, active: boolean, onClick: () => void) => (
@@ -50,6 +52,9 @@ export function ThreadsDropdown(props: {
         {menuItem('History', props.historyOpen, props.onToggleHistory)}
         {menuItem('Agents', props.agentsOpen, props.onToggleAgents)}
         {menuItem('Mission', props.missionOpen, props.onToggleMission)}
+        {props.onToggleContext
+          ? menuItem('Context', Boolean(props.contextOpen), props.onToggleContext)
+          : null}
       </div>
     </details>
   );

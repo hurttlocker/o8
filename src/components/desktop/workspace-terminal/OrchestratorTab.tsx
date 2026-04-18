@@ -35,7 +35,12 @@ import {
 } from '@/components/desktop/OrchestratorEmptyState';
 import { OrchestratorHistorySidebar } from '@/components/desktop/OrchestratorHistorySidebar';
 import { UnifiedAgentsSidebar } from '@/components/desktop/UnifiedAgentsSidebar';
+import { ContextInspector } from '@/components/desktop/orchestrator/ContextInspector';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
+import {
+  OrchestratorContextResidencyProvider,
+  useOrchestratorContextResidency,
+} from '@/components/desktop/orchestrator/context-residency';
 import { ThreadsDropdown } from '@/components/desktop/orchestrator/ThreadsDropdown';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import {
@@ -207,8 +212,17 @@ function PlusIcon({ size = 13 }: { size?: number }) {
   );
 }
 
-export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: OrchestratorTabProps) {
+export function OrchestratorTab(props: OrchestratorTabProps) {
+  return (
+    <OrchestratorContextResidencyProvider>
+      <OrchestratorTabInner {...props} />
+    </OrchestratorContextResidencyProvider>
+  );
+}
+
+function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: OrchestratorTabProps) {
   const data = useOrchestratorData();
+  const residency = useOrchestratorContextResidency();
 
   const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(
     () => readStoredPermissionMode(tabId),
@@ -350,9 +364,26 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
     setMissionOpen((prev) => {
       const next = !prev;
       writeBooleanPref(MISSION_OPEN_KEY, next);
+      // Context inspector and Mission share the right rail — opening one
+      // closes the other so the chat center never compresses below its
+      // comfortable width.
+      if (next) residency?.setOpen(false);
       return next;
     });
-  }, []);
+  }, [residency]);
+
+  const handleToggleContextInspector = useCallback(() => {
+    if (!residency) return;
+    if (residency.isOpen) {
+      residency.setOpen(false);
+      return;
+    }
+    residency.setOpen(true);
+    if (missionOpen) {
+      setMissionOpen(false);
+      writeBooleanPref(MISSION_OPEN_KEY, false);
+    }
+  }, [missionOpen, residency]);
 
   const handleCloseTileSession = useCallback((sessionKey: string) => {
     setTiledSessions((current) => current.filter((key) => key !== sessionKey));
@@ -517,7 +548,7 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
         <ContextMeter
           tokenCount={contextUsage.tokenCount}
           runningTotal={contextUsage.runningTotal}
-          onClick={() => { console.info('[orchestrator] Context inspector is not wired yet.'); }}
+          onClick={handleToggleContextInspector}
         />
       )}
       onMissionStateChange={data.onMissionStateChange}
@@ -592,7 +623,16 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
               <span>{exportState === 'copied' ? 'Copied' : 'Copy'}</span>
             </button>
           ) : null}
-          <ThreadsDropdown historyOpen={historyOpen} agentsOpen={agentsOpen} missionOpen={missionOpen} onToggleHistory={handleToggleHistory} onToggleAgents={handleToggleAgents} onToggleMission={handleToggleMission} />
+          <ThreadsDropdown
+            historyOpen={historyOpen}
+            agentsOpen={agentsOpen}
+            missionOpen={missionOpen}
+            contextOpen={Boolean(residency?.isOpen)}
+            onToggleHistory={handleToggleHistory}
+            onToggleAgents={handleToggleAgents}
+            onToggleMission={handleToggleMission}
+            onToggleContext={residency ? handleToggleContextInspector : undefined}
+          />
 
           {hasMessages ? (
             <button
@@ -838,6 +878,14 @@ export function OrchestratorTab({ tabId, active, repoPath, repoLabel }: Orchestr
             />
           ) : null}
         </div>
+
+        {/* Right: context inspector (toggles with ContextMeter click, #587) */}
+        {residency?.isOpen ? (
+          <ContextInspector
+            open
+            onClose={handleToggleContextInspector}
+          />
+        ) : null}
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
     </div>
