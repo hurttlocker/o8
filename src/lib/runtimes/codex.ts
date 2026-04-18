@@ -17,6 +17,7 @@ import type {
 } from './types';
 import { parseCodexSessionCost } from '@/lib/runtimes/codex-cost-parser';
 import { getCodexDiscoveredFleetAdditions, getCodexRolloutPath, getCodexRuntimeTail } from '@/lib/codex/sessions';
+import { monitorUsageDispatch, usageSnapshotFromTelemetry, type UsageSnapshot } from '@/lib/usage-log';
 
 import {
   launchOwnedCodexSession,
@@ -38,6 +39,41 @@ const capabilities: RuntimeCapabilities = {
   costTelemetry: true,
   streaming: true,
 };
+
+async function waitForOwnedRunToFinish(sessionKey: string, startedAtMs: number) {
+  for (let attempt = 0; attempt < 7200; attempt += 1) {
+    const lifecycle = (await getOwnedCodexFleetAdditions({ fresh: true }).catch(() => null))
+      ?.agents.find((entry) => entry.sessionKey === sessionKey)?.runtimeSurface?.lifecycle;
+    const finishedAtMs = lifecycle?.lastRunFinishedAt ? Date.parse(lifecycle.lastRunFinishedAt) : Number.NaN;
+    if (Number.isFinite(finishedAtMs) && finishedAtMs >= startedAtMs && lifecycle?.availability !== 'running') return finishedAtMs;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return Date.now();
+}
+
+function scheduleCodexUsageDispatch(
+  sessionKey: string,
+  startedAtMs: number,
+  baseline?: UsageSnapshot,
+  laneId?: string,
+  model?: string,
+  awaitFinishedAtMs?: () => Promise<number>,
+) {
+  monitorUsageDispatch({
+    dispatchKey: `codex:${sessionKey}:${startedAtMs}`,
+    runtime: 'codex',
+    laneId,
+    sessionKey,
+    model,
+    startedAtMs,
+    baseline,
+    awaitCompletion: async () => ({
+      finishedAtMs: awaitFinishedAtMs ? await awaitFinishedAtMs() : Date.now(),
+      snapshot: usageSnapshotFromTelemetry(await codexRuntime.getTelemetry?.(sessionKey)),
+    }),
+  });
+}
 
 /**
  * Map internal fleet AgentSummary to the universal RuntimeSession shape.
@@ -172,7 +208,12 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
+    const startedAtMs = Date.now();
     const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt, model: opts.model });
+    if (result.ok && result.surfaceId) {
+      scheduleCodexUsageDispatch(result.surfaceId, startedAtMs, undefined, opts.laneId, opts.model, () =>
+        waitForOwnedRunToFinish(result.surfaceId, startedAtMs));
+    }
     return {
       ok: result.ok,
       note: result.note,
@@ -181,9 +222,14 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
+    const startedAtMs = Date.now();
+    const baseline = usageSnapshotFromTelemetry(await codexRuntime.getTelemetry?.(sessionKey));
+
     // Owned sessions: use existing owned pipeline
     if (sessionKey.startsWith('codex-owned:')) {
       const result = await continueOwnedCodexSession(sessionKey, message);
+      scheduleCodexUsageDispatch(sessionKey, startedAtMs, baseline, undefined, undefined, () =>
+        waitForOwnedRunToFinish(sessionKey, startedAtMs));
       return { ok: true, note: result.note, sessionKey };
     }
 
@@ -208,8 +254,10 @@ export const codexRuntime: AgentRuntime = {
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
         encoding: 'utf-8',
       });
+      scheduleCodexUsageDispatch(sessionKey, startedAtMs, baseline);
       return { ok: true, note: 'Sent to Codex.', sessionKey };
     } catch (err) {
+      scheduleCodexUsageDispatch(sessionKey, startedAtMs, baseline);
       return { ok: false, note: err instanceof Error ? err.message : String(err) };
     }
   },
