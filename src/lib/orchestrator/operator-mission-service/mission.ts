@@ -74,7 +74,7 @@ export async function createMission(input: CreateMissionInput) {
       id: packetIds[index]!,
       referenceLabel: referenceLabels[index]!,
       title: issue.title,
-      summary: buildPacketSummary(issue, input.constraints, inlineLabel),
+      summary: buildPacketSummary(issue, input.constraints, repoPath, inlineLabel),
       workspaceTargetPath: repoPath,
       branchTarget,
       runtime: input.runtime,

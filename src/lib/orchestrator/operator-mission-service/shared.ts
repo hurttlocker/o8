@@ -11,6 +11,7 @@ import {
   reconcileOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
+import { appendPacketFileValidationWarning } from '@/lib/orchestrator/packet-file-validator';
 import type { LoadedIssue } from './types';
 
 const LOG_PREFIX = '[mcp-operator]';
@@ -116,15 +117,21 @@ export function buildMissionSummary(issues: LoadedIssue[], repoPath: string) {
   return `Sprint mission for ${repoName} with ${issues.length} ${noun}${issues.length === 1 ? '' : 's'}.`;
 }
 
-export function buildPacketSummary(issue: LoadedIssue, constraints: string, inlineLabel?: string) {
+export function buildPacketSummary(
+  issue: LoadedIssue,
+  constraints: string,
+  repoPath: string,
+  inlineLabel?: string,
+) {
   const header = isInlineIssue(issue)
     ? `Task${inlineLabel ? ` ${inlineLabel}` : ''}: ${issue.title}`
     : `GitHub issue #${issue.number}: ${issue.title}`;
-  return [
+  const summary = [
     header,
     issue.body.trim() || (isInlineIssue(issue) ? 'No description provided.' : 'No issue body provided.'),
     constraints ? `Constraints: ${constraints}` : null,
   ].filter((value): value is string => Boolean(value)).join('\n\n');
+  return appendPacketFileValidationWarning(summary, repoPath);
 }
 
 export function normalizeMissionSelection(state: OrchestratorMissionState, missionId?: string) {
