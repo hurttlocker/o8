@@ -36,6 +36,38 @@ const AUTO_PRUNE_COOLDOWN_MS = 6 * 60 * 60_000; // 6 hours
 let lastAutoPruneAt = 0;
 
 /**
+ * Thrown when a worktree cannot be rebased onto its base branch cleanly.
+ * Carries the conflicting files + base branch so callers can enqueue a
+ * supervisor inbox item and surface the conflict to the operator instead
+ * of handing a broken tree to codex (which would generate a diff that
+ * reverts already-merged upstream work).
+ */
+export class WorktreeRebaseConflictError extends Error {
+  public readonly baseBranch: string;
+  public readonly conflictFiles: string[];
+  public readonly worktreePath: string;
+  public readonly branch: string;
+
+  constructor(options: {
+    baseBranch: string;
+    conflictFiles: string[];
+    worktreePath: string;
+    branch: string;
+    message?: string;
+  }) {
+    super(
+      options.message
+        ?? `Worktree rebase onto origin/${options.baseBranch} failed with ${options.conflictFiles.length} conflicting file${options.conflictFiles.length === 1 ? '' : 's'}.`,
+    );
+    this.name = 'WorktreeRebaseConflictError';
+    this.baseBranch = options.baseBranch;
+    this.conflictFiles = options.conflictFiles;
+    this.worktreePath = options.worktreePath;
+    this.branch = options.branch;
+  }
+}
+
+/**
  * Sanitize a task name into a safe directory/branch name.
  * Replaces spaces with dashes, strips special chars, lowercases.
  */
@@ -152,6 +184,36 @@ export class WorktreeManager {
       baseBranch,
     ], { cwd: this.repoRoot, timeout: 30_000 });
 
+    // Rebase onto origin/<baseBranch> before handing the worktree to an agent.
+    // The worktree was branched from local <baseBranch>, which may be behind
+    // origin after parallel merges. Without this step, the agent's diff against
+    // origin/<baseBranch> would show reverts of already-merged upstream work.
+    // On conflict we abort + tear down the worktree and throw a typed error so
+    // the caller can surface it to the operator instead of spawning codex into
+    // a broken tree.
+    try {
+      await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
+    } catch (err) {
+      // Best-effort cleanup of the partially-created worktree. Conflict is
+      // caller's problem to surface; we just make sure we don't leak a broken
+      // tree on disk. Failures here are swallowed — the caller still sees the
+      // original rebase error.
+      try {
+        await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
+          cwd: this.repoRoot,
+          timeout: 15_000,
+        });
+      } catch { /* tree may already be gone */ }
+      try {
+        await execFileAsync('git', ['branch', '-D', branchName], {
+          cwd: this.repoRoot,
+          timeout: 5000,
+        });
+      } catch { /* branch may not exist */ }
+      await this.removeMeta(taskId);
+      throw err;
+    }
+
     const info: WorktreeInfo = {
       id: taskId,
       path: worktreePath,
@@ -178,6 +240,92 @@ export class WorktreeManager {
     info.status = 'ready';
     await this.updateMetaStatus(taskId, 'ready');
     return info;
+  }
+
+  // ── Rebase ──
+
+  /**
+   * Fetch origin + rebase the worktree's branch onto origin/<baseBranch>.
+   * Runs inside the worktree (not the repoRoot) so the rebase affects only
+   * the newly-created branch.
+   *
+   * On rebase conflict: aborts the rebase and throws WorktreeRebaseConflictError
+   * with the list of conflicting files. The caller is responsible for tearing
+   * down the worktree and surfacing the conflict to the operator.
+   *
+   * Clean path: logs `[worktree-rebase] <branch> rebased onto origin/<baseBranch>`.
+   */
+  private async rebaseOntoBase(
+    worktreePath: string,
+    baseBranch: string,
+    branchName: string,
+  ): Promise<void> {
+    // Fetch the latest base ref from origin. Failure here is non-fatal —
+    // if origin is unreachable we can still try to rebase onto the local
+    // base ref and log a warning. The operator's intent is "branch from
+    // latest main", and local-only is strictly better than not rebasing.
+    try {
+      await execFileAsync('git', ['fetch', 'origin', baseBranch, '--quiet'], {
+        cwd: worktreePath,
+        timeout: 60_000,
+      });
+    } catch (fetchErr) {
+      console.warn(
+        `[worktree-rebase] fetch origin ${baseBranch} failed (${fetchErr instanceof Error ? fetchErr.message : 'unknown'}); rebasing onto local ${baseBranch} instead.`,
+      );
+    }
+
+    // Prefer origin/<baseBranch> if it exists; fall back to the local ref.
+    let rebaseTarget = `origin/${baseBranch}`;
+    try {
+      await execFileAsync('git', ['rev-parse', '--verify', rebaseTarget], {
+        cwd: worktreePath,
+        timeout: 5000,
+      });
+    } catch {
+      rebaseTarget = baseBranch;
+    }
+
+    try {
+      await execFileAsync('git', ['rebase', rebaseTarget], {
+        cwd: worktreePath,
+        timeout: 60_000,
+      });
+      console.log(`[worktree-rebase] ${branchName} rebased onto ${rebaseTarget}`);
+    } catch (err) {
+      // Collect conflicting files before aborting so the caller can tell
+      // the operator exactly what clashed.
+      let conflictFiles: string[] = [];
+      try {
+        const { stdout } = await execFileAsync(
+          'git', ['diff', '--name-only', '--diff-filter=U'],
+          { cwd: worktreePath, timeout: 5000 },
+        );
+        conflictFiles = stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+      } catch { /* best effort */ }
+
+      try {
+        await execFileAsync('git', ['rebase', '--abort'], {
+          cwd: worktreePath,
+          timeout: 10_000,
+        });
+      } catch { /* rebase state may already be clean */ }
+
+      const underlying = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[worktree-rebase] ${branchName} rebase onto ${rebaseTarget} failed with ${conflictFiles.length} conflict${conflictFiles.length === 1 ? '' : 's'}: ${underlying}`,
+      );
+
+      throw new WorktreeRebaseConflictError({
+        baseBranch,
+        conflictFiles,
+        worktreePath,
+        branch: branchName,
+        message: conflictFiles.length > 0
+          ? `Rebase onto ${rebaseTarget} failed. Conflicting files: ${conflictFiles.join(', ')}`
+          : `Rebase onto ${rebaseTarget} failed. ${underlying}`,
+      });
+    }
   }
 
   // ── List ──
