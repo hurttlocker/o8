@@ -3456,7 +3456,7 @@ async function bootstrapWsServer() {
               autoCommitCompletionWorktree,
               runCompletionVerification,
             } = await import('@/lib/supervisor/completion-verification');
-            const verification = await runCompletionVerification(completionCwd);
+            const verification = await runCompletionVerification(completionCwd, lane.baseBranch);
 
             if (!verification.ok) {
               console.warn(`[supervisor] Agent ${surfaceId} failed post-completion ${verification.kind} in ${completionCwd}`);

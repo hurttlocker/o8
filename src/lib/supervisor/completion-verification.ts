@@ -61,7 +61,10 @@ export async function runCompletionTypecheck(cwd: string): Promise<CompletionTyp
   }
 }
 
-export async function runCompletionVerification(cwd: string): Promise<CompletionVerificationResult> {
+export async function runCompletionVerification(
+  cwd: string,
+  baseRef = 'main',
+): Promise<CompletionVerificationResult> {
   const typecheck = await runCompletionTypecheck(cwd);
   if (!typecheck.ok) {
     return {
@@ -71,7 +74,7 @@ export async function runCompletionVerification(cwd: string): Promise<Completion
     };
   }
 
-  const ruleCheck = await runRuleCheck(cwd);
+  const ruleCheck = await runRuleCheck(cwd, baseRef);
   if (!ruleCheck.ok) {
     return {
       ok: false,
