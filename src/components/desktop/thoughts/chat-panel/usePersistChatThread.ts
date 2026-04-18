@@ -37,7 +37,12 @@ export function usePersistChatThread(resolvedRepoPath: string | null) {
   }, []);
 
   const persistThreadNow = useCallback(
-    async (msgs: MobileTranscriptEntry[], tid: string | null, nextPlanText: string | null) => {
+    async (
+      msgs: MobileTranscriptEntry[],
+      tid: string | null,
+      nextPlanText: string | null,
+      options?: { title?: string | null },
+    ) => {
       if (!tid) return;
       try {
         await fetch('/api/v2/chat-history', {
@@ -49,6 +54,7 @@ export function usePersistChatThread(resolvedRepoPath: string | null) {
             model: 'claude-code',
             planText: nextPlanText ?? undefined,
             repoPath: resolvedRepoPath,
+            title: options?.title ?? undefined,
           }),
         });
       } catch {

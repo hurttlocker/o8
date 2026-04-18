@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { buildOrchestratorArchiveTitle } from '@/lib/orchestrator/history-transcript';
 
 const TOAST_DURATION_MS = 1800;
 
@@ -15,6 +16,7 @@ type Deps = {
     msgs: MobileTranscriptEntry[],
     tid: string | null,
     planText: string | null,
+    options?: { title?: string | null },
   ) => Promise<void>;
   cancelPendingPersist: () => void;
   handleReset: () => void;
@@ -58,7 +60,11 @@ export function useClearCommand(deps: Deps) {
 
   const handleClearCommand = useCallback(async () => {
     const { archiveMessages, archivedPlanText } = buildArchiveSnapshot(deps);
-    const hasArchivableMessages = archiveMessages.some((m) => m.role === 'user');
+    const hasArchivableMessages = archiveMessages.some((message) => (
+      (message.role === 'user' || message.role === 'assistant' || message.role === 'tool')
+      && message.type !== 'command'
+      && message.text.trim().length > 0
+    ));
 
     deps.cancelPendingPersist();
     if (hasArchivableMessages) {
@@ -66,6 +72,12 @@ export function useClearCommand(deps: Deps) {
         archiveMessages,
         deps.threadIdRef.current ?? `thoughts-${Date.now()}`,
         archivedPlanText,
+        {
+          title: buildOrchestratorArchiveTitle({
+            messages: archiveMessages,
+            planText: archivedPlanText,
+          }),
+        },
       );
     }
 
