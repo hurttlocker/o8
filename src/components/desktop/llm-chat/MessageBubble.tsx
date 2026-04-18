@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Bookmark, Brain, Check, ChevronRight, Copy, FileText, GitBranch, Loader2, Pencil, RefreshCw, Square, ThumbsDown, ThumbsUp, Trash2, Volume2, VolumeOff } from '../lucide-shims';
 
+import { DesktopToolCallStack } from '../DesktopToolCallStack';
 import { renderLLMMarkdown } from '../LLMMarkdown';
 import { ChainOfThought } from './ChainOfThought';
 import { deriveFileChangesFromTools, THEME_ACCENT, THEME_ACCENT_BORDER, THEME_ACCENT_SOFT, THEME_ACCENT_SOFT_STRONG, THEME_BG_CARD, THEME_PANEL_GLASS, type FileChangePreview, type LLMMessage } from './shared';
@@ -189,25 +190,11 @@ function MessageBubbleBase({
     setTimeout(() => setCopied(false), 2000);
   }, [message.content]);
 
-  const collapsedToolCalls = (() => {
-    type ToolGroup = { kind: 'single'; toolCall: typeof visibleToolCalls[number] } | { kind: 'group'; count: number; allDone: boolean };
-    const groups: ToolGroup[] = [];
-    let execRun = 0;
-    let execAllDone = true;
+  const toolCallsForStack = (() => {
+    const groups: typeof visibleToolCalls = [];
     for (const toolCall of visibleToolCalls) {
-      if (toolCall.name === 'exec_command' || toolCall.name === 'shell' || toolCall.name === 'bash') {
-        execRun += 1;
-        if (toolCall.status !== 'done') execAllDone = false;
-      } else {
-        if (execRun > 0) {
-          groups.push({ kind: 'group', count: execRun, allDone: execAllDone });
-          execRun = 0;
-          execAllDone = true;
-        }
-        groups.push({ kind: 'single', toolCall });
-      }
+      groups.push(toolCall);
     }
-    if (execRun > 0) groups.push({ kind: 'group', count: execRun, allDone: execAllDone });
     return groups;
   })();
 
@@ -240,22 +227,9 @@ function MessageBubbleBase({
       {!isUser && message.isPartial ? <div style={{ maxWidth: '90%', paddingLeft: 2, fontSize: 11, color: 'var(--t-text-muted)', fontStyle: 'italic' }}>Recovered after reload</div> : null}
       {!isUser && (message.thinkingSteps || message.thinking) ? <ChainOfThought steps={message.thinkingSteps || []} thinking={message.thinking} durationMs={message.thinkingDurationMs} /> : null}
       {!isUser && fileChanges.length > 0 ? <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: '90%', marginTop: 4 }}>{fileChanges.map((change) => <FileChangeCard key={change.id} change={change} />)}</div> : null}
-      {!isUser && collapsedToolCalls.length > 0 && !(message.thinkingSteps && message.thinkingSteps.length > 0) ? (
+      {!isUser && toolCallsForStack.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '90%', marginTop: 4 }}>
-          {collapsedToolCalls.map((item, index) => item.kind === 'group' ? (
-            <div key={`group-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10, background: THEME_BG_CARD, border: '1px solid var(--t-panel-border)', borderRadius: 8, fontSize: 12, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: item.allDone ? '#10b981' : '#3b82f6', flexShrink: 0, ...(item.allDone ? {} : { animation: 'llmDot 1.4s ease-in-out infinite' }) }} />
-              <span style={{ color: 'var(--t-text-secondary)', fontWeight: 500 }}>{item.count} command{item.count > 1 ? 's' : ''} executed</span>
-              {item.allDone ? <Check size={12} style={{ color: '#10b981', marginLeft: 'auto' }} /> : null}
-            </div>
-          ) : (
-            <div key={`${item.toolCall.name}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, paddingRight: 10, paddingBottom: 6, paddingLeft: 10, background: THEME_BG_CARD, border: '1px solid var(--t-panel-border)', borderRadius: 8, fontSize: 12, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', animation: 'llmFadeIn 200ms ease-out' }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: item.toolCall.status === 'done' ? '#10b981' : '#3b82f6', flexShrink: 0, ...(item.toolCall.status !== 'done' ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}) }} />
-              <span style={{ color: 'var(--t-text-secondary)', fontWeight: 500 }}>{item.toolCall.name === 'search_web' ? 'Searched' : item.toolCall.name === 'read_file' ? 'Read' : item.toolCall.name === 'list_files' ? 'Listed' : item.toolCall.name === 'search_code' ? 'Searched code' : item.toolCall.name}</span>
-              <span style={{ color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.toolCall.name === 'search_web' && item.toolCall.args?.query ? `"${item.toolCall.args.query}"` : item.toolCall.name === 'read_file' && item.toolCall.args?.path ? String(item.toolCall.args.path) : item.toolCall.name === 'search_code' && item.toolCall.args?.query ? `"${item.toolCall.args.query}"` : item.toolCall.name === 'list_files' && item.toolCall.args?.path ? String(item.toolCall.args.path) : item.toolCall.preview ? String(item.toolCall.preview).slice(0, 60) : ''}</span>
-              {item.toolCall.status === 'done' ? <Check size={12} style={{ color: '#10b981', marginLeft: 'auto' }} /> : null}
-            </div>
-          ))}
+          <DesktopToolCallStack toolCalls={toolCallsForStack} />
         </div>
       ) : null}
       {!isUser && message.sources && message.sources.length > 0 ? (
