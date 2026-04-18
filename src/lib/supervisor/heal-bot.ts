@@ -18,7 +18,13 @@ export type SupervisorInboxKind =
   | 'session_lost'
   | 'packet_missing'
   | 'bounded_retry_exhausted'
-  | 'merge_blocked';
+  | 'merge_blocked'
+  // #613 — silent-exit detector kinds. Lane's underlying session died
+  // between work-completion and the completion-reported event, so we had to
+  // salvage by hand.
+  | 'silent_exit_verification_failed'
+  | 'silent_exit_no_work'
+  | 'silent_exit_but_work_present';
 
 export type SupervisorInboxStatus =
   | 'pending'
