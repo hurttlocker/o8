@@ -560,12 +560,22 @@ function DashboardInner() {
         });
         return;
       }
-      if (request.tab === 'browser' || request.tab === 'changes' || request.tab === 'files' || request.tab === 'prs' || request.tab === 'activity') {
+      if (request.tab === 'browser' || request.tab === 'changes' || request.tab === 'files' || request.tab === 'prs' || request.tab === 'activity' || request.tab === 'inbox') {
         setO8ActiveTab(request.tab);
       }
     });
     return unsubscribe;
   }, [chatVisible, rightPanelKind]);
+
+  useEffect(() => {
+    const handleOpenInbox = () => {
+      setRightPanelKind('o8');
+      setChatVisible(true);
+      setO8ActiveTab('inbox');
+    };
+    window.addEventListener('o8:open-inbox-tab', handleOpenInbox);
+    return () => window.removeEventListener('o8:open-inbox-tab', handleOpenInbox);
+  }, []);
 
   const handleRepoRemoved = useCallback((removedRepo: RepoRegistryEntry) => {
     const removedRepoPath = removedRepo.localPath;

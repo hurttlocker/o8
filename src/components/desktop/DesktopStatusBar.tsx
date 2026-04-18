@@ -250,14 +250,20 @@ function SupervisorInboxBadge() {
   }, []);
 
   const active = humanRequiredCount > 0;
-  const borderColor = active ? 'rgba(249,115,22,0.2)' : 'rgba(148,163,184,0.16)';
-  const background = active ? 'rgba(249,115,22,0.11)' : 'rgba(255,255,255,0.42)';
-  const countBackground = active ? '#f97316' : 'rgba(148,163,184,0.18)';
-  const countColor = active ? '#fff7ed' : 'var(--t-text-faint)';
+  const borderColor = active ? 'var(--t-warning-border, rgba(249,115,22,0.22))' : 'var(--t-border)';
+  const background = active ? 'var(--t-warning-soft, rgba(249,115,22,0.11))' : 'var(--t-bg-card)';
+  const countBackground = active ? 'var(--t-warning, #f97316)' : 'var(--t-text-faint)';
+  const countColor = active ? 'var(--t-panel)' : 'var(--t-panel)';
+
+  const openInboxTab = () => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('o8:open-inbox-tab'));
+  };
 
   return (
-    <a
-      href="/dashboard/inbox"
+    <button
+      type="button"
+      onClick={openInboxTab}
       aria-label={`Supervisor inbox${active ? `, ${humanRequiredCount} human-required item${humanRequiredCount === 1 ? '' : 's'}` : ''}`}
       title={active ? `${humanRequiredCount} human-required inbox item${humanRequiredCount === 1 ? '' : 's'}` : 'Supervisor inbox'}
       style={{
@@ -268,12 +274,10 @@ function SupervisorInboxBadge() {
         paddingLeft: 7,
         paddingRight: 7,
         borderRadius: 9,
-        textDecoration: 'none',
         border: `1px solid ${borderColor}`,
         background,
-        color: active ? '#c2410c' : 'var(--t-text-faint)',
-        boxShadow: active ? '0 8px 20px rgba(249, 115, 22, 0.12)' : 'none',
-        transition: 'background 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
+        color: active ? 'var(--t-warning, #c2410c)' : 'var(--t-text-faint)',
+        cursor: 'pointer',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}
     >
@@ -306,7 +310,7 @@ function SupervisorInboxBadge() {
       >
         {humanRequiredCount > 99 ? '99+' : humanRequiredCount}
       </span>
-    </a>
+    </button>
   );
 }
 

@@ -13,6 +13,7 @@ import { O8BrowserPane } from './O8BrowserPane';
 import { O8ChangesPane } from './O8ChangesPane';
 import { O8FilesPane } from './O8FilesPane';
 import { O8PRPane } from './O8PRPane';
+import { O8InboxPane } from './O8InboxPane';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
@@ -67,7 +68,16 @@ function IconActivity({ size = 16, color = '#e2e8f0' }: { size?: number; color?:
   );
 }
 
-export type O8Tab = 'changes' | 'browser' | 'files' | 'prs' | 'activity';
+export type O8Tab = 'changes' | 'browser' | 'files' | 'prs' | 'activity' | 'inbox';
+
+function IconInbox({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    </svg>
+  );
+}
 
 interface O8PanelProps {
   onClose: () => void;
@@ -178,6 +188,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         <O8TabButton icon={(c) => <IconGitPullRequest size={16} color={c} />} active={activeTab === 'prs'} onClick={() => handleTabChange('prs')} label="PRs" />
         <O8TabButton icon={(c) => <IconGlobeSimple size={16} color={c} />} active={activeTab === 'browser'} onClick={() => handleTabChange('browser')} label="Browser" />
         <O8TabButton icon={(c) => <IconActivity size={16} color={c} />} active={activeTab === 'activity'} onClick={() => handleTabChange('activity')} label="Activity" />
+        <O8TabButton icon={(c) => <IconInbox size={16} color={c} />} active={activeTab === 'inbox'} onClick={() => handleTabChange('inbox')} label="Inbox" />
         <div style={{ flex: 1 }} />
         <button
           type="button"
@@ -221,6 +232,9 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'activity' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8ActivityPane repoSlug={repoSlug} onSelectCommit={onSelectCommit} onSelectPR={onSelectPR} onSelectIssue={onSelectIssue} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'inbox' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8InboxPane />
       </div>
     </div>
   );
