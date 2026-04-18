@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
-import { InputButtons, type ThinkingEffort } from '../InputButtons';
+import { InputButtons, ThinkingChip, type ThinkingEffort } from '../InputButtons';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import type { ThoughtsChatPermissionMode } from './types';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
@@ -250,6 +250,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const isDisabled = (displayWaiting || runningTools.length > 0) || (!isOrchestratorMode && !targetAgentExists);
 
   const activeSlashCommand = slashSuggestions[Math.min(activeSlashIndex, Math.max(0, slashSuggestions.length - 1))] ?? null;
+  const footerLeadingSlot = isOrchestratorMode ? (
+    <ThinkingChip effort={effort} adaptiveEnabled={adaptiveEnabled} onChange={onEffortChange} />
+  ) : hasAssistantActivity ? <span>{displayMessagesCount} messages</span> : null;
 
   const handleSelectSlashCommand = (definition: OrchestratorSlashCommandDefinition) => {
     if (definition.requiresArgument) {
@@ -406,9 +409,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         </div>
       </div>
 
-      {hasAssistantActivity || footerMeterSlot ? (
+      {footerLeadingSlot || footerMeterSlot ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, paddingLeft: 2, paddingRight: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
-          <span>{hasAssistantActivity ? `${displayMessagesCount} messages` : ''}</span>
+          <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>{footerLeadingSlot}</div>
           {footerMeterSlot ? <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{footerMeterSlot}</div> : null}
         </div>
       ) : null}
