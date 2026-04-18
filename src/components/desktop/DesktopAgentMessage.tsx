@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { FileText } from './lucide-shims';
 import { CommandStripNode } from '@/components/desktop/CommandStripNode';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
@@ -15,6 +15,11 @@ import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
 import { useOrchestratorEntryEvicted } from '@/components/desktop/orchestrator/context-residency';
+import {
+  hydrateOrchestratorTurnPinEntry,
+  persistOrchestratorTurnPin,
+  stageOrchestratorTurnPin,
+} from '@/lib/orchestrator/store';
 
 interface DesktopAgentMessageProps {
   entry: MobileTranscriptEntry;
@@ -34,6 +39,15 @@ function mediaHref(path: string) {
 
 function isImageMedia(item: MobileTranscriptMedia) {
   return item.kind === 'image';
+}
+
+function PinGlyph() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block' }}>
+      <path d="M12 15v6" />
+      <path d="M8.5 5.5h7l-1.7 4.3 2.4 2.6h-8.4l2.4-2.6-1.7-4.3Z" />
+    </svg>
+  );
 }
 
 function MediaGrid({
@@ -174,6 +188,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   const isCompaction = entry.type === 'compaction'
     || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
   const isEvicted = useOrchestratorEntryEvicted(entry.id);
+  const canPin = Boolean(repoPath?.trim()) && entry.type !== 'compaction' && entry.type !== 'command';
+  const [showMetaActions, setShowMetaActions] = useState(false);
+  const [pinHover, setPinHover] = useState(false);
+  const [isPinned, setIsPinned] = useState(() => canPin ? hydrateOrchestratorTurnPinEntry(repoPath, entry) : entry.pinned === true);
   const evictedEyebrow = isEvicted ? (
     <span
       style={{
@@ -189,6 +207,11 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     </span>
   ) : null;
   const evictedOpacity = isEvicted ? 0.55 : 1;
+
+  useEffect(() => {
+    const nextPinned = canPin ? hydrateOrchestratorTurnPinEntry(repoPath, entry) : entry.pinned === true;
+    setIsPinned(nextPinned);
+  }, [canPin, entry, repoPath]);
 
   // Pretext: pre-calculate user message height (plain text, pre-wrap).
   // The orchestrator chat tile is render-hot during streaming — avoiding
@@ -225,6 +248,63 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     }
   }, [repoPath]);
 
+  const handlePinToggle = useCallback(() => {
+    const trimmedRepoPath = repoPath?.trim();
+    if (!canPin || !trimmedRepoPath) return;
+    const nextPinned = !isPinned;
+    entry.pinned = nextPinned;
+    setIsPinned(nextPinned);
+    stageOrchestratorTurnPin(trimmedRepoPath, entry.id, nextPinned);
+    void persistOrchestratorTurnPin({ repoPath: trimmedRepoPath, entryId: entry.id, pinned: nextPinned });
+  }, [canPin, entry, isPinned, repoPath]);
+
+  const renderMetaRow = useCallback((align: 'flex-start' | 'flex-end') => {
+    if (!entry.timestampLabel) return null;
+    const showPinAction = canPin && showMetaActions;
+    return (
+      <div style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        alignSelf: align,
+        paddingLeft: align === 'flex-start' ? 2 : 0,
+        paddingRight: align === 'flex-end' ? 4 : 0,
+      }}>
+        {isPinned ? <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--yellow)', flexShrink: 0 }} /> : null}
+        <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
+          {entry.timestampLabel}
+        </span>
+        {canPin ? (
+          <button
+            type="button"
+            onClick={handlePinToggle}
+            onMouseEnter={() => setPinHover(true)}
+            onMouseLeave={() => setPinHover(false)}
+            aria-label={isPinned ? 'Unpin turn' : 'Pin turn'}
+            title={isPinned ? 'Unpin turn' : 'Pin turn'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 14,
+              height: 14,
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              color: isPinned ? 'var(--yellow)' : pinHover ? 'var(--t-text-secondary)' : 'var(--t-text-faint)',
+              opacity: showPinAction ? 1 : 0,
+              pointerEvents: showPinAction ? 'auto' : 'none',
+              cursor: 'pointer',
+              transition: 'opacity 180ms ease, color 180ms ease',
+            }}
+          >
+            <PinGlyph />
+          </button>
+        ) : null}
+      </div>
+    );
+  }, [canPin, entry.timestampLabel, handlePinToggle, isPinned, pinHover, showMetaActions]);
+
   if (isCompaction) {
     return (
       <CompactionNode
@@ -250,6 +330,11 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         gap: 8,
         opacity: evictedOpacity,
         transition: 'opacity 180ms ease',
+      }}
+      onMouseEnter={() => setShowMetaActions(true)}
+      onMouseLeave={() => {
+        setShowMetaActions(false);
+        setPinHover(false);
       }}>
         {evictedEyebrow}
         {hasMedia ? <MediaGrid media={entry.media ?? []} tint="user" /> : null}
@@ -272,15 +357,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
             {displayText}
           </div>
         ) : null}
-        {entry.timestampLabel ? (
-          <span style={{
-            fontSize: 10,
-            color: 'var(--t-text-faint)',
-            paddingRight: 4,
-          }}>
-            {entry.timestampLabel}
-          </span>
-        ) : null}
+        {renderMetaRow('flex-end')}
       </div>
     );
   }
@@ -300,6 +377,11 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       animation: isLast ? 'llmFadeIn 180ms ease-out' : undefined,
       opacity: evictedOpacity,
       transition: 'opacity 180ms ease',
+    }}
+    onMouseEnter={() => setShowMetaActions(true)}
+    onMouseLeave={() => {
+      setShowMetaActions(false);
+      setPinHover(false);
     }}>
       {evictedEyebrow}
       {hasThinking ? (
@@ -343,15 +425,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         </div>
       ) : null}
 
-      {entry.timestampLabel ? (
-        <span style={{
-          fontSize: 10,
-          color: 'var(--t-text-faint)',
-          paddingLeft: 2,
-        }}>
-          {entry.timestampLabel}
-        </span>
-      ) : null}
+      {renderMetaRow('flex-start')}
     </div>
   );
 });
