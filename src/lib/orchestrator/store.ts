@@ -13,6 +13,7 @@ import type {
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
+export const ORCHESTRATOR_MISSION_COMPLETED_EVENT = 'cortex:orchestrator-mission-completed';
 export const ORCHESTRATOR_STATE_API_PATH = '/api/orchestrator/state';
 const ORCHESTRATOR_ARCHIVE_API_PATH = '/api/orchestrator/archive';
 const LEGACY_THOUGHTS_STORAGE_KEY = 'o8:thoughts:mission-control-v1';
@@ -39,8 +40,38 @@ export interface OrchestratorArchiveMatch {
   entries: MobileTranscriptEntry[];
 }
 
+export interface OrchestratorMissionCompletedDetail {
+  missionId: string; repoPath: string | null; summary: string;
+  mergedCount: number; archivedCount: number;
+  completedAt: string;
+}
+
 function nowIso() {
   return new Date().toISOString();
+}
+
+function isMissionTerminal(state: OrchestratorMissionState) {
+  return state.packets.length > 0
+    && state.packets.every((packet) => packet.releaseState === 'released' || Boolean(packet.archivedAt));
+}
+
+function buildMissionCompletedDetail(
+  previous: OrchestratorMissionState,
+  next: OrchestratorMissionState,
+): OrchestratorMissionCompletedDetail | null {
+  const missionId = next.missionId?.trim() ?? '';
+  if (!missionId || missionId !== (previous.missionId?.trim() ?? '') || previous.packets.length === 0 || isMissionTerminal(previous) || !isMissionTerminal(next)) {
+    return null;
+  }
+
+  const mergedCount = next.packets.filter((packet) => packet.releaseState === 'released').length;
+  const archivedCount = next.packets.filter((packet) => Boolean(packet.archivedAt)).length;
+  const completedAt = next.packets.reduce((latest, packet) => {
+    const candidate = packet.archivedAt ?? packet.lastEventAt ?? packet.review?.recordedAt ?? next.updatedAt;
+    return candidate > latest ? candidate : latest;
+  }, next.updatedAt);
+
+  return { missionId, repoPath: next.repoPath ?? null, summary: next.summary, mergedCount, archivedCount, completedAt };
 }
 
 function packetReferenceIndex(label?: string | null) {
@@ -411,11 +442,14 @@ export function readOrchestratorMissionState(): OrchestratorMissionState {
 }
 
 function broadcastOrchestratorMissionState(state: OrchestratorMissionState) {
+  const previous = orchestratorMissionCache;
   orchestratorMissionCache = normalizeOrchestratorMissionState(state);
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(ORCHESTRATOR_STATE_EVENT, {
     detail: { state: orchestratorMissionCache },
   }));
+  const completed = buildMissionCompletedDetail(previous, orchestratorMissionCache);
+  if (completed) window.dispatchEvent(new CustomEvent<OrchestratorMissionCompletedDetail>(ORCHESTRATOR_MISSION_COMPLETED_EVENT, { detail: completed }));
 }
 
 export async function loadOrchestratorMissionState(): Promise<OrchestratorMissionState> {
@@ -496,6 +530,20 @@ export function subscribeOrchestratorMissionState(listener: (state: Orchestrator
 
   return () => {
     window.removeEventListener(ORCHESTRATOR_STATE_EVENT, handleCustom as EventListener);
+  };
+}
+
+export function subscribeOrchestratorMissionCompleted(listener: (detail: OrchestratorMissionCompletedDetail) => void) {
+  if (typeof window === 'undefined') return () => {};
+
+  const handleCustom = (event: Event) => {
+    listener((event as CustomEvent<OrchestratorMissionCompletedDetail>).detail);
+  };
+
+  window.addEventListener(ORCHESTRATOR_MISSION_COMPLETED_EVENT, handleCustom as EventListener);
+
+  return () => {
+    window.removeEventListener(ORCHESTRATOR_MISSION_COMPLETED_EVENT, handleCustom as EventListener);
   };
 }
 
