@@ -1,4 +1,5 @@
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
+import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
 import type {
   OrchestratorLaneBinding,
   OrchestratorLaneSnapshot,
@@ -11,10 +12,11 @@ import type {
   OrchestratorStateApiResponse,
 } from '@/lib/orchestrator/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-
+if (typeof window !== 'undefined') installOrchestratorTurnPinFetchPatch();
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
 export const ORCHESTRATOR_MISSION_COMPLETED_EVENT = 'cortex:orchestrator-mission-completed';
 export const ORCHESTRATOR_STATE_API_PATH = '/api/orchestrator/state';
+export { hydrateOrchestratorTurnPinEntry, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin };
 const ORCHESTRATOR_ARCHIVE_API_PATH = '/api/orchestrator/archive';
 const LEGACY_THOUGHTS_STORAGE_KEY = 'o8:thoughts:mission-control-v1';
 const LEGACY_AUTO_COMPACT_STORAGE_PREFIX = 'o8:orchestrator:auto-compact:';
