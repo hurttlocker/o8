@@ -6,27 +6,52 @@ import type {
   MobileTranscriptToolLaunchLink,
 } from '@/lib/mobile/types';
 import {
-  buildMissionArchiveTitle,
-  extractLatestCompactionSummary,
-  serializeThoughtsHistoryMessages,
-  transcriptMatchesStoredHistory,
-} from '@/lib/orchestrator/history-transcript';
-import {
   clearQueuedOrchestratorSessionPrelude,
   consumeOrchestratorSessionPrelude,
   hasQueuedOrchestratorSessionPrelude,
-  queueOrchestratorSessionPrelude,
   subscribeOrchestratorMissionCompleted,
   type OrchestratorMissionCompletedDetail,
 } from '@/lib/orchestrator/store';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
+import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
+import {
+  primeCompactedOrchestratorSession,
+  refreshOrchestratorTokenTelemetry,
+  requestOrchestratorCompaction,
+} from './use-orchestrator-stream/session';
+import {
+  DEFAULT_ORCHESTRATOR_MODEL,
+  ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR,
+  ORCHESTRATOR_AUTO_COMPACT_THRESHOLD,
+  ORCHESTRATOR_COMPACTION_STATUS_MIN_MS,
+  ORCHESTRATOR_FORCE_COMPACT_THRESHOLD,
+  ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS,
+  ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS,
+  approxTokens,
+  createIdleBusyState,
+  emitTokenUsage,
+  formatTimestampLabel,
+  getWsUrl,
+  normalizeRepoPath,
+  sortTranscriptEntries,
+  type OrchestratorPermissionMode,
+  type OrchestratorStreamStatus,
+} from './use-orchestrator-stream/shared';
+import {
+  createOrchestratorMessageHandler,
+  type CurrentAssistantStreamState,
+} from './use-orchestrator-stream/socket';
 
-export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
-
-export type OrchestratorPermissionMode = 'full' | 'plan';
-export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-7';
+export {
+  DEFAULT_ORCHESTRATOR_MODEL,
+  ORCHESTRATOR_TOKEN_EVENT,
+} from './use-orchestrator-stream/shared';
+export type {
+  OrchestratorPermissionMode,
+  OrchestratorStreamStatus,
+  OrchestratorTokenUsageDetail,
+} from './use-orchestrator-stream/shared';
 
 interface OrchestratorStreamResult {
   messages: MobileTranscriptEntry[];
@@ -50,107 +75,12 @@ interface OrchestratorStreamResult {
   connected: boolean;
 }
 
-const ORCHESTRATOR_CONTEXT_LIMIT = 1_000_000;
-const ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR = 250_000;
-const ORCHESTRATOR_AUTO_COMPACT_THRESHOLD = 300_000;
-const ORCHESTRATOR_FORCE_COMPACT_THRESHOLD = Math.floor(ORCHESTRATOR_CONTEXT_LIMIT * 0.85);
-const ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS = 4_000;
-const ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS = 8_000;
-const ORCHESTRATOR_COMPACTION_STATUS_MIN_MS = 1_200;
-export const ORCHESTRATOR_TOKEN_EVENT = 'cortex:orchestrator-token-usage';
-
-export interface OrchestratorTokenUsageDetail {
-  repoPath: string | null;
-  tokenCount: number;
-  runningTotal: number;
-}
-
-interface CompactResponsePayload {
-  ok?: boolean;
-  applied?: boolean;
-  transcript?: MobileTranscriptEntry[];
-  resumePrelude?: string | null;
-  tokensAfter?: number;
-}
-
-interface ThoughtsHistoryListEntry {
-  tabId: string;
-  messageCount: number;
-  modifiedAt?: string;
-  repoPath?: string | null;
-}
-
-function approxTokens(value: string): number {
-  return Math.max(0, Math.ceil(value.trim().length / 4));
-}
-
-function sortTranscriptEntries(entries: MobileTranscriptEntry[]) {
-  return [...entries].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
-}
-
-function normalizeRepoPath(value: string | null | undefined) {
-  return (value ?? '').trim().replace(/\/+$/, '');
-}
-
-function missionMergeLabel(count: number) {
-  return `${count} MERGE${count === 1 ? '' : 'S'}`;
-}
-
-function buildMissionTransitionEntry(id: string, text: string, timestamp: number): MobileTranscriptEntry {
-  return { id, role: 'system', text, timestamp };
-}
-
-function getWsUrl(): string {
-  if (typeof window === 'undefined') return '';
-  const { hostname, port, protocol } = window.location;
-  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
-  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
-  const wsProto = protocol === 'https:' ? 'wss' : 'ws';
-
-  if (isLocal) {
-    return `ws://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
-  }
-
-  const wsPort = port ? `:${port}` : '';
-  return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
-}
-
-function normalizeTelemetryPath(value: string | null | undefined): string {
-  return (value ?? '').trim().replace(/\/+$/, '').replace(/^~(?=\/)/, '');
-}
-
-function scoreTelemetryPath(candidate: string | null | undefined, repoPath: string): number {
-  const normalizedCandidate = normalizeTelemetryPath(candidate);
-  const normalizedRepo = normalizeTelemetryPath(repoPath);
-  if (!normalizedCandidate || !normalizedRepo) return 0;
-  if (normalizedCandidate === normalizedRepo) return 4;
-  if (normalizedRepo.endsWith(normalizedCandidate) || normalizedCandidate.endsWith(normalizedRepo)) return 3;
-  const candidateName = normalizedCandidate.split('/').filter(Boolean).pop();
-  const repoName = normalizedRepo.split('/').filter(Boolean).pop();
-  return candidateName && candidateName === repoName ? 1 : 0;
-}
-
-function emitTokenUsage(detail: OrchestratorTokenUsageDetail): void {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent<OrchestratorTokenUsageDetail>(ORCHESTRATOR_TOKEN_EVENT, { detail }));
-}
-
 interface ActiveTurnState {
   startedAt: number;
   toolCallsStarted: number;
   toolCallsCompleted: number;
   latestToolLabel: string | null;
   launches: MobileTranscriptToolLaunchLink[];
-}
-
-function createIdleBusyState(): ThoughtsOrchestratorBusyState {
-  return {
-    active: false,
-    startedAt: null,
-    toolCallsStarted: 0,
-    toolCallsCompleted: 0,
-    latestToolLabel: null,
-  };
 }
 
 /**
@@ -173,7 +103,7 @@ export function useOrchestratorStream(
   const [runningTotal, setRunningTotal] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const resetEpochRef = useRef(0);
-  const currentAssistantRef = useRef<{ id: string; chunks: string[]; thinkingChunks: string[]; epoch: number } | null>(null);
+  const currentAssistantRef = useRef<CurrentAssistantStreamState | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const telemetrySessionKeyRef = useRef<string | null>(null);
@@ -253,138 +183,53 @@ export function useOrchestratorStream(
     setPlanText(nextPlanText);
   }, [resetFirstTurnPlanCapture]);
 
-  const refreshTokenTelemetry = useCallback(async () => {
-    const activeRepoPath = repoPathRef.current;
-    if (!activeRepoPath) return null;
-
-    try {
-      let sessionKey = telemetrySessionKeyRef.current;
-      if (!sessionKey) {
-        const inventoryResponse = await fetch('/api/runtime/inventory?fresh=1', { cache: 'no-store' });
-        const inventory = inventoryResponse.ok
-          ? await inventoryResponse.json() as {
-            agents?: Array<{
-              runtime?: string;
-              sessionKey?: string;
-              sessionKind?: string;
-              status?: string;
-              isCurrentSession?: boolean;
-              workspace?: string;
-              runtimeSurface?: { cwd?: string | null };
-            }>;
-          }
-          : null;
-        sessionKey = (inventory?.agents ?? [])
-          .map((agent) => {
-            if (agent.runtime !== 'claude-code' || !agent.sessionKey) return { score: -1, sessionKey: null as string | null };
-            const pathScore = Math.max(
-              scoreTelemetryPath(agent.workspace, activeRepoPath),
-              scoreTelemetryPath(agent.runtimeSurface?.cwd, activeRepoPath),
-            );
-            if (pathScore === 0) return { score: -1, sessionKey: null as string | null };
-            return {
-              score: pathScore * 10
-                + (agent.sessionKind === 'owned' ? 6 : 0)
-                + (agent.isCurrentSession ? 3 : 0)
-                + (agent.status === 'running' || agent.status === 'reviewing' || agent.status === 'idle' ? 1 : 0),
-              sessionKey: agent.sessionKey,
-            };
-          })
-          .sort((left, right) => right.score - left.score)[0]?.sessionKey ?? null;
-        telemetrySessionKeyRef.current = sessionKey;
-      }
-      if (!sessionKey) return null;
-
-      const response = await fetch(`/api/runtime/telemetry?sessionKey=${encodeURIComponent(sessionKey)}`, { cache: 'no-store' });
-      if (!response.ok) {
-        telemetrySessionKeyRef.current = null;
-        return null;
-      }
-
-      const payload = await response.json() as {
-        telemetry?: {
-          totalTokens?: number | null;
-          estimatedCostUsd?: number | null;
-          model?: string | null;
-        };
-      };
-      const totalTokens = typeof payload.telemetry?.totalTokens === 'number'
-        ? Math.max(0, Math.min(ORCHESTRATOR_CONTEXT_LIMIT, payload.telemetry.totalTokens))
-        : null;
-      const estimatedCostUsd = typeof payload.telemetry?.estimatedCostUsd === 'number'
-        ? payload.telemetry.estimatedCostUsd
-        : null;
-      const telemetryModel = typeof payload.telemetry?.model === 'string' ? payload.telemetry.model : null;
-      if (totalTokens == null) {
-        return { totalTokens: null, estimatedCostUsd, model: telemetryModel };
-      }
-
-      const previousTotal = telemetryTotalRef.current;
-      const nextTokenCount = previousTotal === null || totalTokens < previousTotal
-        ? 0
-        : Math.max(0, totalTokens - previousTotal);
-
-      telemetryTotalRef.current = totalTokens;
-      setTokenCount(nextTokenCount);
-      setRunningTotal(totalTokens);
-      emitTokenUsage({ repoPath: activeRepoPath, tokenCount: nextTokenCount, runningTotal: totalTokens });
-      return { totalTokens, estimatedCostUsd, model: telemetryModel };
-    } catch {
-      return null;
-    }
+  const syncMessages = useCallback((entries: MobileTranscriptEntry[]) => {
+    messagesRef.current = entries;
+    setMessages(entries);
   }, []);
+
+  const updateRunningTotal = useCallback((value: number) => {
+    runningTotalRef.current = value;
+    setRunningTotal(value);
+  }, []);
+
+  const refreshTokenTelemetry = useCallback(async () => {
+    return await refreshOrchestratorTokenTelemetry({
+      repoPath: repoPathRef.current,
+      setRunningTotal: updateRunningTotal,
+      setTokenCount,
+      telemetrySessionKeyRef,
+      telemetryTotalRef,
+    });
+  }, [updateRunningTotal]);
 
   const requestCompaction = useCallback(async (
     activeRepoPath: string,
     nextRunningTotal: number,
     nextMessages: MobileTranscriptEntry[],
     options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff' },
-  ): Promise<CompactResponsePayload | null> => {
-    const response = await fetch('/api/orchestrator/compact', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        repoPath: activeRepoPath,
-        runningTotal: nextRunningTotal,
-        messages: nextMessages,
-        keepTailCount: options?.keepTailCount,
-        trigger: options?.trigger,
-      }),
-    });
-    if (!response.ok) return null;
-    return await response.json() as CompactResponsePayload;
+  ) => {
+    return await requestOrchestratorCompaction(activeRepoPath, nextRunningTotal, nextMessages, options);
   }, []);
 
   const primeCompactedSession = useCallback(async (
     activeRepoPath: string,
-    payload: CompactResponsePayload,
+    payload: Awaited<ReturnType<typeof requestOrchestratorCompaction>>,
     options?: { setTranscript?: boolean },
   ) => {
-    if (!payload.ok || !payload.applied || !Array.isArray(payload.transcript)) return null;
-    await fetch('/api/orchestrator/reset-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repoPath: activeRepoPath }),
-    }).catch(() => null);
-    if (payload.resumePrelude) {
-      queueOrchestratorSessionPrelude(activeRepoPath, payload.resumePrelude, 'replace');
-    }
-    const nextTotal = typeof payload.tokensAfter === 'number' ? payload.tokensAfter : 0;
-    telemetrySessionKeyRef.current = null;
-    telemetryTotalRef.current = nextTotal;
-    if (options?.setTranscript !== false) {
-      messagesRef.current = payload.transcript;
-      setMessages(payload.transcript);
-    }
-    setTokenCount(0);
-    setRunningTotal(nextTotal);
-    emitTokenUsage({ repoPath: activeRepoPath, tokenCount: 0, runningTotal: nextTotal });
-    return {
-      nextTotal,
-      resumePrelude: payload.resumePrelude ?? null,
-      transcript: payload.transcript,
-    };
-  }, []);
+    if (!payload) return null;
+    return await primeCompactedOrchestratorSession({
+      messagesRef,
+      payload,
+      repoPath: activeRepoPath,
+      setMessages: syncMessages,
+      setRunningTotal: updateRunningTotal,
+      setTokenCount,
+      setTranscript: options?.setTranscript,
+      telemetrySessionKeyRef,
+      telemetryTotalRef,
+    });
+  }, [syncMessages, updateRunningTotal]);
 
   const estimateNextTurnTokens = useCallback((message: string) => (
     runningTotalRef.current
@@ -395,9 +240,8 @@ export function useOrchestratorStream(
 
   const replaceTranscript = useCallback((entries: MobileTranscriptEntry[]) => {
     const next = sortTranscriptEntries(entries);
-    messagesRef.current = next;
-    setMessages(next);
-  }, []);
+    syncMessages(next);
+  }, [syncMessages]);
 
   const appendLocalEntries = useCallback((entries: MobileTranscriptEntry[]) => {
     if (entries.length === 0) return;
@@ -422,15 +266,13 @@ export function useOrchestratorStream(
   const reset = useCallback(() => {
     const nextStatus = connected ? 'ready' : 'connecting';
     resetEpochRef.current += 1;
-    messagesRef.current = [];
-    setMessages([]);
+    syncMessages([]);
     planTextRef.current = null;
     setPlanText(null);
     setBusyState(createIdleBusyState());
     activeTurnRef.current = null;
     setTokenCount(0);
-    runningTotalRef.current = 0;
-    setRunningTotal(0);
+    updateRunningTotal(0);
     currentAssistantRef.current = null;
     hasHistoryRef.current = false;
     telemetrySessionKeyRef.current = null;
@@ -447,106 +289,21 @@ export function useOrchestratorStream(
     }
     clearQueuedOrchestratorSessionPrelude(repoPathRef.current);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
-  }, [connected, resetFirstTurnPlanCapture]);
-
-  const findStoredThoughtsThreadTabId = useCallback(async (transcript: MobileTranscriptEntry[]) => {
-    if (transcript.length === 0) return null;
-
-    try {
-      const listResponse = await fetch('/api/v2/chat-history/list?include=orchestrator', { cache: 'no-store' });
-      if (!listResponse.ok) return null;
-      const payload = await listResponse.json() as { conversations?: ThoughtsHistoryListEntry[] };
-      const repoPathKey = normalizeRepoPath(repoPathRef.current);
-      const candidates = (payload.conversations ?? [])
-        .filter((thread) => thread.tabId.startsWith('thoughts-') && thread.messageCount === transcript.length)
-        .filter((thread) => {
-          const candidateRepoPath = normalizeRepoPath(thread.repoPath);
-          return !repoPathKey || !candidateRepoPath || candidateRepoPath === repoPathKey;
-        })
-        .sort((left, right) => new Date(right.modifiedAt ?? 0).getTime() - new Date(left.modifiedAt ?? 0).getTime())
-        .slice(0, 8);
-
-      for (const candidate of candidates) {
-        const historyResponse = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(candidate.tabId)}`, { cache: 'no-store' });
-        if (!historyResponse.ok) continue;
-        const history = await historyResponse.json() as { messages?: unknown[] };
-        if (transcriptMatchesStoredHistory(transcript, history.messages)) {
-          return candidate.tabId;
-        }
-      }
-    } catch {
-      // silent
-    }
-
-    return null;
-  }, []);
-
-  const showMissionThreadTransition = useCallback((detail: OrchestratorMissionCompletedDetail) => {
-    if (transitionStripTimerRef.current) {
-      clearTimeout(transitionStripTimerRef.current);
-      transitionStripTimerRef.current = null;
-    }
-
-    const startedAt = Date.now();
-    replaceTranscript([
-      buildMissionTransitionEntry(
-        `orch-mission-complete-${startedAt}`,
-        `(MISSION COMPLETE · ${missionMergeLabel(detail.mergedCount)} · ARCHIVED)`,
-        startedAt,
-      ),
-    ]);
-    transitionStripTimerRef.current = window.setTimeout(() => {
-      transitionStripTimerRef.current = null;
-      appendLocalEntries([
-        buildMissionTransitionEntry(`orch-mission-ready-${startedAt}`, '(NEW THREAD · READY)', startedAt + 220),
-      ]);
-    }, 220);
-  }, [appendLocalEntries, replaceTranscript]);
+  }, [connected, resetFirstTurnPlanCapture, syncMessages, updateRunningTotal]);
 
   const archiveMissionThread = useCallback(async (detail: OrchestratorMissionCompletedDetail) => {
     const activeRepoPath = repoPathRef.current;
     if (!activeRepoPath) return;
-
-    const transcript = messagesRef.current;
-    const planSnapshot = planTextRef.current;
-    const hasArchivableMessages = transcript.some((entry) => entry.role === 'user');
-    if (hasArchivableMessages) {
-      const currentTabId = await findStoredThoughtsThreadTabId(transcript);
-      const archiveTabId = `thoughts-${Date.now()}-archive`;
-      const archiveResponse = await fetch('/api/v2/chat-history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tabId: archiveTabId,
-          messages: serializeThoughtsHistoryMessages(transcript),
-          model: 'claude-code',
-          title: buildMissionArchiveTitle({
-            missionSummary: detail.summary,
-            compactionSummary: extractLatestCompactionSummary(transcript),
-            mergedCount: detail.mergedCount,
-            completedAt: detail.completedAt,
-          }),
-          planText: planSnapshot ?? undefined,
-          repoPath: activeRepoPath,
-        }),
-      });
-      if (!archiveResponse.ok) {
-        throw new Error('Unable to archive the completed mission thread.');
-      }
-      if (currentTabId) {
-        await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(currentTabId)}`, { method: 'DELETE' }).catch(() => null);
-      }
-    }
-
-    await fetch('/api/orchestrator/reset-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repoPath: activeRepoPath }),
-    }).catch(() => null);
-
-    reset();
-    showMissionThreadTransition(detail);
-  }, [findStoredThoughtsThreadTabId, reset, showMissionThreadTransition]);
+    await archiveCompletedMissionThread(detail, {
+      appendLocalEntries,
+      planText: planTextRef.current,
+      replaceTranscript,
+      repoPath: activeRepoPath,
+      reset,
+      transcript: messagesRef.current,
+      transitionStripTimerRef,
+    });
+  }, [appendLocalEntries, replaceTranscript, reset]);
 
   const rotateMissionThread = useCallback(async (detail: OrchestratorMissionCompletedDetail) => {
     const activeRepoPath = normalizeRepoPath(repoPathRef.current);
@@ -626,7 +383,7 @@ export function useOrchestratorStream(
           text: text || (thinking ? '' : ''),
           thinking,
           timestamp: next[idx].timestamp ?? Date.now(),
-          timestampLabel: next[idx].timestampLabel ?? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestampLabel: next[idx].timestampLabel ?? formatTimestampLabel(Date.now()),
         };
         return next;
       }
@@ -636,7 +393,7 @@ export function useOrchestratorStream(
         text: text || (thinking ? '' : ''),
         thinking,
         timestamp: Date.now(),
-        timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestampLabel: formatTimestampLabel(Date.now()),
       }];
     });
   }, []);
@@ -677,183 +434,23 @@ export function useOrchestratorStream(
       }, RECONNECT_HEAL_DELAY_MS);
     };
 
-    ws.onmessage = (event) => {
-      // Ignore messages from a stale/closed connection (StrictMode double-mount race)
-      if (ws !== wsRef.current) return;
-
-      let msg: { channel?: string; event?: string; data?: Record<string, unknown> };
-      try {
-        msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
-      } catch {
-        return;
-      }
-
-      if (msg.channel !== 'orchestrator') return;
-
-      // #539 — signal liveness for the reconnect heal + stall watchdog.
-      eventCountRef.current += 1;
-      lastEventAtRef.current = Date.now();
-
-      switch (msg.event) {
-        case 'output': {
-          const text = typeof msg.data?.text === 'string' ? msg.data.text : '';
-          if (!text) break;
-          const isThinking = msg.data?.thinking === true;
-
-          if (!isThinking && captureFirstTurnPlanRef.current) {
-            if (firstTurnPlanStartedRef.current || text.trim()) {
-              firstTurnPlanStartedRef.current = true;
-              firstTurnPlanChunksRef.current.push(text);
-            }
-          }
-
-          // Start a new assistant message if we don't have one — but only if
-          // this output isn't a stale chunk from before a +New / reset.
-          if (!currentAssistantRef.current) {
-            if (statusRef.current !== 'busy') break;
-            currentAssistantRef.current = {
-              id: `orch-assistant-${Date.now()}`,
-              chunks: [],
-              thinkingChunks: [],
-              epoch: resetEpochRef.current,
-            };
-          } else if (currentAssistantRef.current.epoch !== resetEpochRef.current) {
-            currentAssistantRef.current = null;
-            break;
-          }
-
-          if (isThinking) {
-            currentAssistantRef.current.thinkingChunks.push(text);
-          } else {
-            currentAssistantRef.current.chunks.push(text);
-          }
-          flushCurrentAssistant();
-
-          if (statusRef.current !== 'busy') setStatus('busy');
-          break;
-        }
-
-        case 'status': {
-          const newStatus = msg.data?.status as string | undefined;
-          if (newStatus === 'ready' || newStatus === 'busy' || newStatus === 'dead') {
-            if (
-              newStatus === 'busy'
-              && statusRef.current !== 'busy'
-              && currentAssistantRef.current === null
-              && messagesRef.current.length === 0
-            ) {
-              break;
-            }
-            statusRef.current = newStatus;
-            setStatus(newStatus);
-
-            // When agent goes ready, finalize current assistant message
-            // and mark any running tools as done
-            if (newStatus === 'ready' && currentAssistantRef.current) {
-              finalizeFirstTurnPlanCapture();
-              flushCurrentAssistant();
-              const finalId = currentAssistantRef.current.id;
-              setMessages(prev => prev.map(m =>
-                m.id === finalId && m.toolCalls?.some(t => t.status === 'running')
-                  ? { ...m, toolCalls: m.toolCalls!.map(t => t.status === 'running' ? { ...t, status: 'done' } : t) }
-                  : m
-              ));
-              currentAssistantRef.current = null;
-            }
-            if (newStatus === 'dead') {
-              finalizeFirstTurnPlanCapture();
-            }
-          } else if (newStatus === 'starting') {
-            statusRef.current = 'connecting';
-            setStatus('connecting');
-          }
-          break;
-        }
-
-        case 'agent-update': {
-          // Agent progress / supervisor narration belongs in the codex agent's
-          // own transcript tab and the SessionVisualizer card — NOT the
-          // orchestrator chat. Surface to dashboard listeners only; do not
-          // mutate the orchestrator's message stream.
-          const update = msg.data as {
-            surfaceId?: string;
-            name?: string;
-            status?: string;
-            detail?: string;
-            duration?: number;
-            repoPath?: string;
-            prompt?: string;
-          } | undefined;
-          if (!update?.surfaceId) break;
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('cortex:agent-supervisor-update', { detail: update }));
-          }
-          break;
-        }
-
-        case 'tool-use': {
-          const toolName = typeof msg.data?.name === 'string' ? msg.data.name : 'unknown';
-          finalizeFirstTurnPlanCapture();
-
-          // Ensure we have a current assistant message to attach the tool call to
-          if (!currentAssistantRef.current) {
-            if (statusRef.current !== 'busy') break;
-            currentAssistantRef.current = {
-              id: `orch-assistant-${Date.now()}`,
-              chunks: [],
-              thinkingChunks: [],
-              epoch: resetEpochRef.current,
-            };
-          }
-
-          // Append to messages with toolCalls
-          const current = currentAssistantRef.current;
-          const toolCall = { name: toolName, status: 'running' as const };
-          setMessages(prev => {
-            const idx = prev.findIndex(m => m.id === current.id);
-            if (idx >= 0) {
-              const next = [...prev];
-              const existing = next[idx];
-              const existingTools = existing.toolCalls ?? [];
-              // Mark previous running tools as done
-              const updatedTools = existingTools.map(t =>
-                t.status === 'running' ? { ...t, status: 'done' as const } : t,
-              );
-              next[idx] = { ...existing, toolCalls: [...updatedTools, toolCall] };
-              return next;
-            }
-            // New message with tool call
-            return [...prev, {
-              id: current.id,
-              role: 'assistant' as const,
-              text: '',
-              toolCalls: [toolCall],
-              timestamp: Date.now(),
-              timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            }];
-          });
-
-          if (statusRef.current !== 'busy') setStatus('busy');
-          break;
-        }
-
-        case 'error': {
-          if (statusRef.current !== 'busy' && messagesRef.current.length === 0) break;
-          const error = typeof msg.data?.error === 'string' ? msg.data.error : 'Unknown error';
-          console.error('[orchestrator-stream] Error:', error);
-          finalizeFirstTurnPlanCapture();
-          setStatus('error');
-          setMessages(prev => [...prev, {
-            id: `orch-error-${Date.now()}`,
-            role: 'system',
-            text: `Orchestrator error: ${error}`,
-            timestamp: Date.now(),
-            timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          }]);
-          break;
-        }
-      }
-    };
+    ws.onmessage = createOrchestratorMessageHandler({
+      captureFirstTurnPlanRef,
+      currentWs: ws,
+      currentAssistantRef,
+      eventCountRef,
+      finalizeFirstTurnPlanCapture,
+      firstTurnPlanChunksRef,
+      firstTurnPlanStartedRef,
+      flushCurrentAssistant,
+      lastEventAtRef,
+      messagesRef,
+      resetEpochRef,
+      setMessages,
+      setStatus,
+      statusRef,
+      wsRef,
+    });
 
     ws.onclose = () => {
       setConnected(false);
@@ -881,7 +478,7 @@ export function useOrchestratorStream(
     telemetrySessionKeyRef.current = null;
     telemetryTotalRef.current = null;
     setTokenCount(0);
-    setRunningTotal(0);
+    updateRunningTotal(0);
     emitTokenUsage({ repoPath, tokenCount: 0, runningTotal: 0 });
     connect();
     if (tokenRefreshTimerRef.current) clearTimeout(tokenRefreshTimerRef.current);
@@ -908,7 +505,7 @@ export function useOrchestratorStream(
         wsRef.current = null;
       }
     };
-  }, [repoPath, connect, refreshTokenTelemetry]);
+  }, [repoPath, connect, refreshTokenTelemetry, updateRunningTotal]);
 
   useEffect(() => {
     if (!repoPath) return () => {};
@@ -1040,7 +637,7 @@ export function useOrchestratorStream(
           role: 'system',
           text: 'Compacting to keep turn fast…',
           timestamp: compactingAt,
-          timestampLabel: new Date(compactingAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestampLabel: formatTimestampLabel(compactingAt),
         }]);
         try {
           const payload = await requestCompaction(activeRepoPath, runningTotalRef.current, transcriptSnapshot);
@@ -1073,7 +670,7 @@ export function useOrchestratorStream(
               role: 'system',
               text: error instanceof Error ? error.message : `Compaction failed before send. Re-send this message:\n\n${message}`,
               timestamp: Date.now(),
-              timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              timestampLabel: formatTimestampLabel(Date.now()),
             },
           ]);
           statusRef.current = connected ? 'ready' : 'connecting';
@@ -1086,7 +683,7 @@ export function useOrchestratorStream(
         role: 'user',
         text: message,
         timestamp: Date.now(),
-        timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestampLabel: formatTimestampLabel(Date.now()),
       };
       messagesRef.current = [...messagesRef.current, userEntry];
       setMessages((prev) => [...prev, userEntry]);
