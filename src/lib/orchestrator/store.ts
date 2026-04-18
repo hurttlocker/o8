@@ -10,14 +10,34 @@ import type {
   OrchestratorRuntimeTruth,
   OrchestratorStateApiResponse,
 } from '@/lib/orchestrator/types';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
 export const ORCHESTRATOR_STATE_API_PATH = '/api/orchestrator/state';
+const ORCHESTRATOR_ARCHIVE_API_PATH = '/api/orchestrator/archive';
 const LEGACY_THOUGHTS_STORAGE_KEY = 'o8:thoughts:mission-control-v1';
+const LEGACY_AUTO_COMPACT_STORAGE_PREFIX = 'o8:orchestrator:auto-compact:';
+const ORCHESTRATOR_MODEL_STORAGE_PREFIX = 'o8:orchestrator:model:';
+const ORCHESTRATOR_PRELUDE_STORAGE_PREFIX = 'o8:orchestrator:resume-prelude:';
 const STALE_LANE_REASON = 'Previously bound workspace lane is missing. Re-launch to reattach.';
 const MAX_RECOVERY_ATTEMPTS = 2;
 const RECOVERY_COOLDOWN_MS = 60_000;
 let orchestratorMissionCache = createEmptyOrchestratorMissionState();
+
+interface StoredOrchestratorPrelude {
+  id: string;
+  text: string;
+}
+
+export interface OrchestratorArchiveMatch {
+  id: string;
+  score: number;
+  source: 'thread' | 'compaction';
+  tabId: string | null;
+  archivedAt: string | null;
+  preview: string;
+  entries: MobileTranscriptEntry[];
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -202,6 +222,38 @@ function comparisonSourcePacketId(packetId: string) {
   return match?.[1] ? match[1] : null;
 }
 
+function normalizeRepoStorageKey(repoPath: string | null | undefined) {
+  return (repoPath ?? '').trim().replace(/\/+$/, '');
+}
+
+function orchestratorPreludeStorageKey(repoPath: string) {
+  return `${ORCHESTRATOR_PRELUDE_STORAGE_PREFIX}${normalizeRepoStorageKey(repoPath)}`;
+}
+
+function readPreludeQueue(repoPath: string) {
+  if (typeof window === 'undefined') return [] as StoredOrchestratorPrelude[];
+  const raw = window.localStorage.getItem(orchestratorPreludeStorageKey(repoPath));
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as StoredOrchestratorPrelude[];
+    return Array.isArray(parsed)
+      ? parsed.filter((item) => typeof item?.id === 'string' && typeof item?.text === 'string' && item.text.trim())
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePreludeQueue(repoPath: string, items: StoredOrchestratorPrelude[]) {
+  if (typeof window === 'undefined') return;
+  const key = orchestratorPreludeStorageKey(repoPath);
+  if (items.length === 0) {
+    window.localStorage.removeItem(key);
+    return;
+  }
+  window.localStorage.setItem(key, JSON.stringify(items));
+}
+
 function resolvePacketDependencies(packets: OrchestratorPacket[]) {
   const lookup = new Map<string, string>();
   packets.forEach((packet) => {
@@ -237,6 +289,97 @@ export function createEmptyOrchestratorMissionState(): OrchestratorMissionState 
     activeComparisonGroups: [],
     updatedAt: nowIso(),
   };
+}
+
+export function queueOrchestratorSessionPrelude(
+  repoPath: string | null | undefined,
+  text: string,
+  mode: 'append' | 'replace' = 'append',
+) {
+  const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
+  const trimmed = text.trim();
+  if (!normalizedRepoPath || !trimmed || typeof window === 'undefined') return;
+  const nextItem = {
+    id: `prelude-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    text: trimmed,
+  } satisfies StoredOrchestratorPrelude;
+  const queue = mode === 'replace' ? [nextItem] : [...readPreludeQueue(normalizedRepoPath), nextItem];
+  writePreludeQueue(normalizedRepoPath, queue);
+}
+
+export function hasQueuedOrchestratorSessionPrelude(repoPath: string | null | undefined) {
+  const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
+  if (!normalizedRepoPath || typeof window === 'undefined') return false;
+  if (readPreludeQueue(normalizedRepoPath).length > 0) return true;
+  return Boolean(window.localStorage.getItem(`${LEGACY_AUTO_COMPACT_STORAGE_PREFIX}${normalizedRepoPath}`));
+}
+
+export function clearQueuedOrchestratorSessionPrelude(repoPath: string | null | undefined) {
+  const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
+  if (!normalizedRepoPath || typeof window === 'undefined') return;
+  writePreludeQueue(normalizedRepoPath, []);
+  window.localStorage.removeItem(`${LEGACY_AUTO_COMPACT_STORAGE_PREFIX}${normalizedRepoPath}`);
+}
+
+export function consumeOrchestratorSessionPrelude(repoPath: string | null | undefined) {
+  const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
+  if (!normalizedRepoPath || typeof window === 'undefined') return null;
+
+  const queue = readPreludeQueue(normalizedRepoPath);
+  writePreludeQueue(normalizedRepoPath, []);
+
+  const legacyKey = `${LEGACY_AUTO_COMPACT_STORAGE_PREFIX}${normalizedRepoPath}`;
+  const legacyPrelude = window.localStorage.getItem(legacyKey);
+  if (legacyPrelude) {
+    window.localStorage.removeItem(legacyKey);
+  }
+
+  const parts = [
+    ...queue.map((item) => item.text.trim()).filter(Boolean),
+    legacyPrelude?.trim() ?? '',
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join('\n\n---\n\n') : null;
+}
+
+export function readStoredOrchestratorModel(repoPath: string | null | undefined) {
+  const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
+  if (!normalizedRepoPath || typeof window === 'undefined') return null;
+  const stored = window.localStorage.getItem(`${ORCHESTRATOR_MODEL_STORAGE_PREFIX}${normalizedRepoPath}`)?.trim();
+  return stored ? stored : null;
+}
+
+export function writeStoredOrchestratorModel(repoPath: string | null | undefined, model: string) {
+  const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
+  const trimmed = model.trim();
+  if (!normalizedRepoPath || !trimmed || typeof window === 'undefined') return;
+  window.localStorage.setItem(`${ORCHESTRATOR_MODEL_STORAGE_PREFIX}${normalizedRepoPath}`, trimmed);
+}
+
+export async function searchOrchestratorArchive(
+  repoPath: string | null | undefined,
+  query: string,
+  limit = 5,
+): Promise<OrchestratorArchiveMatch[]> {
+  const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
+  const trimmedQuery = query.trim();
+  if (!normalizedRepoPath || !trimmedQuery) return [];
+
+  try {
+    const searchParams = new URLSearchParams({
+      repoPath: normalizedRepoPath,
+      q: trimmedQuery,
+      limit: String(limit),
+    });
+    const response = await fetch(`${ORCHESTRATOR_ARCHIVE_API_PATH}?${searchParams.toString()}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    });
+    if (!response.ok) return [];
+    const payload = await response.json() as { matches?: OrchestratorArchiveMatch[] };
+    return Array.isArray(payload.matches) ? payload.matches : [];
+  } catch {
+    return [];
+  }
 }
 
 export function normalizeOrchestratorMissionState(raw: unknown): OrchestratorMissionState {
