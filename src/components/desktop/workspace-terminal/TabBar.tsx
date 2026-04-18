@@ -14,6 +14,22 @@ import { WorkspaceLaunchPicker } from '@/components/desktop/workspace-terminal/W
 import { describeWorkspaceChatTab, workspaceTabPrimaryLabel } from '@/components/desktop/workspace-terminal/utils';
 import { CodexIcon, ClaudeIcon } from '@/components/desktop/repo-registry/shared';
 import { chromeNeoSurface, chromeNeoHoverSurface } from '@/components/desktop/chrome/ChromeButton';
+import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
+import { compactPacketLabel } from '@/lib/workspace-terminal/compact-packet-label';
+
+const LATEST_DISPATCH_BG = 'rgba(255, 90, 31, 0.08)';
+const LATEST_DISPATCH_BORDER = 'rgba(255, 90, 31, 0.22)';
+const LATEST_DISPATCH_TEXT = '#FF5A1F';
+
+function formatDispatchedAt(epochMs: number): string {
+  try {
+    const date = new Date(epochMs);
+    const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return `Dispatched ${time}`;
+  } catch {
+    return 'Dispatched';
+  }
+}
 
 interface TabBarProps {
   tabs: TerminalTab[];
@@ -55,6 +71,9 @@ export const TabBar = memo(function TabBar({
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
   const draggedTabIdRef = useRef<string | null>(null);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const orchestratorData = useOrchestratorData();
+  const latestDispatchedTabId = orchestratorData?.latestDispatchedTabId ?? null;
+  const latestDispatchedAt = orchestratorData?.latestDispatchedAt ?? null;
 
   const syncTabScroll = useCallback(() => {
     const element = tabScrollRef.current;
@@ -152,17 +171,42 @@ export const TabBar = memo(function TabBar({
             const isOrchestrator = tab.kind === 'orchestrator';
             const rawLabel = workspaceTabPrimaryLabel(tab);
             const chatTabMeta = describeWorkspaceChatTab(tab);
-            const primaryLabel = (rawLabel === 'Assistant' || rawLabel === 'Agent' || rawLabel === 'Chat') && chatTabMeta?.summary
-              ? chatTabMeta.summary
-              : rawLabel;
+            const packetTitle = tab.orchestrationPacket?.title ?? null;
+            const compactLabel = packetTitle ? compactPacketLabel(packetTitle) : '';
+            const primaryLabel = compactLabel
+              ? compactLabel
+              : ((rawLabel === 'Assistant' || rawLabel === 'Agent' || rawLabel === 'Chat') && chatTabMeta?.summary
+                ? chatTabMeta.summary
+                : rawLabel);
             const tabDetail = tab.orchestrationPacket
               ? (chatTabMeta?.detail ?? tab.orchestrationPacket.branchTarget ?? null)
               : (chatTabMeta?.summary ?? chatTabMeta?.detail ?? null);
-            const tabTitle = [primaryLabel, tabDetail, chatTabMeta?.fullSummary]
+            const isLatestDispatch = !!tab.orchestrationPacket
+              && latestDispatchedTabId === tab.id;
+            const dispatchTooltip = isLatestDispatch && latestDispatchedAt
+              ? formatDispatchedAt(latestDispatchedAt)
+              : null;
+            const fullPacketTitle = packetTitle ?? null;
+            const tabTitle = [fullPacketTitle, dispatchTooltip, tabDetail, chatTabMeta?.fullSummary]
               .filter((value): value is string => Boolean(value))
-              .join(' - ');
+              .join(' · ')
+              || primaryLabel
+              || tab.label;
 
             const neoSurface = chromeNeoSurface(isActive);
+            const tabBackground = isLatestDispatch
+              ? LATEST_DISPATCH_BG
+              : (isOrchestrator && isActive
+                ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))'
+                : neoSurface.background);
+            const tabBoxShadow = isLatestDispatch
+              ? `inset 0 0 0 1px ${LATEST_DISPATCH_BORDER}`
+              : (isOrchestrator && isActive
+                ? '0 1px 4px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(37, 99, 235, 0.1)'
+                : neoSurface.boxShadow);
+            const tabTextColor = isLatestDispatch
+              ? LATEST_DISPATCH_TEXT
+              : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)');
             return (
               <button
                 type="button"
@@ -189,51 +233,45 @@ export const TabBar = memo(function TabBar({
                 }}
                 onDragEnd={() => { draggedTabIdRef.current = null; setDragOverTabId(null); }}
                 onClick={() => onSelectTab(tab.id)}
-                title={tabTitle || tab.label}
+                title={tabTitle}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  paddingTop: 5,
-                  paddingBottom: 5,
-                  paddingLeft: 12,
-                  paddingRight: 10,
+                  paddingTop: 4,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  paddingRight: 8,
                   marginTop: 4,
                   marginBottom: 4,
-                  marginLeft: 3,
-                  marginRight: 3,
+                  marginLeft: 2,
+                  marginRight: 2,
                   borderWidth: 0,
                   borderStyle: 'none',
-                  borderRadius: 9,
+                  borderRadius: 8,
                   borderLeftWidth: dragOverTabId === tab.id ? 2 : 0,
                   borderLeftStyle: dragOverTabId === tab.id ? 'solid' : 'none',
                   borderLeftColor: '#2563eb',
-                  background: isOrchestrator && isActive
-                    ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))'
-                    : neoSurface.background,
-                  boxShadow: isOrchestrator && isActive
-                    ? '0 1px 4px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(37, 99, 235, 0.1)'
-                    : neoSurface.boxShadow,
-                  color: isOrchestrator
-                    ? (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)')
-                    : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)'),
-                  fontSize: 12,
-                  fontWeight: isActive ? 560 : 460,
+                  background: tabBackground,
+                  boxShadow: tabBoxShadow,
+                  color: tabTextColor,
+                  fontSize: 11,
+                  fontWeight: isActive ? 560 : 500,
                   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                  letterSpacing: '-0.008em',
+                  letterSpacing: '-0.01em',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                   transition: 'background 150ms ease, box-shadow 150ms ease, color 120ms ease',
                   position: 'relative',
                 }}
                 onMouseEnter={(event) => {
-                  if (isActive) return;
+                  if (isActive || isLatestDispatch) return;
                   const hover = chromeNeoHoverSurface();
                   event.currentTarget.style.background = hover.background;
                   event.currentTarget.style.boxShadow = hover.boxShadow;
                 }}
                 onMouseLeave={(event) => {
-                  if (isActive) return;
+                  if (isActive || isLatestDispatch) return;
                   event.currentTarget.style.background = neoSurface.background;
                   event.currentTarget.style.boxShadow = neoSurface.boxShadow;
                 }}
@@ -242,9 +280,9 @@ export const TabBar = memo(function TabBar({
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#2563eb', flexShrink: 0 }} />
                 ) : null}
                 {tab.kind === 'orchestrator' || tab.chatRuntime === 'claude-code' ? (
-                  <ClaudeIcon size={14} />
+                  <ClaudeIcon size={13} />
                 ) : tab.chatRuntime === 'codex' ? (
-                  <CodexIcon size={14} />
+                  <CodexIcon size={13} />
                 ) : null}
                 <span
                   style={{
@@ -274,10 +312,11 @@ export const TabBar = memo(function TabBar({
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: 16,
-                      height: 16,
+                      width: 14,
+                      height: 14,
                       borderRadius: 4,
-                      marginLeft: 4,
+                      borderWidth: 0,
+                      marginLeft: 2,
                       color: 'var(--t-text-secondary)',
                       cursor: 'pointer',
                       transition: 'background 100ms, color 100ms',
@@ -291,7 +330,7 @@ export const TabBar = memo(function TabBar({
                       (event.target as HTMLElement).style.color = '#475569';
                     }}
                   >
-                    <PhosphorXBold size={10} />
+                    <PhosphorXBold size={9} />
                   </span>
                 ) : null}
               </button>
