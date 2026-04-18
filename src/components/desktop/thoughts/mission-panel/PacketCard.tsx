@@ -51,7 +51,10 @@ export function PacketCard({
   const canLaunch = canShowLaunchAction && hasBranchTarget;
   const hasInteractiveLane = Boolean(packet.lane?.tileId && packet.lane?.tabId);
   const targetLabel = workspaceTargets.find((target) => target.localPath === packet.workspaceTargetPath)?.label ?? null;
-  const showReviewSection = packet.status === 'awaiting_review' && Boolean(packet.lane?.laneId);
+  const showReviewSection = Boolean(packet.lane?.laneId) && (
+    packet.status === 'awaiting_review'
+    || (packet.status === 'blocked' && packet.blockedReason === 'Awaiting operator input')
+  );
 
   return (
     <div
