@@ -68,6 +68,46 @@ export class WorktreeRebaseConflictError extends Error {
 }
 
 /**
+ * Thrown when `git fetch origin <baseBranch>` fails AND the local base
+ * branch ref is older than the freshness window (default 5 min), so we
+ * can't safely fall back to the local ref — the agent would branch from
+ * a stale base and generate a diff full of already-merged upstream work.
+ *
+ * Caller surfaces this as a `fetch_unreachable` supervisor inbox kind so
+ * the operator can run `git fetch` manually, reconnect, and retry.
+ */
+export class WorktreeFetchUnreachableError extends Error {
+  public readonly baseBranch: string;
+  public readonly worktreePath: string;
+  public readonly branch: string;
+  public readonly localRefAgeMs: number;
+  public readonly fetchErrorMessage: string;
+
+  constructor(options: {
+    baseBranch: string;
+    worktreePath: string;
+    branch: string;
+    localRefAgeMs: number;
+    fetchErrorMessage: string;
+    message?: string;
+  }) {
+    super(
+      options.message
+        ?? `fetch origin ${options.baseBranch} failed and local ref is stale (${Math.round(options.localRefAgeMs / 60_000)} min old).`,
+    );
+    this.name = 'WorktreeFetchUnreachableError';
+    this.baseBranch = options.baseBranch;
+    this.worktreePath = options.worktreePath;
+    this.branch = options.branch;
+    this.localRefAgeMs = options.localRefAgeMs;
+    this.fetchErrorMessage = options.fetchErrorMessage;
+  }
+}
+
+/** Age threshold for local base-branch ref on fetch failure (5 min). */
+const LOCAL_BASE_REF_FRESHNESS_MS = 5 * 60_000;
+
+/**
  * Sanitize a task name into a safe directory/branch name.
  * Replaces spaces with dashes, strips special chars, lowercases.
  */
@@ -260,18 +300,33 @@ export class WorktreeManager {
     baseBranch: string,
     branchName: string,
   ): Promise<void> {
-    // Fetch the latest base ref from origin. Failure here is non-fatal —
-    // if origin is unreachable we can still try to rebase onto the local
-    // base ref and log a warning. The operator's intent is "branch from
-    // latest main", and local-only is strictly better than not rebasing.
+    // Fetch the latest base ref from origin. Failure is recoverable only if
+    // the local base ref is recent — otherwise the agent would branch from a
+    // stale base and generate a diff that reverts already-merged upstream
+    // work. On stale+unreachable: throw so the caller escalates to a
+    // fetch_unreachable supervisor inbox item.
     try {
       await execFileAsync('git', ['fetch', 'origin', baseBranch, '--quiet'], {
         cwd: worktreePath,
         timeout: 60_000,
       });
     } catch (fetchErr) {
+      const fetchErrorMessage = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      const localRefAgeMs = await this.localBaseRefAgeMs(worktreePath, baseBranch);
+      if (localRefAgeMs == null || localRefAgeMs > LOCAL_BASE_REF_FRESHNESS_MS) {
+        console.warn(
+          `[worktree-rebase] fetch origin ${baseBranch} failed (${fetchErrorMessage}) and local ${baseBranch} ref is ${localRefAgeMs == null ? 'missing' : `${Math.round(localRefAgeMs / 60_000)} min old`} — escalating as fetch_unreachable.`,
+        );
+        throw new WorktreeFetchUnreachableError({
+          baseBranch,
+          worktreePath,
+          branch: branchName,
+          localRefAgeMs: localRefAgeMs ?? Number.POSITIVE_INFINITY,
+          fetchErrorMessage,
+        });
+      }
       console.warn(
-        `[worktree-rebase] fetch origin ${baseBranch} failed (${fetchErr instanceof Error ? fetchErr.message : 'unknown'}); rebasing onto local ${baseBranch} instead.`,
+        `[worktree-rebase] fetch origin ${baseBranch} failed (${fetchErrorMessage}); local ref is ${Math.round(localRefAgeMs / 60_000)} min old — rebasing onto local ${baseBranch} instead.`,
       );
     }
 
@@ -325,6 +380,31 @@ export class WorktreeManager {
           ? `Rebase onto ${rebaseTarget} failed. Conflicting files: ${conflictFiles.join(', ')}`
           : `Rebase onto ${rebaseTarget} failed. ${underlying}`,
       });
+    }
+  }
+
+  /**
+   * Return the age (ms) of the local base-branch ref's tip commit. Used to
+   * decide whether falling back to the local ref is safe when `git fetch`
+   * fails. Returns null if the ref doesn't exist or the timestamp can't be
+   * parsed.
+   */
+  private async localBaseRefAgeMs(
+    worktreePath: string,
+    baseBranch: string,
+  ): Promise<number | null> {
+    try {
+      const { stdout } = await execFileAsync(
+        'git', ['log', '-1', '--format=%ct', baseBranch],
+        { cwd: worktreePath, timeout: 5000 },
+      );
+      const commitUnixSeconds = parseInt(stdout.trim(), 10);
+      if (!Number.isFinite(commitUnixSeconds) || commitUnixSeconds <= 0) {
+        return null;
+      }
+      return Date.now() - commitUnixSeconds * 1000;
+    } catch {
+      return null;
     }
   }
 

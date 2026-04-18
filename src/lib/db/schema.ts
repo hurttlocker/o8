@@ -483,7 +483,7 @@ export const supervisorInbox = sqliteTable('supervisor_inbox', {
   repoPath: text('repo_path').notNull(),
   packetId: text('packet_id'),
   kind: text('kind', {
-    enum: ['verification_failed', 'session_lost', 'packet_missing', 'bounded_retry_exhausted', 'merge_blocked'],
+    enum: ['verification_failed', 'session_lost', 'packet_missing', 'bounded_retry_exhausted', 'merge_blocked', 'fetch_unreachable'],
   }).notNull(),
   payload: text('payload').notNull().default('{}'),
   status: text('status', {

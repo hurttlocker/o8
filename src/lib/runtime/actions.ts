@@ -5,6 +5,7 @@ import { getRuntime, type RuntimeId } from '@/lib/runtimes';
 import {
   linkSessionToWorktree,
   prepareLaunchWorktree,
+  WorktreeFetchUnreachableError,
   WorktreeRebaseConflictError,
 } from '@/lib/worktree';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -200,6 +201,68 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
           `Rebase onto origin/${baseBranchForInbox} failed before launching ${runtimeId}. Resolve the conflict manually and retry.${conflictFiles.length > 0 ? ` Conflicting files: ${conflictFiles.join(', ')}` : ''}`,
         );
       }
+
+      // Fetch unreachable + stale local ref. Don't branch from a stale base —
+      // same policy as a rebase conflict: mark the lane, surface an inbox row
+      // (kind: fetch_unreachable), and throw loudly. The operator can run
+      // `git fetch` manually, reconnect, and retry the launch.
+      if (err instanceof WorktreeFetchUnreachableError) {
+        const baseBranchForInbox = err.baseBranch;
+        const conflictBranch = err.branch;
+        const localRefAgeMinutes = Number.isFinite(err.localRefAgeMs)
+          ? Math.round(err.localRefAgeMs / 60_000)
+          : null;
+
+        if (payload.existingLaneId) {
+          try {
+            const { setLaneStatus } = await import('@/lib/lane/registry');
+            setLaneStatus(payload.existingLaneId, 'awaiting_input', 'system', 'fetch_unreachable');
+          } catch (laneErr) {
+            console.warn(
+              `[worktree-rebase] Failed to mark lane ${payload.existingLaneId} as awaiting_input: ${laneErr instanceof Error ? laneErr.message : laneErr}`,
+            );
+          }
+        } else {
+          console.warn(
+            `[worktree-rebase] Scratch ${runtimeId} launch blocked by fetch_unreachable on origin/${baseBranchForInbox} (no lane to mark, branch ${conflictBranch}).`,
+          );
+        }
+
+        const stalenessLabel = localRefAgeMinutes == null
+          ? 'local ref missing or unreadable'
+          : `local ref is ${localRefAgeMinutes} min old`;
+
+        try {
+          const { enqueueInboxItem } = await import('@/lib/supervisor/inbox');
+          enqueueInboxItem({
+            repoPath,
+            packetId: payload.packetId ?? null,
+            kind: 'fetch_unreachable',
+            payload: {
+              stage: 'pre_launch_fetch',
+              baseBranch: baseBranchForInbox,
+              branch: conflictBranch,
+              laneId: payload.existingLaneId ?? null,
+              packetId: payload.packetId ?? null,
+              runtime: runtimeId,
+              localRefAgeMs: Number.isFinite(err.localRefAgeMs) ? err.localRefAgeMs : null,
+              fetchErrorMessage: err.fetchErrorMessage,
+              errorMessage: err.message,
+              errorExcerpt: `Fetch origin ${baseBranchForInbox} unreachable and ${stalenessLabel}. Reconnect and retry.`,
+            },
+            status: 'human_required',
+          });
+        } catch (inboxErr) {
+          console.warn(
+            `[worktree-rebase] Failed to enqueue fetch_unreachable inbox item: ${inboxErr instanceof Error ? inboxErr.message : inboxErr}`,
+          );
+        }
+
+        throw new Error(
+          `Cannot launch ${runtimeId}: fetch origin ${baseBranchForInbox} failed and ${stalenessLabel}. Reconnect and retry.`,
+        );
+      }
+
       throw err;
     }
   }
