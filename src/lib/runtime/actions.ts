@@ -54,6 +54,11 @@ export interface RuntimeLaunchRequest {
   // dispatch going through the lane command bus). launchRuntimeSurface will
   // skip its implicit lane creation and leave binding to the caller.
   existingLaneId?: string;
+  // When the launch is bound to a packet, include its id so supervisor inbox
+  // items surfaced during pre-launch (eg. rebase conflicts) can deep-link
+  // back to the packet card in Mission Control. Leave undefined for scratch
+  // runs that aren't tied to a packet.
+  packetId?: string;
 }
 
 export interface RuntimeLaunchResult {
@@ -157,7 +162,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
           const { enqueueInboxItem } = await import('@/lib/supervisor/inbox');
           enqueueInboxItem({
             repoPath,
-            packetId: null,
+            packetId: payload.packetId ?? null,
             kind: 'merge_blocked',
             payload: {
               stage: 'pre_launch_rebase',
@@ -165,6 +170,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
               branch: conflictBranch,
               conflictFiles,
               laneId: payload.existingLaneId ?? null,
+              packetId: payload.packetId ?? null,
               runtime: runtimeId,
               errorMessage: err.message,
               errorExcerpt: conflictFiles.length > 0
@@ -179,6 +185,10 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
           );
         }
 
+        // Scratch runs (no existingLaneId) surface rebase failures via the
+        // thrown error only — there's no lane to mark awaiting_input. The
+        // supervisor inbox item above is still enqueued so the operator sees
+        // it. Never swallow silently.
         throw new Error(
           `Rebase onto origin/${baseBranchForInbox} failed before launching ${runtimeId}. Resolve the conflict manually and retry.${conflictFiles.length > 0 ? ` Conflicting files: ${conflictFiles.join(', ')}` : ''}`,
         );
