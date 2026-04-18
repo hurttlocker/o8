@@ -10,14 +10,15 @@ import type {
   ToolSideEffectClass,
 } from '@/lib/mobile/types';
 import { renderDiffLines } from '@/components/desktop/diff-utils';
-import { publishO8PanelFocus } from '@/lib/events/o8-panel-focus';
-import { requestRuntimeSessionFocus } from '@/lib/runtime/session-focus';
 import {
   classifyToolCall,
 } from '@/components/desktop/thoughts/toolClassifier';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
 
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+const FILE_MUTATION_ROW_HEIGHT = 26;
+const FILE_MUTATION_ROW_BACKGROUND = 'var(--t-panel)';
+const FILE_MUTATION_ROW_BACKGROUND_ACTIVE = 'var(--t-bg-subtle, var(--t-panel))';
 const FILE_MUTATION_TOOL_NAMES = new Set([
   'write',
   'write_file',
@@ -75,7 +76,7 @@ function toolDetail(tool: MobileTranscriptToolCall) {
     return sanitizeTranscriptText(firstString(args.file_path, args.path) ?? '') || 'File read';
   }
   if (FILE_MUTATION_TOOL_NAMES.has(name)) {
-    return sanitizeTranscriptText(firstString(args.file_path, args.path, args.notebook_path) ?? '') || 'File edit';
+    return fileMutationPath(tool) || 'File edit';
   }
   if (name === 'search_web' || name === 'web_search' || name === 'cortex_search' || name === 'memory_search') {
     return sanitizeTranscriptText(firstString(args.query, args.q) ?? '') || 'Search';
@@ -201,9 +202,35 @@ function getDiffStats(diff: string) {
   }, { additions: 0, deletions: 0 });
 }
 
+function pathFromDiffText(diff: string) {
+  const diffMatch = diff.match(/^diff --git a\/(.+?) b\/(.+)$/m);
+  if (diffMatch) return sanitizeTranscriptText(diffMatch[2] ?? diffMatch[1] ?? '');
+
+  const fileHeaderMatch = diff.match(/^\+\+\+ (?:b\/)?(.+)$/m);
+  if (fileHeaderMatch && fileHeaderMatch[1] !== '/dev/null') {
+    return sanitizeTranscriptText(fileHeaderMatch[1]);
+  }
+
+  return '';
+}
+
 function fileMutationPath(tool: MobileTranscriptToolCall) {
   const args = tool.args ?? {};
-  return sanitizeTranscriptText(firstString(args.file_path, args.path, args.notebook_path) ?? '');
+  const directPath = sanitizeTranscriptText(firstString(
+    args.file_path,
+    args.filePath,
+    args.path,
+    args.notebook_path,
+    args.relative_path,
+  ) ?? '');
+  if (directPath) return directPath;
+
+  const fallbackDiff = typeof tool.preview === 'string' && isDiffText(tool.preview)
+    ? tool.preview
+    : typeof tool.result === 'string' && isDiffText(tool.result)
+      ? tool.result
+      : '';
+  return fallbackDiff ? pathFromDiffText(fallbackDiff) : '';
 }
 
 function fileMutationPreview(tool: MobileTranscriptToolCall) {
@@ -274,8 +301,8 @@ function fileMutationPreview(tool: MobileTranscriptToolCall) {
 function FileMutationLine({ tool }: { tool: MobileTranscriptToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const preview = useMemo(() => fileMutationPreview(tool), [tool]);
-  const path = preview?.path ?? toolDetail(tool);
-  const compactPath = truncateMiddle(path, 58);
+  const path = preview?.path || fileMutationPath(tool) || toolLabel(tool);
+  const compactPath = truncateMiddle(path, 60);
   const canExpand = Boolean(preview?.diff);
   const isRunning = tool.status === 'running' || tool.status === 'calling';
   const isDone = tool.status === 'done' || !tool.status;
@@ -295,19 +322,22 @@ function FileMutationLine({ tool }: { tool: MobileTranscriptToolCall }) {
           alignItems: 'center',
           gap: 8,
           width: '100%',
-          minHeight: 26,
-          paddingTop: 4,
+          height: FILE_MUTATION_ROW_HEIGHT,
+          paddingTop: 0,
           paddingRight: 10,
-          paddingBottom: 4,
-          paddingLeft: 10,
+          paddingBottom: 0,
+          paddingLeft: 8,
+          boxSizing: 'border-box',
           borderWidth: 1,
           borderStyle: 'solid',
           borderColor: 'var(--t-border)',
-          borderRadius: 14,
-          background: expanded ? 'var(--t-hover)' : THEME_PANEL_GLASS,
+          borderRadius: 11,
+          background: expanded ? FILE_MUTATION_ROW_BACKGROUND_ACTIVE : FILE_MUTATION_ROW_BACKGROUND,
+          boxShadow: 'none',
           fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           textAlign: 'left',
           cursor: canExpand ? 'pointer' : 'default',
+          transition: 'background 180ms ease, border-color 180ms ease',
         }}
       >
         <span
@@ -318,7 +348,7 @@ function FileMutationLine({ tool }: { tool: MobileTranscriptToolCall }) {
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
-            color: isDone ? 'var(--t-success, #16a34a)' : 'var(--t-text-faint)',
+            color: isDone ? 'var(--t-success, #16a34a)' : 'var(--t-accent, #2563eb)',
           }}
         >
           {isRunning ? (
@@ -347,10 +377,11 @@ function FileMutationLine({ tool }: { tool: MobileTranscriptToolCall }) {
             overflow: 'hidden',
             whiteSpace: 'nowrap',
             textOverflow: 'ellipsis',
-            fontSize: 11.5,
-            lineHeight: 1.2,
+            fontSize: 11,
+            lineHeight: 1.1,
             color: 'var(--t-text)',
             fontFamily: '"SF Mono", ui-monospace, monospace',
+            letterSpacing: '-0.01em',
           }}
         >
           {compactPath || toolLabel(tool)}
@@ -360,14 +391,16 @@ function FileMutationLine({ tool }: { tool: MobileTranscriptToolCall }) {
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 8,
+              gap: 6,
               flexShrink: 0,
-              fontSize: 10.5,
+              fontSize: 10,
               lineHeight: 1,
               fontFamily: '"SF Mono", ui-monospace, monospace',
+              color: 'var(--t-text-secondary)',
             }}
           >
             <span style={{ color: 'var(--t-success, #16a34a)' }}>+{preview.additions}</span>
+            <span style={{ color: 'var(--t-text-faint)' }}>/</span>
             <span style={{ color: 'var(--t-danger, #ef4444)' }}>-{preview.deletions}</span>
           </span>
         ) : null}
@@ -393,93 +426,13 @@ function FileMutationLine({ tool }: { tool: MobileTranscriptToolCall }) {
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-border)',
-            borderRadius: 14,
+            borderRadius: 12,
             background: THEME_PANEL_GLASS,
           }}
         >
           <div style={{ paddingTop: 8, paddingRight: 0, paddingBottom: 8, paddingLeft: 0 }}>
             {renderDiffLines(preview.diff)}
           </div>
-          {(preview.path || tool.launchLink) ? (
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                flexWrap: 'wrap',
-                gap: 8,
-                paddingTop: 8,
-                paddingRight: 10,
-                paddingBottom: 10,
-                paddingLeft: 10,
-                borderTop: '1px solid var(--t-divider-subtle)',
-              }}
-            >
-              {tool.launchLink ? (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    requestRuntimeSessionFocus({
-                      sessionKey: tool.launchLink!.surfaceId,
-                      repoPath: tool.launchLink!.repoPath,
-                      label: tool.launchLink!.label,
-                    });
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    minHeight: 24,
-                    paddingTop: 0,
-                    paddingRight: 10,
-                    paddingBottom: 0,
-                    paddingLeft: 10,
-                    borderRadius: 8,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: 'var(--t-border)',
-                    background: 'transparent',
-                    color: 'var(--t-text-muted)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                  }}
-                >
-                  {`Open ${tool.launchLink.label}`}
-                </button>
-              ) : null}
-              {preview.path ? (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    publishO8PanelFocus({ tab: 'changes', artifactId: preview.path });
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    minHeight: 24,
-                    paddingTop: 0,
-                    paddingRight: 10,
-                    paddingBottom: 0,
-                    paddingLeft: 10,
-                    borderRadius: 8,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: 'var(--t-border)',
-                    background: 'transparent',
-                    color: 'var(--t-text-muted)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                  }}
-                >
-                  Open in Changes
-                </button>
-              ) : null}
-            </div>
-          ) : null}
         </div>
       ) : null}
     </div>
