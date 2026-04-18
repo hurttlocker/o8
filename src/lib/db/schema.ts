@@ -477,3 +477,23 @@ export const laneEvents = sqliteTable('lane_events', {
   laneTimestampIdx: index('idx_lane_events_lane_timestamp').on(table.laneId, table.timestamp),
   timestampIdx: index('idx_lane_events_timestamp').on(table.timestamp),
 }));
+
+export const supervisorInbox = sqliteTable('supervisor_inbox', {
+  id: text('id').primaryKey(),
+  repoPath: text('repo_path').notNull(),
+  packetId: text('packet_id'),
+  kind: text('kind', {
+    enum: ['verification_failed', 'session_lost', 'packet_missing', 'bounded_retry_exhausted', 'merge_blocked'],
+  }).notNull(),
+  payload: text('payload').notNull().default('{}'),
+  status: text('status', {
+    enum: ['pending', 'healing', 'self_healed', 'human_required', 'dismissed'],
+  }).notNull().default('pending'),
+  healAttemptCount: integer('heal_attempt_count').notNull().default(0),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  resolvedAt: text('resolved_at'),
+}, (table) => ({
+  statusCreatedIdx: index('idx_supervisor_inbox_status_created').on(table.status, table.createdAt),
+  packetIdIdx: index('idx_supervisor_inbox_packet_id').on(table.packetId),
+  repoCreatedIdx: index('idx_supervisor_inbox_repo_created').on(table.repoPath, table.createdAt),
+}));
