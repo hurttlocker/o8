@@ -5,6 +5,7 @@ import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import type { ThoughtsChatPermissionMode } from './types';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 
 function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -24,8 +25,8 @@ function ComposerStatusBar({
   activeTargetLabel: string;
   latestUserMessageId: string | null;
 }) {
-  const [now, setNow] = useState(() => Date.now());
   const startedAtRef = useRef<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const prevDisplayWaitingRef = useRef(displayWaiting);
   const prevLatestUserMessageIdRef = useRef<string | null>(latestUserMessageId);
   const hasRunningTools = runningTools.length > 0;
@@ -45,26 +46,36 @@ function ComposerStatusBar({
     prevLatestUserMessageIdRef.current = latestUserMessageId;
     if (risingEdge || newUserMessage) {
       startedAtRef.current = Date.now();
-      setNow(Date.now());
+      const frame = window.requestAnimationFrame(() => {
+        setElapsed(0);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
   }, [displayWaiting, latestUserMessageId]);
 
   useEffect(() => {
     if (!active) {
       startedAtRef.current = null;
-      return;
+      const frame = window.requestAnimationFrame(() => setElapsed(0));
+      return () => window.cancelAnimationFrame(frame);
     }
     if (startedAtRef.current === null) {
       startedAtRef.current = Date.now();
-      setNow(Date.now());
     }
-    const id = window.setInterval(() => setNow(Date.now()), 500);
-    return () => window.clearInterval(id);
+    const tick = () => {
+      const anchor = startedAtRef.current;
+      setElapsed(anchor === null ? 0 : Date.now() - anchor);
+    };
+    const frame = window.requestAnimationFrame(tick);
+    const id = window.setInterval(tick, 500);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(id);
+    };
   }, [active]);
 
   if (!active) return null;
 
-  const elapsed = startedAtRef.current !== null ? now - startedAtRef.current : 0;
   const runningSummary = hasRunningTools
     ? runningTools.slice(0, 2).map((t) => t.name).join(', ') + (runningTools.length > 2 ? ` +${runningTools.length - 2}` : '')
     : null;
@@ -207,6 +218,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   hasAssistantActivity,
   footerMeterSlot,
 }, inputRef) {
+  const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
     if (!isOrchestratorMode) return [];
     // Scan the latest assistant message for any tool calls still marked as
@@ -230,7 +242,26 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     }
     return null;
   }, [chatMessages]);
+  const slashSuggestions = useMemo(() => (
+    isOrchestratorMode ? getOrchestratorSlashCommandSuggestions(input) : []
+  ), [input, isOrchestratorMode]);
   const isDisabled = (displayWaiting || runningTools.length > 0) || (!isOrchestratorMode && !targetAgentExists);
+
+  const activeSlashCommand = slashSuggestions[Math.min(activeSlashIndex, Math.max(0, slashSuggestions.length - 1))] ?? null;
+
+  const handleSelectSlashCommand = (definition: OrchestratorSlashCommandDefinition) => {
+    if (definition.requiresArgument) {
+      const nextValue = `${definition.command} `;
+      onInputChange(nextValue);
+      requestAnimationFrame(() => {
+        const node = inputRef && 'current' in inputRef ? inputRef.current : null;
+        node?.focus();
+        if (node) node.selectionStart = node.selectionEnd = node.value.length;
+      });
+      return;
+    }
+    onSlashCommand(definition.command);
+  };
 
   return (
     <div style={{
@@ -249,9 +280,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ) : null}
       <div style={{ position: 'relative' }}>
         <SlashCommandPicker
-          input={input}
-          isOrchestratorMode={isOrchestratorMode}
-          onSelect={onSlashCommand}
+          suggestions={slashSuggestions}
+          activeIndex={activeSlashIndex}
+          onSelect={handleSelectSlashCommand}
         />
         <div
           style={{
@@ -274,6 +305,26 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
             }}
             onKeyDown={(event) => {
+              if (slashSuggestions.length > 0) {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setActiveSlashIndex((current) => (current + 1) % slashSuggestions.length);
+                  return;
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setActiveSlashIndex((current) => (current - 1 + slashSuggestions.length) % slashSuggestions.length);
+                  return;
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  onInputChange('');
+                  if (event.currentTarget) {
+                    event.currentTarget.style.height = 'auto';
+                  }
+                  return;
+                }
+              }
               if (event.key === 'ArrowUp' && !input.trim()) {
                 event.preventDefault();
                 const lastUserMsg = [...chatMessages].reverse().find((message) => message.role === 'user');
@@ -282,6 +333,22 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
+                if (slashSuggestions.length > 0 && activeSlashCommand) {
+                  const normalized = input.trim();
+                  const [commandToken] = normalized.split(/\s+/, 1);
+                  if (activeSlashCommand.requiresArgument && normalized === commandToken) {
+                    onInputChange(`${activeSlashCommand.command} `);
+                    return;
+                  }
+                  const nextCommand = normalized.startsWith(activeSlashCommand.command)
+                    ? normalized
+                    : activeSlashCommand.command;
+                  onSlashCommand(nextCommand);
+                  if (event.currentTarget) {
+                    event.currentTarget.style.height = 'auto';
+                  }
+                  return;
+                }
                 onSubmit();
                 if (event.currentTarget) {
                   event.currentTarget.style.height = 'auto';
