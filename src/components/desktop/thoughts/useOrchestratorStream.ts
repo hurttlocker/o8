@@ -5,6 +5,7 @@ import type {
   MobileTranscriptEntry,
   MobileTranscriptToolLaunchLink,
 } from '@/lib/mobile/types';
+import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import {
   clearQueuedOrchestratorSessionPrelude,
   consumeOrchestratorSessionPrelude,
@@ -172,7 +173,10 @@ export function useOrchestratorStream(
       return;
     }
 
-    const nextPlanText = firstTurnPlanChunksRef.current.join('').trim();
+    const nextPlanText = extractPlanFromTranscript([{
+      role: 'assistant',
+      text: firstTurnPlanChunksRef.current.join(''),
+    }]);
     resetFirstTurnPlanCapture();
 
     if (!nextPlanText) {
