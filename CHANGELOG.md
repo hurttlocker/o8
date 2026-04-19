@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-19
 
+- `8cef91d6` design(settings): visual polish sweep — spacing, acronyms, typography [via-o8]
 - `c3a722a1` design(analytics): Rams pass
 - `5e91e677` design(settings): Rams pass on Settings shell + tab bar [via-o8]
 - `83931920` design(settings): Rams pass on About tab [via-o8]
