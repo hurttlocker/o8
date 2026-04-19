@@ -4,6 +4,7 @@ import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestra
 import { packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorPacket, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { hasPacketBranchTarget } from '@/components/desktop/thoughts/mission-panel/branchTarget';
+import { PacketActionStrip } from '@/components/desktop/thoughts/PacketActionStrip';
 import type { EditingField, ReviewPanelState } from './types';
 import { PacketMetaRows } from './PacketMetaRows';
 import { PacketReviewPanel } from './PacketReviewPanel';
@@ -55,6 +56,8 @@ export function PacketCard({
     packet.status === 'awaiting_review'
     || (packet.status === 'blocked' && packet.blockedReason === 'Awaiting operator input')
   );
+
+  const packetPrompt = [packet.title, packet.summary].map((part) => part.trim()).filter(Boolean).join('\n\n') || null;
 
   return (
     <div
@@ -150,6 +153,43 @@ export function PacketCard({
             onEditingFieldChange={onEditingFieldChange}
             onPatch={onPatch}
           />
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              paddingTop: 7,
+              paddingRight: 10,
+              paddingBottom: 7,
+              paddingLeft: 10,
+              borderTopWidth: 1,
+              borderTopStyle: 'solid',
+              borderTopColor: 'var(--t-divider-subtle)',
+            }}
+          >
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                color: 'var(--t-text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                paddingTop: 5,
+                flexShrink: 0,
+                width: 56,
+              }}
+            >
+              Actions
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <PacketActionStrip
+                packetId={packet.id}
+                issueUrl={null}
+                prompt={packetPrompt}
+              />
+            </div>
+          </div>
 
           {(packet.blockedReason || dependencyBlocker) ? (
             <div
