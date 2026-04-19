@@ -7,6 +7,15 @@ import {
   type ExternalMcpServer,
 } from './shared';
 
+export interface McpServerTestOutcome {
+  ok: boolean;
+  toolCount?: number;
+  tools?: Array<{ name: string; description?: string }>;
+  durationMs?: number;
+  error?: string;
+  stderr?: string;
+}
+
 export interface UseExternalMcpServersResult {
   servers: ExternalMcpServer[];
   loading: boolean;
@@ -19,6 +28,9 @@ export interface UseExternalMcpServersResult {
   create: () => Promise<void>;
   toggle: (server: ExternalMcpServer) => Promise<void>;
   remove: (server: ExternalMcpServer) => Promise<void>;
+  testingId: string | null;
+  testResults: Record<string, McpServerTestOutcome>;
+  test: (server: ExternalMcpServer) => Promise<void>;
 }
 
 export function useExternalMcpServers(): UseExternalMcpServersResult {
@@ -29,6 +41,8 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
   const [actionId, setActionId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ExternalMcpFormState>(EMPTY_EXTERNAL_SERVER_FORM);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, McpServerTestOutcome>>({});
 
   const load = useCallback(async () => {
     try {
@@ -133,5 +147,58 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
     }
   }, [load]);
 
-  return { servers, loading, error, note, actionId, creating, form, setForm, create, toggle, remove };
+  const test = useCallback(async (server: ExternalMcpServer) => {
+    setTestingId(server.id);
+    try {
+      const res = await fetch('/api/panel/mcp-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverId: server.id }),
+      });
+      const body = await res.json().catch(() => ({})) as {
+        ok?: boolean;
+        toolCount?: number;
+        tools?: Array<{ name: string; description?: string }>;
+        durationMs?: number;
+        error?: string;
+        stderr?: string;
+      };
+      const outcome: McpServerTestOutcome = {
+        ok: Boolean(body.ok),
+        toolCount: typeof body.toolCount === 'number' ? body.toolCount : undefined,
+        tools: Array.isArray(body.tools) ? body.tools : undefined,
+        durationMs: typeof body.durationMs === 'number' ? body.durationMs : undefined,
+        error: typeof body.error === 'string' ? body.error : undefined,
+        stderr: typeof body.stderr === 'string' ? body.stderr : undefined,
+      };
+      setTestResults((current) => ({ ...current, [server.id]: outcome }));
+    } catch (e) {
+      setTestResults((current) => ({
+        ...current,
+        [server.id]: {
+          ok: false,
+          error: e instanceof Error ? e.message : 'Test failed',
+        },
+      }));
+    } finally {
+      setTestingId(null);
+    }
+  }, []);
+
+  return {
+    servers,
+    loading,
+    error,
+    note,
+    actionId,
+    creating,
+    form,
+    setForm,
+    create,
+    toggle,
+    remove,
+    testingId,
+    testResults,
+    test,
+  };
 }
