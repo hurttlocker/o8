@@ -81,6 +81,7 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
     streamContent: rest.streamContent,
     liveFallbackNotice: rest.liveFallbackNotice,
     permissionMode: rest.permissionMode,
+    onStop: rest.onStop,
   };
 
   const composerProps: React.ComponentProps<typeof Composer> = {

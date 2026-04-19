@@ -1,8 +1,29 @@
 'use client';
 
-import React, { memo, useCallback, useMemo, useState } from 'react';
-import { Check, Copy, FileCode } from './lucide-shims';
-import { DiffStatusIcon } from './diff-utils';
+/**
+ * DiffCard — Cursor Composer 2 style streaming diff preview (#525).
+ *
+ * Renders inside chat messages whenever an assistant message contains a
+ * ```diff fenced code block. Streams hunks as they arrive, supports
+ * per-hunk partial apply, and wires Apply → existing `/api/lanes/apply-diff`
+ * endpoint via the `onApplyDiff` callback.
+ *
+ * Keyboard:
+ *   Cmd/Ctrl+Enter       → Apply all selected hunks
+ *   Cmd/Ctrl+Shift+Enter → Toggle hunk picker
+ *   Esc                  → Close hunk picker
+ */
+
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Check, Copy, FileCode, X } from './lucide-shims';
+import { DiffCardFile } from './DiffCardRows';
+import {
+  countDiffLines,
+  hunkKey,
+  parseDiff,
+  serializeSelectedHunks,
+  type ParsedDiffFile,
+} from '@/lib/llm/diff-parse';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -10,297 +31,177 @@ const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
 
 export interface DiffCardProps {
+  /** Raw diff body (contents between ```diff fences). */
   code: string;
+  /** Callback fired when the user clicks Apply. Receives the (optionally filtered) diff. */
   onApplyDiff?: (diffText: string) => void;
+  /**
+   * Streaming signal — when true, the parser treats the final hunk as potentially
+   * incomplete, fades new hunks in, and renders a live pulse in the header.
+   */
+  isStreaming?: boolean;
+  /**
+   * Optional interrupt hook. When provided + streaming, a stop button appears
+   * in the header. Fire this to call through to the upstream stream-cancel
+   * path (e.g. `useOrchestratorStream.interrupt()`).
+   */
+  onInterrupt?: () => void;
 }
 
-interface ParsedDiffHunk {
-  header: string;
-  lines: string[];
-}
+const BUTTON_BASE: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  minHeight: 28,
+  paddingTop: 0,
+  paddingRight: 10,
+  paddingBottom: 0,
+  paddingLeft: 10,
+  borderWidth: 0,
+  borderRadius: 8,
+  background: 'transparent',
+  fontSize: 11,
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  transition: 'color 150ms, background 150ms, opacity 150ms',
+};
 
-interface ParsedDiffFile {
-  path: string;
-  status: 'added' | 'modified' | 'deleted';
-  hunks: ParsedDiffHunk[];
-}
-
-function normalizeDiffPath(rawPath: string) {
-  const trimmed = rawPath.trim();
-  if (trimmed === '/dev/null') return trimmed;
-  return trimmed.replace(/^[ab]\//, '');
-}
-
-function getDiffFileStatus(oldPath: string, newPath: string): ParsedDiffFile['status'] {
-  if (oldPath === '/dev/null') return 'added';
-  if (newPath === '/dev/null') return 'deleted';
-  return 'modified';
-}
-
-function getDiffTargetPath(oldPath: string, newPath: string) {
-  return newPath !== '/dev/null' ? normalizeDiffPath(newPath) : normalizeDiffPath(oldPath);
-}
-
-function parseUnifiedDiff(rawDiff: string): ParsedDiffFile[] {
-  const lines = rawDiff.replace(/\r\n/g, '\n').split('\n');
-  const files: ParsedDiffFile[] = [];
-  let currentFile: ParsedDiffFile | null = null;
-  let currentHunk: ParsedDiffHunk | null = null;
-
-  const pushCurrentHunk = () => {
-    if (!currentFile || !currentHunk) return;
-    currentFile.hunks.push(currentHunk);
-    currentHunk = null;
-  };
-
-  const pushCurrentFile = () => {
-    if (!currentFile) return;
-    pushCurrentHunk();
-    if (currentFile.path) {
-      files.push(currentFile);
-    }
-    currentFile = null;
-  };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const nextLine = lines[index + 1] ?? '';
-
-    if (!currentHunk && line.startsWith('--- ') && nextLine.startsWith('+++ ')) {
-      pushCurrentFile();
-      const oldPath = line.slice(4).trim();
-      const newPath = nextLine.slice(4).trim();
-      currentFile = {
-        path: getDiffTargetPath(oldPath, newPath),
-        status: getDiffFileStatus(oldPath, newPath),
-        hunks: [],
-      };
-      index += 1;
-      continue;
-    }
-
-    if (!currentFile) {
-      continue;
-    }
-
-    if (line.startsWith('@@')) {
-      pushCurrentHunk();
-      currentHunk = { header: line, lines: [] };
-      continue;
-    }
-
-    if (currentHunk) {
-      currentHunk.lines.push(line);
-    }
-  }
-
-  pushCurrentFile();
-  return files;
-}
-
-function DiffCardHunk({ hunk }: { hunk: ParsedDiffHunk }) {
-  const hunkMatch = hunk.header.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-  const startOldLine = hunkMatch ? Number.parseInt(hunkMatch[1], 10) : 1;
-  const startNewLine = hunkMatch ? Number.parseInt(hunkMatch[2], 10) : 1;
-  const rows = useMemo(() => {
-    return hunk.lines.reduce<{
-      oldLine: number;
-      newLine: number;
-      rows: Array<{
-        key: string;
-        line: string;
-        color: string;
-        background: string;
-        leftNum: string;
-        rightNum: string;
-      }>;
-    }>((state, line, lineIndex) => {
-      if (line.startsWith('+') && !line.startsWith('+++')) {
-        return {
-          oldLine: state.oldLine,
-          newLine: state.newLine + 1,
-          rows: [
-            ...state.rows,
-            {
-              key: `${hunk.header}-${lineIndex}`,
-              line,
-              color: '#166534',
-              background: 'rgba(34, 197, 94, 0.08)',
-              leftNum: '',
-              rightNum: String(state.newLine),
-            },
-          ],
-        };
-      }
-
-      if (line.startsWith('-') && !line.startsWith('---')) {
-        return {
-          oldLine: state.oldLine + 1,
-          newLine: state.newLine,
-          rows: [
-            ...state.rows,
-            {
-              key: `${hunk.header}-${lineIndex}`,
-              line,
-              color: '#991b1b',
-              background: 'rgba(239, 68, 68, 0.08)',
-              leftNum: String(state.oldLine),
-              rightNum: '',
-            },
-          ],
-        };
-      }
-
-      if (line.startsWith('\\')) {
-        return {
-          oldLine: state.oldLine,
-          newLine: state.newLine,
-          rows: [
-            ...state.rows,
-            {
-              key: `${hunk.header}-${lineIndex}`,
-              line,
-              color: 'var(--t-text-muted)',
-              background: 'transparent',
-              leftNum: '',
-              rightNum: '',
-            },
-          ],
-        };
-      }
-
-      return {
-        oldLine: state.oldLine + 1,
-        newLine: state.newLine + 1,
-        rows: [
-          ...state.rows,
-          {
-            key: `${hunk.header}-${lineIndex}`,
-            line,
-            color: 'var(--t-text)',
-            background: 'transparent',
-            leftNum: String(state.oldLine),
-            rightNum: String(state.newLine),
-          },
-        ],
-      };
-    }, {
-      oldLine: startOldLine,
-      newLine: startNewLine,
-      rows: [],
-    }).rows;
-  }, [hunk.header, hunk.lines, startNewLine, startOldLine]);
-
-  return (
-    <div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          paddingTop: 6,
-          paddingRight: 12,
-          paddingBottom: 6,
-          paddingLeft: 12,
-          background: 'rgba(99, 102, 241, 0.06)',
-          color: '#6366f1',
-          fontSize: 12,
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-          borderTop: '1px solid var(--t-divider-subtle)',
-          borderBottom: '1px solid var(--t-divider-subtle)',
-        }}
-      >
-        <span style={{ flex: 1 }}>{hunk.header}</span>
-      </div>
-      {rows.map((row) => {
-        return (
-          <div
-            key={row.key}
-            style={{
-              display: 'flex',
-              color: row.color,
-              background: row.background,
-            }}
-          >
-            <span
-              style={{
-                width: 42,
-                flexShrink: 0,
-                textAlign: 'right',
-                paddingTop: 1,
-                paddingRight: 6,
-                paddingBottom: 1,
-                paddingLeft: 0,
-                color: 'var(--t-text-faint)',
-                fontSize: 12,
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                userSelect: 'none',
-                borderRight: '1px solid var(--t-divider-subtle)',
-              }}
-            >
-              {row.leftNum}
-            </span>
-            <span
-              style={{
-                width: 42,
-                flexShrink: 0,
-                textAlign: 'right',
-                paddingTop: 1,
-                paddingRight: 6,
-                paddingBottom: 1,
-                paddingLeft: 0,
-                color: 'var(--t-text-faint)',
-                fontSize: 12,
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                userSelect: 'none',
-                borderRight: '1px solid var(--t-divider-subtle)',
-              }}
-            >
-              {row.rightNum}
-            </span>
-            <span
-              style={{
-                flex: 1,
-                paddingTop: 1,
-                paddingRight: 12,
-                paddingBottom: 1,
-                paddingLeft: 8,
-                fontSize: 12,
-                lineHeight: 1.5,
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {row.line || '\u00A0'}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-export const DiffCard = memo(function DiffCard({ code, onApplyDiff }: DiffCardProps) {
+export const DiffCard = memo(function DiffCard({ code, onApplyDiff, isStreaming, onInterrupt }: DiffCardProps) {
   const [copied, setCopied] = useState(false);
   const [applied, setApplied] = useState(false);
-  const files = useMemo(() => parseUnifiedDiff(code), [code]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Selection map — keys are `${filePath}::${hunkIndex}`. Missing key = selected
+  // (default-on). Explicit `false` = deselected. Explicit `true` = selected.
+  const [selection, setSelection] = useState<Record<string, boolean>>({});
+  // Track hunks that are newly appeared on the current render for fade-in.
+  const seenHunkKeysRef = useRef<Set<string>>(new Set());
+  const [newHunkKeys, setNewHunkKeys] = useState<Set<string>>(new Set());
+
+  const files = useMemo(() => parseDiff(code), [code]);
+  const { added, removed } = useMemo(() => countDiffLines(files), [files]);
+
+  // Detect newly arrived hunks for fade-in.
+  useEffect(() => {
+    const currentKeys = new Set<string>();
+    for (const file of files) {
+      for (let i = 0; i < file.hunks.length; i += 1) {
+        currentKeys.add(hunkKey(file, i));
+      }
+    }
+    const fresh = new Set<string>();
+    currentKeys.forEach((key) => {
+      if (!seenHunkKeysRef.current.has(key)) fresh.add(key);
+    });
+    seenHunkKeysRef.current = currentKeys;
+    if (fresh.size > 0) {
+      setNewHunkKeys(fresh);
+      // Clear the fade-in marker after the animation completes so future
+      // re-renders don't replay the animation.
+      const timer = window.setTimeout(() => setNewHunkKeys(new Set()), 300);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [files]);
+
+  const selectedDiffText = useMemo(() => {
+    const hasExplicitSelection = Object.values(selection).some((v) => v === false);
+    if (!hasExplicitSelection) return code; // all hunks on — apply the raw text
+    return serializeSelectedHunks(files, selection);
+  }, [code, files, selection]);
+
+  const selectedHunkCount = useMemo(() => {
+    let count = 0;
+    for (const file of files) {
+      for (let i = 0; i < file.hunks.length; i += 1) {
+        if (selection[hunkKey(file, i)] !== false) count += 1;
+      }
+    }
+    return count;
+  }, [files, selection]);
+
+  const totalHunkCount = useMemo(() => {
+    return files.reduce((acc, file) => acc + file.hunks.length, 0);
+  }, [files]);
+
+  const canApply = !!onApplyDiff && !isStreaming && selectedHunkCount > 0;
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(code);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    window.setTimeout(() => setCopied(false), 2000);
   }, [code]);
 
   const handleApply = useCallback(() => {
-    if (!onApplyDiff) return;
-    onApplyDiff(code);
+    if (!onApplyDiff || isStreaming) return;
+    const diff = selectedDiffText.trim();
+    if (!diff) return;
+    onApplyDiff(diff);
     setApplied(true);
-    setTimeout(() => setApplied(false), 2000);
-  }, [code, onApplyDiff]);
+    window.setTimeout(() => setApplied(false), 2000);
+  }, [isStreaming, onApplyDiff, selectedDiffText]);
+
+  const handleTogglePicker = useCallback(() => {
+    setPickerOpen((open) => !open);
+  }, []);
+
+  const handleToggleHunk = useCallback((key: string) => {
+    setSelection((prev) => {
+      const isSelected = prev[key] !== false;
+      return { ...prev, [key]: !isSelected };
+    });
+  }, []);
+
+  const handleToggleFile = useCallback((file: ParsedDiffFile) => {
+    setSelection((prev) => {
+      const next = { ...prev };
+      const allOn = file.hunks.every((_, i) => next[hunkKey(file, i)] !== false);
+      for (let i = 0; i < file.hunks.length; i += 1) {
+        next[hunkKey(file, i)] = !allOn;
+      }
+      return next;
+    });
+  }, []);
+
+  // Keyboard shortcuts — scoped to the card via a ref + key handler.
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card) return undefined;
+    const handler = (event: KeyboardEvent) => {
+      const meta = event.metaKey || event.ctrlKey;
+      if (!meta) return;
+      // Only fire if the card contains the focused element.
+      const activeElement = document.activeElement;
+      if (!(activeElement instanceof Node) || !card.contains(activeElement)) return;
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          setPickerOpen((open) => !open);
+        } else if (canApply) {
+          handleApply();
+        }
+      } else if (event.key === 'Escape' && pickerOpen) {
+        event.preventDefault();
+        setPickerOpen(false);
+      }
+    };
+    card.addEventListener('keydown', handler);
+    return () => card.removeEventListener('keydown', handler);
+  }, [canApply, handleApply, pickerOpen]);
+
+  const applyLabel = applied
+    ? 'Applied'
+    : pickerOpen && selectedHunkCount < totalHunkCount
+    ? `Apply ${selectedHunkCount}`
+    : 'Apply';
 
   return (
     <div
+      ref={cardRef}
+      tabIndex={-1}
+      data-diff-card="true"
       style={{
         marginTop: 8,
         marginBottom: 8,
@@ -326,45 +227,87 @@ export const DiffCard = memo(function DiffCard({ code, onApplyDiff }: DiffCardPr
           borderBottom: '1px solid var(--t-divider)',
         }}
       >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: 'var(--t-text-secondary)',
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-          }}
-        >
-          diff
-        </span>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--t-text-secondary)',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+            }}
+          >
+            diff
+          </span>
+          {isStreaming ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 10,
+                color: THEME_ACCENT,
+                fontWeight: 600,
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: THEME_ACCENT,
+                  animation: 'llmDot 1s ease-in-out infinite',
+                }}
+              />
+              streaming
+            </span>
+          ) : null}
+          {files.length > 0 ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 10,
+                color: 'var(--t-text-muted)',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <span style={{ color: '#16a34a', fontWeight: 700 }}>+{added}</span>
+              <span style={{ color: '#dc2626', fontWeight: 700 }}>-{removed}</span>
+              <span>· {totalHunkCount} hunk{totalHunkCount === 1 ? '' : 's'}</span>
+            </span>
+          ) : null}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {isStreaming && onInterrupt ? (
+            <button
+              type="button"
+              onClick={onInterrupt}
+              title="Stop streaming"
+              aria-label="Stop streaming"
+              style={{
+                ...BUTTON_BASE,
+                color: '#dc2626',
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = 'transparent';
+              }}
+            >
+              <X size={12} />
+              Stop
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={handleCopy}
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-              minHeight: 44,
-              paddingTop: 0,
-              paddingRight: 10,
-              paddingBottom: 0,
-              paddingLeft: 10,
-              borderWidth: 0,
-              borderRadius: 8,
-              background: 'transparent',
+              ...BUTTON_BASE,
               color: copied ? '#10b981' : 'var(--t-text-muted)',
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-              transition: 'color 150ms, background 150ms',
             }}
             onMouseEnter={(event) => {
               if (copied) return;
@@ -379,44 +322,58 @@ export const DiffCard = memo(function DiffCard({ code, onApplyDiff }: DiffCardPr
             {copied ? <Check size={12} /> : <Copy size={12} />}
             {copied ? 'Copied' : 'Copy'}
           </button>
+          {totalHunkCount > 1 ? (
+            <button
+              type="button"
+              onClick={handleTogglePicker}
+              title="Cmd+Shift+Enter"
+              style={{
+                ...BUTTON_BASE,
+                color: pickerOpen ? THEME_ACCENT : 'var(--t-text-muted)',
+                background: pickerOpen ? THEME_ACCENT_SOFT : 'transparent',
+              }}
+              onMouseEnter={(event) => {
+                if (pickerOpen) return;
+                event.currentTarget.style.background = THEME_BG_CARD;
+                event.currentTarget.style.color = 'var(--t-text-secondary)';
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = pickerOpen ? THEME_ACCENT_SOFT : 'transparent';
+                event.currentTarget.style.color = pickerOpen ? THEME_ACCENT : 'var(--t-text-muted)';
+              }}
+            >
+              {pickerOpen ? `${selectedHunkCount}/${totalHunkCount}` : 'Pick'}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={handleApply}
-            disabled={!onApplyDiff}
+            disabled={!canApply}
+            title={canApply ? 'Cmd+Enter' : undefined}
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-              minHeight: 44,
-              paddingTop: 0,
+              ...BUTTON_BASE,
               paddingRight: 12,
-              paddingBottom: 0,
               paddingLeft: 12,
               borderWidth: 1,
               borderStyle: 'solid',
               borderColor: 'var(--t-accent-border, rgba(37, 99, 235, 0.22))',
-              borderRadius: 8,
-              background: applied ? THEME_ACCENT_SOFT : THEME_ACCENT,
-              color: applied ? '#10b981' : '#ffffff',
-              fontSize: 11,
+              background: applied ? THEME_ACCENT_SOFT : canApply ? THEME_ACCENT : THEME_BG_CARD,
+              color: applied ? '#10b981' : canApply ? '#ffffff' : 'var(--t-text-muted)',
               fontWeight: 700,
-              cursor: onApplyDiff ? 'pointer' : 'not-allowed',
-              opacity: onApplyDiff ? 1 : 0.6,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-              transition: 'background 150ms, color 150ms, opacity 150ms',
+              cursor: canApply ? 'pointer' : 'not-allowed',
+              opacity: canApply ? 1 : 0.6,
             }}
             onMouseEnter={(event) => {
-              if (!onApplyDiff || applied) return;
+              if (!canApply || applied) return;
               event.currentTarget.style.background = 'var(--t-accent-strong, #1d4ed8)';
             }}
             onMouseLeave={(event) => {
-              if (!onApplyDiff || applied) return;
+              if (!canApply || applied) return;
               event.currentTarget.style.background = THEME_ACCENT;
             }}
           >
             {applied ? <Check size={12} /> : <FileCode size={12} />}
-            {applied ? 'Applied' : 'Apply'}
+            {applyLabel}
           </button>
         </div>
       </div>
@@ -424,60 +381,16 @@ export const DiffCard = memo(function DiffCard({ code, onApplyDiff }: DiffCardPr
       {files.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {files.map((file, fileIndex) => (
-            <div
-              key={`${file.path}-${fileIndex}`}
-              style={{
-                borderTop: fileIndex === 0 ? 'none' : '1px solid var(--t-divider)',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  paddingTop: 10,
-                  paddingRight: 12,
-                  paddingBottom: 10,
-                  paddingLeft: 12,
-                  background: 'var(--t-bg-card, rgba(148, 163, 184, 0.05))',
-                  borderBottom: file.hunks.length > 0 ? '1px solid var(--t-divider-subtle)' : 'none',
-                }}
-              >
-                <DiffStatusIcon status={file.status} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: 'var(--t-text)',
-                      lineHeight: 1.4,
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    {file.path}
-                  </div>
-                </div>
-              </div>
-              {file.hunks.length > 0 ? (
-                file.hunks.map((hunk, hunkIndex) => (
-                  <DiffCardHunk key={`${file.path}-hunk-${hunkIndex}`} hunk={hunk} />
-                ))
-              ) : (
-                <div
-                  style={{
-                    paddingTop: 12,
-                    paddingRight: 12,
-                    paddingBottom: 12,
-                    paddingLeft: 12,
-                    fontSize: 12,
-                    color: 'var(--t-text-muted)',
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                  }}
-                >
-                  No hunks parsed from this diff section.
-                </div>
-              )}
-            </div>
+            <DiffCardFile
+              key={`${file.filePath || file.oldPath || 'file'}-${fileIndex}`}
+              file={file}
+              fileIndex={fileIndex}
+              selection={selection}
+              onToggleHunk={handleToggleHunk}
+              onToggleFile={handleToggleFile}
+              pickerOpen={pickerOpen}
+              newHunkKeys={newHunkKeys}
+            />
           ))}
         </div>
       ) : (
@@ -501,7 +414,20 @@ export const DiffCard = memo(function DiffCard({ code, onApplyDiff }: DiffCardPr
             wordBreak: 'break-word',
           }}
         >
-          {code}
+          {code || '\u00A0'}
+          {isStreaming ? (
+            <span
+              style={{
+                display: 'inline-block',
+                width: 2,
+                height: 14,
+                background: THEME_ACCENT,
+                marginLeft: 1,
+                verticalAlign: 'text-bottom',
+                animation: 'llmDot 1s ease-in-out infinite',
+              }}
+            />
+          ) : null}
         </pre>
       )}
     </div>
