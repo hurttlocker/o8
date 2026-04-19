@@ -1,0 +1,154 @@
+/**
+ * Merge preview — read-only wrapper around the merge gate (#623).
+ *
+ * Runs the same four enforcement checks as `runMergeGate` but returns a
+ * structured `{ checks[], blockers[] }` shape without touching the worktree
+ * or issuing a merge commit. Used by the `o8_merge_preview` MCP tool so
+ * orchestrator agents can "dry-run" a merge before committing to it.
+ *
+ * This is intentionally defensive: if the packet has no lane (archived,
+ * never spawned, etc.) the preview returns a deterministic "unwired" shape
+ * instead of throwing, so callers can distinguish "gate says no" from
+ * "gate could not run".
+ */
+
+import { findLaneByPacket } from '@/lib/lane/registry';
+import type { Lane } from '@/lib/lane/types';
+import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
+
+// ── Public Types ──
+
+/** One row per enforcement check that ran, in the order listed below. */
+export type MergeCheckName =
+  | 'security-patterns'
+  | 'diff-budget'
+  | 'untracked-imports'
+  | 'self-review-integrity';
+
+export type MergeCheckVerdict = 'pass' | 'fail' | 'skipped';
+
+export interface MergeCheckResult {
+  name: MergeCheckName;
+  verdict: MergeCheckVerdict;
+  /** Human-readable detail for failing checks. Empty string when passing. */
+  detail?: string;
+}
+
+/** Shape returned by `buildMergePreview` and by `o8_merge_preview`. */
+export interface MergePreviewResult {
+  packetId: string;
+  /** True when the gate passed — a merge call would proceed past the gate. */
+  wouldMerge: boolean;
+  checks: MergeCheckResult[];
+  /** Short category labels for every block-severity violation. */
+  blockers: string[];
+  branch: string | null;
+  /** Populated when no lane is bound so the gate could not run. */
+  unwired?: boolean;
+}
+
+// ── Check-name mapping ──
+
+const CATEGORY_TO_CHECK: Record<MergeViolation['category'], MergeCheckName> = {
+  security: 'security-patterns',
+  budget: 'diff-budget',
+  integrity: 'self-review-integrity',
+};
+
+const ALL_CHECKS: MergeCheckName[] = [
+  'security-patterns',
+  'diff-budget',
+  'untracked-imports',
+  'self-review-integrity',
+];
+
+// ── Shape translation ──
+
+/**
+ * Map a `MergeGateResult` into the structured preview shape.
+ * Every check in `ALL_CHECKS` appears in the output with a pass/fail verdict.
+ */
+export function buildCheckList(result: MergeGateResult): MergeCheckResult[] {
+  const firstViolationByCheck = new Map<MergeCheckName, MergeViolation>();
+  for (const violation of result.violations) {
+    if (violation.severity !== 'block') continue;
+    // Integrity category covers both untracked-imports and self-review.
+    // Disambiguate by label since both map to different check names.
+    const check = resolveCheckName(violation);
+    if (!firstViolationByCheck.has(check)) {
+      firstViolationByCheck.set(check, violation);
+    }
+  }
+
+  return ALL_CHECKS.map((name) => {
+    const violation = firstViolationByCheck.get(name);
+    if (violation) {
+      return { name, verdict: 'fail' as const, detail: violation.detail };
+    }
+    return { name, verdict: 'pass' as const };
+  });
+}
+
+function resolveCheckName(violation: MergeViolation): MergeCheckName {
+  if (violation.category !== 'integrity') {
+    return CATEGORY_TO_CHECK[violation.category];
+  }
+  // Integrity violations come from two checks — the label distinguishes them.
+  if (violation.label === 'Untracked imported files') {
+    return 'untracked-imports';
+  }
+  return 'self-review-integrity';
+}
+
+/** Derive a short blocker list from the gate result. Stable order, deduped. */
+export function buildBlockerList(result: MergeGateResult): string[] {
+  const seen = new Set<string>();
+  const blockers: string[] = [];
+  for (const check of buildCheckList(result)) {
+    if (check.verdict !== 'fail') continue;
+    if (seen.has(check.name)) continue;
+    seen.add(check.name);
+    blockers.push(check.name);
+  }
+  return blockers;
+}
+
+// ── Preview runner ──
+
+/**
+ * Run the merge gate against a lane and return the structured preview shape.
+ * Callers already holding a `Lane` reference should use this path — it
+ * avoids the extra `findLaneByPacket` lookup.
+ */
+export function buildPreviewForLane(lane: Lane, packetId: string): MergePreviewResult {
+  const gateResult = runMergeGate(lane);
+  const checks = buildCheckList(gateResult);
+  const blockers = buildBlockerList(gateResult);
+  return {
+    packetId,
+    wouldMerge: gateResult.passed,
+    checks,
+    blockers,
+    branch: lane.branch ?? null,
+  };
+}
+
+/**
+ * Run the merge gate for a packet id and return the preview shape.
+ * When the packet has no lane (archived / never spawned) returns a
+ * deterministic "unwired" payload so callers can surface it cleanly.
+ */
+export function previewPacketMerge(packetId: string): MergePreviewResult {
+  const lane = findLaneByPacket(packetId);
+  if (!lane) {
+    return {
+      packetId,
+      wouldMerge: false,
+      checks: ALL_CHECKS.map((name) => ({ name, verdict: 'skipped' as const })),
+      blockers: ['no-lane'],
+      branch: null,
+      unwired: true,
+    };
+  }
+  return buildPreviewForLane(lane, packetId);
+}

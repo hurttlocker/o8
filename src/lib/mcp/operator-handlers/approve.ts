@@ -1,4 +1,6 @@
+import { previewPacketMerge } from '@/lib/lane/preview-merge';
 import { approveAndMergePacket } from '@/lib/mcp/operator-mission-tools';
+import { getIdempotent, setIdempotent } from '@/lib/orchestrator/idempotency-cache';
 import { withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
 import {
   type McpTool,
@@ -49,7 +51,7 @@ export const APPROVE_TOOLS: McpTool[] = [
   {
     name: 'approve_and_merge',
     description:
-      'Merge a reviewed packet to main through the lane merge pipeline. Runs the governance policy engine before merging. Example: approve_and_merge({packetId: "pkt-abc"}) or approve_and_merge({packetId: "pkt-abc", commitMessage: "feat: add login flow (#100)"})',
+      'Merge a reviewed packet to main through the lane merge pipeline. Runs the governance policy engine before merging. On failure returns {merged:false, checks[], blockers[]} so callers can reason about which gate rejected it. Pass an optional idempotencyKey to safely retry within a 5-minute window. Example: approve_and_merge({packetId: "pkt-abc"}) or approve_and_merge({packetId: "pkt-abc", commitMessage: "feat: add login flow (#100)", idempotencyKey: "merge-pkt-abc-2026-04-18"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -60,6 +62,25 @@ export const APPROVE_TOOLS: McpTool[] = [
         commitMessage: {
           type: 'string',
           description: 'Optional commit message to use before merging.',
+        },
+        idempotencyKey: {
+          type: 'string',
+          description: 'Optional client-supplied key. Repeat calls with the same key inside a 5-minute window return the cached result without re-running the merge.',
+        },
+      },
+      required: ['packetId'],
+    },
+  },
+  {
+    name: 'o8_merge_preview',
+    description:
+      'Dry-run the merge gate for a packet WITHOUT merging. Returns {packetId, wouldMerge, checks[], blockers[], branch}. Use this to check whether a packet would pass the governance checks (security patterns, diff budget, untracked imports, self-review integrity) before calling approve_and_merge. Example: o8_merge_preview({packetId: "pkt-abc"}).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'The packet ID to preview.',
         },
       },
       required: ['packetId'],
@@ -118,14 +139,42 @@ export async function handleReject(args: Record<string, unknown>): Promise<McpTo
   }
 }
 
+function buildIdempotencyKey(packetId: string, clientKey: string): string {
+  return `approve_and_merge:${packetId}:${clientKey}`;
+}
+
 export async function handleApproveAndMerge(args: Record<string, unknown>): Promise<McpToolResult> {
   const packetId = requiredString(args, 'packetId');
+  const clientKey = optionalString(args, 'idempotencyKey');
+  const cacheKey = clientKey ? buildIdempotencyKey(packetId, clientKey) : null;
+
+  if (cacheKey) {
+    const cached = getIdempotent<Record<string, unknown>>(cacheKey);
+    if (cached) {
+      return jsonResult({ ...cached, idempotencyReplay: true });
+    }
+  }
+
   try {
     // #622 — wrapper guarantees synchronous worktree cleanup before return.
     const result = await withSynchronousWorktreeCleanup(packetId, () => approveAndMergePacket({ packetId, commitMessage: optionalString(args, 'commitMessage') || undefined }));
+    if (cacheKey) {
+      setIdempotent(cacheKey, result as unknown as Record<string, unknown>);
+    }
     return jsonResult(result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} approve_and_merge failed: ${errorText(error)}`);
     return textResult(`Failed to approve and merge: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleMergePreview(args: Record<string, unknown>): Promise<McpToolResult> {
+  const packetId = requiredString(args, 'packetId');
+  try {
+    const preview = previewPacketMerge(packetId);
+    return jsonResult(preview);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_merge_preview failed: ${errorText(error)}`);
+    return textResult(`Failed to preview merge: ${errorText(error)}`, true);
   }
 }

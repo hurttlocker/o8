@@ -1,5 +1,6 @@
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
+import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
 import { archiveLane, findLaneByPacket } from '@/lib/lane/registry';
 import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { buildDependencyGraph } from '@/lib/orchestrator/dag';
@@ -119,6 +120,41 @@ async function getWaveMergeOrder(
   return ordered;
 }
 
+/**
+ * #623 — Decorate a failing merge result with structured gate verdict fields.
+ * Populates `checks[]`, `blockers[]`, and the back-compat `reason` string so
+ * callers see the same structured shape the preview tool returns.
+ * No-op on success results.
+ */
+function withGateVerdict(
+  packetId: string,
+  result: MergePacketResult,
+): MergePacketResult {
+  if (result.merged) return result;
+  // Preserve prior decoration if merge.ts already populated the fields.
+  if (result.checks && result.blockers) return result;
+
+  const lane = findLaneByPacket(packetId);
+  if (!lane) return result;
+
+  let preview: MergePreviewResult;
+  try {
+    preview = buildPreviewForLane(lane, packetId);
+  } catch (error) {
+    console.warn(`${'[mcp-operator]'} gate verdict decoration failed for packet ${packetId}:`, error);
+    return result;
+  }
+
+  const blockers = preview.blockers;
+  const reason = blockers.length > 0 ? blockers.join(', ') : result.note;
+  return {
+    ...result,
+    checks: preview.checks,
+    blockers,
+    reason,
+  };
+}
+
 function findLatestMergeApproval(packetId: string, laneId: string, sessionKey?: string | null) {
   return listApprovalsForContext({
     packetId,
@@ -193,11 +229,11 @@ async function dispatchPacketMerge(
     actor,
   });
 
-  return {
+  return withGateVerdict(packet.id, {
     merged: result.ok,
     note: result.note,
     ...(result.approvalId ? { approvalId: result.approvalId } : {}),
-  };
+  });
 }
 
 async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise<MergePacketResult> {
@@ -208,10 +244,11 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     // #622 — wrapper captures lane pre-merge and runs synchronous cleanup on
     // success, making the bash-merge fallback atomic with the merge commit.
     const { mergeOrphanLaneByPacket } = await import('../orphan-lane-merge');
-    return withSynchronousWorktreeCleanup(
+    const orphanResult = await withSynchronousWorktreeCleanup(
       input.packetId,
       () => mergeOrphanLaneByPacket(input.packetId, input.commitMessage),
     );
+    return withGateVerdict(input.packetId, orphanResult);
   }
 
   if (packet.review && !packet.review.approved) {
@@ -233,13 +270,13 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
   }
   const latestMergeApproval = findLatestMergeApproval(packet.id, lane.id, lane.sessionKey);
   if (latestMergeApproval?.status === 'pending') {
-    return {
+    return withGateVerdict(packet.id, {
       merged: false,
       note: latestMergeApproval.policyRuleId === 'merge-gate-violation'
         ? 'Merge gate enforcement: human review required.'
         : `Approval required: ${latestMergeApproval.title}`,
       approvalId: latestMergeApproval.id,
-    };
+    });
   }
   if (latestMergeApproval?.status === 'approved' && (lane.status === 'completed' || lane.status === 'archived')) {
     await syncOrchestratorControlPlaneState();
@@ -286,6 +323,8 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
           ? result.note
           : `Merge order requires ${candidate.packet.referenceLabel} to merge before ${packet.referenceLabel}: ${result.note}`,
         ...(result.approvalId ? { approvalId: result.approvalId } : {}),
+        ...(result.checks ? { checks: result.checks } : {}),
+        ...(result.blockers ? { blockers: result.blockers, reason: result.blockers.join(', ') || result.note } : {}),
       };
     }
 
