@@ -116,6 +116,8 @@ export function InputButtons({
   missionOpen,
   onToggleMission,
   repoLabel,
+  working = false,
+  onStop,
 }: {
   input: string;
   enhancing: boolean;
@@ -134,6 +136,8 @@ export function InputButtons({
   missionOpen?: boolean;
   onToggleMission?: () => void;
   repoLabel?: string | null;
+  working?: boolean;
+  onStop?: () => void;
 }) {
   const canSubmit = Boolean(input.trim());
   const effortCycle: ThinkingEffort[] = adaptiveEnabled
@@ -330,31 +334,108 @@ export function InputButtons({
         +
       </button>
 
-      {/* Send */}
-      <button
-        type="button"
-        onClick={onSubmit}
-        disabled={!canSubmit}
-        title="Send"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 30,
-          height: 30,
-          borderRadius: 9,
-          borderWidth: 0,
-          background: canSubmit ? '#2563eb' : 'rgba(148, 163, 184, 0.18)',
-          cursor: canSubmit ? 'pointer' : 'default',
-          transition: 'background 120ms',
-          flexShrink: 0,
-        }}
-      >
-        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-          <path d="M12 19V5" stroke={canSubmit ? '#ffffff' : '#9ca3af'} />
-          <path d="m5 12 7-7 7 7" stroke={canSubmit ? '#ffffff' : '#9ca3af'} />
-        </svg>
-      </button>
+      {/* Send — Rams pill matching ContextMeter/ThinkingChip aesthetic.
+          Three states with 180ms morph: idle (hairline faint) → armed
+          (accent border + soft bg + dot) → working (orange hairline +
+          pulsing dot + "stop" if onStop provided, else "working"). */}
+      <SendPill
+        canSubmit={canSubmit}
+        working={working}
+        onSubmit={onSubmit}
+        onStop={onStop}
+      />
     </div>
+  );
+}
+
+function SendPill({
+  canSubmit,
+  working,
+  onSubmit,
+  onStop,
+}: {
+  canSubmit: boolean;
+  working: boolean;
+  onSubmit: () => void;
+  onStop?: () => void;
+}) {
+  const canStop = working && Boolean(onStop);
+  const interactive = canStop || (!working && canSubmit);
+  const stateColor = working ? '#FF5A1F' : canSubmit ? '#2563eb' : 'var(--t-text-faint)';
+  const borderColor = working
+    ? 'rgba(255, 90, 31, 0.32)'
+    : canSubmit
+      ? 'rgba(37, 99, 235, 0.32)'
+      : 'var(--t-border)';
+  const background = working
+    ? 'rgba(255, 90, 31, 0.08)'
+    : canSubmit
+      ? 'rgba(37, 99, 235, 0.06)'
+      : 'transparent';
+  const label = working ? (canStop ? 'stop' : 'working') : 'send';
+  const title = working
+    ? (canStop ? 'Stop orchestrator' : 'Orchestrator working…')
+    : canSubmit ? 'Send (Enter)' : 'Type to send';
+
+  return (
+    <button
+      type="button"
+      onClick={canStop ? onStop : onSubmit}
+      disabled={!interactive}
+      title={title}
+      aria-label={title}
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        height: 26,
+        paddingLeft: 10,
+        paddingRight: 10,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor,
+        background,
+        color: stateColor,
+        cursor: interactive ? 'pointer' : 'default',
+        minWidth: 0,
+        fontSize: 11.5,
+        fontWeight: 500,
+        letterSpacing: '0.01em',
+        whiteSpace: 'nowrap',
+        fontVariantNumeric: 'tabular-nums',
+        fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
+        flexShrink: 0,
+        transition: 'background 180ms ease, border-color 180ms ease, color 180ms ease',
+      }}
+    >
+      {/* status dot — pulses during working */}
+      <span
+        aria-hidden="true"
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          flexShrink: 0,
+          background: stateColor,
+          animation: working ? 'sendpill-pulse 1.6s ease-in-out infinite' : 'none',
+          transition: 'background 180ms ease',
+        }}
+      />
+      <span style={{ color: stateColor }}>{label}</span>
+      {/* glyph — up-arrow when send/armed, small square when stop */}
+      {canStop ? (
+        <svg width={9} height={9} viewBox="0 0 24 24" style={{ display: 'block', flexShrink: 0 }}>
+          <rect x="6" y="6" width="12" height="12" rx="1.5" fill={stateColor} />
+        </svg>
+      ) : working ? null : (
+        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+          <path d="M12 19V5" stroke={stateColor} />
+          <path d="m5 12 7-7 7 7" stroke={stateColor} />
+        </svg>
+      )}
+      <style>{`@keyframes sendpill-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
+    </button>
   );
 }
