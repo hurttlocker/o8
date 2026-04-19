@@ -239,6 +239,25 @@ if (existsSync(ORCHESTRATOR_PROMPT_SRC)) {
   process.exit(1);
 }
 
+// Decomposition pipeline template (#538). The pipeline probes a handful of
+// layout-specific locations at runtime (cwd-relative, standalone-relative,
+// bundle-adjacent). Copying it to two spots covers both prod layouts — the
+// Next.js standalone cwd AND the out/server root where esbuild drops the
+// other runtime-read prompts.
+const DECOMPOSE_PROMPT_SRC = join(root, 'src', 'lib', 'dispatch', 'prompts', 'decompose.md');
+const DECOMPOSE_PROMPT_DST = join(server, 'prompts', 'decompose.md');
+const DECOMPOSE_PROMPT_STANDALONE_DST = join(server, 'src', 'lib', 'dispatch', 'prompts', 'decompose.md');
+if (existsSync(DECOMPOSE_PROMPT_SRC)) {
+  mkdirSync(dirname(DECOMPOSE_PROMPT_DST), { recursive: true });
+  cpSync(DECOMPOSE_PROMPT_SRC, DECOMPOSE_PROMPT_DST);
+  mkdirSync(dirname(DECOMPOSE_PROMPT_STANDALONE_DST), { recursive: true });
+  cpSync(DECOMPOSE_PROMPT_SRC, DECOMPOSE_PROMPT_STANDALONE_DST);
+} else {
+  // Missing the prompt is not fatal — the pipeline has an inline fallback so
+  // a missed copy still enqueues packets. Warn loudly though; packaging miss.
+  console.warn('⚠️  Missing decompose.md at', DECOMPOSE_PROMPT_SRC, '— pipeline will use inline fallback');
+}
+
 // ── Sanity check: every expected standalone bundle must exist ──
 // Belt-and-braces guard against future compile failures slipping through.
 const REQUIRED_BUNDLES = ['ws-server.mjs', 'operator-mcp-server.mjs', 'cortex-mcp-server.mjs'];
