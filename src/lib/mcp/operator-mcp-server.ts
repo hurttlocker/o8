@@ -20,6 +20,7 @@ import {
   APPROVE_TOOLS,
   handleApprove,
   handleApproveAndMerge,
+  handleMergePreview,
   handleReject,
 } from '@/lib/mcp/operator-handlers/approve';
 import {
@@ -154,6 +155,7 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((t) => t.name === 'get_mission_status'),
   ...MISSION_TOOLS.filter((t) => t.name === 'submit_review'),
   ...APPROVE_TOOLS.filter((t) => t.name === 'approve_and_merge'),
+  ...APPROVE_TOOLS.filter((t) => t.name === 'o8_merge_preview'),
   ...MISSION_TOOLS.filter((t) => t.name === 'reset_packet'),
   ...MISSION_TOOLS.filter((t) => t.name === 'retry_packet'),
   ...MISSION_TOOLS.filter((t) => t.name === 'o8_review_state'),
@@ -173,6 +175,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   get_mission_status: handleGetMissionStatus,
   submit_review: handleSubmitReview,
   approve_and_merge: handleApproveAndMerge,
+  o8_merge_preview: handleMergePreview,
   reset_packet: handleResetPacket,
   retry_packet: handleResetPacket,
   o8_review_state: handleReviewState,

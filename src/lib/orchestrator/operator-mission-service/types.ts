@@ -1,4 +1,5 @@
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+import type { MergeCheckResult } from '@/lib/lane/preview-merge';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 export interface LoadedIssue {
@@ -52,4 +53,19 @@ export interface MergePacketResult {
   merged: boolean;
   note: string;
   approvalId?: string;
+  /**
+   * Structured gate verdict (#623). Populated when the merge path ran the
+   * gate — preview calls, pre-dispatch gate failures, and post-dispatch
+   * approvals. Omitted when the failure came from a non-gate source
+   * (e.g. policy approval, orphan lane error).
+   */
+  checks?: MergeCheckResult[];
+  /** Short category labels for every blocking gate violation. */
+  blockers?: string[];
+  /**
+   * Back-compat derived from `blockers.join(', ')` so older UI clients
+   * that read a `reason` field still render something sane. New callers
+   * should prefer `blockers` / `checks`.
+   */
+  reason?: string;
 }
