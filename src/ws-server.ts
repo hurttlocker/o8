@@ -3478,37 +3478,33 @@ async function bootstrapWsServer() {
         return data.ok ? (data.surfaceId as string) : null;
       },
       broadcastAgentUpdate(update: AgentUpdateEvent) {
-        const msg = JSON.stringify({
-          channel: 'orchestrator',
-          event: 'agent-update',
-          data: update,
-        });
-        for (const [cid] of orchestratorSubscriptions) {
-          const c = clients.get(cid);
-          if (c) sendRaw(c, msg);
-        }
+        // #529 — Supervisor/agent lifecycle events go on a dedicated channel,
+        // not on the orchestrator channel. The orchestrator chat subscribes
+        // to `orchestrator` for its own claude transcript; mixing codex agent
+        // state (including watcher-captured transcript snippets) into that
+        // channel was bleeding into the UI as mid-stream messages. The new
+        // `supervisor` channel is a notification feed — every connected
+        // client receives it, and UI surfaces decide where to render.
+        broadcast({ channel: 'supervisor', event: 'agent-update', data: update });
       },
       queueOrchestratorEscalation,
       onAgentProgress(surfaceId, lastMessage) {
+        // #529 — Progress heartbeats must NOT carry codex transcript prose
+        // into the orchestrator chat. The supervisor uses the last-observed
+        // assistant sentence only for stuck-detection internally; the outbound
+        // event surfaces a neutral "working" marker instead. Any UI that needs
+        // more detail can fetch the codex transcript directly.
         const watched = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
         const update: AgentUpdateEvent = {
           surfaceId,
           name: watched?.name ?? surfaceId,
           status: watched?.lastStatus ?? 'running',
-          detail: lastMessage,
+          detail: 'working',
           repoPath: watched?.repoPath,
         };
-        console.log(`[supervisor] Agent ${surfaceId} progress: ${lastMessage.slice(0, 80)}`);
+        console.log(`[supervisor] Agent ${surfaceId} progress heartbeat (suppressing transcript preview of ${lastMessage.length}ch)`);
 
-        const msg = JSON.stringify({
-          channel: 'orchestrator',
-          event: 'agent-update',
-          data: update,
-        });
-        for (const [cid] of orchestratorSubscriptions) {
-          const c = clients.get(cid);
-          if (c) sendRaw(c, msg);
-        }
+        broadcast({ channel: 'supervisor', event: 'agent-update', data: update });
       },
       async onAgentCompletion(surfaceId, outcome) {
         try {
