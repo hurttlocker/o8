@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isCodexSessionLive } from '@/lib/codex/live-sessions';
 import {
   listCurrentIdeRepoPaths,
   readIdeTerminalStateFiles,
@@ -113,6 +114,14 @@ export function listIdeRuntimeTabs(): IdeRuntimeSessionDescriptor[] {
         const liveSessionKey = tab.chatSessionKey
           ? canonicalizeSessionKey(tab.chatRuntime, tab.chatSessionKey)
           : null;
+
+        // #545 root fix — drop codex ghost tabs whose underlying session
+        // has been dead beyond the stale window. Claude Code tabs pass
+        // through because there is no equivalent liveness registry.
+        if (liveSessionKey && tab.chatRuntime === 'codex' && !isCodexSessionLive(liveSessionKey)) {
+          continue;
+        }
+
         const sessionKey = liveSessionKey ?? syntheticSessionKey(tab.chatRuntime, scope, tab.id);
 
         const next: IdeRuntimeSessionDescriptor = {
