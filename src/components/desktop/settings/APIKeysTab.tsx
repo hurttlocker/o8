@@ -3,13 +3,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   APP_FONT_STACK,
-  CheckCircleIcon,
-  KeyIcon,
-  LockIcon,
-  THEME_ACCENT,
-  THEME_ACCENT_BORDER,
-  THEME_ACCENT_RING,
-  THEME_ACCENT_SOFT,
+  MONO_FONT_STACK,
+  RAMS_ACCENT,
+  RAMS_HAIRLINE_SOFT,
+  RAMS_INK_QUIET,
+  BracketLabel,
+  FieldLabel,
+  HairlineRule,
+  SectionLabel,
+  TabBreadcrumb,
+  TabHeading,
 } from './shared';
 import {
   readAdaptiveThinkingEnabled,
@@ -28,13 +31,6 @@ interface ProviderKeyInfo {
   configured: boolean;
   maskedKey: string | null;
 }
-
-const SUCCESS_BG = 'rgba(52, 199, 89, 0.12)';
-const SUCCESS_BORDER = 'rgba(52, 199, 89, 0.18)';
-const SUCCESS_TEXT = '#16a34a';
-const DANGER_BG = 'rgba(239, 68, 68, 0.05)';
-const DANGER_BORDER = 'rgba(239, 68, 68, 0.16)';
-const DANGER_TEXT = '#dc2626';
 
 // ── API Keys Tab ──
 
@@ -96,7 +92,7 @@ export function APIKeysTab() {
       });
       const data = await res.json();
       if (res.ok) {
-        setFeedback({ provider: providerId, type: 'success', message: 'Key saved — active immediately' });
+        setFeedback({ provider: providerId, type: 'success', message: 'Saved. Active immediately.' });
         setEditingProvider(null);
         setKeyInput('');
         void loadKeys();
@@ -119,7 +115,7 @@ export function APIKeysTab() {
         body: JSON.stringify({ provider: providerId }),
       });
       if (res.ok) {
-        setFeedback({ provider: providerId, type: 'success', message: 'Key removed' });
+        setFeedback({ provider: providerId, type: 'success', message: 'Removed.' });
         void loadKeys();
       }
     } catch { /* ignore */ }
@@ -130,9 +126,7 @@ export function APIKeysTab() {
   if (loading) {
     return (
       <div style={{
-        paddingTop: 32,
-        paddingLeft: 32,
-        paddingRight: 32,
+        paddingTop: 40,
         color: 'var(--t-text-muted)',
         fontSize: 13,
         fontFamily: APP_FONT_STACK,
@@ -144,131 +138,73 @@ export function APIKeysTab() {
 
   return (
     <div style={{
-      paddingTop: 32,
-      paddingLeft: 32,
+      paddingTop: 8,
+      paddingLeft: 8,
       paddingRight: 32,
-      paddingBottom: 32,
+      paddingBottom: 40,
       maxWidth: 780,
       fontFamily: APP_FONT_STACK,
     }}>
-      <div style={{
-        fontSize: 28,
-        fontWeight: 800,
-        color: 'var(--t-text)',
-        marginBottom: 6,
-        letterSpacing: '-0.05em',
-        lineHeight: 1,
-      }}>
-        API Keys
-      </div>
-      <div style={{
-        fontSize: 14,
-        color: 'var(--t-text-secondary)',
-        marginBottom: 22,
-        lineHeight: 1.5,
-        maxWidth: 700,
-      }}>
-        Add your API keys to use models in the Chat panel. Keys are stored locally and never leave your machine.
-      </div>
+      <TabBreadcrumb tab="api keys" />
+      <TabHeading
+        title="api keys"
+        subtitle="Provider keys unlock model families in the orchestrator and assistant. Keys stay local to this installation and take effect immediately."
+      />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {providers.map((p) => {
-          const isEditing = editingProvider === p.id;
-          const fb = feedback?.provider === p.id ? feedback : null;
+      {/* 01 — PROVIDERS */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="01">PROVIDERS</SectionLabel>
 
-          return (
-            <div
-              key={p.id}
-              style={{
-                border: '1px solid var(--t-panel-border)',
-                borderRadius: 18,
-                paddingTop: 16,
-                paddingBottom: 16,
-                paddingLeft: 18,
-                paddingRight: 18,
-                background: 'var(--t-panel)',
-                transition: 'border-color 180ms ease, transform 180ms ease',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-              }}
-            >
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 14,
-                flexWrap: 'wrap',
-              }}>
+        <div style={{
+          borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+        }}>
+          {providers.map((p) => {
+            const isEditing = editingProvider === p.id;
+            const fb = feedback?.provider === p.id ? feedback : null;
+
+            return (
+              <div
+                key={p.id}
+                style={{
+                  borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                  paddingTop: 16,
+                  paddingBottom: 16,
+                  paddingLeft: 2,
+                  paddingRight: 2,
+                }}
+              >
                 <div style={{
                   display: 'flex',
-                  alignItems: 'center',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
                   gap: 14,
-                  minWidth: 0,
-                  flex: '1 1 420px',
+                  flexWrap: 'wrap',
                 }}>
                   <div style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 14,
-                    background: p.configured ? SUCCESS_BG : 'var(--t-bg-card)',
-                    border: p.configured ? `1px solid ${SUCCESS_BORDER}` : '1px solid var(--t-panel-border)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    color: p.configured ? SUCCESS_TEXT : 'var(--t-text-muted)',
-                  }}>
-                    {p.configured ? <CheckCircleIcon /> : <KeyIcon />}
-                  </div>
-
-                  <div style={{
-                    flex: 1,
-                    minWidth: 0,
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 5,
+                    gap: 6,
+                    minWidth: 0,
+                    flex: '1 1 360px',
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                      <div style={{
-                        fontSize: 17,
-                        fontWeight: 700,
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                      <span style={{
+                        fontSize: 15,
+                        fontWeight: 500,
                         color: 'var(--t-text)',
-                        letterSpacing: '-0.04em',
-                        lineHeight: 1.05,
+                        letterSpacing: '-0.01em',
                       }}>
                         {p.label}
-                      </div>
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        paddingTop: 4,
-                        paddingBottom: 4,
-                        paddingLeft: 10,
-                        paddingRight: 10,
-                        borderRadius: 999,
-                        background: p.configured ? SUCCESS_BG : THEME_ACCENT_SOFT,
-                        color: p.configured ? SUCCESS_TEXT : THEME_ACCENT,
-                        fontSize: 9,
-                        fontWeight: 700,
-                        letterSpacing: '0.04em',
-                      }}>
-                        {p.configured ? 'ACTIVE LOCALLY' : 'ADD KEY'}
                       </span>
+                      <BracketLabel tone={p.configured ? 'quiet' : 'accent'}>
+                        {p.configured ? 'configured' : 'missing'}
+                      </BracketLabel>
                       <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        paddingTop: 4,
-                        paddingBottom: 4,
-                        paddingLeft: 10,
-                        paddingRight: 10,
-                        borderRadius: 999,
-                        background: 'var(--t-bg-card)',
-                        border: '1px solid var(--t-panel-border)',
-                        color: 'var(--t-text-muted)',
-                        fontSize: 9,
-                        fontWeight: 700,
-                        letterSpacing: '0.04em',
+                        fontFamily: MONO_FONT_STACK,
+                        fontSize: 10,
+                        fontWeight: 400,
+                        letterSpacing: '0.12em',
+                        color: RAMS_INK_QUIET,
                       }}>
                         {p.envVar}
                       </span>
@@ -277,28 +213,38 @@ export function APIKeysTab() {
                     <div style={{
                       fontSize: 13,
                       color: 'var(--t-text-secondary)',
-                      lineHeight: 1.45,
-                      maxWidth: 500,
+                      lineHeight: 1.55,
+                      maxWidth: 520,
                     }}>
                       {p.configured
-                        ? 'Ready for Chat immediately. Stored only on this machine.'
-                        : 'Add a provider key to unlock this model family in Chat. Keys stay local to this installation.'}
+                        ? 'Available to the orchestrator and assistant. Stored on this machine only.'
+                        : 'Add a key to unlock this model family. Stays local to this installation.'}
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 16,
+                      flexWrap: 'wrap',
+                    }}>
                       {p.configured && p.maskedKey ? (
                         <span style={{
-                          fontSize: 14,
-                          fontWeight: 600,
-                          color: 'var(--t-text)',
-                          letterSpacing: '-0.02em',
-                          fontVariantNumeric: 'tabular-nums',
+                          fontFamily: MONO_FONT_STACK,
+                          fontSize: 12,
+                          fontWeight: 400,
+                          color: 'var(--t-text-secondary)',
+                          letterSpacing: '0.04em',
                         }}>
                           {p.maskedKey}
                         </span>
                       ) : (
-                        <span style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>
-                          Not configured yet
+                        <span style={{
+                          fontFamily: MONO_FONT_STACK,
+                          fontSize: 12,
+                          color: RAMS_INK_QUIET,
+                          letterSpacing: '0.04em',
+                        }}>
+                          not configured
                         </span>
                       )}
                       <a
@@ -306,386 +252,266 @@ export function APIKeysTab() {
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
+                          fontFamily: APP_FONT_STACK,
+                          fontSize: 12,
+                          fontWeight: 400,
                           color: 'var(--t-text-muted)',
-                          fontSize: 11,
-                          fontWeight: 600,
-                          textDecoration: 'none',
+                          textDecoration: 'underline',
+                          textDecorationColor: RAMS_HAIRLINE_SOFT,
+                          textUnderlineOffset: 3,
                         }}
                       >
-                        Get key ↗
+                        get key ›
                       </a>
                     </div>
                   </div>
-                </div>
 
-                {!isEditing && (
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    flexWrap: 'wrap',
-                    marginLeft: 'auto',
-                  }}>
-                    <button
-                      type="button"
-                      onClick={() => { setEditingProvider(p.id); setKeyInput(''); }}
-                      style={{
-                        minHeight: 36,
-                        paddingTop: 0,
-                        paddingBottom: 0,
-                        paddingLeft: 14,
-                        paddingRight: 14,
-                        border: p.configured ? `1px solid ${THEME_ACCENT_BORDER}` : `1px solid ${THEME_ACCENT}`,
-                        borderRadius: 999,
-                        background: p.configured ? 'transparent' : THEME_ACCENT,
-                        color: p.configured ? THEME_ACCENT : '#ffffff',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        boxShadow: 'none',
-                        transition: 'background 180ms ease, border-color 180ms ease',
-                      }}
-                    >
-                      {p.configured ? 'Update key' : 'Add key'}
-                    </button>
-                    {p.configured && (
+                  {!isEditing ? (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 20,
+                      flexWrap: 'wrap',
+                    }}>
                       <button
                         type="button"
-                        onClick={() => { void handleRemove(p.id); }}
-                        disabled={saving}
-                        style={{
-                          minHeight: 36,
-                          paddingTop: 0,
-                          paddingBottom: 0,
-                          paddingLeft: 14,
-                          paddingRight: 14,
-                          border: `1px solid ${DANGER_BORDER}`,
-                          borderRadius: 999,
-                          background: 'transparent',
-                          color: DANGER_TEXT,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: saving ? 'default' : 'pointer',
-                          opacity: saving ? 0.6 : 1,
-                          transition: 'opacity 180ms ease',
-                        }}
+                        onClick={() => { setEditingProvider(p.id); setKeyInput(''); }}
+                        style={accentLinkStyle(false)}
                       >
-                        Remove
+                        {p.configured ? 'update key ›' : 'add key ›'}
                       </button>
-                    )}
-                  </div>
-                )}
-              </div>
+                      {p.configured ? (
+                        <button
+                          type="button"
+                          onClick={() => { void handleRemove(p.id); }}
+                          disabled={saving}
+                          style={quietLinkStyle(saving)}
+                        >
+                          remove
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
 
-              {/* Editing input */}
-              {isEditing && (
-                <div style={{
-                  borderTop: '1px solid var(--t-divider)',
-                  paddingTop: 14,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 10,
-                }}>
+                {/* Inline editor */}
+                {isEditing ? (
                   <div style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: 'var(--t-text-muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
+                    marginTop: 16,
+                    paddingTop: 14,
+                    borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                    maxWidth: 620,
                   }}>
-                    Paste {p.label} API key
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <FieldLabel>paste {p.label.toLowerCase()} key</FieldLabel>
                     <input
                       type="password"
                       value={keyInput}
                       onChange={(e) => setKeyInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') void handleSave(p.id); if (e.key === 'Escape') setEditingProvider(null); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void handleSave(p.id);
+                        if (e.key === 'Escape') setEditingProvider(null);
+                      }}
                       placeholder={p.placeholder}
                       autoFocus
                       style={{
-                        flex: '1 1 340px',
-                        minHeight: 40,
-                        paddingTop: 0,
-                        paddingBottom: 0,
-                        paddingLeft: 14,
-                        paddingRight: 14,
-                        border: '1px solid var(--t-input-border)',
-                        borderRadius: 12,
-                        background: 'var(--t-input-bg)',
+                        fontFamily: MONO_FONT_STACK,
                         fontSize: 13,
-                        fontFamily: APP_FONT_STACK,
+                        fontWeight: 400,
+                        letterSpacing: '0.02em',
                         color: 'var(--t-text)',
+                        background: 'transparent',
+                        border: 'none',
+                        borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                        paddingTop: 6,
+                        paddingBottom: 8,
+                        paddingLeft: 0,
+                        paddingRight: 0,
                         outline: 'none',
+                        width: '100%',
                       }}
                       onFocus={(e) => {
-                        e.currentTarget.style.borderColor = THEME_ACCENT;
-                        e.currentTarget.style.boxShadow = `0 0 0 3px ${THEME_ACCENT_RING}`;
+                        e.currentTarget.style.borderBottomColor = RAMS_ACCENT;
                       }}
                       onBlur={(e) => {
-                        e.currentTarget.style.borderColor = 'var(--t-input-border)';
-                        e.currentTarget.style.boxShadow = 'none';
+                        e.currentTarget.style.borderBottomColor = RAMS_HAIRLINE_SOFT;
                       }}
                     />
-                    <button
-                      type="button"
-                      onClick={() => { void handleSave(p.id); }}
-                      disabled={!keyInput.trim() || saving}
-                      style={{
-                        minHeight: 38,
-                        paddingTop: 0,
-                        paddingBottom: 0,
-                        paddingLeft: 14,
-                        paddingRight: 14,
-                        border: '1px solid transparent',
-                        borderRadius: 999,
-                        background: keyInput.trim() ? THEME_ACCENT : 'var(--t-bg-card)',
-                        color: keyInput.trim() ? '#ffffff' : 'var(--t-text-faint)',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: keyInput.trim() && !saving ? 'pointer' : 'default',
-                        boxShadow: keyInput.trim() ? `0 10px 24px ${THEME_ACCENT_RING}` : 'none',
-                        transition: 'background 180ms ease, box-shadow 180ms ease, opacity 180ms ease',
-                        opacity: saving ? 0.7 : 1,
-                      }}
-                    >
-                      {saving ? 'Saving…' : 'Save key'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setEditingProvider(null); setKeyInput(''); }}
-                      style={{
-                        minHeight: 38,
-                        paddingTop: 0,
-                        paddingBottom: 0,
-                        paddingLeft: 14,
-                        paddingRight: 14,
-                        border: '1px solid var(--t-panel-border)',
-                        borderRadius: 999,
-                        background: 'transparent',
-                        color: 'var(--t-text-muted)',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Cancel
-                    </button>
+                    <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => { void handleSave(p.id); }}
+                        disabled={!keyInput.trim() || saving}
+                        style={accentLinkStyle(!keyInput.trim() || saving)}
+                      >
+                        {saving ? 'saving...' : 'save key ›'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setEditingProvider(null); setKeyInput(''); }}
+                        style={quietLinkStyle(false)}
+                      >
+                        cancel
+                      </button>
+                    </div>
+                    <div style={{
+                      fontSize: 12,
+                      color: 'var(--t-text-muted)',
+                      lineHeight: 1.55,
+                    }}>
+                      Written to{' '}
+                      <span style={{
+                        fontFamily: MONO_FONT_STACK,
+                        fontSize: 11,
+                        letterSpacing: '0.04em',
+                        color: 'var(--t-text-secondary)',
+                      }}>
+                        .env.local
+                      </span>
+                      {' '}and available right away.
+                    </div>
                   </div>
+                ) : null}
+
+                {/* Feedback */}
+                {fb ? (
                   <div style={{
-                    fontSize: 11,
-                    color: 'var(--t-text-muted)',
-                    lineHeight: 1.5,
+                    marginTop: 10,
+                    fontSize: 12,
+                    fontFamily: MONO_FONT_STACK,
+                    letterSpacing: '0.04em',
+                    color: fb.type === 'success' ? '#15803d' : '#dc2626',
                   }}>
-                    The new key is written to{' '}
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      paddingTop: 2,
-                      paddingBottom: 2,
-                      paddingLeft: 8,
-                      paddingRight: 8,
-                      borderRadius: 999,
-                      background: 'var(--t-bg-card)',
-                      border: '1px solid var(--t-panel-border)',
-                      color: 'var(--t-text-secondary)',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.02em',
-                    }}
-                    >
-                      .env.local
-                    </span>{' '}
-                    and becomes available right away.
+                    {fb.message}
                   </div>
-                </div>
-              )}
-
-              {/* Feedback */}
-              {fb && (
-                <div style={{
-                  paddingTop: 8,
-                  paddingBottom: 8,
-                  paddingLeft: 12,
-                  paddingRight: 12,
-                  borderRadius: 12,
-                  background: fb.type === 'success' ? SUCCESS_BG : DANGER_BG,
-                  border: fb.type === 'success' ? `1px solid ${SUCCESS_BORDER}` : `1px solid ${DANGER_BORDER}`,
-                  color: fb.type === 'success' ? SUCCESS_TEXT : DANGER_TEXT,
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}>
-                  {fb.message}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <div style={{
-        marginTop: 24,
-        paddingTop: 18,
-        paddingBottom: 18,
-        paddingLeft: 18,
-        paddingRight: 18,
-        borderRadius: 16,
-        border: '1px solid var(--t-panel-border)',
-        background: 'var(--t-panel)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 16,
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0, flex: '1 1 420px' }}>
-          <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: 'var(--t-text-muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-          }}>
-            LLM behavior
-          </div>
-          <div style={{
-            fontSize: 16,
-            fontWeight: 700,
-            color: 'var(--t-text)',
-            letterSpacing: '-0.03em',
-          }}>
-            Adaptive orchestrator thinking
-          </div>
-          <div style={{
-            fontSize: 13,
-            color: 'var(--t-text-secondary)',
-            lineHeight: 1.55,
-            maxWidth: 560,
-          }}>
-            When enabled, new orchestrator turns default to adaptive thinking and can stream summarized reasoning above the reply.
-            Turn it off to fall back to the fixed manual effort path.
-          </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
+      </section>
 
-        <button
-          type="button"
-          onClick={() => writeAdaptiveThinkingEnabled(!adaptiveThinkingEnabled)}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 10,
-            minHeight: 40,
-            padding: '0 12px 0 10px',
-            borderRadius: 999,
-            border: adaptiveThinkingEnabled
-              ? `1px solid ${THEME_ACCENT_BORDER}`
-              : '1px solid var(--t-panel-border)',
-            background: adaptiveThinkingEnabled ? THEME_ACCENT_SOFT : 'var(--t-bg-card)',
-            color: adaptiveThinkingEnabled ? THEME_ACCENT : 'var(--t-text-secondary)',
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: 'pointer',
-            letterSpacing: '0.01em',
-          }}
-          aria-pressed={adaptiveThinkingEnabled}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              position: 'relative',
-              width: 30,
-              height: 18,
-              borderRadius: 999,
-              background: adaptiveThinkingEnabled ? THEME_ACCENT : 'var(--t-divider)',
-              transition: 'background 180ms ease',
-            }}
-          >
-            <span
-              style={{
-                position: 'absolute',
-                top: 2,
-                left: adaptiveThinkingEnabled ? 14 : 2,
-                width: 14,
-                height: 14,
-                borderRadius: '50%',
-                background: 'var(--t-panel)',
-                border: '1px solid var(--t-panel-border)',
-                transition: 'left 180ms ease',
-              }}
-            />
-          </span>
-          {adaptiveThinkingEnabled ? 'Enabled' : 'Disabled'}
-        </button>
-      </div>
+      {/* 02 — BEHAVIOR */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="02">BEHAVIOR</SectionLabel>
 
-      <div style={{
-        marginTop: 24,
-        paddingTop: 16,
-        paddingBottom: 16,
-        paddingLeft: 18,
-        paddingRight: 18,
-        borderRadius: 16,
-        border: '1px solid var(--t-panel-border)',
-        background: 'var(--t-panel)',
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 12,
-        maxWidth: 760,
-      }}>
         <div style={{
-          width: 28,
-          height: 28,
-          borderRadius: 10,
-          background: THEME_ACCENT_SOFT,
-          color: THEME_ACCENT,
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 20,
+          paddingTop: 4,
+          paddingBottom: 16,
+          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
         }}>
-          <LockIcon />
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: 'var(--t-text-muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-          }}>
-            Local storage
-          </div>
-          <div style={{
-            fontSize: 13,
-            color: 'var(--t-text-secondary)',
-            lineHeight: 1.55,
-          }}>
-            Keys are written to{' '}
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              paddingTop: 2,
-              paddingBottom: 2,
-              paddingLeft: 8,
-              paddingRight: 8,
-              borderRadius: 999,
-              background: 'var(--t-bg-card)',
-              border: '1px solid var(--t-panel-border)',
+          <div style={{ flex: 1, minWidth: 0, maxWidth: 560 }}>
+            <div style={{
+              fontSize: 14,
+              fontWeight: 500,
+              color: 'var(--t-text)',
+              letterSpacing: '-0.01em',
+              marginBottom: 6,
+            }}>
+              Adaptive orchestrator thinking
+            </div>
+            <div style={{
+              fontSize: 13,
               color: 'var(--t-text-secondary)',
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.02em',
-            }}
-            >
-              .env.local
-            </span>{' '}
-            and take effect immediately. In the cloud version, keys are encrypted and stored in your account.
+              lineHeight: 1.55,
+            }}>
+              When enabled, new orchestrator turns default to adaptive thinking and can stream summarized reasoning above the reply. Turn it off to fall back to the fixed manual effort path.
+            </div>
           </div>
+          <ToggleLink
+            checked={adaptiveThinkingEnabled}
+            onChange={(next) => writeAdaptiveThinkingEnabled(next)}
+          />
         </div>
-      </div>
+      </section>
+
+      {/* 03 — STORAGE */}
+      <section>
+        <SectionLabel number="03">STORAGE</SectionLabel>
+        <div style={{
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          maxWidth: 620,
+        }}>
+          Keys are written to{' '}
+          <span style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 12,
+            letterSpacing: '0.04em',
+            color: 'var(--t-text-secondary)',
+          }}>
+            .env.local
+          </span>
+          {' '}and take effect immediately. In the cloud version, keys are encrypted and stored in your account.
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <HairlineRule />
+        </div>
+      </section>
     </div>
   );
+}
+
+// ── Support primitives ──
+
+function ToggleLink({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      style={{
+        ...accentLinkStyle(false),
+        color: checked ? RAMS_ACCENT : 'var(--t-text-secondary)',
+        borderBottomColor: checked ? RAMS_ACCENT : RAMS_HAIRLINE_SOFT,
+      }}
+      aria-pressed={checked}
+    >
+      {checked ? 'enabled' : 'disabled'}
+    </button>
+  );
+}
+
+function accentLinkStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 13,
+    fontWeight: 400,
+    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${disabled ? RAMS_HAIRLINE_SOFT : RAMS_ACCENT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '-0.005em',
+    opacity: disabled ? 0.6 : 1,
+  };
+}
+
+function quietLinkStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 13,
+    fontWeight: 400,
+    color: 'var(--t-text-muted)',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '-0.005em',
+    opacity: disabled ? 0.6 : 1,
+  };
 }
