@@ -65,6 +65,13 @@ export const THEME_ACCENT_SOFT_STRONG = 'var(--t-settings-accent-soft-strong, rg
 export const THEME_ACCENT_BORDER = 'var(--t-settings-accent-border, rgba(124, 156, 255, 0.28))';
 export const THEME_ACCENT_RING = 'var(--t-settings-accent-ring, rgba(124, 156, 255, 0.18))';
 export const APP_FONT_STACK = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+export const MONO_FONT_STACK = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
+
+// Rams × o8-site editorial tokens — paper, ink, one orange. See o8_design_language.md.
+export const RAMS_ACCENT = '#FF5A1F';
+export const RAMS_HAIRLINE_SOFT = 'rgba(17, 17, 17, 0.08)';
+export const RAMS_HAIRLINE = 'rgba(17, 17, 17, 0.18)';
+export const RAMS_INK_QUIET = 'var(--t-text-muted, #9A968E)';
 
 // ── Helpers ──
 
@@ -216,38 +223,210 @@ export function ChevronDownIcon({ rotated }: { rotated?: boolean }) {
 
 // ── Settings Tab Button ──
 
-export function TabButton({ label, icon, active, onClick }: {
+export function TabButton({ label, icon, active, onClick, comingSoon = false }: {
   label: string;
   icon: React.ReactNode;
   active: boolean;
   onClick: () => void;
+  comingSoon?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       style={{
+        position: 'relative',
         display: 'flex',
         alignItems: 'center',
         gap: 10,
         width: '100%',
-        padding: '10px 14px',
-        borderRadius: 10,
-        border: active ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid transparent',
-        background: active ? THEME_ACCENT_SOFT : 'transparent',
-        color: active ? THEME_ACCENT : 'var(--t-text-secondary)',
+        paddingTop: 9,
+        paddingRight: 12,
+        paddingBottom: 9,
+        paddingLeft: 14,
+        borderRadius: 0,
+        border: 'none',
+        borderLeft: active ? `2px solid ${RAMS_ACCENT}` : '2px solid transparent',
+        background: 'transparent',
+        color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
         fontSize: 13,
-        fontWeight: active ? 600 : 500,
+        fontWeight: active ? 500 : 400,
         cursor: 'pointer',
         textAlign: 'left',
         fontFamily: APP_FONT_STACK,
-        transition: 'background 120ms, color 120ms, border-color 120ms, box-shadow 120ms',
-        boxShadow: active ? `0 10px 24px ${THEME_ACCENT_RING}` : 'none',
+        letterSpacing: '-0.01em',
+        transition: 'color 120ms, border-color 120ms',
+        opacity: comingSoon && !active ? 0.55 : 1,
       }}
     >
-      {icon}
-      {label}
+      <span style={{ flexShrink: 0, color: active ? 'var(--t-text)' : 'var(--t-text-muted)', display: 'inline-flex' }}>
+        {icon}
+      </span>
+      <span style={{ flex: 1 }}>{label}</span>
+      {comingSoon ? (
+        <span style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 9,
+          fontWeight: 400,
+          letterSpacing: '0.12em',
+          color: RAMS_INK_QUIET,
+          textTransform: 'uppercase',
+        }}>
+          (soon)
+        </span>
+      ) : null}
     </button>
+  );
+}
+
+// ── Tab breadcrumb + heading primitives ──
+
+export function TabBreadcrumb({ tab }: { tab: string }) {
+  return (
+    <div style={{
+      fontFamily: MONO_FONT_STACK,
+      fontSize: 10,
+      fontWeight: 400,
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: RAMS_INK_QUIET,
+      marginBottom: 20,
+    }}>
+      <span>settings</span>
+      <span style={{ opacity: 0.5, marginLeft: 8, marginRight: 8 }}>/</span>
+      <span>{tab}</span>
+    </div>
+  );
+}
+
+export function TabHeading({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div style={{ marginBottom: 32 }}>
+      <h1 style={{
+        fontFamily: APP_FONT_STACK,
+        fontSize: 28,
+        fontWeight: 500,
+        color: 'var(--t-text)',
+        letterSpacing: '-0.04em',
+        lineHeight: 1.05,
+        margin: 0,
+        marginBottom: subtitle ? 10 : 0,
+      }}>
+        {title}
+      </h1>
+      {subtitle ? (
+        <p style={{
+          fontFamily: APP_FONT_STACK,
+          fontSize: 14,
+          fontWeight: 400,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          margin: 0,
+          maxWidth: 640,
+          letterSpacing: '-0.005em',
+        }}>
+          {subtitle}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Shared Rams form-label primitive ──
+
+export function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{
+      fontFamily: MONO_FONT_STACK,
+      fontSize: 10,
+      fontWeight: 400,
+      letterSpacing: '0.14em',
+      textTransform: 'uppercase',
+      color: RAMS_INK_QUIET,
+    }}>
+      {children}
+    </span>
+  );
+}
+
+// ── Rams primitives ──
+
+export function SectionLabel({ number, children }: { number: string; children: React.ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: 10,
+      fontFamily: MONO_FONT_STACK,
+      fontSize: 11,
+      fontWeight: 400,
+      letterSpacing: '0.22em',
+      textTransform: 'uppercase',
+      color: RAMS_INK_QUIET,
+      marginBottom: 14,
+    }}>
+      <span>{number}</span>
+      <span>—</span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+export function HairlineRule({ strong = false }: { strong?: boolean } = {}) {
+  return <div style={{ height: 1, background: strong ? RAMS_HAIRLINE : RAMS_HAIRLINE_SOFT, width: '100%' }} />;
+}
+
+export function BracketLabel({ children, tone = 'quiet' }: { children: React.ReactNode; tone?: 'quiet' | 'accent' | 'soon' }) {
+  const color = tone === 'accent' ? RAMS_ACCENT : tone === 'soon' ? RAMS_INK_QUIET : RAMS_INK_QUIET;
+  return (
+    <span style={{
+      fontFamily: MONO_FONT_STACK,
+      fontSize: 10,
+      fontWeight: 400,
+      letterSpacing: '0.12em',
+      textTransform: 'uppercase',
+      color,
+    }}>
+      ({children})
+    </span>
+  );
+}
+
+export function ComingSoonBanner({ message }: { message: string }) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 14,
+      paddingTop: 16,
+      paddingRight: 20,
+      paddingBottom: 16,
+      paddingLeft: 20,
+      border: `1px dashed ${RAMS_HAIRLINE}`,
+      borderRadius: 4,
+      background: 'transparent',
+    }}>
+      <span style={{
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 10,
+        fontWeight: 400,
+        letterSpacing: '0.22em',
+        textTransform: 'uppercase',
+        color: RAMS_INK_QUIET,
+        flexShrink: 0,
+      }}>
+        (coming soon)
+      </span>
+      <span style={{
+        fontFamily: APP_FONT_STACK,
+        fontSize: 13,
+        fontWeight: 400,
+        color: 'var(--t-text-secondary)',
+        lineHeight: 1.5,
+      }}>
+        {message}
+      </span>
+    </div>
   );
 }
 
