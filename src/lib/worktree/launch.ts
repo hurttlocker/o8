@@ -2,13 +2,20 @@
  * Worktree Launch Integration
  *
  * Wires WorktreeManager into the agent launch flow.
- * - Claude Code: appends --worktree flag (Claude creates + manages worktree natively)
- * - Codex / others: creates managed worktree, sets cwd for agent launch
+ * - All supported agents (Codex, Claude Code): creates a managed git worktree,
+ *   runs the pre-launch rebase onto origin/<baseBranch>, sets cwd for agent
+ *   launch.
+ *
+ * Historically claude-code got the `--worktree` CLI flag and Claude managed
+ * its own worktree externally. That skipped the pre-launch rebase and let
+ * stale-base packets revert upstream work (#608). We now force managed mode
+ * for claude-code so it walks through the same rebase gate Codex does.
  *
  * Auto-toggle: worktree isolation defaults ON when repo has active agents,
  * OFF when it's the first/only agent.
  *
- * @see https://github.com/hurttlocker/cortex-ide/issues/68
+ * @see https://github.com/hurttlocker/cortex-ide/issues/65
+ * @see https://github.com/hurttlocker/cortex-ide/issues/608
  */
 
 import { WorktreeManager } from './manager';
@@ -31,15 +38,20 @@ function getManager(repoRoot: string): WorktreeManager {
  * Resolve launch options for an agent, potentially creating a worktree.
  *
  * Returns:
- * - { worktree, cwd, claudeWorktreeFlag } if isolation was applied
+ * - { worktree, cwd } if isolation was applied
  * - null if no isolation needed (first agent, or user opted out)
  */
 export interface WorktreeLaunchResult {
   /** The worktree metadata */
   worktree: WorktreeInfo;
-  /** CWD to launch the agent in (worktree path for managed, repo root for Claude) */
+  /** CWD to launch the agent in (always the managed worktree path post-#608) */
   cwd: string;
-  /** For Claude Code: the --worktree flag value to pass */
+  /**
+   * Deprecated — historically the Claude CLI `--worktree` flag value. We now
+   * always run claude-code from the managed worktree's cwd, so callers should
+   * NOT forward this to the CLI. Kept optional on the type for backward-compat
+   * with any in-flight lanes that still look it up during the transition.
+   */
   claudeWorktreeFlag?: string;
 }
 
@@ -86,8 +98,10 @@ export async function shouldIsolate(opts: WorktreeLaunchOptions): Promise<boolea
 /**
  * Prepare a worktree for an agent launch.
  *
- * For Claude Code: creates metadata entry, returns flag to pass to CLI.
- * For Codex / others: creates real worktree, runs setup, returns cwd.
+ * Creates a real managed git worktree for every supported agent, runs the
+ * pre-launch rebase onto origin/<baseBranch>, runs setup, and returns the
+ * worktree cwd. claude-code used to take a metadata-only path with
+ * `--worktree`; that was retired in #608.
  *
  * Returns null if isolation is not needed.
  */
@@ -99,6 +113,9 @@ export async function prepareLaunchWorktree(
 
   const mgr = getManager(opts.repoRoot);
 
+  // #608 — claude-code packets now go through the same managed worktree path
+  // as Codex so the pre-launch rebase runs. Force `managed: true` on claude-code
+  // to bypass the Claude-self-managed early-return in WorktreeManager.create.
   const worktree = await mgr.create({
     agentType: opts.agentType,
     taskName: opts.taskName,
@@ -106,19 +123,12 @@ export async function prepareLaunchWorktree(
     skipSetup: opts.skipSetup,
     envMode: opts.envMode,
     envFiles: opts.envFiles,
+    managed: opts.agentType === 'claude-code' ? true : undefined,
   });
-
-  if (opts.agentType === 'claude-code') {
-    return {
-      worktree,
-      cwd: opts.repoRoot, // Claude runs from repo root, creates worktree itself
-      claudeWorktreeFlag: worktree.id, // Pass as: claude --worktree ${flag}
-    };
-  }
 
   return {
     worktree,
-    cwd: worktree.path, // Codex and others run inside the worktree directory
+    cwd: worktree.path, // All agents run inside the managed worktree directory
   };
 }
 
