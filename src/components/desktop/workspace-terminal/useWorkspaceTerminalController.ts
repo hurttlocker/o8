@@ -518,7 +518,7 @@ export function useWorkspaceTerminalController(
         tab.id === result.updatedTabId ? { ...tab, label: options.label ?? tab.label, llmDraftInjection: injection ?? tab.llmDraftInjection } : tab
       )));
     } else if (result.newTab) {
-      setTabs((previous) => [...previous, result.newTab!]);
+      setTabs((previous) => [result.newTab!, ...previous]);
     }
     setActiveTabId(result.activeTabId);
     return result.activeTabId;
@@ -533,7 +533,7 @@ export function useWorkspaceTerminalController(
           : tab
       )));
     } else if (result.newTab) {
-      setTabs((previous) => [...previous, result.newTab!]);
+      setTabs((previous) => [result.newTab!, ...previous]);
     }
     if (result.activeTabId !== null) {
       setActiveTabId(result.activeTabId);
@@ -583,14 +583,14 @@ export function useWorkspaceTerminalController(
     if (result.cliCommand) {
       pendingCliCommands.current.set(result.newTab.id, result.cliCommand);
     }
-    setTabs((previous) => [...previous, result.newTab!]);
+    setTabs((previous) => [result.newTab!, ...previous]);
     setActiveTabId(result.activeTabId);
     requestTerminalForTab(result.newTab.id, result.cliCommand ?? undefined);
   }, [requestTerminalForTab]);
 
   const handleNewChatTab = useCallback((runtime: 'codex' | 'claude-code', repo?: RegisteredRepo) => {
     const newTab = buildNewChatTab(runtime, repo);
-    setTabs((previous) => [...previous, newTab]);
+    setTabs((previous) => [newTab, ...previous]);
     setActiveTabId(newTab.id);
   }, []);
 

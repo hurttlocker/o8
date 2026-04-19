@@ -60,7 +60,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 const SILENT_EXIT_TICK_MS = 30_000;
-const LANE_INACTIVITY_GRACE_MS = 60_000;
+const LANE_INACTIVITY_GRACE_MS = 300_000;
 const GIT_COMMAND_TIMEOUT_MS = 15_000;
 const GIT_COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 
