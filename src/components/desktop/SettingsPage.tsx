@@ -33,6 +33,7 @@ import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
 import { OperatorDefaultsTab } from './settings/OperatorDefaultsTab';
 import { WorkersTab } from './settings/WorkersTab';
+import { CloudWorkersTab } from './settings/CloudWorkersTab';
 import { AppearanceTab } from './settings/AppearanceTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
@@ -269,6 +270,7 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
         <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
         <TabButton label="Workers" icon={<UsersIcon />} active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} />
+        <TabButton label="Cloud Workers" icon={<UsersIcon />} active={activeTab === 'cloud-workers'} onClick={() => setActiveTab('cloud-workers')} />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
         <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
@@ -309,6 +311,9 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         )}
         {activeTab === 'workers' && (
           <WorkersTab />
+        )}
+        {activeTab === 'cloud-workers' && (
+          <CloudWorkersTab />
         )}
         {activeTab === 'appearance' && (
           <AppearanceTab />

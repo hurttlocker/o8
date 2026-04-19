@@ -89,11 +89,16 @@ const ALLOWLIST_ANY_METHOD: RegExp[] = [
 
 /**
  * Worker protocol routes are authenticated inside each handler against the
- * worker_tokens table. Workers run off-host (customer laptops, Vercel Sandbox),
- * so the loopback-origin check does not apply here and they must bypass the
- * panel ws-token gate entirely.
+ * worker_tokens table (or, for /api/cloud/*, the cloud-workers config files).
+ * Workers run off-host (customer laptops, Kubernetes, Vercel Sandbox), so the
+ * loopback-origin check does not apply here and they must bypass the panel
+ * ws-token gate entirely. Each handler runs its own Bearer check.
+ *
+ * /api/cloud/* — Cursor-style self-hosted worker pool (issue #514). Auth via
+ * service-account keys in ~/.cortex-ide/cloud-workers/ via verifyCloudWorkerKey.
+ * /api/worker/* — push-based remote-customer runtime (earlier work).
  */
-const WORKER_PREFIXES = ['/api/worker/'];
+const WORKER_PREFIXES = ['/api/worker/', '/api/cloud/'];
 
 /**
  * Path prefixes that require auth. Everything else (pages, static, etc.) is
