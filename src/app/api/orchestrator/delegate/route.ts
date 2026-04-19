@@ -21,8 +21,16 @@ export const dynamic = 'force-dynamic';
  * reset_packet, and the whole governance toolchain work on it without the
  * orchestrator having to fall back to raw git commands.
  *
- * Body: { prompt, repoPath, taskName?, isolate? }
- * Returns: { ok, laneId, packetId, surfaceId, worktreePath, note, approvalId? }
+ * Body: { prompt, repoPath, taskName?, isolate?, baseBranch? }
+ *   baseBranch — the branch the new lane should fork from (default: 'main').
+ *     Used by fix dispatches that need to resume work against a feature
+ *     branch whose diff exists only on that branch. See #530 Option A.
+ * Returns: { ok, laneId, packetId, surfaceId, worktreePath, note, approvalId?, baseBranch }
+ *
+ * Note on #530 follow-ups: Options B (dedicated `resume` verb for
+ * existing lanes) and C (fix `cortex_steer_agent` at its root) are
+ * deferred — track them in a follow-up issue. Option A ships here as
+ * the quickest unlock for medium (5–50-edit) fix dispatches.
  */
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -34,6 +42,12 @@ export async function POST(request: NextRequest) {
   const repoPath = (body.repoPath as string)?.trim();
   const taskName = (body.taskName as string)?.trim() || prompt?.slice(0, 60);
   const isolate = body.isolate !== false; // Default true for delegated work
+
+  // #530 — Option A. Caller may override the base branch so a fix dispatch
+  // forks off a feature branch instead of main. Absent / blank → 'main' so
+  // existing callers behave identically.
+  const baseBranchRaw = typeof body.baseBranch === 'string' ? body.baseBranch.trim() : '';
+  const baseBranch = baseBranchRaw || 'main';
 
   if (!prompt) {
     return NextResponse.json({ ok: false, error: 'prompt is required' }, { status: 400 });
@@ -49,7 +63,12 @@ export async function POST(request: NextRequest) {
     .replace(/^-|-$/g, '')
     .slice(0, 40);
   const hash = createHash('sha256').update(`${prompt}-${Date.now()}`).digest('hex').slice(0, 6);
-  const branch = isolate ? `agent/${slug}-${hash}` : 'main';
+  // When not isolating we just write directly onto the caller's baseBranch
+  // (typically 'main'). When isolating we fork a fresh agent/* branch from
+  // baseBranch — the lane command carries baseBranch through to the
+  // worktree manager so `git worktree add -b <branch> origin/<baseBranch>`
+  // uses the right starting point.
+  const branch = isolate ? `agent/${slug}-${hash}` : baseBranch;
 
   try {
     // Step 1: Synthesize a packet shell in the orchestrator control plane
@@ -129,11 +148,14 @@ export async function POST(request: NextRequest) {
       current.updatedAt = now;
     });
 
-    // Step 2: Open a lane bound to the synthesized packet
+    // Step 2: Open a lane bound to the synthesized packet. #530 — pass the
+    // resolved baseBranch through so fix dispatches can fork from a feature
+    // branch rather than main.
     const laneResult = await dispatch({
       verb: 'open_lane',
       repoPath,
       branch,
+      baseBranch,
       runtime: 'codex',
       label: taskName,
       packetId,
@@ -206,6 +228,7 @@ export async function POST(request: NextRequest) {
       surfaceId: launchResult.lane?.sessionKey || null,
       worktreePath: launchResult.lane?.worktreePath || null,
       branch,
+      baseBranch,
       note: launchResult.note,
     });
   } catch (err) {
