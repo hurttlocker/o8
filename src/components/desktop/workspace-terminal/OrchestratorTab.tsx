@@ -37,6 +37,8 @@ import { OrchestratorHistorySidebar } from '@/components/desktop/OrchestratorHis
 import { UnifiedAgentsSidebar } from '@/components/desktop/UnifiedAgentsSidebar';
 import { ContextInspector } from '@/components/desktop/orchestrator/ContextInspector';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
+import { QuickActionPalette } from '@/components/desktop/orchestrator/QuickActionPalette';
+import type { QuickAction } from '@/lib/orchestrator/quick-actions';
 import {
   OrchestratorContextResidencyProvider,
   useOrchestratorContextResidency,
@@ -245,6 +247,8 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   const [missionOpen, setMissionOpen] = useState(() => readBooleanPref(MISSION_OPEN_KEY));
   const [tiledSessions, setTiledSessions] = useState<string[]>([]);
   const [tileDockExpanded, setTileDockExpanded] = useState(true);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
   const autoTiledComparisonGroupIdRef = useRef<string | null>(null);
 
@@ -421,6 +425,37 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     chatPanelRef.current?.sendNow(prompt);
   }, []);
 
+  // Cmd+K opens the quick-action palette — EXCEPT when focus is
+  // already inside the composer textarea (the composer owns that
+  // keystroke for its own shortcuts).
+  useEffect(() => {
+    if (!active) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isMac = event.metaKey;
+      const isCtrl = event.ctrlKey;
+      if (event.key !== 'k' || !(isMac || isCtrl)) return;
+      const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
+      if (activeTag === 'TEXTAREA') return;
+      event.preventDefault();
+      setPaletteOpen(true);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [active]);
+
+  const handlePalettePick = useCallback((action: QuickAction) => {
+    // Piggy-back the existing `draftInjection` pipeline: changing the
+    // id triggers ThoughtsChatPanel's useEffect which appends the text
+    // to the composer input. Operator can edit before sending.
+    setPaletteDraft({
+      id: `quick-action-${action.id}-${Date.now()}`,
+      text: action.promptTemplate,
+    });
+    setTimeout(() => chatPanelRef.current?.focusInput(), 40);
+  }, []);
+
+  const effectiveDraftInjection = paletteDraft ?? data?.draftInjection ?? null;
+
   const handleDismissComparisonGroup = useCallback((groupId: string) => {
     if (!data) {
       return;
@@ -525,7 +560,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     <ThoughtsChatPanel
       ref={chatPanelRef}
       open
-      draftInjection={data.draftInjection}
+      draftInjection={effectiveDraftInjection}
       agents={agents}
       missionState={data.missionState}
       preferredRuntime={preferredRuntime}
@@ -888,6 +923,11 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
         ) : null}
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
+      <QuickActionPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onPick={handlePalettePick}
+      />
     </div>
   );
 }
