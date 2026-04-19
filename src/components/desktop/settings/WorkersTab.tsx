@@ -3,12 +3,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   APP_FONT_STACK,
-  ActivityIcon,
-  KeyIcon,
-  PlugIcon,
-  THEME_ACCENT,
-  THEME_ACCENT_BORDER,
-  THEME_ACCENT_SOFT,
+  MONO_FONT_STACK,
+  RAMS_ACCENT,
+  RAMS_HAIRLINE_SOFT,
+  RAMS_INK_QUIET,
+  BracketLabel,
+  ComingSoonBanner,
+  FieldLabel,
+  HairlineRule,
+  SectionLabel,
+  TabBreadcrumb,
+  TabHeading,
 } from './shared';
 
 type FleetStatusKind = 'running' | 'completed' | 'failed' | 'cancelled';
@@ -45,13 +50,6 @@ interface WorkersResponse {
   remoteRuntimeRegistered: boolean;
 }
 
-const STATUS_META: Record<FleetStatusKind, { label: string; color: string; background: string; border: string }> = {
-  running: { label: 'Running', color: '#15803d', background: 'rgba(22, 163, 74, 0.12)', border: 'rgba(22, 163, 74, 0.2)' },
-  completed: { label: 'Completed', color: 'var(--t-text-secondary)', background: 'var(--t-bg-card)', border: 'var(--t-panel-border)' },
-  failed: { label: 'Failed', color: '#dc2626', background: 'rgba(239, 68, 68, 0.12)', border: 'rgba(239, 68, 68, 0.2)' },
-  cancelled: { label: 'Cancelled', color: '#b45309', background: 'rgba(245, 158, 11, 0.14)', border: 'rgba(245, 158, 11, 0.24)' },
-};
-
 function formatDate(value: string | null | undefined) {
   return value ? value.slice(0, 10) : '-';
 }
@@ -69,8 +67,8 @@ function buildBreakdown(counts: Record<FleetStatusKind, number>) {
 
 function sourceCopy(source: RemoteFlagSource) {
   if (source === 'env') return 'Environment override: O8_ENABLE_REMOTE_RUNTIME=1';
-  if (source === 'file') return 'Saved in o8 preferences for future launches';
-  return 'Using the default startup setting';
+  if (source === 'file') return 'Saved in o8 preferences for future launches.';
+  return 'Using the default startup setting.';
 }
 
 export function WorkersTab() {
@@ -217,7 +215,7 @@ export function WorkersTab() {
 
   if (loading && !data) {
     return (
-      <div style={{ paddingTop: 32, paddingRight: 32, paddingBottom: 32, paddingLeft: 32, color: 'var(--t-text-muted)', fontSize: 13, fontFamily: APP_FONT_STACK }}>
+      <div style={{ paddingTop: 40, color: 'var(--t-text-muted)', fontSize: 13, fontFamily: APP_FONT_STACK }}>
         Loading workers...
       </div>
     );
@@ -233,235 +231,521 @@ export function WorkersTab() {
   const restartAction = remoteFlag.enabled ? 'load' : 'unload';
 
   return (
-    <div style={{ paddingTop: 32, paddingRight: 32, paddingBottom: 32, paddingLeft: 32, maxWidth: 860, fontFamily: APP_FONT_STACK }}>
-      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--t-text)', marginBottom: 6, letterSpacing: '-0.05em', lineHeight: 1 }}>
-        Workers
-      </div>
-      <div style={{ fontSize: 14, color: 'var(--t-text-secondary)', marginBottom: 22, lineHeight: 1.5, maxWidth: 720 }}>
-        Manage remote worker tokens, monitor recent fleet activity, and control the remote runtime feature flag used by desktop adapters.
+    <div style={{
+      paddingTop: 8,
+      paddingLeft: 8,
+      paddingRight: 32,
+      paddingBottom: 40,
+      maxWidth: 780,
+      fontFamily: APP_FONT_STACK,
+    }}>
+      <TabBreadcrumb tab="workers" />
+      <TabHeading
+        title="workers"
+        subtitle="Manage remote worker tokens, monitor fleet activity, and control the remote runtime flag used by desktop adapters."
+      />
+
+      <div style={{ marginBottom: 28 }}>
+        <ComingSoonBanner message="Remote worker execution is scaffolded but not yet shipped. Token minting and fleet views below are live so you can stage credentials, but nothing actually runs against these tokens yet." />
       </div>
 
       {notice ? (
-        <div style={{ marginBottom: 14, border: '1px solid rgba(239, 68, 68, 0.16)', borderRadius: 14, background: 'rgba(239, 68, 68, 0.08)', color: '#b91c1c', fontSize: 13, fontWeight: 600, paddingTop: 12, paddingRight: 14, paddingBottom: 12, paddingLeft: 14 }}>
+        <div style={{
+          marginBottom: 28,
+          borderLeft: `2px solid #ef4444`,
+          paddingLeft: 14,
+          paddingTop: 2,
+          paddingBottom: 2,
+          fontSize: 13,
+          color: 'var(--t-text)',
+          lineHeight: 1.55,
+        }}>
           {notice}
         </div>
       ) : null}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ border: '1px solid var(--t-panel-border)', borderRadius: 20, background: 'var(--t-panel)', paddingTop: 18, paddingRight: 18, paddingBottom: 18, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0, flex: '1 1 480px' }}>
-              <div style={{ width: 42, height: 42, borderRadius: 14, background: THEME_ACCENT_SOFT, border: `1px solid ${THEME_ACCENT_BORDER}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: THEME_ACCENT, flexShrink: 0 }}>
-                <KeyIcon />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.03em', marginBottom: 4 }}>Worker tokens</div>
-                <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>Generate tokens for remote workers. Plaintext is shown once at creation time and never returned again.</div>
-              </div>
-            </div>
-            {!formOpen && !createdToken ? (
-              <button type="button" onClick={() => { setFormOpen(true); setNotice(null); }} style={{ minHeight: 38, paddingTop: 0, paddingRight: 16, paddingBottom: 0, paddingLeft: 16, border: `1px solid ${THEME_ACCENT}`, borderRadius: 999, background: THEME_ACCENT, color: '#ffffff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: APP_FONT_STACK }}>
-                Generate token
-              </button>
-            ) : null}
-          </div>
+      {/* 01 — TOKENS */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="01">TOKENS</SectionLabel>
 
-          {createdToken ? (
-            <div style={{ border: `1px solid ${THEME_ACCENT_BORDER}`, borderRadius: 16, background: THEME_ACCENT_SOFT, paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Token created - copy it now</div>
-                <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>This is the only time you&apos;ll see the full token. Revoke and regenerate if lost.</div>
-              </div>
-              <div style={{ border: '1px solid var(--t-panel-border)', borderRadius: 14, background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 13, fontWeight: 600, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', lineHeight: 1.5, wordBreak: 'break-all', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12 }}>
-                {createdToken.plaintextToken}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" onClick={() => { void copyCreatedToken(); }} style={{ minHeight: 36, paddingTop: 0, paddingRight: 14, paddingBottom: 0, paddingLeft: 14, border: `1px solid ${THEME_ACCENT}`, borderRadius: 999, background: THEME_ACCENT, color: '#ffffff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: APP_FONT_STACK }}>
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-                <button type="button" onClick={() => { void dismissCreatedToken(); }} style={{ minHeight: 36, paddingTop: 0, paddingRight: 14, paddingBottom: 0, paddingLeft: 14, border: '1px solid var(--t-panel-border)', borderRadius: 999, background: 'transparent', color: 'var(--t-text-secondary)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: APP_FONT_STACK }}>
-                  Dismiss
-                </button>
-              </div>
-            </div>
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 20,
+          paddingTop: 4,
+          paddingBottom: 16,
+          flexWrap: 'wrap',
+        }}>
+          <p style={{
+            fontSize: 13,
+            color: 'var(--t-text-secondary)',
+            lineHeight: 1.55,
+            maxWidth: 520,
+            margin: 0,
+          }}>
+            Generate tokens for remote workers. Plaintext is shown once at creation time and never returned again.
+          </p>
+
+          {!formOpen && !createdToken ? (
+            <button
+              type="button"
+              onClick={() => { setFormOpen(true); setNotice(null); }}
+              style={accentLinkStyle(false)}
+            >
+              generate token ›
+            </button>
           ) : null}
-
-          {formOpen && !createdToken ? (
-            <form onSubmit={submitCreate} style={{ border: '1px solid var(--t-panel-border)', borderRadius: 16, background: 'var(--t-bg-card)', paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-                {[
-                  { label: 'Label', value: label, setValue: setLabel, type: 'text', placeholder: 'Primary worker token' },
-                  { label: 'Scope', value: scope, setValue: setScope, type: 'text', placeholder: 'customer-worker' },
-                  { label: 'Max workers', value: maxWorkers, setValue: setMaxWorkers, type: 'number', placeholder: '10' },
-                ].map((field) => (
-                  <label key={field.label} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text-secondary)' }}>{field.label}</span>
-                    <input type={field.type} required={field.label === 'Label'} value={field.value} onChange={(event) => field.setValue(event.target.value)} placeholder={field.placeholder} style={{ height: 40, border: '1px solid var(--t-panel-border)', borderRadius: 12, background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 13, fontFamily: APP_FONT_STACK, outline: 'none', paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12 }} />
-                  </label>
-                ))}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <button type="submit" disabled={creating} style={{ minHeight: 36, paddingTop: 0, paddingRight: 14, paddingBottom: 0, paddingLeft: 14, border: `1px solid ${THEME_ACCENT}`, borderRadius: 999, background: THEME_ACCENT, color: '#ffffff', fontSize: 12, fontWeight: 700, cursor: creating ? 'default' : 'pointer', opacity: creating ? 0.7 : 1, fontFamily: APP_FONT_STACK }}>
-                  {creating ? 'Generating...' : 'Generate token'}
-                </button>
-                <button type="button" onClick={() => { setFormOpen(false); setNotice(null); }} style={{ minHeight: 36, paddingTop: 0, paddingRight: 14, paddingBottom: 0, paddingLeft: 14, border: '1px solid var(--t-panel-border)', borderRadius: 999, background: 'transparent', color: 'var(--t-text-secondary)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: APP_FONT_STACK }}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          ) : null}
-
-          {tokens.length === 0 ? (
-            <div style={{ border: '1px solid var(--t-panel-border)', borderRadius: 16, background: 'var(--t-bg-card)', color: 'var(--t-text-secondary)', fontSize: 13, lineHeight: 1.5, paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16 }}>
-              No worker tokens yet. Generate one to provision a remote worker with O8_WORKER_TOKEN.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {tokens.map((token) => (
-                <div key={token.id} style={{ border: '1px solid var(--t-panel-border)', borderRadius: 16, background: 'var(--t-bg-card)', paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                    <div style={{ minWidth: 0, flex: '1 1 420px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)' }}>{token.label || 'Untitled token'}</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: THEME_ACCENT, background: THEME_ACCENT_SOFT, border: `1px solid ${THEME_ACCENT_BORDER}`, borderRadius: 999, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10 }}>{token.scope}</span>
-                        {token.revokedAt ? (
-                          <span style={{ fontSize: 11, fontWeight: 700, color: '#b45309', background: 'rgba(245, 158, 11, 0.14)', border: '1px solid rgba(245, 158, 11, 0.24)', borderRadius: 999, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10 }}>REVOKED</span>
-                        ) : null}
-                      </div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{maskToken(knownPrefixes[token.id])}</div>
-                      <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
-                        Created {formatDate(token.createdAt)} · Max workers {token.maxWorkers}
-                        {token.revokedAt ? ` · Revoked at ${formatDate(token.revokedAt)}` : ''}
-                      </div>
-                    </div>
-                    {!token.revokedAt && revokeTargetId !== token.id ? (
-                      <button type="button" onClick={() => setRevokeTargetId(token.id)} style={{ minHeight: 34, paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: 999, background: 'transparent', color: '#dc2626', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: APP_FONT_STACK }}>
-                        Revoke
-                      </button>
-                    ) : null}
-                  </div>
-                  {revokeTargetId === token.id && !token.revokedAt ? (
-                    <div style={{ border: '1px solid rgba(239, 68, 68, 0.16)', borderRadius: 14, background: 'rgba(239, 68, 68, 0.08)', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: 13, color: '#991b1b', lineHeight: 1.5 }}>Revoke this token? Workers using it will be cut off on next poll.</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <button type="button" onClick={() => { void confirmRevoke(token.id); }} disabled={revokingId === token.id} style={{ minHeight: 34, paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, border: '1px solid rgba(239, 68, 68, 0.22)', borderRadius: 999, background: '#dc2626', color: '#ffffff', fontSize: 12, fontWeight: 700, cursor: revokingId === token.id ? 'default' : 'pointer', opacity: revokingId === token.id ? 0.7 : 1, fontFamily: APP_FONT_STACK }}>
-                          {revokingId === token.id ? 'Revoking...' : 'Confirm'}
-                        </button>
-                        <button type="button" onClick={() => setRevokeTargetId(null)} style={{ minHeight: 34, paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, border: '1px solid rgba(239, 68, 68, 0.16)', borderRadius: 999, background: 'transparent', color: '#991b1b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: APP_FONT_STACK }}>
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
-        <div style={{ border: '1px solid var(--t-panel-border)', borderRadius: 20, background: 'var(--t-panel)', paddingTop: 18, paddingRight: 18, paddingBottom: 18, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{ width: 42, height: 42, borderRadius: 14, background: 'var(--t-bg-card)', border: '1px solid var(--t-panel-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-secondary)', flexShrink: 0 }}>
-              <ActivityIcon />
+        {createdToken ? (
+          <div style={{
+            borderLeft: `2px solid ${RAMS_ACCENT}`,
+            paddingLeft: 14,
+            paddingTop: 12,
+            paddingBottom: 12,
+            marginBottom: 16,
+          }}>
+            <FieldLabel>token created — copy now</FieldLabel>
+            <div style={{
+              fontSize: 12,
+              color: 'var(--t-text-secondary)',
+              lineHeight: 1.55,
+              marginTop: 4,
+              marginBottom: 10,
+            }}>
+              This is the only time the plaintext will be shown. Revoke and regenerate if lost.
             </div>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.03em', marginBottom: 4 }}>Fleet status</div>
-              <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>Recent worker runs from the last 100 records. This section is read-only.</div>
+            <div style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 12,
+              fontWeight: 400,
+              color: 'var(--t-text)',
+              letterSpacing: '0.02em',
+              lineHeight: 1.55,
+              wordBreak: 'break-all',
+              paddingTop: 10,
+              paddingBottom: 10,
+              paddingLeft: 0,
+              paddingRight: 0,
+              borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+              borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+              marginBottom: 10,
+            }}>
+              {createdToken.plaintextToken}
+            </div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => { void copyCreatedToken(); }} style={accentLinkStyle(false)}>
+                {copied ? '(copied)' : 'copy ›'}
+              </button>
+              <button type="button" onClick={() => { void dismissCreatedToken(); }} style={quietLinkStyle(false)}>
+                dismiss
+              </button>
             </div>
           </div>
+        ) : null}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
-            {(['running', 'completed', 'failed', 'cancelled'] as FleetStatusKind[]).map((status) => (
-              <div key={status} style={{ border: `1px solid ${STATUS_META[status].border}`, borderRadius: 16, background: STATUS_META[status].background, paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14 }}>
-                <div style={{ display: 'inline-flex', alignItems: 'center', border: `1px solid ${STATUS_META[status].border}`, borderRadius: 999, background: 'transparent', color: STATUS_META[status].color, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10, marginBottom: 12 }}>{STATUS_META[status].label}</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--t-text)', letterSpacing: '-0.05em', lineHeight: 1 }}>{data?.fleet.counts[status] ?? 0}</div>
+        {formOpen && !createdToken ? (
+          <form onSubmit={submitCreate} style={{
+            paddingTop: 16,
+            paddingBottom: 16,
+            borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+            borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+            marginBottom: 16,
+          }}>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 14,
+            }}>
+              <TokenField label="Label" value={label} setValue={setLabel} placeholder="Primary worker token" />
+              <TokenField label="Scope" value={scope} setValue={setScope} placeholder="customer-worker" />
+              <TokenField label="Max workers" value={maxWorkers} setValue={setMaxWorkers} placeholder="10" type="number" />
+            </div>
+            <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button type="submit" disabled={creating} style={accentLinkStyle(creating)}>
+                {creating ? 'generating...' : 'generate ›'}
+              </button>
+              <button type="button" onClick={() => { setFormOpen(false); setNotice(null); }} style={quietLinkStyle(false)}>
+                cancel
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        {tokens.length === 0 ? (
+          <div style={{
+            paddingTop: 8,
+            fontSize: 13,
+            color: RAMS_INK_QUIET,
+            lineHeight: 1.55,
+          }}>
+            No worker tokens yet. Generate one to provision a remote worker with{' '}
+            <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>O8_WORKER_TOKEN</span>.
+          </div>
+        ) : (
+          <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+            {tokens.map((token) => (
+              <div key={token.id} style={{
+                paddingTop: 14,
+                paddingBottom: 14,
+                borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ minWidth: 0, flex: '1 1 420px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                        {token.label || 'Untitled token'}
+                      </span>
+                      <BracketLabel tone="quiet">{token.scope}</BracketLabel>
+                      {token.revokedAt ? <BracketLabel tone="accent">revoked</BracketLabel> : null}
+                    </div>
+                    <div style={{ fontFamily: MONO_FONT_STACK, fontSize: 12, color: 'var(--t-text-secondary)', letterSpacing: '0.02em' }}>
+                      {maskToken(knownPrefixes[token.id])}
+                    </div>
+                    <div style={{ fontSize: 12, color: RAMS_INK_QUIET, lineHeight: 1.55 }}>
+                      Created {formatDate(token.createdAt)} · Max workers {token.maxWorkers}
+                      {token.revokedAt ? ` · Revoked ${formatDate(token.revokedAt)}` : ''}
+                    </div>
+                  </div>
+                  {!token.revokedAt && revokeTargetId !== token.id ? (
+                    <button type="button" onClick={() => setRevokeTargetId(token.id)} style={quietLinkStyle(false)}>
+                      revoke
+                    </button>
+                  ) : null}
+                </div>
+                {revokeTargetId === token.id && !token.revokedAt ? (
+                  <div style={{
+                    paddingTop: 10,
+                    paddingBottom: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 16,
+                    flexWrap: 'wrap',
+                    borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                  }}>
+                    <div style={{ fontSize: 12, color: '#991b1b', lineHeight: 1.55 }}>
+                      Revoke this token? Workers using it will be cut off on next poll.
+                    </div>
+                    <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => { void confirmRevoke(token.id); }}
+                        disabled={revokingId === token.id}
+                        style={{
+                          ...accentLinkStyle(revokingId === token.id),
+                          color: '#dc2626',
+                          borderBottomColor: '#dc2626',
+                        }}
+                      >
+                        {revokingId === token.id ? 'revoking...' : 'confirm ›'}
+                      </button>
+                      <button type="button" onClick={() => setRevokeTargetId(null)} style={quietLinkStyle(false)}>
+                        cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
+        )}
+      </section>
 
-          {fleetTokens.length === 0 ? (
-            <div style={{ border: '1px solid var(--t-panel-border)', borderRadius: 16, background: 'var(--t-bg-card)', color: 'var(--t-text-secondary)', fontSize: 13, lineHeight: 1.5, paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16 }}>
-              No worker runs recorded yet. Generate a token and wire a worker with O8_WORKER_TOKEN.
+      {/* 02 — FLEET */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="02">FLEET</SectionLabel>
+        <p style={{
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          maxWidth: 580,
+          margin: 0,
+          marginBottom: 14,
+        }}>
+          Recent worker runs from the last 100 records. Read-only.
+        </p>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+          marginBottom: 16,
+        }}>
+          {(['running', 'completed', 'failed', 'cancelled'] as FleetStatusKind[]).map((status, idx) => (
+            <div key={status} style={{
+              paddingTop: 14,
+              paddingBottom: 14,
+              paddingLeft: 14,
+              paddingRight: 14,
+              borderRight: idx === 3 ? 'none' : `1px solid ${RAMS_HAIRLINE_SOFT}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}>
+              <FieldLabel>{status}</FieldLabel>
+              <div style={{
+                fontSize: 26,
+                fontWeight: 400,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.02em',
+                lineHeight: 1,
+                fontFamily: APP_FONT_STACK,
+              }}>
+                {data?.fleet.counts[status] ?? 0}
+              </div>
             </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {fleetTokens.map((token) => (
-                <div key={token.tokenId} style={{ border: '1px solid var(--t-panel-border)', borderRadius: 16, background: 'var(--t-bg-card)', paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                  <div style={{ minWidth: 0, flex: '1 1 360px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)' }}>{token.label || 'Untitled token'}</span>
-                      {token.hasActiveRuns ? (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: '#15803d', background: 'rgba(22, 163, 74, 0.12)', border: '1px solid rgba(22, 163, 74, 0.2)', borderRadius: 999, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10 }}>ACTIVE</span>
-                      ) : null}
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>{token.totalRuns} runs · {buildBreakdown(token.counts)}</div>
+          ))}
+        </div>
+
+        {fleetTokens.length === 0 ? (
+          <div style={{ fontSize: 13, color: RAMS_INK_QUIET, lineHeight: 1.55 }}>
+            No worker runs recorded yet.
+          </div>
+        ) : (
+          <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+            {fleetTokens.map((token) => (
+              <div key={token.tokenId} style={{
+                paddingTop: 12,
+                paddingBottom: 12,
+                borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                flexWrap: 'wrap',
+              }}>
+                <div style={{ minWidth: 0, flex: '1 1 360px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                      {token.label || 'Untitled token'}
+                    </span>
+                    {token.hasActiveRuns ? <BracketLabel tone="accent">active</BracketLabel> : null}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Last event {formatDate(token.lastRunAt)}</div>
+                  <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
+                    {token.totalRuns} runs · {buildBreakdown(token.counts)}
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+                <div style={{ fontSize: 12, color: RAMS_INK_QUIET, fontFamily: MONO_FONT_STACK }}>
+                  last {formatDate(token.lastRunAt)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
-        <div style={{ border: '1px solid var(--t-panel-border)', borderRadius: 20, background: 'var(--t-panel)', paddingTop: 18, paddingRight: 18, paddingBottom: 18, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{ width: 42, height: 42, borderRadius: 14, background: 'var(--t-bg-card)', border: '1px solid var(--t-panel-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-secondary)', flexShrink: 0 }}>
-              <PlugIcon />
+      {/* 03 — REMOTE RUNTIME */}
+      <section>
+        <SectionLabel number="03">REMOTE RUNTIME</SectionLabel>
+        <p style={{
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          maxWidth: 580,
+          margin: 0,
+          marginBottom: 14,
+        }}>
+          Control whether desktop surfaces remote runtime adapters.
+        </p>
+
+        <div
+          title={envControlled ? 'Controlled by environment variable; unset O8_ENABLE_REMOTE_RUNTIME to change from this UI.' : undefined}
+          style={{
+            paddingTop: 14,
+            paddingBottom: 14,
+            borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+            borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 20,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t-text)', marginBottom: 4, letterSpacing: '-0.01em' }}>
+              Enable on next launch
             </div>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.03em', marginBottom: 4 }}>Remote runtime toggle</div>
-              <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>Control whether desktop can surface remote runtime adapters.</div>
+            <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
+              {remoteFlagDirty
+                ? `Pending change: ${draftRemoteEnabled ? 'enable' : 'disable'} after Apply.`
+                : sourceCopy(remoteFlag.source)}
             </div>
           </div>
-
-          <label title={envControlled ? 'Controlled by environment variable; unset `O8_ENABLE_REMOTE_RUNTIME` to change from this UI.' : undefined} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, border: '1px solid var(--t-panel-border)', borderRadius: 16, background: 'var(--t-bg-card)', paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14, cursor: envControlled ? 'not-allowed' : 'pointer' }}>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Enable remote runtime adapters on next launch</div>
-              <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
-                {remoteFlagDirty ? `Pending change: ${draftRemoteEnabled ? 'enable' : 'disable'} after Apply.` : sourceCopy(remoteFlag.source)}
-              </div>
-            </div>
-            <span style={{ position: 'relative', width: 48, height: 28, borderRadius: 999, background: draftRemoteEnabled ? THEME_ACCENT : 'var(--t-input-bg)', border: draftRemoteEnabled ? `1px solid ${THEME_ACCENT}` : '1px solid var(--t-panel-border)', flexShrink: 0, opacity: flagBusy ? 0.7 : 1 }}>
-              <input type="checkbox" checked={draftRemoteEnabled} disabled={envControlled || flagBusy} onChange={(event) => { setDraftRemoteEnabled(event.target.checked); setNotice(null); }} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: envControlled ? 'not-allowed' : 'pointer' }} />
-              <span style={{ position: 'absolute', top: 3, left: draftRemoteEnabled ? 23 : 3, width: 20, height: 20, borderRadius: 999, background: '#ffffff', boxShadow: '0 4px 12px rgba(15, 23, 42, 0.18)', transition: 'left 180ms ease' }} />
-            </span>
-          </label>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 999, border: remoteRuntimeRegistered ? '1px solid rgba(22, 163, 74, 0.2)' : '1px solid var(--t-panel-border)', background: remoteRuntimeRegistered ? 'rgba(22, 163, 74, 0.12)' : 'var(--t-bg-card)', color: remoteRuntimeRegistered ? '#15803d' : 'var(--t-text-secondary)', fontSize: 11, fontWeight: 700, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10 }}>
-              Current session: {remoteRuntimeRegistered ? 'loaded' : 'not loaded'}
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 999, border: remoteFlag.enabled ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)', background: remoteFlag.enabled ? THEME_ACCENT_SOFT : 'var(--t-bg-card)', color: remoteFlag.enabled ? THEME_ACCENT : 'var(--t-text-secondary)', fontSize: 11, fontWeight: 700, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10 }}>
-              Next launch: {remoteFlag.enabled ? 'enabled' : 'disabled'}
-            </span>
-          </div>
-
-          {restartRequired ? (
-            <div style={{ border: '1px solid rgba(245, 158, 11, 0.24)', borderRadius: 14, background: 'rgba(245, 158, 11, 0.12)', color: '#b45309', fontSize: 12, lineHeight: 1.5, paddingTop: 12, paddingRight: 14, paddingBottom: 12, paddingLeft: 14 }}>
-              Restart o8 to {restartAction} remote runtime adapters. This desktop session stays {remoteRuntimeRegistered ? 'loaded' : 'unloaded'} until restart.
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
-              Changes here apply on the next desktop launch. Hot-reloadable adapter registration is follow-up work.
-            </div>
-          )}
-
-          {envControlled ? (
-            <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
-              The environment override owns this setting. Restart o8 without `O8_ENABLE_REMOTE_RUNTIME=1` to manage it from Settings.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
-                {remoteFlagDirty ? `Apply to ${draftRemoteEnabled ? 'enable' : 'disable'} remote runtime adapters for the next launch.` : 'No pending change.'}
-              </div>
-              <button type="button" onClick={() => { void updateRemoteFlag(draftRemoteEnabled); }} disabled={!remoteFlagDirty || flagBusy} style={{ minHeight: 36, paddingTop: 0, paddingRight: 14, paddingBottom: 0, paddingLeft: 14, border: `1px solid ${THEME_ACCENT}`, borderRadius: 999, background: THEME_ACCENT, color: '#ffffff', fontSize: 12, fontWeight: 700, cursor: !remoteFlagDirty || flagBusy ? 'default' : 'pointer', opacity: !remoteFlagDirty || flagBusy ? 0.6 : 1, fontFamily: APP_FONT_STACK }}>
-                {flagBusy ? 'Applying...' : 'Apply (requires restart)'}
-              </button>
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={() => { if (!envControlled && !flagBusy) { setDraftRemoteEnabled(!draftRemoteEnabled); setNotice(null); } }}
+            disabled={envControlled || flagBusy}
+            style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 400,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: draftRemoteEnabled ? RAMS_ACCENT : 'var(--t-text-muted)',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: `1px solid ${draftRemoteEnabled ? RAMS_ACCENT : RAMS_HAIRLINE_SOFT}`,
+              paddingTop: 3,
+              paddingBottom: 3,
+              paddingLeft: 0,
+              paddingRight: 0,
+              cursor: envControlled ? 'not-allowed' : 'pointer',
+              opacity: flagBusy ? 0.6 : 1,
+            }}
+          >
+            {draftRemoteEnabled ? '(on)' : '(off)'}
+          </button>
         </div>
-      </div>
+
+        <div style={{
+          display: 'flex',
+          gap: 20,
+          paddingTop: 10,
+          paddingBottom: 10,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+        }}>
+          <BracketLabel tone="quiet">
+            current: {remoteRuntimeRegistered ? 'loaded' : 'not loaded'}
+          </BracketLabel>
+          <BracketLabel tone={remoteFlag.enabled ? 'accent' : 'quiet'}>
+            next: {remoteFlag.enabled ? 'enabled' : 'disabled'}
+          </BracketLabel>
+        </div>
+
+        {restartRequired ? (
+          <div style={{
+            borderLeft: `2px solid #f59e0b`,
+            paddingLeft: 14,
+            paddingTop: 2,
+            paddingBottom: 2,
+            fontSize: 12,
+            color: 'var(--t-text-secondary)',
+            lineHeight: 1.55,
+            marginBottom: 14,
+          }}>
+            Restart o8 to {restartAction} remote runtime adapters. This session stays {remoteRuntimeRegistered ? 'loaded' : 'unloaded'} until restart.
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: RAMS_INK_QUIET, lineHeight: 1.55, marginBottom: 14 }}>
+            Changes apply on the next desktop launch. Hot-reloadable adapter registration is follow-up work.
+          </div>
+        )}
+
+        {envControlled ? (
+          <div style={{ fontSize: 12, color: RAMS_INK_QUIET, lineHeight: 1.55 }}>
+            The environment override owns this setting. Restart o8 without{' '}
+            <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>O8_ENABLE_REMOTE_RUNTIME=1</span>{' '}
+            to manage it here.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
+              {remoteFlagDirty
+                ? `Apply to ${draftRemoteEnabled ? 'enable' : 'disable'} adapters for the next launch.`
+                : 'No pending change.'}
+            </div>
+            <button
+              type="button"
+              onClick={() => { void updateRemoteFlag(draftRemoteEnabled); }}
+              disabled={!remoteFlagDirty || flagBusy}
+              style={accentLinkStyle(!remoteFlagDirty || flagBusy)}
+            >
+              {flagBusy ? 'applying...' : 'apply (requires restart) ›'}
+            </button>
+          </div>
+        )}
+
+        <div style={{ marginTop: 20 }}>
+          <HairlineRule />
+        </div>
+      </section>
     </div>
   );
+}
+
+function TokenField({ label, value, setValue, placeholder, type = 'text' }: {
+  label: string;
+  value: string;
+  setValue: (v: string) => void;
+  placeholder: string;
+  type?: string;
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <FieldLabel>{label}</FieldLabel>
+      <input
+        type={type}
+        required={label === 'Label'}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        placeholder={placeholder}
+        style={{
+          border: 'none',
+          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+          background: 'transparent',
+          color: 'var(--t-text)',
+          fontSize: 14,
+          fontFamily: APP_FONT_STACK,
+          fontWeight: 400,
+          letterSpacing: '-0.005em',
+          outline: 'none',
+          paddingTop: 6,
+          paddingBottom: 6,
+          paddingLeft: 0,
+          paddingRight: 0,
+        }}
+        onFocus={(e) => { e.currentTarget.style.borderBottomColor = RAMS_ACCENT; }}
+        onBlur={(e) => { e.currentTarget.style.borderBottomColor = RAMS_HAIRLINE_SOFT; }}
+      />
+    </label>
+  );
+}
+
+function accentLinkStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 13,
+    fontWeight: 400,
+    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${disabled ? RAMS_HAIRLINE_SOFT : RAMS_ACCENT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '-0.005em',
+    opacity: disabled ? 0.6 : 1,
+  };
+}
+
+function quietLinkStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 13,
+    fontWeight: 400,
+    color: 'var(--t-text-muted)',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '-0.005em',
+    opacity: disabled ? 0.6 : 1,
+  };
 }
