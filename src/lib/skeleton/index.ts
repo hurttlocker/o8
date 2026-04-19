@@ -252,7 +252,9 @@ export function searchSymbols(
 export { renderSkeleton } from './renderer';
 export { walkRepo } from './walker';
 export { parseFile, hashFile, hashContent } from './parser';
-export { clearRepo, getAllCached, getChunksForFile, getChunksForRepo, getChunkStats } from './store';
+export { clearRepo, getAllCached, getCached, getChunksForFile, getChunksForRepo, getChunkStats } from './store';
+export { getImportGraph, getInboundImporters } from './import-graph';
+export type { ImportGraphNode, ImportGraphResult } from './import-graph';
 export {
   ensureBooted,
   triggerScan,

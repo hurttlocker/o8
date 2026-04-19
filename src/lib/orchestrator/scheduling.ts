@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 
+import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
@@ -296,6 +297,28 @@ export async function runDispatchTick(
       if (packet.predictedFiles) return packet;
       const files = computePredictedFiles(packet);
       return files.length > 0 ? { ...packet, predictedFiles: files } : packet;
+    }),
+  };
+
+  // #535 — Populate `readBudget` for any queued packet that doesn't already
+  // have one set. Dispatch-site injection only — in-flight packets (running,
+  // launching, awaiting_review, etc.) are left untouched so we never mutate
+  // a prompt under an agent's feet. The computed budget is opt-out: when
+  // `computeReadBudget` returns null (no targets, strong tier w/ no graph),
+  // the packet field stays undefined and legacy behaviour is preserved.
+  nextState = {
+    ...nextState,
+    packets: nextState.packets.map((packet) => {
+      if (packet.readBudget) return packet;
+      if (packet.status !== 'queued' && packet.status !== 'recovering' && packet.status !== 'draft') {
+        return packet;
+      }
+      const repoPath = packet.workspaceTargetPath;
+      const targetFiles = packet.predictedFiles ?? [];
+      if (!repoPath || targetFiles.length === 0) return packet;
+      const tier = resolveModelTier({ runtime: packet.runtime, assignedModel: packet.assignedModel });
+      const budget = computeReadBudget({ repoPath, targetFiles, tier });
+      return budget ? { ...packet, readBudget: budget } : packet;
     }),
   };
 
