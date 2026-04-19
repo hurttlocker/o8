@@ -240,6 +240,28 @@ async function fetchNextJson<T>(
   return payload as T;
 }
 
+// ── Boot readiness probe ──
+// Poll /api/panel/status (allowlisted — no bearer token needed) until Next.js answers
+// with a 200, or until the timeout elapses. This prevents the "fetch failed" storm that
+// occurs when ws-server boots before Next's request handler is listening.
+const NEXT_READY_POLL_MS = 250;
+const NEXT_READY_TIMEOUT_MS = 10_000;
+
+async function waitForNextReady(): Promise<void> {
+  const url = buildNextUrl('/api/panel/status');
+  const deadline = Date.now() + NEXT_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(NEXT_READY_POLL_MS) });
+      if (res.ok) return;
+    } catch {
+      // ECONNREFUSED / fetch failed — Next not up yet; keep polling
+    }
+    await new Promise<void>((resolve) => { setTimeout(resolve, NEXT_READY_POLL_MS); });
+  }
+  console.warn('[ws-server] Next.js did not become ready within 10s — proceeding anyway');
+}
+
 async function fetchCommandCenterSnapshot(fresh = false): Promise<CommandCenterSnapshot> {
   const searchParams = new URLSearchParams();
   if (fresh) searchParams.set('fresh', '1');
@@ -1510,7 +1532,11 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
       }
     }
   } catch (error) {
-    console.error('[ws-server] realtime global snapshot failed:', error instanceof Error ? error.message : 'unknown');
+    const msg = error instanceof Error ? error.message : 'unknown';
+    // Silently skip transient 404s during startup / packet transitions — the route
+    // exists but Next.js may not have compiled/rendered it yet.
+    if (typeof msg === 'string' && msg.includes('(404)')) return;
+    console.error('[ws-server] realtime global snapshot failed:', msg);
   }
 }
 
@@ -3312,6 +3338,8 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 async function bootstrapWsServer() {
+  await waitForNextReady();
+
   const db = getDb();
   if (db) {
     expireStaleApprovals();
