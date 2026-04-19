@@ -5,6 +5,7 @@ import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import {
   buildMissionId,
   buildMissionPrompt,
@@ -69,12 +70,40 @@ export async function createMission(input: CreateMissionInput) {
       ? `inline/${slugify(issue.title)}`
       : `issue/${issue.number}-${slugify(issue.title)}`;
     const inlineLabel = hasInlineIssues ? referenceLabels[index] : undefined;
+    const packetSummary = buildPacketSummary(issue, input.constraints, repoPath, inlineLabel);
+
+    // #615 — Snapshot learned-rules + issue body for the details popover.
+    const packetType = issue.title.trim().split(/\s+/)[0]?.toLowerCase() || 'feat';
+    let learnedRules: string[] = [];
+    try {
+      const seen = new Set<string>();
+      learnedRules = [
+        ...readRepoScopedRules(repoPath).map((ruleText) => ({ ruleText, source: 'file' as const })),
+        ...getTopRulesForPacket({ repoPath, packetType, limit: 5 }),
+      ].flatMap((rule) => {
+        const text = rule.ruleText.trim();
+        const normalized = text.toLowerCase();
+        if (!text || seen.has(normalized)) return [];
+        seen.add(normalized);
+        return [text];
+      });
+    } catch {
+      learnedRules = [];
+    }
+
+    const issueMeta = isInlineIssue(issue)
+      ? (issue.body?.trim() ? { number: issue.number, body: issue.body } : undefined)
+      : {
+          number: issue.number,
+          ...(issue.body?.trim() ? { body: issue.body } : {}),
+          ...(issue.url?.trim() ? { url: issue.url } : {}),
+        };
 
     return {
       id: packetIds[index]!,
       referenceLabel: referenceLabels[index]!,
       title: issue.title,
-      summary: buildPacketSummary(issue, input.constraints, repoPath, inlineLabel),
+      summary: packetSummary,
       workspaceTargetPath: repoPath,
       branchTarget,
       runtime: input.runtime,
@@ -89,6 +118,9 @@ export async function createMission(input: CreateMissionInput) {
       archivedAt: null,
       review: null,
       lane: null,
+      prompt: [issue.title, packetSummary].map((part) => part.trim()).filter(Boolean).join('\n\n'),
+      ...(learnedRules.length > 0 ? { learnedRules } : {}),
+      ...(issueMeta ? { issue: issueMeta } : {}),
     } satisfies OrchestratorPacket;
   });
 
