@@ -33,7 +33,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 7;
+const DB_SCHEMA_VERSION = 8;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -434,11 +434,14 @@ function ensureTables(sqlite: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS external_mcp_servers (
       id TEXT PRIMARY KEY,
+      team_id TEXT,
       name TEXT NOT NULL UNIQUE,
       transport TEXT NOT NULL,
       command TEXT NOT NULL,
       args TEXT NOT NULL DEFAULT '[]',
       env_json TEXT,
+      url TEXT,
+      oauth_token TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -482,6 +485,7 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_lane_events_timestamp ON lane_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_enabled ON external_mcp_servers(enabled);
     CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_updated_at ON external_mcp_servers(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_team_id ON external_mcp_servers(team_id);
 
     CREATE TABLE IF NOT EXISTS review_queue (
       id TEXT PRIMARY KEY,
@@ -517,6 +521,7 @@ function ensureTables(sqlite: Database.Database): void {
   ensureSessionOutcomeColumns(sqlite);
   ensureUsageLogSchema(sqlite);
   ensureApprovalEventsTable(sqlite);
+  ensureExternalMcpServerColumns(sqlite);
   migrateLegacyApprovalStoreIfNeeded(sqlite, { approvalsTablePreviouslyMissing });
   backfillWatchedAgentColumns(sqlite);
   backfillApprovalContextColumns(sqlite);
@@ -703,6 +708,26 @@ function ensureApprovalContextIndexes(sqlite: Database.Database): void {
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_approvals_packet_id ON approvals(packet_id);
     CREATE INDEX IF NOT EXISTS idx_approvals_lane_id ON approvals(lane_id);
+  `);
+}
+
+/**
+ * Adds columns introduced in schema v8 to an existing external_mcp_servers table.
+ * CREATE TABLE IF NOT EXISTS already includes these for fresh databases.
+ */
+function ensureExternalMcpServerColumns(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'external_mcp_servers', 'team_id')) {
+    sqlite.exec('ALTER TABLE external_mcp_servers ADD COLUMN team_id TEXT');
+  }
+  if (!tableColumnExists(sqlite, 'external_mcp_servers', 'url')) {
+    sqlite.exec('ALTER TABLE external_mcp_servers ADD COLUMN url TEXT');
+  }
+  if (!tableColumnExists(sqlite, 'external_mcp_servers', 'oauth_token')) {
+    sqlite.exec('ALTER TABLE external_mcp_servers ADD COLUMN oauth_token TEXT');
+  }
+  // Ensure team_id index exists (may be missing on pre-v8 databases)
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_team_id ON external_mcp_servers(team_id);
   `);
 }
 

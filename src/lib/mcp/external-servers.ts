@@ -8,6 +8,8 @@ type ExternalMcpEnv = Record<string, string>;
 
 export interface ExternalMcpServerRecord {
   id: string;
+  /** Optional team scoping — null means global (user-level) */
+  teamId: string | null;
   name: string;
   transport: ExternalMcpTransport;
   command: string;
@@ -15,27 +17,40 @@ export interface ExternalMcpServerRecord {
   argsJson: string;
   env: ExternalMcpEnv | null;
   envJson: string | null;
+  /** HTTP servers: explicit URL (same as command for backwards compat) */
+  url: string | null;
+  /** OAuth bearer token for authenticated HTTP MCP servers */
+  oauthToken: string | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface InsertExternalMcpServerInput {
+  /** Optional team ID to scope this server to a specific team */
+  teamId?: string | null;
   name: string;
   transport: ExternalMcpTransport;
   command: string;
   args?: string[];
   env?: ExternalMcpEnv | null;
+  /** HTTP transport: explicit URL field */
+  url?: string | null;
+  /** OAuth bearer token for authenticated HTTP servers (stored as-is) */
+  oauthToken?: string | null;
   enabled?: boolean;
 }
 
 interface ExternalMcpServerRow {
   id: string;
+  teamId: string | null;
   name: string;
   transport: ExternalMcpTransport;
   command: string;
   args: string;
   envJson: string | null;
+  url: string | null;
+  oauthToken: string | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -51,6 +66,8 @@ export type OrchestratorMcpServerConfig =
   | {
     type: 'http';
     url: string;
+    /** Optional headers (e.g. Authorization: Bearer <token>) */
+    headers?: Record<string, string>;
   };
 
 function requireDb() {
@@ -136,6 +153,9 @@ function toRecord(row: ExternalMcpServerRow): ExternalMcpServerRecord {
     argsJson: JSON.stringify(args),
     env,
     envJson: env ? JSON.stringify(env, null, 2) : null,
+    url: row.url ?? null,
+    oauthToken: row.oauthToken ?? null,
+    teamId: row.teamId ?? null,
   };
 }
 
@@ -191,14 +211,22 @@ export function insertExternalMcpServer(input: InsertExternalMcpServerInput): Ex
     throw new Error(`An MCP server named "${name}" already exists`);
   }
 
+  // For HTTP transport, normalize: if url is provided use it, fall back to command
+  const resolvedUrl = input.transport === 'http'
+    ? (input.url?.trim() || command)
+    : null;
+
   const id = randomUUID();
   db.insert(externalMcpServers).values({
     id,
+    teamId: input.teamId ?? null,
     name,
     transport: input.transport,
     command,
     args: serializeArgs(input.args),
     envJson: serializeEnv(input.env),
+    url: resolvedUrl,
+    oauthToken: input.oauthToken?.trim() || null,
     enabled: input.enabled ?? true,
     createdAt: now,
     updatedAt: now,
@@ -237,10 +265,16 @@ export function removeExternalMcpServer(id: string): boolean {
 
 export function externalServerToMcpConfig(server: ExternalMcpServerRecord): OrchestratorMcpServerConfig {
   if (server.transport === 'http') {
-    return {
-      type: 'http',
-      url: server.command,
-    };
+    // Use explicit url field if set, fall back to command for backwards compat
+    const url = server.url || server.command;
+    if (server.oauthToken) {
+      return {
+        type: 'http',
+        url,
+        headers: { Authorization: `Bearer ${server.oauthToken}` },
+      } as OrchestratorMcpServerConfig;
+    }
+    return { type: 'http', url };
   }
 
   const env = server.env ?? undefined;
