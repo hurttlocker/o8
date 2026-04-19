@@ -44,6 +44,7 @@ import {
   handleLaneEvents,
   handleSend,
   handleStatus,
+  handleTranscript,
 } from '@/lib/mcp/operator-handlers/status';
 
 // ── Pre-flight diagnostics (run once at startup) ──
@@ -146,6 +147,7 @@ const TOOLS: McpTool[] = [
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_reject'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_history'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_lane_events'),
+  ...STATUS_TOOLS.filter((t) => t.name === 'o8_packet_transcript'),
   ...O8_WEBVIEW_TOOLS,
   ...MISSION_TOOLS.filter((t) => t.name === 'create_mission'),
   ...MISSION_TOOLS.filter((t) => t.name === 'dispatch_mission'),
@@ -164,6 +166,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_reject: handleReject,
   o8_history: handleHistory,
   o8_lane_events: handleLaneEvents,
+  o8_packet_transcript: handleTranscript,
   ...createO8WebviewToolHandlers(getO8WebviewClient),
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,

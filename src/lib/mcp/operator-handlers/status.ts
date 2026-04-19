@@ -90,6 +90,33 @@ export const STATUS_TOOLS: McpTool[] = [
       },
     },
   },
+  {
+    name: 'o8_packet_transcript',
+    description:
+      'Read a paginated tail of a packet\'s codex transcript with normalized events (tool_call / tool_result / assistant / error / done). Pass `tail: true` for the last N events, or `cursor: N` to fetch events with seq > N. Example: o8_packet_transcript({packetId: "P1", tail: true, limit: 20}) returns the last 20 events. o8_packet_transcript({packetId: "P1", cursor: 47}) returns events after seq 47.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'Packet id to read the transcript for.',
+        },
+        cursor: {
+          type: 'number',
+          description: 'Return events with seq > cursor. Ignored when tail is true.',
+        },
+        tail: {
+          type: 'boolean',
+          description: 'If true, return the last `limit` events instead of paginating by cursor.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max events to return. Default 50, max 200.',
+        },
+      },
+      required: ['packetId'],
+    },
+  },
 ];
 
 export async function handleSend(args: Record<string, unknown>): Promise<McpToolResult> {
@@ -257,5 +284,58 @@ export async function handleLaneEvents(args: Record<string, unknown>): Promise<M
   } catch (err) {
     console.error(`[o8-operator] o8_lane_events failed: ${err}`);
     return textResult(`Failed to read lane events: ${err}`, true);
+  }
+}
+
+export async function handleTranscript(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const packetIdRaw = args.packetId;
+    const packetId = typeof packetIdRaw === 'string' ? packetIdRaw.trim() : '';
+    if (!packetId) return textResult('packetId is required', true);
+
+    const cursorRaw = args.cursor;
+    const cursor = typeof cursorRaw === 'number' && Number.isFinite(cursorRaw) && cursorRaw >= 0
+      ? Math.floor(cursorRaw)
+      : undefined;
+
+    const tailRaw = args.tail;
+    const tail = tailRaw === true || tailRaw === 'true' || tailRaw === 1;
+
+    const limitRaw = args.limit;
+    const limit = typeof limitRaw === 'number' && Number.isFinite(limitRaw) && limitRaw > 0
+      ? Math.min(200, Math.floor(limitRaw))
+      : undefined;
+
+    const qs = new URLSearchParams();
+    qs.set('packetId', packetId);
+    if (tail) qs.set('tail', 'true');
+    if (cursor !== undefined) qs.set('cursor', String(cursor));
+    if (limit !== undefined) qs.set('limit', String(limit));
+
+    const data = await apiFetch(`/api/orchestrator/packet-transcript?${qs.toString()}`) as Record<string, unknown>;
+    const events = Array.isArray(data.events) ? data.events as Array<Record<string, unknown>> : [];
+    const nextCursorRaw = data.nextCursor;
+    const nextCursor = typeof nextCursorRaw === 'number' && Number.isFinite(nextCursorRaw)
+      ? nextCursorRaw
+      : null;
+    const note = typeof data.note === 'string' ? data.note : '';
+
+    const summary = events.length === 0
+      ? (note ? `No events (${note})` : `No transcript events for ${packetId}`)
+      : `${events.length} transcript events (nextCursor: ${nextCursor ?? 'null'})`;
+
+    return jsonResult({
+      summary,
+      data: {
+        packetId,
+        sessionKey: data.sessionKey ?? null,
+        events,
+        nextCursor,
+        note: note || null,
+      },
+    });
+  } catch (err) {
+    console.error(`[o8-operator] o8_packet_transcript failed: ${err}`);
+    return textResult(`Failed to read packet transcript: ${err}`, true);
   }
 }
