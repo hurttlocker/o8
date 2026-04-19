@@ -442,17 +442,25 @@ export const workerEvents = sqliteTable('worker_events', {
 
 export const externalMcpServers = sqliteTable('external_mcp_servers', {
   id: text('id').primaryKey(),
+  /** Optional team scoping — null means global (user-level) */
+  teamId: text('team_id'),
   name: text('name').notNull().unique(),
   transport: text('transport', { enum: ['stdio', 'http'] }).notNull(),
+  /** stdio: binary/command path. http: treated as url field alias. */
   command: text('command').notNull(),
   args: text('args').notNull().default('[]'),
   envJson: text('env_json'),
+  /** HTTP transport: explicit URL field (mirrors command for http servers) */
+  url: text('url'),
+  /** OAuth bearer token for authenticated HTTP MCP servers (stored as-is; users paste it) */
+  oauthToken: text('oauth_token'),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
 }, (table) => ({
   enabledIdx: index('idx_external_mcp_servers_enabled').on(table.enabled),
   updatedAtIdx: index('idx_external_mcp_servers_updated_at').on(table.updatedAt),
+  teamIdIdx: index('idx_external_mcp_servers_team_id').on(table.teamId),
 }));
 
 export const approvalEvents = sqliteTable('approval_events', {
