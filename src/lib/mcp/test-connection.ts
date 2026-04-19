@@ -15,6 +15,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { isNpxFamily } from './npx-detection';
 
 export interface McpTestSuccess {
   ok: true;
@@ -23,6 +24,8 @@ export interface McpTestSuccess {
   toolCount: number;
   durationMs: number;
   stderr?: string;
+  /** True when the probe used the extended npx-family timeout. */
+  npxFamily?: boolean;
 }
 
 export interface McpTestFailure {
@@ -31,6 +34,8 @@ export interface McpTestFailure {
   error: string;
   stderr?: string;
   durationMs: number;
+  /** True when the probe used the extended npx-family timeout. */
+  npxFamily?: boolean;
 }
 
 export type McpTestResult = McpTestSuccess | McpTestFailure;
@@ -50,7 +55,8 @@ export interface HttpTestInput {
 
 export type McpTestInput = StdioTestInput | HttpTestInput;
 
-const DEFAULT_TIMEOUT_MS = 8000;
+const DEFAULT_TIMEOUT_MS = 8_000;
+const NPX_TIMEOUT_MS = 45_000;
 const STDERR_CAP = 4000;
 
 interface JsonRpcRequest {
@@ -91,7 +97,7 @@ function normalizeTools(result: unknown): Array<{ name: string; description?: st
   return out;
 }
 
-async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpTestResult> {
+async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: boolean): Promise<McpTestResult> {
   const started = Date.now();
   let stderrBuf = '';
   let resolved = false;
@@ -112,6 +118,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpT
         transport: 'stdio',
         error: `Spawn failed — ${message}`,
         durationMs: Date.now() - started,
+        ...(npxFamily ? { npxFamily: true } : {}),
       });
       return;
     }
@@ -138,6 +145,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpT
         error: `Timed out after ${timeoutMs}ms waiting for tools/list`,
         stderr: shortenStderr(stderrBuf) || undefined,
         durationMs: Date.now() - started,
+        ...(npxFamily ? { npxFamily: true } : {}),
       });
     }, timeoutMs);
 
@@ -149,6 +157,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpT
         error: `Process error — ${err.message}`,
         stderr: shortenStderr(stderrBuf) || undefined,
         durationMs: Date.now() - started,
+        ...(npxFamily ? { npxFamily: true } : {}),
       });
     });
 
@@ -169,6 +178,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpT
         error: `Process exited before tools/list completed (${hint})`,
         stderr: shortenStderr(stderrBuf) || undefined,
         durationMs: Date.now() - started,
+        ...(npxFamily ? { npxFamily: true } : {}),
       });
     });
 
@@ -205,6 +215,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpT
           error: 'Child stdin closed before request was sent',
           stderr: shortenStderr(stderrBuf) || undefined,
           durationMs: Date.now() - started,
+          ...(npxFamily ? { npxFamily: true } : {}),
         });
         return false;
       }
@@ -219,6 +230,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpT
           error: `Failed to write request — ${message}`,
           stderr: shortenStderr(stderrBuf) || undefined,
           durationMs: Date.now() - started,
+          ...(npxFamily ? { npxFamily: true } : {}),
         });
         return false;
       }
@@ -251,6 +263,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpT
           error: `initialize failed — ${initResp.error.message}`,
           stderr: shortenStderr(stderrBuf) || undefined,
           durationMs: Date.now() - started,
+          ...(npxFamily ? { npxFamily: true } : {}),
         });
         return;
       }
@@ -270,6 +283,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpT
             error: `tools/list failed — ${listResp.error.message}`,
             stderr: shortenStderr(stderrBuf) || undefined,
             durationMs: Date.now() - started,
+            ...(npxFamily ? { npxFamily: true } : {}),
           });
           return;
         }
@@ -282,6 +296,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number): Promise<McpT
           toolCount: tools.length,
           durationMs: Date.now() - started,
           stderr: shortenStderr(stderrBuf) || undefined,
+          ...(npxFamily ? { npxFamily: true } : {}),
         });
       });
     });
@@ -385,10 +400,12 @@ async function testHttp(input: HttpTestInput, timeoutMs: number): Promise<McpTes
 
 export async function testMcpConnection(
   input: McpTestInput,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs?: number,
 ): Promise<McpTestResult> {
   if (input.transport === 'stdio') {
-    return testStdio(input, timeoutMs);
+    const npxFamily = isNpxFamily(input.command);
+    const resolvedTimeout = timeoutMs ?? (npxFamily ? NPX_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
+    return testStdio(input, resolvedTimeout, npxFamily);
   }
-  return testHttp(input, timeoutMs);
+  return testHttp(input, timeoutMs ?? DEFAULT_TIMEOUT_MS);
 }
