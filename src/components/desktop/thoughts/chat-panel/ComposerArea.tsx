@@ -436,6 +436,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             missionOpen={missionOpen}
             onToggleMission={onToggleMission}
             repoLabel={isOrchestratorMode ? repoLabel : null}
+            working={isOrchestratorMode && displayWaiting}
           />
         </div>
       </div>
