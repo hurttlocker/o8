@@ -63,6 +63,7 @@ interface OrchestratorStreamResult {
   runningTotal: number;
   estimateNextTurnTokens: (message: string) => number;
   send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: ThinkingEffort; model?: string }) => void;
+  interrupt: () => void;
   appendLocalEntries: (entries: MobileTranscriptEntry[]) => void;
   replaceTranscript: (entries: MobileTranscriptEntry[]) => void;
   fetchTelemetrySnapshot: () => Promise<{ totalTokens: number | null; estimatedCostUsd: number | null; model: string | null }>;
@@ -618,6 +619,28 @@ export function useOrchestratorStream(
     };
   }, [primeCompactedSession, requestCompaction]);
 
+  // #624 — User clicked the stop pill. Fire-and-forget the interrupt message
+  // to ws-server and optimistically flip status back to ready/connecting so
+  // the composer unlocks immediately. The server's abort path emits a normal
+  // 'done' event within 1-2s which reinforces the idle state. Partial events
+  // already accumulated in the transcript stay intact.
+  const interrupt = useCallback(() => {
+    const activeRepoPath = repoPathRef.current;
+    if (!activeRepoPath) return;
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'orchestrator-interrupt', repoPath: activeRepoPath }));
+    }
+    if (statusRef.current === 'busy') {
+      const nextStatus = connected ? 'ready' : 'connecting';
+      statusRef.current = nextStatus;
+      setStatus(nextStatus);
+      setBusyState(createIdleBusyState());
+      activeTurnRef.current = null;
+      currentAssistantRef.current = null;
+    }
+  }, [connected]);
+
   const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: ThinkingEffort; model?: string }) => {
     if (!repoPathRef.current) return;
 
@@ -740,6 +763,7 @@ export function useOrchestratorStream(
     runningTotal,
     estimateNextTurnTokens,
     send,
+    interrupt,
     appendLocalEntries,
     replaceTranscript,
     fetchTelemetrySnapshot: async () => (

@@ -532,6 +532,12 @@ interface OrchestratorSubscription {
 
 const orchestratorSubscriptions = new Map<string, OrchestratorSubscription>(); // clientId → subscription
 
+// #624 — In-flight AbortControllers keyed by repoPath. Attached when an
+// orchestrator-send turn starts; the orchestrator-interrupt handler calls
+// .abort() on the matching entry to terminate the streaming claude subprocess
+// within 1-2s. Entries are removed when the turn resolves (close/error/done).
+const orchestratorInflightAborts = new Map<string, AbortController>(); // repoPath → controller
+
 // ── Agent Supervisor auto-message queue ──
 
 interface OrchestratorAutoMessage {
@@ -1759,6 +1765,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'orchestrator-unsubscribe':
       orchestratorSubscriptions.delete(client.id);
       break;
+    case 'orchestrator-interrupt':
+      handleOrchestratorInterrupt(client, msg);
+      break;
   }
 }
 
@@ -1809,6 +1818,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     ? msg.model.trim()
     : undefined;
 
+  // #624 — Declared outside try so the catch can also release the entry.
+  let turnController: AbortController | null = null;
+
   try {
     let session = getOrchestratorSession(repoPath);
     if (!session || session.status === 'dead') {
@@ -1836,6 +1848,17 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         if (c) sendRaw(c, busyMsg);
       }
     }
+
+    // #624 — Attach an AbortController for this turn. Defensively abort any
+    // prior entry for the same repo so a stale subprocess never outlives a
+    // fresh send (shouldn't happen under normal flow because session.status
+    // serializes sends, but we stay guarded).
+    const priorController = orchestratorInflightAborts.get(repoPath);
+    if (priorController && !priorController.signal.aborted) {
+      priorController.abort();
+    }
+    turnController = new AbortController();
+    orchestratorInflightAborts.set(repoPath, turnController);
 
     // Spawn claude process and stream structured JSON events to subscribers
     await sendToOrchestrator(session, message, (event) => {
@@ -1910,17 +1933,46 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           if (c) sendRaw(c, wsMsg);
         }
       }
-    }, { permissionMode, thinkingEffort, model });
+    }, { permissionMode, thinkingEffort, model, signal: turnController.signal });
+
+    // #624 — Release the in-flight controller. Keyed compare guards against a
+    // newer turn having already replaced this entry.
+    if (orchestratorInflightAborts.get(repoPath) === turnController) {
+      orchestratorInflightAborts.delete(repoPath);
+    }
 
     // After user message completes, drain any queued supervisor escalations
     void drainOrchestratorAutoQueue();
   } catch (err) {
+    if (turnController && orchestratorInflightAborts.get(repoPath) === turnController) {
+      orchestratorInflightAborts.delete(repoPath);
+    }
     send(client, {
       channel: 'orchestrator',
       event: 'error',
       data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath },
     });
   }
+}
+
+// #624 — User clicked the stop pill. Aborts the in-flight controller for this
+// repo; the abort listener inside sendToOrchestrator kills the claude CLI
+// subprocess with SIGTERM, which triggers the normal 'done'/close event path
+// so subscribers transition back to 'ready'. Clients also optimistically flip
+// status to idle the moment they send this message, so the composer unlocks
+// without waiting for the server round-trip.
+function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, unknown>) {
+  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
+  if (!repoPath) return;
+  const controller = orchestratorInflightAborts.get(repoPath);
+  if (!controller) {
+    console.log(`[ws-server] orchestrator-interrupt for ${repoPath} — no in-flight turn`);
+    return;
+  }
+  console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (client ${client.id})`);
+  controller.abort();
+  // Leave the map entry in place; handleOrchestratorSendMsg removes it when
+  // the turn resolves (the abort causes close to fire within 1-2s).
 }
 
 function handleOrchestratorStatus(client: ClientState, msg: Record<string, unknown>) {
