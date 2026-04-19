@@ -6,6 +6,7 @@ import {
   type ExternalMcpFormState,
   type ExternalMcpServer,
 } from './shared';
+import { isNpxFamily } from '@/lib/mcp/npx-detection';
 
 export interface McpServerTestOutcome {
   ok: boolean;
@@ -14,6 +15,8 @@ export interface McpServerTestOutcome {
   durationMs?: number;
   error?: string;
   stderr?: string;
+  /** True when the probe ran with the extended npx-family timeout. */
+  npxFamily?: boolean;
 }
 
 export interface UseExternalMcpServersResult {
@@ -29,6 +32,8 @@ export interface UseExternalMcpServersResult {
   toggle: (server: ExternalMcpServer) => Promise<void>;
   remove: (server: ExternalMcpServer) => Promise<void>;
   testingId: string | null;
+  /** True when the in-flight test is for an npx-family command (extended timeout). */
+  testingNpxFamily: boolean;
   testResults: Record<string, McpServerTestOutcome>;
   test: (server: ExternalMcpServer) => Promise<void>;
 }
@@ -42,6 +47,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ExternalMcpFormState>(EMPTY_EXTERNAL_SERVER_FORM);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [testingNpxFamily, setTestingNpxFamily] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, McpServerTestOutcome>>({});
 
   const load = useCallback(async () => {
@@ -149,6 +155,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
 
   const test = useCallback(async (server: ExternalMcpServer) => {
     setTestingId(server.id);
+    setTestingNpxFamily(server.transport === 'stdio' && isNpxFamily(server.command));
     try {
       const res = await fetch('/api/panel/mcp-test', {
         method: 'POST',
@@ -162,6 +169,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
         durationMs?: number;
         error?: string;
         stderr?: string;
+        npxFamily?: boolean;
       };
       const outcome: McpServerTestOutcome = {
         ok: Boolean(body.ok),
@@ -170,6 +178,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
         durationMs: typeof body.durationMs === 'number' ? body.durationMs : undefined,
         error: typeof body.error === 'string' ? body.error : undefined,
         stderr: typeof body.stderr === 'string' ? body.stderr : undefined,
+        npxFamily: body.npxFamily === true ? true : undefined,
       };
       setTestResults((current) => ({ ...current, [server.id]: outcome }));
     } catch (e) {
@@ -182,6 +191,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
       }));
     } finally {
       setTestingId(null);
+      setTestingNpxFamily(false);
     }
   }, []);
 
@@ -198,6 +208,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
     toggle,
     remove,
     testingId,
+    testingNpxFamily,
     testResults,
     test,
   };

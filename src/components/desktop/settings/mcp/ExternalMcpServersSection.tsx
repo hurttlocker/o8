@@ -57,6 +57,7 @@ export function ExternalMcpServersSection() {
     create,
     remove,
     testingId,
+    testingNpxFamily,
     testResults,
     test,
   } = useExternalMcpServers();
@@ -475,6 +476,7 @@ export function ExternalMcpServersSection() {
               server={server}
               busy={busy}
               testing={testing}
+              testingNpxFamily={testing && testingNpxFamily}
               outcome={outcome}
               envCount={envCount}
               expandedStderr={expandedStderrId === server.id}
@@ -495,6 +497,7 @@ function ServerRow({
   server,
   busy,
   testing,
+  testingNpxFamily,
   outcome,
   envCount,
   expandedStderr,
@@ -505,6 +508,7 @@ function ServerRow({
   server: ExternalMcpServer;
   busy: boolean;
   testing: boolean;
+  testingNpxFamily: boolean;
   outcome: McpServerTestOutcome | undefined;
   envCount: number;
   expandedStderr: boolean;
@@ -513,11 +517,20 @@ function ServerRow({
   onToggleStderr: () => void;
 }) {
   const status = useMemo<{ label: string; tone: 'quiet' | 'accent'; color: string }>(() => {
-    if (testing) return { label: 'testing…', tone: 'quiet', color: RAMS_INK_QUIET };
+    if (testing) {
+      const label = testingNpxFamily ? 'testing — fetching package…' : 'testing…';
+      return { label, tone: 'quiet', color: RAMS_INK_QUIET };
+    }
     if (outcome?.ok) {
       const count = typeof outcome.toolCount === 'number' ? outcome.toolCount : undefined;
+      const secs = typeof outcome.durationMs === 'number'
+        ? `${(outcome.durationMs / 1000).toFixed(1)}s`
+        : undefined;
+      const label = count !== undefined
+        ? `ok · ${count} tool${count === 1 ? '' : 's'}${secs ? ` · ${secs}` : ''}`
+        : 'ok';
       return {
-        label: count !== undefined ? `ok · ${count} tool${count === 1 ? '' : 's'}` : 'ok',
+        label,
         tone: 'quiet',
         color: 'var(--t-text)',
       };
@@ -525,7 +538,7 @@ function ServerRow({
     if (outcome && !outcome.ok) return { label: 'failed', tone: 'accent', color: '#dc2626' };
     if (!server.enabled) return { label: 'disabled', tone: 'quiet', color: RAMS_INK_QUIET };
     return { label: 'pending', tone: 'quiet', color: RAMS_INK_QUIET };
-  }, [outcome, server.enabled, testing]);
+  }, [outcome, server.enabled, testing, testingNpxFamily]);
 
   return (
     <div style={{
@@ -597,11 +610,7 @@ function ServerRow({
             textTransform: 'uppercase',
             color: status.color,
           }}>
-            ({status.label}
-            {outcome?.ok && typeof outcome.durationMs === 'number' ? (
-              <span style={{ color: RAMS_INK_QUIET, marginLeft: 6 }}>· {outcome.durationMs}ms</span>
-            ) : null}
-            )
+            ({status.label})
           </span>
           <span style={{
             width: 1,
@@ -614,7 +623,7 @@ function ServerRow({
             disabled={testing || busy}
             style={rowLinkStyle(testing || busy)}
           >
-            {testing ? 'testing…' : 'test'}
+            {testing ? (testingNpxFamily ? 'fetching…' : 'testing…') : 'test'}
           </button>
           <button
             type="button"
