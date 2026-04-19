@@ -91,6 +91,18 @@ export interface OrchestratorPacket {
   assignedModel?: string | null;
   /** Files predicted to be touched, computed from packet scope vs skeleton cache */
   predictedFiles?: string[];
+  /** Rendered packet prompt body (surfaced in details popover). Optional. */
+  prompt?: string;
+  /** Files allowed to be touched by this packet. Alias of predictedFiles when present. */
+  allowedFiles?: string[];
+  /** Learned guardrails injected into the packet's prompt (surfaced in details popover). */
+  learnedRules?: string[];
+  /** Snapshot of the originating GitHub issue for the details popover. */
+  issue?: {
+    number?: number;
+    body?: string;
+    url?: string;
+  } | null;
 }
 
 export interface OrchestratorMissionState {

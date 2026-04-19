@@ -1,10 +1,12 @@
 'use client';
 
+import { useCallback, useRef, useState } from 'react';
 import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestrator/display';
 import { packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorPacket, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { hasPacketBranchTarget } from '@/components/desktop/thoughts/mission-panel/branchTarget';
 import { PacketActionStrip } from '@/components/desktop/thoughts/PacketActionStrip';
+import { PacketDetailsPopover } from '@/components/desktop/thoughts/PacketDetailsPopover';
 import type { EditingField, ReviewPanelState } from './types';
 import { PacketMetaRows } from './PacketMetaRows';
 import { PacketReviewPanel } from './PacketReviewPanel';
@@ -58,6 +60,18 @@ export function PacketCard({
   );
 
   const packetPrompt = [packet.title, packet.summary].map((part) => part.trim()).filter(Boolean).join('\n\n') || null;
+
+  // #615 — Details popover state. Anchored to the DETAILS row via DOMRect snapshot.
+  const detailsRowRef = useRef<HTMLButtonElement | null>(null);
+  const [detailsAnchor, setDetailsAnchor] = useState<DOMRect | null>(null);
+  const openDetails = useCallback(() => {
+    const node = detailsRowRef.current;
+    if (!node) return;
+    setDetailsAnchor(node.getBoundingClientRect());
+  }, []);
+  const closeDetails = useCallback(() => {
+    setDetailsAnchor(null);
+  }, []);
 
   return (
     <div
@@ -153,6 +167,82 @@ export function PacketCard({
             onEditingFieldChange={onEditingFieldChange}
             onPatch={onPatch}
           />
+
+          {/* #615 — DETAILS row (read-only popover trigger). */}
+          <div
+            data-packet-row
+            style={{
+              borderTopWidth: 1,
+              borderTopStyle: 'solid',
+              borderTopColor: 'var(--t-divider-subtle)',
+              position: 'relative',
+            }}
+          >
+            <button
+              ref={detailsRowRef}
+              type="button"
+              onClick={openDetails}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                minHeight: 28,
+                paddingTop: 5,
+                paddingRight: 10,
+                paddingBottom: 5,
+                paddingLeft: 10,
+                width: '100%',
+                borderWidth: 0,
+                background: detailsAnchor ? 'var(--t-divider-subtle)' : 'transparent',
+                textAlign: 'left',
+                cursor: 'pointer',
+                transition: 'background 120ms ease',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              }}
+              onMouseEnter={(e) => { if (!detailsAnchor) e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+              onMouseLeave={(e) => { if (!detailsAnchor) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: 'var(--t-text-muted)',
+                  width: 58,
+                  flexShrink: 0,
+                }}
+              >
+                details
+              </span>
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: 11.5,
+                  color: 'var(--t-text-muted)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  letterSpacing: '-0.005em',
+                }}
+              >
+                View packet brief
+              </span>
+              <svg
+                width={9}
+                height={9}
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="var(--t-text-faint)"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                style={{ flexShrink: 0, opacity: 0.5 }}
+              >
+                <path d="M2.5 3.5L5 6L7.5 3.5" />
+              </svg>
+            </button>
+          </div>
 
           <div
             style={{
@@ -405,6 +495,14 @@ export function PacketCard({
           {packet.lane?.laneId ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)' }}>{packet.lane.laneId.slice(0, 12)}</span></> : null}
         </div>
       )}
+
+      {detailsAnchor ? (
+        <PacketDetailsPopover
+          packet={packet}
+          anchorRect={detailsAnchor}
+          onClose={closeDetails}
+        />
+      ) : null}
     </div>
   );
 }

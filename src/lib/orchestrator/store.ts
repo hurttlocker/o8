@@ -244,7 +244,29 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     assignedModel: typeof packet.assignedModel === 'string' && packet.assignedModel.trim()
       ? packet.assignedModel.trim()
       : null,
+    prompt: typeof packet.prompt === 'string' && packet.prompt.trim() ? packet.prompt : undefined,
+    allowedFiles: Array.isArray(packet.allowedFiles)
+      ? packet.allowedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)
+      : undefined,
+    learnedRules: Array.isArray(packet.learnedRules)
+      ? packet.learnedRules.map((rule) => String(rule).trim()).filter(Boolean).slice(0, 12)
+      : undefined,
+    issue: normalizePacketIssue(packet.issue),
   } satisfies OrchestratorPacket;
+}
+
+function normalizePacketIssue(value: unknown): OrchestratorPacket['issue'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as { number?: unknown; body?: unknown; url?: unknown };
+  const number = typeof raw.number === 'number' && Number.isFinite(raw.number) ? raw.number : undefined;
+  const body = typeof raw.body === 'string' ? raw.body : undefined;
+  const url = typeof raw.url === 'string' && raw.url.trim() ? raw.url.trim() : undefined;
+  if (number === undefined && !body && !url) return undefined;
+  const result: NonNullable<OrchestratorPacket['issue']> = {};
+  if (number !== undefined) result.number = number;
+  if (body !== undefined) result.body = body;
+  if (url !== undefined) result.url = url;
+  return result;
 }
 
 function normalizeLookupValue(value: string) {
