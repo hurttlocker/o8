@@ -15,7 +15,6 @@ import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 import { ThemeProvider } from '@/lib/theme/context';
-import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
@@ -159,7 +158,6 @@ function DashboardInner() {
     settingsInitialTab,
     sidebarVisible, setSidebarVisible,
     timelineVisible, setTimelineVisible,
-    alertTrayOpen, setAlertTrayOpen,
     desktopDraftInjection, setDesktopDraftInjection,
     thoughtsDraftInjection, setThoughtsDraftInjection,
     mobileRemoteHref,
@@ -764,14 +762,9 @@ function DashboardInner() {
     void refreshWorkspaceLifecycle();
   }, [refreshWorkspaceLifecycle, wsStatus]);
 
-  // ── Alert system ──
+  // ── Alert system (toast-only; tray removed) ──
   const {
     alerts: activeAlerts,
-    unreadCount,
-    markRead,
-    markAllRead,
-    dismiss,
-    dismissAll,
     updateAgents,
   } = useAlerts();
 
@@ -1287,8 +1280,7 @@ function DashboardInner() {
     if (alert.sessionKey) {
       setActiveSessionKey(alert.sessionKey);
     }
-    setAlertTrayOpen(false);
-  }, [setActiveSessionKey, setAlertTrayOpen]);
+  }, [setActiveSessionKey]);
 
   const handleOpenDeploy = useCallback((project?: string) => {
     openCanvasTab({
@@ -1914,12 +1906,10 @@ function DashboardInner() {
     globalRepo,
     globalRepoEntries,
     globalRepoEntry,
-    handleFocusCurrentRepoSetup,
     handleLaunchWorkspaceAgent,
     handleLaunchWorkspaceRepoTask,
     handleOpenCI,
     handleOpenFolder,
-    handleOpenRepoInDesktop,
     handleOpenSettingsTab,
     handleReviewPR,
     handleRunInTerminal,
@@ -1936,7 +1926,6 @@ function DashboardInner() {
     selectedSessionAgent,
     selectedSessionWorktree,
     staleSelectedRepoWorktrees,
-    waitForWorkspaceTerminalTarget,
     wsStatus,
     setActiveSessionKey,
     setActiveWorkspace,
@@ -2109,21 +2098,6 @@ function DashboardInner() {
           if (!chatVisible) setChatVisible(true);
           setRightPanelMode('chat');
         }}
-        alertCount={unreadCount}
-        onToggleAlerts={() => setAlertTrayOpen(!alertTrayOpen)}
-        alertTray={(
-          <AlertTray
-            alerts={activeAlerts}
-            open={alertTrayOpen}
-            onClose={() => setAlertTrayOpen(false)}
-            onMarkRead={markRead}
-            onMarkAllRead={markAllRead}
-            onDismiss={dismiss}
-            onDismissAll={dismissAll}
-            onAction={handleAlertAction}
-            variant="desktop"
-          />
-        )}
         renderSearch={(onClose) => (
           <UniversalSearch
             variant="desktop"

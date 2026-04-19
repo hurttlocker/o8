@@ -56,12 +56,6 @@ interface LaunchWorkspaceRepoTaskRequest {
   branch?: string;
 }
 
-interface WorkspaceTerminalTargetOptions {
-  repoPath?: string | null;
-  preferredTileId?: string | null;
-  fallbackToAnyExisting?: boolean;
-}
-
 interface UsePaletteActionsArgs {
   activeSessionKey: string | undefined;
   archivedWorkspaceCandidate: WorkspaceLifecycleRecordView | null;
@@ -71,12 +65,10 @@ interface UsePaletteActionsArgs {
   globalRepo: string | null;
   globalRepoEntries: RepoRegistryEntry[];
   globalRepoEntry: RepoRegistryEntry | null;
-  handleFocusCurrentRepoSetup: () => void;
   handleLaunchWorkspaceAgent: (request: LaunchWorkspaceAgentRequest) => Promise<void>;
   handleLaunchWorkspaceRepoTask: (request: LaunchWorkspaceRepoTaskRequest) => Promise<void>;
   handleOpenCI: (repo: string) => void;
   handleOpenFolder: () => Promise<void>;
-  handleOpenRepoInDesktop: (editor: 'finder' | 'terminal') => Promise<void>;
   handleOpenSettingsTab: (tab: SettingsTab) => void;
   handleReviewPR: (prNumber: number, repo?: string) => void;
   handleRunInTerminal: (command: string) => void;
@@ -93,7 +85,6 @@ interface UsePaletteActionsArgs {
   selectedSessionAgent: PaletteAgentSummary | null;
   selectedSessionWorktree: WorktreeInfo | null;
   staleSelectedRepoWorktrees: WorktreeInfo[];
-  waitForWorkspaceTerminalTarget: (options?: WorkspaceTerminalTargetOptions) => Promise<{ tileId: string } | null>;
   wsStatus: WsConnectionState;
   focusRepoSetup: (repoEntry: RepoRegistryEntry) => void;
   setActiveSessionKey: Dispatch<SetStateAction<string | undefined>>;
@@ -114,12 +105,10 @@ export function usePaletteActions({
   globalRepo,
   globalRepoEntries,
   globalRepoEntry,
-  handleFocusCurrentRepoSetup,
   handleLaunchWorkspaceAgent,
   handleLaunchWorkspaceRepoTask,
   handleOpenCI,
   handleOpenFolder,
-  handleOpenRepoInDesktop,
   handleOpenSettingsTab,
   handleReviewPR,
   handleRunInTerminal,
@@ -136,7 +125,6 @@ export function usePaletteActions({
   selectedSessionAgent,
   selectedSessionWorktree,
   staleSelectedRepoWorktrees,
-  waitForWorkspaceTerminalTarget,
   wsStatus,
   focusRepoSetup,
   setActiveSessionKey,
@@ -297,20 +285,6 @@ export function usePaletteActions({
       });
 
       actions.push({
-        id: 'workspace:repo-setup',
-        category: 'workspace',
-        title: 'Open current repo setup',
-        detail: globalRepoEntry.readiness
-          ? repoReadinessSummary
-          : `Edit saved env, build, and dev commands for ${globalRepoEntry.name}.`,
-        stateLabel: repoReadinessLabel,
-        stateTone: repoReadinessTone,
-        keywords: [globalRepoEntry.name, 'repo setup', 'env', 'build', 'dev', 'profile'],
-        priority: 300,
-        run: handleFocusCurrentRepoSetup,
-      });
-
-      actions.push({
         id: 'workspace:create-worktree',
         category: 'workspace',
         title: 'Create workspace worktree',
@@ -341,25 +315,6 @@ export function usePaletteActions({
           run: () => focusRepoSetup(globalRepoEntry),
         });
       }
-
-      actions.push({
-        id: 'workspace:open-cli-surface',
-        category: 'workspace',
-        title: 'Open workspace CLI surface',
-        detail: `Focus the main workspace terminal for ${globalRepoEntry.name}.`,
-        stateLabel: 'Ready',
-        stateTone: 'blue',
-        keywords: ['workspace cli', 'workspace terminal', 'terminal', 'focus terminal'],
-        priority: 295,
-        run: async () => {
-          const target = await waitForWorkspaceTerminalTarget({
-            repoPath: globalRepoEntry.localPath,
-          });
-          if (!target) {
-            throw new Error('No workspace CLI surface is available right now. Reload the workspace and try again.');
-          }
-        },
-      });
 
       if (globalRepoEntry.readiness?.state === 'needs_setup' && globalRepoEntry.setup.installCommand) {
         actions.push({
@@ -416,26 +371,6 @@ export function usePaletteActions({
       }
 
       actions.push({
-        id: 'workspace:finder',
-        category: 'workspace',
-        title: 'Open current repo in Finder',
-        detail: shortenPath(globalRepoEntry.localPath),
-        keywords: [globalRepoEntry.localPath, 'finder', 'folder', 'open repo'],
-        priority: 250,
-        run: () => handleOpenRepoInDesktop('finder'),
-      });
-
-      actions.push({
-        id: 'workspace:terminal-app',
-        category: 'workspace',
-        title: 'Open current repo in Terminal',
-        detail: shortenPath(globalRepoEntry.localPath),
-        keywords: [globalRepoEntry.localPath, 'terminal app', 'open in terminal', 'open repo'],
-        priority: 248,
-        run: () => handleOpenRepoInDesktop('terminal'),
-      });
-
-      actions.push({
         id: 'workspace:copy-path',
         category: 'recovery',
         title: 'Copy current repo path',
@@ -488,22 +423,6 @@ export function usePaletteActions({
         run: handleOpenFolder,
       });
 
-      actions.push({
-        id: 'workspace:open-cli-surface-empty',
-        category: 'workspace',
-        title: 'Open workspace CLI surface',
-        detail: 'Focus the main workspace terminal even before a repo is selected.',
-        stateLabel: 'Ready',
-        stateTone: 'blue',
-        keywords: ['workspace cli', 'workspace terminal', 'terminal', 'focus terminal'],
-        priority: 260,
-        run: async () => {
-          const target = await waitForWorkspaceTerminalTarget();
-          if (!target) {
-            throw new Error('No workspace CLI surface is available right now. Reload the workspace and try again.');
-          }
-        },
-      });
     }
 
     if (globalRepoEntry) {
@@ -861,13 +780,11 @@ export function usePaletteActions({
     globalRepo,
     globalRepoEntry,
     globalRepoEntries,
-    handleFocusCurrentRepoSetup,
     handleLaunchWorkspaceAgent,
     handleLaunchWorkspaceRepoTask,
     handleSelectSession,
     handleReviewPR,
     handleOpenFolder,
-    handleOpenRepoInDesktop,
     handleOpenSettingsTab,
     handleOpenCI,
     handleRunInTerminal,
@@ -886,7 +803,6 @@ export function usePaletteActions({
     selectedSessionAgent,
     scopedRepoAgents,
     staleSelectedRepoWorktrees,
-    waitForWorkspaceTerminalTarget,
     wsStatus,
     setActiveSessionKey,
     setActiveWorkspace,
