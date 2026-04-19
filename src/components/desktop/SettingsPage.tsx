@@ -19,6 +19,9 @@ import type {
 } from './settings/shared';
 import {
   APP_FONT_STACK,
+  MONO_FONT_STACK,
+  RAMS_HAIRLINE_SOFT,
+  RAMS_INK_QUIET,
   TabButton,
   PlugIcon,
   KeyIcon,
@@ -236,10 +239,13 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
       style={{
         height: '100%',
         overflow: 'auto',
-        padding: 24,
+        paddingTop: 24,
+        paddingRight: 24,
+        paddingBottom: 24,
+        paddingLeft: 24,
         background: 'var(--t-bg-subtle)',
         display: 'flex',
-        gap: 20,
+        gap: 28,
         fontFamily: APP_FONT_STACK,
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
@@ -252,16 +258,21 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
-        gap: 2,
+        gap: 0,
+        borderRight: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+        paddingRight: 4,
       }}>
         <div style={{
+          fontFamily: MONO_FONT_STACK,
           fontSize: 11,
-          fontWeight: 600,
-          color: 'var(--t-text-muted)',
+          fontWeight: 400,
+          color: RAMS_INK_QUIET,
           textTransform: 'uppercase',
-          letterSpacing: '0.04em',
-          padding: '8px 14px',
-          marginBottom: 4,
+          letterSpacing: '0.22em',
+          paddingTop: 12,
+          paddingRight: 14,
+          paddingBottom: 14,
+          paddingLeft: 16,
         }}>
           Settings
         </div>
@@ -269,8 +280,8 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
         <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
-        <TabButton label="Workers" icon={<UsersIcon />} active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} />
-        <TabButton label="Cloud Workers" icon={<UsersIcon />} active={activeTab === 'cloud-workers'} onClick={() => setActiveTab('cloud-workers')} />
+        <TabButton label="Workers" icon={<UsersIcon />} active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} comingSoon />
+        <TabButton label="Cloud Workers" icon={<UsersIcon />} active={activeTab === 'cloud-workers'} onClick={() => setActiveTab('cloud-workers')} comingSoon />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
         <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
