@@ -3,39 +3,31 @@
 /**
  * AnalyticsPage — Cost & Usage Dashboard
  *
- * Full-width workspace view showing spend, token usage,
- * and agent efficiency metrics across all supported surfaces:
- * Codex CLI, Claude Code, and IDE LLM Chat.
- *
- * Layout:
- *   Hero metrics row → Hourly/Daily chart → Surface breakdown →
- *   Agent breakdown → Model breakdown → Top sessions
- *
- * Visual language: one accent (var(--t-accent)) everywhere. Hierarchy is
- * expressed by weight, size, and neutral grays — never by hue. Apple Stocks /
- * Health / Finder do the same thing. Color-coding per agent/surface/model was
- * noise and broke on midnight (some hardcoded hexes went black-on-black).
+ * Dieter Rams × Swiss-Korean editorial design language.
+ * Numbered sections, hairlines, solid page surface, mono metric callouts.
+ * One orange accent (RAMS_ACCENT) scarce per fold. No colored pill backgrounds.
+ * Flat text + hairline rows over cards wherever possible.
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
-import { Activity, BarChart3, Clock, Cpu, DollarSign, Layers, TrendingUp, Zap } from './lucide-shims';
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 import { formatTokens } from '@/lib/util/format-tokens';
+import type { ReactNode } from 'react';
+import {
+  APP_FONT_STACK,
+  MONO_FONT_STACK,
+  RAMS_ACCENT,
+  RAMS_HAIRLINE_SOFT,
+  RAMS_HAIRLINE,
+  RAMS_INK_QUIET,
+  BracketLabel,
+  HairlineRule,
+  SectionLabel,
+  TabBreadcrumb,
+  TabHeading,
+} from './settings/shared';
 
-const APP_FONT_STACK = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
-
-/**
- * Render the official brand logo for an agent/surface/model name when it
- * matches a known family; otherwise return null so callers can fall back
- * to the generic accent dot.
- */
-function brandLogoFor(name: string, size = 12): ReactNode | null {
-  const lower = name.toLowerCase();
-  if (lower.includes('claude')) return <ClaudeIcon size={size} />;
-  if (lower.includes('codex') || lower.startsWith('gpt')) return <CodexIcon size={size} />;
-  return null;
-}
+// ── Types ──
 
 interface Totals {
   cost: number;
@@ -90,80 +82,122 @@ interface AnalyticsData {
 }
 
 // ── Formatting helpers ──
+
 function formatCost(n: number): string {
   if (n >= 1) return `$${n.toFixed(2)}`;
   if (n >= 0.01) return `$${n.toFixed(3)}`;
   return `$${n.toFixed(4)}`;
 }
 
-// ── Hero Metric Card ──
-const MetricCard = memo(function MetricCard({
-  icon: Icon,
+/**
+ * Return the official brand logo node for a known agent/model family.
+ * Returns null so callers can fall back to a neutral dot.
+ */
+function brandLogoFor(name: string, size = 12): ReactNode | null {
+  const lower = name.toLowerCase();
+  if (lower.includes('claude')) return <ClaudeIcon size={size} />;
+  if (lower.includes('codex') || lower.startsWith('gpt')) return <CodexIcon size={size} />;
+  return null;
+}
+
+// ── Accent-link button style (matches DiagnosticsTab pattern) ──
+
+function accentLinkStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 13,
+    fontWeight: 400,
+    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${disabled ? RAMS_HAIRLINE_SOFT : RAMS_ACCENT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '-0.005em',
+    opacity: disabled ? 0.6 : 1,
+  };
+}
+
+// ── Time range picker ──
+
+const TIME_RANGES = [
+  { label: '6h', hours: 6 },
+  { label: '12h', hours: 12 },
+  { label: '24h', hours: 24 },
+  { label: '48h', hours: 48 },
+  { label: '7d', hours: 168 },
+];
+
+// ── Hero Metric Row ──
+// Large mono callout value, small uppercase label below. No icon box.
+
+const MetricCell = memo(function MetricCell({
   label,
   value,
   sub,
+  accent = false,
 }: {
-  icon: typeof DollarSign;
   label: string;
   value: string;
   sub?: string;
+  accent?: boolean;
 }) {
   return (
     <div style={{
       flex: 1,
-      minWidth: 140,
-      background: 'var(--t-panel)',
-      border: '1px solid var(--t-divider-subtle)',
-      borderRadius: 14,
-      padding: '16px 18px',
+      minWidth: 130,
       display: 'flex',
       flexDirection: 'column',
-      gap: 8,
+      gap: 4,
+      paddingTop: 16,
+      paddingBottom: 16,
+      paddingLeft: 0,
+      paddingRight: 24,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{
-          width: 28,
-          height: 28,
-          borderRadius: 8,
-          background: 'var(--t-accent-soft)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          <Icon size={14} strokeWidth={2} color="var(--t-accent)" />
-        </div>
-        <span style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: 'var(--t-text-muted)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-        }}>
-          {label}
-        </span>
-      </div>
       <div style={{
-        fontSize: 26,
-        fontWeight: 700,
-        color: 'var(--t-text)',
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 22,
+        fontWeight: 500,
+        color: accent ? RAMS_ACCENT : 'var(--t-text)',
         letterSpacing: '-0.03em',
-        fontFamily: APP_FONT_STACK,
+        lineHeight: 1.1,
         fontVariantNumeric: 'tabular-nums',
       }}>
         {value}
       </div>
-      {sub && (
-        <span style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>
+      <div style={{
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 10,
+        fontWeight: 400,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        color: RAMS_INK_QUIET,
+      }}>
+        {label}
+      </div>
+      {sub ? (
+        <div style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 10,
+          fontWeight: 400,
+          color: RAMS_INK_QUIET,
+          letterSpacing: '0.04em',
+          marginTop: 2,
+        }}>
           {sub}
-        </span>
-      )}
+        </div>
+      ) : null}
     </div>
   );
 });
 
-// ── Hourly/Daily Bar Chart (pure inline SVG) ──
+// ── Spend Chart (inline SVG) ──
+// Single RAMS_ACCENT orange series. Hairline grid. No color rainbows.
+
 const SpendChart = memo(function SpendChart({ data }: { data: HourBucket[] }) {
-  // Aggregate to daily when more than 48 buckets
   const chartData = useMemo(() => {
     if (data.length <= 48) return data;
     const dailyMap = new Map<string, HourBucket>();
@@ -182,353 +216,451 @@ const SpendChart = memo(function SpendChart({ data }: { data: HourBucket[] }) {
   }, [data]);
 
   if (chartData.length === 0) return null;
+
   const maxCost = Math.max(...chartData.map(d => d.cost), 0.01);
   const barWidth = Math.max(8, Math.min(28, 700 / chartData.length - 2));
-  const chartHeight = 160;
+  const chartHeight = 140;
   const chartWidth = chartData.length * (barWidth + 2);
   const isDaily = data.length > 48;
 
   return (
-    <div style={{
-      background: 'var(--t-panel)',
-      border: '1px solid var(--t-divider-subtle)',
-      borderRadius: 14,
-      padding: '16px 18px',
-    }}>
+    <div style={{ overflowX: 'auto', scrollbarWidth: 'none' } as React.CSSProperties}>
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 14,
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 10,
+        fontWeight: 400,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        color: RAMS_INK_QUIET,
+        marginBottom: 10,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <BarChart3 size={14} strokeWidth={2} color="var(--t-accent)" />
-          <span style={{
-            fontSize: 13,
-            fontWeight: 700,
-            color: 'var(--t-text)',
-            letterSpacing: '-0.01em',
-          }}>
-            {isDaily ? 'Daily Spend' : 'Hourly Spend'}
-          </span>
-        </div>
-        <span style={{
-          fontSize: 11,
-          color: 'var(--t-text-faint)',
-          fontFamily: APP_FONT_STACK,
-          fontVariantNumeric: 'tabular-nums',
-        }}>
+        {isDaily ? 'daily spend' : 'hourly spend'}
+        <span style={{ marginLeft: 12, opacity: 0.6 }}>
           {chartData.length} {isDaily ? 'days' : 'hours'}
         </span>
       </div>
-      <div style={{ overflowX: 'auto', scrollbarWidth: 'none' } as React.CSSProperties} className="hide-scrollbar">
-        <svg width={Math.max(chartWidth, 300)} height={chartHeight + 24} viewBox={`0 0 ${Math.max(chartWidth, 300)} ${chartHeight + 24}`}>
-          {[0, 0.25, 0.5, 0.75, 1].map(pct => (
-            <line
-              key={pct}
-              x1={0} x2={Math.max(chartWidth, 300)}
-              y1={chartHeight * (1 - pct)} y2={chartHeight * (1 - pct)}
-              stroke="var(--t-divider-subtle)" strokeWidth="1" strokeDasharray="4,4"
-            />
-          ))}
-          {chartData.map((d, i) => {
-            const h = (d.cost / maxCost) * chartHeight;
-            const x = i * (barWidth + 2);
-            const labelInterval = Math.max(1, Math.floor(chartData.length / 8));
-            return (
-              <g key={i}>
-                <rect
-                  x={x} y={chartHeight - h}
-                  width={barWidth} height={Math.max(h, 1)}
-                  rx={barWidth > 12 ? 4 : 2}
-                  fill="var(--t-accent)"
-                  opacity={0.78}
+      <svg
+        width={Math.max(chartWidth, 300)}
+        height={chartHeight + 24}
+        viewBox={`0 0 ${Math.max(chartWidth, 300)} ${chartHeight + 24}`}
+      >
+        {/* Hairline grid */}
+        {[0, 0.25, 0.5, 0.75, 1].map(pct => (
+          <line
+            key={pct}
+            x1={0}
+            x2={Math.max(chartWidth, 300)}
+            y1={chartHeight * (1 - pct)}
+            y2={chartHeight * (1 - pct)}
+            stroke={RAMS_HAIRLINE_SOFT}
+            strokeWidth="1"
+          />
+        ))}
+        {/* Bars — single orange series */}
+        {chartData.map((d, i) => {
+          const h = (d.cost / maxCost) * chartHeight;
+          const x = i * (barWidth + 2);
+          const labelInterval = Math.max(1, Math.floor(chartData.length / 8));
+          return (
+            <g key={i}>
+              <rect
+                x={x}
+                y={chartHeight - h}
+                width={barWidth}
+                height={Math.max(h, 1)}
+                rx={barWidth > 12 ? 3 : 2}
+                fill={RAMS_ACCENT}
+                opacity={0.72}
+              >
+                <title>{`${d.hour}\n${formatCost(d.cost)} · ${d.messages} msgs · ${formatTokens(d.tokens)} tokens`}</title>
+              </rect>
+              {(i % labelInterval === 0) && (
+                <text
+                  x={x + barWidth / 2}
+                  y={chartHeight + 16}
+                  textAnchor="middle"
+                  fontSize={9}
+                  fill={RAMS_INK_QUIET}
+                  fontFamily={MONO_FONT_STACK}
                 >
-                  <title>{`${d.hour}\n${formatCost(d.cost)} · ${d.messages} msgs · ${formatTokens(d.tokens)} tokens`}</title>
-                </rect>
-                {(i % labelInterval === 0) && (
-                  <text
-                    x={x + barWidth / 2} y={chartHeight + 16}
-                    textAnchor="middle"
-                    fontSize={9} fill="var(--t-text-faint)"
-                    fontFamily={APP_FONT_STACK}
-                  >
-                    {isDaily ? d.hour.slice(5) : (d.hour.split(' ')[1] || d.hour.slice(-5))}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
-      </div>
+                  {isDaily ? d.hour.slice(5) : (d.hour.split(' ')[1] || d.hour.slice(-5))}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 });
 
-// ── Breakdown Card (shared for Agent, Surface) ──
-// Single accent color, hierarchy by bar width + text weight, no per-entry hue.
-const BreakdownCard = memo(function BreakdownCard({
-  title,
-  icon: Icon,
+// ── Breakdown Rows (Surface / Agent) ──
+// Flat hairline rows, no card backgrounds. Bar uses RAMS_ACCENT, muted track.
+
+const BreakdownRows = memo(function BreakdownRows({
   entries,
   totalCost,
 }: {
-  title: string;
-  icon: typeof Cpu;
   entries: Array<[string, BreakdownEntry]>;
   totalCost: number;
 }) {
   if (entries.length === 0) return null;
-
   const tokenTotal = entries.reduce((s, [, d]) => s + d.tokens, 0);
 
   return (
-    <div style={{
-      background: 'var(--t-panel)',
-      border: '1px solid var(--t-divider-subtle)',
-      borderRadius: 14,
-      padding: '16px 18px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <Icon size={14} strokeWidth={2} color="var(--t-accent)" />
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-          {title}
-        </span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {entries.map(([name, data]) => {
-          const pct = totalCost > 0 ? (data.cost / totalCost) * 100 : 0;
-          const tokPct = tokenTotal > 0 ? (data.tokens / tokenTotal) * 100 : 0;
-          const barPct = Math.max(pct, tokPct);
-          const brand = brandLogoFor(name, 14);
-          return (
-            <div key={name}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {brand ?? <div style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--t-accent)' }} />}
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)' }}>{name}</span>
-                  <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
-                    {data.sessions} session{data.sessions !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <span style={{
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: 'var(--t-text)',
-                  fontFamily: APP_FONT_STACK,
-                  fontVariantNumeric: 'tabular-nums',
-                }}>
-                  {data.cost > 0 ? formatCost(data.cost) : formatTokens(data.tokens) + ' tok'}
-                </span>
-              </div>
-              <div style={{ height: 6, borderRadius: 3, background: 'var(--t-bg-subtle)', overflow: 'hidden' }}>
-                <div style={{
-                  width: `${Math.max(barPct, 1)}%`,
-                  height: '100%',
-                  borderRadius: 3,
-                  background: 'var(--t-accent)',
-                  opacity: 0.78,
-                  transition: 'width 300ms cubic-bezier(0.32, 0.72, 0, 1)',
-                }} />
-              </div>
-              <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-                <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: APP_FONT_STACK, fontVariantNumeric: 'tabular-nums' }}>
-                  {data.messages.toLocaleString()} msgs
-                </span>
-                <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: APP_FONT_STACK, fontVariantNumeric: 'tabular-nums' }}>
-                  {formatTokens(data.tokens)} tokens
-                </span>
-                {data.cost > 0 && (
-                  <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: APP_FONT_STACK, fontVariantNumeric: 'tabular-nums' }}>
-                    {pct.toFixed(1)}%
-                  </span>
+    <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+      {entries.map(([name, data]) => {
+        const pct = totalCost > 0 ? (data.cost / totalCost) * 100 : 0;
+        const tokPct = tokenTotal > 0 ? (data.tokens / tokenTotal) * 100 : 0;
+        const barPct = Math.max(pct, tokPct);
+        const brand = brandLogoFor(name, 13);
+
+        return (
+          <div
+            key={name}
+            style={{
+              paddingTop: 12,
+              paddingBottom: 12,
+              paddingLeft: 0,
+              paddingRight: 0,
+              borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+            }}
+          >
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: 6,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {brand ? (
+                  <span style={{ display: 'inline-flex', flexShrink: 0 }}>{brand}</span>
+                ) : (
+                  <span style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 3,
+                    background: RAMS_INK_QUIET,
+                    flexShrink: 0,
+                    display: 'inline-block',
+                  }} />
                 )}
+                <span style={{
+                  fontFamily: APP_FONT_STACK,
+                  fontSize: 13,
+                  fontWeight: 400,
+                  color: 'var(--t-text)',
+                  letterSpacing: '-0.005em',
+                }}>
+                  {name}
+                </span>
+                <BracketLabel tone="quiet">
+                  {data.sessions} sess
+                </BracketLabel>
               </div>
+              <span style={{
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 13,
+                fontWeight: 500,
+                color: 'var(--t-text)',
+                fontVariantNumeric: 'tabular-nums',
+                flexShrink: 0,
+              }}>
+                {data.cost > 0 ? formatCost(data.cost) : formatTokens(data.tokens) + ' tok'}
+              </span>
             </div>
-          );
-        })}
-      </div>
+            {/* Progress bar — orange, muted track */}
+            <div style={{
+              height: 2,
+              borderRadius: 1,
+              background: RAMS_HAIRLINE_SOFT,
+              overflow: 'hidden',
+              marginBottom: 6,
+            }}>
+              <div style={{
+                width: `${Math.max(barPct, 1)}%`,
+                height: '100%',
+                borderRadius: 1,
+                background: RAMS_ACCENT,
+                opacity: 0.7,
+                transition: 'width 300ms cubic-bezier(0.32, 0.72, 0, 1)',
+              }} />
+            </div>
+            <div style={{ display: 'flex', gap: 14 }}>
+              <span style={{
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 10,
+                color: RAMS_INK_QUIET,
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '0.04em',
+              }}>
+                {data.messages.toLocaleString()} msgs
+              </span>
+              <span style={{
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 10,
+                color: RAMS_INK_QUIET,
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '0.04em',
+              }}>
+                {formatTokens(data.tokens)} tok
+              </span>
+              {data.cost > 0 && (
+                <span style={{
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 10,
+                  color: RAMS_INK_QUIET,
+                  fontVariantNumeric: 'tabular-nums',
+                  letterSpacing: '0.04em',
+                }}>
+                  {pct.toFixed(1)}%
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 });
 
-// ── Model Breakdown ──
-const ModelBreakdownCard = memo(function ModelBreakdownCard({ byModel }: { byModel: ModelBreakdown[] }) {
+// ── Model Breakdown Rows ──
+
+const ModelRows = memo(function ModelRows({ byModel }: { byModel: ModelBreakdown[] }) {
   if (byModel.length === 0) return null;
 
   return (
-    <div style={{
-      background: 'var(--t-panel)',
-      border: '1px solid var(--t-divider-subtle)',
-      borderRadius: 14,
-      padding: '16px 18px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <Zap size={14} strokeWidth={2} color="var(--t-accent)" />
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-          By Model
-        </span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {byModel.map((m) => {
-          const brand = brandLogoFor(m.model, 12);
-          return (
-          <div key={m.model} style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '8px 10px',
-            borderRadius: 10,
-            background: 'var(--t-bg-subtle)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {brand ?? <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--t-accent)' }} />}
+    <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+      {byModel.map((m) => {
+        const brand = brandLogoFor(m.model, 12);
+        return (
+          <div
+            key={m.model}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              paddingTop: 11,
+              paddingBottom: 11,
+              paddingLeft: 0,
+              paddingRight: 0,
+              borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+              {brand ? (
+                <span style={{ display: 'inline-flex', flexShrink: 0 }}>{brand}</span>
+              ) : (
+                <span style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 3,
+                  background: RAMS_INK_QUIET,
+                  flexShrink: 0,
+                  display: 'inline-block',
+                }} />
+              )}
               <span style={{
+                fontFamily: MONO_FONT_STACK,
                 fontSize: 11,
-                fontWeight: 600,
+                fontWeight: 400,
                 color: 'var(--t-text)',
-                fontFamily: APP_FONT_STACK,
+                letterSpacing: '0.04em',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}>
                 {m.model}
               </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+              <span style={{
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 10,
+                color: RAMS_INK_QUIET,
+                letterSpacing: '0.04em',
+              }}>
                 {m.sessions} sess · {m.messages} msgs
               </span>
               <span style={{
+                fontFamily: MONO_FONT_STACK,
                 fontSize: 12,
-                fontWeight: 700,
+                fontWeight: 500,
                 color: 'var(--t-text)',
-                fontFamily: APP_FONT_STACK,
                 fontVariantNumeric: 'tabular-nums',
+                minWidth: 60,
+                textAlign: 'right',
               }}>
                 {m.cost > 0 ? formatCost(m.cost) : `${m.messages} calls`}
               </span>
             </div>
           </div>
-          );
-        })}
-      </div>
+        );
+      })}
     </div>
   );
 });
 
 // ── Top Sessions Table ──
-const TopSessionsCard = memo(function TopSessionsCard({ sessions }: { sessions: TopSession[] }) {
+// Flat hairline rows, mono session ID, no zebra-stripe backgrounds.
+
+const TopSessionsRows = memo(function TopSessionsRows({ sessions }: { sessions: TopSession[] }) {
   if (sessions.length === 0) return null;
 
   return (
-    <div style={{
-      background: 'var(--t-panel)',
-      border: '1px solid var(--t-divider-subtle)',
-      borderRadius: 14,
-      padding: '16px 18px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <TrendingUp size={14} strokeWidth={2} color="var(--t-accent)" />
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-          Top Sessions by Spend
-        </span>
+    <>
+      {/* Column headers */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        paddingTop: 0,
+        paddingBottom: 8,
+        paddingLeft: 0,
+        paddingRight: 0,
+        borderBottom: `1px solid ${RAMS_HAIRLINE}`,
+      }}>
+        <span style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 10,
+          fontWeight: 400,
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          color: RAMS_INK_QUIET,
+          width: 20,
+        }}>#</span>
+        <span style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 10,
+          fontWeight: 400,
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          color: RAMS_INK_QUIET,
+          width: 80,
+        }}>agent</span>
+        <span style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 10,
+          fontWeight: 400,
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          color: RAMS_INK_QUIET,
+          flex: 1,
+        }}>session id</span>
+        <span style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 10,
+          fontWeight: 400,
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          color: RAMS_INK_QUIET,
+          width: 50,
+          textAlign: 'right',
+        }}>msgs</span>
+        <span style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 10,
+          fontWeight: 400,
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          color: RAMS_INK_QUIET,
+          width: 70,
+          textAlign: 'right',
+        }}>spend</span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {sessions.map((s, i) => {
-          const brand = brandLogoFor(s.agent, 14);
-          return (
-          <div key={s.id} style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '8px 10px',
-            borderRadius: 10,
-            background: i % 2 === 0 ? 'var(--t-bg-subtle)' : 'transparent',
-          }}>
+      {sessions.map((s, i) => {
+        const brand = brandLogoFor(s.agent, 12);
+        return (
+          <div
+            key={s.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              paddingTop: 10,
+              paddingBottom: 10,
+              paddingLeft: 0,
+              paddingRight: 0,
+              borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+            }}
+          >
             <span style={{
-              width: 18,
-              fontSize: 10,
-              fontWeight: 700,
-              color: 'var(--t-text-faint)',
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              color: RAMS_INK_QUIET,
+              width: 20,
               textAlign: 'right',
+              fontVariantNumeric: 'tabular-nums',
             }}>
               {i + 1}
             </span>
-            {brand ? (
-              <div style={{
-                position: 'relative',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 14,
-                height: 14,
-                flexShrink: 0,
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: 80 }}>
+              {brand ? (
+                <span style={{ display: 'inline-flex', flexShrink: 0 }}>{brand}</span>
+              ) : (
+                <span style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: s.active ? RAMS_ACCENT : RAMS_INK_QUIET,
+                  flexShrink: 0,
+                  display: 'inline-block',
+                }} />
+              )}
+              <span style={{
+                fontFamily: APP_FONT_STACK,
+                fontSize: 12,
+                fontWeight: 400,
+                color: 'var(--t-text)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}>
-                {brand}
-                {s.active ? (
-                  <span
-                    style={{
-                      position: 'absolute',
-                      right: -2,
-                      bottom: -2,
-                      width: 6,
-                      height: 6,
-                      borderRadius: 3,
-                      background: 'var(--t-accent)',
-                      boxShadow: '0 0 5px var(--t-accent-ring)',
-                    }}
-                  />
-                ) : null}
-              </div>
-            ) : (
-              <div style={{
-                width: 8,
-                height: 8,
-                borderRadius: 4,
-                background: s.active ? 'var(--t-accent)' : 'var(--t-text-faint)',
-                boxShadow: s.active ? '0 0 6px var(--t-accent-ring)' : 'none',
-              }} />
-            )}
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text)', width: 80 }}>
-              {s.agent}
-            </span>
+                {s.agent}
+              </span>
+            </div>
             <span style={{
-              fontSize: 10,
-              color: 'var(--t-text-faint)',
-              fontFamily: APP_FONT_STACK,
-              fontVariantNumeric: 'tabular-nums',
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              color: RAMS_INK_QUIET,
               flex: 1,
+              fontVariantNumeric: 'tabular-nums',
+              letterSpacing: '0.04em',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}>
               {s.id.slice(0, 8)}…
             </span>
-            <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
-              {s.messages} msgs
+            <span style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              color: RAMS_INK_QUIET,
+              width: 50,
+              textAlign: 'right',
+              fontVariantNumeric: 'tabular-nums',
+            }}>
+              {s.messages}
             </span>
             <span style={{
+              fontFamily: MONO_FONT_STACK,
               fontSize: 12,
-              fontWeight: 700,
+              fontWeight: 500,
               color: 'var(--t-text)',
-              fontFamily: APP_FONT_STACK,
-              fontVariantNumeric: 'tabular-nums',
               width: 70,
               textAlign: 'right',
+              fontVariantNumeric: 'tabular-nums',
             }}>
               {s.cost > 0 ? formatCost(s.cost) : `${s.messages}×`}
             </span>
           </div>
-          );
-        })}
-      </div>
-    </div>
+        );
+      })}
+    </>
   );
 });
-
-// ── Time Range Picker ──
-const timeRanges = [
-  { label: '6h', hours: 6 },
-  { label: '12h', hours: 12 },
-  { label: '24h', hours: 24 },
-  { label: '48h', hours: 48 },
-  { label: '7d', hours: 168 },
-];
 
 // ══════════════════════════════════════════════════
 // MAIN COMPONENT
@@ -570,164 +702,239 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
   }, [data?.bySurface]);
 
   return (
-    <div style={{
-      flex: 1,
-      minHeight: 0,
-      overflowY: 'auto',
-      padding: '24px 32px',
-      scrollbarWidth: 'none',
-      background: 'var(--t-bg-subtle)',
-    } as React.CSSProperties}
-    className="hide-scrollbar"
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: 'auto',
+        paddingTop: 8,
+        paddingLeft: 8,
+        paddingRight: 32,
+        paddingBottom: 40,
+        scrollbarWidth: 'none',
+        background: 'var(--t-page-surface)',
+        fontFamily: APP_FONT_STACK,
+      } as React.CSSProperties}
     >
-      {/* Header */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 20,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Activity size={18} strokeWidth={2} color="var(--t-accent)" />
-          <span style={{
-            fontSize: 20,
-            fontWeight: 800,
-            color: 'var(--t-text)',
-            letterSpacing: '-0.03em',
+      <div style={{ maxWidth: 900 }}>
+        {/* Breadcrumb + heading */}
+        <TabBreadcrumb tab="analytics" />
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 16,
+          flexWrap: 'wrap',
+          marginBottom: 32,
+        }}>
+          <TabHeading
+            title="analytics"
+            subtitle="Spend, token usage, and agent efficiency across Codex, Claude Code, and IDE chat."
+          />
+          {/* Time range picker — mono underline links */}
+          <div style={{
+            display: 'flex',
+            gap: 4,
+            alignItems: 'center',
+            paddingTop: 6,
+            flexShrink: 0,
           }}>
-            Analytics
-          </span>
-        </div>
-        {/* Time range picker */}
-        <div style={{
-          display: 'flex',
-          gap: 2,
-          background: 'var(--t-panel)',
-          border: '1px solid var(--t-divider-subtle)',
-          borderRadius: 8,
-          padding: 2,
-        }}>
-          {timeRanges.map(r => (
+            {TIME_RANGES.map(r => (
+              <button
+                key={r.hours}
+                type="button"
+                onClick={() => setSelectedRange(r.hours)}
+                style={{
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 11,
+                  fontWeight: 400,
+                  letterSpacing: '0.1em',
+                  color: selectedRange === r.hours ? RAMS_ACCENT : RAMS_INK_QUIET,
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: `1px solid ${selectedRange === r.hours ? RAMS_ACCENT : 'transparent'}`,
+                  paddingTop: 3,
+                  paddingBottom: 3,
+                  paddingLeft: 6,
+                  paddingRight: 6,
+                  cursor: 'pointer',
+                  transition: 'color 120ms, border-color 120ms',
+                }}
+              >
+                {r.label}
+              </button>
+            ))}
             <button
-              key={r.hours}
               type="button"
-              onClick={() => setSelectedRange(r.hours)}
-              style={{
-                padding: '4px 10px',
-                borderRadius: 6,
-                border: 'none',
-                background: selectedRange === r.hours ? 'var(--t-accent)' : 'transparent',
-                color: selectedRange === r.hours ? '#fff' : 'var(--t-text-muted)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: APP_FONT_STACK,
-                fontVariantNumeric: 'tabular-nums',
-                transition: 'all 120ms',
-              }}
+              onClick={() => { void fetchData(selectedRange); }}
+              disabled={loading}
+              style={{ ...accentLinkStyle(loading), marginLeft: 8 }}
             >
-              {r.label}
+              {loading ? 'loading…' : 'refresh ›'}
             </button>
-          ))}
+          </div>
         </div>
+
+        {/* ── Loading / empty / data ── */}
+
+        {loading && !data ? (
+          <div style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 11,
+            color: RAMS_INK_QUIET,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            paddingTop: 40,
+          }}>
+            loading…
+          </div>
+        ) : data && data.totals.messages === 0 ? (
+          <div style={{
+            paddingTop: 48,
+            paddingBottom: 48,
+          }}>
+            <BracketLabel tone="quiet">no data</BracketLabel>
+            <p style={{
+              fontFamily: APP_FONT_STACK,
+              fontSize: 13,
+              fontWeight: 400,
+              color: 'var(--t-text-secondary)',
+              lineHeight: 1.55,
+              marginTop: 10,
+              marginBottom: 0,
+            }}>
+              No activity recorded in this period. Try a wider time range or wait for agent activity.
+            </p>
+          </div>
+        ) : data ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+            {/* ── 01 — TOTALS ── */}
+            <section style={{ marginBottom: 36 }}>
+              <SectionLabel number="01">TOTALS</SectionLabel>
+              {/* Row 1: spend / messages / cost-per-hour */}
+              <div style={{
+                display: 'flex',
+                gap: 0,
+                flexWrap: 'wrap',
+                borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                marginBottom: 0,
+              }}>
+                <MetricCell
+                  label="total spend"
+                  value={formatCost(data.totals.cost)}
+                  sub={`${data.totals.sessions} sessions`}
+                  accent
+                />
+                <MetricCell
+                  label="messages"
+                  value={data.totals.messages.toLocaleString()}
+                  sub={`~${Math.round(data.totals.messages / Math.max(data.hourly.length, 1))}/hr avg`}
+                />
+                <MetricCell
+                  label="cost / hour"
+                  value={formatCost(data.totals.cost / Math.max(data.hourly.length, 1))}
+                  sub={`over ${data.hourly.length} hrs`}
+                />
+              </div>
+              <HairlineRule />
+              {/* Row 2: tokens */}
+              <div style={{
+                display: 'flex',
+                gap: 0,
+                flexWrap: 'wrap',
+                borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                marginBottom: 16,
+              }}>
+                <MetricCell
+                  label="input tokens"
+                  value={formatTokens(data.totals.inputTokens)}
+                  sub={`${formatTokens(data.totals.cacheWriteTokens)} cache writes`}
+                />
+                <MetricCell
+                  label="output tokens"
+                  value={formatTokens(data.totals.outputTokens)}
+                  sub={`${formatTokens(data.totals.totalTokens)} total`}
+                />
+                <MetricCell
+                  label="cache hit rate"
+                  value={`${data.totals.cacheHitRate.toFixed(1)}%`}
+                  sub={`${formatTokens(data.totals.cacheTokens)} reads saved`}
+                />
+              </div>
+              <HairlineRule />
+            </section>
+
+            {/* ── 02 — SPEND OVER TIME ── */}
+            {data.hourly.length > 0 && (
+              <section style={{ marginBottom: 36 }}>
+                <SectionLabel number="02">SPEND OVER TIME</SectionLabel>
+                <SpendChart data={data.hourly} />
+                <div style={{ marginTop: 20 }}>
+                  <HairlineRule />
+                </div>
+              </section>
+            )}
+
+            {/* ── 03 — BY SURFACE ── */}
+            {surfaceEntries.length > 0 && (
+              <section style={{ marginBottom: 36 }}>
+                <SectionLabel number="03">BY SURFACE</SectionLabel>
+                <BreakdownRows
+                  entries={surfaceEntries}
+                  totalCost={data.totals.cost}
+                />
+                <div style={{ marginTop: 20 }}>
+                  <HairlineRule />
+                </div>
+              </section>
+            )}
+
+            {/* ── 04 — BY AGENT + BY MODEL (two columns) ── */}
+            <section style={{ marginBottom: 36 }}>
+              <div style={{
+                display: 'flex',
+                gap: 48,
+                flexWrap: 'wrap',
+                alignItems: 'flex-start',
+              }}>
+                {agentEntries.length > 0 && (
+                  <div style={{ flex: 1, minWidth: 240 }}>
+                    <SectionLabel number="04">BY AGENT</SectionLabel>
+                    <BreakdownRows
+                      entries={agentEntries}
+                      totalCost={data.totals.cost}
+                    />
+                  </div>
+                )}
+                {data.byModel.length > 0 && (
+                  <div style={{ flex: 1, minWidth: 240 }}>
+                    <SectionLabel number={agentEntries.length > 0 ? '05' : '04'}>BY MODEL</SectionLabel>
+                    <ModelRows byModel={data.byModel} />
+                  </div>
+                )}
+              </div>
+              <div style={{ marginTop: 20 }}>
+                <HairlineRule />
+              </div>
+            </section>
+
+            {/* ── 05 / 06 — TOP SESSIONS ── */}
+            {data.topSessions.length > 0 && (
+              <section style={{ marginBottom: 36 }}>
+                <SectionLabel number={agentEntries.length > 0 && data.byModel.length > 0 ? '06' : '05'}>
+                  TOP SESSIONS BY SPEND
+                </SectionLabel>
+                <TopSessionsRows sessions={data.topSessions} />
+                <div style={{ marginTop: 20 }}>
+                  <HairlineRule />
+                </div>
+              </section>
+            )}
+
+          </div>
+        ) : null}
       </div>
-
-      {loading && !data ? (
-        <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', padding: 40 }}>
-          Loading analytics…
-        </div>
-      ) : data && data.totals.messages === 0 ? (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 12,
-          padding: '80px 32px',
-          color: 'var(--t-text-faint)',
-        }}>
-          <BarChart3 size={40} strokeWidth={1.5} style={{ opacity: 0.3 }} />
-          <span style={{ fontSize: 15, fontWeight: 600 }}>No activity in this period</span>
-          <span style={{ fontSize: 12 }}>Try a wider time range or wait for agent activity.</span>
-        </div>
-      ) : data ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 960 }}>
-          {/* Hero metrics — row 1 */}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <MetricCard
-              icon={DollarSign}
-              label="Total Spend"
-              value={formatCost(data.totals.cost)}
-              sub={`${data.totals.sessions} sessions`}
-            />
-            <MetricCard
-              icon={Zap}
-              label="Messages"
-              value={data.totals.messages.toLocaleString()}
-              sub={`~${Math.round(data.totals.messages / Math.max(data.hourly.length, 1))}/hr avg`}
-            />
-            <MetricCard
-              icon={Clock}
-              label="Cost/Hour"
-              value={formatCost(data.totals.cost / Math.max(data.hourly.length, 1))}
-              sub={`over ${data.hourly.length} hours`}
-            />
-          </div>
-
-          {/* Hero metrics — row 2 */}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <MetricCard
-              icon={TrendingUp}
-              label="Input Tokens"
-              value={formatTokens(data.totals.inputTokens)}
-              sub={`${formatTokens(data.totals.cacheWriteTokens)} cache writes`}
-            />
-            <MetricCard
-              icon={TrendingUp}
-              label="Output Tokens"
-              value={formatTokens(data.totals.outputTokens)}
-              sub={`${formatTokens(data.totals.totalTokens)} total tokens`}
-            />
-            <MetricCard
-              icon={Activity}
-              label="Cache Hit Rate"
-              value={`${data.totals.cacheHitRate.toFixed(1)}%`}
-              sub={`${formatTokens(data.totals.cacheTokens)} cache reads saved`}
-            />
-          </div>
-
-          {/* Spend chart */}
-          <SpendChart data={data.hourly} />
-
-          {/* Surface breakdown */}
-          {surfaceEntries.length > 0 && (
-            <BreakdownCard
-              title="By Surface"
-              icon={Layers}
-              entries={surfaceEntries}
-              totalCost={data.totals.cost}
-            />
-          )}
-
-          {/* Two-column: Agent + Model */}
-          <div style={{ display: 'flex', gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <BreakdownCard
-                title="By Agent"
-                icon={Cpu}
-                entries={agentEntries}
-                totalCost={data.totals.cost}
-              />
-            </div>
-            <div style={{ flex: 1 }}>
-              <ModelBreakdownCard byModel={data.byModel} />
-            </div>
-          </div>
-
-          {/* Top sessions */}
-          <TopSessionsCard sessions={data.topSessions} />
-        </div>
-      ) : null}
     </div>
   );
 });
