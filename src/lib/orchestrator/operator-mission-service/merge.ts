@@ -9,6 +9,7 @@ import {
   writeOrchestratorControlPlaneState,
 } from '@/lib/orchestrator/control-plane';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+import { removeMergedWorktree, withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
 import { detectFileOverlaps, recommendMergeOrder } from '@/lib/worktree/conflicts';
 import type { MergeOrderRecommendation } from '@/lib/worktree/conflicts';
 import { getWorktreeManager } from '@/lib/worktree/launch';
@@ -145,6 +146,23 @@ async function dispatchPacketMerge(
     actor,
   });
 
+  // #622 — Synchronous worktree cleanup guarantee.
+  // The verb=merge path in lane/commands.ts already removes the worktree on
+  // success, but its prune step is fire-and-forget and the control-plane
+  // lifecycle event below (`lastEventLabel = 'merged'`) must see a clean
+  // working tree so the next dispatch doesn't race against a half-gone
+  // directory. The helper is idempotent — if commands.ts already removed
+  // the worktree, this call reports `already-removed` and exits quickly.
+  if (result.ok) {
+    const cleanup = await removeMergedWorktree(lane);
+    if (!cleanup.removed) {
+      console.log(
+        '[worktree-cleanup]',
+        `Post-merge cleanup skipped for lane ${lane.id} (packet ${packet.id}): reason=${cleanup.reason ?? 'unknown'}. Reconcile sweep will handle it.`,
+      );
+    }
+  }
+
   // Sync first so reconciliation runs, then apply the release on top.
   // This prevents reconciliation from resetting the packet status after we set it.
   // Pass undefined so sync re-reads inside the mutex — otherwise we race the
@@ -187,8 +205,13 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
   if (!packet) {
     // #557 — Fall through to lane-only merge when the mission packet is missing.
+    // #622 — wrapper captures lane pre-merge and runs synchronous cleanup on
+    // success, making the bash-merge fallback atomic with the merge commit.
     const { mergeOrphanLaneByPacket } = await import('../orphan-lane-merge');
-    return mergeOrphanLaneByPacket(input.packetId, input.commitMessage);
+    return withSynchronousWorktreeCleanup(
+      input.packetId,
+      () => mergeOrphanLaneByPacket(input.packetId, input.commitMessage),
+    );
   }
 
   if (packet.review && !packet.review.approved) {
