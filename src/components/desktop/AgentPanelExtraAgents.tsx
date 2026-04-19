@@ -31,6 +31,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 
 // ── Types ──
 
@@ -79,6 +80,7 @@ interface ExtraAgentRow {
   key: string;
   origin: AgentOrigin;
   status: VisualStatus;
+  runtime: string;
   name: string;
   subtitle: string;
   lastActivityAt: number;
@@ -186,6 +188,7 @@ function buildRows(
       key: `lane:${lane.id}`,
       origin,
       status,
+      runtime: lane.runtime,
       name: lane.label || `${lane.runtime} lane`,
       subtitle: lane.branch,
       lastActivityAt: parseTimestamp(lane.lastEventAt),
@@ -203,6 +206,7 @@ function buildRows(
       key: `agent:${agent.sessionKey}`,
       origin,
       status,
+      runtime: agent.runtime ?? '',
       name: agent.name || agent.runtime || 'Agent',
       subtitle: agent.currentTask ?? '',
       lastActivityAt: parseTimestamp(agent.lastEventAt),
@@ -291,6 +295,25 @@ function OriginChip({ origin }: { origin: AgentOrigin }) {
   );
 }
 
+function RuntimeGlyph({ runtime }: { runtime: string }) {
+  const r = runtime.toLowerCase();
+  if (r.includes('claude')) return <ClaudeIcon size={13} />;
+  if (r.includes('codex') || r.startsWith('gpt')) return <CodexIcon size={13} />;
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 6,
+        height: 6,
+        borderRadius: '50%',
+        background: 'var(--t-text-muted)',
+        opacity: 0.6,
+        display: 'inline-block',
+      }}
+    />
+  );
+}
+
 function ExtraAgentRowView({
   row,
   onSelectSession,
@@ -344,6 +367,19 @@ function ExtraAgentRowView({
           flexShrink: 0,
         }}
       />
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 18,
+          height: 18,
+          flexShrink: 0,
+          color: 'var(--t-text-muted)',
+        }}
+      >
+        <RuntimeGlyph runtime={row.runtime} />
+      </span>
       <span
         style={{
           flex: 1,
