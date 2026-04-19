@@ -27,6 +27,7 @@ import {
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webview-tools';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
 
 // ── Pre-flight diagnostics (run once at startup) ──
 // Verifies that the binaries the MCP tools depend on are actually
@@ -896,11 +897,10 @@ async function handleSubmitReview(args: Record<string, unknown>): Promise<McpToo
 }
 
 async function handleApproveAndMerge(args: Record<string, unknown>): Promise<McpToolResult> {
+  const packetId = requiredString(args, 'packetId');
   try {
-    const result = await approveAndMergePacket({
-      packetId: requiredString(args, 'packetId'),
-      commitMessage: optionalString(args, 'commitMessage') || undefined,
-    });
+    // #622 — wrapper guarantees synchronous worktree cleanup before return.
+    const result = await withSynchronousWorktreeCleanup(packetId, () => approveAndMergePacket({ packetId, commitMessage: optionalString(args, 'commitMessage') || undefined }));
     return jsonResult(result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} approve_and_merge failed: ${errorText(error)}`);
