@@ -271,6 +271,7 @@ export function TabButton({ label, icon, active, onClick, comingSoon = false }: 
           letterSpacing: '0.12em',
           color: RAMS_INK_QUIET,
           textTransform: 'uppercase',
+          paddingRight: 4,
         }}>
           (soon)
         </span>
@@ -281,7 +282,7 @@ export function TabButton({ label, icon, active, onClick, comingSoon = false }: 
 
 // ── Tab breadcrumb + heading primitives ──
 
-export function TabBreadcrumb({ tab }: { tab: string }) {
+export function TabBreadcrumb({ tab, scope = 'settings' }: { tab: string; scope?: string }) {
   return (
     <div style={{
       fontFamily: MONO_FONT_STACK,
@@ -292,7 +293,7 @@ export function TabBreadcrumb({ tab }: { tab: string }) {
       color: RAMS_INK_QUIET,
       marginBottom: 20,
     }}>
-      <span>settings</span>
+      <span>{scope}</span>
       <span style={{ opacity: 0.5, marginLeft: 8, marginRight: 8 }}>/</span>
       <span>{tab}</span>
     </div>

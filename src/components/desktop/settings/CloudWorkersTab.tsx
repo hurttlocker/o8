@@ -170,7 +170,7 @@ export function CloudWorkersTab() {
         subtitle="API keys for self-hosted workers running on your own infra. Workers open outbound-only HTTPS to the o8 backend, pick up dispatched jobs, and stream transcripts back."
       />
 
-      <div style={{ marginBottom: 28 }}>
+      <div style={{ marginTop: 0, marginBottom: 32 }}>
         <ComingSoonBanner message="Cloud worker runtime is v0 scaffolding. You can mint keys and the /api/cloud/worker-poll endpoint is live, but there is no production worker runner yet. Key management below is safe to use — nothing executes against these keys yet." />
       </div>
 

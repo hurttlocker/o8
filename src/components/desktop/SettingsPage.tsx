@@ -243,7 +243,8 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         paddingRight: 24,
         paddingBottom: 24,
         paddingLeft: 24,
-        background: 'var(--t-bg-subtle)',
+        background: 'var(--t-chat-surface-bg)',
+        color: 'var(--t-chat-surface-text)',
         display: 'flex',
         gap: 28,
         fontFamily: APP_FONT_STACK,
@@ -258,7 +259,7 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
-        gap: 0,
+        gap: 2,
         borderRight: `1px solid ${RAMS_HAIRLINE_SOFT}`,
         paddingRight: 4,
       }}>
@@ -269,9 +270,9 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
           color: RAMS_INK_QUIET,
           textTransform: 'uppercase',
           letterSpacing: '0.22em',
-          paddingTop: 12,
+          paddingTop: 16,
           paddingRight: 14,
-          paddingBottom: 14,
+          paddingBottom: 18,
           paddingLeft: 16,
         }}>
           Settings
