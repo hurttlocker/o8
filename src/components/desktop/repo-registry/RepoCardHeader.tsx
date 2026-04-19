@@ -8,39 +8,19 @@ function ChevronDownIcon({ size = 13 }: { size?: number }) {
 function ChevronRightIcon({ size = 13 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="m9 18 6-6-6-6" /></svg>;
 }
-function ArrowRightIcon({ size = 12 }: { size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>;
-}
-function ExternalLinkIcon({ size = 12 }: { size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>;
-}
 import {
   AlertCircle,
-  BlueGlassActionButton,
-  BlueGlassHoverCard,
-  BlueGlassMetricPill,
-  BlueGlassSparklineLane,
-  GitBranch,
-  GitPullRequest,
-  THEME_ACCENT,
-  THEME_ACCENT_BORDER,
-  THEME_ACCENT_SOFT,
-  THEME_SUCCESS_BORDER,
-  THEME_SUCCESS_SOFT,
-  THEME_SUCCESS_TEXT,
-  formatRelativeTime,
   repoReadinessDisplayLabel,
   repoReadinessExplanation,
   repoReadinessPalette,
   shortenPath,
   worktreeStageTone,
   worktreeStatusExplanation,
-  AgentSpinner,
   type BranchAgent,
   type RepoRegistryEntry,
 } from './shared';
+import { RepoStatusHover } from './RepoStatusHover';
 import type { RepoCardModel } from './useRepoCardModel';
-import { useTheme } from '@/lib/theme/context';
 
 interface RepoCardHeaderProps {
   repo: RepoRegistryEntry;
@@ -60,29 +40,28 @@ interface RepoCardHeaderProps {
 function RepoCardHeaderBase({
   repo,
   agentsByBranch,
-  activePorts,
+  // activePorts, onSelectPR, and onReviewPR are intentionally unused here —
+  // the new repo hover no longer surfaces port pills or PR action buttons.
+  // We keep them on the prop type so parent components can pass them without
+  // churn when the card body is extended later.
+  activePorts: _activePorts,
   isActive,
   expanded = false,
   activeWorkspacePath = null,
   onToggle,
   onSelectRepo,
   onRemove,
-  onSelectPR,
-  onReviewPR,
+  onSelectPR: _onSelectPR,
+  onReviewPR: _onReviewPR,
   model,
 }: RepoCardHeaderProps) {
-  const { themeId } = useTheme();
   const {
     cardWidth,
     hoveringHeader,
     hoverPreviewRect,
-    prPreviewLoading,
     prPreview,
     prPreviewLoaded,
-    prPreviewDetail,
     previewCheckCounts,
-    previewFailingChecks,
-    mergeRisk,
     worktreeSummary,
     githubSlug,
     schedulePreviewHover,
@@ -106,201 +85,12 @@ function RepoCardHeaderBase({
   const rowStatusLabel = activeWorktreeTone?.label ?? readinessDisplayLabel ?? null;
   const rowStatusColor = activeWorktreeTone?.color ?? readinessPalette?.color ?? 'var(--t-text-faint)';
   const rowStatusExplanation = activeWorktreeExplanation ?? readinessExplanation;
-  const darkHoverCardStyle = themeId !== 'light'
-    ? {
-        background: 'linear-gradient(180deg, rgba(68, 75, 85, 0.96) 0%, rgba(54, 60, 69, 0.94) 100%)',
-        boxShadow: '0 22px 56px rgba(0, 0, 0, 0.28), 0 8px 24px rgba(15, 23, 42, 0.12)',
-      }
-    : undefined;
   const showStatusInfo = Boolean(
     rowStatusLabel
     && rowStatusExplanation
     && (activeWorktreeTone?.label || repo.readiness?.state === 'blocked' || repo.readiness?.state === 'needs_setup'),
   );
-  const currentBadge = isActive && !activeWorktree ? (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: compactLayout ? '1px 5px' : '1px 6px',
-        borderRadius: 5,
-        background: 'var(--t-divider-subtle)',
-        border: 'none',
-        color: 'var(--t-text-faint)',
-        fontSize: 8.5,
-        fontWeight: 520,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-        flexShrink: 0,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-      }}
-    >
-      Current
-    </span>
-  ) : null;
-  const portsBadge = activePorts && activePorts.length > 0 ? (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        padding: compactLayout ? '1px 5px' : '1px 6px',
-        borderRadius: 999,
-        background: THEME_SUCCESS_SOFT,
-        border: `1px solid ${THEME_SUCCESS_BORDER}`,
-        flexShrink: 0,
-      }}
-    >
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: THEME_SUCCESS_TEXT }} />
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 600,
-          color: THEME_SUCCESS_TEXT,
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-        }}
-      >
-        {activePorts.length === 1 ? `:${activePorts[0]}` : `${activePorts.length} ports`}
-      </span>
-    </span>
-  ) : null;
-  const prBadge = prPreview.length > 0 ? (
-    <span
-      role="button"
-      tabIndex={0}
-      onClick={(event) => {
-        event.stopPropagation();
-        if (onReviewPR) onReviewPR(0, githubSlug ?? undefined);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' && onReviewPR) {
-          event.stopPropagation();
-          onReviewPR(0, githubSlug ?? undefined);
-        }
-      }}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        padding: compactLayout ? '2px 7px' : '2px 8px',
-        borderRadius: 999,
-        background: THEME_ACCENT_SOFT,
-        border: `1px solid ${THEME_ACCENT_BORDER}`,
-        flexShrink: 0,
-        cursor: onReviewPR ? 'pointer' : 'default',
-      }}
-    >
-      <GitPullRequest size={10} strokeWidth={2.2} color="currentColor" />
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          color: THEME_ACCENT,
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-        }}
-      >
-        {prPreview.length} PR{prPreview.length === 1 ? '' : 's'}
-      </span>
-    </span>
-  ) : null;
-  const mergeRiskBadge = prPreview.length > 0 ? (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '2px 8px',
-        borderRadius: 999,
-        background: `${mergeRisk.color}14`,
-        border: `1px solid ${mergeRisk.color}28`,
-        color: mergeRisk.color,
-        fontSize: 10,
-        fontWeight: 700,
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-        flexShrink: 0,
-      }}
-    >
-      {mergeRisk.label}
-    </span>
-  ) : null;
-  const readinessBadge = repo.readiness ? (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        padding: compactLayout ? '2px 7px' : '2px 8px',
-        borderRadius: 999,
-        background: readinessPalette?.background,
-        border: `1px solid ${readinessPalette?.border}`,
-        color: readinessPalette?.color,
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-        flexShrink: 0,
-      }}
-      title={readinessExplanation ?? repo.readiness.summary}
-    >
-      {readinessDisplayLabel}
-      {readinessExplanation && repo.readiness.state !== 'ready' ? (
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'help',
-          }}
-          title={readinessExplanation}
-          aria-label={readinessExplanation}
-        >
-          <AlertCircle size={11} strokeWidth={2.1} />
-        </span>
-      ) : null}
-    </span>
-  ) : null;
-  const branchBadge = (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 3,
-        padding: compactLayout ? '1px 5px' : '1px 6px',
-        borderRadius: 999,
-        background: 'var(--t-divider-subtle)',
-        color: 'var(--t-text-secondary)',
-        fontSize: 10,
-        fontWeight: 600,
-        fontFamily: '"SF Mono", ui-monospace, monospace',
-        flexShrink: 0,
-      }}
-    >
-      <GitBranch size={10} strokeWidth={2} />
-      {repo.defaultBranch}
-    </span>
-  );
-  const repoAgentsBadge = repoAgents.length > 0 ? (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        padding: compactLayout ? '2px 7px' : '2px 8px',
-        borderRadius: 999,
-        background: 'var(--t-panel-hover)',
-        border: '1px solid var(--t-panel-border)',
-        color: 'var(--t-text-secondary)',
-        fontSize: 10,
-        fontWeight: 700,
-        flexShrink: 0,
-      }}
-    >
-      <AgentSpinner status={repoAgents.some(a => a.status === 'running') ? 'running' : 'completed'} size={5} />
-      {repoAgents.length} live
-    </span>
-  ) : null;
-
-  /* --- Compact activity badges (PR count + CI dot) --- */
+  /* --- Compact activity badges (PR count + CI dot on the row header) --- */
   const openPrCount = prPreviewLoaded ? prPreview.length : 0;
   const ciTotal = previewCheckCounts.passed + previewCheckCounts.failed + previewCheckCounts.pending;
   const ciDotColor = previewCheckCounts.failed > 0
@@ -311,15 +101,6 @@ function RepoCardHeaderBase({
         ? '#22c55e'
         : null;
 
-  const headerMetaBadges = [
-    currentBadge,
-    readinessBadge,
-    portsBadge,
-    branchBadge,
-    repoAgentsBadge,
-    prBadge,
-    mergeRiskBadge,
-  ].filter(Boolean);
   const primaryPreview = prPreview[0] ?? null;
   const rowMetaSegments: Array<{ key: string; content: React.ReactNode }> = [
     {
@@ -376,12 +157,7 @@ function RepoCardHeaderBase({
   }
   rowMetaSegments.splice(3);
   const repoHeaderLeadingInset = 19;
-  const showHeaderHover = hoveringHeader && (
-    prPreviewLoading
-    || prPreview.length > 0
-    || headerMetaBadges.length > 0
-    || Boolean(repo.readiness?.summary)
-  );
+  const showHeaderHover = hoveringHeader && hoverPreviewRect !== null;
 
   return (
     <>
@@ -566,148 +342,14 @@ function RepoCardHeaderBase({
         </div>
 
         {showHeaderHover ? (
-          <BlueGlassHoverCard
-            eyebrow={prPreviewLoading || prPreview.length > 0 ? 'Repository Status' : 'Repository'}
-            title={prPreviewLoading ? `Checking ${repo.name}…` : repo.name}
-            subtitle={prPreviewLoading ? 'Looking for active merge work and repo status.' : shortenPath(repo.localPath)}
+          <RepoStatusHover
+            repo={repo}
             anchorRect={hoverPreviewRect}
-            interactive
+            agents={repoAgents}
+            githubSlug={githubSlug ?? null}
             onMouseEnter={holdPreviewHover}
             onMouseLeave={closePreviewHover}
-            style={darkHoverCardStyle}
-            footer={prPreviewLoading ? null : (
-              <>
-                {prPreview.length > 0 ? (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <BlueGlassMetricPill label="Review" value={primaryPreview?.reviewDecision || 'pending'} color="#1d4ed8" />
-                    <BlueGlassMetricPill label="Files" value={String(primaryPreview?.changedFiles ?? 0)} color="var(--t-text)" />
-                    <BlueGlassMetricPill label="Risk" value={mergeRisk.label} color={mergeRisk.color} />
-                  </div>
-                ) : null}
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  {primaryPreview && onReviewPR ? (
-                    <BlueGlassActionButton
-                      icon={<GitPullRequest size={12} strokeWidth={2} />}
-                      label="Review"
-                      onClick={() => onReviewPR(primaryPreview.number, model.githubSlug ?? undefined)}
-                    />
-                  ) : null}
-                  {primaryPreview && onSelectPR ? (
-                    <BlueGlassActionButton
-                      icon={<ArrowRightIcon size={12} />}
-                      label="Open full PR"
-                      onClick={() => onSelectPR(primaryPreview.number, model.githubSlug ?? undefined)}
-                    />
-                  ) : null}
-                  {primaryPreview?.url ? (
-                    <BlueGlassActionButton
-                      icon={<ExternalLinkIcon size={12} />}
-                      label="Open on GitHub"
-                      onClick={() => window.open(primaryPreview.url, '_blank', 'noopener,noreferrer')}
-                    />
-                  ) : null}
-                </div>
-              </>
-            )}
-          >
-            {!prPreviewLoading ? (
-              <>
-                {headerMetaBadges.length > 0 ? (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {headerMetaBadges.map((badge, index) => (
-                      <span key={index}>{badge}</span>
-                    ))}
-                  </div>
-                ) : null}
-                {repo.readiness?.summary ? (
-                  <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
-                    {repo.readiness.summary}
-                  </div>
-                ) : null}
-                {prPreview.length > 0 ? (
-                  <>
-                    <BlueGlassSparklineLane
-                      segments={[
-                        { label: 'Pass', value: previewCheckCounts.passed, color: '#22c55e' },
-                        { label: 'Fail', value: previewCheckCounts.failed, color: '#ef4444' },
-                        { label: 'Pending', value: previewCheckCounts.pending, color: '#f59e0b' },
-                      ]}
-                    />
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        fontSize: 11,
-                        color: 'var(--t-text-muted)',
-                      }}
-                    >
-                      <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{primaryPreview?.headRefName}</span>
-                      <span>{primaryPreview ? formatRelativeTime(primaryPreview.createdAt) : null}</span>
-                    </div>
-                    <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
-                      {primaryPreview?.title}
-                    </div>
-                    {previewFailingChecks.length > 0 ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#dc2626' }}>
-                          Top failing checks
-                        </div>
-                        {previewFailingChecks.map((check) => (
-                          <div
-                            key={check}
-                            style={{
-                              fontSize: 11,
-                              lineHeight: 1.45,
-                              color: 'var(--t-text-secondary)',
-                              padding: '6px 8px',
-                              borderRadius: 10,
-                              background: 'var(--t-panel-hover)',
-                            }}
-                          >
-                            {check}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                    {prPreviewDetail?.files?.length ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#1d4ed8' }}>
-                          Changed files
-                        </div>
-                        {prPreviewDetail.files.slice(0, 3).map((file) => (
-                          <div
-                            key={file.path}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 8,
-                              padding: '6px 8px',
-                              borderRadius: 10,
-                              background: 'var(--t-panel-hover)',
-                              fontSize: 11,
-                            }}
-                          >
-                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text)' }}>
-                              {file.path}
-                            </span>
-                            <span style={{ color: 'var(--t-text-secondary)', fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>+{file.additions}</span>
-                            <span style={{ color: 'var(--t-text-secondary)', fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>-{file.deletions}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                    {prPreview.length > 1 ? (
-                      <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
-                        {prPreview.length - 1} more open PR{prPreview.length - 1 === 1 ? '' : 's'} on this repo.
-                      </div>
-                    ) : null}
-                  </>
-                ) : null}
-              </>
-            ) : null}
-          </BlueGlassHoverCard>
+          />
         ) : null}
 
         {confirmingRemove ? (
