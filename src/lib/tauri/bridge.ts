@@ -180,3 +180,21 @@ export async function storeSet<T>(key: string, value: T): Promise<void> {
     // Store not available
   }
 }
+
+// ── Keychain ──
+
+/**
+ * Retrieve the AES-256-GCM master encryption key from the macOS Keychain.
+ * Returns null if the entry does not exist or this is not a Tauri build.
+ */
+export async function masterKeyGet(): Promise<string | null> {
+  return invoke<string>('master_key_get');
+}
+
+/**
+ * Retrieve the master key from Keychain, creating one if absent.
+ * Returns null on non-Tauri / non-macOS environments.
+ */
+export async function masterKeyEnsure(): Promise<string | null> {
+  return invoke<string>('master_key_ensure');
+}
