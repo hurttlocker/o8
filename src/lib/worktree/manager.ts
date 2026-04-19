@@ -2,8 +2,13 @@
  * WorktreeManager — Orchestration Layer for Git Worktree Isolation
  *
  * Manages worktree lifecycle for ALL agent types:
- * - Claude Code: passes through --worktree flag (Claude handles creation natively)
- * - Codex / others: creates and manages worktrees via git commands
+ * - Default path (Codex, Claude Code as of #608): creates and manages the
+ *   worktree via git commands, runs a pre-launch rebase onto origin/<base>,
+ *   and spawns the agent with cwd=<worktreePath>.
+ * - Legacy claude-managed path (only when `opts.managed` is falsy): records
+ *   metadata only, lets the Claude CLI handle worktree creation itself via
+ *   its `--worktree` flag. Retained so existing in-flight lanes keep working;
+ *   new launches pass `managed: true` to force the managed path.
  *
  * Thin orchestration on top of git worktree + agent-specific behavior.
  *
@@ -11,6 +16,7 @@
  *
  * @see https://github.com/hurttlocker/cortex-ide/issues/65
  * @see https://github.com/hurttlocker/cortex-ide/issues/66
+ * @see https://github.com/hurttlocker/cortex-ide/issues/608
  */
 
 import { execFile } from 'node:child_process';
@@ -146,8 +152,12 @@ export class WorktreeManager {
 
   /**
    * Create a new isolated worktree for an agent.
-   * Claude Code: records metadata only (Claude creates worktree via --worktree flag)
-   * Codex/others: git worktree add + optional setup
+   * - `opts.managed: true` (default for Codex, and for Claude Code post-#608):
+   *   git worktree add + rebase onto origin/<base> + optional setup
+   * - `opts.managed: false/undefined` + agentType === 'claude-code':
+   *   records metadata only (Claude creates worktree via --worktree flag).
+   *   Legacy path — still reachable so existing claude-code lanes in flight
+   *   at deploy time keep working until they drain.
    */
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
     // Auto-prune stale worktrees (throttled to once per 6 hours)

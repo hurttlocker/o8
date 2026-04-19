@@ -1124,9 +1124,14 @@ export const claudeCodeRuntime: AgentRuntime = {
       const captureDir = await mkdtemp(path.join(os.tmpdir(), 'cortex-claude-launch-'));
       const stdoutPath = path.join(captureDir, 'stdout.jsonl');
       const stderrPath = path.join(captureDir, 'stderr.log');
+      // #608 — claude-code now runs inside an o8-managed worktree (same path
+      // as Codex) so the pre-launch rebase happens before the agent spawns.
+      // The CLI treats `cwd` as its working directory, so we no longer forward
+      // `--worktree`. `opts.worktreeFlag` is intentionally ignored: legacy
+      // in-flight lanes at deploy time may still have it set on their payload,
+      // but the managed worktree path in `opts.cwd` is authoritative.
       const cliArgs = [
         '-p', '--print',
-        ...(opts.worktreeFlag ? ['--worktree', opts.worktreeFlag] : []),
         '--dangerously-skip-permissions',
         '--output-format', 'stream-json',
         '--verbose',
