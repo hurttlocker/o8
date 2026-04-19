@@ -484,6 +484,13 @@ export interface SendToOrchestratorOptions {
   permissionMode?: OrchestratorPermissionMode;
   thinkingEffort?: ThinkingEffort;
   model?: string;
+  /**
+   * #624 — Abort signal for user-initiated interrupt. When aborted mid-stream,
+   * the in-flight claude CLI subprocess is terminated with SIGTERM so the turn
+   * ends within 1-2s. Partial transcript output that already fired via onEvent
+   * is preserved — only NEW output is stopped.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -580,6 +587,34 @@ export async function sendToOrchestrator(
       }, 5_000);
     }, PROCESS_TIMEOUT_MS);
 
+    // #624 — User-initiated interrupt. The AbortSignal is the plumbing; the
+    // actual stop is SIGTERM to the streaming claude subprocess (same mechanism
+    // the timeout path above uses). Events already delivered via onEvent stay
+    // in the transcript — we only suppress NEW output after the abort.
+    const userAbortSignal = options.signal;
+    let userAbortListener: (() => void) | null = null;
+    if (userAbortSignal) {
+      if (userAbortSignal.aborted) {
+        console.log(`[orchestrator-session] Abort requested before spawn listener attached — killing ${session.sessionName}`);
+        proc.kill('SIGTERM');
+      } else {
+        userAbortListener = () => {
+          console.log(`[orchestrator-session] User interrupt — killing ${session.sessionName}`);
+          if (!proc.killed) proc.kill('SIGTERM');
+          setTimeout(() => {
+            if (!proc.killed) proc.kill('SIGKILL');
+          }, 2_000);
+        };
+        userAbortSignal.addEventListener('abort', userAbortListener, { once: true });
+      }
+    }
+    const detachUserAbortListener = () => {
+      if (userAbortSignal && userAbortListener) {
+        userAbortSignal.removeEventListener('abort', userAbortListener);
+        userAbortListener = null;
+      }
+    };
+
     let lineBuffer = '';
     let sessionId: string | null = session.claudeSessionId;
     let cost: number | null = null;
@@ -630,6 +665,7 @@ export async function sendToOrchestrator(
 
     proc.on('error', (err) => {
       clearTimeout(processTimeout);
+      detachUserAbortListener();
       session.status = 'dead';
       session.proc = null;
       onEvent({ type: 'error', error: err.message });
@@ -638,6 +674,7 @@ export async function sendToOrchestrator(
 
     proc.on('close', (code) => {
       clearTimeout(processTimeout);
+      detachUserAbortListener();
       session.proc = null;
 
       // Process any remaining buffer

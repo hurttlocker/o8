@@ -977,6 +977,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onEnhance={handleEnhance}
         onUndoEnhance={handleUndoEnhance}
         onSubmit={() => { void handleTaskSend(); }}
+        onStop={orchStream.interrupt}
         onSlashCommand={handleSlashCommand}
         modelLabel={isOrchestratorMode ? formatModelLabel(orchestratorModel) : activeTargetLabel}
         effort={thinkingEffort}

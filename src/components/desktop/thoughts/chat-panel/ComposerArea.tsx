@@ -191,6 +191,7 @@ interface ComposerAreaProps {
   onEnhance: () => void;
   onUndoEnhance: () => void;
   onSubmit: () => void;
+  onStop?: () => void;
   onSlashCommand: (cmd: string) => void;
   modelLabel: string;
   effort: ThinkingEffort;
@@ -220,6 +221,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onEnhance,
   onUndoEnhance,
   onSubmit,
+  onStop,
   onSlashCommand,
   modelLabel,
   effort,
@@ -437,6 +439,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onToggleMission={onToggleMission}
             repoLabel={isOrchestratorMode ? repoLabel : null}
             working={isOrchestratorMode && displayWaiting}
+            onStop={isOrchestratorMode ? onStop : undefined}
           />
         </div>
       </div>
