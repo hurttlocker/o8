@@ -5,6 +5,7 @@ import { memo, type CSSProperties } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Clock } from './lucide-shims';
 import { RepoRegistrySection } from './RepoRegistrySection';
+import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
 import {
   AgentPanelEmptyState,
   SidebarSection,
@@ -185,6 +186,11 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             tab open. The repo list above is the primary panel content;
             discovered agent sessions appear inline on branch rows when
             they exist. */}
+
+        {/* #627 fold-in — non-CLI origin agents (MCP, Mobile, Webhook,
+            Cloud) grouped by their bound repo, with a final "Other" group
+            for cross-repo agents. Renders nothing when absent. */}
+        <AgentPanelExtraAgents onSelectSession={onSelectSession} />
 
       </div>
     </div>
