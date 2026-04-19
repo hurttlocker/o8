@@ -408,12 +408,6 @@ export function useWebSocket({
             const toolName = typeof data?.name === 'string' ? data.name : 'tool';
             setOrchestratorStatus('busy');
             setOrchestratorNote(`Orchestrator is using ${toolName}.`);
-          } else if (eventType === 'agent-update') {
-            const detail = typeof data?.detail === 'string' ? data.detail : null;
-            const name = typeof data?.name === 'string' ? data.name : 'Agent';
-            const statusText = typeof data?.status === 'string' ? data.status : 'updated';
-            setOrchestratorStatus('busy');
-            setOrchestratorNote(detail ?? `${name} ${statusText}.`);
           } else if (eventType === 'output') {
             const text = typeof data?.text === 'string' ? data.text : '';
             const thinking = data?.thinking === true;
@@ -429,6 +423,20 @@ export function useWebSocket({
             const error = typeof data?.error === 'string' ? data.error : 'Desktop orchestrator error.';
             setOrchestratorStatus('error');
             setOrchestratorNote(error);
+          }
+          break;
+
+        case 'supervisor':
+          // #529 — Agent lifecycle events are notifications, not orchestrator
+          // transcript. Surface them as the ambient status note (not the full
+          // codex sentence — ws-server strips transcript prose before fanout)
+          // so the mobile operator knows a watched agent updated without
+          // hearing a mid-stream monologue.
+          if (eventType === 'agent-update') {
+            const name = typeof data?.name === 'string' ? data.name : 'Agent';
+            const statusText = typeof data?.status === 'string' ? data.status : 'updated';
+            setOrchestratorStatus('busy');
+            setOrchestratorNote(`${name} ${statusText}.`);
           }
           break;
       }
