@@ -7,15 +7,19 @@ import {
   type GitHubBrokerStatus,
   type GitHubDeviceFlowState,
   type GitHubActionKind,
-  THEME_ACCENT,
-  THEME_ACCENT_SOFT,
-  THEME_ACCENT_BORDER,
-  CheckCircleIcon,
+  APP_FONT_STACK,
+  MONO_FONT_STACK,
+  RAMS_ACCENT,
+  RAMS_HAIRLINE_SOFT,
+  RAMS_INK_QUIET,
+  BracketLabel,
+  FieldLabel,
+  HairlineRule,
   LockIcon,
   GlobeIcon,
-  ChevronDownIcon,
-  ScopeDiagnostic,
-  GitHubAvatar,
+  SectionLabel,
+  TabBreadcrumb,
+  TabHeading,
 } from './shared';
 
 export function GitHubTab({
@@ -51,7 +55,6 @@ export function GitHubTab({
   onPollDeviceFlow?: (flowId: string) => void;
   onCancelDeviceFlow?: (flowId: string) => void;
 }) {
-  const [cliExpanded, setCliExpanded] = useState(false);
   const [reposExpanded, setReposExpanded] = useState(false);
   const [deviceCodeCopied, setDeviceCodeCopied] = useState(false);
 
@@ -63,8 +66,6 @@ export function GitHubTab({
     && broker.tokenReady
     && broker.installationReachable
     && broker.privateKeyConfigured);
-  // Webhook + production URL only matter when this install is hosting a
-  // public webhook target. For local-only installs, hide that noise.
   const showProdDiagnostics = !!(broker && (broker.publicBaseUrlConfigured || broker.webhookSecretConfigured));
 
   async function copyDeviceCode() {
@@ -80,430 +81,541 @@ export function GitHubTab({
 
   if (loading) {
     return (
-      <div style={{ padding: 40, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
+      <div style={{
+        paddingTop: 40,
+        color: 'var(--t-text-muted)',
+        fontSize: 13,
+        fontFamily: APP_FONT_STACK,
+      }}>
         Checking GitHub connection...
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* ── Section 1: o8 GitHub App ─────────────────────────── */}
-      <div style={{
-        background: 'var(--t-panel)',
-        borderRadius: 14,
-        border: '1px solid var(--t-panel-border)',
-        boxShadow: 'var(--t-panel-shadow)',
-        padding: 18,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 14 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)' }}>o8 GitHub App</span>
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '3px 9px',
-                borderRadius: 999,
-                background: appConnected ? 'rgba(34, 197, 94, 0.08)' : 'rgba(245, 158, 11, 0.08)',
-                color: appConnected ? '#22c55e' : '#92400e',
-                fontSize: 11,
-                fontWeight: 700,
-              }}>
-                {appConnected && <CheckCircleIcon />}
-                {appConnected ? 'Connected' : appConfigured ? 'Needs Attention' : 'Not Configured'}
-              </span>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--t-text-muted)', marginTop: 6, lineHeight: 1.5 }}>
-              {appConnected && broker
-                ? `App ${broker.appId} · installed on @${broker.installationAccount} · ${repoCount} ${repoCount === 1 ? 'repo' : 'repos'}`
-                : appConfigured
-                  ? broker?.note ?? 'Diagnostics below show what still needs to be configured.'
-                  : 'The product needs the GitHub App to read issues, open PRs, and act on your behalf. Set GITHUB_APP_ID + GITHUB_APP_INSTALLATION_ID and drop the PEM at ~/.o8/github-app.pem.'}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={actionBusy === 'refresh'}
-            style={{
-              padding: '7px 12px',
-              borderRadius: 8,
-              border: '1px solid var(--t-panel-border)',
-              background: 'var(--t-panel)',
-              color: 'var(--t-text-secondary)',
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: actionBusy === 'refresh' ? 'default' : 'pointer',
-              opacity: actionBusy === 'refresh' ? 0.55 : 1,
-              flexShrink: 0,
-            }}
-          >
-            {actionBusy === 'refresh' ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
+    <div style={{
+      paddingTop: 8,
+      paddingLeft: 8,
+      paddingRight: 32,
+      paddingBottom: 40,
+      maxWidth: 780,
+      fontFamily: APP_FONT_STACK,
+    }}>
+      <TabBreadcrumb tab="connectors" />
+      <TabHeading
+        title="connectors"
+        subtitle="GitHub is the first-class connector. App install drives automation; the local CLI is optional for terminal git commands."
+      />
 
-        {actionNote && (
-          <div style={{
-            marginBottom: 14,
-            padding: '10px 12px',
-            borderRadius: 10,
-            background: THEME_ACCENT_SOFT,
-            border: `1px solid ${THEME_ACCENT_BORDER}`,
-            color: 'var(--t-text-secondary)',
-            fontSize: 12,
-            lineHeight: 1.45,
-          }}>
-            {actionNote}
-          </div>
-        )}
-
-        {appConfigured && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 10,
-            marginBottom: 14,
-          }}>
-            <ScopeDiagnostic
-              title="App key"
-              status={broker!.privateKeyConfigured ? 'ready' : 'missing'}
-              detail={broker!.privateKeyConfigured
-                ? `App ${broker!.appId ?? 'unknown'} can sign installation token requests.`
-                : 'Missing GitHub App private key at ~/.o8/github-app.pem.'}
-            />
-            <ScopeDiagnostic
-              title="Installation"
-              status={broker!.installationReachable ? 'ready' : 'missing'}
-              detail={broker!.installationReachable
-                ? `Installation ${broker!.installationId ?? 'unknown'} is healthy on ${broker!.probeRepo ?? 'the probe repo'}.`
-                : `Cannot reach installation for ${broker!.probeRepo ?? 'the configured repo'}.`}
-            />
-            {showProdDiagnostics && (
-              <ScopeDiagnostic
-                title="Webhook secret"
-                status={broker!.webhookSecretConfigured ? 'ready' : 'missing'}
-                detail={broker!.webhookSecretConfigured
-                  ? 'Webhook signature verification can be enforced in production.'
-                  : 'Set GITHUB_APP_WEBHOOK_SECRET before enabling production webhooks.'}
-              />
-            )}
-            {showProdDiagnostics && (
-              <ScopeDiagnostic
-                title="Production URL"
-                status={broker!.publicBaseUrlConfigured ? 'ready' : 'missing'}
-                detail={broker!.publicBaseUrlConfigured
-                  ? `Webhook target is ${broker!.webhookUrl ?? 'configured'}.`
-                  : 'Set CORTEX_IDE_PUBLIC_BASE_URL when this installation is publicly reachable.'}
-              />
-            )}
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {broker?.installationId && (
-            <a
-              href={`https://github.com/settings/installations/${broker.installationId}`}
-              target="_blank"
-              rel="noreferrer"
-              style={brokerLinkStyle}
-            >
-              Open Installation
-            </a>
-          )}
-          <a
-            href="https://github.com/settings/apps/cortex-dev-agent"
-            target="_blank"
-            rel="noreferrer"
-            style={brokerLinkStyle}
-          >
-            App Settings
-          </a>
-        </div>
-      </div>
-
-      {/* ── Repositories ──────────────────────────────────────── */}
-      {repos.length > 0 && (
+      {actionNote ? (
         <div style={{
-          background: 'var(--t-panel)',
-          borderRadius: 14,
-          border: '1px solid var(--t-panel-border)',
-          boxShadow: 'var(--t-panel-shadow)',
-          overflow: 'hidden',
+          marginBottom: 28,
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          fontFamily: APP_FONT_STACK,
+          lineHeight: 1.5,
+          borderLeft: `2px solid ${RAMS_ACCENT}`,
+          paddingLeft: 12,
+          paddingTop: 2,
+          paddingBottom: 2,
         }}>
-          <button
-            type="button"
-            onClick={() => setReposExpanded((v) => !v)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              width: '100%',
-              padding: '14px 18px',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: 700,
-              color: 'var(--t-text)',
-              textAlign: 'left',
-            }}
-          >
-            <span>Tracked repositories ({repos.length})</span>
-            <ChevronDownIcon rotated={reposExpanded} />
-          </button>
-          {reposExpanded && (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              maxHeight: 240,
-              overflowY: 'auto',
-              padding: '0 18px 18px',
-            }}>
-              {repos.map((repo) => (
-                <a
-                  key={repo.nameWithOwner}
-                  href={`https://github.com/${repo.nameWithOwner}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '9px 12px',
-                    borderRadius: 10,
-                    border: '1px solid var(--t-panel-border)',
-                    background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
-                    textDecoration: 'none',
-                  }}
-                >
-                  <div style={{ color: repo.isPrivate ? '#f59e0b' : '#22c55e' }}>
-                    {repo.isPrivate ? <LockIcon /> : <GlobeIcon />}
-                  </div>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--t-text)', flex: 1 }}>
-                    {repo.nameWithOwner}
-                  </span>
-                  <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
-                    {repo.updatedAt}
-                  </span>
-                </a>
-              ))}
-            </div>
-          )}
+          {actionNote}
         </div>
-      )}
+      ) : null}
 
-      {/* ── Section 2: Local GitHub CLI (optional) ──────────── */}
-      <div style={{
-        background: 'var(--t-panel)',
-        borderRadius: 14,
-        border: '1px solid var(--t-panel-border)',
-        boxShadow: 'var(--t-panel-shadow)',
-        overflow: 'hidden',
-      }}>
-        <button
-          type="button"
-          onClick={() => setCliExpanded((v) => !v)}
-          style={{
+      {/* 01 — ACCOUNTS */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="01">ACCOUNTS</SectionLabel>
+
+        {activeAccount ? (
+          <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 12,
-            width: '100%',
-            padding: '14px 18px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            textAlign: 'left',
-          }}
-        >
-          {activeAccount
-            ? <GitHubAvatar avatarUrl={activeAccount.avatarUrl} login={activeAccount.login} size={32} />
-            : <GitHubAvatar login="github" size={32} />}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
-                Local GitHub CLI
-              </span>
-              <span style={{
-                padding: '2px 8px',
-                borderRadius: 999,
-                background: 'var(--t-bg-card, rgba(148, 163, 184, 0.10))',
+            gap: 14,
+            paddingTop: 12,
+            paddingBottom: 14,
+          }}>
+            <AccountAvatar login={activeAccount.login} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 15, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                  {activeAccount.login}
+                </span>
+                <BracketLabel tone="quiet">active</BracketLabel>
+              </div>
+              <div style={{
+                fontSize: 12,
                 color: 'var(--t-text-muted)',
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
+                marginTop: 4,
+                fontFamily: MONO_FONT_STACK,
+                letterSpacing: '0.02em',
               }}>
-                Optional
-              </span>
+                {activeAccount.protocol} · {activeAccount.scopes.length} {activeAccount.scopes.length === 1 ? 'scope' : 'scopes'}
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 3, lineHeight: 1.45 }}>
-              {cliConnected
-                ? `Signed in as ${activeAccount!.login} — used for terminal git push/fetch and gh commands.`
-                : 'Sign in if you want o8 to run gh commands or git push from the workspace terminals.'}
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={actionBusy === 'refresh'}
+              style={quietActionStyle(actionBusy === 'refresh')}
+            >
+              {actionBusy === 'refresh' ? 'refreshing...' : 'refresh'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onDisconnect?.(activeAccount.login)}
+              disabled={actionBusy === 'logout'}
+              style={quietActionStyle(actionBusy === 'logout')}
+            >
+              {actionBusy === 'logout' ? 'disconnecting...' : 'disconnect'}
+            </button>
+          </div>
+        ) : (
+          <div style={{
+            paddingTop: 8,
+            paddingBottom: 14,
+            fontSize: 13,
+            color: 'var(--t-text-secondary)',
+            lineHeight: 1.55,
+            maxWidth: 580,
+          }}>
+            No GitHub account is connected. Use the device flow below to sign in. Terminal git push and gh commands will pick it up automatically.
+          </div>
+        )}
+
+        <HairlineRule />
+      </section>
+
+      {/* 02 — DEVICE FLOW */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="02">DEVICE FLOW</SectionLabel>
+
+        {!cliConnected && !deviceFlow ? (
+          <div style={{ paddingTop: 8 }}>
+            <button
+              type="button"
+              onClick={onStartDeviceFlow}
+              disabled={!deviceFlowEnabled || actionBusy === 'login_device'}
+              style={primaryLinkStyle(!deviceFlowEnabled || actionBusy === 'login_device')}
+            >
+              {actionBusy === 'login_device' ? 'starting...' : 'sign in with github'}
+            </button>
+            <div style={{
+              fontSize: 12,
+              color: 'var(--t-text-muted)',
+              marginTop: 10,
+              lineHeight: 1.55,
+              maxWidth: 580,
+            }}>
+              {deviceFlowEnabled
+                ? 'Opens a GitHub device code flow. The verification code appears below, paste it into github.com/login/device.'
+                : 'Set GITHUB_OAUTH_CLIENT_ID to enable device-flow sign-in.'}
             </div>
           </div>
-          <ChevronDownIcon rotated={cliExpanded} />
-        </button>
+        ) : null}
 
-        {cliExpanded && (
+        {deviceFlow ? (
           <div style={{
-            padding: '0 18px 18px',
-            borderTop: '1px solid var(--t-divider-subtle)',
+            paddingTop: 4,
+            paddingBottom: 8,
             display: 'flex',
             flexDirection: 'column',
             gap: 14,
           }}>
-            {cliConnected && activeAccount && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 14 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>
-                    {activeAccount.login}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2 }}>
-                    Protocol: {activeAccount.protocol} · {activeAccount.scopes.length} {activeAccount.scopes.length === 1 ? 'scope' : 'scopes'}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onDisconnect?.(activeAccount.login)}
-                  disabled={actionBusy === 'logout'}
-                  style={{
-                    padding: '7px 12px',
-                    borderRadius: 8,
-                    border: '1px solid rgba(239, 68, 68, 0.18)',
-                    background: 'rgba(239, 68, 68, 0.04)',
-                    color: '#b91c1c',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: actionBusy === 'logout' ? 'default' : 'pointer',
-                    opacity: actionBusy === 'logout' ? 0.6 : 1,
-                  }}
-                >
-                  {actionBusy === 'logout' ? 'Disconnecting…' : 'Disconnect'}
-                </button>
+            <div>
+              <FieldLabel>enter this code</FieldLabel>
+              <div style={{
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 22,
+                fontWeight: 500,
+                color: 'var(--t-text)',
+                letterSpacing: '0.18em',
+                marginTop: 8,
+              }}>
+                {deviceFlow.userCode}
               </div>
-            )}
-
-            {!cliConnected && !deviceFlow && (
-              <div style={{ paddingTop: 14 }}>
-                <button
-                  type="button"
-                  onClick={onStartDeviceFlow}
-                  disabled={!deviceFlowEnabled || actionBusy === 'login_device'}
-                  style={{
-                    padding: '9px 16px',
-                    borderRadius: 9,
-                    border: 'none',
-                    background: !deviceFlowEnabled || actionBusy === 'login_device' ? 'var(--t-divider-subtle)' : THEME_ACCENT,
-                    color: !deviceFlowEnabled || actionBusy === 'login_device' ? 'var(--t-text-faint)' : '#fff',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: !deviceFlowEnabled || actionBusy === 'login_device' ? 'default' : 'pointer',
-                  }}
-                >
-                  {actionBusy === 'login_device' ? 'Starting…' : 'Sign in with GitHub'}
-                </button>
-                <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 8, lineHeight: 1.45 }}>
-                  {deviceFlowEnabled
-                    ? 'Opens a GitHub device code flow and stores the result in your local gh CLI.'
-                    : 'Set GITHUB_OAUTH_CLIENT_ID to enable device-flow sign-in.'}
-                </div>
+              <div style={{
+                marginTop: 6,
+                fontSize: 12,
+                color: 'var(--t-text-secondary)',
+                lineHeight: 1.55,
+                maxWidth: 560,
+              }}>
+                {deviceFlow.note || 'Waiting for approval in GitHub.'} Expires in about {deviceFlow.expiresInMinutes} minute{deviceFlow.expiresInMinutes === 1 ? '' : 's'}.
               </div>
-            )}
+              <div style={{
+                marginTop: 4,
+                fontSize: 12,
+                color: 'var(--t-text-muted)',
+                fontFamily: MONO_FONT_STACK,
+                wordBreak: 'break-all',
+              }}>
+                {deviceFlow.verificationUriComplete || deviceFlow.verificationUri}
+              </div>
+            </div>
 
-            {deviceFlow && (
-              <div style={{ paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{
-                  padding: '12px 14px',
-                  borderRadius: 12,
-                  background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
-                  border: '1px solid var(--t-panel-border)',
-                }}>
-                  <div style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: 'var(--t-text-muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    marginBottom: 6,
-                  }}>
-                    Enter This Code
-                  </div>
-                  <div style={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                    color: 'var(--t-text)',
-                    letterSpacing: '0.14em',
-                    fontFamily: '"SF Mono", Menlo, monospace',
-                  }}>
-                    {deviceFlow.userCode}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 8, lineHeight: 1.45 }}>
-                    {deviceFlow.note || 'Waiting for approval in GitHub…'} Expires in about {deviceFlow.expiresInMinutes} minute{deviceFlow.expiresInMinutes === 1 ? '' : 's'}.
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => window.open(deviceFlow.verificationUriComplete || deviceFlow.verificationUri, '_blank', 'noopener,noreferrer')}
-                    style={ghostButtonStyle}
-                  >
-                    Open GitHub
-                  </button>
-                  <button type="button" onClick={() => { void copyDeviceCode(); }} style={ghostButtonStyle}>
-                    {deviceCodeCopied ? 'Copied' : 'Copy Code'}
-                  </button>
-                  <button type="button" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)} style={ghostButtonStyle}>
-                    Poll Now
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
-                    disabled={actionBusy === 'cancel_device'}
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => window.open(deviceFlow.verificationUriComplete || deviceFlow.verificationUri, '_blank', 'noopener,noreferrer')}
+                style={quietActionStyle(false)}
+              >
+                open github
+              </button>
+              <button type="button" onClick={() => { void copyDeviceCode(); }} style={quietActionStyle(false)}>
+                {deviceCodeCopied ? 'copied' : 'copy code'}
+              </button>
+              <button type="button" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)} style={quietActionStyle(false)}>
+                poll now
+              </button>
+              <button
+                type="button"
+                onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
+                disabled={actionBusy === 'cancel_device'}
+                style={quietActionStyle(actionBusy === 'cancel_device')}
+              >
+                {actionBusy === 'cancel_device' ? 'cancelling...' : 'cancel'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {cliConnected && !deviceFlow ? (
+          <div style={{
+            paddingTop: 4,
+            fontSize: 13,
+            color: 'var(--t-text-secondary)',
+            lineHeight: 1.55,
+            maxWidth: 580,
+          }}>
+            Signed in as {activeAccount!.login}. Terminal git push and gh commands use this session. Disconnect above to sign in with a different account.
+          </div>
+        ) : null}
+
+        <div style={{ marginTop: 24 }}>
+          <HairlineRule />
+        </div>
+      </section>
+
+      {/* 03 — REPOSITORIES */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="03">REPOSITORIES</SectionLabel>
+
+        {repos.length === 0 ? (
+          <div style={{
+            paddingTop: 4,
+            paddingBottom: 14,
+            fontSize: 13,
+            color: 'var(--t-text-muted)',
+            lineHeight: 1.55,
+            maxWidth: 580,
+          }}>
+            No tracked repositories yet. Connect the GitHub App below to pull in issues and open PRs from your repos.
+          </div>
+        ) : (
+          <div>
+            <button
+              type="button"
+              onClick={() => setReposExpanded((v) => !v)}
+              style={{
+                ...quietActionStyle(false),
+                paddingLeft: 0,
+                paddingRight: 0,
+                marginTop: 4,
+                marginBottom: 4,
+              }}
+            >
+              {repos.length} tracked {repos.length === 1 ? 'repo' : 'repos'} {reposExpanded ? '—' : '+'}
+            </button>
+
+            {reposExpanded ? (
+              <div style={{
+                marginTop: 8,
+                display: 'flex',
+                flexDirection: 'column',
+                maxHeight: 300,
+                overflowY: 'auto',
+                borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+              }}>
+                {repos.map((repo) => (
+                  <a
+                    key={repo.nameWithOwner}
+                    href={`https://github.com/${repo.nameWithOwner}`}
+                    target="_blank"
+                    rel="noreferrer"
                     style={{
-                      ...ghostButtonStyle,
-                      border: '1px solid rgba(239, 68, 68, 0.18)',
-                      background: 'rgba(239, 68, 68, 0.04)',
-                      color: '#b91c1c',
-                      opacity: actionBusy === 'cancel_device' ? 0.6 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      paddingTop: 10,
+                      paddingBottom: 10,
+                      paddingLeft: 2,
+                      paddingRight: 8,
+                      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+                      textDecoration: 'none',
                     }}
                   >
-                    {actionBusy === 'cancel_device' ? 'Cancelling…' : 'Cancel'}
-                  </button>
-                </div>
+                    <span style={{
+                      color: 'var(--t-text-muted)',
+                      display: 'inline-flex',
+                    }}>
+                      {repo.isPrivate ? <LockIcon /> : <GlobeIcon />}
+                    </span>
+                    <span style={{
+                      fontSize: 13,
+                      fontWeight: 400,
+                      color: 'var(--t-text)',
+                      flex: 1,
+                      letterSpacing: '-0.005em',
+                    }}>
+                      {repo.nameWithOwner}
+                    </span>
+                    <span style={{
+                      fontSize: 11,
+                      color: RAMS_INK_QUIET,
+                      fontFamily: MONO_FONT_STACK,
+                    }}>
+                      {repo.updatedAt}
+                    </span>
+                  </a>
+                ))}
               </div>
-            )}
+            ) : null}
           </div>
         )}
+
+        <div style={{ marginTop: 14 }}>
+          <HairlineRule />
+        </div>
+      </section>
+
+      {/* 04 — GITHUB APP */}
+      <section style={{ marginBottom: 12 }}>
+        <SectionLabel number="04">GITHUB APP</SectionLabel>
+
+        <div style={{ paddingTop: 4 }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+            marginBottom: 10,
+          }}>
+            <span style={{
+              fontSize: 15,
+              fontWeight: 500,
+              color: 'var(--t-text)',
+              letterSpacing: '-0.01em',
+            }}>
+              o8 github app
+            </span>
+            <BracketLabel tone={appConnected ? 'quiet' : 'accent'}>
+              {appConnected ? 'connected' : appConfigured ? 'needs attention' : 'not configured'}
+            </BracketLabel>
+          </div>
+
+          <div style={{
+            fontSize: 13,
+            color: 'var(--t-text-secondary)',
+            lineHeight: 1.55,
+            maxWidth: 600,
+            marginBottom: 16,
+          }}>
+            {appConnected && broker
+              ? `App ${broker.appId} · installed on @${broker.installationAccount} · ${repoCount} ${repoCount === 1 ? 'repo' : 'repos'}.`
+              : appConfigured
+                ? broker?.note ?? 'Diagnostics below show what still needs to be configured.'
+                : 'The product needs the GitHub App to read issues, open PRs, and act on your behalf. Set GITHUB_APP_ID + GITHUB_APP_INSTALLATION_ID and drop the PEM at ~/.o8/github-app.pem.'}
+          </div>
+
+          {appConfigured ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              marginBottom: 16,
+              borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+            }}>
+              <DiagnosticRow
+                title="App key"
+                status={broker!.privateKeyConfigured ? 'ready' : 'missing'}
+                detail={broker!.privateKeyConfigured
+                  ? `App ${broker!.appId ?? 'unknown'} can sign installation token requests.`
+                  : 'Missing GitHub App private key at ~/.o8/github-app.pem.'}
+              />
+              <DiagnosticRow
+                title="Installation"
+                status={broker!.installationReachable ? 'ready' : 'missing'}
+                detail={broker!.installationReachable
+                  ? `Installation ${broker!.installationId ?? 'unknown'} is healthy on ${broker!.probeRepo ?? 'the probe repo'}.`
+                  : `Cannot reach installation for ${broker!.probeRepo ?? 'the configured repo'}.`}
+              />
+              {showProdDiagnostics ? (
+                <DiagnosticRow
+                  title="Webhook secret"
+                  status={broker!.webhookSecretConfigured ? 'ready' : 'missing'}
+                  detail={broker!.webhookSecretConfigured
+                    ? 'Webhook signature verification can be enforced in production.'
+                    : 'Set GITHUB_APP_WEBHOOK_SECRET before enabling production webhooks.'}
+                />
+              ) : null}
+              {showProdDiagnostics ? (
+                <DiagnosticRow
+                  title="Production URL"
+                  status={broker!.publicBaseUrlConfigured ? 'ready' : 'missing'}
+                  detail={broker!.publicBaseUrlConfigured
+                    ? `Webhook target is ${broker!.webhookUrl ?? 'configured'}.`
+                    : 'Set CORTEX_IDE_PUBLIC_BASE_URL when this installation is publicly reachable.'}
+                />
+              ) : null}
+            </div>
+          ) : null}
+
+          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+            {broker?.installationId ? (
+              <a
+                href={`https://github.com/settings/installations/${broker.installationId}`}
+                target="_blank"
+                rel="noreferrer"
+                style={primaryLinkStyle(false)}
+              >
+                open installation ›
+              </a>
+            ) : null}
+            <a
+              href="https://github.com/settings/apps/cortex-dev-agent"
+              target="_blank"
+              rel="noreferrer"
+              style={primaryLinkStyle(false)}
+            >
+              app settings ›
+            </a>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ── Support primitives ──
+
+function AccountAvatar({ login }: { login: string }) {
+  const letter = (login || '?').slice(0, 1).toUpperCase();
+  return (
+    <div style={{
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      border: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+      background: 'transparent',
+      color: 'var(--t-text-muted)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontFamily: MONO_FONT_STACK,
+      fontSize: 14,
+      fontWeight: 400,
+      letterSpacing: '0.04em',
+      flexShrink: 0,
+    }}>
+      {letter}
+    </div>
+  );
+}
+
+function DiagnosticRow({
+  title,
+  status,
+  detail,
+}: {
+  title: string;
+  status: 'ready' | 'partial' | 'missing';
+  detail: string;
+}) {
+  const dotColor = status === 'ready'
+    ? '#22c55e'
+    : status === 'partial'
+      ? '#f59e0b'
+      : '#ef4444';
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: 14,
+      paddingTop: 12,
+      paddingBottom: 12,
+      paddingLeft: 2,
+      paddingRight: 2,
+      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+    }}>
+      <div style={{
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        background: dotColor,
+        flexShrink: 0,
+        marginTop: 8,
+      }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 11,
+          fontWeight: 400,
+          color: RAMS_INK_QUIET,
+          textTransform: 'uppercase',
+          letterSpacing: '0.14em',
+          marginBottom: 4,
+        }}>
+          {title}
+        </div>
+        <div style={{
+          fontSize: 12,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          maxWidth: 520,
+        }}>
+          {detail}
+        </div>
       </div>
     </div>
   );
 }
 
-const brokerLinkStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '7px 14px',
-  borderRadius: 9,
-  border: `1px solid ${THEME_ACCENT_BORDER}`,
-  background: THEME_ACCENT_SOFT,
-  color: THEME_ACCENT,
-  fontSize: 11,
-  fontWeight: 700,
-  textDecoration: 'none',
-};
+function primaryLinkStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 13,
+    fontWeight: 400,
+    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${disabled ? RAMS_HAIRLINE_SOFT : RAMS_ACCENT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    textDecoration: 'none',
+    cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '-0.005em',
+    opacity: disabled ? 0.6 : 1,
+  };
+}
 
-const ghostButtonStyle: React.CSSProperties = {
-  padding: '7px 12px',
-  borderRadius: 8,
-  border: '1px solid var(--t-panel-border)',
-  background: 'var(--t-panel)',
-  color: 'var(--t-text-secondary)',
-  fontSize: 11,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
+function quietActionStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 12,
+    fontWeight: 400,
+    color: 'var(--t-text-secondary)',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    cursor: disabled ? 'default' : 'pointer',
+    opacity: disabled ? 0.6 : 1,
+    letterSpacing: '-0.005em',
+  };
+}
