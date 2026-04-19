@@ -216,9 +216,9 @@ export function MCPTab() {
       maxWidth: 780,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="mcp" />
+      <TabBreadcrumb tab="MCP" />
       <TabHeading
-        title="mcp"
+        title="MCP"
         subtitle="One click to let Claude Desktop or Claude Code dispatch work to your o8 fleet. Your other MCP servers stay untouched — we only write the o8 entry."
       />
 

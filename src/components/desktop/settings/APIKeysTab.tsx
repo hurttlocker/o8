@@ -145,9 +145,9 @@ export function APIKeysTab() {
       maxWidth: 780,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="api keys" />
+      <TabBreadcrumb tab="API keys" />
       <TabHeading
-        title="api keys"
+        title="API keys"
         subtitle="Provider keys unlock model families in the orchestrator and assistant. Keys stay local to this installation and take effect immediately."
       />
 
