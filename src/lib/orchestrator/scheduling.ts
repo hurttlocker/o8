@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 
+import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
@@ -319,6 +320,25 @@ export async function runDispatchTick(
       const tier = resolveModelTier({ runtime: packet.runtime, assignedModel: packet.assignedModel });
       const budget = computeReadBudget({ repoPath, targetFiles, tier });
       return budget ? { ...packet, readBudget: budget } : packet;
+    }),
+  };
+
+  // #536 — Populate `edgeCaseSites` on the same enrichment gate so any
+  // packet queued without a surfacer pass picks one up at dispatch time.
+  // `surfaceEdgeCases` never throws; on garbage input it returns empty,
+  // which collapses to an undefined field (legacy-identical).
+  nextState = {
+    ...nextState,
+    packets: nextState.packets.map((packet) => {
+      if (packet.edgeCaseSites && packet.edgeCaseSites.length > 0) return packet;
+      if (packet.status !== 'queued' && packet.status !== 'recovering' && packet.status !== 'draft') {
+        return packet;
+      }
+      const repoPath = packet.workspaceTargetPath;
+      const targetFiles = packet.predictedFiles ?? [];
+      if (!repoPath || targetFiles.length === 0) return packet;
+      const { sites } = surfaceEdgeCases({ repoPath, targetFiles, depth: 1 });
+      return sites.length > 0 ? { ...packet, edgeCaseSites: sites } : packet;
     }),
   };
 
