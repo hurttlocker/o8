@@ -10,6 +10,7 @@ import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
+import { AgentsSidebar } from '@/components/desktop/AgentsSidebar';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
@@ -160,6 +161,7 @@ function DashboardInner() {
     sidebarVisible, setSidebarVisible,
     timelineVisible, setTimelineVisible,
     alertTrayOpen, setAlertTrayOpen,
+    agentsSidebarOpen, setAgentsSidebarOpen,
     desktopDraftInjection, setDesktopDraftInjection,
     thoughtsDraftInjection, setThoughtsDraftInjection,
     mobileRemoteHref,
@@ -372,6 +374,18 @@ function DashboardInner() {
   });
 
   const archivedLaneView = useLaneArchivedView();
+
+  // Agents sidebar: focus a WorkspaceTerminal tab by ID. Iterates all
+  // registered terminal handles (same pattern as focusOrchestrationPacketLane).
+  const handleFocusTabFromSidebar = useCallback((tabId: string) => {
+    for (const [tileId, handle] of workspaceTerminalHandlesRef.current.entries()) {
+      if (handle.focusTab(tabId)) {
+        setActiveTileId(tileId);
+        return;
+      }
+    }
+  }, [workspaceTerminalHandlesRef, setActiveTileId]);
+
   const activePackets = useMemo(
     () => thoughtsMissionState.packets.filter((packet) => !archivedLaneView.packetIds.has(packet.id)),
     [thoughtsMissionState.packets, archivedLaneView.packetIds],
@@ -2108,6 +2122,8 @@ function DashboardInner() {
           if (!chatVisible) setChatVisible(true);
           setRightPanelMode('chat');
         }}
+        agentsSidebarOpen={agentsSidebarOpen}
+        onToggleAgentsSidebar={() => setAgentsSidebarOpen((v) => !v)}
         alertCount={unreadCount}
         onToggleAlerts={() => setAlertTrayOpen(!alertTrayOpen)}
         alertTray={(
@@ -2293,6 +2309,14 @@ function DashboardInner() {
           and Analytics / Settings / Ports / Add-repo live in the
           DesktopStatusBar at the bottom. The AgentPanel stays docked as the
           left column below. */}
+
+      {/* ── All Agents Sidebar (#515) ── */}
+      <AgentsSidebar
+        open={agentsSidebarOpen}
+        onClose={() => setAgentsSidebarOpen(false)}
+        onFocusTab={handleFocusTabFromSidebar}
+        onSelectSession={handleSelectSession}
+      />
 
       {/* ── Left: Agent Panel ── */}
       {sidebarVisible && (
