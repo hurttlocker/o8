@@ -41,6 +41,7 @@ import {
 import {
   STATUS_TOOLS,
   handleHistory,
+  handleLaneEvents,
   handleSend,
   handleStatus,
 } from '@/lib/mcp/operator-handlers/status';
@@ -144,6 +145,7 @@ const TOOLS: McpTool[] = [
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_approve'),
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_reject'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_history'),
+  ...STATUS_TOOLS.filter((t) => t.name === 'o8_lane_events'),
   ...O8_WEBVIEW_TOOLS,
   ...MISSION_TOOLS.filter((t) => t.name === 'create_mission'),
   ...MISSION_TOOLS.filter((t) => t.name === 'dispatch_mission'),
@@ -161,6 +163,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_approve: handleApprove,
   o8_reject: handleReject,
   o8_history: handleHistory,
+  o8_lane_events: handleLaneEvents,
   ...createO8WebviewToolHandlers(getO8WebviewClient),
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,

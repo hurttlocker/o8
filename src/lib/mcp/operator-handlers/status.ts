@@ -67,6 +67,29 @@ export const STATUS_TOOLS: McpTool[] = [
       required: ['sessionKey'],
     },
   },
+  {
+    name: 'o8_lane_events',
+    description:
+      'Stream lane lifecycle events. Pass `since` cursor from the previous response to long-poll for new events. Returns events in chronological order. Blocks up to `timeoutMs` (default 5000) waiting for new events when the buffer is empty. Example: o8_lane_events() returns the current buffer. o8_lane_events({since: 47, timeoutMs: 8000}) long-polls for events newer than seq 47.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        since: {
+          type: 'number',
+          description: 'Event sequence cursor from previous response. Omit on first call.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Max ms to wait for new events. Default 5000, max 25000.',
+        },
+        lanes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional filter to specific lane ids.',
+        },
+      },
+    },
+  },
 ];
 
 export async function handleSend(args: Record<string, unknown>): Promise<McpToolResult> {
@@ -189,5 +212,50 @@ export async function handleHistory(args: Record<string, unknown>): Promise<McpT
   } catch (err) {
     console.error(`[o8-operator] o8_history failed: ${err}`);
     return textResult(`Failed to read history: ${err}`, true);
+  }
+}
+
+export async function handleLaneEvents(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const sinceRaw = args.since;
+    const since = typeof sinceRaw === 'number' && Number.isFinite(sinceRaw) && sinceRaw >= 0
+      ? Math.floor(sinceRaw)
+      : 0;
+
+    const timeoutRaw = args.timeoutMs;
+    const timeoutMs = typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw) && timeoutRaw >= 0
+      ? Math.floor(timeoutRaw)
+      : 5_000;
+
+    const laneFilterRaw = args.lanes;
+    const laneFilter = Array.isArray(laneFilterRaw)
+      ? laneFilterRaw
+        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+        .filter((entry) => entry.length > 0)
+      : [];
+
+    const qs = new URLSearchParams();
+    qs.set('since', String(since));
+    qs.set('timeoutMs', String(timeoutMs));
+    if (laneFilter.length > 0) qs.set('lanes', laneFilter.join(','));
+
+    const data = await apiFetch(`/api/orchestrator/lane-events?${qs.toString()}`) as Record<string, unknown>;
+    const events = Array.isArray(data.events) ? data.events as Array<Record<string, unknown>> : [];
+    const nextSinceRaw = data.nextSince;
+    const nextSince = typeof nextSinceRaw === 'number' && Number.isFinite(nextSinceRaw)
+      ? nextSinceRaw
+      : since;
+
+    const summary = events.length === 0
+      ? `No new lane events (nextSince: ${nextSince})`
+      : `${events.length} lane events (nextSince: ${nextSince})`;
+
+    return jsonResult({
+      summary,
+      data: { events, nextSince },
+    });
+  } catch (err) {
+    console.error(`[o8-operator] o8_lane_events failed: ${err}`);
+    return textResult(`Failed to read lane events: ${err}`, true);
   }
 }
