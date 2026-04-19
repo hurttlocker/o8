@@ -58,6 +58,27 @@ export interface OrchestratorPacketReview {
   auditApprovalId?: string | null;
 }
 
+/**
+ * Tagged packet variants the pipeline can recognize. Default (undefined) is
+ * a regular feature/fix packet driven by an issue. `decompose` is reserved
+ * for post-merge decomposition packets fanned out by the governance
+ * pipeline (#538) — those run at queue tail and carry {@link
+ * OrchestratorDecompositionMetadata}.
+ */
+export type OrchestratorPacketType = 'decompose';
+
+/**
+ * Metadata carried by a `decompose` packet. `targetFile` is the repo-relative
+ * path that tripped the 800-line ceiling; `postMergeSha` is the merge commit
+ * whose diff pushed the file over the threshold (used to diff the parent and
+ * confirm the merge actually added lines, so pre-existing debt is skipped).
+ */
+export interface OrchestratorDecompositionMetadata {
+  targetFile: string;
+  postMergeSha: string;
+  lineCount: number;
+}
+
 export interface OrchestratorPacket {
   id: string;
   referenceLabel: string;
@@ -81,6 +102,18 @@ export interface OrchestratorPacket {
   archivedAt?: string | null;
   review?: OrchestratorPacketReview | null;
   lane?: OrchestratorLaneBinding | null;
+  /**
+   * Tag for governance-issued packets. When `decompose`, the packet is a
+   * post-merge cleanup fanned out by the decomposition pipeline (#538); the
+   * concrete metadata lives in {@link OrchestratorPacket.decomposition}.
+   */
+  packetType?: OrchestratorPacketType;
+  /**
+   * Decomposition metadata. Only populated when `packetType === 'decompose'`.
+   * Allows downstream consumers (dashboards, rule-check, audit) to identify
+   * a governance cleanup packet without parsing titles.
+   */
+  decomposition?: OrchestratorDecompositionMetadata;
   /** When set, dispatch fans out N parallel lanes — one per model. */
   comparisonModels?: string[];
   /** Links sibling packets spawned from the same best-of-n group. */

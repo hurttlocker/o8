@@ -1,3 +1,4 @@
+import { normalizeDecompositionMetadata, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
 import type {
@@ -178,12 +179,8 @@ function normalizeMaxAttempts(value: unknown): number {
 }
 
 function normalizeComparisonModels(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const models = value
-    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-    .filter(Boolean);
+  if (!Array.isArray(value)) return undefined;
+  const models = value.map((entry) => (typeof entry === 'string' ? entry.trim() : '')).filter(Boolean);
   return models.length > 0 ? models : undefined;
 }
 
@@ -234,6 +231,8 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     archivedAt: typeof packet.archivedAt === 'string' ? packet.archivedAt : null,
     review: normalizePacketReview(packet.review),
     lane: normalizeLaneBinding(packet.lane),
+    packetType: normalizePacketType(packet.packetType),
+    decomposition: normalizeDecompositionMetadata(packet.decomposition),
     comparisonModels: normalizeComparisonModels(packet.comparisonModels),
     comparisonGroupId: typeof packet.comparisonGroupId === 'string' && packet.comparisonGroupId.trim()
       ? packet.comparisonGroupId.trim()
