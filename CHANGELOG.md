@@ -9,6 +9,9 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-19
 
+- `3f7a3734` feat(mcp): test connection button with live tools probe [via-o8]
+- `82295a64` feat(mcp): paste-JSON config input [via-o8]
+- `6c4606a3` design(settings): acronym casing — MCP + configuration [via-o8]
 - `8cef91d6` design(settings): visual polish sweep — spacing, acronyms, typography [via-o8]
 - `c3a722a1` design(analytics): Rams pass
 - `5e91e677` design(settings): Rams pass on Settings shell + tab bar [via-o8]
