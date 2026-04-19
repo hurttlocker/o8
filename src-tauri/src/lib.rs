@@ -11,6 +11,115 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 #[cfg(target_os = "windows")]
 use window_vibrancy::apply_blur;
 
+// ── macOS Keychain integration ──
+//
+// The AES-256-GCM master key that protects API keys at rest is stored in the
+// macOS Keychain under a well-known service / account pair. We shell out to
+// the `security` CLI (always present on macOS) rather than pulling in a
+// keychain crate, keeping the dependency tree minimal.
+//
+// On non-macOS platforms these functions are not compiled. The TypeScript
+// layer falls back to an env-var / config-file key on those platforms.
+
+/// Keychain service name — identifies the o8 application.
+const KEYCHAIN_SERVICE: &str = "ai.o8.master-key";
+/// Keychain account name — a single per-install master key slot.
+const KEYCHAIN_ACCOUNT: &str = "default";
+
+/// Minimal URL-safe base64 encoder (no padding, no external crate).
+/// Used only for the 32-byte master key.
+fn base64_encode_url(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity((data.len() * 4 + 2) / 3);
+    let mut i = 0;
+    while i < data.len() {
+        let b0 = data[i] as u32;
+        let b1 = if i + 1 < data.len() { data[i + 1] as u32 } else { 0 };
+        let b2 = if i + 2 < data.len() { data[i + 2] as u32 } else { 0 };
+        out.push(TABLE[((b0 >> 2) & 0x3f) as usize] as char);
+        out.push(TABLE[(((b0 << 4) | (b1 >> 4)) & 0x3f) as usize] as char);
+        if i + 1 < data.len() {
+            out.push(TABLE[(((b1 << 2) | (b2 >> 6)) & 0x3f) as usize] as char);
+        }
+        if i + 2 < data.len() {
+            out.push(TABLE[(b2 & 0x3f) as usize] as char);
+        }
+        i += 3;
+    }
+    out
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_find_password() -> Option<String> {
+    let out = Command::new("security")
+        .args([
+            "find-generic-password",
+            "-s", KEYCHAIN_SERVICE,
+            "-a", KEYCHAIN_ACCOUNT,
+            "-w",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let pw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if pw.is_empty() { None } else { Some(pw) }
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_add_password(password: &str) -> bool {
+    // -U updates an existing entry if one already exists.
+    Command::new("security")
+        .args([
+            "add-generic-password",
+            "-s", KEYCHAIN_SERVICE,
+            "-a", KEYCHAIN_ACCOUNT,
+            "-w", password,
+            "-U",
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Generate a cryptographically random 256-bit key encoded as URL-safe base64.
+#[cfg(target_os = "macos")]
+fn generate_master_key() -> String {
+    use std::io::Read;
+    let mut bytes = [0u8; 32];
+    // /dev/urandom is always available on macOS.
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut bytes);
+    }
+    base64_encode_url(&bytes)
+}
+
+/// Retrieve the master encryption key from the Keychain.
+/// Returns Err("keychain-miss") if the entry does not exist.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn master_key_get() -> Result<String, String> {
+    keychain_find_password().ok_or_else(|| "keychain-miss".to_string())
+}
+
+/// Retrieve the master key, creating and storing a new one if absent.
+/// Idempotent — multiple calls return the same key.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn master_key_ensure() -> Result<String, String> {
+    if let Some(existing) = keychain_find_password() {
+        return Ok(existing);
+    }
+    let key = generate_master_key();
+    if keychain_add_password(&key) {
+        log::info!("[keychain] Master key created and stored (service={} account={})", KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+        Ok(key)
+    } else {
+        Err("keychain-write-failed".to_string())
+    }
+}
+
 // ── Data directory resolution ──
 //
 // Canonical location: ~/.o8 (was ~/.cortex-ide before the April 13 rebrand).
@@ -121,6 +230,171 @@ fn write_port_file(name: &str, port: u16) -> std::io::Result<()> {
     let _ = std::fs::create_dir_all(&dir);
     let path = format!("{}/{}", dir, name);
     std::fs::write(path, port.to_string())
+}
+
+// ── Orphan bundled-server detection (issue #509) ──
+//
+// When the Tauri shell is force-quit (kill -9) or crashes, its child Node
+// process (the bundled Next server) can be reparented to launchd (pid 1)
+// and keep holding port 3001. The naive `TcpStream::connect(...)` probe
+// used to think any listener on :3001 was a legitimate `npm run
+// desktop:dev` server and defer to it, leaving the user with a half-dead
+// app (orphan Next but no ws-server, stale state, silent hangs).
+//
+// We now classify the listener before deciding:
+//   1. Free      → spawn bundled as normal.
+//   2. Legit dev → defer (parent is NOT launchd, or binary is not the
+//      bundled server).
+//   3. Orphan    → SIGKILL, wait for port release, spawn bundled fresh.
+//
+// On macOS we shell out to `lsof` / `ps` / `kill` because they're part of
+// the base system and avoid pulling in a new crate. On other platforms
+// the orphan path is a no-op (tracked for #548 cross-platform work).
+
+/// Lookup result for a port listener classification.
+#[derive(Debug)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+enum PortListener {
+    /// Nothing listening on the port.
+    Free,
+    /// Legitimate listener — defer to it (dev server, etc.).
+    Legit { pid: u32, command: String },
+    /// Orphan reparented to launchd that still owns the bundled server.
+    Orphan { pid: u32, command: String },
+}
+
+#[cfg(target_os = "macos")]
+fn classify_port_listener(port: u16) -> PortListener {
+    // First: quick TCP connect probe. Cheap check — if nothing answers we
+    // skip lsof entirely.
+    if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_err() {
+        return PortListener::Free;
+    }
+
+    // Find the owning PID via lsof. `-t` prints only the pid, `-sTCP:LISTEN`
+    // filters to listeners, and we scope to the port to keep output tiny.
+    let lsof = Command::new("lsof")
+        .args([
+            "-nP",
+            &format!("-iTCP:{}", port),
+            "-sTCP:LISTEN",
+            "-t",
+        ])
+        .output();
+    let pid = match lsof {
+        Ok(out) if out.status.success() => {
+            let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // lsof can return multiple pids on separate lines when IPv4 and
+            // IPv6 share the same listener — take the first.
+            raw.lines().next().and_then(|s| s.trim().parse::<u32>().ok())
+        }
+        _ => None,
+    };
+
+    let Some(pid) = pid else {
+        // Something is listening per TCP connect, but lsof couldn't tell us
+        // who. Treat as legit to stay conservative.
+        log::warn!("[orphan-check] Port :{} is bound but lsof returned no pid", port);
+        return PortListener::Legit {
+            pid: 0,
+            command: "<unknown>".to_string(),
+        };
+    };
+
+    // Grab the owner's ppid + command line with `ps`. `-o` fields are comma
+    // separated in BSD ps; `command` gives the full argv.
+    let ps = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "ppid=,command="])
+        .output();
+    let (ppid, command) = match ps {
+        Ok(out) if out.status.success() => {
+            let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // The first whitespace-separated token is ppid; the rest is the
+            // full command line (which may itself contain spaces).
+            let mut parts = raw.splitn(2, char::is_whitespace);
+            let ppid = parts.next().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0);
+            let command = parts.next().unwrap_or("").trim().to_string();
+            (ppid, command)
+        }
+        _ => (0, String::new()),
+    };
+
+    log::info!(
+        "[orphan-check] :{} bound by pid={} ppid={} cmd={:?}",
+        port, pid, ppid, command
+    );
+
+    // Orphan signature: parent is launchd (pid 1) AND the binary path
+    // points into the packaged app's server bundle. We accept either
+    // `/Applications/o8.app/Contents/Resources/server/server.js` (signed
+    // install) or the more general `.app/Contents/Resources/server`
+    // substring in case someone installed under a different prefix.
+    let looks_bundled =
+        command.contains(".app/Contents/Resources/server")
+        || command.contains("/Resources/server/server.js")
+        || command.ends_with("server.js");
+
+    if ppid == 1 && looks_bundled {
+        PortListener::Orphan { pid, command }
+    } else {
+        PortListener::Legit { pid, command }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+fn classify_port_listener(port: u16) -> PortListener {
+    // TODO(#548): implement Windows/Linux orphan detection. Until then we
+    // fall back to the original naive behavior: anything listening is
+    // treated as a legitimate dev server.
+    if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok() {
+        PortListener::Legit {
+            pid: 0,
+            command: "<unsupported-platform>".to_string(),
+        }
+    } else {
+        PortListener::Free
+    }
+}
+
+/// SIGKILL the orphan and poll until the port is released. Returns true if
+/// the port became free within the timeout, false if the socket is still
+/// held (caller should log + continue — launching anyway is worse than
+/// trying to bind a free port higher up the range).
+#[cfg(target_os = "macos")]
+fn kill_orphan_and_wait(pid: u32, port: u16) -> bool {
+    log::info!("[orphan-check] Killing orphan pid={} on :{}", pid, port);
+    let out = Command::new("kill").args(["-9", &pid.to_string()]).output();
+    match out {
+        Ok(o) if o.status.success() => {
+            log::info!("[orphan-check] kill -9 {} succeeded", pid);
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            log::warn!("[orphan-check] kill -9 {} non-zero: {}", pid, stderr.trim());
+        }
+        Err(e) => {
+            log::warn!("[orphan-check] kill -9 {} failed to spawn: {}", pid, e);
+            return false;
+        }
+    }
+
+    // Poll the port for up to 3s. TcpListener::bind is the authoritative
+    // signal because SO_REUSEADDR semantics on macOS mean a TIME_WAIT
+    // socket still refuses new binds even after the process is gone.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::time::Instant::now() < deadline {
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            log::info!("[orphan-check] Port :{} released after kill", port);
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    log::warn!(
+        "[orphan-check] Port :{} still held 3s after killing pid={}; continuing",
+        port, pid
+    );
+    false
 }
 
 // ── Child process log capture ──
@@ -862,7 +1136,32 @@ pub fn run() {
             // user is running `npm run desktop:dev` in a terminal), defer to it
             // and don't spawn the bundled copy — the dev server is the source
             // of truth during iteration.
-            let dev_server_running = std::net::TcpStream::connect("127.0.0.1:3001").is_ok();
+            //
+            // BUT: a crashed prior install may have orphaned its bundled Next
+            // server (reparented to launchd, still holding :3001). Issue #509
+            // — we now classify the listener before deferring. An orphan gets
+            // killed and we fall through to the bundled-spawn path so the new
+            // shell owns both Next and ws-server.
+            let dev_server_running = match classify_port_listener(3001) {
+                PortListener::Free => false,
+                PortListener::Legit { pid, command } => {
+                    log::info!(
+                        "[orphan-check] :3001 looks legitimate (pid={}, cmd={:?}) — deferring",
+                        pid, command
+                    );
+                    true
+                }
+                PortListener::Orphan { pid, command } => {
+                    log::info!(
+                        "[orphan-check] :3001 owned by ORPHAN pid={} cmd={:?} — killing",
+                        pid, command
+                    );
+                    kill_orphan_and_wait(pid, 3001);
+                    // Re-probe in case another legit process grabbed the port
+                    // between kill and this check. Unlikely but cheap.
+                    std::net::TcpStream::connect("127.0.0.1:3001").is_ok()
+                }
+            };
 
             // Default ports that survived from the legacy 3001/3002 era. If
             // nothing is on them and the bundled server is about to start,
