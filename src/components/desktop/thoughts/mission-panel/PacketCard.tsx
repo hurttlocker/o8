@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestrator/display';
+import { deriveGithubIssueUrl } from '@/lib/orchestrator/issue-url';
 import { packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorPacket, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { hasPacketBranchTarget } from '@/components/desktop/thoughts/mission-panel/branchTarget';
@@ -19,6 +20,10 @@ interface PacketCardProps {
   editingField: EditingField;
   onEditingFieldChange: (next: EditingField) => void;
   workspaceTargets: OrchestratorWorkspaceTarget[];
+  /** Map of workspace target localPath → repo remoteUrl. Used as a fallback when
+   *  `packet.issue?.url` is absent so the action strip's "open" pill can still
+   *  reconstruct an issue URL from packet.referenceLabel + remoteUrl. */
+  repoRemoteUrlByPath?: Record<string, string | null | undefined>;
   reviewState: ReviewPanelState | null;
   onPatch: (updater: (packet: OrchestratorPacket) => OrchestratorPacket) => void;
   onLaunch: () => void;
@@ -37,6 +42,7 @@ export function PacketCard({
   editingField,
   onEditingFieldChange,
   workspaceTargets,
+  repoRemoteUrlByPath,
   reviewState,
   onPatch,
   onLaunch,
@@ -60,6 +66,17 @@ export function PacketCard({
   );
 
   const packetPrompt = [packet.title, packet.summary].map((part) => part.trim()).filter(Boolean).join('\n\n') || null;
+
+  // #626 — Prefer the snapshot captured at mission creation; fall back to
+  // reconstructing from referenceLabel + the repo's remoteUrl.
+  const resolvedIssueUrl = useMemo(() => {
+    const cached = packet.issue?.url?.trim();
+    if (cached) return cached;
+    const remoteUrl = packet.workspaceTargetPath
+      ? repoRemoteUrlByPath?.[packet.workspaceTargetPath] ?? null
+      : null;
+    return deriveGithubIssueUrl(packet.referenceLabel, remoteUrl);
+  }, [packet.issue?.url, packet.referenceLabel, packet.workspaceTargetPath, repoRemoteUrlByPath]);
 
   // #615 — Details popover state. Anchored to the DETAILS row via DOMRect snapshot.
   const detailsRowRef = useRef<HTMLButtonElement | null>(null);
@@ -275,7 +292,7 @@ export function PacketCard({
             <div style={{ flex: 1, minWidth: 0 }}>
               <PacketActionStrip
                 packetId={packet.id}
-                issueUrl={null}
+                issueUrl={resolvedIssueUrl}
                 prompt={packetPrompt}
               />
             </div>
