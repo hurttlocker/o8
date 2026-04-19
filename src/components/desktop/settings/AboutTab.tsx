@@ -2,9 +2,15 @@
 
 import packageJson from '../../../../package.json';
 import {
-  THEME_ACCENT,
-  THEME_ACCENT_BORDER,
-  THEME_ACCENT_SOFT,
+  APP_FONT_STACK,
+  MONO_FONT_STACK,
+  RAMS_ACCENT,
+  RAMS_HAIRLINE_SOFT,
+  RAMS_INK_QUIET,
+  HairlineRule,
+  SectionLabel,
+  TabBreadcrumb,
+  TabHeading,
   normalizeVersion,
 } from './shared';
 
@@ -15,72 +21,86 @@ export function AboutTab() {
     return '—';
   })();
 
-  const systemInfo = [
-    { label: 'Platform', value: platform },
-    { label: 'Version', value: normalizeVersion(packageJson.version) },
-  ];
+  const nowIso = (() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  })();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
-      <div style={{
-        background: 'var(--t-panel)',
-        borderRadius: 14,
-        border: '1px solid var(--t-panel-border)',
-        boxShadow: 'var(--t-panel-shadow)',
-        padding: 24,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-          <h3 style={{ fontSize: 22, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>o8</h3>
-          <span style={{
-            fontSize: 11,
-            fontWeight: 700,
-            padding: '4px 9px',
-            borderRadius: 999,
-            background: THEME_ACCENT_SOFT,
-            color: THEME_ACCENT,
-          }}>
-            {normalizeVersion(packageJson.version)}
-          </span>
-        </div>
-        <p style={{ fontSize: 13, color: 'var(--t-text-secondary)', margin: '0 0 18px', lineHeight: 1.5 }}>
-          Built with Next.js + Tauri
-        </p>
+    <div style={{
+      paddingTop: 8,
+      paddingLeft: 8,
+      paddingRight: 32,
+      paddingBottom: 40,
+      maxWidth: 780,
+      fontFamily: APP_FONT_STACK,
+    }}>
+      <TabBreadcrumb tab="about" />
+      <TabHeading
+        title="about"
+        subtitle="A precision instrument for autonomous engineering teams. Built with Next.js and Tauri."
+      />
+
+      {/* 01 — VERSION */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="01">VERSION</SectionLabel>
 
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          paddingTop: 4,
+          paddingBottom: 20,
+          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+        }}>
+          <div style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 10,
+            fontWeight: 400,
+            letterSpacing: '0.22em',
+            textTransform: 'uppercase',
+            color: RAMS_INK_QUIET,
+            marginBottom: 10,
+          }}>
+            (version)
+          </div>
+          <div style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 32,
+            fontWeight: 400,
+            color: 'var(--t-text)',
+            letterSpacing: '0.02em',
+            lineHeight: 1,
+          }}>
+            {normalizeVersion(packageJson.version)}
+          </div>
+          <div style={{
+            marginTop: 16,
+            display: 'flex',
+            gap: 28,
+            flexWrap: 'wrap',
+          }}>
+            <InfoField label="PLATFORM" value={platform} />
+            <InfoField label="MODE" value={isProduction ? 'production' : 'development'} />
+          </div>
+        </div>
+      </section>
+
+      {/* 02 — LINKS */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="02">LINKS</SectionLabel>
+        <div style={{
+          paddingTop: 4,
+          paddingBottom: 20,
+          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+          display: 'flex',
+          flexDirection: 'column',
           gap: 12,
         }}>
-          {systemInfo.map((item) => (
-            <div key={item.label} style={{
-              padding: 14,
-              borderRadius: 12,
-              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
-              border: '1px solid var(--t-panel-border)',
-            }}>
-              <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginBottom: 6 }}>{item.label}</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text)' }}>{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{
-        background: 'var(--t-panel)',
-        borderRadius: 14,
-        border: '1px solid var(--t-panel-border)',
-        boxShadow: 'var(--t-panel-shadow)',
-        padding: 24,
-      }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 6 }}>Links</div>
-        <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
-          Project resources and release surfaces.
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {[
-            { label: 'GitHub', href: 'https://github.com/hurttlocker/cortex-ide' },
-            { label: 'Docs', href: 'https://github.com/hurttlocker/cortex-ide/tree/main/docs' },
-            { label: 'Releases', href: 'https://github.com/hurttlocker/cortex-ide/releases/latest' },
+            { label: 'github', href: 'https://github.com/hurttlocker/cortex-ide' },
+            { label: 'docs', href: 'https://github.com/hurttlocker/cortex-ide/tree/main/docs' },
+            { label: 'releases', href: 'https://github.com/hurttlocker/cortex-ide/releases/latest' },
           ].map((link) => (
             <a
               key={link.label}
@@ -88,32 +108,50 @@ export function AboutTab() {
               target="_blank"
               rel="noreferrer"
               style={{
-                padding: '8px 12px',
-                borderRadius: 10,
-                border: '1px solid var(--t-panel-border)',
-                background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
-                color: 'var(--t-text-secondary)',
-                fontSize: 12,
-                fontWeight: 600,
-                textDecoration: 'none',
+                fontFamily: APP_FONT_STACK,
+                fontSize: 14,
+                fontWeight: 400,
+                color: RAMS_ACCENT,
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+                textDecorationColor: RAMS_HAIRLINE_SOFT,
+                letterSpacing: '-0.01em',
+                width: 'fit-content',
               }}
             >
-              {link.label}
+              {link.label} ›
             </a>
           ))}
         </div>
-      </div>
+      </section>
 
-      {!isProduction && (
+      {/* 03 — CREDITS */}
+      <section style={{ marginBottom: isProduction ? 0 : 32 }}>
+        <SectionLabel number="03">CREDITS</SectionLabel>
         <div style={{
-          background: 'var(--t-panel)',
-          borderRadius: 14,
-          border: '1px dashed rgba(239, 68, 68, 0.3)',
-          padding: 24,
+          paddingTop: 4,
+          paddingBottom: 20,
+          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.6,
+          maxWidth: 620,
         }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Developer Tools</div>
-          <p style={{ fontSize: 11, color: 'var(--t-text-muted)', margin: '0 0 14px' }}>Visible only in non-production builds.</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          o8 is built on Next.js 16, Tauri v2, and the runtime adapter system. It ships with the Codex and Claude Code adapters and the operator MCP server that lets Claude drive the webview. Design language is Dieter Rams × Swiss-Korean editorial — less, but better.
+        </div>
+      </section>
+
+      {/* Developer tools (dev only) */}
+      {!isProduction ? (
+        <section>
+          <SectionLabel number="04">DEVELOPER</SectionLabel>
+          <div style={{
+            paddingTop: 4,
+            paddingBottom: 4,
+            display: 'flex',
+            gap: 24,
+            flexWrap: 'wrap',
+          }}>
             <button
               type="button"
               onClick={async () => {
@@ -124,28 +162,18 @@ export function AboutTab() {
                 });
                 window.location.href = '/dashboard';
               }}
-              style={{
-                padding: '8px 14px', borderRadius: 10,
-                border: `1px solid ${THEME_ACCENT_BORDER}`,
-                background: THEME_ACCENT_SOFT,
-                color: THEME_ACCENT, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              }}
+              style={accentLinkStyle(false)}
             >
-              ▸ Reset + Run Onboarding
+              reset + run onboarding ›
             </button>
             <button
               type="button"
               onClick={() => {
                 window.dispatchEvent(new CustomEvent('o8-trigger-onboarding'));
               }}
-              style={{
-                padding: '8px 14px', borderRadius: 10,
-                border: `1px solid ${THEME_ACCENT_BORDER}`,
-                background: THEME_ACCENT_SOFT,
-                color: THEME_ACCENT, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              }}
+              style={accentLinkStyle(false)}
             >
-              ▸ Preview Onboarding
+              preview onboarding ›
             </button>
             <button
               type="button"
@@ -154,18 +182,92 @@ export function AboutTab() {
                 const data = await res.json();
                 alert(JSON.stringify(data, null, 2));
               }}
-              style={{
-                padding: '8px 14px', borderRadius: 10,
-                border: '1px solid var(--t-panel-border)',
-                background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
-                color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-              }}
+              style={quietLinkStyle(false)}
             >
-              ▸ View Detection
+              view detection
             </button>
           </div>
-        </div>
-      )}
+          <div style={{ marginTop: 20 }}>
+            <HairlineRule />
+          </div>
+        </section>
+      ) : null}
+
+      {/* Footer timestamp */}
+      <div style={{
+        marginTop: 32,
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 11,
+        fontWeight: 400,
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+        color: RAMS_INK_QUIET,
+      }}>
+        {nowIso} · viewed
+      </div>
     </div>
   );
+}
+
+function InfoField({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 10,
+        fontWeight: 400,
+        letterSpacing: '0.18em',
+        textTransform: 'uppercase',
+        color: RAMS_INK_QUIET,
+      }}>
+        {label}
+      </span>
+      <span style={{
+        fontSize: 13,
+        fontWeight: 400,
+        color: 'var(--t-text)',
+        letterSpacing: '-0.005em',
+      }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function accentLinkStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 13,
+    fontWeight: 400,
+    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${disabled ? RAMS_HAIRLINE_SOFT : RAMS_ACCENT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '-0.005em',
+    opacity: disabled ? 0.6 : 1,
+  };
+}
+
+function quietLinkStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 13,
+    fontWeight: 400,
+    color: 'var(--t-text-muted)',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '-0.005em',
+    opacity: disabled ? 0.6 : 1,
+  };
 }
