@@ -245,7 +245,7 @@ export function WorkersTab() {
         subtitle="Manage remote worker tokens, monitor fleet activity, and control the remote runtime flag used by desktop adapters."
       />
 
-      <div style={{ marginBottom: 28 }}>
+      <div style={{ marginTop: 0, marginBottom: 32 }}>
         <ComingSoonBanner message="Remote worker execution is scaffolded but not yet shipped. Token minting and fleet views below are live so you can stage credentials, but nothing actually runs against these tokens yet." />
       </div>
 

@@ -585,7 +585,7 @@ function primaryLinkStyle(disabled: boolean): React.CSSProperties {
   return {
     fontFamily: APP_FONT_STACK,
     fontSize: 13,
-    fontWeight: 400,
+    fontWeight: 500,
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
     background: 'transparent',
     border: 'none',
