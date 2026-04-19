@@ -7,6 +7,7 @@ import {
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
 import {
+  apiFetch,
   type McpTool,
   type McpToolResult,
   errorText,
@@ -181,6 +182,21 @@ export const MISSION_TOOLS: McpTool[] = [
       required: ['packetId'],
     },
   },
+  {
+    name: 'o8_review_state',
+    description:
+      'Get the canonical review state for a packet. Returns working|ready-to-merge|needs-revision|merged|failed plus the latest orchestrator review verdict and merge-gate verdict. Poll this to know when a packet is safe to approve_and_merge. Example: o8_review_state({packetId: "pkt-abc"}) returns {state, orchestratorReview, mergeGate, lane, branch}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'The packet ID to read state for.',
+        },
+      },
+      required: ['packetId'],
+    },
+  },
 ];
 
 export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
@@ -313,5 +329,16 @@ export async function handleResetPacket(args: Record<string, unknown>): Promise<
   } catch (error) {
     console.error(`${'[mcp-operator]'} reset_packet failed: ${errorText(error)}`);
     return textResult(`Failed to reset packet: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleReviewState(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const packetId = requiredString(args, 'packetId');
+    const result = await apiFetch(`/api/orchestrator/review-state?packetId=${encodeURIComponent(packetId)}`);
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_review_state failed: ${errorText(error)}`);
+    return textResult(`Failed to read review state: ${errorText(error)}`, true);
   }
 }

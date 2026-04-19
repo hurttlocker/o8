@@ -28,6 +28,7 @@ import {
   handleDispatchMission,
   handleGetMissionStatus,
   handleResetPacket,
+  handleReviewState,
   handleSubmitReview,
 } from '@/lib/mcp/operator-handlers/mission';
 import {
@@ -151,6 +152,7 @@ const TOOLS: McpTool[] = [
   ...APPROVE_TOOLS.filter((t) => t.name === 'approve_and_merge'),
   ...MISSION_TOOLS.filter((t) => t.name === 'reset_packet'),
   ...MISSION_TOOLS.filter((t) => t.name === 'retry_packet'),
+  ...MISSION_TOOLS.filter((t) => t.name === 'o8_review_state'),
 ];
 
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
@@ -167,6 +169,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   approve_and_merge: handleApproveAndMerge,
   reset_packet: handleResetPacket,
   retry_packet: handleResetPacket,
+  o8_review_state: handleReviewState,
 };
 
 // ── JSON-RPC Server ──
