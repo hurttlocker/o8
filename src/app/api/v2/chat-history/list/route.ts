@@ -24,6 +24,7 @@ interface ChatHistoryEntry {
   savedAt: string;
   modifiedAt: string;
   starred: boolean;
+  pinned: boolean;
   planText?: string | null;
   firstUserMessage?: string | null;
   repoName?: string | null;
@@ -95,6 +96,7 @@ export async function GET(request: NextRequest) {
           savedAt: data.savedAt || stat.mtime.toISOString(),
           modifiedAt: stat.mtime.toISOString(),
           starred: data.starred || false,
+          pinned: data.pinned === true,
           planText: typeof data.planText === 'string' && data.planText.trim() ? data.planText : null,
           firstUserMessage: firstUserMsg ? firstUserMsg.content.slice(0, 500) : null,
           repoName: data.repoName || null,
