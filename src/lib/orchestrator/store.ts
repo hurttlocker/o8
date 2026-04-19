@@ -251,7 +251,44 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       ? packet.learnedRules.map((rule) => String(rule).trim()).filter(Boolean).slice(0, 12)
       : undefined,
     issue: normalizePacketIssue(packet.issue),
+    // #535 — readBudget + #536 — edgeCaseSites: preserved verbatim when valid,
+    // stripped silently when malformed so existing callers never break.
+    readBudget: normalizePacketReadBudget(packet.readBudget),
+    edgeCaseSites: normalizePacketEdgeCaseSites(packet.edgeCaseSites),
   } satisfies OrchestratorPacket;
+}
+
+function normalizePacketReadBudget(value: unknown): OrchestratorPacket['readBudget'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as { minToolCalls?: unknown; requiredReads?: unknown; planBeforeWrite?: unknown };
+  const minToolCalls = typeof raw.minToolCalls === 'number' && Number.isFinite(raw.minToolCalls) && raw.minToolCalls >= 0
+    ? Math.floor(raw.minToolCalls)
+    : null;
+  const requiredReads = Array.isArray(raw.requiredReads)
+    ? raw.requiredReads.map((entry) => String(entry).trim()).filter(Boolean).slice(0, 32)
+    : null;
+  if (minToolCalls === null || requiredReads === null) return undefined;
+  return {
+    minToolCalls,
+    requiredReads,
+    planBeforeWrite: Boolean(raw.planBeforeWrite),
+  };
+}
+
+function normalizePacketEdgeCaseSites(value: unknown): OrchestratorPacket['edgeCaseSites'] {
+  if (!Array.isArray(value)) return undefined;
+  const allowedKinds = new Set(['conditional', 'error-handler', 'reconciliation', 'archive', 'loop-exit', 'other']);
+  const normalized = value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const raw = entry as { location?: unknown; description?: unknown; kind?: unknown };
+    const location = typeof raw.location === 'string' ? raw.location.trim() : '';
+    const description = typeof raw.description === 'string' ? raw.description.trim() : '';
+    if (!location || !description) return [];
+    const kindCandidate = typeof raw.kind === 'string' ? raw.kind.trim() : '';
+    const kind = allowedKinds.has(kindCandidate) ? (kindCandidate as NonNullable<OrchestratorPacket['edgeCaseSites']>[number]['kind']) : undefined;
+    return [kind ? { location, description, kind } : { location, description }];
+  });
+  return normalized.length > 0 ? normalized.slice(0, 16) : undefined;
 }
 
 function normalizePacketIssue(value: unknown): OrchestratorPacket['issue'] {
