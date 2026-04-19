@@ -63,6 +63,7 @@ function ChatSurfaceBase({
   streamContent,
   liveFallbackNotice,
   permissionMode,
+  onStop,
 }: {
   activeThinking: ActiveThinkingState | null;
   activeToolCalls: ToolCallInfo[];
@@ -98,6 +99,8 @@ function ChatSurfaceBase({
   streamContent: string;
   liveFallbackNotice?: string | null;
   permissionMode?: 'full' | 'plan';
+  /** #525 — wired to the streaming DiffCard Stop button so mid-stream diffs are cancellable. */
+  onStop?: () => void;
 }) {
   return (
     <>
@@ -285,7 +288,14 @@ function ChatSurfaceBase({
               {activeToolCalls.length > 0 && !activeThinking?.steps.length ? <LiveToolCalls toolCalls={activeToolCalls} /> : null}
               {streamContent ? (
                 <div style={{ maxWidth: '90%', paddingTop: 16, paddingBottom: 16, fontSize: 14, lineHeight: '1.6', color: '#1e293b', wordBreak: 'break-word', animation: 'llmFadeIn 200ms ease-out' }}>
-                  {renderLLMMarkdown(streamContent)}
+                  {renderLLMMarkdown(streamContent, {
+                    onApplyToFile,
+                    onApplyDiff,
+                    onOpenInCanvas,
+                    onRunInTerminal,
+                    isStreaming: true,
+                    onInterruptStream: onStop,
+                  })}
                   <span style={{ display: 'inline-block', width: 2, height: 16, background: '#3b82f6', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'llmDot 1s ease-in-out infinite' }} />
                 </div>
               ) : !activeThinking ? <StreamingIndicator /> : null}
