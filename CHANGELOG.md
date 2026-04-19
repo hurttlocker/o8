@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-19
 
+- `6a0b58b5` feat(mcp): adaptive probe timeout + npx prewarm [via-o8]
 - `3f7a3734` feat(mcp): test connection button with live tools probe [via-o8]
 - `82295a64` feat(mcp): paste-JSON config input [via-o8]
 - `6c4606a3` design(settings): acronym casing — MCP + configuration [via-o8]
