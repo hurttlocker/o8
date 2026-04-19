@@ -34,6 +34,11 @@ interface PacketCardProps {
   onResume: () => void;
 }
 
+// #517 — Packets that belong to a best-of-n comparison group render via
+// ComparisonCard at the ThoughtsMissionPanel level. PacketCard is the
+// single-packet path; guard here as defense in depth so a misplaced packet
+// never flashes as a rogue single-card row.
+
 export function PacketCard({
   packet,
   allPackets,
@@ -89,6 +94,13 @@ export function PacketCard({
   const closeDetails = useCallback(() => {
     setDetailsAnchor(null);
   }, []);
+
+  // #517 — Packets in a best-of-n comparison group render via ComparisonCard at
+  // the ThoughtsMissionPanel level. Guard AFTER all hooks so the hook order
+  // stays stable render-to-render.
+  if (packet.comparisonGroupId) {
+    return null;
+  }
 
   return (
     <div
