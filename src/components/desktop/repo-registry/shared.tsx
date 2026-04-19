@@ -66,6 +66,25 @@ export interface BranchAgent {
   additions?: number;
   deletions?: number;
   changedFiles?: number;
+  /** Workspace path as surfaced by the runtime — used to resolve the worktree
+   *  diff for the agent hover card when a lane record isn't available. */
+  workspace?: string | null;
+  /** Last activity unix-ms. Powers the "idle" flag + elapsed-since-start line
+   *  on the agent hover. */
+  lastActivityAt?: number | null;
+  /** Context window usage (0-100). Rendered as `143k / 1M` when the agent's
+   *  telemetry exposes a token count; falls back to the percent. */
+  contextUsedPercent?: number | null;
+  /** Model identifier, if the runtime reports one. */
+  model?: string | null;
+  /** Optional activity label from the fleet snapshot ("Editing auth.ts",
+   *  "Running build", etc.) — the closest we have to a "last tool call"
+   *  signal for the hover card. */
+  activityHeadline?: string | null;
+  /** Tool name from the latest runtime activity record. */
+  activityToolName?: string | null;
+  /** File path the latest tool call targeted. */
+  activityFilePath?: string | null;
 }
 
 export type IdeWorkspaceSession = MobileInboxSnapshot['sessions'][number];
@@ -649,6 +668,13 @@ export function buildBranchAgentMapFromIdeSessions(sessions: IdeWorkspaceSession
       runtime: session.runtime,
       status: session.status,
       currentTask: session.currentTask ?? null,
+      workspace: session.workspace ?? null,
+      lastActivityAt: typeof session.lastActivityAt === 'number' ? session.lastActivityAt : null,
+      contextUsedPercent: typeof session.context?.usedPercent === 'number' ? session.context.usedPercent : null,
+      model: session.model ?? session.primaryModel ?? null,
+      activityHeadline: session.activity?.headline ?? null,
+      activityToolName: session.activity?.toolName ?? null,
+      activityFilePath: session.activity?.filePath ?? null,
     });
   }
   return map;
