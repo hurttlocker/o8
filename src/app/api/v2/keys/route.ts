@@ -7,8 +7,15 @@ export const dynamic = 'force-dynamic';
  * POST /api/v2/keys — set/update a provider key
  * DELETE /api/v2/keys — remove a provider key
  *
- * Keys are stored in .env.local on the server side (self-hosted model).
- * For cloud, they'll go in the encrypted api_keys DB table.
+ * Keys are AES-256-GCM encrypted at rest inside ~/.o8/.env.local.
+ * The encryption master key lives in the macOS Keychain (Tauri builds) or
+ * the O8_MASTER_KEY env var (dev / non-macOS). Plaintext values written by
+ * older installs are migrated to encrypted form on first read.
+ *
+ * Storage format (per line in .env.local):
+ *   PROVIDER_KEY=enc:<hex-iv>:<hex-ciphertext+authtag>
+ *
+ * Legacy plaintext lines are re-encrypted automatically on next write.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,6 +23,10 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { encryptValue, decryptValue } from '@/lib/db/master-key';
+
+// Prefix that distinguishes an encrypted value from legacy plaintext.
+const ENC_PREFIX = 'enc:' as const;
 
 // Config lives in ~/.o8/ so it survives app updates
 const CONFIG_DIR = join(homedir(), '.o8');
@@ -47,38 +58,84 @@ const PROVIDERS: ProviderKeyConfig[] = [
   },
 ];
 
-function parseEnvFromPath(path: string): Map<string, string> {
+/**
+ * Parse raw env lines from a file. Returns a map of key → raw stored value
+ * (which may be an `enc:…` blob or legacy plaintext).
+ */
+function parseRawEnvFromPath(filePath: string): Map<string, string> {
   const vars = new Map<string, string>();
-  if (!existsSync(path)) return vars;
-  const content = readFileSync(path, 'utf-8');
+  if (!existsSync(filePath)) return vars;
+  const content = readFileSync(filePath, 'utf-8');
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const eqIdx = trimmed.indexOf('=');
     if (eqIdx === -1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    let value = trimmed.slice(eqIdx + 1).trim();
-    // Strip quotes
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
+    const k = trimmed.slice(0, eqIdx).trim();
+    let v = trimmed.slice(eqIdx + 1).trim();
+    // Strip surrounding quotes from legacy plaintext values only.
+    if (!v.startsWith(ENC_PREFIX)) {
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+        v = v.slice(1, -1);
+      }
     }
-    vars.set(key, value);
+    vars.set(k, v);
   }
   return vars;
 }
 
-function parseEnvFile(): Map<string, string> {
-  // Merge: project-local first, then ~/.o8/ overrides
-  const local = parseEnvFromPath(LOCAL_ENV);
-  const global = parseEnvFromPath(ENV_FILE);
-  // Also check process.env for runtime-set values
-  return new Map([...local, ...global]);
+/**
+ * Decode a stored value: decrypt `enc:iv:ct` blobs, pass plaintext through as-is.
+ * Returns null if decryption fails (corrupt / wrong key).
+ */
+async function decodeStoredValue(stored: string): Promise<string | null> {
+  if (!stored.startsWith(ENC_PREFIX)) {
+    // Legacy plaintext — return unchanged.
+    return stored;
+  }
+  // Format: enc:<hex-iv>:<hex-ciphertext+authtag>
+  const rest = stored.slice(ENC_PREFIX.length);
+  const colonIdx = rest.indexOf(':');
+  if (colonIdx === -1) return null;
+  const iv = rest.slice(0, colonIdx);
+  const ct = rest.slice(colonIdx + 1);
+  return decryptValue(ct, iv);
 }
 
-function writeEnvFile(vars: Map<string, string>) {
-  // Ensure config dir exists
+/**
+ * Encode a plaintext value to the `enc:iv:ct` storage format.
+ */
+async function encodeStoredValue(plaintext: string): Promise<string> {
+  const { ciphertext, iv } = await encryptValue(plaintext);
+  return `${ENC_PREFIX}${iv}:${ciphertext}`;
+}
+
+/**
+ * Read all provider env vars from the config files, decrypting enc: blobs.
+ * Returns a map of envVar → plaintext value (or empty string if missing).
+ */
+async function parseEnvFile(): Promise<Map<string, string>> {
+  const rawLocal = parseRawEnvFromPath(LOCAL_ENV);
+  const rawGlobal = parseRawEnvFromPath(ENV_FILE);
+  const merged = new Map([...rawLocal, ...rawGlobal]);
+
+  const decoded = new Map<string, string>();
+  for (const [k, v] of merged) {
+    const plain = await decodeStoredValue(v);
+    if (plain !== null) {
+      decoded.set(k, plain);
+    }
+  }
+  return decoded;
+}
+
+/**
+ * Write provider env vars to ~/.o8/.env.local, encrypting each value.
+ * Non-provider lines (comments, unrecognised keys) are preserved verbatim.
+ */
+async function writeEnvFile(vars: Map<string, string>): Promise<void> {
   mkdirSync(CONFIG_DIR, { recursive: true });
-  // Read existing file to preserve comments and ordering
+
   let lines: string[] = [];
   if (existsSync(ENV_FILE)) {
     lines = readFileSync(ENV_FILE, 'utf-8').split('\n');
@@ -86,24 +143,34 @@ function writeEnvFile(vars: Map<string, string>) {
 
   const written = new Set<string>();
 
-  // Update existing lines
-  const updated = lines.map((line) => {
+  // Build updated line list. For keys we're writing, replace with encrypted form.
+  const updated: string[] = [];
+  for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) return line;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx === -1) return line;
-    const key = trimmed.slice(0, eqIdx).trim();
-    if (vars.has(key)) {
-      written.add(key);
-      return `${key}=${vars.get(key)}`;
+    if (!trimmed || trimmed.startsWith('#')) {
+      updated.push(line);
+      continue;
     }
-    return line;
-  });
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) {
+      updated.push(line);
+      continue;
+    }
+    const k = trimmed.slice(0, eqIdx).trim();
+    if (vars.has(k)) {
+      written.add(k);
+      const encoded = await encodeStoredValue(vars.get(k)!);
+      updated.push(`${k}=${encoded}`);
+    } else {
+      updated.push(line);
+    }
+  }
 
-  // Append new vars
-  for (const [key, value] of vars) {
-    if (!written.has(key)) {
-      updated.push(`${key}=${value}`);
+  // Append any new keys not already in the file.
+  for (const [k, v] of vars) {
+    if (!written.has(k)) {
+      const encoded = await encodeStoredValue(v);
+      updated.push(`${k}=${encoded}`);
     }
   }
 
@@ -169,7 +236,7 @@ export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
-  const envVars = parseEnvFile();
+  const envVars = await parseEnvFile();
   // Also check process.env (may be set outside .env.local)
   const providers = PROVIDERS.map((p) => {
     const envValue = envVars.get(p.envVar) || process.env[p.envVar] || '';
@@ -213,10 +280,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: validation.error || 'Invalid API key' }, { status: 400 });
   }
 
-  // Write to .env.local
-  const envVars = parseEnvFile();
+  // Read existing plaintext map (decrypted), update, then re-encrypt all entries.
+  const envVars = await parseEnvFile();
   envVars.set(config.envVar, key);
-  writeEnvFile(envVars);
+  await writeEnvFile(envVars);
 
   // Also set in process.env so it takes effect immediately (no restart needed)
   process.env[config.envVar] = key;
@@ -244,10 +311,10 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: `Unknown provider: ${body.provider}` }, { status: 400 });
   }
 
-  // Remove from .env.local
-  const envVars = parseEnvFile();
+  // Remove from .env.local (delete key, re-encrypt remaining entries).
+  const envVars = await parseEnvFile();
   envVars.delete(config.envVar);
-  writeEnvFile(envVars);
+  await writeEnvFile(envVars);
 
   // Clear from process.env
   delete process.env[config.envVar];

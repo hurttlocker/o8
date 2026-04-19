@@ -1060,6 +1060,10 @@ pub fn run() {
             read_git_status,
             read_approvals,
             read_workspaces,
+            #[cfg(target_os = "macos")]
+            master_key_get,
+            #[cfg(target_os = "macos")]
+            master_key_ensure,
         ])
         .setup(|app| {
             // ── System Tray ──
