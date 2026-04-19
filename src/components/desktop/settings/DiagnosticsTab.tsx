@@ -2,10 +2,16 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  THEME_ACCENT,
-  THEME_ACCENT_SOFT,
-  THEME_ACCENT_BORDER,
-  THEME_ACCENT_RING,
+  APP_FONT_STACK,
+  MONO_FONT_STACK,
+  RAMS_ACCENT,
+  RAMS_HAIRLINE_SOFT,
+  RAMS_INK_QUIET,
+  BracketLabel,
+  HairlineRule,
+  SectionLabel,
+  TabBreadcrumb,
+  TabHeading,
 } from './shared';
 
 // ── Types ──
@@ -38,7 +44,6 @@ function formatDuration(durationMs: number) {
   if (durationMs < 1000) {
     return `${durationMs}ms`;
   }
-
   return `${(durationMs / 1000).toFixed(1)}s`;
 }
 
@@ -97,174 +102,137 @@ export function DiagnosticsTab() {
   useEffect(() => { void runDiagnostics(); }, [runDiagnostics]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>Diagnostics</div>
-          <div style={{ fontSize: 12, color: 'var(--t-text-muted)', marginTop: 2 }}>
-            {lastChecked ? `Last checked at ${lastChecked}` : 'Runtime and tool health'}
-          </div>
+    <div style={{
+      paddingTop: 8,
+      paddingLeft: 8,
+      paddingRight: 32,
+      paddingBottom: 40,
+      maxWidth: 780,
+      fontFamily: APP_FONT_STACK,
+    }}>
+      <TabBreadcrumb tab="diagnostics" />
+      <TabHeading
+        title="diagnostics"
+        subtitle="Runtime and tool health. Quiet neutral dots when everything is fine; colored dots only when action is demanded."
+      />
+
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 20,
+        marginBottom: 28,
+        flexWrap: 'wrap',
+      }}>
+        <div style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 11,
+          fontWeight: 400,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: RAMS_INK_QUIET,
+        }}>
+          {lastChecked ? `last checked ${lastChecked}` : 'not yet checked'}
         </div>
         <button
           type="button"
           onClick={() => { void runDiagnostics(); }}
           disabled={loading}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 14px',
-            borderRadius: 8,
-            border: `1px solid ${THEME_ACCENT_BORDER}`,
-            background: THEME_ACCENT_SOFT,
-            color: THEME_ACCENT,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: loading ? 'wait' : 'pointer',
-            opacity: loading ? 0.6 : 1,
-          }}
+          style={accentLinkStyle(loading)}
         >
-          {loading ? 'Checking...' : 'Re-run'}
+          {loading ? 'checking...' : 're-run ›'}
         </button>
       </div>
 
       {error ? (
         <div style={{
-          padding: '12px 16px',
-          borderRadius: 10,
-          background: 'rgba(239, 68, 68, 0.06)',
-          border: '1px solid rgba(239, 68, 68, 0.15)',
-          color: '#ef4444',
+          marginBottom: 28,
+          borderLeft: `2px solid #ef4444`,
+          paddingLeft: 14,
+          paddingTop: 2,
+          paddingBottom: 2,
           fontSize: 13,
+          color: 'var(--t-text)',
+          lineHeight: 1.55,
         }}>
           {error}
         </div>
       ) : null}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {tools.map((tool) => (
-          <div key={tool.id} style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: '10px 14px',
-            borderRadius: 10,
-            background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
-            border: '1px solid var(--t-divider-subtle, rgba(148, 163, 184, 0.10))',
-          }}>
-            <div style={{
-              width: 8,
-              height: 8,
-              borderRadius: 999,
-              background: tool.detected ? '#22c55e' : '#ef4444',
-              flexShrink: 0,
-            }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>{tool.id}</div>
-              {tool.path ? (
-                <div style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {tool.path}
-                </div>
-              ) : null}
-            </div>
-            <div style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: tool.detected ? 'var(--t-text-secondary)' : '#ef4444',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-            }}>
-              {tool.detected ? (tool.version ?? 'detected') : 'not found'}
-            </div>
-          </div>
-        ))}
-        {!loading && tools.length === 0 && !error ? (
-          <div style={{ fontSize: 13, color: 'var(--t-text-muted)', padding: '20px 0', textAlign: 'center' }}>
-            No tools detected. Run diagnostics to check your environment.
-          </div>
-        ) : null}
-      </div>
+      {/* 01 — RUNTIMES */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="01">RUNTIMES</SectionLabel>
 
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        padding: '16px 18px',
-        borderRadius: 16,
-        background: `linear-gradient(180deg, ${THEME_ACCENT_SOFT} 0%, var(--t-bg-card, rgba(148, 163, 184, 0.06)) 100%)`,
-        border: `1px solid ${THEME_ACCENT_BORDER}`,
-        boxShadow: `0 18px 36px ${THEME_ACCENT_RING}`,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 560 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
+        <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+          {tools.map((tool) => (
+            <ToolRow key={tool.id} tool={tool} />
+          ))}
+          {!loading && tools.length === 0 && !error ? (
+            <div style={{
+              paddingTop: 14,
+              paddingBottom: 14,
+              fontSize: 13,
+              color: RAMS_INK_QUIET,
+              lineHeight: 1.55,
+            }}>
+              No tools detected. Re-run to check your environment.
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      {/* 02 — MAINTENANCE */}
+      <section>
+        <SectionLabel number="02">MAINTENANCE</SectionLabel>
+
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 20,
+          paddingTop: 4,
+          paddingBottom: 16,
+          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+          flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
+            <div style={{
+              fontSize: 14,
+              fontWeight: 500,
+              color: 'var(--t-text)',
+              marginBottom: 4,
+              letterSpacing: '-0.01em',
+            }}>
               Codex session archive prune
             </div>
-            <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-muted)' }}>
-              Move stale Codex session transcripts older than 14 days, or pointing at missing worktrees, out of
-              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', color: 'var(--t-text-secondary)' }}> ~/.codex/sessions/</span>
-              {' '}into
-              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', color: 'var(--t-text-secondary)' }}> ~/.codex/sessions-archive/</span>
-              . This only runs when you trigger it here.
+            <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
+              Move stale Codex session transcripts older than 14 days, or pointing at missing worktrees, from{' '}
+              <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>~/.codex/sessions/</span>{' '}
+              into{' '}
+              <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>~/.codex/sessions-archive/</span>.
+              Only runs when you trigger it here.
             </div>
           </div>
           <button
             type="button"
             onClick={() => { void runPrune(); }}
             disabled={pruneBusy}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-              minWidth: 164,
-              padding: '9px 14px',
-              borderRadius: 10,
-              border: `1px solid ${THEME_ACCENT_BORDER}`,
-              background: pruneBusy ? THEME_ACCENT_SOFT : THEME_ACCENT,
-              color: pruneBusy ? THEME_ACCENT : 'var(--t-bg, #ffffff)',
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: pruneBusy ? 'wait' : 'pointer',
-              boxShadow: pruneBusy ? 'none' : `0 12px 28px ${THEME_ACCENT_RING}`,
-              transition: 'background 180ms ease, box-shadow 180ms ease, opacity 180ms ease',
-              opacity: pruneBusy ? 0.85 : 1,
-            }}
+            style={accentLinkStyle(pruneBusy)}
           >
-            {pruneBusy ? 'Pruning...' : 'Prune old sessions'}
+            {pruneBusy ? 'pruning...' : 'prune old sessions ›'}
           </button>
-        </div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {[
-            'Archive-first',
-            '14-day stale window',
-            'Missing worktree cleanup',
-          ].map((label) => (
-            <div
-              key={label}
-              style={{
-                padding: '5px 10px',
-                borderRadius: 999,
-                fontSize: 11,
-                fontWeight: 600,
-                color: 'var(--t-text-secondary)',
-                background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
-                border: '1px solid var(--t-divider-subtle, rgba(148, 163, 184, 0.12))',
-              }}
-            >
-              {label}
-            </div>
-          ))}
         </div>
 
         {pruneError ? (
           <div style={{
-            padding: '12px 14px',
-            borderRadius: 12,
-            background: 'rgba(239, 68, 68, 0.06)',
-            border: '1px solid rgba(239, 68, 68, 0.15)',
-            color: '#ef4444',
+            marginTop: 14,
+            borderLeft: `2px solid #ef4444`,
+            paddingLeft: 14,
+            paddingTop: 2,
+            paddingBottom: 2,
             fontSize: 13,
+            color: 'var(--t-text)',
+            lineHeight: 1.55,
           }}>
             {pruneError}
           </div>
@@ -272,60 +240,139 @@ export function DiagnosticsTab() {
 
         {pruneResult ? (
           <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-            padding: '14px 16px',
-            borderRadius: 14,
-            background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
-            border: `1px solid ${THEME_ACCENT_BORDER}`,
+            marginTop: 14,
+            paddingTop: 12,
+            paddingBottom: 12,
+            borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+              flexWrap: 'wrap',
+              marginBottom: 12,
+            }}>
+              <span style={{
+                fontSize: 14,
+                fontWeight: 500,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.01em',
+              }}>
                 Prune finished in {formatDuration(pruneResult.durationMs)}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>
-                Scanned {pruneResult.scanned} session files
-              </div>
+              </span>
+              <span style={{
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 11,
+                letterSpacing: '0.04em',
+                color: RAMS_INK_QUIET,
+              }}>
+                scanned {pruneResult.scanned} files
+              </span>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {[
-                `${pruneResult.moved} archived`,
-                `${pruneResult.deleted} deleted`,
-                `${pruneResult.missingCwd} missing cwd`,
-                `${pruneResult.olderThanDays} older than ${pruneResult.maxAgeDays}d`,
-                `${pruneResult.skipped} skipped`,
-              ].map((label) => (
-                <div
-                  key={label}
-                  style={{
-                    padding: '6px 10px',
-                    borderRadius: 999,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: label.endsWith('skipped') && pruneResult.skipped > 0 ? 'var(--t-warning, #c2410c)' : 'var(--t-text-secondary)',
-                    background: label.endsWith('skipped') && pruneResult.skipped > 0
-                      ? 'var(--t-warning-soft, rgba(249, 115, 22, 0.12))'
-                      : 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
-                    border: label.endsWith('skipped') && pruneResult.skipped > 0
-                      ? '1px solid var(--t-warning-border, rgba(249, 115, 22, 0.22))'
-                      : '1px solid var(--t-divider-subtle, rgba(148, 163, 184, 0.1))',
-                  }}
-                >
-                  {label}
-                </div>
-              ))}
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <BracketLabel tone="quiet">{pruneResult.moved} archived</BracketLabel>
+              <BracketLabel tone="quiet">{pruneResult.deleted} deleted</BracketLabel>
+              <BracketLabel tone="quiet">{pruneResult.missingCwd} missing cwd</BracketLabel>
+              <BracketLabel tone="quiet">{pruneResult.olderThanDays} older than {pruneResult.maxAgeDays}d</BracketLabel>
+              {pruneResult.skipped > 0
+                ? <BracketLabel tone="accent">{pruneResult.skipped} skipped</BracketLabel>
+                : <BracketLabel tone="quiet">0 skipped</BracketLabel>}
             </div>
             {pruneResult.archiveRoot ? (
-              <div style={{ fontSize: 12, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>
-                Archived transcripts were moved to
-                <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', color: 'var(--t-text-secondary)' }}> {pruneResult.archiveRoot}</span>
-                .
+              <div style={{
+                marginTop: 10,
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 11,
+                letterSpacing: '0.02em',
+                color: 'var(--t-text-secondary)',
+                wordBreak: 'break-all',
+              }}>
+                {pruneResult.archiveRoot}
               </div>
             ) : null}
           </div>
         ) : null}
-      </div>
+
+        <div style={{ marginTop: 20 }}>
+          <HairlineRule />
+        </div>
+      </section>
     </div>
   );
+}
+
+function ToolRow({ tool }: { tool: DiagnosticTool }) {
+  const dotColor = tool.detected ? RAMS_INK_QUIET : '#ef4444';
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 14,
+      paddingTop: 12,
+      paddingBottom: 12,
+      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+    }}>
+      <span style={{
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        background: dotColor,
+        flexShrink: 0,
+      }} />
+      <span style={{
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 11,
+        fontWeight: 400,
+        color: RAMS_INK_QUIET,
+        textTransform: 'uppercase',
+        letterSpacing: '0.14em',
+        minWidth: 120,
+      }}>
+        {tool.id}
+      </span>
+      <span style={{
+        fontSize: 13,
+        fontWeight: 400,
+        color: 'var(--t-text)',
+        flex: 1,
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        fontFamily: tool.path ? MONO_FONT_STACK : APP_FONT_STACK,
+        letterSpacing: tool.path ? '0.02em' : '-0.005em',
+      }}>
+        {tool.path || (tool.detected ? (tool.version ?? 'detected') : 'not found')}
+      </span>
+      <span style={{
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 11,
+        fontWeight: 400,
+        letterSpacing: '0.04em',
+        color: tool.detected ? 'var(--t-text-secondary)' : '#dc2626',
+      }}>
+        {tool.detected ? (tool.version ?? 'detected') : 'missing'}
+      </span>
+    </div>
+  );
+}
+
+function accentLinkStyle(disabled: boolean): React.CSSProperties {
+  return {
+    fontFamily: APP_FONT_STACK,
+    fontSize: 13,
+    fontWeight: 400,
+    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${disabled ? RAMS_HAIRLINE_SOFT : RAMS_ACCENT}`,
+    paddingTop: 2,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    cursor: disabled ? 'default' : 'pointer',
+    letterSpacing: '-0.005em',
+    opacity: disabled ? 0.6 : 1,
+  };
 }
