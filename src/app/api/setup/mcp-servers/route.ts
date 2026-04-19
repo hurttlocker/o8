@@ -8,6 +8,7 @@ import {
   removeExternalMcpServer,
   type ExternalMcpTransport,
 } from '@/lib/mcp/external-servers';
+import { prewarmMcpServer } from '@/lib/mcp/prewarm';
 
 function isTransport(value: unknown): value is ExternalMcpTransport {
   return value === 'stdio' || value === 'http';
@@ -87,6 +88,16 @@ export async function POST(request: Request) {
       env: parseEnv(body.env),
       enabled: body.enabled !== false,
     });
+
+    // Fire-and-forget: warm the npm cache for npx-family commands so the
+    // first "Test Connection" click doesn't hit the download delay.
+    if (body.transport === 'stdio') {
+      void prewarmMcpServer({
+        command: body.command,
+        args: parseArgs(body.args),
+        env: parseEnv(body.env) ?? undefined,
+      });
+    }
 
     return NextResponse.json({ ok: true, server });
   } catch (error) {
