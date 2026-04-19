@@ -10,9 +10,10 @@
  * to zero width; when open, it takes ~260px and the chat narrows.
  */
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
+import { filterThreads } from '@/lib/orchestrator/history-filter';
 // Raw SVG icons — lucide-react doesn't render in Tauri
 function MessageSquareIcon({ size = 12 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>;
@@ -26,6 +27,9 @@ function TrashIcon({ size = 11 }: { size?: number }) {
 function CopyMarkdownIcon({ size = 12 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>;
 }
+function SearchIcon({ size = 13 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>;
+}
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 
 interface OrchestratorThread {
@@ -35,6 +39,7 @@ interface OrchestratorThread {
   messageCount?: number;
   model?: string;
   planText?: string | null;
+  firstUserMessage?: string | null;
 }
 
 interface ArchivedLaneRow {
@@ -137,6 +142,8 @@ function OrchestratorHistorySidebarBase({
   const [archivedLanes, setArchivedLanes] = useState<ArchivedLaneRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<{ threadId: string | null; status: 'idle' | 'copying' | 'copied' | 'error' }>({
@@ -150,7 +157,7 @@ function OrchestratorHistorySidebarBase({
       const res = await fetch('/api/v2/chat-history/list?include=orchestrator');
       if (!res.ok) return;
       const data = await res.json() as {
-        conversations?: Array<{ tabId: string; title?: string; modifiedAt: string; messageCount?: number; model?: string; planText?: string | null }>;
+        conversations?: Array<{ tabId: string; title?: string; modifiedAt: string; messageCount?: number; model?: string; planText?: string | null; firstUserMessage?: string | null }>;
       };
       const filtered = (data.conversations ?? [])
         .filter((c) => c.tabId.startsWith('thoughts-'))
@@ -161,6 +168,7 @@ function OrchestratorHistorySidebarBase({
           messageCount: c.messageCount,
           model: c.model,
           planText: typeof c.planText === 'string' && c.planText.trim() ? c.planText : null,
+          firstUserMessage: typeof c.firstUserMessage === 'string' && c.firstUserMessage.trim() ? c.firstUserMessage : null,
         }));
       setThreads(filtered);
     } catch {
@@ -265,17 +273,32 @@ function OrchestratorHistorySidebarBase({
     return () => window.clearTimeout(timeout);
   }, [copyState]);
 
-  const filteredThreads = useMemo(() => {
-    if (!search.trim()) return threads;
-    const needle = search.trim().toLowerCase();
-    return threads.filter((t) => t.title.toLowerCase().includes(needle));
-  }, [threads, search]);
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedSearch(search), 120);
+    return () => window.clearTimeout(handle);
+  }, [search]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isFindShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f';
+      if (isFindShortcut) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+
+  const filteredThreads = useMemo(() => filterThreads(threads, debouncedSearch), [threads, debouncedSearch]);
 
   const filteredArchivedLanes = useMemo(() => {
-    if (!search.trim()) return archivedLanes;
-    const needle = search.trim().toLowerCase();
+    if (!debouncedSearch.trim()) return archivedLanes;
+    const needle = debouncedSearch.trim().toLowerCase();
     return archivedLanes.filter((l) => l.label.toLowerCase().includes(needle) || l.branch.toLowerCase().includes(needle));
-  }, [archivedLanes, search]);
+  }, [archivedLanes, debouncedSearch]);
 
   const grouped = useMemo(() => groupThreads(filteredThreads), [filteredThreads]);
   const groupedArchive = useMemo(() => groupArchivedLanes(filteredArchivedLanes), [filteredArchivedLanes]);
@@ -392,35 +415,73 @@ function OrchestratorHistorySidebarBase({
           </div>
 
           <div style={{ paddingTop: 6, paddingRight: 10, paddingBottom: 8, paddingLeft: 10, flexShrink: 0 }}>
-            <input
-              type="text"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={mode === 'conversations' ? 'Search conversations...' : 'Search archived lanes...'}
+            <div
               style={{
-                width: '100%',
-                paddingTop: 6,
-                paddingRight: 10,
-                paddingBottom: 6,
-                paddingLeft: 10,
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                height: 28,
                 borderWidth: 1,
                 borderStyle: 'solid',
                 borderColor: 'var(--t-input-border)',
                 borderRadius: 8,
-                fontSize: 11,
-                outline: 'none',
-                boxSizing: 'border-box',
                 background: 'var(--t-input-bg)',
-                color: 'var(--t-text)',
                 transition: 'border-color 150ms',
               }}
-              onFocus={(event) => {
+              onFocusCapture={(event) => {
                 event.currentTarget.style.borderColor = 'var(--t-accent-border)';
               }}
-              onBlur={(event) => {
+              onBlurCapture={(event) => {
                 event.currentTarget.style.borderColor = 'var(--t-input-border)';
               }}
-            />
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 26,
+                  height: '100%',
+                  color: 'var(--t-text-muted)',
+                  flexShrink: 0,
+                }}
+              >
+                <SearchIcon size={13} />
+              </div>
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    if (search) {
+                      event.preventDefault();
+                      setSearch('');
+                    }
+                    event.currentTarget.blur();
+                  }
+                }}
+                placeholder={mode === 'conversations' ? 'Search threads…' : 'Search archived lanes…'}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  height: '100%',
+                  paddingTop: 0,
+                  paddingRight: 10,
+                  paddingBottom: 0,
+                  paddingLeft: 0,
+                  borderWidth: 0,
+                  outline: 'none',
+                  background: 'transparent',
+                  color: 'var(--t-text)',
+                  fontSize: 12,
+                  fontWeight: 400,
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  letterSpacing: '-0.005em',
+                }}
+              />
+            </div>
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
@@ -428,8 +489,8 @@ function OrchestratorHistorySidebarBase({
               loading ? (
                 <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 11 }}>Loading…</div>
               ) : filteredArchivedLanes.length === 0 ? (
-                <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 11 }}>
-                  {search ? 'No matches' : 'No archived work yet'}
+                <div style={{ textAlign: 'center', paddingTop: 20, paddingLeft: 16, paddingRight: 16, color: 'var(--t-text-muted)', fontSize: 11 }}>
+                  {debouncedSearch.trim() ? `No lanes match "${debouncedSearch.trim()}"` : 'No archived work yet'}
                 </div>
               ) : (
                 groupedArchive.map((group) => (
@@ -540,8 +601,8 @@ function OrchestratorHistorySidebarBase({
             ) : loading ? (
               <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 11 }}>Loading…</div>
             ) : filteredThreads.length === 0 ? (
-              <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 11 }}>
-                {search ? 'No matches' : 'No saved conversations'}
+              <div style={{ textAlign: 'center', paddingTop: 20, paddingLeft: 16, paddingRight: 16, color: 'var(--t-text-muted)', fontSize: 11 }}>
+                {debouncedSearch.trim() ? `No threads match "${debouncedSearch.trim()}"` : 'No saved conversations'}
               </div>
             ) : (
               grouped.map((group) => (
