@@ -567,6 +567,7 @@ export async function sendToOrchestrator(
         ...process.env,
         FORCE_COLOR: '0',
         NO_COLOR: '1',
+        O8_MANAGED_SESSION: '1',
       },
       // We pass the full prompt via the `-p` CLI flag, not via stdin.
       // Leaving stdin on 'pipe' causes Claude Code to wait 3s for input

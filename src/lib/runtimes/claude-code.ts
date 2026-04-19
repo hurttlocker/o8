@@ -1185,7 +1185,7 @@ export const claudeCodeRuntime: AgentRuntime = {
           cwd: opts.cwd,
           stdio: ['ignore', stdoutFd, stderrFd],
           detached: true,
-          env: { ...process.env, FORCE_COLOR: '0' },
+          env: { ...process.env, FORCE_COLOR: '0', O8_MANAGED_SESSION: '1' },
         });
         child.unref();
       } finally {

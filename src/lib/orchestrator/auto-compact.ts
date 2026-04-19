@@ -99,7 +99,7 @@ async function summarizeWithHaiku(repoPath: string, prompt: string) {
     const child = spawn(CLAUDE_BIN, ['--print', '--output-format', 'stream-json', '--verbose', '--model', 'haiku', prompt], {
       cwd: repoPath,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
     });
     let buffer = '';
     let stderr = '';

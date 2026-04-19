@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
     start(controller) {
       const child = spawn(CLAUDE_BIN, args, {
         cwd: workingDir,
-        env: { ...process.env, FORCE_COLOR: '0' },
+        env: { ...process.env, FORCE_COLOR: '0', O8_MANAGED_SESSION: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
