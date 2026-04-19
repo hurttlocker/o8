@@ -4,6 +4,7 @@ import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { createHash, randomUUID } from 'node:crypto';
+import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -76,6 +77,15 @@ export async function POST(request: NextRequest) {
       tier: modelTier,
     }) ?? undefined;
 
+    // #536 — Edge-case surfacer — never throws, returns { sites: [] } on
+    // garbage input so the packet shape stays legal.
+    const edgeCaseResult = surfaceEdgeCases({
+      repoPath,
+      targetFiles: predictedFiles,
+      depth: 1,
+    });
+    const edgeCaseSites = edgeCaseResult.sites.length > 0 ? edgeCaseResult.sites : undefined;
+
     const packet: OrchestratorPacket = {
       id: packetId,
       referenceLabel: `D${Date.now().toString(36).slice(-4).toUpperCase()}`,
@@ -99,6 +109,7 @@ export async function POST(request: NextRequest) {
       lane: null,
       predictedFiles: predictedFiles.length > 0 ? predictedFiles : undefined,
       readBudget,
+      edgeCaseSites,
     };
 
     // Append the packet by MUTATING the state object passed into the
