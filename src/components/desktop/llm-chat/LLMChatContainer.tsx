@@ -5,7 +5,7 @@ import { useFileDrop } from '@/lib/hooks/use-file-drop';
 
 import { LLMChatLayout } from './LLMChatLayout';
 import {
-  API_MODELS, buildRepoRequestHeaders, CLI_RUNTIME_MODELS, SLASH_COMMANDS,
+  API_MODELS, buildOpencodeModels, buildRepoRequestHeaders, CLI_RUNTIME_MODELS, SLASH_COMMANDS,
   type ActiveThinkingState, type AttachedImage, type FileSuggestion, type LLMChatProps, type LLMMessage, type ModelOption, type PendingApprovalState, type QueuedContextCard, type ToolCallInfo,
 } from './shared';
 import { generateFollowUps, streamAssistantResponse } from './streaming';
@@ -72,7 +72,13 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
           const data = await detectRes.json();
           const detected: ModelOption[] = [];
           for (const tool of data.tools ?? []) {
-            if (tool.detected && CLI_RUNTIME_MODELS[tool.id as string]) {
+            if (!tool.detected) continue;
+            if (tool.id === 'opencode') {
+              const authedProviders = Array.isArray(tool.details?.authedProviders)
+                ? (tool.details.authedProviders as string[])
+                : undefined;
+              detected.push(...buildOpencodeModels(authedProviders));
+            } else if (CLI_RUNTIME_MODELS[tool.id as string]) {
               detected.push(...CLI_RUNTIME_MODELS[tool.id as string]);
             }
           }

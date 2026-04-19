@@ -194,12 +194,56 @@ export const CLI_RUNTIME_MODELS: Record<string, ModelOption[]> = {
     { id: 'cli:gemini:gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', color: '#4285f4', description: 'Fast + cheap', backend: 'cli', cliRuntime: 'gemini', supportsThinking: true },
   ],
   opencode: [
-    // v1: single row that routes to whatever opencode is configured to use by default.
-    // Issue #512 tracks the eager-parse follow-up that surfaces individual authed providers
-    // (anthropic/openai/google/etc.) as sub-rows under this group.
+    // Fallback: single row used when auth.json is missing or unparseable.
+    // At runtime, LLMChatContainer replaces this with buildOpencodeModels() which
+    // surfaces each authed provider as its own sub-row (issue #512).
     { id: 'cli:opencode:default', label: 'OpenCode (default)', provider: 'local', color: '#a855f7', description: '75+ providers', backend: 'cli', cliRuntime: 'opencode' },
   ],
 };
+
+/** Display label for each opencode provider id. Unmapped ids fall back to title-case. */
+const OPENCODE_PROVIDER_LABELS: Record<string, string> = {
+  anthropic: 'Claude',
+  openai: 'GPT',
+  google: 'Gemini',
+  groq: 'Groq',
+  mistral: 'Mistral',
+  cohere: 'Cohere',
+  xai: 'Grok',
+  bedrock: 'AWS Bedrock',
+  vertex: 'Vertex AI',
+  azure: 'Azure OpenAI',
+  perplexity: 'Perplexity',
+  together: 'Together AI',
+  fireworks: 'Fireworks',
+  deepseek: 'DeepSeek',
+  ollama: 'Ollama',
+};
+
+/**
+ * Build the opencode sub-row list from a list of authed provider keys read from
+ * ~/.local/share/opencode/auth.json.  Falls back to the single "OpenCode (default)"
+ * entry when the list is empty or undefined.
+ */
+export function buildOpencodeModels(authedProviders?: string[]): ModelOption[] {
+  if (!authedProviders || authedProviders.length === 0) {
+    return CLI_RUNTIME_MODELS.opencode;
+  }
+
+  return authedProviders.map((providerId) => {
+    const displayLabel = OPENCODE_PROVIDER_LABELS[providerId]
+      ?? (providerId.charAt(0).toUpperCase() + providerId.slice(1));
+    return {
+      id: `cli:opencode:${providerId}`,
+      label: `OpenCode \u00b7 ${displayLabel}`,
+      provider: 'local' as ModelOption['provider'],
+      color: '#a855f7',
+      description: displayLabel,
+      backend: 'cli' as ModelOption['backend'],
+      cliRuntime: 'opencode' as ModelOption['cliRuntime'],
+    };
+  });
+}
 
 /** o8 Operator — branded, free, zero-setup default. Routes to Gemini Flash with OpenRouter free fallback. */
 export const OPERATOR_MODEL: ModelOption = {
