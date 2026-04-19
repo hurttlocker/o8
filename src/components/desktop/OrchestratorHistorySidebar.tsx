@@ -11,26 +11,17 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
+import { HistoryThreadRow } from '@/components/desktop/HistoryThreadRow';
 import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
 import { filterThreads } from '@/lib/orchestrator/history-filter';
-// Raw SVG icons — lucide-react doesn't render in Tauri
-function MessageSquareIcon({ size = 12 }: { size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>;
-}
+import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
+
 function PanelLeftCloseIcon({ size = 13 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /><path d="m16 15-3-3 3-3" /></svg>;
-}
-function TrashIcon({ size = 11 }: { size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>;
-}
-function CopyMarkdownIcon({ size = 12 }: { size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>;
 }
 function SearchIcon({ size = 13 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>;
 }
-import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 
 interface OrchestratorThread {
   tabId: string;
@@ -40,6 +31,7 @@ interface OrchestratorThread {
   model?: string;
   planText?: string | null;
   firstUserMessage?: string | null;
+  pinned?: boolean;
 }
 
 interface ArchivedLaneRow {
@@ -144,8 +136,10 @@ function OrchestratorHistorySidebarBase({
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
+  const [renameState, setRenameState] = useState<{ threadId: string; draft: string } | null>(null);
   const [copyState, setCopyState] = useState<{ threadId: string | null; status: 'idle' | 'copying' | 'copied' | 'error' }>({
     threadId: null,
     status: 'idle',
@@ -157,7 +151,7 @@ function OrchestratorHistorySidebarBase({
       const res = await fetch('/api/v2/chat-history/list?include=orchestrator');
       if (!res.ok) return;
       const data = await res.json() as {
-        conversations?: Array<{ tabId: string; title?: string; modifiedAt: string; messageCount?: number; model?: string; planText?: string | null; firstUserMessage?: string | null }>;
+        conversations?: Array<{ tabId: string; title?: string; modifiedAt: string; messageCount?: number; model?: string; planText?: string | null; firstUserMessage?: string | null; pinned?: boolean }>;
       };
       const filtered = (data.conversations ?? [])
         .filter((c) => c.tabId.startsWith('thoughts-'))
@@ -169,6 +163,7 @@ function OrchestratorHistorySidebarBase({
           model: c.model,
           planText: typeof c.planText === 'string' && c.planText.trim() ? c.planText : null,
           firstUserMessage: typeof c.firstUserMessage === 'string' && c.firstUserMessage.trim() ? c.firstUserMessage : null,
+          pinned: c.pinned === true,
         }));
       setThreads(filtered);
     } catch {
@@ -220,6 +215,47 @@ function OrchestratorHistorySidebarBase({
       setDeletingId(null);
     }
   }, []);
+
+  const handleTogglePin = useCallback(async (threadTabId: string, nextPinned: boolean) => {
+    setThreads((current) => current.map((t) => (t.tabId === threadTabId ? { ...t, pinned: nextPinned } : t)));
+    try {
+      await fetch('/api/v2/chat-history', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabId: threadTabId, pinned: nextPinned }),
+      });
+    } catch {
+      setThreads((current) => current.map((t) => (t.tabId === threadTabId ? { ...t, pinned: !nextPinned } : t)));
+    }
+  }, []);
+
+  const handleRenameStart = useCallback((threadTabId: string, currentTitle: string) => {
+    setRenameState({ threadId: threadTabId, draft: currentTitle });
+    requestAnimationFrame(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    });
+  }, []);
+
+  const handleRenameCommit = useCallback(async () => {
+    if (!renameState) return;
+    const trimmed = renameState.draft.trim();
+    const { threadId } = renameState;
+    setRenameState(null);
+    if (!trimmed) return;
+    setThreads((current) => current.map((t) => (t.tabId === threadId ? { ...t, title: trimmed } : t)));
+    try {
+      await fetch('/api/v2/chat-history', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabId: threadId, title: trimmed }),
+      });
+    } catch {
+      void fetchThreads();
+    }
+  }, [renameState, fetchThreads]);
+
+  const handleRenameCancel = useCallback(() => setRenameState(null), []);
 
   const handleExport = useCallback(async (threadTabId: string, fallbackTitle: string) => {
     if (!navigator.clipboard?.writeText) {
@@ -300,8 +336,50 @@ function OrchestratorHistorySidebarBase({
     return archivedLanes.filter((l) => l.label.toLowerCase().includes(needle) || l.branch.toLowerCase().includes(needle));
   }, [archivedLanes, debouncedSearch]);
 
-  const grouped = useMemo(() => groupThreads(filteredThreads), [filteredThreads]);
+  const pinnedThreads = useMemo(() => filteredThreads.filter((t) => t.pinned), [filteredThreads]);
+  const grouped = useMemo(() => groupThreads(filteredThreads.filter((t) => !t.pinned)), [filteredThreads]);
   const groupedArchive = useMemo(() => groupArchivedLanes(filteredArchivedLanes), [filteredArchivedLanes]);
+
+  const renderThreadRow = useCallback((thread: OrchestratorThread) => {
+    const isCurrent = thread.tabId === currentThreadId;
+    const isDeleting = deletingId === thread.tabId;
+    const isHovered = hoveredThreadId === thread.tabId;
+    const runtime = threadRuntime(thread.model);
+    const exportStatus = copyState.threadId === thread.tabId ? copyState.status : 'idle';
+    const renameDraft = renameState?.threadId === thread.tabId ? renameState.draft : null;
+    const pinned = thread.pinned === true;
+    return (
+      <HistoryThreadRow
+        key={thread.tabId}
+        tabId={thread.tabId}
+        title={thread.title}
+        messageCount={thread.messageCount}
+        runtime={runtime}
+        planText={thread.planText}
+        pinned={pinned}
+        isCurrent={isCurrent}
+        isDeleting={isDeleting}
+        isHovered={isHovered}
+        renameDraft={renameDraft}
+        renameInputRef={renameInputRef}
+        exportStatus={exportStatus}
+        onHoverChange={(hovered) => {
+          setHoveredThreadId((current) => {
+            if (hovered) return thread.tabId;
+            return current === thread.tabId ? null : current;
+          });
+        }}
+        onSelect={() => onSelectThread(thread.tabId)}
+        onPinToggle={() => { void handleTogglePin(thread.tabId, !pinned); }}
+        onRenameStart={() => handleRenameStart(thread.tabId, thread.title)}
+        onRenameDraftChange={(draft) => setRenameState((current) => (current && current.threadId === thread.tabId ? { threadId: thread.tabId, draft } : current))}
+        onRenameCommit={() => { void handleRenameCommit(); }}
+        onRenameCancel={handleRenameCancel}
+        onExport={() => { void handleExport(thread.tabId, thread.title); }}
+        onDelete={() => { void handleDelete(thread.tabId); }}
+      />
+    );
+  }, [currentThreadId, deletingId, hoveredThreadId, copyState, renameState, handleTogglePin, handleRenameStart, handleRenameCommit, handleRenameCancel, handleExport, handleDelete, onSelectThread]);
 
   return (
     <div
@@ -605,242 +683,46 @@ function OrchestratorHistorySidebarBase({
                 {debouncedSearch.trim() ? `No threads match "${debouncedSearch.trim()}"` : 'No saved conversations'}
               </div>
             ) : (
-              grouped.map((group) => (
-                <div key={group.label}>
-                  <div
-                    style={{
-                      paddingTop: 10,
-                      paddingBottom: 4,
-                      paddingLeft: 14,
-                      fontSize: 9,
-                      fontWeight: 700,
-                      color: 'var(--t-text-muted)',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                    }}
-                  >
-                    {group.label}
+              <>
+                {pinnedThreads.length > 0 ? (
+                  <div>
+                    <div
+                      style={{
+                        paddingTop: 10,
+                        paddingBottom: 4,
+                        paddingLeft: 14,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: 'var(--t-text-muted)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                      }}
+                    >
+                      Pinned
+                    </div>
+                    {pinnedThreads.map((thread) => renderThreadRow(thread))}
                   </div>
-                  {group.items.map((thread) => {
-                    const isCurrent = thread.tabId === currentThreadId;
-                    const isDeleting = deletingId === thread.tabId;
-                    const isHovered = hoveredThreadId === thread.tabId;
-                    const runtime = threadRuntime(thread.model);
-                    const exportStatus = copyState.threadId === thread.tabId ? copyState.status : 'idle';
-                    const actionsVisible = isHovered || exportStatus !== 'idle';
-                    return (
-                      <div key={thread.tabId} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div
-                          data-thread-row={thread.tabId}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 2,
-                            width: 'calc(100% - 8px)',
-                            marginLeft: 4,
-                            marginRight: 4,
-                            borderRadius: 14,
-                            background: isCurrent
-                              ? 'var(--t-accent-soft)'
-                              : isHovered
-                                ? 'var(--t-panel-hover)'
-                                : 'transparent',
-                            transition: 'background 100ms',
-                            opacity: isDeleting ? 0.4 : 1,
-                            position: 'relative',
-                          }}
-                          onMouseEnter={() => setHoveredThreadId(thread.tabId)}
-                          onMouseLeave={() => setHoveredThreadId((current) => (current === thread.tabId ? null : current))}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => onSelectThread(thread.tabId)}
-                            disabled={isDeleting}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 10,
-                              flex: 1,
-                              minWidth: 0,
-                              minHeight: 44,
-                              paddingTop: 9,
-                              paddingRight: 4,
-                              paddingBottom: 9,
-                              paddingLeft: 12,
-                              borderWidth: 0,
-                              background: 'transparent',
-                              cursor: isDeleting ? 'default' : 'pointer',
-                              textAlign: 'left',
-                              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                width: 22,
-                                height: 22,
-                                borderRadius: 6,
-                                flexShrink: 0,
-                                background: runtime
-                                  ? 'transparent'
-                                  : isCurrent
-                                    ? 'var(--t-accent)'
-                                    : 'var(--t-bg-card)',
-                                color: isCurrent ? '#ffffff' : 'var(--t-text-muted)',
-                                transition: 'background 120ms ease, color 120ms ease',
-                              }}
-                            >
-                              {runtime === 'claude-code' ? (
-                                <ClaudeIcon size={16} />
-                              ) : runtime === 'codex' ? (
-                                <CodexIcon size={16} />
-                              ) : (
-                                <MessageSquareIcon size={12} />
-                              )}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontSize: 11.5,
-                                  fontWeight: isCurrent ? 600 : 500,
-                                  color: 'var(--t-text)',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  lineHeight: 1.3,
-                                  letterSpacing: '-0.005em',
-                                }}
-                              >
-                                {thread.title}
-                              </div>
-                              {thread.messageCount != null && thread.messageCount > 0 ? (
-                                <div
-                                  style={{
-                                    fontSize: 9.5,
-                                    color: 'var(--t-text-muted)',
-                                    marginTop: 2,
-                                    fontWeight: 500,
-                                  }}
-                                >
-                                  {thread.messageCount} msg{thread.messageCount !== 1 ? 's' : ''}
-                                </div>
-                              ) : thread.messageCount === 0 ? (
-                                <div
-                                  style={{
-                                    fontSize: 9.5,
-                                    color: 'var(--t-text-faint)',
-                                    marginTop: 2,
-                                    fontWeight: 500,
-                                    fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
-                                  }}
-                                >
-                                  (empty)
-                                </div>
-                              ) : null}
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleExport(thread.tabId, thread.title);
-                            }}
-                            disabled={isDeleting || exportStatus === 'copying'}
-                            title={exportStatus === 'copied' ? 'Copied as Markdown' : 'Copy thread as Markdown'}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 44,
-                              height: 44,
-                              borderWidth: 0,
-                              borderRadius: 12,
-                              background: exportStatus === 'copied' ? 'var(--t-accent-soft)' : 'transparent',
-                              color: exportStatus === 'copied'
-                                ? 'var(--t-accent)'
-                                : exportStatus === 'error'
-                                  ? 'var(--t-danger, #ef4444)'
-                                  : 'var(--t-text-muted)',
-                              cursor: isDeleting || exportStatus === 'copying' ? 'default' : 'pointer',
-                              opacity: actionsVisible ? 1 : 0,
-                              transition: 'opacity 120ms ease, color 120ms ease, background 120ms ease',
-                              flexShrink: 0,
-                            }}
-                            onMouseEnter={(event) => {
-                              if (isDeleting || exportStatus === 'copying' || exportStatus === 'copied') return;
-                              event.currentTarget.style.background = 'var(--t-bg-card)';
-                              event.currentTarget.style.color = exportStatus === 'error'
-                                ? 'var(--t-danger, #ef4444)'
-                                : 'var(--t-text)';
-                            }}
-                            onMouseLeave={(event) => {
-                              event.currentTarget.style.background = exportStatus === 'copied'
-                                ? 'var(--t-accent-soft)'
-                                : 'transparent';
-                              event.currentTarget.style.color = exportStatus === 'copied'
-                                ? 'var(--t-accent)'
-                                : exportStatus === 'error'
-                                  ? 'var(--t-danger, #ef4444)'
-                                  : 'var(--t-text-muted)';
-                            }}
-                          >
-                            <CopyMarkdownIcon size={12} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleDelete(thread.tabId);
-                            }}
-                            disabled={isDeleting}
-                            title="Delete conversation"
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 44,
-                              height: 44,
-                              marginRight: 2,
-                              borderWidth: 0,
-                              borderRadius: 12,
-                              background: 'transparent',
-                              color: 'var(--t-text-muted)',
-                              cursor: isDeleting ? 'default' : 'pointer',
-                              opacity: actionsVisible ? 1 : 0,
-                              transition: 'opacity 120ms ease, color 120ms ease, background 120ms ease',
-                              flexShrink: 0,
-                            }}
-                            onMouseEnter={(event) => {
-                              event.currentTarget.style.background = 'var(--t-bg-card)';
-                              event.currentTarget.style.color = 'var(--t-danger, #ef4444)';
-                            }}
-                            onMouseLeave={(event) => {
-                              event.currentTarget.style.background = 'transparent';
-                              event.currentTarget.style.color = 'var(--t-text-muted)';
-                            }}
-                          >
-                            <TrashIcon size={11} />
-                          </button>
-                        </div>
-                        {isCurrent && thread.planText ? (
-                          <div
-                            style={{
-                              paddingTop: 0,
-                              paddingRight: 8,
-                              paddingBottom: 6,
-                              paddingLeft: 8,
-                            }}
-                          >
-                            <CollapsiblePlanCard text={thread.planText} compact />
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ))
+                ) : null}
+                {grouped.map((group) => (
+                  <div key={group.label}>
+                    <div
+                      style={{
+                        paddingTop: 10,
+                        paddingBottom: 4,
+                        paddingLeft: 14,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: 'var(--t-text-muted)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                      }}
+                    >
+                      {group.label}
+                    </div>
+                    {group.items.map((thread) => renderThreadRow(thread))}
+                  </div>
+                ))}
+              </>
             )}
           </div>
         </>

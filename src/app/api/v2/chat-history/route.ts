@@ -122,6 +122,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const data = JSON.parse(readFileSync(filePath, 'utf-8'));
     if (body.starred !== undefined) data.starred = body.starred;
+    if (body.pinned !== undefined) data.pinned = body.pinned;
     if (body.title !== undefined) data.title = body.title;
     if (body.planText !== undefined) data.planText = normalizePlanText(body.planText) ?? null;
     if (body.repoName !== undefined) data.repoName = body.repoName;
