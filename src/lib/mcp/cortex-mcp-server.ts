@@ -16,6 +16,7 @@ import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { parseMcpConfigInput, type ParsedMcpServer } from './parse-config';
 import { getOrCreateWsToken } from '../ws-auth';
 
 /**
@@ -281,6 +282,50 @@ const TOOLS: McpTool[] = [
         },
       },
       required: ['surfaceId'],
+    },
+  },
+  {
+    name: 'register_mcp',
+    description:
+      'Register an external MCP server in o8. After registering, the orchestrator session will reload so the new tools become available on the next turn — your transcript is preserved via --resume. ' +
+      'Pass either a JSON config block (from a server README) OR discrete fields. ' +
+      'Accepts the standard Claude Desktop / Cursor shape: {"mcpServers":{"name":{...}}}, a map of servers, or a single {"command","args"} entry.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        configJson: {
+          type: 'string',
+          description:
+            'Optional: paste the full JSON config from the server README. Accepts {"mcpServers":{...}}, a map of servers, or a single server object. If provided, the discrete fields below are ignored.',
+        },
+        name: {
+          type: 'string',
+          description: 'Server identifier (e.g. "filesystem", "slack"). Required unless configJson supplies names.',
+        },
+        command: {
+          type: 'string',
+          description: 'Executable for stdio transport (e.g. "npx", "node"). Required unless configJson or transport=http with url.',
+        },
+        args: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Command-line arguments for stdio transport.',
+        },
+        env: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'Environment variables passed to the MCP server subprocess.',
+        },
+        transport: {
+          type: 'string',
+          enum: ['stdio', 'http'],
+          description: 'Transport protocol. Defaults to "stdio".',
+        },
+        url: {
+          type: 'string',
+          description: 'For transport="http": the MCP endpoint URL.',
+        },
+      },
     },
   },
 ];
@@ -642,6 +687,178 @@ async function handleInterruptAgent(args: Record<string, unknown>): Promise<McpT
   }
 }
 
+// ── Conversational MCP registration ──
+
+function serversFromDiscreteArgs(args: Record<string, unknown>): ParsedMcpServer[] {
+  const transportRaw = typeof args.transport === 'string' ? args.transport.toLowerCase() : 'stdio';
+  const transport: 'stdio' | 'http' = transportRaw === 'http' ? 'http' : 'stdio';
+  const name = typeof args.name === 'string' ? args.name.trim() : '';
+  if (!name) {
+    throw new Error('name is required when configJson is not provided');
+  }
+
+  const envRecord: Record<string, string> = {};
+  if (args.env && typeof args.env === 'object' && !Array.isArray(args.env)) {
+    for (const [key, value] of Object.entries(args.env as Record<string, unknown>)) {
+      if (typeof value !== 'string') continue;
+      const trimmedKey = key.trim();
+      if (!trimmedKey) continue;
+      envRecord[trimmedKey] = value;
+    }
+  }
+
+  if (transport === 'http') {
+    const url = typeof args.url === 'string' ? args.url.trim() : '';
+    if (!url) {
+      throw new Error('url is required for transport="http"');
+    }
+    return [{
+      name,
+      transport: 'http',
+      command: url,
+      args: [],
+      env: envRecord,
+      url,
+    }];
+  }
+
+  const command = typeof args.command === 'string' ? args.command.trim() : '';
+  if (!command) {
+    throw new Error('command is required for transport="stdio"');
+  }
+  const serverArgs = Array.isArray(args.args)
+    ? (args.args as unknown[])
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+    : [];
+
+  return [{
+    name,
+    transport: 'stdio',
+    command,
+    args: serverArgs,
+    env: envRecord,
+  }];
+}
+
+async function handleRegisterMcp(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const configJson = typeof args.configJson === 'string' ? args.configJson.trim() : '';
+    let servers: ParsedMcpServer[];
+
+    if (configJson) {
+      const parsed = parseMcpConfigInput(configJson);
+      servers = parsed.servers;
+      const unnamed = servers.findIndex((server) => !server.name);
+      if (unnamed !== -1) {
+        const discreteName = typeof args.name === 'string' ? args.name.trim() : '';
+        if (!discreteName) {
+          return textResult(
+            'The pasted config does not include a server name. Re-send with an outer {"mcpServers":{"<name>":{...}}} wrapper, or pass `name` alongside `configJson`.',
+            true,
+          );
+        }
+        // Fill in any unnamed single entries using the discrete `name` hint
+        servers = servers.map((server) => server.name ? server : { ...server, name: discreteName });
+      }
+    } else {
+      servers = serversFromDiscreteArgs(args);
+    }
+
+    const registered: string[] = [];
+    const failures: Array<{ name: string; error: string }> = [];
+
+    for (const server of servers) {
+      if (!server.name) continue;
+      const body = server.transport === 'http'
+        ? {
+            name: server.name,
+            transport: 'http' as const,
+            command: server.url ?? server.command,
+            args: [],
+            env: Object.keys(server.env).length > 0 ? server.env : null,
+            enabled: true,
+          }
+        : {
+            name: server.name,
+            transport: 'stdio' as const,
+            command: server.command,
+            args: server.args,
+            env: Object.keys(server.env).length > 0 ? server.env : null,
+            enabled: true,
+          };
+
+      try {
+        const res = await fetch(`${API_BASE}/api/setup/mcp-servers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const payload = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
+        if (!res.ok || !payload.ok) {
+          failures.push({ name: server.name, error: payload.error ?? `HTTP ${res.status}` });
+          continue;
+        }
+        registered.push(server.name);
+      } catch (err) {
+        failures.push({ name: server.name, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    if (registered.length === 0) {
+      return jsonResult({
+        ok: false,
+        registered: [],
+        failures,
+        note: failures.length > 0
+          ? `Could not register any MCP server: ${failures.map((f) => `${f.name} — ${f.error}`).join('; ')}`
+          : 'No servers were registered. Check the input.',
+      }, true);
+    }
+
+    // Schedule an orchestrator reload so the next user turn spawns with the
+    // new MCP config. Best-effort — the next turn will pick up the new server
+    // even if this call fails, because ensureMcpConfig() rebuilds the file
+    // on every send. We still want to surface a UI banner on success.
+    let reloadScheduled = false;
+    let reloadError: string | null = null;
+    try {
+      const reloadRes = await fetch(`${API_BASE}/api/orchestrator/reload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repoPath: REPO_PATH || undefined,
+          registered,
+          message: registered.length === 1
+            ? `Registered ${registered[0]}. Reloading so the new tools are available…`
+            : `Registered ${registered.length} MCP servers. Reloading so the new tools are available…`,
+        }),
+      });
+      const reloadBody = await reloadRes.json().catch(() => ({})) as { ok?: boolean; error?: { message?: string } };
+      reloadScheduled = Boolean(reloadBody.ok);
+      if (!reloadScheduled) {
+        reloadError = reloadBody.error?.message ?? `HTTP ${reloadRes.status}`;
+      }
+    } catch (err) {
+      reloadError = err instanceof Error ? err.message : String(err);
+    }
+
+    return jsonResult({
+      ok: true,
+      registered,
+      failures: failures.length > 0 ? failures : undefined,
+      reloadScheduled,
+      reloadError: reloadScheduled ? undefined : reloadError,
+      message: registered.length === 1
+        ? `Registered ${registered[0]}. ${reloadScheduled ? 'Reloading so the new tools are available — your transcript will resume automatically.' : 'New tools will be available on the next orchestrator turn.'}`
+        : `Registered ${registered.length} MCP servers: ${registered.join(', ')}. ${reloadScheduled ? 'Reloading so the new tools are available — your transcript will resume automatically.' : 'New tools will be available on the next orchestrator turn.'}`,
+    });
+  } catch (err) {
+    return textResult(`Failed to register MCP server: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
   cortex_fleet_status: handleFleetStatus,
   cortex_list_issues: handleListIssues,
@@ -655,6 +872,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_steer_agent: handleSteerAgent,
   cortex_read_transcript: handleReadTranscript,
   cortex_interrupt_agent: handleInterruptAgent,
+  register_mcp: handleRegisterMcp,
 };
 
 // ── JSON-RPC Server ──
