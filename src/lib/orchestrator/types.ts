@@ -136,6 +136,36 @@ export interface OrchestratorPacket {
     body?: string;
     url?: string;
   } | null;
+  /**
+   * Read-before-write scaffolding (#535). Pre-computed at dispatch time by
+   * `computeReadBudget` and rendered into the packet prompt so weaker models
+   * behave like Codex xhigh: read the adjacent surface first, write second.
+   *
+   * Undefined on legacy packets — absence must NOT change behaviour.
+   */
+  readBudget?: {
+    /** Minimum read-only tool calls required before write tools should unlock. */
+    minToolCalls: number;
+    /** Pre-computed 1–2 hop import-graph fan-out that should be read first. */
+    requiredReads: string[];
+    /** When true, the first assistant turn must emit a plan before writes. */
+    planBeforeWrite: boolean;
+  };
+  /**
+   * Edge-case surfacer output (#536). Populated by the static AST walker at
+   * dispatch-prep time — plain-text descriptions of conditional branches,
+   * error handlers, and reconciliation paths the model should watch for.
+   *
+   * Undefined on legacy packets — absence must NOT change behaviour.
+   */
+  edgeCaseSites?: Array<{
+    /** `src/lib/foo.ts:120` — stable human-readable location. */
+    location: string;
+    /** One-sentence description of what could go wrong at this site. */
+    description: string;
+    /** Optional category for grouping in the prompt. */
+    kind?: 'conditional' | 'error-handler' | 'reconciliation' | 'archive' | 'loop-exit' | 'other';
+  }>;
 }
 
 export interface OrchestratorMissionState {

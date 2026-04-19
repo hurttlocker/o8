@@ -4,6 +4,8 @@ import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { createHash, randomUUID } from 'node:crypto';
+import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
+import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 export const runtime = 'nodejs';
@@ -57,6 +59,23 @@ export async function POST(request: NextRequest) {
     // and hides state from the UI.
     const packetId = `pkt-${randomUUID()}`;
     const now = new Date().toISOString();
+
+    // #535 — Compute a read budget at dispatch time so weaker models don't
+    // start writing before reading the adjacent surface. The helper returns
+    // null when no budget is warranted (empty targets / strong tier w/ no
+    // graph), which preserves legacy behaviour for delegate callers.
+    const predictedFiles = computePredictedFiles({
+      workspaceTargetPath: repoPath,
+      title: taskName,
+      summary: prompt,
+    } as OrchestratorPacket);
+    const modelTier = resolveModelTier({ runtime: 'codex', assignedModel: null });
+    const readBudget = computeReadBudget({
+      repoPath,
+      targetFiles: predictedFiles,
+      tier: modelTier,
+    }) ?? undefined;
+
     const packet: OrchestratorPacket = {
       id: packetId,
       referenceLabel: `D${Date.now().toString(36).slice(-4).toUpperCase()}`,
@@ -78,6 +97,8 @@ export async function POST(request: NextRequest) {
       archivedAt: null,
       review: null,
       lane: null,
+      predictedFiles: predictedFiles.length > 0 ? predictedFiles : undefined,
+      readBudget,
     };
 
     // Append the packet by MUTATING the state object passed into the

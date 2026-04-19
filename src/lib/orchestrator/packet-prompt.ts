@@ -1,3 +1,4 @@
+import { renderReadBudgetSections } from '@/lib/dispatch/read-budget';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
@@ -229,6 +230,11 @@ export async function buildPacketPrompt(
   const preservationSections = buildPreservationEnvelope(packet);
   const packetType = packet.title.trim().split(/\s+/)[0]?.toLowerCase() || 'feat';
   const learnedRuleSection = buildLearnedRuleSection(packet, packetType);
+  // #535 — Read-before-write scaffolding. When the delegate route or
+  // scheduler populated `packet.readBudget`, render it into the prompt so
+  // weaker models see the required reads + plan gate up-front. Legacy
+  // packets without `readBudget` skip this block entirely.
+  const readBudgetSections = renderReadBudgetSections(packet.readBudget);
   if (dependencySections.length > 0) {
     console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
   }
@@ -244,6 +250,9 @@ export async function buildPacketPrompt(
   if (learnedRuleSection) {
     console.log(`[learned-rules] Injected learned guardrails for packet ${packet.id} (${packetType})`);
   }
+  if (readBudgetSections.length > 0) {
+    console.log(`[read-budget] Injected read-before-write scaffolding for packet ${packet.id} (${packet.readBudget?.requiredReads.length ?? 0} required reads, minToolCalls=${packet.readBudget?.minToolCalls ?? 0})`);
+  }
 
   return [
     `Packet: ${packet.title}`,
@@ -256,6 +265,7 @@ export async function buildPacketPrompt(
     ...priorAttemptLearningSections,
     ...fileSizeSections,
     ...preservationSections,
+    ...readBudgetSections,
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     learnedRuleSection,
     ...buildPacketSelfReviewInstructions(baseBranch),
