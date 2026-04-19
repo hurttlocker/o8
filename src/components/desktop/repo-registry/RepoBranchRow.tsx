@@ -1,8 +1,8 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight, ExternalLink, PlayCircle } from '../lucide-shims';
+import { ExternalLink, PlayCircle } from '../lucide-shims';
 import {
   AlertCircle,
   FolderOpen,
@@ -10,7 +10,6 @@ import {
   RepoActionButton,
   THEME_ACCENT,
   THEME_ACCENT_BORDER,
-  THEME_ACCENT_RING,
   THEME_ACCENT_SOFT,
   THEME_SUCCESS_TEXT,
   THEME_WORKTREE_BORDER,
@@ -37,6 +36,7 @@ import {
   CodexIcon,
   ClaudeIcon,
 } from './shared';
+import { AgentStatusHover } from './AgentStatusHover';
 import { threeWordTaskSummary } from './task-label';
 
 interface RepoBranchRowProps {
@@ -92,6 +92,50 @@ function RepoBranchRowBase({
   branchDeleteConfirm,
   setBranchDeleteConfirm,
 }: RepoBranchRowProps) {
+  // ── Agent hover state — opens the AgentStatusHover popover after a short
+  // dwell so flicking past agent rows doesn't flash the card. The hover
+  // only tracks the currently-entered row via `hoveredAgentKey`; the rect
+  // + agent reference are captured at hover-in time and frozen for the
+  // duration of the hover so the card doesn't drift if the agent's status
+  // updates mid-hover.
+  const [hoveredAgentKey, setHoveredAgentKey] = useState<string | null>(null);
+  const [hoveredAgentRect, setHoveredAgentRect] = useState<DOMRect | null>(null);
+  const agentHoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentHoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleAgentHover = useCallback((key: string, element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    if (agentHoverCloseTimerRef.current) {
+      clearTimeout(agentHoverCloseTimerRef.current);
+      agentHoverCloseTimerRef.current = null;
+    }
+    if (agentHoverOpenTimerRef.current) clearTimeout(agentHoverOpenTimerRef.current);
+    agentHoverOpenTimerRef.current = setTimeout(() => {
+      setHoveredAgentKey(key);
+      setHoveredAgentRect(rect);
+      agentHoverOpenTimerRef.current = null;
+    }, 140);
+  }, []);
+
+  const holdAgentHover = useCallback(() => {
+    if (agentHoverCloseTimerRef.current) {
+      clearTimeout(agentHoverCloseTimerRef.current);
+      agentHoverCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const closeAgentHover = useCallback(() => {
+    if (agentHoverOpenTimerRef.current) {
+      clearTimeout(agentHoverOpenTimerRef.current);
+      agentHoverOpenTimerRef.current = null;
+    }
+    if (agentHoverCloseTimerRef.current) clearTimeout(agentHoverCloseTimerRef.current);
+    agentHoverCloseTimerRef.current = setTimeout(() => {
+      setHoveredAgentKey(null);
+      setHoveredAgentRect(null);
+    }, 120);
+  }, []);
+
   const branchPackets = orchestratorPackets.filter((packet) => packetMatchesBranch(packet, repo, branch, branchAgents));
   const packetBoundSessionKeys = new Set(
     branchPackets
@@ -515,6 +559,12 @@ function RepoBranchRowBase({
                           event.stopPropagation();
                           onSelectSession?.(agent.sessionKey);
                         }}
+                        onMouseEnter={(event) => {
+                          scheduleAgentHover(agent.sessionKey, event.currentTarget);
+                        }}
+                        onMouseLeave={() => {
+                          closeAgentHover();
+                        }}
                         style={{
                           width: '100%',
                           display: 'flex',
@@ -769,6 +819,21 @@ function RepoBranchRowBase({
           </button>
         </div>
       ) : null}
+
+      {hoveredAgentKey && hoveredAgentRect ? (() => {
+        const hoveredAgent = orderedBranchAgents.find((agent) => agent.sessionKey === hoveredAgentKey);
+        if (!hoveredAgent) return null;
+        return (
+          <AgentStatusHover
+            agent={hoveredAgent}
+            anchorRect={hoveredAgentRect}
+            worktreePath={worktree?.path ?? (branch.isWorktree ? branch.worktreePath ?? null : null)}
+            baseBranch={worktree?.baseBranch ?? repo.defaultBranch}
+            onMouseEnter={holdAgentHover}
+            onMouseLeave={closeAgentHover}
+          />
+        );
+      })() : null}
     </div>
   );
 }
