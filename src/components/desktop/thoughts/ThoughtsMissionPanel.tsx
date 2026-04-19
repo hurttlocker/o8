@@ -59,6 +59,9 @@ export function ThoughtsMissionPanel({
   const [issueGroups, setIssueGroups] = useState<RepoIssuesGroup[]>([]);
   const [issueGroupCollapsed, setIssueGroupCollapsed] = useState<Record<string, boolean>>({});
   const [issuesLoading, setIssuesLoading] = useState(false);
+  // #626 — cache of workspace localPath → GitHub remoteUrl, reused by PacketCard
+  // so its "open" action can derive an issue URL when packet.issue?.url is absent.
+  const [repoRemoteUrlByPath, setRepoRemoteUrlByPath] = useState<Record<string, string | null>>({});
   const [expandedPacketId, setExpandedPacketId] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [reviewStateByPacketId, setReviewStateByPacketId] = useState<Record<string, ReviewPanelState>>({});
@@ -104,6 +107,15 @@ export function ThoughtsMissionPanel({
         if (!reposRes.ok || cancelled) { setIssuesLoading(false); return; }
         const reposData = await reposRes.json() as { repos?: Array<{ id: string; name: string; localPath: string; remoteUrl?: string }> };
         const repos = reposData.repos ?? [];
+
+        if (!cancelled) {
+          // #626 — snapshot the localPath → remoteUrl mapping for PacketCard.
+          const nextMap: Record<string, string | null> = {};
+          for (const repo of repos) {
+            if (repo.localPath) nextMap[repo.localPath] = repo.remoteUrl ?? null;
+          }
+          setRepoRemoteUrlByPath(nextMap);
+        }
 
         const groups = await Promise.all(repos.map(async (repo) => {
           if (!repo.remoteUrl) return null;
@@ -486,6 +498,7 @@ export function ThoughtsMissionPanel({
             editingField={editingField}
             onEditingFieldChange={setEditingField}
             workspaceTargets={workspaceTargets}
+            repoRemoteUrlByPath={repoRemoteUrlByPath}
             reviewState={reviewState}
             onPatch={(updater) => patchPacket(packet.id, updater)}
             onLaunch={() => { void handleLaunchPacket(packet); }}
