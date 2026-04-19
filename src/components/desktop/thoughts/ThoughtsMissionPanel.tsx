@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   OrchestratorLaneBinding,
   OrchestratorMissionState,
@@ -10,6 +10,7 @@ import type {
 } from '@/lib/orchestrator/types';
 import type { AgentTarget } from './types';
 import { createDraftPacket } from './utils';
+import { ComparisonCard } from './ComparisonCard';
 import type {
   EditingField,
   RepoIssue,
@@ -25,6 +26,12 @@ import {
 } from './mission-panel/branchTarget';
 import { IssueGroupList } from './mission-panel/IssueGroupList';
 import { PacketCard } from './mission-panel/PacketCard';
+
+// #517 — Rough per-run cost estimate used only for the fan-out gate warning.
+// Not meant to be accurate — it just reminds the operator that running 3+
+// frontier models in parallel is expensive.
+const COMPARISON_COST_ESTIMATE_PER_MODEL_USD = 0.60;
+const COMPARISON_FAN_OUT_WARN_THRESHOLD = 2;
 
 export function ThoughtsMissionPanel({
   open,
@@ -329,6 +336,57 @@ export function ThoughtsMissionPanel({
     }).catch(() => {});
   }, []);
 
+  // #517 — Best-of-n: bucket packets by comparisonGroupId so each group
+  // renders ONCE via ComparisonCard instead of N separate PacketCards.
+  const comparisonGroups = useMemo(() => {
+    const groups = new Map<string, OrchestratorPacket[]>();
+    for (const packet of missionState.packets) {
+      if (!packet.comparisonGroupId) continue;
+      const current = groups.get(packet.comparisonGroupId) ?? [];
+      current.push(packet);
+      groups.set(packet.comparisonGroupId, current);
+    }
+    return groups;
+  }, [missionState.packets]);
+
+  // #517 — Cost warning: any draft packet staged with fan-out > 2 gets a
+  // non-blocking callout. Once the packet is dispatched it sheds
+  // `comparisonModels` (scheduling.ts clears it after fan-out) so the
+  // warning auto-dismisses.
+  const pendingFanOutCost = useMemo(() => {
+    let worstCount = 0;
+    for (const packet of missionState.packets) {
+      const count = packet.comparisonModels?.length ?? 0;
+      if (count > worstCount) worstCount = count;
+    }
+    if (worstCount <= COMPARISON_FAN_OUT_WARN_THRESHOLD) return null;
+    return {
+      fanOut: worstCount,
+      estimateUsd: Math.round(worstCount * COMPARISON_COST_ESTIMATE_PER_MODEL_USD * 100) / 100,
+    };
+  }, [missionState.packets]);
+
+  const handlePickComparisonWinner = useCallback(async (packetId: string) => {
+    try {
+      const response = await fetch('/api/orchestrator/comparison-pick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId }),
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        error?: { message?: string };
+      } | null;
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error?.message ?? 'Unable to pick the comparison winner.');
+      }
+    } catch (error) {
+      console.error('[best-of-n] Failed to pick comparison winner.', error);
+    }
+  }, []);
+
+  const renderedComparisonGroupIds = new Set<string>();
+
   useEffect(() => {
     if (!open || !visible || !expandedPacketId) return;
 
@@ -460,6 +518,40 @@ export function ThoughtsMissionPanel({
         onCreatePacketFromIssue={handleCreatePacketFromIssue}
       />
 
+      {pendingFanOutCost ? (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 8,
+            paddingTop: 8,
+            paddingRight: 10,
+            paddingBottom: 8,
+            paddingLeft: 10,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'rgba(245, 158, 11, 0.32)',
+            background: 'rgba(245, 158, 11, 0.08)',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+            <path d="M12 9v4" />
+            <path d="M12 17h.01" />
+          </svg>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: '#b45309', letterSpacing: '-0.01em' }}>
+              Fan-out of {pendingFanOutCost.fanOut} models
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--t-text-secondary)', marginTop: 2, lineHeight: 1.4 }}>
+              Runs all {pendingFanOutCost.fanOut} models in parallel worktrees. Rough estimate ~${pendingFanOutCost.estimateUsd.toFixed(2)} per packet. Trim the comparison list if this is a routine change.
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Empty state — no issues and no packets */}
       {issueGroups.length === 0 && missionState.packets.length === 0 ? (
         <div style={{
@@ -486,6 +578,24 @@ export function ThoughtsMissionPanel({
       ) : null}
 
       {missionState.packets.map((packet) => {
+        // #517 — Route comparison-group packets through ComparisonCard. Render
+        // ONE card per groupId (at the first sibling's position), skip the rest.
+        if (packet.comparisonGroupId) {
+          if (renderedComparisonGroupIds.has(packet.comparisonGroupId)) {
+            return null;
+          }
+          renderedComparisonGroupIds.add(packet.comparisonGroupId);
+          const groupPackets = comparisonGroups.get(packet.comparisonGroupId) ?? [packet];
+          return (
+            <ComparisonCard
+              key={`cmp-${packet.comparisonGroupId}`}
+              groupId={packet.comparisonGroupId}
+              packets={groupPackets}
+              onPickWinner={handlePickComparisonWinner}
+            />
+          );
+        }
+
         const isExpanded = expandedPacketId === packet.id;
         const reviewState = reviewStateByPacketId[packet.id] ?? null;
         return (
