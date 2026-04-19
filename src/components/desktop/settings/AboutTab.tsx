@@ -67,12 +67,23 @@ export function AboutTab() {
           <div style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 32,
-            fontWeight: 400,
+            fontWeight: 500,
             color: 'var(--t-text)',
             letterSpacing: '0.02em',
             lineHeight: 1,
           }}>
             {normalizeVersion(packageJson.version)}
+          </div>
+          <div style={{
+            marginTop: 10,
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 10,
+            fontWeight: 400,
+            letterSpacing: '0.16em',
+            textTransform: 'uppercase',
+            color: RAMS_INK_QUIET,
+          }}>
+            UPDATED {nowIso}
           </div>
           <div style={{
             marginTop: 16,
