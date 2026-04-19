@@ -386,10 +386,13 @@ export function updateLane(
 
     for (const key of updatableKeys) {
       const value = updates[key];
-      if (value !== undefined && lane[key as keyof Lane] !== value) {
-        (nextValues as Record<string, unknown>)[key] = value;
-        changes[key] = value;
+      if (value === undefined || lane[key as keyof Lane] === value) continue;
+      if (key === 'label' && actor !== 'user') { // #529 label is load-bearing
+        console.warn(`[lane-registry] Reject label overwrite on ${laneId} from ${actor}; kept "${lane.label}"`);
+        continue;
       }
+      (nextValues as Record<string, unknown>)[key] = value;
+      changes[key] = value;
     }
 
     if (Object.keys(changes).length === 0) {
@@ -451,10 +454,7 @@ function recordMergedLaneDispatchRules(lane: Lane) {
       .flatMap((approval) => approval.audit.filter((event) => event.type === 'orchestrator_review'))
       .sort((left, right) => right.timestamp - left.timestamp)[0];
     const reviewSummary = latestReview?.note?.trim();
-    if (!reviewSummary) {
-      return;
-    }
-
+    if (!reviewSummary) return;
     const findings = extractReviewFindings(reviewSummary);
     const patterns = extractReviewPatterns(reviewSummary, findings);
     for (const ruleText of [...findings.map((finding) => finding.description), ...patterns]) {

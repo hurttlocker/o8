@@ -56,6 +56,29 @@ export function createOrchestratorMessageHandler(
       return;
     }
 
+    // #529 — Supervisor/agent lifecycle events ride a separate channel so
+    // their `detail` payloads (codex transcript previews, stuck steers, etc.)
+    // cannot bleed into the orchestrator chat. We still listen for them on
+    // the same underlying WebSocket connection, but route them straight to
+    // the window-level listener without touching transcript state.
+    if (msg.channel === 'supervisor') {
+      if (msg.event !== 'agent-update') return;
+      const update = msg.data as {
+        surfaceId?: string;
+        name?: string;
+        status?: string;
+        detail?: string;
+        duration?: number;
+        repoPath?: string;
+        prompt?: string;
+      } | undefined;
+      if (!update?.surfaceId) return;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cortex:agent-supervisor-update', { detail: update }));
+      }
+      return;
+    }
+
     if (msg.channel !== 'orchestrator') return;
 
     options.eventCountRef.current += 1;
@@ -124,23 +147,6 @@ export function createOrchestratorMessageHandler(
         } else if (newStatus === 'starting') {
           options.statusRef.current = 'connecting';
           options.setStatus('connecting');
-        }
-        break;
-      }
-
-      case 'agent-update': {
-        const update = msg.data as {
-          surfaceId?: string;
-          name?: string;
-          status?: string;
-          detail?: string;
-          duration?: number;
-          repoPath?: string;
-          prompt?: string;
-        } | undefined;
-        if (!update?.surfaceId) break;
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('cortex:agent-supervisor-update', { detail: update }));
         }
         break;
       }
