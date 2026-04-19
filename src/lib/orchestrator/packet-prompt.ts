@@ -1,3 +1,4 @@
+import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
 import { renderReadBudgetSections } from '@/lib/dispatch/read-budget';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
@@ -235,6 +236,10 @@ export async function buildPacketPrompt(
   // weaker models see the required reads + plan gate up-front. Legacy
   // packets without `readBudget` skip this block entirely.
   const readBudgetSections = renderReadBudgetSections(packet.readBudget);
+  // #536 — Edge-case surfacer output. When the surfacer populated
+  // `packet.edgeCaseSites`, render them as a grouped "Watch for these"
+  // block so weaker models see adjacent risk surfaces up-front.
+  const edgeCaseSections = renderEdgeCaseSections(packet.edgeCaseSites);
   if (dependencySections.length > 0) {
     console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
   }
@@ -253,6 +258,9 @@ export async function buildPacketPrompt(
   if (readBudgetSections.length > 0) {
     console.log(`[read-budget] Injected read-before-write scaffolding for packet ${packet.id} (${packet.readBudget?.requiredReads.length ?? 0} required reads, minToolCalls=${packet.readBudget?.minToolCalls ?? 0})`);
   }
+  if (edgeCaseSections.length > 0) {
+    console.log(`[edge-case-surfacer] Injected ${packet.edgeCaseSites?.length ?? 0} edge-case sites for packet ${packet.id}`);
+  }
 
   return [
     `Packet: ${packet.title}`,
@@ -266,6 +274,7 @@ export async function buildPacketPrompt(
     ...fileSizeSections,
     ...preservationSections,
     ...readBudgetSections,
+    ...edgeCaseSections,
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     learnedRuleSection,
     ...buildPacketSelfReviewInstructions(baseBranch),
