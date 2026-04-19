@@ -755,6 +755,10 @@ export function renderLLMMarkdown(text: string, opts?: {
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
   onApplyDiff?: (diffText: string) => void;
+  /** #525 — when true, an unclosed ```diff fence renders a live streaming DiffCard. */
+  isStreaming?: boolean;
+  /** #525 — wired to the streaming-card Stop button when provided. */
+  onInterruptStream?: () => void;
 }): React.ReactNode[] {
   // Handle <think>...</think> blocks — render as italic, smaller, muted text
   const processedText = text.replace(/<think>([\s\S]*?)(<\/think>|$)/g, (_match, content, closer) => {
@@ -968,6 +972,20 @@ export function renderLLMMarkdown(text: string, opts?: {
 
   // Unclosed code block — streaming mode (show live with cursor)
   if (inCodeBlock && codeContent) {
+    // #525 — route unclosed ```diff fences to the streaming DiffCard so hunks
+    // fade in as they arrive and the Stop button is available mid-stream.
+    if (codeLang.toLowerCase() === 'diff') {
+      nodes.push(
+        <DiffCard
+          key="diff-streaming"
+          code={codeContent}
+          onApplyDiff={opts?.onApplyDiff}
+          isStreaming
+          onInterrupt={opts?.onInterruptStream}
+        />
+      );
+      return nodes;
+    }
     nodes.push(
       <div key="code-streaming" style={{
         marginTop: 8,
