@@ -184,8 +184,23 @@ async function main() {
     return;
   }
 
+  // Operator's paired Claude Code session vs o8-spawned autonomous agent.
+  // o8 sets O8_MANAGED_SESSION=1 on every spawn site; the operator's own
+  // `claude` in their terminal does not. Hard-safety blocks (rm, kill, etc.)
+  // still apply everywhere. Ask_user + panel approval rows only fire for
+  // managed agents — Claude Code's own permission system handles prompts
+  // for the paired session, and routing through o8 is redundant.
+  const isManagedSession = process.env.O8_MANAGED_SESSION === '1';
   const outcome = evaluateToolUse(parsed);
-  if (outcome.decision !== 'approve') {
+
+  if (!isManagedSession && outcome.decision === 'ask_user') {
+    const payload = `${JSON.stringify(toHookPayload({ decision: 'approve' }))}\n`;
+    process.stdout.write(payload);
+    process.exit(0);
+    return;
+  }
+
+  if (outcome.decision !== 'approve' && isManagedSession) {
     await createApproval(parsed, outcome);
   }
 
