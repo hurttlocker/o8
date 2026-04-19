@@ -35,6 +35,7 @@ export function useUIChrome() {
   // ── Overlay state ──
   const [alertTrayOpen, setAlertTrayOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [agentsSidebarOpen, setAgentsSidebarOpen] = useState(false);
 
   // ── Draft injections ──
   const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
@@ -79,6 +80,8 @@ export function useUIChrome() {
     setAlertTrayOpen,
     searchOpen,
     setSearchOpen,
+    agentsSidebarOpen,
+    setAgentsSidebarOpen,
 
     // Draft injections
     desktopDraftInjection,
