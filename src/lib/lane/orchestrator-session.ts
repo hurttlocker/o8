@@ -435,6 +435,32 @@ export function requestOrchestratorSessionReset(repoPath: string): { repoPath: s
   return { repoPath: normalizedRepoPath, sessionName };
 }
 
+/**
+ * Request a graceful orchestrator reload. Unlike `requestOrchestratorSessionReset`,
+ * this PRESERVES the `claudeSessionId` so the next user turn resumes the
+ * existing transcript via `--resume`. The in-flight MCP config is rewritten
+ * on every turn in `ensureMcpConfig()`, so simply letting the next turn spawn
+ * is enough to pick up a newly-registered external MCP server. Used by the
+ * conversational `cortex.register_mcp` flow.
+ *
+ * Callers are expected to also broadcast a `notice` event to WS subscribers
+ * so the UI can show a reload banner (see ws-server `/internal/orchestrator-reload`).
+ */
+export function reloadOrchestratorSession(repoPath: string): {
+  repoPath: string;
+  sessionName: string;
+  claudeSessionId: string | null;
+} {
+  const normalizedRepoPath = normalizeRepoPath(repoPath);
+  const sessionName = orchestratorSessionName(normalizedRepoPath);
+  const session = sessions.get(sessionName);
+  return {
+    repoPath: normalizedRepoPath,
+    sessionName,
+    claudeSessionId: session?.claudeSessionId ?? null,
+  };
+}
+
 // ── Ensure session exists ──
 
 export function ensureOrchestratorSession(repoPath: string): OrchestratorSession {

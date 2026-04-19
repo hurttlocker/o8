@@ -2865,6 +2865,105 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  // ── Orchestrator reload broadcast ──
+  // Invoked by /api/orchestrator/reload after a conversational MCP install
+  // (via cortex.register_mcp). Aborts any in-flight turn for the repo so the
+  // next user message spawns fresh, then fans out a `notice` event to every
+  // orchestrator subscriber so the UI can render its reload banner.
+  if (req.url === '/internal/orchestrator-reload' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
+          repoPath?: string;
+          message?: string;
+          registered?: unknown;
+          noticeId?: string;
+        };
+        const repoPath = normalizeOrchestratorRepoPath(typeof body.repoPath === 'string' ? body.repoPath : null);
+        if (!repoPath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'repoPath required' }));
+          return;
+        }
+
+        const registered = Array.isArray(body.registered)
+          ? body.registered.filter((entry): entry is string => typeof entry === 'string')
+          : [];
+        const noticeMessage = typeof body.message === 'string' && body.message.trim()
+          ? body.message.trim()
+          : registered.length > 0
+            ? `Reloading with new MCP tools: ${registered.join(', ')}…`
+            : 'Reloading with new MCP tools…';
+        const noticeId = typeof body.noticeId === 'string' && body.noticeId.trim()
+          ? body.noticeId.trim()
+          : `mcp-reload-${Date.now()}`;
+
+        // Abort any in-flight turn so the next user message respawns Claude
+        // Code with the latest MCP config. We don't null claudeSessionId —
+        // the next turn passes `--resume <id>` and the transcript stays intact.
+        const controller = orchestratorInflightAborts.get(repoPath);
+        let aborted = false;
+        if (controller && !controller.signal.aborted) {
+          controller.abort();
+          aborted = true;
+          console.log(`[ws-server] orchestrator-reload aborted in-flight turn for ${repoPath}`);
+        }
+
+        const session = getOrchestratorSession(repoPath);
+        const sessionName = session?.sessionName ?? null;
+
+        // Broadcast a `notice` event to every orchestrator subscriber for
+        // this repo. The UI hook renders a short-lived banner.
+        const payload = JSON.stringify({
+          channel: 'orchestrator',
+          event: 'notice',
+          data: {
+            repoPath,
+            kind: 'mcp-reload',
+            noticeId,
+            message: noticeMessage,
+            registered,
+          },
+        });
+        let delivered = 0;
+        for (const [cid, sub] of orchestratorSubscriptions) {
+          if (sessionName && sub.sessionName !== sessionName) continue;
+          if (!sessionName && sub.repoPath !== repoPath) continue;
+          const c = clients.get(cid);
+          if (c) {
+            sendRaw(c, payload);
+            delivered += 1;
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok: true,
+          repoPath,
+          sessionName,
+          aborted,
+          delivered,
+          noticeId,
+        }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : 'invalid json',
+        }));
+      }
+    });
+    return;
+  }
+
   if (req.url === '/internal/realtime' && req.method === 'POST') {
     if (!isAuthorizedInternalRequest(req)) {
       res.writeHead(401);
