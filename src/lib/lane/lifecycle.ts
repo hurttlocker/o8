@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recordLaneEvent } from '@/lib/orchestrator/runtime-status';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import type { LaneLifecycleEventPayload } from '@/lib/realtime/types';
 import type { Lane, LaneStatus } from './types';
@@ -31,6 +32,13 @@ export function publishLaneLifecycleEvent(
 ) {
   const payload = buildLaneLifecyclePayload(lane, previousStatus, timestamp);
   console.log(`[lane-lifecycle] ${payload.laneId} ${previousStatus ?? 'new'} -> ${payload.status}`);
+  // #619 — Sibling effect: record into the MCP-facing ring buffer so agents
+  // can long-poll lane transitions without racing the WS broadcast loop.
+  try {
+    recordLaneEvent(payload);
+  } catch (err) {
+    console.error(`[lane-lifecycle] recordLaneEvent failed: ${err}`);
+  }
   void publishRealtimeMutation({
     mutation: {
       mutationId: generateLaneLifecycleMutationId(payload.laneId),
