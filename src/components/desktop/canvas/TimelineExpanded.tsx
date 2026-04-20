@@ -78,6 +78,32 @@ function timelineReplayPrimarySession(sessions: AgentSummary[]): AgentSummary | 
   })[0] ?? null;
 }
 
+function StatBlock({ value, label, isCompact, tone = 'default' }: { value: string; label: string; isCompact: boolean; tone?: 'default' | 'active' }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 56 }}>
+      <div style={{
+        fontSize: isCompact ? 18 : 22,
+        fontWeight: 600,
+        letterSpacing: '-0.02em',
+        color: tone === 'active' ? 'var(--t-accent, #2563eb)' : 'var(--t-text)',
+        lineHeight: 1,
+        fontVariantNumeric: 'tabular-nums',
+      }}>
+        {value}
+      </div>
+      <div style={{
+        fontSize: 9,
+        fontWeight: 600,
+        letterSpacing: '0.1em',
+        color: 'var(--t-text-muted)',
+        textTransform: 'uppercase',
+      }}>
+        {label}
+      </div>
+    </div>
+  );
+}
+
 export function TimelineExpanded() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -250,24 +276,13 @@ export function TimelineExpanded() {
       }}
       ref={containerRef}
     >
-      <div style={{ marginBottom: isCompact ? 14 : 20 }}>
-        <h2 style={{ fontSize: titleSize, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--t-text)', marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 }}>
+      <div style={{ marginBottom: isCompact ? 14 : 20, display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <h2 style={{ fontSize: titleSize, fontWeight: 600, letterSpacing: '-0.03em', color: 'var(--t-text)', marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 }}>
           Session Replay
         </h2>
-        <p
-          style={{
-            fontSize: introSize,
-            color: 'var(--t-text-muted)',
-            marginTop: 6,
-            marginRight: 0,
-            marginBottom: 0,
-            marginLeft: 0,
-            lineHeight: 1.5,
-            maxWidth: isCompact ? '100%' : 680,
-          }}
-        >
-          Real timeline aggregation from active app sessions and local runtimes. This view shows what is happening, where it is happening, and which surface is doing the work.
-        </p>
+        <span style={{ fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-muted)', fontWeight: 500 }}>
+          What, where, which surface
+        </span>
       </div>
 
       {loading ? (
@@ -351,55 +366,10 @@ export function TimelineExpanded() {
                   {timelineReplayTime(0)} → {timelineReplayTime(totalMin)}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span
-                  style={{
-                    paddingTop: metricPillPaddingTop,
-                    paddingRight: metricPillPaddingRight,
-                    paddingBottom: metricPillPaddingBottom,
-                    paddingLeft: metricPillPaddingLeft,
-                    borderRadius: 999,
-                    background: THEME_ACCENT_SOFT,
-                    border: `1px solid ${THEME_ACCENT_BORDER}`,
-                    color: THEME_ACCENT,
-                    fontSize: isCompact ? 10 : 11,
-                    fontWeight: 700,
-                  }}
-                >
-                  {timelineReplayDuration(totalMin)} total
-                </span>
-                <span
-                  style={{
-                    paddingTop: metricPillPaddingTop,
-                    paddingRight: metricPillPaddingRight,
-                    paddingBottom: metricPillPaddingBottom,
-                    paddingLeft: metricPillPaddingLeft,
-                    borderRadius: 999,
-                    background: 'var(--t-divider-subtle)',
-                    border: '1px solid var(--t-panel-border)',
-                    color: 'var(--t-text-secondary)',
-                    fontSize: isCompact ? 10 : 11,
-                    fontWeight: 700,
-                  }}
-                >
-                  {agentBreakdown.length} active lanes
-                </span>
-                <span
-                  style={{
-                    paddingTop: metricPillPaddingTop,
-                    paddingRight: metricPillPaddingRight,
-                    paddingBottom: metricPillPaddingBottom,
-                    paddingLeft: metricPillPaddingLeft,
-                    borderRadius: 999,
-                    background: 'rgba(34, 197, 94, 0.12)',
-                    border: '1px solid rgba(34, 197, 94, 0.18)',
-                    color: '#4ade80',
-                    fontSize: isCompact ? 10 : 11,
-                    fontWeight: 700,
-                  }}
-                >
-                  {liveSessions.length} live surfaces
-                </span>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <StatBlock value={timelineReplayDuration(totalMin)} label="TOTAL" isCompact={isCompact} />
+                <StatBlock value={String(agentBreakdown.length)} label={agentBreakdown.length === 1 ? 'ACTIVE LANE' : 'ACTIVE LANES'} isCompact={isCompact} />
+                <StatBlock value={String(liveSessions.length)} label={liveSessions.length === 1 ? 'LIVE SURFACE' : 'LIVE SURFACES'} isCompact={isCompact} tone={liveSessions.length > 0 ? 'active' : 'default'} />
               </div>
             </div>
 
