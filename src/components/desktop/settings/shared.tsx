@@ -360,21 +360,103 @@ export function SectionLabel({ number, children }: { number: string; children: R
       gap: 10,
       fontFamily: MONO_FONT_STACK,
       fontSize: 11,
-      fontWeight: 400,
+      fontWeight: 500,
       letterSpacing: '0.22em',
       textTransform: 'uppercase',
-      color: RAMS_INK_QUIET,
+      color: 'var(--t-text-secondary)',
       marginBottom: 14,
     }}>
-      <span>{number}</span>
-      <span>—</span>
+      <span style={{ color: RAMS_ACCENT }}>{number}</span>
+      <span style={{ color: RAMS_INK_QUIET }}>—</span>
       <span>{children}</span>
     </div>
   );
 }
 
+export function RamsButton({
+  children,
+  onClick,
+  disabled = false,
+  variant = 'primary',
+  type = 'button',
+  busy = false,
+  icon,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant?: 'primary' | 'ghost' | 'danger';
+  type?: 'button' | 'submit';
+  busy?: boolean;
+  icon?: React.ReactNode;
+}) {
+  const tone = variant === 'danger' ? '#d94f3a' : variant === 'ghost' ? 'var(--t-text-secondary)' : RAMS_ACCENT;
+  const border = variant === 'ghost'
+    ? RAMS_HAIRLINE
+    : variant === 'danger'
+      ? 'rgba(217, 79, 58, 0.32)'
+      : 'rgba(255, 90, 31, 0.32)';
+  const bg = disabled
+    ? 'transparent'
+    : variant === 'ghost'
+      ? 'transparent'
+      : variant === 'danger'
+        ? 'rgba(217, 79, 58, 0.08)'
+        : 'rgba(255, 90, 31, 0.1)';
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled || busy}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        height: 30,
+        paddingLeft: 12,
+        paddingRight: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: disabled ? RAMS_HAIRLINE_SOFT : border,
+        background: bg,
+        color: disabled ? RAMS_INK_QUIET : tone,
+        cursor: disabled || busy ? 'default' : 'pointer',
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 11.5,
+        fontWeight: 500,
+        letterSpacing: '0.02em',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+        transition: 'background 150ms ease, border-color 150ms ease, color 150ms ease',
+        opacity: busy ? 0.7 : 1,
+      }}
+    >
+      {icon ? <span style={{ display: 'inline-flex', flexShrink: 0 }}>{icon}</span> : null}
+      <span>{children}</span>
+    </button>
+  );
+}
+
 export function HairlineRule({ strong = false }: { strong?: boolean } = {}) {
   return <div style={{ height: 1, background: strong ? RAMS_HAIRLINE : RAMS_HAIRLINE_SOFT, width: '100%' }} />;
+}
+
+export function CornerBrackets({ armLength = 8, thickness = 1.5, inset = 4 }: { armLength?: number; thickness?: number; inset?: number } = {}) {
+  const common: React.CSSProperties = { position: 'absolute', background: RAMS_ACCENT, pointerEvents: 'none' };
+  return (
+    <>
+      <span aria-hidden="true" style={{ ...common, top: inset, left: inset, width: armLength, height: thickness }} />
+      <span aria-hidden="true" style={{ ...common, top: inset, left: inset, width: thickness, height: armLength }} />
+      <span aria-hidden="true" style={{ ...common, top: inset, right: inset, width: armLength, height: thickness }} />
+      <span aria-hidden="true" style={{ ...common, top: inset, right: inset, width: thickness, height: armLength }} />
+      <span aria-hidden="true" style={{ ...common, bottom: inset, left: inset, width: armLength, height: thickness }} />
+      <span aria-hidden="true" style={{ ...common, bottom: inset, left: inset, width: thickness, height: armLength }} />
+      <span aria-hidden="true" style={{ ...common, bottom: inset, right: inset, width: armLength, height: thickness }} />
+      <span aria-hidden="true" style={{ ...common, bottom: inset, right: inset, width: thickness, height: armLength }} />
+    </>
+  );
 }
 
 export function BracketLabel({ children, tone = 'quiet' }: { children: React.ReactNode; tone?: 'quiet' | 'accent' | 'soon' }) {
