@@ -9,6 +9,9 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-19
 
+- `ef1268ba` feat(ui): reload banner in ThoughtsChatPanel [via-o8]
+- `4d04dacc` feat(orchestrator): graceful reload endpoint with transcript resume [via-o8]
+- `e861f1e5` feat(mcp-register): add o8.register_mcp tool for conversational MCP install [via-o8]
 - `6a0b58b5` feat(mcp): adaptive probe timeout + npx prewarm [via-o8]
 - `3f7a3734` feat(mcp): test connection button with live tools probe [via-o8]
 - `82295a64` feat(mcp): paste-JSON config input [via-o8]
