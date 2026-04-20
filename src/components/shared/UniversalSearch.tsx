@@ -655,11 +655,12 @@ export const UniversalSearch = memo(function UniversalSearch({
                 {showSection ? (
                   <div
                     style={{
-                      padding: isMobile ? '10px 0 6px' : index === 0 ? '6px 10px 8px' : '12px 10px 8px',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: '#64748b',
-                      letterSpacing: '-0.01em',
+                      padding: isMobile ? '14px 0 6px' : index === 0 ? '6px 12px 8px' : '16px 12px 8px',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: '#94a3b8',
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
                     }}
                   >
                     {item.section}
@@ -672,93 +673,91 @@ export const UniversalSearch = memo(function UniversalSearch({
                   style={{
                     display: 'flex',
                     alignItems: 'flex-start',
-                    gap: 10,
+                    gap: 12,
                     width: '100%',
                     padding: isMobile ? '12px 0' : '10px 12px',
                     border: 'none',
-                    borderRadius: isMobile ? 0 : 12,
-                    background: isSelected ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                    borderRadius: isMobile ? 0 : 10,
+                    background: isSelected ? 'rgba(15, 23, 42, 0.04)' : 'transparent',
                     cursor: isDisabled ? 'default' : 'pointer',
                     textAlign: 'left',
                     fontFamily: '-apple-system, system-ui, sans-serif',
                     transition: 'background 90ms ease',
                     WebkitTapHighlightColor: 'transparent',
-                    minHeight: 48,
-                    opacity: isDisabled ? 0.68 : 1,
+                    minHeight: 44,
+                    opacity: isDisabled ? 0.55 : 1,
                   }}
                 >
                   <div
                     style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 10,
-                      background: `${item.color}16`,
+                      width: 20,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexShrink: 0,
-                      marginTop: 1,
+                      marginTop: 2,
+                      color: '#64748b',
                     }}
                   >
-                    <item.Icon size={15} strokeWidth={2} style={{ color: item.color }} />
+                    <item.Icon size={14} strokeWidth={1.75} />
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span
                         style={{
                           fontSize: 13,
-                          fontWeight: 600,
+                          fontWeight: 500,
                           color: '#0f172a',
                           lineHeight: 1.3,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
                           flex: 1,
+                          letterSpacing: '-0.005em',
                         }}
                       >
                         {item.title}
                       </span>
-                      {actionState && item.itemKind === 'action' ? (
+                      {actionState && item.itemKind === 'action' && (item.stateTone === 'red' || item.stateTone === 'amber') ? (
                         <span
                           style={{
-                            fontSize: 10,
-                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            fontSize: 9,
+                            fontWeight: 600,
                             color: actionState.color,
-                            background: actionState.background,
-                            padding: '2px 6px',
-                            borderRadius: 999,
                             flexShrink: 0,
-                            letterSpacing: '-0.01em',
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
                           }}
                         >
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              width: 5,
+                              height: 5,
+                              borderRadius: '50%',
+                              background: actionState.color,
+                              display: 'inline-block',
+                            }}
+                          />
                           {item.stateLabel}
                         </span>
                       ) : null}
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: item.color,
-                          background: `${item.color}14`,
-                          padding: '2px 6px',
-                          borderRadius: 999,
-                          flexShrink: 0,
-                          letterSpacing: '-0.01em',
-                        }}
-                      >
-                        {item.badge}
-                      </span>
                       {'shortcut' in item && item.shortcut ? (
                         <kbd
                           style={{
                             fontSize: 10,
-                            fontWeight: 700,
-                            color: '#64748b',
-                            background: 'rgba(15, 23, 42, 0.06)',
-                            padding: '2px 6px',
-                            borderRadius: 6,
+                            fontWeight: 500,
+                            color: '#94a3b8',
+                            background: 'transparent',
+                            padding: '1px 5px',
+                            borderRadius: 4,
                             flexShrink: 0,
+                            border: '1px solid rgba(15, 23, 42, 0.08)',
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                           }}
                         >
                           {item.shortcut}
@@ -768,13 +767,15 @@ export const UniversalSearch = memo(function UniversalSearch({
                     {item.detail ? (
                       <div
                         style={{
-                          fontSize: 12,
-                          color: '#64748b',
+                          fontSize: 11.5,
+                          color: '#94a3b8',
                           lineHeight: 1.4,
                           marginTop: 2,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
+                          fontWeight: 400,
+                          letterSpacing: '-0.005em',
                         }}
                       >
                         {isActionBusy ? 'Running…' : item.detail}
