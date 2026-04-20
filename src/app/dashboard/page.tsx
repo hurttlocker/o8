@@ -2217,9 +2217,8 @@ function DashboardInner() {
         ) : null}
       </AnimatePresence>
 
-      {/* ── Session Timeline ── */}
-      {timelineVisible && (
-        <div style={{ position: 'relative', zIndex: 1 }}>
+      {/* ── Session Timeline — always mounted so toggling doesn't refetch. ── */}
+      <div style={{ position: 'relative', zIndex: 1, display: timelineVisible ? 'block' : 'none' }}>
           <GuidedDiscoveryHalo active={showCompletionFtux} borderRadius={18} />
           <GuidedDiscoveryCoachmark
             visible={showCompletionFtux}
@@ -2255,7 +2254,6 @@ function DashboardInner() {
             }}
           />
         </div>
-      )}
 
       {/* ── Main Layout (horizontal) ── */}
       <div data-mcp-scope="main-layout" style={{

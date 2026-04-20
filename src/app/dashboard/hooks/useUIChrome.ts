@@ -33,7 +33,6 @@ export function useUIChrome() {
   }, []);
 
   // ── Overlay state ──
-  const [alertTrayOpen, setAlertTrayOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
   // ── Draft injections ──
@@ -75,8 +74,6 @@ export function useUIChrome() {
     setTimelineVisible,
 
     // Overlays
-    alertTrayOpen,
-    setAlertTrayOpen,
     searchOpen,
     setSearchOpen,
 

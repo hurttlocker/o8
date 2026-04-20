@@ -11,9 +11,9 @@
  * Sits ABOVE everything. Height: 44px. Frosted glass.
  */
 
-import { useState, useCallback, useEffect, useRef, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { UsersThree, Bell } from '@phosphor-icons/react';
+import { UsersThree } from '@phosphor-icons/react';
 import { ChromeButton } from './chrome/ChromeButton';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render Lucide React components) ──
@@ -87,13 +87,9 @@ interface TitleBarProps {
   onToggleWorkspacePanel?: () => void;
   o8PanelVisible?: boolean;
   onToggleO8Panel?: () => void;
-  // Agents / Alerts slots — migrated out of the NavRail.
+  // Agents slot — migrated out of the NavRail.
   isAgentsSectionActive?: boolean;
   onOpenAgents?: () => void;
-  alertCount?: number;
-  onToggleAlerts?: () => void;
-  /** Alert tray component to render anchored to the alerts button. */
-  alertTray?: ReactNode;
 }
 
 // ── Icon Button ──
@@ -250,18 +246,9 @@ export function TitleBar({
   onToggleO8Panel,
   isAgentsSectionActive = false,
   onOpenAgents,
-  alertCount = 0,
-  onToggleAlerts,
-  alertTray,
 }: TitleBarProps) {
   const [searchExpanded, setSearchExpanded] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
-  const [alertAnchorEl, setAlertAnchorEl] = useState<HTMLElement | null>(null);
-  // Inject the alerts button's wrapper element into the tray so its popover
-  // anchors to the bell icon instead of the old NavRail column.
-  const alertTrayNode = alertTray && isValidElement(alertTray)
-    ? cloneElement(alertTray as ReactElement<{ desktopAnchorEl?: HTMLElement | null }>, { desktopAnchorEl: alertAnchorEl })
-    : alertTray;
 
   // Window drag — Tauri v2 startDragging API
   const handleMouseDown = useCallback(async (e: React.MouseEvent) => {
@@ -453,25 +440,6 @@ export function TitleBar({
           paddingRight: 4,
         }}
       >
-        {/* Alerts bell — migrated from the NavRail. The tray popover is
-            rendered as a child of this wrapper so it anchors to the bell's
-            DOM node via the alertTray prop's anchorEl. */}
-        {onToggleAlerts ? (
-          <div
-            ref={setAlertAnchorEl}
-            style={{ position: 'relative', ['WebkitAppRegion' as string]: 'no-drag' }}
-          >
-            <ChromeButton
-              icon={<Bell size={18} weight={alertCount > 0 ? 'fill' : 'bold'} color={alertCount > 0 ? '#ef4444' : 'var(--t-text)'} />}
-              label={alertCount > 0 ? `${alertCount} unread alerts` : 'Alerts'}
-              onClick={onToggleAlerts}
-              badge={alertCount}
-              noDrag
-            />
-            {alertTrayNode}
-          </div>
-        ) : null}
-
         <RightPanelMorphButton
           workspacePanelVisible={workspacePanelVisible}
           o8PanelVisible={o8PanelVisible}
