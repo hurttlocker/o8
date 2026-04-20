@@ -33,7 +33,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 8;
+const DB_SCHEMA_VERSION = 9;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -70,10 +70,22 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
   if (shouldEnsureTables(dbFilePreviouslyExisted)) {
     ensureTables(_sqlite);
     writeMigrationMarker();
+  } else {
+    ensureIdempotentColumnAdds(_sqlite);
   }
 
   console.log(`[db] Connected to ${DB_PATH}`);
   return _db;
+}
+
+function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
+  ensureApprovalContextColumns(sqlite);
+  ensureWatchedAgentColumns(sqlite);
+  ensureChatHistoryColumns(sqlite);
+  ensureSessionOutcomeColumns(sqlite);
+  ensureUsageLogSchema(sqlite);
+  ensureApprovalEventsTable(sqlite);
+  ensureExternalMcpServerColumns(sqlite);
 }
 
 /**
