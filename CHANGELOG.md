@@ -9,6 +9,9 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-19
 
+- `559a9c98` design(theme): unify midnight chrome glass + solid page surface on Settings/Analytics + inbox pill
+- `b4785637` design(settings): RamsButton pill sweep + CornerBrackets selection + SectionLabel brightness
+- `66eaa4b9` design(chrome): Rams palette, remove alerts tray, quiet timeline strip, tighten Session Replay
 - `ef1268ba` feat(ui): reload banner in ThoughtsChatPanel [via-o8]
 - `4d04dacc` feat(orchestrator): graceful reload endpoint with transcript resume [via-o8]
 - `e861f1e5` feat(mcp-register): add o8.register_mcp tool for conversational MCP install [via-o8]
