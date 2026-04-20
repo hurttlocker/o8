@@ -250,10 +250,10 @@ function SupervisorInboxBadge() {
   }, []);
 
   const active = humanRequiredCount > 0;
-  const borderColor = active ? 'var(--t-warning-border, rgba(249,115,22,0.22))' : 'var(--t-border)';
-  const background = active ? 'var(--t-warning-soft, rgba(249,115,22,0.11))' : 'var(--t-bg-card)';
-  const countBackground = active ? 'var(--t-warning, #f97316)' : 'var(--t-text-faint)';
-  const countColor = active ? 'var(--t-panel)' : 'var(--t-panel)';
+  const background = active ? 'var(--t-warning-soft, rgba(249,115,22,0.11))' : 'var(--t-chrome-btn-bg)';
+  const chromeShadow = 'var(--t-chrome-btn-shadow)';
+  const countBackground = active ? 'var(--t-warning, #f97316)' : 'transparent';
+  const countColor = active ? '#ffffff' : 'var(--t-text-muted)';
 
   const openInboxTab = () => {
     if (typeof window === 'undefined') return;
@@ -270,13 +270,14 @@ function SupervisorInboxBadge() {
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
-        height: 18,
-        paddingLeft: 7,
-        paddingRight: 7,
-        borderRadius: 9,
-        border: `1px solid ${borderColor}`,
+        height: 22,
+        paddingLeft: 8,
+        paddingRight: 8,
+        borderRadius: 6,
+        border: active ? `1px solid var(--t-warning-border, rgba(249,115,22,0.22))` : 'none',
+        boxShadow: active ? 'none' : chromeShadow,
         background,
-        color: active ? 'var(--t-warning, #c2410c)' : 'var(--t-text-faint)',
+        color: active ? 'var(--t-warning, #c2410c)' : 'var(--t-chrome-btn-text, var(--t-text))',
         cursor: 'pointer',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}

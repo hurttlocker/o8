@@ -708,17 +708,18 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
         minHeight: 0,
         overflowY: 'auto',
         paddingTop: 8,
-        paddingLeft: 8,
+        paddingLeft: 32,
         paddingRight: 32,
         paddingBottom: 40,
         scrollbarWidth: 'none',
-        background: 'var(--t-page-surface)',
+        background: 'var(--t-chat-surface-bg)',
+        color: 'var(--t-chat-surface-text)',
         fontFamily: APP_FONT_STACK,
       } as React.CSSProperties}
     >
-      <div style={{ maxWidth: 900 }}>
+      <div style={{ maxWidth: 900, marginLeft: 'auto', marginRight: 'auto' }}>
         {/* Breadcrumb + heading */}
-        <TabBreadcrumb tab="analytics" />
+        <TabBreadcrumb scope="dashboard" tab="analytics" />
         <div style={{
           display: 'flex',
           alignItems: 'flex-start',
