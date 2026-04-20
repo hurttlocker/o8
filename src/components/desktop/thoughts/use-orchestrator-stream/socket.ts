@@ -84,6 +84,23 @@ export function createOrchestratorMessageHandler(
     options.eventCountRef.current += 1;
     options.lastEventAtRef.current = Date.now();
 
+    // #register-mcp — transient banner notices ride the same channel but
+    // don't touch transcript state. They're dispatched to a window listener
+    // that the chat panel subscribes to via useOrchestratorReloadNotice.
+    if (msg.event === 'notice') {
+      const data = msg.data as {
+        kind?: string;
+        noticeId?: string;
+        message?: string;
+        registered?: unknown;
+        repoPath?: string;
+      } | undefined;
+      if (data && typeof data.kind === 'string' && typeof data.noticeId === 'string' && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cortex:orchestrator-notice', { detail: data }));
+      }
+      return;
+    }
+
     switch (msg.event) {
       case 'output': {
         const text = typeof msg.data?.text === 'string' ? msg.data.text : '';
