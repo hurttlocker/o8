@@ -175,7 +175,7 @@ export function AboutTab() {
               }}
               style={accentLinkStyle(false)}
             >
-              reset + run onboarding ›
+              reset + run onboarding
             </button>
             <button
               type="button"
@@ -184,7 +184,7 @@ export function AboutTab() {
               }}
               style={accentLinkStyle(false)}
             >
-              preview onboarding ›
+              preview onboarding
             </button>
             <button
               type="button"
@@ -247,19 +247,25 @@ function InfoField({ label, value }: { label: string; value: string }) {
 
 function accentLinkStyle(disabled: boolean): React.CSSProperties {
   return {
-    fontFamily: APP_FONT_STACK,
-    fontSize: 13,
-    fontWeight: 400,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    height: 30,
+    paddingLeft: 12,
+    paddingRight: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: disabled ? RAMS_HAIRLINE_SOFT : 'rgba(255, 90, 31, 0.32)',
+    background: disabled ? 'transparent' : 'rgba(255, 90, 31, 0.1)',
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    background: 'transparent',
-    border: 'none',
-    borderBottom: `1px solid ${disabled ? RAMS_HAIRLINE_SOFT : RAMS_ACCENT}`,
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingLeft: 0,
-    paddingRight: 0,
+    fontFamily: MONO_FONT_STACK,
+    fontSize: 11.5,
+    fontWeight: 500,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase' as const,
     cursor: disabled ? 'default' : 'pointer',
-    letterSpacing: '-0.005em',
+    transition: 'background 150ms ease, border-color 150ms ease',
     opacity: disabled ? 0.6 : 1,
   };
 }

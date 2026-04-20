@@ -9,6 +9,7 @@ import {
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
+  CornerBrackets,
   HairlineRule,
   SectionLabel,
   TabBreadcrumb,
@@ -62,6 +63,7 @@ function sourceLabel(source: SettingSource): string {
   if (source === 'file') return 'saved';
   return 'default';
 }
+
 
 // ── Small primitives ──
 
@@ -157,7 +159,7 @@ function SegmentedControl<T extends string>({ value, options, onChange, disabled
   disabled?: boolean;
 }) {
   return (
-    <div style={{ display: 'inline-flex', gap: 20, alignItems: 'center' }}>
+    <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
       {options.map((opt) => {
         const active = opt.value === value;
         return (
@@ -167,23 +169,25 @@ function SegmentedControl<T extends string>({ value, options, onChange, disabled
             disabled={disabled}
             onClick={() => onChange(opt.value)}
             style={{
+              position: 'relative',
               fontFamily: MONO_FONT_STACK,
               fontSize: 11,
               fontWeight: 400,
               letterSpacing: '0.14em',
               textTransform: 'uppercase',
               color: active ? RAMS_ACCENT : 'var(--t-text-muted)',
-              background: 'transparent',
+              background: active ? 'rgba(255, 90, 31, 0.08)' : 'transparent',
               border: 'none',
-              borderBottom: `1px solid ${active ? RAMS_ACCENT : RAMS_HAIRLINE_SOFT}`,
-              paddingTop: 3,
-              paddingBottom: 3,
-              paddingLeft: 0,
-              paddingRight: 0,
+              paddingTop: 8,
+              paddingBottom: 8,
+              paddingLeft: 14,
+              paddingRight: 14,
               cursor: disabled ? 'not-allowed' : 'pointer',
               opacity: disabled ? 0.6 : 1,
+              transition: 'background 150ms ease',
             }}
           >
+            {active ? <CornerBrackets inset={3} armLength={6} /> : null}
             ({opt.label.toLowerCase()})
           </button>
         );
@@ -321,7 +325,6 @@ export function OperatorDefaultsTab() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyField, setBusyField] = useState<keyof OperatorDefaults | null>(null);
-  const [capDraft, setCapDraft] = useState<string>('');
 
   const loadDefaults = useCallback(async () => {
     try {
@@ -342,12 +345,6 @@ export function OperatorDefaultsTab() {
   useEffect(() => {
     void loadDefaults();
   }, [loadDefaults]);
-
-  useEffect(() => {
-    if (data) {
-      setCapDraft(String(data.values.parallelCap));
-    }
-  }, [data]);
 
   const updateField = useCallback(async <K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => {
     setBusyField(field);
@@ -383,17 +380,6 @@ export function OperatorDefaultsTab() {
 
   const envDisabledReason = 'Controlled by environment variable. Unset to manage from Settings.';
 
-  const commitCapDraft = useCallback(() => {
-    if (!values) return;
-    const parsed = Number.parseInt(capDraft, 10);
-    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 32) {
-      setNotice('Parallel cap must be an integer between 1 and 32.');
-      setCapDraft(String(values.parallelCap));
-      return;
-    }
-    if (parsed === values.parallelCap) return;
-    void updateField('parallelCap', parsed);
-  }, [capDraft, updateField, values]);
 
   const activePresetKey = useMemo(() => {
     if (!values) return null;
@@ -488,18 +474,17 @@ export function OperatorDefaultsTab() {
                 type="button"
                 disabled={parallelCapEnv || busyField === 'parallelCap'}
                 onClick={() => {
-                  setCapDraft(String(preset.value));
                   void updateField('parallelCap', preset.value);
                 }}
                 style={{
+                  position: 'relative',
                   paddingTop: 16,
                   paddingBottom: 16,
                   paddingLeft: 14,
                   paddingRight: 14,
                   border: 'none',
                   borderRight: isLast ? 'none' : `1px solid ${RAMS_HAIRLINE_SOFT}`,
-                  borderLeft: active ? `2px solid ${RAMS_ACCENT}` : '2px solid transparent',
-                  background: 'transparent',
+                  background: active ? 'rgba(255, 90, 31, 0.08)' : 'transparent',
                   color: 'var(--t-text)',
                   cursor: parallelCapEnv ? 'not-allowed' : 'pointer',
                   fontFamily: APP_FONT_STACK,
@@ -508,8 +493,10 @@ export function OperatorDefaultsTab() {
                   gap: 4,
                   textAlign: 'left',
                   opacity: parallelCapEnv ? 0.55 : 1,
+                  transition: 'background 150ms ease',
                 }}
               >
+                {active ? <CornerBrackets /> : null}
                 <span style={{
                   fontSize: 14,
                   fontWeight: 500,
@@ -532,55 +519,6 @@ export function OperatorDefaultsTab() {
           })}
         </div>
 
-        <div style={{
-          marginTop: 16,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-        }}>
-          <span style={{
-            fontFamily: MONO_FONT_STACK,
-            fontSize: 10,
-            letterSpacing: '0.18em',
-            color: RAMS_INK_QUIET,
-            textTransform: 'uppercase',
-          }}>
-            custom
-          </span>
-          <input
-            type="number"
-            min={1}
-            max={32}
-            disabled={parallelCapEnv || busyField === 'parallelCap'}
-            value={capDraft}
-            onChange={(event) => setCapDraft(event.target.value)}
-            onBlur={commitCapDraft}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                (event.currentTarget as HTMLInputElement).blur();
-              }
-            }}
-            style={{
-              width: 80,
-              border: 'none',
-              borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-              background: 'transparent',
-              color: 'var(--t-text)',
-              fontSize: 14,
-              fontWeight: 400,
-              textAlign: 'left',
-              fontFamily: MONO_FONT_STACK,
-              outline: 'none',
-              paddingTop: 4,
-              paddingBottom: 4,
-              paddingLeft: 0,
-              paddingRight: 0,
-              letterSpacing: '0.04em',
-            }}
-          />
-          <span style={{ fontSize: 12, color: RAMS_INK_QUIET }}>1 – 32</span>
-        </div>
       </section>
 
       {/* 02 — OVERLAP GATE */}
