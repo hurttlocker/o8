@@ -38,11 +38,12 @@ import {
 import { useOrchestratorStream } from './useOrchestratorStream';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
-import { ClearToast } from './chat-panel/ClearToast';
+import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
+import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadNotice';
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import type {
   ThoughtsChatPanelChromeState,
@@ -615,6 +616,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     handleReset,
   });
 
+  const { notice: reloadNotice, dismiss: dismissReloadNotice } = useOrchestratorReloadNotice(
+    isOrchestratorMode ? resolvedRepoPath : null,
+  );
+
   const handleLoadThread = useCallback(async (tabId: string) => {
     try {
       const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`);
@@ -944,23 +949,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         isOrchestratorMode={isOrchestratorMode}
       />
 
-      {showClearToast ? (
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            paddingTop: 0,
-            paddingRight: 12,
-            paddingBottom: 8,
-            paddingLeft: 12,
-            background: thoughtsBodyBackground,
-            flexShrink: 0,
-            pointerEvents: 'none',
-          }}
-        >
-          <ClearToast />
-        </div>
-      ) : null}
+      <ChatToastStack
+        reloadNotice={reloadNotice}
+        onDismissReloadNotice={dismissReloadNotice}
+        showClearToast={showClearToast}
+        thoughtsBodyBackground={thoughtsBodyBackground}
+      />
 
       <ComposerArea
         ref={inputRef}
