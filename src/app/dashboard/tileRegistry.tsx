@@ -43,7 +43,7 @@ const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
 
 interface WorkspaceAgentLaunchRequest {
   repoPath: string;
-  runtime?: 'codex' | 'claude-code';
+  runtime?: 'codex' | 'claude-code' | 'gemini' | 'opencode';
   modelId?: string;
   initialText?: string;
   autoSend?: boolean;

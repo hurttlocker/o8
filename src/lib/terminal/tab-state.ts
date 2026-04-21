@@ -22,7 +22,7 @@ export interface PersistedTab {
   repoName?: string;
   repoPath?: string;
   tmuxSession?: string; // last known tmux session name (may still be alive)
-  chatRuntime?: 'codex' | 'claude-code'; // for kind='chat' (CLI Session)
+  chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'opencode'; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
   chatModel?: string;
   chatContinueLatest?: boolean;

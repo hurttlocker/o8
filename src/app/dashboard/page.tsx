@@ -967,7 +967,10 @@ function DashboardInner() {
     void (async () => {
       const target = await waitForWorkspaceTerminalTarget({});
       if (!target) return;
-      const runtime = sessionKey.startsWith('claude-code') ? 'claude-code' : 'codex';
+      const runtime = sessionKey.startsWith('claude-code:') ? 'claude-code'
+        : sessionKey.startsWith('gemini-owned:') ? 'gemini'
+        : sessionKey.startsWith('opencode-owned:') ? 'opencode'
+        : 'codex';
       target.handle.openCliChatSession({
         runtime,
         targetSessionKey: sessionKey,
@@ -1316,7 +1319,7 @@ function DashboardInner() {
 
   const handleLaunchWorkspaceAgent = useCallback(async (request: {
     repoPath: string;
-    runtime?: 'codex' | 'claude-code';
+    runtime?: 'codex' | 'claude-code' | 'gemini' | 'opencode';
     modelId?: string;
     initialText?: string;
     autoSend?: boolean;
