@@ -2,6 +2,10 @@ import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { registerCostParser } from './shared/cost-parser-registry';
+
+export type { SessionCostData } from './shared/cost-parser-registry';
+import type { SessionCostData } from './shared/cost-parser-registry';
 
 const TOKENS_PER_MILLION = 1_000_000;
 const CACHE_READ_MULTIPLIER = 0.1;
@@ -48,15 +52,6 @@ interface ParsedUsageEntry {
   model: string | null;
   outputTokens: number;
   totalCostUsd: number;
-}
-
-export interface SessionCostData {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  totalCostUsd: number;
-  model: string | null;
 }
 
 function toTokenCount(value: unknown): number {
@@ -264,3 +259,29 @@ export async function parseSessionCost(sessionDir: string): Promise<SessionCostD
 
   return totals;
 }
+
+// ── Zero-cost sentinel returned when the Claude parser finds no data ──────────
+const EMPTY_COST: SessionCostData = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  totalCostUsd: 0,
+  model: null,
+};
+
+// ── Self-registration ─────────────────────────────────────────────────────────
+// Runs on import so the registry is populated before any caller invokes parseCost.
+registerCostParser({
+  runtimeId: 'claude-code',
+  async parseFiles(paths, _opts) {
+    // parseSessionCost accepts a single path (file or directory).
+    // The Claude parser derives the model from the JSONL itself — no fallback needed.
+    // Use the first path; multi-path support can be added per-adapter later.
+    const firstPath = paths[0];
+    if (!firstPath) {
+      return EMPTY_COST;
+    }
+    return parseSessionCost(firstPath);
+  },
+});
