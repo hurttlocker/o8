@@ -257,7 +257,7 @@ function geminiParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
         entries.push({
           id: `${run.id}:message:${lineIndex}`,
           kind: 'message',
-          label: 'Gemini',
+          label: 'Assistant',
           text,
           timestamp: fallbackIso,
           timestampLabel: fallbackLabel,
@@ -303,7 +303,7 @@ function geminiParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
         entries.push({
           id: `${run.id}:result-text:${entries.length}`,
           kind: 'message',
-          label: 'Gemini',
+          label: 'Assistant',
           text: compactText(response, 500),
           timestamp: fallbackIso,
           timestampLabel: fallbackLabel,
