@@ -71,6 +71,22 @@ export const TabBar = memo(function TabBar({
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
   const draggedTabIdRef = useRef<string | null>(null);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const [flashTabId, setFlashTabId] = useState<string | null>(null);
+
+  // Hotkey-driven tab focus flash: page.tsx dispatches `o8:tab-focus-flash`
+  // with the target tabId; we pulse an accent shadow + ring for ~180ms so
+  // the user gets a confirmation that the keybind landed.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string }>).detail;
+      if (!detail?.tabId) return;
+      setFlashTabId(detail.tabId);
+      const timer = window.setTimeout(() => setFlashTabId(null), 220);
+      return () => window.clearTimeout(timer);
+    };
+    window.addEventListener('o8:tab-focus-flash', handler as EventListener);
+    return () => window.removeEventListener('o8:tab-focus-flash', handler as EventListener);
+  }, []);
   const orchestratorData = useOrchestratorData();
   const latestDispatchedTabId = orchestratorData?.latestDispatchedTabId ?? null;
   const latestDispatchedAt = orchestratorData?.latestDispatchedAt ?? null;
@@ -194,16 +210,20 @@ export const TabBar = memo(function TabBar({
               || tab.label;
 
             const neoSurface = chromeNeoSurface(isActive);
+            const isFlashing = flashTabId === tab.id;
+            const baseBoxShadow = isLatestDispatch
+              ? `inset 0 0 0 1px ${LATEST_DISPATCH_BORDER}`
+              : (isOrchestrator && isActive
+                ? '0 1px 4px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(37, 99, 235, 0.1)'
+                : neoSurface.boxShadow);
             const tabBackground = isLatestDispatch
               ? LATEST_DISPATCH_BG
               : (isOrchestrator && isActive
                 ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))'
                 : neoSurface.background);
-            const tabBoxShadow = isLatestDispatch
-              ? `inset 0 0 0 1px ${LATEST_DISPATCH_BORDER}`
-              : (isOrchestrator && isActive
-                ? '0 1px 4px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(37, 99, 235, 0.1)'
-                : neoSurface.boxShadow);
+            const tabBoxShadow = isFlashing
+              ? `${baseBoxShadow}, 0 0 0 2px var(--t-accent-soft, rgba(37, 99, 235, 0.22)), 0 6px 18px rgba(37, 99, 235, 0.28)`
+              : baseBoxShadow;
             const tabTextColor = isLatestDispatch
               ? LATEST_DISPATCH_TEXT
               : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)');
