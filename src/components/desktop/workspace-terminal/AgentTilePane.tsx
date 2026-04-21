@@ -1,9 +1,11 @@
 'use client';
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
+import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
+import { useTranscript } from '@/lib/transcripts/useTranscript';
 
 interface AgentTilePaneProps {
   sessionKey: string;
@@ -61,43 +63,23 @@ function entryContent(entry: MobileTranscriptEntry): string {
 }
 
 function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: AgentTilePaneProps) {
-  const [entries, setEntries] = useState<MobileTranscriptEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const slice = useTranscript(sessionKey);
+  const entries = slice.messages;
+  const loading = slice.status === 'loading' || slice.status === 'idle';
+  const error = slice.status === 'error' ? slice.error ?? 'Unable to load transcript.' : null;
   const scrollRef = useRef<HTMLDivElement>(null);
   const name = useMemo(() => displayName(agent, sessionKey), [agent, sessionKey]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
   const runtimeTone = useMemo(() => orchestratorRuntimeTone(runtime), [runtime]);
   const status = useMemo(() => classifyStatus(agent?.status), [agent?.status]);
-  const shouldPoll = status === 'running' || status === 'waiting';
   const lastEntryKey = entries.length > 0 ? `${entries[entries.length - 1]?.id}:${entryContent(entries[entries.length - 1]!)}` : '';
 
+  // One-shot seed for agents not in the workspace bootstrap list. After this,
+  // WS pushes via transcriptStore keep the slice live — no per-agent polling.
   useEffect(() => {
-    let cancelled = false;
-    const fetchTranscript = async (showLoading: boolean) => {
-      if (showLoading) setLoading(true);
-      try {
-        const response = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=80`, { cache: 'no-store' });
-        if (!response.ok) throw new Error(`Transcript request failed (${response.status})`);
-        const payload = await response.json() as { transcript?: MobileTranscriptEntry[] };
-        if (cancelled) return;
-        setEntries(Array.isArray(payload.transcript) ? payload.transcript : []);
-        setError(null);
-      } catch (fetchError) {
-        if (!cancelled) setError(fetchError instanceof Error ? fetchError.message : 'Unable to load transcript.');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    void fetchTranscript(true);
-    let intervalId: number | null = null;
-    if (shouldPoll) intervalId = window.setInterval(() => { void fetchTranscript(false); }, 3_000);
-    return () => {
-      cancelled = true;
-      if (intervalId !== null) window.clearInterval(intervalId);
-    };
-  }, [sessionKey, shouldPoll]);
+    if (slice.status !== 'idle') return;
+    void bootstrapTranscripts([sessionKey]);
+  }, [sessionKey, slice.status]);
 
   useEffect(() => {
     requestAnimationFrame(() => {
