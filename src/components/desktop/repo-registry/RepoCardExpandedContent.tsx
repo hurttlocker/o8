@@ -206,7 +206,7 @@ function RepoCardExpandedContentBase({
                     letterSpacing: '-0.005em',
                     lineHeight: 1.35,
                     ...(isActiveRepo
-                      ? { animation: 'tab-label-shimmer 2.6s ease-in-out infinite' }
+                      ? { animation: 'tab-label-shimmer 2.2s ease-in-out infinite' }
                       : null),
                   }}
                 >

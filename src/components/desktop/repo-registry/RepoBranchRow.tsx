@@ -318,7 +318,6 @@ function RepoBranchRowBase({
         />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
           <span
-            title={branch.name}
             style={{
               fontSize: 12,
               fontWeight: 440,

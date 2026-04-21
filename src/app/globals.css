@@ -1618,10 +1618,11 @@ button.workflow-file-item.workflow-file-item-active {
 
 /* Active agent label — Superconductor-style shimmer sweep on the
    "Orchestrator" text in the agent panel row when the repo is focused.
-   Uses a BRIGHTNESS sweep via filter instead of background-clip:text
-   so the glyphs never go transparent — prevents the "rator only" bug
-   where the gradient midpoint became fully invisible in midnight theme. */
+   Pure opacity pulse so it works identically in light + midnight and
+   never makes glyphs disappear. Contrast is deliberately punchy (0.45)
+   so the pulse is visible at a glance — the whole point is to lock the
+   eye onto which repo the orchestrator is focused on. */
 @keyframes tab-label-shimmer {
-  0%, 100% { filter: brightness(1); opacity: 1; }
-  50%      { filter: brightness(1.25); opacity: 0.78; }
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
 }
