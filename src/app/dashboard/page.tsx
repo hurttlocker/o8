@@ -885,10 +885,11 @@ function DashboardInner() {
       return null;
     }
 
-    // openCliChatSession only supports codex/claude-code as workspace-tab runtimes.
-    // gemini/opencode packets fall back to codex for the monitoring tab — the
-    // actual dispatch uses packet.runtime which is correct.
-    const chatRuntime = (packet.runtime === 'claude-code' ? 'claude-code' : 'codex') as 'codex' | 'claude-code';
+    // All four runtimes are first-class workspace-tab runtimes since v0.1.24.
+    // Use packet.runtime directly so the monitoring tab shows the correct
+    // agent label, streams from the right /api/mobile/history branch, and
+    // pins the right default model instead of masquerading as Codex.
+    const chatRuntime = packet.runtime;
     const tabId = workspaceTarget.handle.openCliChatSession({
       runtime: chatRuntime,
       repo: targetScope ? {
