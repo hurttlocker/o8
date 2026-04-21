@@ -35,6 +35,8 @@ import {
   type WorktreeInfo,
   CodexIcon,
   ClaudeIcon,
+  GeminiIcon,
+  OpenCodeIcon,
 } from './shared';
 import { AgentStatusHover } from './AgentStatusHover';
 import { threeWordTaskSummary } from './task-label';
@@ -481,8 +483,9 @@ function RepoBranchRowBase({
                         marginTop: 1,
                       }}
                     >
-                      {packet.runtime === 'claude-code'
-                        ? <ClaudeIcon size={13} />
+                      {packet.runtime === 'claude-code' ? <ClaudeIcon size={13} />
+                        : packet.runtime === 'gemini' ? <GeminiIcon size={13} />
+                        : packet.runtime === 'opencode' ? <OpenCodeIcon size={13} />
                         : <CodexIcon size={13} />}
                     </span>
                     <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
@@ -583,8 +586,9 @@ function RepoBranchRowBase({
                         <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
                           <AgentSpinner status={agent.status} size={6} />
                         </span>
-                        {agent.runtime === 'claude-code'
-                          ? <ClaudeIcon size={12} />
+                        {agent.runtime === 'claude-code' ? <ClaudeIcon size={12} />
+                          : agent.runtime === 'gemini' ? <GeminiIcon size={12} />
+                          : agent.runtime === 'opencode' ? <OpenCodeIcon size={12} />
                           : <CodexIcon size={12} />}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
                           <span
@@ -633,14 +637,14 @@ function RepoBranchRowBase({
             position: 'fixed',
             zIndex: 10000,
             width: 320,
-            padding: '14px 15px 13px',
-            borderRadius: 18,
+            padding: '14px 16px 12px',
+            borderRadius: 12,
             border: '1px solid var(--t-panel-border)',
-            background: 'linear-gradient(180deg, rgba(68, 75, 85, 0.96), rgba(54, 60, 69, 0.94))',
-            backdropFilter: 'blur(28px) saturate(1.2)',
-            WebkitBackdropFilter: 'blur(28px) saturate(1.2)',
-            boxShadow: '0 22px 56px rgba(0, 0, 0, 0.28), 0 8px 24px rgba(15, 23, 42, 0.12)',
+            background: 'var(--t-panel-solid)',
+            boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
             color: 'var(--t-text)',
+            pointerEvents: 'auto',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             ...resolveFloatingPanelPosition(branchHoverRect, 320),
           }}
         >
@@ -698,8 +702,9 @@ function RepoBranchRowBase({
                     padding: '4px 8px',
                   }}
                 >
-                  {agent.runtime === 'claude-code'
-                    ? <ClaudeIcon size={12} color={agent.color} />
+                  {agent.runtime === 'claude-code' ? <ClaudeIcon size={12} color={agent.color} />
+                    : agent.runtime === 'gemini' ? <GeminiIcon size={12} />
+                    : agent.runtime === 'opencode' ? <OpenCodeIcon size={12} />
                     : <CodexIcon size={12} color={agent.color} />}
                   {agent.name}
                 </span>
