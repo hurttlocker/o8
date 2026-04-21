@@ -109,7 +109,33 @@ export async function computeRestoredTabs(
     }
 
     if (tabKind === 'chat') {
-      const prefixedSessionKey = formatPersistedRuntimeSessionKey(savedTab.chatRuntime, savedTab.chatSessionKey);
+      // Reclassify runtime from sessionKey prefix if persisted value is stale.
+      // Tabs saved pre-v0.1.24 persisted chatRuntime='codex' even for dispatched
+      // Gemini/opencode packets. The sessionKey prefix is the authoritative
+      // signal, so fix the runtime + default model on restore so the UI
+      // immediately talks to the correct endpoint instead of showing a
+      // "Connecting to Codex session" spinner forever.
+      const rawSessionKey = savedTab.chatSessionKey?.trim() ?? '';
+      let effectiveRuntime = savedTab.chatRuntime;
+      let effectiveModel = savedTab.chatModel;
+      if (rawSessionKey.startsWith('gemini-owned:') && effectiveRuntime !== 'gemini') {
+        effectiveRuntime = 'gemini';
+        effectiveModel = 'gemini-3.1-pro-preview';
+      } else if (rawSessionKey.startsWith('opencode-owned:') && effectiveRuntime !== 'opencode') {
+        effectiveRuntime = 'opencode';
+        effectiveModel = 'opencode/gpt-5-nano';
+      } else if (
+        (rawSessionKey.startsWith('codex-owned:')
+          || rawSessionKey.startsWith('codex:')
+          || rawSessionKey.startsWith('codex-discovered:')
+          || rawSessionKey.startsWith('codex-live:'))
+        && effectiveRuntime !== 'codex'
+      ) {
+        effectiveRuntime = 'codex';
+      } else if (rawSessionKey.startsWith('claude-code:') && effectiveRuntime !== 'claude-code') {
+        effectiveRuntime = 'claude-code';
+      }
+      const prefixedSessionKey = formatPersistedRuntimeSessionKey(effectiveRuntime, savedTab.chatSessionKey);
       if (prefixedSessionKey && seenRuntimeChats.has(`${prefixedSessionKey}:${savedTab.repoPath ?? ''}`)) {
         continue;
       }
@@ -117,17 +143,19 @@ export async function computeRestoredTabs(
         seenRuntimeChats.add(`${prefixedSessionKey}:${savedTab.repoPath ?? ''}`);
       }
       const liveSessionKey = prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
-        ? stripPersistedRuntimeSessionKey(savedTab.chatRuntime, savedTab.chatSessionKey)
-        : undefined;
+        ? stripPersistedRuntimeSessionKey(effectiveRuntime, savedTab.chatSessionKey)
+        : (rawSessionKey.startsWith('gemini-owned:') || rawSessionKey.startsWith('opencode-owned:'))
+          ? rawSessionKey
+          : undefined;
       const tabId = claimWorkspaceTabId('chat', seenTabIds, savedTab.id);
       restoredTabs.push({
         id: tabId,
         label: savedTab.label,
         kind: 'chat',
         tmuxSession: null,
-        chatRuntime: savedTab.chatRuntime,
+        chatRuntime: effectiveRuntime,
         chatSessionKey: liveSessionKey,
-        chatModel: savedTab.chatModel,
+        chatModel: effectiveModel,
         chatContinueLatest: liveSessionKey ? savedTab.chatContinueLatest : false,
         chatCheckpoints: savedTab.chatCheckpoints ?? [],
         repo: savedTab.repoPath ? { name: savedTab.repoName ?? 'repo', localPath: savedTab.repoPath } : (currentPreferredRepo ?? undefined),

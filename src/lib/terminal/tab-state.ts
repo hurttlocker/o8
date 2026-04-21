@@ -58,7 +58,9 @@ export type PersistedRuntimeSessionKey =
   | `codex-owned:${string}`
   | `codex-discovered:${string}`
   | `codex-live:${string}`
-  | `claude-code:${string}`;
+  | `claude-code:${string}`
+  | `gemini-owned:${string}`
+  | `opencode-owned:${string}`;
 
 const API_PATH = '/api/panel/terminal-state';
 
@@ -79,7 +81,7 @@ export function formatPersistedRuntimeSessionKey(
   sessionKey?: string | null,
 ): PersistedRuntimeSessionKey | null {
   const trimmed = sessionKey?.trim();
-  if (!trimmed || (runtime !== 'codex' && runtime !== 'claude-code')) return null;
+  if (!trimmed || !runtime) return null;
   if (runtime === 'codex' && (
     trimmed.startsWith('codex:')
     || trimmed.startsWith('codex-owned:')
@@ -88,9 +90,20 @@ export function formatPersistedRuntimeSessionKey(
   )) {
     return trimmed as PersistedRuntimeSessionKey;
   }
-  return trimmed.startsWith(`${runtime}:`)
-    ? trimmed as PersistedRuntimeSessionKey
-    : `${runtime}:${trimmed}`;
+  if (runtime === 'gemini' && trimmed.startsWith('gemini-owned:')) {
+    return trimmed as PersistedRuntimeSessionKey;
+  }
+  if (runtime === 'opencode' && trimmed.startsWith('opencode-owned:')) {
+    return trimmed as PersistedRuntimeSessionKey;
+  }
+  if (runtime === 'codex' || runtime === 'claude-code') {
+    return trimmed.startsWith(`${runtime}:`)
+      ? trimmed as PersistedRuntimeSessionKey
+      : `${runtime}:${trimmed}`;
+  }
+  // Gemini/opencode only use owned prefixes — any sessionKey without that
+  // prefix isn't trackable as a persisted live runtime session for now.
+  return null;
 }
 
 export function stripPersistedRuntimeSessionKey(
@@ -99,12 +112,21 @@ export function stripPersistedRuntimeSessionKey(
 ) {
   const trimmed = sessionKey?.trim();
   if (!trimmed) return undefined;
-  if (runtime !== 'codex' && runtime !== 'claude-code') return trimmed;
+  if (!runtime) return trimmed;
   if (runtime === 'codex' && (
     trimmed.startsWith('codex-owned:')
     || trimmed.startsWith('codex-discovered:')
     || trimmed.startsWith('codex-live:')
   )) {
+    return trimmed;
+  }
+  // Owned CLI sessions for gemini/opencode keep their full prefixed key —
+  // downstream dispatch paths (`/api/runtime/action`, owned-session-store,
+  // `/api/mobile/history`) route on the prefix, so stripping would break them.
+  if (runtime === 'gemini' && trimmed.startsWith('gemini-owned:')) {
+    return trimmed;
+  }
+  if (runtime === 'opencode' && trimmed.startsWith('opencode-owned:')) {
     return trimmed;
   }
   return trimmed.startsWith(`${runtime}:`) ? trimmed.slice(`${runtime}:`.length) : trimmed;
