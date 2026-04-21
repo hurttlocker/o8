@@ -111,31 +111,50 @@ export async function computeRestoredTabs(
     if (tabKind === 'chat') {
       // Reclassify runtime from sessionKey prefix if persisted value is stale.
       // Tabs saved pre-v0.1.24 persisted chatRuntime='codex' even for dispatched
-      // Gemini/opencode packets. The sessionKey prefix is the authoritative
-      // signal, so fix the runtime + default model on restore so the UI
-      // immediately talks to the correct endpoint instead of showing a
-      // "Connecting to Codex session" spinner forever.
+      // Gemini/opencode packets, and `formatPersistedRuntimeSessionKey` then
+      // prepended `codex:` in front of the real owned prefix — ending up with
+      // triple-wrapped keys like `codex:gemini-owned:gemini-owned-<id>`.
+      // Unwrap the leading codex:/claude-code: if an inner owned prefix is
+      // visible, then reclassify based on the unwrapped key.
       const rawSessionKey = savedTab.chatSessionKey?.trim() ?? '';
+      let unwrappedSessionKey = rawSessionKey;
+      for (const stalePrefix of ['codex:', 'claude-code:']) {
+        if (unwrappedSessionKey.startsWith(stalePrefix)) {
+          const inner = unwrappedSessionKey.slice(stalePrefix.length);
+          if (
+            inner.startsWith('gemini-owned:')
+            || inner.startsWith('opencode-owned:')
+            || inner.startsWith('codex-owned:')
+            || inner.startsWith('codex-discovered:')
+            || inner.startsWith('codex-live:')
+          ) {
+            unwrappedSessionKey = inner;
+          }
+        }
+      }
       let effectiveRuntime = savedTab.chatRuntime;
       let effectiveModel = savedTab.chatModel;
-      if (rawSessionKey.startsWith('gemini-owned:') && effectiveRuntime !== 'gemini') {
+      let effectiveSessionKey = unwrappedSessionKey;
+      if (unwrappedSessionKey.startsWith('gemini-owned:') && effectiveRuntime !== 'gemini') {
         effectiveRuntime = 'gemini';
         effectiveModel = 'gemini-3.1-pro-preview';
-      } else if (rawSessionKey.startsWith('opencode-owned:') && effectiveRuntime !== 'opencode') {
+      } else if (unwrappedSessionKey.startsWith('opencode-owned:') && effectiveRuntime !== 'opencode') {
         effectiveRuntime = 'opencode';
         effectiveModel = 'opencode/gpt-5-nano';
       } else if (
-        (rawSessionKey.startsWith('codex-owned:')
-          || rawSessionKey.startsWith('codex:')
-          || rawSessionKey.startsWith('codex-discovered:')
-          || rawSessionKey.startsWith('codex-live:'))
+        (unwrappedSessionKey.startsWith('codex-owned:')
+          || unwrappedSessionKey.startsWith('codex:')
+          || unwrappedSessionKey.startsWith('codex-discovered:')
+          || unwrappedSessionKey.startsWith('codex-live:'))
         && effectiveRuntime !== 'codex'
       ) {
         effectiveRuntime = 'codex';
-      } else if (rawSessionKey.startsWith('claude-code:') && effectiveRuntime !== 'claude-code') {
+      } else if (unwrappedSessionKey.startsWith('claude-code:') && effectiveRuntime !== 'claude-code') {
         effectiveRuntime = 'claude-code';
       }
-      const prefixedSessionKey = formatPersistedRuntimeSessionKey(effectiveRuntime, savedTab.chatSessionKey);
+      // Persist the unwrapped key so downstream endpoints route correctly.
+      const savedChatSessionKey = effectiveSessionKey || savedTab.chatSessionKey;
+      const prefixedSessionKey = formatPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey);
       if (prefixedSessionKey && seenRuntimeChats.has(`${prefixedSessionKey}:${savedTab.repoPath ?? ''}`)) {
         continue;
       }
@@ -143,9 +162,9 @@ export async function computeRestoredTabs(
         seenRuntimeChats.add(`${prefixedSessionKey}:${savedTab.repoPath ?? ''}`);
       }
       const liveSessionKey = prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
-        ? stripPersistedRuntimeSessionKey(effectiveRuntime, savedTab.chatSessionKey)
-        : (rawSessionKey.startsWith('gemini-owned:') || rawSessionKey.startsWith('opencode-owned:'))
-          ? rawSessionKey
+        ? stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey)
+        : (effectiveSessionKey.startsWith('gemini-owned:') || effectiveSessionKey.startsWith('opencode-owned:'))
+          ? effectiveSessionKey
           : undefined;
       const tabId = claimWorkspaceTabId('chat', seenTabIds, savedTab.id);
       restoredTabs.push({
