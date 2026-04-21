@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { getDb, usageLogs } from '@/lib/db';
 import { getRuntime } from '@/lib/runtimes';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 const LOG_PREFIX = '[cost-persistence]';
 
@@ -36,6 +37,9 @@ function normalizeUsd(value: number) {
   return Number(finiteNumber(value).toFixed(6));
 }
 
+// Problem C — exhaustive dispatch switch: maps runtime → billing provider.
+// Each runtime routes to a different payment provider (anthropic/openai/google).
+// Add a new runtime case here when adding a new adapter. Never collapse to a label lookup.
 function providerForRuntime(runtime: string): UsageProvider | null {
   if (runtime === 'claude-code') {
     return 'anthropic';
@@ -43,17 +47,17 @@ function providerForRuntime(runtime: string): UsageProvider | null {
   if (runtime === 'codex') {
     return 'openai';
   }
+  if (runtime === 'gemini') {
+    return 'google';
+  }
+  // opencode routes to the user-selected provider; cost is attributed externally
   return null;
 }
 
 function agentNameForRuntime(runtime: string) {
-  if (runtime === 'claude-code') {
-    return 'Claude Code';
-  }
-  if (runtime === 'codex') {
-    return 'Codex CLI';
-  }
-  return runtime;
+  // Capability-map lookup for display label; optional chaining guards against unknown runtimes.
+  const label = ORCHESTRATOR_RUNTIMES[runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label;
+  return label ?? runtime;
 }
 
 export async function persistSessionCost(input: PersistSessionCostInput): Promise<boolean> {

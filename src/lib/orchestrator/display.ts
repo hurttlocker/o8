@@ -3,6 +3,7 @@ import type {
   OrchestratorRuntime,
   WorkspaceOrchestrationPacketBadge,
 } from './types';
+import { ORCHESTRATOR_RUNTIMES } from './runtime-capabilities';
 
 export { normalizeRuntimeStatusToOrchestratorStatus } from './runtime-status';
 
@@ -15,41 +16,33 @@ export interface OrchestratorDisplayTone {
   dot: string;
 }
 
+/** Short-label abbreviations not stored in the capability map (display-only). */
+const RUNTIME_SHORT_LABELS: Partial<Record<OrchestratorRuntime, string>> = {
+  codex: 'CX',
+  'claude-code': 'CC',
+  gemini: 'GM',
+  opencode: 'OC',
+};
+
 export function orchestratorRuntimeTone(runtime?: OrchestratorRuntime | string | null): OrchestratorDisplayTone {
-  if (runtime === 'claude-code') {
+  const cap = runtime ? ORCHESTRATOR_RUNTIMES[runtime as OrchestratorRuntime] : null;
+  if (cap) {
+    const color = cap.accentColor;
+    // Parse hex to rgba — hex is always 7-char #rrggbb from the map
+    const r = parseInt(color.slice(1, 3), 16);
+    const g = parseInt(color.slice(3, 5), 16);
+    const b = parseInt(color.slice(5, 7), 16);
     return {
-      label: 'Claude Code',
-      shortLabel: 'CC',
-      color: '#e07a3a',
-      background: 'rgba(224, 122, 58, 0.12)',
-      border: 'rgba(224, 122, 58, 0.2)',
-      dot: '#e07a3a',
+      label: cap.label,
+      shortLabel: RUNTIME_SHORT_LABELS[runtime as OrchestratorRuntime] ?? cap.shortLabel,
+      color,
+      background: `rgba(${r}, ${g}, ${b}, 0.12)`,
+      border: `rgba(${r}, ${g}, ${b}, 0.2)`,
+      dot: color,
     };
   }
 
-  if (runtime === 'gemini') {
-    return {
-      label: 'Gemini',
-      shortLabel: 'GM',
-      color: '#4285f4',
-      background: 'rgba(66, 133, 244, 0.12)',
-      border: 'rgba(66, 133, 244, 0.2)',
-      dot: '#4285f4',
-    };
-  }
-
-  if (runtime === 'opencode') {
-    return {
-      label: 'opencode',
-      shortLabel: 'OC',
-      color: '#a855f7',
-      background: 'rgba(168, 85, 247, 0.12)',
-      border: 'rgba(168, 85, 247, 0.2)',
-      dot: '#a855f7',
-    };
-  }
-
-  // 'codex' or unknown — default to codex blue
+  // Unknown runtime — fall back to codex blue
   return {
     label: 'Codex',
     shortLabel: 'CX',

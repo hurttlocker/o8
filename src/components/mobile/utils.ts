@@ -9,6 +9,7 @@ import type {
 } from '@/lib/mobile/types';
 import { truncateText } from '@/lib/util/text';
 import type { ProjectGroup, SessionSummary } from './types';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 // ── Image helpers ──
 
@@ -227,9 +228,10 @@ export function sessionStatusSummary(
 
 export function threadLaneLabel(session: SessionSummary) {
   if (session.isCurrentSession) return 'Assistant';
-  if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return 'Codex';
-  if (session.runtime === 'claude-code') return 'Claude Code';
   if (session.runtime === 'chat') return 'Chat';
+  // Capability-map label lookup; ownership check for codex is dispatch-logic but label itself is from the map.
+  const runtimeLabel = ORCHESTRATOR_RUNTIMES[session.runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label;
+  if (runtimeLabel) return runtimeLabel;
   return 'Session';
 }
 
@@ -746,7 +748,9 @@ export async function readJson<T>(response: Response) {
 export function agentDisplayName(session: SessionSummary): string {
   if (session.isCurrentSession) return 'Assistant';
   if (session.runtime === 'chat') return 'Chat';
-  if (session.runtime === 'codex') return 'Codex';
+  // Capability-map lookup for known runtimes; falls through to name-based disambiguation.
+  const runtimeCap = ORCHESTRATOR_RUNTIMES[session.runtime as keyof typeof ORCHESTRATOR_RUNTIMES];
+  if (runtimeCap && session.runtime !== 'claude-code') return runtimeCap.label;
   const name = session.name || '';
   if (name.startsWith('Hawk')) return 'Hawk';
   if (name.startsWith('Niot')) return 'Niot';

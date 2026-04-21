@@ -13,6 +13,7 @@ import type { TileLayout, TileLeafNode } from '@/lib/tiles/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, describeWorkflowStage } from '@/lib/workflows/status';
 import type { WorktreeInfo } from '@/lib/worktree/types';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import type {
   PaletteAgentSummary,
   RepoWorktreeSummary,
@@ -112,9 +113,8 @@ export function sameWorkspaceLaneState(left: WorkspaceLaneState | null | undefin
 }
 
 export function workspaceSessionRuntimeLabel(session: MobileInboxSnapshot['sessions'][number]) {
-  if (session.runtime === 'claude-code') return 'Claude Code';
-  if (session.runtime === 'codex') return 'Codex';
-  return 'Chat';
+  // Capability-map lookup; optional chaining guards against 'chat' and other non-OrchestratorRuntime values.
+  return ORCHESTRATOR_RUNTIMES[session.runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label ?? 'Chat';
 }
 
 export function shortRepoName(repo?: string | null) {
@@ -328,9 +328,8 @@ export function formatAttentionDetail(agent: PaletteAgentSummary) {
 }
 
 export function paletteSessionRuntime(agent: PaletteAgentSummary) {
-  if (agent.runtime === 'claude-code') return 'Claude Code';
-  if (agent.runtime === 'codex') return 'Codex';
-  return agent.name;
+  // Capability-map lookup; optional chaining guards against non-OrchestratorRuntime values.
+  return ORCHESTRATOR_RUNTIMES[agent.runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label ?? agent.name;
 }
 
 export function paletteSessionTask(agent: PaletteAgentSummary) {

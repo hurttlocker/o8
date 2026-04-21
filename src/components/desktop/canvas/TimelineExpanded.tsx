@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { formatAge } from '@/components/desktop/canvas-utils';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 type ReplaySegment = { kind: string; startMin: number; durationMin: number; label?: string; agent?: string };
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -32,9 +33,9 @@ function timelineReplayTime(minutesSinceAnchor: number): string {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 function timelineReplayRuntimeLabel(runtime: string | null | undefined): string {
-  if (runtime === 'claude-code') return 'Claude Code';
-  if (runtime === 'codex') return 'Codex';
-  return runtime || 'Runtime';
+  if (!runtime) return 'Runtime';
+  // Capability-map lookup; optional chaining guards against unknown string values.
+  return ORCHESTRATOR_RUNTIMES[runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label ?? runtime;
 }
 function timelineReplayWorkspace(path: string | null | undefined): string | null {
   if (!path || path === 'unknown') return null;

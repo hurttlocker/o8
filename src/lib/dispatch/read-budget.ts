@@ -87,9 +87,9 @@ export function resolveModelTier(input: {
     }
   }
 
-  // Runtime fallback — codex runtime without an explicit model is assumed
-  // strong (the user ships xhigh by default). claude-code is claude-mid.
-  // gemini without explicit model is claude-mid. opencode defaults to gpt-5-nano (weak).
+  // Problem C — exhaustive dispatch switch: tier classification by runtime default model.
+  // Each runtime has a different default compute tier when no explicit model is specified.
+  // Add a new runtime case here when adding a new adapter. Cannot be collapsed to a label lookup.
   if (input.runtime === 'codex' && !model) {
     return 'codex-strong';
   }

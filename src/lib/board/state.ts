@@ -163,6 +163,9 @@ function createTaskId(title: string) {
   return `${slug}-${randomUUID().slice(0, 8)}`;
 }
 
+// Problem C — intentionally narrower: BoardTask bindings only support codex and claude-code.
+// gemini/opencode do not expose owned-session worktree bindings. Extend when a new runtime
+// ships worktree-binding support. Do not widen the runtime type here without updating the DB schema.
 function normalizeRuntime(value: unknown): 'codex' | 'claude-code' {
   return value === 'claude-code' ? 'claude-code' : 'codex';
 }

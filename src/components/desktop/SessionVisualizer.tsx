@@ -2,6 +2,7 @@
 
 import { memo, useMemo } from 'react';
 import type { FleetAgent } from './thoughts/types';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 interface SessionVisualizerProps {
   agents: FleetAgent[];
@@ -53,16 +54,15 @@ export function classifyRuntime(rawRuntime: string | undefined): VisualRuntime {
   return 'other';
 }
 
+// VisualRuntime is intentionally narrower than OrchestratorRuntime — it collapses
+// gemini/opencode to 'other' for the session strip view. Capability-map lookups use
+// optional chaining because 'other' is not a valid OrchestratorRuntime key.
 function runtimeLabel(runtime: VisualSession['runtime']): string {
-  if (runtime === 'claude-code') return 'Claude Code';
-  if (runtime === 'codex') return 'Codex';
-  return 'Agent';
+  return ORCHESTRATOR_RUNTIMES[runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label ?? 'Agent';
 }
 
 function runtimeTint(runtime: VisualSession['runtime']): string {
-  if (runtime === 'claude-code') return '#c86b2b';
-  if (runtime === 'codex') return '#2563eb';
-  return 'var(--t-text-muted)';
+  return ORCHESTRATOR_RUNTIMES[runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.accentColor ?? 'var(--t-text-muted)';
 }
 
 function workspaceLabel(workspace: string | undefined | null): string | null {
