@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
+import type { RegisteredRepo, TerminalTab, WorkspaceChatRuntime } from '@/components/desktop/workspace-terminal/types';
 import {
   PhosphorCaretLeft,
   PhosphorCaretRight,
@@ -38,7 +38,7 @@ interface TabBarProps {
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
-  onNewChatTab: (runtime: 'codex' | 'claude-code', repo?: RegisteredRepo) => void;
+  onNewChatTab: (runtime: Exclude<WorkspaceChatRuntime, 'chat'>, repo?: RegisteredRepo) => void;
   onNewLLMChatTab: (repo?: RegisteredRepo) => void;
   scopedRepo?: RegisteredRepo | null;
   onRegisterRepo?: (localPath: string) => void;
