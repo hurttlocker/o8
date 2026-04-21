@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-04-21
+
+- `102e3e8e` design: o8 boot splash + shimmer on active agent panel label
+
 ## 2026-04-20
 
 - `3e66b94f` feat(workspace): wire AI provider + agent runtime into CLI Session live-tail pane
