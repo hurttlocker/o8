@@ -27,6 +27,29 @@ export function orchestratorRuntimeTone(runtime?: OrchestratorRuntime | string |
     };
   }
 
+  if (runtime === 'gemini') {
+    return {
+      label: 'Gemini',
+      shortLabel: 'GM',
+      color: '#4285f4',
+      background: 'rgba(66, 133, 244, 0.12)',
+      border: 'rgba(66, 133, 244, 0.2)',
+      dot: '#4285f4',
+    };
+  }
+
+  if (runtime === 'opencode') {
+    return {
+      label: 'opencode',
+      shortLabel: 'OC',
+      color: '#a855f7',
+      background: 'rgba(168, 85, 247, 0.12)',
+      border: 'rgba(168, 85, 247, 0.2)',
+      dot: '#a855f7',
+    };
+  }
+
+  // 'codex' or unknown — default to codex blue
   return {
     label: 'Codex',
     shortLabel: 'CX',

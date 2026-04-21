@@ -89,11 +89,18 @@ export function resolveModelTier(input: {
 
   // Runtime fallback — codex runtime without an explicit model is assumed
   // strong (the user ships xhigh by default). claude-code is claude-mid.
+  // gemini without explicit model is claude-mid. opencode defaults to gpt-5-nano (weak).
   if (input.runtime === 'codex' && !model) {
     return 'codex-strong';
   }
   if (input.runtime === 'claude-code' && !model) {
     return 'claude-mid';
+  }
+  if (input.runtime === 'gemini' && !model) {
+    return 'claude-mid';
+  }
+  if (input.runtime === 'opencode' && !model) {
+    return 'weak';
   }
   return 'unknown';
 }
