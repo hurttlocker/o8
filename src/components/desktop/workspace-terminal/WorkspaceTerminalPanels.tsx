@@ -87,10 +87,15 @@ function WorkspaceTerminalPanelsBase({
         ) : tab.kind === 'llm-chat' ? (
           <div
             key={tab.id}
+            aria-hidden={tab.id !== effectiveActiveTabId}
             style={{
-              flex: 1,
-              display: tab.id === effectiveActiveTabId ? 'flex' : 'none',
+              display: 'flex',
               flexDirection: 'column',
+              visibility: tab.id === effectiveActiveTabId ? 'visible' : 'hidden',
+              pointerEvents: tab.id === effectiveActiveTabId ? 'auto' : 'none',
+              position: tab.id === effectiveActiveTabId ? 'relative' : 'absolute',
+              inset: 0,
+              flex: tab.id === effectiveActiveTabId ? 1 : undefined,
               height: '100%',
             }}
           >
@@ -111,10 +116,15 @@ function WorkspaceTerminalPanelsBase({
         ) : tab.kind === 'chat' ? (
           <div
             key={tab.id}
+            aria-hidden={tab.id !== effectiveActiveTabId}
             style={{
-              flex: 1,
-              display: tab.id === effectiveActiveTabId ? 'flex' : 'none',
+              display: 'flex',
               flexDirection: 'column',
+              visibility: tab.id === effectiveActiveTabId ? 'visible' : 'hidden',
+              pointerEvents: tab.id === effectiveActiveTabId ? 'auto' : 'none',
+              position: tab.id === effectiveActiveTabId ? 'relative' : 'absolute',
+              inset: 0,
+              flex: tab.id === effectiveActiveTabId ? 1 : undefined,
               height: '100%',
               minHeight: 0,
             }}
@@ -243,10 +253,15 @@ function CanvasPanel({
 }) {
   return (
     <div
+      aria-hidden={!active}
       style={{
-        flex: 1,
-        display: active ? 'flex' : 'none',
+        display: 'flex',
         flexDirection: 'column',
+        visibility: active ? 'visible' : 'hidden',
+        pointerEvents: active ? 'auto' : 'none',
+        position: active ? 'relative' : 'absolute',
+        inset: 0,
+        flex: active ? 1 : undefined,
         height: '100%',
         minHeight: 0,
         overflow: 'hidden',
