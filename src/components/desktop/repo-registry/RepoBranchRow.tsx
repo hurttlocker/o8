@@ -68,6 +68,56 @@ interface RepoBranchRowProps {
   setBranchDeleteConfirm: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
+// Rams-style status row — matches RepoStatusHover's StatusRow exactly.
+// Flat monochrome list item with 88px uppercase label gutter + value cell.
+function BranchStatusRow({
+  label,
+  value,
+  mono,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+  tone?: 'neutral' | 'attention' | 'danger';
+}) {
+  const toneColor = tone === 'danger' ? '#d28787' : tone === 'attention' ? '#d4a050' : 'var(--t-text)';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 4, paddingBottom: 4 }}>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: 'var(--t-text-faint)',
+          width: 88,
+          flexShrink: 0,
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 12.5,
+          fontWeight: 460,
+          color: toneColor,
+          letterSpacing: '-0.005em',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontFamily: mono ? '"SF Mono", ui-monospace, Menlo, monospace' : '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function RepoBranchRowBase({
   repo,
   branch,
@@ -648,76 +698,103 @@ function RepoBranchRowBase({
             ...resolveFloatingPanelPosition(branchHoverRect, 320),
           }}
         >
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: worktreeTone?.color ?? (branch.current ? THEME_SUCCESS_TEXT : THEME_ACCENT) }}>
-            {branch.isWorktree ? (worktreeTone?.label ?? 'Worktree') : branch.current ? 'Current Branch' : 'Branch'}
-          </div>
-          <div style={{ marginTop: 6, fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--t-text)' }}>
-            {branch.name}
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px' }}>
-              {branch.lastCommitAge}
-            </span>
-            {branchAgentLabel ? (
-              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px' }}>
-                {branchAgentLabel}
-              </span>
-            ) : null}
-            {branchDiffAgent ? (
-              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                +{(branchDiffAgent.additions ?? 0).toLocaleString()} -{(branchDiffAgent.deletions ?? 0).toLocaleString()}
-              </span>
-            ) : null}
-            {branch.ahead > 0 || branch.behind > 0 ? (
-              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                {branch.ahead > 0 ? `↑${branch.ahead}` : ''}{branch.behind > 0 ? ` ↓${branch.behind}` : ''}
-              </span>
-            ) : null}
-            {branch.diskSize ? (
-              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                {branch.diskSize}
-              </span>
-            ) : null}
-            {worktree ? (
-              <span style={{ fontSize: 10, fontWeight: 700, color: worktreeTone?.color ?? THEME_WORKTREE_TEXT, background: worktreeTone?.background ?? THEME_WORKTREE_SOFT, border: `1px solid ${worktreeTone?.border ?? THEME_WORKTREE_BORDER}`, borderRadius: 999, padding: '3px 8px' }}>
-                {worktree.status === 'stale' ? 'Needs cleanup' : 'Workspace tracked'}
-              </span>
-            ) : null}
-          </div>
-          {branchAgents.length > 0 ? (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-              {branchAgents.map((agent) => (
-                <span
-                  key={agent.sessionKey}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: 'var(--t-text-secondary)',
-                    background: 'var(--t-panel-hover)',
-                    border: '1px solid var(--t-panel-border)',
-                    borderRadius: 999,
-                    padding: '4px 8px',
-                  }}
-                >
-                  {agent.runtime === 'claude-code' ? <ClaudeIcon size={12} color={agent.color} />
-                    : agent.runtime === 'gemini' ? <GeminiIcon size={12} />
-                    : agent.runtime === 'opencode' ? <OpenCodeIcon size={12} />
-                    : <CodexIcon size={12} color={agent.color} />}
-                  {agent.name}
-                </span>
-              ))}
+          {/* Header — branch name + muted classification + commit message */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 10 }}>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                letterSpacing: '-0.012em',
+                color: 'var(--t-text)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+              }}
+            >
+              {branch.name}
             </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--t-text-faint)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                letterSpacing: '-0.002em',
+              }}
+            >
+              {branch.isWorktree ? (worktreeTone?.label ?? 'Worktree') : branch.current ? 'Current branch' : 'Branch'}
+              {worktree?.path ? ` · ${shortenPath(worktree.path)}` : ''}
+            </div>
+            {branch.lastCommitMessage ? (
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 11.5,
+                  lineHeight: 1.4,
+                  color: 'var(--t-text-secondary)',
+                  letterSpacing: '-0.003em',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {branch.lastCommitMessage}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Divider */}
+          <div style={{ height: 1, background: 'var(--t-divider-subtle)', margin: '2px -16px 6px' }} />
+
+          {/* Status rows — same pattern as repo hover */}
+          <BranchStatusRow label="Last commit" value={branch.lastCommitAge} />
+          {branchDiffAgent ? (
+            <BranchStatusRow
+              label="Working tree"
+              value={`+${(branchDiffAgent.additions ?? 0).toLocaleString()} -${(branchDiffAgent.deletions ?? 0).toLocaleString()}`}
+              mono
+            />
           ) : null}
-          <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
-            {branch.lastCommitMessage || (branch.current ? 'Current branch checked out in this repository.' : 'Click the row to switch to this branch.')}
-          </div>
-          {worktree?.path ? (
-            <div style={{ marginTop: 8, fontSize: 10, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace', lineHeight: 1.5 }}>
-              {shortenPath(worktree.path)}
-            </div>
+          {(branch.ahead > 0 || branch.behind > 0) ? (
+            <BranchStatusRow
+              label="Upstream"
+              value={`${branch.ahead > 0 ? `↑${branch.ahead}` : ''}${branch.ahead > 0 && branch.behind > 0 ? ' ' : ''}${branch.behind > 0 ? `↓${branch.behind}` : ''}`}
+              mono
+              tone={branch.behind > 0 ? 'attention' : 'neutral'}
+            />
+          ) : null}
+          {branch.diskSize ? (
+            <BranchStatusRow label="Disk" value={branch.diskSize} mono />
+          ) : null}
+          {worktree ? (
+            <BranchStatusRow
+              label="Workspace"
+              value={worktree.status === 'stale' ? 'Needs cleanup' : 'Tracked'}
+              tone={worktree.status === 'stale' ? 'attention' : 'neutral'}
+            />
+          ) : null}
+          {branchAgents.length > 0 ? (
+            <BranchStatusRow
+              label="Agents"
+              value={(
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  {branchAgents.map((agent) => (
+                    <span
+                      key={agent.sessionKey}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    >
+                      {agent.runtime === 'claude-code' ? <ClaudeIcon size={11} color={agent.color} />
+                        : agent.runtime === 'gemini' ? <GeminiIcon size={11} />
+                        : agent.runtime === 'opencode' ? <OpenCodeIcon size={11} />
+                        : <CodexIcon size={11} color={agent.color} />}
+                      <span style={{ fontSize: 11.5, color: 'var(--t-text)' }}>{agent.name}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            />
           ) : null}
           <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--t-divider-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>
