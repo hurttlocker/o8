@@ -10,6 +10,7 @@ and internal chores live in the private engineering log.
 ## 2026-04-21
 
 - `3e2e844c` design(AI provider-code-transcript): emit structured toolCalls for agent runtime-parity italic dropdowns
+- `1c82ea51` perf: visibility swap + render memo on tab panes ( Packet C)
 - `f3eb16b3` perf: client transcript store + workspace bootstrap ( Packet A)
 - `a9790994` design(chat): collapsible PacketHeaderCard replaces giant packet prompt
 - `da098e4c` design(branch-hover): Rams-style status rows matching repo hover
