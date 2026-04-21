@@ -348,6 +348,7 @@ function DashboardInner() {
     sendTerminalInput,
     sendTerminalResize,
     setTerminalTileRepoScope,
+    setWorkspaceActiveTabKindByTileId,
     setWorkspaceChatSessionByTileId,
     setWorkspaceChatSessionsByTileId,
     setWorkspaceLaneByTileId,
@@ -355,6 +356,7 @@ function DashboardInner() {
     termWsConnected,
     updateSupervisorWorkspaceTab,
     waitForWorkspaceTerminalTarget,
+    workspaceActiveTabKindByTileId,
     workspaceChatSessionsByTileId,
     workspaceChatTargets,
     workspaceTerminalHandlesRef,
@@ -401,6 +403,19 @@ function DashboardInner() {
     });
     return () => controller.abort();
   }, [transcriptBootstrapKeysKey]);
+
+  // ── Active workspace-tab kind ──
+  // Surfaced to the AgentPanel so the Orchestrator / Assistant rows shimmer
+  // only when the corresponding workspace tab is selected, not whenever the
+  // repo is focused. Falls back to the first tile with a tracked kind when
+  // the activeTileId points at something non-workspace (e.g. orchestrator tile).
+  const activeWorkspaceTabKind = useMemo(() => {
+    if (activeTileId && workspaceActiveTabKindByTileId[activeTileId]) {
+      return workspaceActiveTabKindByTileId[activeTileId];
+    }
+    const values = Object.values(workspaceActiveTabKindByTileId).filter((kind) => kind !== null);
+    return values[0] ?? null;
+  }, [activeTileId, workspaceActiveTabKindByTileId]);
 
   // ── Workspace tab hotkeys ──
   // Cmd+1..Cmd+9 jump to the Nth workspace tab, Cmd+Opt+Left / Right cycle
@@ -846,6 +861,7 @@ function DashboardInner() {
     setGlobalRepoEntries,
     setGlobalRepoId,
     setSelectedRepoWorktrees,
+    setWorkspaceActiveTabKindByTileId,
     setWorkspaceChatSessionByTileId,
     setWorkspaceChatSessionsByTileId,
     setWorkspaceLaneByTileId,
@@ -2090,6 +2106,7 @@ function DashboardInner() {
     setTileLayout,
     setTileLayoutHydrated,
     setTerminalTileRepoScope,
+    setWorkspaceActiveTabKindByTileId,
     setWorkspaceChatSessionByTileId,
     setWorkspaceChatSessionsByTileId,
     setWorkspaceLaneByTileId,
@@ -2139,6 +2156,7 @@ function DashboardInner() {
     setTileLayout,
     setTileLayoutHydrated,
     setTerminalTileRepoScope,
+    setWorkspaceActiveTabKindByTileId,
     setWorkspaceChatSessionByTileId,
     setWorkspaceChatSessionsByTileId,
     setWorkspaceLaneByTileId,
@@ -2422,6 +2440,29 @@ function DashboardInner() {
             selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
             selectedRepoLocalPath={globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null}
             activeWorkspacePath={activeWorkspace ?? null}
+            activeWorkspaceTabKind={activeWorkspaceTabKind}
+            onFocusOrchestratorTab={() => {
+              for (const handle of workspaceTerminalHandlesRef.current.values()) {
+                const snap = handle.getTabsSnapshot();
+                const orchTab = snap.tabs.find((tab) => tab.kind === 'orchestrator');
+                if (orchTab) {
+                  handle.focusTab(orchTab.id);
+                  window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId: orchTab.id } }));
+                  return;
+                }
+              }
+            }}
+            onFocusAssistantTab={() => {
+              for (const handle of workspaceTerminalHandlesRef.current.values()) {
+                const snap = handle.getTabsSnapshot();
+                const assistantTab = snap.tabs.find((tab) => tab.kind === 'llm-chat');
+                if (assistantTab) {
+                  handle.focusTab(assistantTab.id);
+                  window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId: assistantTab.id } }));
+                  return;
+                }
+              }
+            }}
             selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
             onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
             onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}

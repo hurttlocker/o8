@@ -170,6 +170,9 @@ export interface AgentPanelProps {
   selectedRepoBranch?: string | null;
   selectedRepoLocalPath?: string | null;
   activeWorkspacePath?: string | null;
+  activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | null;
+  onFocusOrchestratorTab?: () => void;
+  onFocusAssistantTab?: () => void;
   selectedRepoReadiness?: RepoReadiness | null;
   onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   onLaunchWorkspaceTask?: (request: RepoTaskLaunchRequest) => Promise<void>;
