@@ -607,7 +607,10 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
         title: `${run.mode === 'launch' ? launchGroupLabel : resumeGroupLabel} • ${outcome}`,
         mode: run.mode,
         outcome,
-        prompt: compactText(run.prompt, 260),
+        // Packet prompts carry the full scope (800-line rule, self-review gate,
+        // commit discipline, preservation contracts). Keep enough headroom for
+        // the entire body so the PacketHeaderCard can render it expanded.
+        prompt: compactText(run.prompt, 8000),
         startedAt: run.startedAt,
         finishedAt: run.finishedAt,
         startedAtLabel: formatClock(run.startedAt),
