@@ -44,7 +44,21 @@ import { claudeCodeRuntime } from './claude-code';
 import { geminiRuntime } from './gemini';
 import { cloudRuntime } from './cloud-adapter';
 import { opencodeRuntime } from './opencode';
+import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
+import { invalidateOwnedGeminiFleetCache } from '@/lib/gemini/owned';
+import { invalidateOwnedOpencodeFleetCache } from '@/lib/opencode/owned';
 import './opencode-cost-parser';
+
+/**
+ * Flush the fleet cache across all owned-session stores. Callers (e.g. the
+ * active-workspace switch handler) use this to force the next fleet consumer
+ * to rebuild, avoiding the up-to-20s TTL gap.
+ */
+export function invalidateAllOwnedFleets(): void {
+  invalidateOwnedCodexFleetCache();
+  invalidateOwnedGeminiFleetCache();
+  invalidateOwnedOpencodeFleetCache();
+}
 
 registerRuntime(codexRuntime);
 registerRuntime(claudeCodeRuntime);
