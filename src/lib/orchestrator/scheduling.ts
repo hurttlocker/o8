@@ -392,8 +392,32 @@ export async function runDispatchTick(
   }
 
   const parallelCap = resolveParallelCapSync();
-  for (let index = 0; index < dispatchablePackets.length; index += parallelCap) {
-    const batch = dispatchablePackets.slice(index, index + parallelCap);
+  // Per-runtime parallel cap — Gemini 3.1 Pro drops concurrent calls past ~3
+  // (observed: 4-packet parallel burst lost 1 silently with no stderr). Other
+  // runtimes have no additional cap beyond the global.
+  const RUNTIME_PARALLEL_CAP: Partial<Record<typeof dispatchablePackets[number]['packet']['runtime'], number>> = {
+    gemini: 3,
+  };
+  const queue = [...dispatchablePackets];
+  while (queue.length > 0) {
+    const batch: typeof dispatchablePackets = [];
+    const deferred: typeof dispatchablePackets = [];
+    const runtimeCountsInBatch: Record<string, number> = {};
+    for (const candidate of queue) {
+      const runtime = candidate.packet.runtime;
+      const perRuntimeCap = RUNTIME_PARALLEL_CAP[runtime];
+      const hitRuntimeCap =
+        perRuntimeCap !== undefined && (runtimeCountsInBatch[runtime] ?? 0) >= perRuntimeCap;
+      if (batch.length < parallelCap && !hitRuntimeCap) {
+        batch.push(candidate);
+        runtimeCountsInBatch[runtime] = (runtimeCountsInBatch[runtime] ?? 0) + 1;
+      } else {
+        deferred.push(candidate);
+      }
+    }
+    if (batch.length === 0) break;
+    queue.length = 0;
+    queue.push(...deferred);
     console.log(`[dag-scheduler] Dispatching ${batch.length} packets in parallel (cap ${parallelCap}): ${batch.map(({ packet }) => packet.id).join(', ')}`);
 
     const results = await Promise.allSettled(
