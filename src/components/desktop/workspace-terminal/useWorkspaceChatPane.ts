@@ -106,6 +106,7 @@ export function useWorkspaceChatPane({
     () => availableModels.find((model) => model.id === tab.chatModel) ?? availableModels[0],
     [availableModels, tab.chatModel],
   );
+  const selectedModelLabel = selectedModel?.label;
   const isAgentTab = isAgentRuntimeTab(tab);
   const isRuntimeBound = Boolean(normalizedSessionKey && isAgentTab);
 
@@ -652,7 +653,7 @@ export function useWorkspaceChatPane({
       id: message.id,
       role: message.role === 'system' || message.role === 'tool' ? 'assistant' : message.role,
       content: message.text,
-      model: message.model ?? (message.role === 'assistant' ? selectedModel?.label : undefined),
+      model: message.model ?? (message.role === 'assistant' ? selectedModelLabel : undefined),
       timestamp: message.timestamp ?? Date.now(),
       tokens: message.tokens,
       costUsd: message.costUsd,
@@ -669,7 +670,7 @@ export function useWorkspaceChatPane({
       recalledFacts: message.recalledFacts,
       isError: /^error:/i.test(message.text.trim()),
     })),
-    [messages, selectedModel],
+    [messages, selectedModelLabel],
   );
 
   const visibleMessages = useMemo(
