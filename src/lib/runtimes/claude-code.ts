@@ -12,6 +12,7 @@ import { access, mkdtemp, open, readdir, readFile, stat } from 'node:fs/promises
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { resolveCli, CliNotFoundError } from '@/lib/runtimes/shared/cli-resolver';
 import type {
   AgentRuntime,
   RuntimeCapabilities,
@@ -36,8 +37,34 @@ import { monitorUsageDispatch, readClaudeUsageSnapshot, type UsageSnapshot } fro
 const execFileAsync = promisify(execFile);
 
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude');
-const CLAUDE_BIN = process.env.CLAUDE_BIN || path.join(os.homedir(), '.local', 'bin', 'claude');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
+
+/**
+ * Lazily resolve the claude CLI binary path using the shared resolver.
+ *
+ * Respects O8_CLAUDE_CODE_BIN (primary) and CLAUDE_BIN (legacy) env overrides
+ * before falling back to which / login-shell / static paths. The result is
+ * cached by the resolver for 10 minutes so repeated calls are cheap.
+ */
+async function resolveClaudeBin(): Promise<string> {
+  try {
+    const resolved = await resolveCli({
+      runtimeId: 'claude-code',
+      binaryName: 'claude',
+      envOverride: 'O8_CLAUDE_CODE_BIN',
+      // CLAUDE_BIN is the historical env-var — keep honouring it
+      extraEnvOverrides: ['CLAUDE_BIN'],
+      aliases: ['claude-code'],
+    });
+    return resolved.path;
+  } catch (err) {
+    // Surface a clear error message rather than ENOENT deep inside spawn
+    if (err instanceof CliNotFoundError) {
+      throw new Error(`Claude Code binary not found. Set O8_CLAUDE_CODE_BIN or CLAUDE_BIN to the full path. ${err.message}`);
+    }
+    throw err;
+  }
+}
 const RECENT_WINDOW_MS = 6 * 60 * 60_000; // 6 hours
 const LAUNCH_SESSION_ID_TIMEOUT_MS = 12_000;
 const CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
@@ -1110,6 +1137,7 @@ export const claudeCodeRuntime: AgentRuntime = {
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
     try {
       const startedAtMs = Date.now();
+      const claudeBin = await resolveClaudeBin();
       const launchId = `launched-${Date.now()}`;
       const projectPaths = Array.from(new Set(
         [opts.worktreePath, opts.cwd]
@@ -1138,7 +1166,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         opts.prompt,
       ];
       const bridgeSessionName = tmuxSessionName('cc', launchId);
-      const shellCmd = `${quoteShellArg(CLAUDE_BIN)} ${cliArgs.map(quoteShellArg).join(' ')} | tee ${quoteShellArg(stdoutPath)} 2>${quoteShellArg(stderrPath)}`;
+      const shellCmd = `${quoteShellArg(claudeBin)} ${cliArgs.map(quoteShellArg).join(' ')} | tee ${quoteShellArg(stdoutPath)} 2>${quoteShellArg(stderrPath)}`;
 
       try {
         await spawnBridgeTerminalSession({
@@ -1177,11 +1205,11 @@ export const claudeCodeRuntime: AgentRuntime = {
         // bridge spawn failed — fall through to detached spawn
       }
 
-      // Fallback: detached spawn (existing behavior)
+      // Fallback: detached spawn using resolved binary path
       const stdoutFd = openSync(stdoutPath, 'a');
       const stderrFd = openSync(stderrPath, 'a');
       try {
-        const child = spawn(CLAUDE_BIN, cliArgs, {
+        const child = spawn(claudeBin, cliArgs, {
           cwd: opts.cwd,
           stdio: ['ignore', stdoutFd, stderrFd],
           detached: true,
@@ -1226,6 +1254,7 @@ export const claudeCodeRuntime: AgentRuntime = {
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
     const startedAtMs = Date.now();
+    const claudeBin = await resolveClaudeBin();
     let sessionId = sessionKey.replace('claude-code:', '');
 
     // If sessionId is a synthetic live-PID key, try to resolve to a real session ID
@@ -1273,7 +1302,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       // Resume must start a fresh Claude CLI turn every time. Reusing a dead
       // tmux session name can silently no-op on later sends, so resume runs
       // detached instead of through the tmux session helper.
-      await spawnDetached(CLAUDE_BIN, cliArgs, spawnCwd);
+      await spawnDetached(claudeBin, cliArgs, spawnCwd);
       monitorUsageDispatch({
         dispatchKey: `claude-code:${sessionId}:${startedAtMs}`,
         runtime: 'claude-code',
