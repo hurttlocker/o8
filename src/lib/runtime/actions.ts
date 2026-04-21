@@ -118,7 +118,10 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     throw new Error(`Runtime ${runtimeId} does not support launch.`);
   }
 
-  const supportsWorktrees = runtimeId === 'codex' || runtimeId === 'claude-code';
+  const supportsWorktrees = runtimeId === 'codex'
+    || runtimeId === 'claude-code'
+    || runtimeId === 'gemini'
+    || runtimeId === 'opencode';
 
   // Create a worktree when: explicitly requested via isolate flag, OR when not skipping setup.
   // This allows dispatch to request isolation (isolate: true) while skipping env setup (skipSetup: true).
@@ -291,11 +294,12 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   // attach the session itself. We only auto-wrap launches that got a worktree;
   // un-isolated scratch runs still fall through without a lane.
   let laneId: string | null = payload.existingLaneId ?? null;
-  const laneRuntime: 'codex' | 'claude-code' | null = runtimeId === 'codex'
-    ? 'codex'
-    : runtimeId === 'claude-code'
-      ? 'claude-code'
-      : null;
+  const laneRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode' | null =
+    runtimeId === 'codex' ? 'codex'
+    : runtimeId === 'claude-code' ? 'claude-code'
+    : runtimeId === 'gemini' ? 'gemini'
+    : runtimeId === 'opencode' ? 'opencode'
+    : null;
   if (!laneId && launchWorktree?.worktree && laneRuntime) {
     try {
       const { createLane, attachSession } = await import('@/lib/lane/registry');
