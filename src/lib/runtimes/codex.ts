@@ -254,8 +254,23 @@ export const codexRuntime: AgentRuntime = {
     try {
       const { execFileSync } = await import('node:child_process');
       const os = await import('node:os');
-      const path = await import('node:path');
-      const codexBin = path.join(os.homedir(), '.npm-global', 'bin', 'codex');
+      const { resolveCli, CliNotFoundError } = await import('@/lib/runtimes/shared/cli-resolver');
+      let codexBin: string;
+      try {
+        const resolved = await resolveCli({
+          runtimeId: 'codex',
+          binaryName: 'codex',
+          envOverride: 'O8_CODEX_BIN',
+          extraEnvOverrides: ['CODEX_HOME'],
+        });
+        codexBin = resolved.path;
+      } catch (resolveErr) {
+        scheduleCodexUsageDispatch(sessionKey, startedAtMs, baseline);
+        const note = resolveErr instanceof CliNotFoundError
+          ? `Codex binary not found: ${resolveErr.message}`
+          : `Failed to resolve Codex binary: ${resolveErr instanceof Error ? resolveErr.message : String(resolveErr)}`;
+        return { ok: false, note };
+      }
       execFileSync(codexBin, ['exec', 'resume', threadId, message, '--json', '--dangerously-bypass-approvals-and-sandbox'], {
         cwd: process.env.HOME || os.homedir(),
         timeout: 120_000,
