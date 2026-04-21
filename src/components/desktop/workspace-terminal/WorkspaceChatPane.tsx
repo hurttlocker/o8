@@ -259,6 +259,24 @@ function WorkspaceChatPaneBase({
     return sessionKey ? archivedLaneView.sessionKeys.has(sessionKey) : false;
   }, [tab.kind, tab.chatSessionKey, archivedLaneView.sessionKeys]);
 
+  const streamingMessage = useMemo<import('@/components/desktop/LLMChat').LLMMessage>(() => ({
+    id: `stream:${chat.tabId}`,
+    role: 'assistant',
+    content: chat.streamingText || 'Thinking...',
+    model: chat.selectedModel.label,
+    timestamp: Date.now(),
+    tokens: chat.streamMeta.tokens,
+    costUsd: chat.streamMeta.costUsd,
+    sources: chat.streamMeta.sources,
+    recalledFacts: chat.streamMeta.recalledFacts,
+    toolCalls: chat.activeToolCalls.map((tool) => ({
+      name: tool.name,
+      status: tool.status ?? 'running',
+      args: tool.args,
+      preview: tool.preview,
+    })),
+  }), [chat.tabId, chat.streamingText, chat.selectedModel.label, chat.streamMeta, chat.activeToolCalls]);
+
   return (
     <div
       style={{
@@ -479,23 +497,7 @@ function WorkspaceChatPaneBase({
               ) : null}
               {chat.agentRunning ? (
                 <LazyMessageBubble
-                  message={{
-                    id: `stream:${chat.tabId}`,
-                    role: 'assistant',
-                    content: chat.streamingText || 'Thinking...',
-                    model: chat.selectedModel.label,
-                    timestamp: Date.now(),
-                    tokens: chat.streamMeta.tokens,
-                    costUsd: chat.streamMeta.costUsd,
-                    sources: chat.streamMeta.sources,
-                    recalledFacts: chat.streamMeta.recalledFacts,
-                    toolCalls: chat.activeToolCalls.map((tool) => ({
-                      name: tool.name,
-                      status: tool.status ?? 'running',
-                      args: tool.args,
-                      preview: tool.preview,
-                    })),
-                  }}
+                  message={streamingMessage}
                   isLast
                   onRunInTerminal={onRunInTerminal}
                 />
