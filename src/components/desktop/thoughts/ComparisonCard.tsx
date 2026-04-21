@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { orchestratorStatusTone } from '@/lib/orchestrator/display';
+import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestrator/display';
 import type {
   ComparisonCandidateCommentary,
   ComparisonCommentary,
@@ -40,7 +40,7 @@ function isComparisonPacketComplete(packet: OrchestratorPacket): boolean {
 
 function modelLabel(packet: OrchestratorPacket): string {
   if (packet.assignedModel && packet.assignedModel.trim()) return packet.assignedModel.trim();
-  return packet.runtime === 'claude-code' ? 'Claude Code' : 'Codex';
+  return orchestratorRuntimeTone(packet.runtime).label;
 }
 
 function verdictTone(verdict: ComparisonVerdict): { label: string; color: string; bg: string; border: string } {

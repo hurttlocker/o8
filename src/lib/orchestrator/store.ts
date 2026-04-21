@@ -9,9 +9,20 @@ import type {
   OrchestratorPacketReview,
   OrchestratorPacketReviewFinding,
   OrchestratorQueueState,
+  OrchestratorRuntime,
   OrchestratorRuntimeTruth,
   OrchestratorStateApiResponse,
 } from '@/lib/orchestrator/types';
+
+const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode']);
+
+/** Deserializer — validates and coerces an unknown value to OrchestratorRuntime. */
+function normalizeRuntime(value: unknown): OrchestratorRuntime {
+  if (typeof value === 'string' && VALID_RUNTIMES.has(value as OrchestratorRuntime)) {
+    return value as OrchestratorRuntime;
+  }
+  return 'codex';
+}
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 if (typeof window !== 'undefined') installOrchestratorTurnPinFetchPatch();
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
@@ -107,7 +118,7 @@ function normalizeLaneBinding(value: unknown): OrchestratorLaneBinding | null {
     tabId: lane.tabId,
     repoPath: typeof lane.repoPath === 'string' ? lane.repoPath : null,
     worktreePath: typeof lane.worktreePath === 'string' ? lane.worktreePath : null,
-    runtime: lane.runtime === 'claude-code' ? 'claude-code' : 'codex',
+    runtime: normalizeRuntime(lane.runtime),
     sessionKey: typeof lane.sessionKey === 'string' ? lane.sessionKey : null,
     laneId: typeof lane.laneId === 'string' ? lane.laneId : null,
     lastHeartbeatAt: typeof lane.lastHeartbeatAt === 'string' ? lane.lastHeartbeatAt : null,
@@ -198,7 +209,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     summary: typeof packet.summary === 'string' ? packet.summary : '',
     workspaceTargetPath: typeof packet.workspaceTargetPath === 'string' && packet.workspaceTargetPath.trim() ? packet.workspaceTargetPath : null,
     branchTarget: branchTarget || (queueState === 'draft' ? '' : 'main'),
-    runtime: packet.runtime === 'claude-code' ? 'claude-code' : 'codex',
+    runtime: normalizeRuntime(packet.runtime),
     dependencyLabels: Array.isArray(packet.dependencyLabels)
       ? packet.dependencyLabels.map((label) => String(label).trim()).filter(Boolean).slice(0, 8)
       : [],
@@ -486,7 +497,7 @@ export function normalizeOrchestratorMissionState(raw: unknown): OrchestratorMis
     prompt: typeof value.prompt === 'string' ? value.prompt : '',
     summary: typeof value.summary === 'string' ? value.summary : '',
     repoPath: typeof value.repoPath === 'string' ? value.repoPath : null,
-    runtime: value.runtime === 'claude-code' ? 'claude-code' : 'codex',
+    runtime: normalizeRuntime(value.runtime),
     constraints: typeof value.constraints === 'string' ? value.constraints : '',
     packets: resolvePacketDependencies(normalizedPackets),
     activeComparisonGroups: Array.isArray(value.activeComparisonGroups)

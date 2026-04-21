@@ -10,7 +10,7 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import type { PlanApprovalContinuation } from '@/lib/approvals/types';
-import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 const LOG_PREFIX = '[plan-dispatch]';
 
@@ -18,7 +18,7 @@ function buildPacketFromTask(
   task: { title: string; body: string },
   index: number,
   repoPath: string,
-  runtime: 'codex' | 'claude-code',
+  runtime: OrchestratorRuntime,
   issueNumber: number,
 ): OrchestratorPacket {
   const now = new Date().toISOString();

@@ -5,6 +5,15 @@ import type {
   OrchestratorRuntime,
   OrchestratorWorkspaceTarget,
 } from '@/lib/orchestrator/types';
+
+const VALID_ORCHESTRATOR_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode']);
+
+function coerceAgentRuntime(value?: string | null): OrchestratorRuntime {
+  if (value && VALID_ORCHESTRATOR_RUNTIMES.has(value as OrchestratorRuntime)) {
+    return value as OrchestratorRuntime;
+  }
+  return 'codex';
+}
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { AgentTarget, ContextSuggestion, FleetAgent } from './types';
 
@@ -119,7 +128,7 @@ export function isRunnableCliSession(agent: FleetAgent) {
   const runtime = agent.runtime;
   const sessionKey = agent.sessionKey?.trim();
   if (!sessionKey) return false;
-  if (runtime !== 'codex' && runtime !== 'claude-code') return false;
+  if (runtime !== 'codex' && runtime !== 'claude-code' && runtime !== 'gemini' && runtime !== 'opencode') return false;
   if (sessionKey.includes(':ide-tab-')) return false;
   return true;
 }
@@ -141,7 +150,7 @@ export function buildAgentTargets(
     });
 
   return cliAgents.map((agent) => {
-    const runtime = agent.runtime === 'claude-code' ? 'claude-code' : 'codex';
+    const runtime = coerceAgentRuntime(agent.runtime);
     const runtimeTone = orchestratorRuntimeTone(runtime);
     return {
       key: agent.sessionKey!,
@@ -214,7 +223,7 @@ export function generateSuggestions(agents: FleetAgent[], targets: AgentTarget[]
 
   for (const agent of agents) {
     const name = agent.name || 'Unknown';
-    const runtime = agent.runtime === 'claude-code' ? 'claude-code' : 'codex';
+    const runtime = coerceAgentRuntime(agent.runtime);
     const target = (agent.sessionKey ? targetBySessionKey.get(agent.sessionKey) : null)
       ?? targetByName.get(name.toLowerCase())
       ?? targetByRuntime.get(runtime)

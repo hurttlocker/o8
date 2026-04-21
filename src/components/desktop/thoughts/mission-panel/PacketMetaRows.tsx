@@ -2,7 +2,8 @@
 
 import { BranchPickerPopover } from '@/components/desktop/thoughts/BranchPickerPopover';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
-import type { OrchestratorPacket, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import type { OrchestratorPacket, OrchestratorRuntime, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import {
   clearPacketBranchBlockedReason,
   hasPacketBranchTarget,
@@ -34,7 +35,7 @@ export function PacketMetaRows({
     ? (workspaceTargets.find((t) => t.localPath === packet.workspaceTargetPath)?.label ?? packet.workspaceTargetPath.split('/').pop() ?? 'target')
     : null;
 
-  const runtimeDisplay = packet.runtime === 'claude-code' ? 'Claude Code' : 'Codex';
+  const runtimeDisplay = orchestratorRuntimeTone(packet.runtime).label;
 
   const rowChromeStyle: React.CSSProperties = {
     display: 'flex',
@@ -174,7 +175,7 @@ export function PacketMetaRows({
               overflow: 'hidden',
             }}
           >
-            {(['codex', 'claude-code'] as const).map((runtime) => (
+            {listDispatchableRuntimes().map((runtime: OrchestratorRuntime) => (
               <button
                 key={runtime}
                 type="button"
@@ -203,7 +204,7 @@ export function PacketMetaRows({
                 onMouseLeave={(e) => { if (packet.runtime !== runtime) e.currentTarget.style.background = 'transparent'; }}
               >
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: orchestratorRuntimeTone(runtime).color }} />
-                {runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
+                {orchestratorRuntimeTone(runtime).label}
               </button>
             ))}
           </div>

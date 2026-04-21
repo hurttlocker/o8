@@ -149,7 +149,7 @@ export function PacketCard({
               {packet.title}
             </span>
             <span style={{ display: 'block', marginTop: 1, fontSize: 9, lineHeight: 1.3, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {packet.runtime === 'claude-code' ? 'Claude Code' : 'Codex'}
+              {orchestratorRuntimeTone(packet.runtime).label}
             </span>
           </span>
           <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 600, color: statusMeta.color, letterSpacing: '-0.01em' }}>
