@@ -45,7 +45,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     shortLabel: 'Gemini',
     dispatchable: true,
     requiresModel: false,
-    defaultModel: 'gemini-3-1-pro',
+    defaultModel: 'gemini-3-pro-preview',
     accentColor: '#4285f4', // Google blue
     binaryName: 'gemini',
     description: 'Google Gemini CLI with --yolo autonomous dispatch and JSONL streaming.',
@@ -68,6 +68,5 @@ export function listDispatchableRuntimes(): OrchestratorRuntime[] {
 }
 
 export function getRuntimeCapability(runtime: OrchestratorRuntime): OrchestratorRuntimeCapability {
-  console.log(`[runtime-caps] getRuntimeCapability(${runtime})`);
   return ORCHESTRATOR_RUNTIMES[runtime];
 }
