@@ -1615,3 +1615,12 @@ button.workflow-file-item.workflow-file-item-active {
     box-shadow: 0 0 4px rgba(52, 211, 153, 0.02), inset 0 0 4px rgba(52, 211, 153, 0.01);
   }
 }
+
+/* Active workspace tab label — Superconductor-style shimmer sweep.
+   The base text sits on var(--t-text); a softer color patch rides across
+   every ~3s so your eye locks onto which tab is active. Background-clip:text
+   means only the glyphs get the gradient, not the tab chrome. */
+@keyframes tab-label-shimmer {
+  0%   { background-position: 140% 50%; }
+  100% { background-position: -40% 50%; }
+}
