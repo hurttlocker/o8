@@ -19,6 +19,7 @@ import {
   buildWorkspaceThinkingStep,
   isAgentRuntimeTab,
   isOwnedCodexRuntimeSession,
+  isOwnedCliRuntimeSession,
   mergeTranscriptEntries,
   normalizeWorkspaceChatSessionKey,
   runtimeTransportSessionId,
@@ -241,8 +242,12 @@ export function useWorkspaceChatPane({
           model: selectedModel?.id,
           continueLatest: tab.chatContinueLatest !== false,
         };
-      } else if (chatRuntime === 'codex') {
-        if (isOwnedCodexRuntimeSession(normalizedSessionKey)) {
+      } else if (chatRuntime === 'codex' || chatRuntime === 'gemini' || chatRuntime === 'opencode') {
+        // Owned CLI sessions (dispatched via Mission Control) steer through
+        // the generic /api/runtime/action verb — the owned-session-store
+        // injects the message into the live CLI process. Same pattern for
+        // codex, gemini, and opencode since they share the primitive.
+        if (isOwnedCliRuntimeSession(normalizedSessionKey)) {
           const res = await fetch('/api/runtime/action', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -271,6 +276,13 @@ export function useWorkspaceChatPane({
             void fetchTranscript();
           }, 800);
           return;
+        }
+        // Non-owned discovered sessions fall back to the runtime-specific
+        // streaming endpoint (codex-only today; gemini/opencode discovered
+        // is a follow-up since neither CLI has a stable scratch-session UX
+        // yet).
+        if (chatRuntime !== 'codex') {
+          throw new Error(`Discovered ${chatRuntime} sessions don't support send yet — dispatch a packet via Mission Control instead.`);
         }
         endpoint = '/api/codex/send';
         body = {
