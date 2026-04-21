@@ -41,10 +41,15 @@ import { getRemoteRuntimeFlagSync } from '../worker/feature-flags';
 import { registerRuntime } from './registry';
 import { codexRuntime } from './codex';
 import { claudeCodeRuntime } from './claude-code';
+import { geminiRuntime } from './gemini';
 import { cloudRuntime } from './cloud-adapter';
 
 registerRuntime(codexRuntime);
 registerRuntime(claudeCodeRuntime);
+// Wave 2c: Gemini CLI as a first-class coding runtime, peer to Codex/Claude
+// Code. Surfaces 'gemini-owned:' sessions, uses `gemini -p … --yolo
+// --output-format stream-json` under the hood. See src/lib/gemini/owned.ts.
+registerRuntime(geminiRuntime);
 // #514 — Cloud runtime adapter (Cursor-style self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires
 // a worker CLI to connect to /api/cloud/worker-poll with a provisioned key.
