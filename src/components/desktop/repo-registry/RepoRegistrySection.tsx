@@ -36,6 +36,9 @@ function RepoRegistrySectionBase({
   activeSessionKey = null,
   activeRepoLocalPath = null,
   activeWorkspacePath = null,
+  activeWorkspaceTabKind = null,
+  onFocusOrchestratorTab,
+  onFocusAssistantTab,
   sectionOpen,
   onSectionOpenChange,
   launchIntent,
@@ -56,6 +59,9 @@ function RepoRegistrySectionBase({
   activeSessionKey?: string | null;
   activeRepoLocalPath?: string | null;
   activeWorkspacePath?: string | null;
+  activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | null;
+  onFocusOrchestratorTab?: () => void;
+  onFocusAssistantTab?: () => void;
   sectionOpen?: boolean;
   onSectionOpenChange?: (open: boolean) => void;
   launchIntent?: { repoPath: string | null; nonce: number } | null;
@@ -690,6 +696,9 @@ function RepoRegistrySectionBase({
         setExpandedRepoIds={setExpandedRepoIds}
         activeRepoLocalPath={activeRepoLocalPath}
         activeWorkspacePath={activeWorkspacePath}
+        activeWorkspaceTabKind={activeWorkspaceTabKind}
+        onFocusOrchestratorTab={onFocusOrchestratorTab}
+        onFocusAssistantTab={onFocusAssistantTab}
         onSelectRepo={onSelectRepo}
       />
 

@@ -54,6 +54,9 @@ function RepoCardBase(props: RepoCardProps) {
           orchestratorPackets={props.orchestratorPackets}
           activeSessionKey={props.activeSessionKey}
           activeWorkspacePath={props.activeWorkspacePath}
+          activeWorkspaceTabKind={props.activeWorkspaceTabKind}
+          onFocusOrchestratorTab={props.onFocusOrchestratorTab}
+          onFocusAssistantTab={props.onFocusAssistantTab}
           onSelectSession={props.onSelectSession}
           model={renderModel}
         />

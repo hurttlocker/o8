@@ -38,6 +38,9 @@ interface RepoRegistryListProps {
   setExpandedRepoIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeRepoLocalPath?: string | null;
   activeWorkspacePath?: string | null;
+  activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | null;
+  onFocusOrchestratorTab?: () => void;
+  onFocusAssistantTab?: () => void;
   onSelectRepo?: (repoId: string) => void;
 }
 
@@ -67,6 +70,9 @@ function RepoRegistryListBase({
   setExpandedRepoIds,
   activeRepoLocalPath = null,
   activeWorkspacePath = null,
+  activeWorkspaceTabKind = null,
+  onFocusOrchestratorTab,
+  onFocusAssistantTab,
   onSelectRepo,
 }: RepoRegistryListProps) {
   return (
@@ -251,6 +257,9 @@ function RepoRegistryListBase({
                 onSelectRepo={() => onSelectRepo?.(repo.id)}
                 isActive={repo.localPath === activeRepoLocalPath}
                 activeWorkspacePath={activeWorkspacePath}
+                activeWorkspaceTabKind={activeWorkspaceTabKind}
+                onFocusOrchestratorTab={onFocusOrchestratorTab}
+                onFocusAssistantTab={onFocusAssistantTab}
               />
             ))
           ) : null}
