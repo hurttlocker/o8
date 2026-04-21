@@ -24,9 +24,14 @@ import type {
 
 export function isAgentRuntimeTab(
   tab: TerminalTab | null | undefined,
-): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' } {
+): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode' } {
   return tab?.kind === 'chat'
-    && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code');
+    && (
+      tab.chatRuntime === 'codex'
+      || tab.chatRuntime === 'claude-code'
+      || tab.chatRuntime === 'gemini'
+      || tab.chatRuntime === 'opencode'
+    );
 }
 
 export function shortenPath(value: string) {
@@ -170,6 +175,12 @@ export function normalizeWorkspaceChatSessionKey(
     }
     return `codex:${trimmed}`;
   }
+  if (runtime === 'gemini') {
+    return trimmed.startsWith('gemini-owned:') ? trimmed : `gemini-owned:${trimmed}`;
+  }
+  if (runtime === 'opencode') {
+    return trimmed.startsWith('opencode-owned:') ? trimmed : `opencode-owned:${trimmed}`;
+  }
   return trimmed;
 }
 
@@ -192,6 +203,12 @@ export function runtimeTransportSessionId(
   if (runtime === 'codex') {
     if (normalized.startsWith('codex:')) return normalized.slice('codex:'.length);
     if (normalized.startsWith('codex-discovered:')) return normalized.slice('codex-discovered:'.length);
+  }
+  if (runtime === 'gemini' && normalized.startsWith('gemini-owned:')) {
+    return normalized.slice('gemini-owned:'.length);
+  }
+  if (runtime === 'opencode' && normalized.startsWith('opencode-owned:')) {
+    return normalized.slice('opencode-owned:'.length);
   }
   return undefined;
 }
@@ -277,7 +294,7 @@ export function generateLlmChatTabId() {
 }
 
 export function fallbackWorkspaceChatSessionKey(
-  runtime: 'codex' | 'claude-code',
+  runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode',
   tabId: string,
   scope: string,
 ) {
@@ -492,7 +509,11 @@ export function workspaceTabPrimaryLabel(tab: TerminalTab) {
   if (tab.kind === 'chat') {
     // Show repo + runtime instead of generic "Assistant"
     const repoName = tab.repo?.name ?? (tab.repo?.localPath ? tab.repo.localPath.split('/').pop() : null);
-    const runtimeShort = tab.chatRuntime === 'claude-code' ? 'Claude' : tab.chatRuntime === 'codex' ? 'Codex' : null;
+    const runtimeShort = tab.chatRuntime === 'claude-code' ? 'Claude'
+      : tab.chatRuntime === 'codex' ? 'Codex'
+      : tab.chatRuntime === 'gemini' ? 'Gemini'
+      : tab.chatRuntime === 'opencode' ? 'opencode'
+      : null;
     if (repoName && runtimeShort) return `${repoName} (${runtimeShort})`;
     if (repoName) return repoName;
     if (runtimeShort) return runtimeShort;

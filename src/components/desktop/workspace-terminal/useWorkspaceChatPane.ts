@@ -5,6 +5,7 @@ import { buildLinkedIssueContext } from '@/components/desktop/IssueLinkPicker';
 import {
   CLAUDE_CLI_MODELS,
   CODEX_CLI_MODELS,
+  GEMINI_CLI_MODELS,
   getOpenCodeModels,
 } from '@/components/desktop/workspace-terminal/constants';
 import type {
@@ -76,7 +77,7 @@ export function useWorkspaceChatPane({
 
   const messages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
   const tabId = tab.id;
-  const chatRuntime = tab.chatRuntime as 'codex' | 'claude-code' | 'opencode' | undefined;
+  const chatRuntime = tab.chatRuntime as 'codex' | 'claude-code' | 'gemini' | 'opencode' | undefined;
   const chatSessionKey = tab.chatSessionKey;
   const linkedIssue = tab.linkedIssue ?? null;
   const normalizedSessionKey = useMemo(
@@ -88,12 +89,13 @@ export function useWorkspaceChatPane({
     [chatRuntime, chatSessionKey],
   );
   const runtimeLabel = useMemo(
-    () => ({ codex: 'Codex', 'claude-code': 'Claude Code', opencode: 'OpenCode' } as const)[chatRuntime ?? 'codex'],
+    () => ({ codex: 'Codex', 'claude-code': 'Claude Code', gemini: 'Gemini', opencode: 'OpenCode' } as Record<string, string>)[chatRuntime ?? 'codex'] ?? 'Codex',
     [chatRuntime],
   );
   const availableModels = useMemo<WorkspaceCliModelOption[]>(
     () => {
       if (chatRuntime === 'claude-code') return CLAUDE_CLI_MODELS;
+      if (chatRuntime === 'gemini') return GEMINI_CLI_MODELS;
       if (chatRuntime === 'opencode') return getOpenCodeModels(openCodeProviders);
       return CODEX_CLI_MODELS;
     },
@@ -143,7 +145,7 @@ export function useWorkspaceChatPane({
 
   const fetchTranscript = useCallback(async () => {
     if (!chatRuntime || !normalizedSessionKey) return;
-    if (chatRuntime !== 'codex' && chatRuntime !== 'claude-code') return;
+    if (chatRuntime !== 'codex' && chatRuntime !== 'claude-code' && chatRuntime !== 'gemini' && chatRuntime !== 'opencode') return;
     try {
       const endpoint = `/api/mobile/history?sessionKey=${encodeURIComponent(normalizedSessionKey)}&limit=80`;
       const res = await fetch(endpoint);

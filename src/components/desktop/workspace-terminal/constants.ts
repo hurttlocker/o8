@@ -13,6 +13,13 @@ export const CLI_AGENTS = [
   { id: 'gemini', label: 'Gemini CLI', color: '#4285f4', command: 'gemini' },
 ] as const;
 
+export const GEMINI_CLI_MODELS: WorkspaceCliModelOption[] = [
+  { id: 'gemini-3-1-pro', label: 'Gemini 3.1 Pro', color: '#4285f4' },
+  { id: 'gemini-3-pro', label: 'Gemini 3 Pro', color: '#4285f4' },
+  { id: 'gemini-2-5-pro', label: 'Gemini 2.5 Pro', color: '#4285f4' },
+  { id: 'gemini-2-5-flash', label: 'Gemini 2.5 Flash', color: '#8ab4f8' },
+];
+
 export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6', color: '#8b5cf6' },
   { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5', color: '#8b5cf6' },
