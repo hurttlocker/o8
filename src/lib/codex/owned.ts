@@ -1,38 +1,50 @@
-import { execFile, spawn } from 'node:child_process';
-import { closeSync, openSync } from 'node:fs';
-import { access, mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
+/**
+ * Codex owned-session adapter.
+ *
+ * This file is the Codex-specific adapter on top of the generic
+ * owned-session primitive (`@/lib/runtimes/shared/owned-session`).
+ *
+ * Every public export here preserves the exact same signature and semantics
+ * the Codex implementation had before Wave 2b. Callers across the codebase
+ * (runtime registry, mobile history, API routes, command-center snapshot)
+ * continue to import the same names with no behavioural change.
+ *
+ * What's Codex-specific and lives here:
+ *   - launchArgs / resumeArgs (Codex exec CLI flags, danger-full-access sandbox)
+ *   - parseRunLog (Codex JSONL stream: thread.started, turn.started, event_msg,
+ *     response_item, item.started/completed, turn.completed, plus tool paths)
+ *   - parseRunEvidence (extract agent_message + command_execution items)
+ *   - stderr noise patterns (MCP teardown warnings, etc.)
+ *
+ * What moved to the shared primitive:
+ *   - spawn/launch/resume/interrupt pipelines
+ *   - tmux bridge spawn + detached spawn fallback
+ *   - metadata JSON read/write, runs/ directory layout
+ *   - lifecycle derivation + surface/status/current-task building
+ *   - stale-session filtering, TTL fleet cache + inflight dedupe + generation
+ *   - auto-retry logic
+ *   - review packet assembly (wraps getRuntimeRepoReview + worktree join)
+ */
+
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { promisify } from 'node:util';
-import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
-import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
-import { getWorktreeManager } from '@/lib/worktree/launch';
-import { tmuxSessionName } from '@/lib/terminal/tmux';
-import { isBridgeSessionAlive, signalBridgeTerminalSession, spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
-import type {
-  AgentSummary,
-  EventItem,
-  ReviewArtifact,
-  RuntimeReviewCommandEvidence,
-  RuntimeReviewPacket,
-  RuntimeSurfaceLifecycle,
-  RuntimeSurfaceSummary,
-  SquadSummary,
-} from '@/lib/fleet/types';
-import { truncateText } from '@/lib/util/text';
+import type { RuntimeReviewCommandEvidence } from '@/lib/fleet/types';
+import {
+  compactText,
+  createOwnedSessionStore,
+  previewText,
+  type OwnedRunEvidence,
+  type OwnedRunOutcome,
+  type OwnedRunRecord,
+  type OwnedRuntimeAdapter,
+  type OwnedTailEntry,
+  type ParsedRunLog,
+} from '@/lib/runtimes/shared/owned-session';
 
-const execFileAsync = promisify(execFile);
-const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(os.homedir(), '.o8', 'owned-codex');
-const RUNS_DIR = 'runs';
-const METADATA_FILE = 'session.json';
-const ACTIVE_WINDOW_MS = 10 * 60_000;
-const RECENT_WINDOW_MS = 6 * 60 * 60_000;
-const OWNED_STALE_WINDOW_MS = 24 * 60 * 60_000;
-const OWNED_CODEX_FLEET_TTL_MS = 20_000;
+// Re-export the fleet additions shape under its original Codex name.
+export type { OwnedCodexFleetAdditions } from '@/lib/runtimes/shared/owned-session';
 
-type OwnedRunMode = 'launch' | 'resume';
-type OwnedRunOutcome = 'running' | 'finished' | 'interrupted' | 'failed';
+// ── Codex-specific types (preserved signatures) ──────────────────────────────
 
 export type OwnedCodexLaunchRequest = {
   cwd: string;
@@ -47,107 +59,9 @@ export type OwnedCodexLaunchResponse = {
   note: string;
 };
 
-type OwnedCodexRunRecord = {
-  id: string;
-  mode: OwnedRunMode;
-  prompt: string;
-  startedAt: string;
-  finishedAt?: string;
-  pid: number;
-  stdoutPath: string;
-  stderrPath: string;
-  outcome: OwnedRunOutcome;
-  interruptRequestedAt?: string;
-  tmuxSession?: string;
-};
-
 type OwnedReviewDisposition = 'watching' | 'resolved';
 
-type OwnedCodexSessionRecord = {
-  surfaceId: string;
-  sessionDir: string;
-  cwd: string;
-  repoPath: string;
-  repoSlug?: string;
-  branch?: string;
-  head?: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  threadId?: string;
-  latestPrompt: string;
-  latestSummary: string;
-  model?: string;
-  reviewDisposition?: OwnedReviewDisposition;
-  reviewDispositionUpdatedAt?: string;
-  activeRun?: OwnedCodexRunRecord;
-  recentRuns: OwnedCodexRunRecord[];
-  autoRetry?: boolean;
-  retryCount?: number;
-};
-
-type OwnedCodexFleetAdditions = {
-  agents: AgentSummary[];
-  squads: SquadSummary[];
-  events: EventItem[];
-  artifacts: ReviewArtifact[];
-  sourceLabel?: string;
-  note?: string;
-  ownedThreadIds: string[];
-};
-
-let ownedFleetCache: { value: OwnedCodexFleetAdditions; cachedAt: number } | null = null;
-let ownedFleetInflight: Promise<OwnedCodexFleetAdditions> | null = null;
-let ownedFleetGeneration = 0;
-
-export function invalidateOwnedCodexFleetCache() {
-  ownedFleetGeneration += 1;
-  ownedFleetCache = null;
-  ownedFleetInflight = null;
-}
-
-type OwnedTailEntry = {
-  id: string;
-  kind: 'message' | 'event' | 'tool' | 'tool-output';
-  label: string;
-  text: string;
-  timestamp?: string;
-  timestampLabel?: string;
-};
-
-type OwnedTailGroup = {
-  id: string;
-  title: string;
-  mode: OwnedRunMode;
-  outcome: OwnedRunOutcome;
-  prompt: string;
-  startedAt: string;
-  finishedAt?: string;
-  startedAtLabel?: string;
-  finishedAtLabel?: string;
-  summary: string;
-  entries: OwnedTailEntry[];
-};
-
-type ParsedRunLog = {
-  threadId?: string;
-  entries: OwnedTailEntry[];
-  outcome: OwnedRunOutcome;
-  completedTurn: boolean;
-};
-
-type ParsedRunEvidence = {
-  assistantSummary?: string;
-  commands: RuntimeReviewCommandEvidence[];
-};
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function compactText(value: string | null | undefined, max = 120) {
-  return truncateText(value, max, { normalizeWhitespace: true });
-}
+// ── Codex JSONL helpers ──────────────────────────────────────────────────────
 
 function safeObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -225,6 +139,13 @@ function extractStructuredText(value: unknown): string {
   return '';
 }
 
+function formatClock(timestampIso?: string) {
+  if (!timestampIso) return undefined;
+  const date = new Date(timestampIso);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
 function parseEntryTimestamp(value: unknown, fallbackIso: string) {
   const timestamp = typeof value === 'string' && value.trim() ? value : fallbackIso;
   return {
@@ -298,142 +219,9 @@ function toolOutputPreview(value: unknown) {
   return compactText(text, 500);
 }
 
-function previewText(value: string | null | undefined, max = 260) {
-  const compact = compactText(value, max);
-  return compact || undefined;
-}
+// ── Codex CLI argv builders ──────────────────────────────────────────────────
 
-function relativeAge(timestampIso?: string) {
-  if (!timestampIso) return 'just now';
-  const ageMs = Math.max(0, Date.now() - new Date(timestampIso).getTime());
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  if (ageMs < minute) return 'just now';
-  if (ageMs < hour) return `${Math.max(1, Math.round(ageMs / minute))}m ago`;
-  if (ageMs < day) return `${Math.max(1, Math.round(ageMs / hour))}h ago`;
-  return `${Math.max(1, Math.round(ageMs / day))}d ago`;
-}
-
-function formatClock(timestampIso?: string) {
-  if (!timestampIso) return undefined;
-  const date = new Date(timestampIso);
-  if (Number.isNaN(date.getTime())) return undefined;
-  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-}
-
-function shortHome(value: string) {
-  return value.replace(`${os.homedir()}/`, '~/');
-}
-
-function metadataPath(sessionDir: string) {
-  return path.join(sessionDir, METADATA_FILE);
-}
-
-async function pathExists(target: string) {
-  try {
-    await access(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function ensureDir(target: string) {
-  await mkdir(target, { recursive: true });
-}
-
-async function readJsonFile<T>(filePath: string) {
-  const raw = await readFile(filePath, 'utf8');
-  return JSON.parse(raw) as T;
-}
-
-async function writeJsonFile(filePath: string, value: unknown) {
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-}
-
-async function ensureOwnedRoot() {
-  await ensureDir(OWNED_CODEX_ROOT);
-  return OWNED_CODEX_ROOT;
-}
-
-function isPidAlive(pid?: number) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function isOwnedRunAlive(run?: OwnedCodexRunRecord | null): Promise<boolean> {
-  if (!run) return false;
-  if (isPidAlive(run.pid)) return true;
-  if (run.tmuxSession) {
-    return isBridgeSessionAlive(run.tmuxSession);
-  }
-  return false;
-}
-
-async function validateWorkspace(targetCwd: string) {
-  // Expand ~ to home directory
-  const expanded = targetCwd.startsWith('~/') ? path.join(os.homedir(), targetCwd.slice(2)) : targetCwd;
-  const resolved = path.resolve(expanded);
-  const real = await realpath(resolved).catch(() => resolved);
-  if (!real.startsWith(os.homedir())) {
-    throw new Error('Owned Codex launch is restricted to paths under the home directory.');
-  }
-
-  const { stdout } = await execFileAsync('git', ['-C', real, 'rev-parse', '--show-toplevel'], {
-    maxBuffer: 256 * 1024,
-  });
-  return path.resolve(stdout.trim());
-}
-
-async function gitValue(repoPath: string, args: string[]) {
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
-      maxBuffer: 256 * 1024,
-    });
-    const value = stdout.trim();
-    return value || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function repoSlugFromOrigin(origin?: string) {
-  const value = (origin ?? '').trim();
-  if (!value) return undefined;
-  const httpsMatch = value.match(/github\.com[/:]([^/]+\/[^/.]+)(?:\.git)?$/i);
-  if (httpsMatch?.[1]) return httpsMatch[1];
-  const sshMatch = value.match(/github\.com:([^/]+\/[^/.]+)(?:\.git)?$/i);
-  if (sshMatch?.[1]) return sshMatch[1];
-  return undefined;
-}
-
-async function resolveRepoContext(repoPath: string) {
-  const [branch, head, origin] = await Promise.all([
-    gitValue(repoPath, ['branch', '--show-current']),
-    gitValue(repoPath, ['rev-parse', 'HEAD']),
-    gitValue(repoPath, ['remote', 'get-url', 'origin']),
-  ]);
-
-  const repoSlug = repoSlugFromOrigin(origin);
-  const repoName = repoSlug?.split('/').pop() ?? path.basename(repoPath);
-  const title = branch ? `${repoName} • ${branch}` : repoName;
-
-  return {
-    repoPath,
-    repoSlug,
-    branch,
-    head,
-    title,
-  };
-}
-
-function runArgsForLaunch(repoPath: string, prompt: string, model?: string) {
+function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: string }): string[] {
   return [
     'exec',
     '--json',
@@ -441,26 +229,28 @@ function runArgsForLaunch(repoPath: string, prompt: string, model?: string) {
     '-s',
     'danger-full-access',
     '-C',
-    repoPath,
-    ...(model ? ['--model', model] : []),
-    prompt,
+    ctx.cwd,
+    ...(ctx.model ? ['--model', ctx.model] : []),
+    ctx.prompt,
   ];
 }
 
-function runArgsForResume(threadId: string, prompt: string) {
-  return ['exec', 'resume', threadId, '--json', '--dangerously-bypass-approvals-and-sandbox', '-s', 'danger-full-access', prompt];
+function codexResumeArgs(ctx: { threadId: string; prompt: string; model?: string }): string[] {
+  return [
+    'exec',
+    'resume',
+    ctx.threadId,
+    '--json',
+    '--dangerously-bypass-approvals-and-sandbox',
+    '-s',
+    'danger-full-access',
+    ctx.prompt,
+  ];
 }
 
-async function loadOwnedSession(sessionDir: string) {
-  return readJsonFile<OwnedCodexSessionRecord>(metadataPath(sessionDir));
-}
+// ── Codex JSONL stdout parser ────────────────────────────────────────────────
 
-async function saveOwnedSession(session: OwnedCodexSessionRecord) {
-  session.updatedAt = nowIso();
-  await writeJsonFile(metadataPath(session.sessionDir), session);
-}
-
-function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
+function codexParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
   const entries: OwnedTailEntry[] = [
     {
       id: `${run.id}:prompt`,
@@ -720,7 +510,9 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
   };
 }
 
-function parseOwnedRunEvidence(raw: string, run: OwnedCodexRunRecord, resolvedOutcome?: OwnedRunOutcome): ParsedRunEvidence {
+// ── Codex run-evidence parser (for review packets) ──────────────────────────
+
+function codexParseRunEvidence(raw: string, run: OwnedRunRecord, resolvedOutcome: OwnedRunOutcome): OwnedRunEvidence {
   let assistantSummary: string | undefined;
   const commands = [] as RuntimeReviewCommandEvidence[];
   const finalOutcome = resolvedOutcome ?? run.outcome;
@@ -791,824 +583,86 @@ function parseOwnedRunEvidence(raw: string, run: OwnedCodexRunRecord, resolvedOu
   };
 }
 
-async function readRunArtifacts(run: OwnedCodexRunRecord) {
-  const [stdoutRaw, stderrRaw] = await Promise.all([
-    pathExists(run.stdoutPath).then((exists) => (exists ? readFile(run.stdoutPath, 'utf8').catch(() => '') : '')),
-    pathExists(run.stderrPath).then((exists) => (exists ? readFile(run.stderrPath, 'utf8').catch(() => '') : '')),
-  ]);
-
-  return {
-    stdoutRaw,
-    stderrRaw,
-    parsed: parseOwnedRunLog(stdoutRaw, run),
-  };
-}
+// ── Adapter wiring + store ───────────────────────────────────────────────────
 
 /** Patterns in Codex stderr that are non-fatal noise (MCP server teardown, etc.) */
-const STDERR_NOISE_PATTERNS = [
+const CODEX_STDERR_NOISE_PATTERNS: RegExp[] = [
   /rmcp::transport::worker.*worker quit/i,
   /mcp.*connection refused/i,
   /mcp.*transport channel closed/i,
 ];
 
-function filterStderrNoise(raw: string): string {
-  return raw
-    .split('\n')
-    .filter((line) => !STDERR_NOISE_PATTERNS.some((pattern) => pattern.test(line)))
-    .join('\n');
+const codexAdapter: OwnedRuntimeAdapter = {
+  runtimeId: 'codex',
+  // IMPORTANT: Keep 'codex-owned:' prefix — load-bearing for session routing.
+  surfaceIdPrefix: 'codex-owned:',
+  rootEnvVar: 'CORTEX_IDE_OWNED_CODEX_ROOT',
+  rootDefault: path.join(os.homedir(), '.o8', 'owned-codex'),
+  binaryName: 'codex',
+  binaryEnvOverride: 'O8_CODEX_BIN',
+  binaryExtraEnvOverrides: ['CODEX_HOME'],
+  humanLabel: 'Owned Codex',
+  squadShortName: 'Codex',
+  sessionIdPrefix: 'codex-owned-',
+  launchArgs: codexLaunchArgs,
+  resumeArgs: codexResumeArgs,
+  parseRunLog: codexParseRunLog,
+  parseRunEvidence: codexParseRunEvidence,
+  stderrNoise: CODEX_STDERR_NOISE_PATTERNS,
+  retryDelayMs: 5_000,
+  launchGroupLabel: 'Launch turn',
+  resumeGroupLabel: 'Resume turn',
+};
+
+const codexStore = createOwnedSessionStore(codexAdapter);
+
+// ── Public API (identical signatures to the pre-Wave-2b implementation) ─────
+
+export function invalidateOwnedCodexFleetCache(): void {
+  codexStore.invalidateFleetCache();
 }
 
-function deriveRunOutcome(run: OwnedCodexRunRecord, parsed: ParsedRunLog, stderrRaw: string): OwnedRunOutcome {
-  if (run.outcome === 'interrupted' || run.interruptRequestedAt) {
-    return 'interrupted';
-  }
-  if (parsed.completedTurn) {
-    return 'finished';
-  }
-  const stderrText = filterStderrNoise(stderrRaw).toLowerCase();
-  if (stderrText.includes('panic') || stderrText.includes('fatal') || stderrText.includes('error')) {
-    return 'failed';
-  }
-  return run.outcome === 'running' ? 'failed' : run.outcome;
-}
-
-function latestFinishedRun(session: OwnedCodexSessionRecord) {
-  return [...session.recentRuns]
-    .filter((run) => run.outcome !== 'running')
-    .sort((a, b) => (b.finishedAt ?? b.startedAt).localeCompare(a.finishedAt ?? a.startedAt))[0];
-}
-
-function deriveLifecycle(session: OwnedCodexSessionRecord, activeRunOverride?: boolean): RuntimeSurfaceLifecycle {
-  const activeRun = activeRunOverride === true
-    ? session.activeRun
-    : activeRunOverride === false
-      ? undefined
-      : (session.activeRun && isPidAlive(session.activeRun.pid) ? session.activeRun : undefined);
-  const latest = latestFinishedRun(session);
-
-  if (activeRun) {
-    return {
-      availability: 'running',
-      lastOutcome: latest?.outcome === 'finished' || latest?.outcome === 'interrupted' || latest?.outcome === 'failed'
-        ? latest.outcome
-        : undefined,
-      lastRunMode: activeRun.mode,
-      lastRunStartedAt: activeRun.startedAt,
-      lastRunFinishedAt: latest?.finishedAt,
-      summary: 'Active owned run in flight.',
-    };
-  }
-
-  if (!session.threadId) {
-    return {
-      availability: 'awaiting-thread',
-      lastOutcome: latest?.outcome === 'finished' || latest?.outcome === 'interrupted' || latest?.outcome === 'failed'
-        ? latest.outcome
-        : undefined,
-      lastRunMode: latest?.mode,
-      lastRunStartedAt: latest?.startedAt,
-      lastRunFinishedAt: latest?.finishedAt,
-      summary: 'Waiting for the first persistent Codex thread id before resume is available.',
-    };
-  }
-
+export async function launchOwnedCodexSession(
+  request: OwnedCodexLaunchRequest,
+): Promise<OwnedCodexLaunchResponse> {
+  const result = await codexStore.launch(request);
   return {
-    availability: 'ready-for-resume',
-    lastOutcome: latest?.outcome === 'finished' || latest?.outcome === 'interrupted' || latest?.outcome === 'failed'
-      ? latest.outcome
-      : undefined,
-    lastRunMode: latest?.mode,
-    lastRunStartedAt: latest?.startedAt,
-    lastRunFinishedAt: latest?.finishedAt,
-    summary: latest?.outcome === 'interrupted'
-      ? 'Previous run was interrupted. This owned session is ready for the next bounded input.'
-      : latest?.outcome === 'failed'
-        ? 'Previous run failed. This owned session is ready for a corrective follow-up.'
-        : 'Owned session is idle between runs and ready for the next bounded input.',
-  };
-}
-
-function lifecycleAvailabilityLabel(availability?: RuntimeSurfaceLifecycle['availability']) {
-  switch (availability) {
-    case 'running':
-      return 'running';
-    case 'awaiting-thread':
-      return 'awaiting thread';
-    case 'ready-for-resume':
-      return 'ready for resume';
-    default:
-      return 'unknown';
-  }
-}
-
-async function refreshOwnedSession(session: OwnedCodexSessionRecord) {
-  let dirty = false;
-
-  for (const run of session.recentRuns) {
-    const { stderrRaw, parsed } = await readRunArtifacts(run);
-
-    if (!session.threadId && parsed.threadId) {
-      session.threadId = parsed.threadId;
-      dirty = true;
-    }
-
-    const runAlive = await isOwnedRunAlive(run);
-    if (runAlive) {
-      if (run.outcome !== 'running') {
-        run.outcome = 'running';
-        dirty = true;
-      }
-      continue;
-    }
-
-    const nextOutcome = deriveRunOutcome(run, parsed, stderrRaw);
-    if (run.outcome !== nextOutcome) {
-      run.outcome = nextOutcome;
-      dirty = true;
-    }
-    if (!run.finishedAt) {
-      run.finishedAt = nowIso();
-      dirty = true;
-    }
-  }
-
-  if (session.activeRun && !(await isOwnedRunAlive(session.activeRun))) {
-    session.activeRun = undefined;
-    dirty = true;
-  }
-
-  if (dirty) {
-    await saveOwnedSession(session);
-  }
-
-  // Auto-retry: if the latest run just failed and autoRetry is enabled, retry once after 5s
-  if (session.autoRetry && (session.retryCount ?? 0) < 1) {
-    const latestFailedRun = session.recentRuns.find((r) => r.outcome === 'failed');
-    if (latestFailedRun && !session.activeRun) {
-      const failAge = latestFailedRun.finishedAt
-        ? Date.now() - new Date(latestFailedRun.finishedAt).getTime()
-        : Infinity;
-      // Only auto-retry if failure is recent (within 60s) to avoid retrying stale failures
-      if (failAge < 60_000) {
-        session.retryCount = (session.retryCount ?? 0) + 1;
-        await saveOwnedSession(session);
-        console.log(`[owned-codex] Auto-retrying session ${session.surfaceId} after failure (attempt ${session.retryCount})`);
-        setTimeout(async () => {
-          try {
-            await spawnOwnedRun(session, session.latestPrompt, session.threadId ? 'resume' : 'launch');
-            invalidateOwnedCodexFleetCache();
-          } catch (err) {
-            console.error(`[owned-codex] Auto-retry failed for ${session.surfaceId}:`, err);
-          }
-        }, 5_000);
-      }
-    }
-  }
-
-  return session;
-}
-
-function buildOwnedRuntimeSurface(session: OwnedCodexSessionRecord, running: boolean): RuntimeSurfaceSummary {
-  const lifecycle = deriveLifecycle(session);
-  const lastOutcomeLabel = lifecycle.lastOutcome ? ` • last ${lifecycle.lastOutcome}` : '';
-
-  return {
-    id: session.surfaceId,
+    ok: result.ok,
     runtime: 'codex',
-    kind: 'runtime-session',
-    ownership: 'owned',
-    title: session.title,
-    cwd: shortHome(session.repoPath),
-    branch: session.branch,
-    sourceLabel: running
-      ? `IDE-owned Codex registry • active pid ${session.activeRun?.pid ?? 'unknown'}${lastOutcomeLabel}`
-      : `IDE-owned Codex registry • ${lifecycleAvailabilityLabel(lifecycle.availability)}${lastOutcomeLabel}`,
-    tailSourceLabel: `${shortHome(session.sessionDir)}/${RUNS_DIR}/*.jsonl`,
-    capabilities: {
-      attach: true,
-      readTail: true,
-      sendInput: lifecycle.availability === 'ready-for-resume',
-      interrupt: lifecycle.availability === 'running',
-      resize: false,
-      diffContext: Boolean(session.branch || session.repoSlug),
-      reviewContext: Boolean(session.branch || session.repoSlug),
-    },
-    lifecycle,
-    reviewContext: {
-      repoSlug: session.repoSlug,
-      branch: session.branch,
-      head: session.head,
-    },
-  };
-}
-
-function latestRun(session: OwnedCodexSessionRecord) {
-  return [...session.recentRuns].sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-}
-
-function deriveOwnedStatus(session: OwnedCodexSessionRecord): AgentSummary['status'] {
-  const lifecycle = deriveLifecycle(session);
-  if (lifecycle.availability === 'running') return 'running';
-  if (lifecycle.lastOutcome === 'failed') return 'failed';
-  if (lifecycle.availability === 'awaiting-thread') return 'waiting';
-  if (lifecycle.lastOutcome === 'interrupted') return 'waiting';
-  if (lifecycle.availability === 'ready-for-resume') return 'reviewing';
-
-  const latest = latestRun(session);
-  if (!latest) return 'idle';
-  const ageMs = Math.max(0, Date.now() - new Date(latest.finishedAt ?? latest.startedAt).getTime());
-  if (ageMs < ACTIVE_WINDOW_MS) return 'reviewing';
-  if (ageMs < RECENT_WINDOW_MS) return 'reviewing';
-  return 'idle';
-}
-
-function buildOwnedCurrentTask(session: OwnedCodexSessionRecord, running: boolean) {
-  const lifecycle = deriveLifecycle(session);
-  if (running) {
-    return `IDE-launched Codex run active. ${session.latestSummary}`;
-  }
-  if (lifecycle.availability === 'awaiting-thread') {
-    return `IDE-owned Codex session launched and waiting for its first thread id. ${session.latestSummary}`;
-  }
-  if (reviewDisposition(session) === 'resolved') {
-    return `Operator marked this owned result resolved. Keep watching only if new evidence appears. ${session.latestSummary}`;
-  }
-  if (lifecycle.lastOutcome === 'interrupted') {
-    return `IDE-owned Codex session is ready for resume after an interrupted run. ${session.latestSummary}`;
-  }
-  if (lifecycle.lastOutcome === 'failed') {
-    return `IDE-owned Codex session is ready for a corrective follow-up after a failed run. ${session.latestSummary}`;
-  }
-  if (session.threadId) {
-    return `IDE-owned Codex session ready for the next input via resume. ${session.latestSummary}`;
-  }
-  return `IDE-owned Codex session is idle. ${session.latestSummary}`;
-}
-
-async function listOwnedSessionDirs() {
-  const root = await ensureOwnedRoot();
-  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
-  return entries.filter((entry) => entry.isDirectory()).map((entry) => path.join(root, entry.name));
-}
-
-async function spawnOwnedRun(session: OwnedCodexSessionRecord, prompt: string, mode: OwnedRunMode) {
-  await ensureDir(path.join(session.sessionDir, RUNS_DIR));
-
-  const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const stdoutPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.jsonl`);
-  const stderrPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.stderr.log`);
-
-  const args = mode === 'launch'
-    ? runArgsForLaunch(session.repoPath, prompt, session.model)
-    : runArgsForResume(session.threadId ?? '', prompt);
-
-  // Resolve codex binary path — honours O8_CODEX_BIN or CODEX_HOME env overrides
-  // before falling back to which/login-shell/static-fallbacks. Never hardcode
-  // ~/.npm-global/bin/codex which breaks on asdf, volta, fnm, and Finder-launched
-  // Tauri apps where PATH is stripped to a minimal set.
-  const codexBin = await resolveCli({
-    runtimeId: 'codex',
-    binaryName: 'codex',
-    envOverride: 'O8_CODEX_BIN',
-    extraEnvOverrides: ['CODEX_HOME'],
-  }).then((r) => r.path).catch(() => 'codex');
-
-  let pid = 0;
-  let terminalSessionName: string | undefined;
-
-  const bridgeSessionName = tmuxSessionName('codex', runId);
-  const codexCmd = [codexBin, ...args].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-  const shellCmd = `${codexCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
-
-  try {
-    const result = await spawnBridgeTerminalSession({
-      sessionName: bridgeSessionName,
-      shellCommand: shellCmd,
-      cwd: session.repoPath,
-      env: { FORCE_COLOR: '0', NO_COLOR: '1' },
-    });
-    terminalSessionName = result.sessionName;
-    pid = typeof result.pid === 'number' ? result.pid : 0;
-  } catch {
-    // bridge spawn failed — fall through to detached spawn
-  }
-
-  if (!terminalSessionName) {
-    // Fallback: detached spawn using resolved binary path
-    const stdoutFd = openSync(stdoutPath, 'a');
-    const stderrFd = openSync(stderrPath, 'a');
-    try {
-      const child = spawn(codexBin, args, {
-        cwd: session.repoPath,
-        detached: true,
-        stdio: ['ignore', stdoutFd, stderrFd],
-      });
-      child.unref();
-      pid = child.pid ?? 0;
-    } finally {
-      closeSync(stdoutFd);
-      closeSync(stderrFd);
-    }
-  }
-
-  const run: OwnedCodexRunRecord = {
-    id: runId,
-    mode,
-    prompt,
-    startedAt: nowIso(),
-    pid,
-    stdoutPath,
-    stderrPath,
-    outcome: 'running',
-    tmuxSession: terminalSessionName,
-  };
-
-  session.latestPrompt = prompt;
-  session.latestSummary = compactText(prompt, 140) || session.latestSummary;
-  session.reviewDisposition = 'watching';
-  session.reviewDispositionUpdatedAt = nowIso();
-  session.activeRun = run;
-  session.recentRuns = [run, ...session.recentRuns].slice(0, 16);
-  await saveOwnedSession(session);
-  return run;
-}
-
-export async function launchOwnedCodexSession(request: OwnedCodexLaunchRequest): Promise<OwnedCodexLaunchResponse> {
-  const prompt = request.prompt.trim();
-  if (!prompt) {
-    throw new Error('prompt is required');
-  }
-
-  const repoPath = await validateWorkspace(request.cwd);
-  const repo = await resolveRepoContext(repoPath);
-  const id = `codex-owned-${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const sessionDir = path.join(await ensureOwnedRoot(), id);
-  await ensureDir(sessionDir);
-
-  const session: OwnedCodexSessionRecord = {
-    surfaceId: `codex-owned:${id}`,
-    sessionDir,
-    cwd: repoPath,
-    repoPath,
-    repoSlug: repo.repoSlug,
-    branch: repo.branch,
-    head: repo.head,
-    title: repo.title,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-    latestPrompt: prompt,
-    latestSummary: compactText(prompt, 140) || 'Owned Codex session launched from Cortex IDE.',
-    model: request.model?.trim() || undefined,
-    reviewDisposition: 'watching',
-    reviewDispositionUpdatedAt: nowIso(),
-    recentRuns: [],
-  };
-
-  await saveOwnedSession(session);
-  await spawnOwnedRun(session, prompt, 'launch');
-  invalidateOwnedCodexFleetCache();
-
-  return {
-    ok: true,
-    runtime: 'codex',
-    surfaceId: session.surfaceId,
-    note: `Owned Codex run launched for ${repo.title}. It will become mutable through resume/interrupt only because Cortex IDE owns this surface.`,
+    surfaceId: result.surfaceId,
+    note: result.note,
   };
 }
 
 export async function continueOwnedCodexSession(surfaceId: string, prompt: string) {
-  const session = await findOwnedSession(surfaceId);
-  if (!session) {
-    throw new Error('Owned Codex session was not found.');
-  }
-  await refreshOwnedSession(session);
-
-  if (session.activeRun && isPidAlive(session.activeRun.pid)) {
-    throw new Error('This owned Codex session still has an active run. Wait for it to settle or interrupt it first.');
-  }
-  if (!session.threadId) {
-    throw new Error('This owned Codex session does not have a thread id yet, so resume is not available.');
-  }
-
-  await spawnOwnedRun(session, prompt.trim(), 'resume');
-  invalidateOwnedCodexFleetCache();
-  return {
-    ok: true,
-    note: 'Queued a new turn on the IDE-owned Codex session via codex exec resume.',
-  };
+  return codexStore.resume(surfaceId, prompt);
 }
 
 export async function interruptOwnedCodexSession(surfaceId: string) {
-  const session = await findOwnedSession(surfaceId);
-  if (!session) {
-    throw new Error('Owned Codex session was not found.');
-  }
-  await refreshOwnedSession(session);
-
-  if (!session.activeRun || !isPidAlive(session.activeRun.pid)) {
-    return { interrupted: false, note: 'No active owned Codex run was in flight.' };
-  }
-
-  try {
-    if (session.activeRun.tmuxSession) {
-      await signalBridgeTerminalSession(session.activeRun.tmuxSession, 'SIGINT');
-    } else {
-      process.kill(-session.activeRun.pid, 'SIGINT');
-    }
-    session.activeRun = {
-      ...session.activeRun,
-      outcome: 'interrupted',
-      interruptRequestedAt: nowIso(),
-    };
-    session.recentRuns = session.recentRuns.map((run) =>
-      run.id === session.activeRun?.id
-        ? {
-            ...run,
-            outcome: 'interrupted',
-            interruptRequestedAt: session.activeRun?.interruptRequestedAt,
-          }
-        : run,
-    );
-    await saveOwnedSession(session);
-    invalidateOwnedCodexFleetCache();
-    return { interrupted: true, note: 'Interrupt sent to the active IDE-owned Codex run.' };
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : 'Unable to interrupt the owned Codex run.');
-  }
+  return codexStore.interrupt(surfaceId);
 }
 
-export async function setOwnedCodexReviewDisposition(surfaceId: string, disposition: OwnedReviewDisposition) {
-  const session = await findOwnedSession(surfaceId);
-  if (!session) {
-    throw new Error('Owned Codex session was not found.');
-  }
-
-  session.reviewDisposition = disposition;
-  session.reviewDispositionUpdatedAt = nowIso();
-  await saveOwnedSession(session);
-  invalidateOwnedCodexFleetCache();
-
-  return {
-    disposition,
-    note: disposition === 'resolved'
-      ? 'Marked this owned result resolved. It stays visible, but no longer needs active attention unless new evidence appears.'
-      : 'Switched this owned result back to keep-watching mode.',
-  };
+export async function setOwnedCodexReviewDisposition(
+  surfaceId: string,
+  disposition: OwnedReviewDisposition,
+) {
+  return codexStore.setReviewDisposition(surfaceId, disposition);
 }
 
-async function findOwnedSession(surfaceId: string) {
-  for (const sessionDir of await listOwnedSessionDirs()) {
-    const filePath = metadataPath(sessionDir);
-    if (!(await pathExists(filePath))) continue;
-    const session = await loadOwnedSession(sessionDir);
-    if (session.surfaceId === surfaceId) {
-      return session;
-    }
-  }
-  return null;
-}
-
-export async function getOwnedCodexTelemetrySources(surfaceId: string): Promise<{
-  threadId?: string;
-  stdoutPaths: string[];
-} | null> {
-  const session = await findOwnedSession(surfaceId);
-  if (!session) {
-    return null;
-  }
-
-  await refreshOwnedSession(session);
-
-  return {
-    threadId: session.threadId,
-    stdoutPaths: [...session.recentRuns]
-      .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
-      .map((run) => run.stdoutPath),
-  };
-}
-
-async function collectOwnedTailEntries(session: OwnedCodexSessionRecord) {
-  const runs = [...session.recentRuns].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-  const entries: OwnedTailEntry[] = [];
-  const groups: OwnedTailGroup[] = [];
-  let discoveredThreadId = session.threadId;
-
-  for (const run of runs) {
-    const { parsed, stderrRaw } = await readRunArtifacts(run);
-    if (!parsed.entries.length) continue;
-
-    const outcome = deriveRunOutcome(run, parsed, stderrRaw);
-    discoveredThreadId = discoveredThreadId ?? parsed.threadId;
-    entries.push(...parsed.entries);
-    groups.push({
-      id: run.id,
-      title: `${run.mode === 'launch' ? 'Launch turn' : 'Resume turn'} • ${outcome}`,
-      mode: run.mode,
-      outcome,
-      prompt: compactText(run.prompt, 260),
-      startedAt: run.startedAt,
-      finishedAt: run.finishedAt,
-      startedAtLabel: formatClock(run.startedAt),
-      finishedAtLabel: formatClock(run.finishedAt),
-      summary: outcome === 'interrupted'
-        ? 'Interrupted before Codex completed the turn.'
-        : outcome === 'failed'
-          ? 'Run ended without a clean turn completion.'
-          : outcome === 'running'
-            ? 'Run is still in flight.'
-            : 'Run completed and the session can continue from here.',
-      entries: parsed.entries,
-    });
-  }
-
-  return {
-    entries: entries.slice(-24),
-    groups: groups.slice(-8),
-    threadId: discoveredThreadId,
-  };
-}
-
-function buildReviewActions(packet: Pick<RuntimeReviewPacket, 'dirty' | 'changedFiles' | 'lastRun' | 'reviewDisposition'>) {
-  const actions = [] as string[];
-
-  if (packet.lastRun?.outcome === 'running') {
-    actions.push('Watch the active run', 'Interrupt if it drifts');
-    return actions;
-  }
-
-  if (packet.reviewDisposition === 'resolved') {
-    actions.push('Keep watching for new evidence');
-  }
-
-  if (packet.dirty) {
-    actions.push('Review current repo delta', 'Open desktop diff context');
-  }
-
-  if (packet.lastRun?.outcome === 'failed') {
-    actions.push('Resume with correction context', 'Inspect failing command evidence');
-  } else if (packet.lastRun?.outcome === 'interrupted') {
-    actions.push('Resume from the interrupted state');
-  } else if (packet.lastRun?.outcome === 'finished') {
-    actions.push('Decide whether the result is good enough', 'Resume with a bounded follow-up if needed');
-  }
-
-  if (!actions.length) {
-    actions.push('Review the latest run evidence');
-  }
-
-  return actions.slice(0, 4);
-}
-
-function buildReviewNotes(session: OwnedCodexSessionRecord, dirty: boolean) {
-  const notes = [
-    'Current repo delta is shown live from git and is not yet isolated per run when multiple sessions touch the same repo.',
-  ];
-
-  if (!dirty) {
-    notes.push('The repo is currently clean, so this run may have been exploratory, purely read-only, or already reconciled.');
-  }
-
-  if (!session.threadId) {
-    notes.push('This owned surface is still waiting for its first persistent thread id before resume becomes available.');
-  }
-
-  return notes;
-}
-
-function reviewDisposition(session: OwnedCodexSessionRecord): OwnedReviewDisposition {
-  return session.reviewDisposition ?? 'watching';
+export async function getOwnedCodexTelemetrySources(surfaceId: string) {
+  return codexStore.getTelemetrySources(surfaceId);
 }
 
 export async function getOwnedCodexRuntimeTail(surfaceId: string) {
-  const session = await findOwnedSession(surfaceId);
-  if (!session) {
-    throw new Error('Owned Codex runtime surface was not found.');
-  }
-
-  await refreshOwnedSession(session);
-  const tail = await collectOwnedTailEntries(session);
-  if (!session.threadId && tail.threadId) {
-    session.threadId = tail.threadId;
-    await saveOwnedSession(session);
-  }
-
-  return {
-    surface: buildOwnedRuntimeSurface(session, Boolean(session.activeRun)),
-    entries: tail.entries,
-    groups: tail.groups,
-  };
+  return codexStore.getRuntimeTail(surfaceId);
 }
 
-export async function getOwnedCodexReviewPacket(surfaceId: string): Promise<RuntimeReviewPacket> {
-  const session = await findOwnedSession(surfaceId);
-  if (!session) {
-    throw new Error('Owned Codex review packet was not found.');
-  }
-
-  await refreshOwnedSession(session);
-  const repoReview = await getRuntimeRepoReview(session.repoPath);
-  const lastRun = latestRun(session);
-  const lastRunArtifacts = lastRun ? await readRunArtifacts(lastRun) : null;
-  const lastRunOutcome = lastRun && lastRunArtifacts
-    ? deriveRunOutcome(lastRun, lastRunArtifacts.parsed, lastRunArtifacts.stderrRaw)
-    : undefined;
-  const lastRunEvidence = lastRunArtifacts && lastRun
-    ? parseOwnedRunEvidence(lastRunArtifacts.stdoutRaw, lastRun, lastRunOutcome)
-    : null;
-  const runtimeSurface = buildOwnedRuntimeSurface(session, Boolean(session.activeRun));
-  const linkedWorktree = await getWorktreeManager(session.repoPath).list()
-    .then((worktrees) => worktrees.find((worktree) => worktree.sessionKey === session.surfaceId) ?? null)
-    .catch(() => null);
-
-  const packet: RuntimeReviewPacket = {
-    surfaceId: session.surfaceId,
-    runtime: 'codex',
-    title: session.title,
-    summary: runtimeSurface.lifecycle?.summary ?? session.latestSummary,
-    repoPath: shortHome(session.repoPath),
-    repoSlug: session.repoSlug,
-    branch: repoReview.branch ?? session.branch,
-    head: repoReview.head ?? session.head,
-    dirty: repoReview.dirty,
-    diffStat: repoReview.diffStat,
-    changedFiles: repoReview.changedFiles,
-    recentCommits: repoReview.recentCommits,
-    reviewDisposition: reviewDisposition(session),
-    reviewDispositionUpdatedAt: session.reviewDispositionUpdatedAt,
-    reviewDispositionUpdatedAtLabel: formatClock(session.reviewDispositionUpdatedAt),
-    worktree: linkedWorktree ? {
-      id: linkedWorktree.id,
-      path: linkedWorktree.path,
-      branch: linkedWorktree.branch,
-      baseBranch: linkedWorktree.baseBranch,
-      status: linkedWorktree.status,
-      dirtyFiles: linkedWorktree.dirtyFiles,
-    } : null,
-    lastRun: lastRun
-      ? {
-          id: lastRun.id,
-          mode: lastRun.mode,
-          outcome: lastRunOutcome ?? lastRun.outcome,
-          prompt: compactText(lastRun.prompt, 260),
-          startedAt: lastRun.startedAt,
-          finishedAt: lastRun.finishedAt,
-          startedAtLabel: formatClock(lastRun.startedAt),
-          finishedAtLabel: formatClock(lastRun.finishedAt),
-          assistantSummary: lastRunEvidence?.assistantSummary,
-          commands: lastRunEvidence?.commands ?? [],
-        }
-      : undefined,
-    nextActions: [],
-    notes: buildReviewNotes(session, repoReview.dirty),
-  };
-
-  packet.nextActions = buildReviewActions(packet);
-  return packet;
+export async function getOwnedCodexReviewPacket(surfaceId: string) {
+  return codexStore.getReviewPacket(surfaceId);
 }
 
 export async function getOwnedCodexFleetAdditions(
   options: { fresh?: boolean } = {},
-): Promise<OwnedCodexFleetAdditions> {
-  const fresh = options.fresh ?? false;
-  const now = Date.now();
-  const generation = ownedFleetGeneration;
-  if (!fresh && ownedFleetCache && (now - ownedFleetCache.cachedAt) < OWNED_CODEX_FLEET_TTL_MS) {
-    return ownedFleetCache.value;
-  }
-
-  if (!fresh && ownedFleetInflight) {
-    return ownedFleetInflight;
-  }
-
-  const promise = (async () => {
-  const sessionDirs = await listOwnedSessionDirs();
-  if (!sessionDirs.length) {
-    return {
-      agents: [],
-      squads: [],
-      events: [],
-      artifacts: [],
-      ownedThreadIds: [],
-    };
-  }
-
-  const allSessions = [] as OwnedCodexSessionRecord[];
-  for (const sessionDir of sessionDirs) {
-    const filePath = metadataPath(sessionDir);
-    if (!(await pathExists(filePath))) continue;
-    const session = await loadOwnedSession(sessionDir);
-    await refreshOwnedSession(session);
-    allSessions.push(session);
-  }
-
-  // Filter out stale sessions: no active run + last activity > 24h ago
-  const now = Date.now();
-  const sessions = allSessions.filter((session) => {
-    if (session.activeRun) return true;
-    const latest = latestRun(session);
-    const lastActivityStr = latest?.finishedAt ?? latest?.startedAt ?? session.updatedAt;
-    const ageMs = Math.max(0, now - new Date(lastActivityStr).getTime());
-    return ageMs < OWNED_STALE_WINDOW_MS;
-  });
-
-  const agents: AgentSummary[] = sessions
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .map((session) => {
-      const running = Boolean(session.activeRun);
-      const status = deriveOwnedStatus(session);
-      const runtimeSurface = buildOwnedRuntimeSurface(session, running);
-      const lifecycle = runtimeSurface.lifecycle;
-      const lastRun = latestRun(session);
-      const lifecycleLabel = lifecycle?.availability === 'running'
-        ? 'owned active'
-        : lifecycle?.lastOutcome === 'failed'
-          ? 'owned failed'
-          : lifecycle?.lastOutcome === 'interrupted'
-            ? 'owned interrupted'
-            : lifecycle?.availability === 'awaiting-thread'
-              ? 'owned warming'
-              : 'owned ready';
-      return {
-        id: session.surfaceId,
-        name: session.title,
-        squadId: 'squad-codex-owned',
-        runtime: 'codex',
-        model: 'codex owned',
-        status,
-        currentTask: buildOwnedCurrentTask(session, running),
-        workspace: shortHome(session.repoPath),
-        branch: session.branch ?? 'detached',
-        sessionKey: session.surfaceId,
-        approvalStatus: 'none',
-        lastEventAt: relativeAge(lastRun?.finishedAt ?? lastRun?.startedAt ?? session.createdAt),
-        context: {
-          usedPercent: 0,
-          trend: running ? 'rising' : 'stable',
-        },
-        alerts: lifecycle?.lastOutcome === 'failed' ? 1 : 0,
-        sessionId: session.threadId ?? session.surfaceId,
-        sessionKind: 'owned-runtime',
-        surfaceLabel: `Codex terminal • ${lifecycleLabel}`,
-        runtimeSurface,
-        tmuxSession: session.activeRun?.tmuxSession ?? lastRun?.tmuxSession,
-      } satisfies AgentSummary;
-    });
-
-  const squad: SquadSummary | null = agents.length
-    ? {
-        id: 'squad-codex-owned',
-        name: 'Codex Owned',
-        status: agents.some((agent) => agent.status === 'running') ? 'healthy' : 'watching',
-        throughputLabel: `${agents.length} IDE-owned surface${agents.length === 1 ? '' : 's'}`,
-        blockers: 0,
-        alerts: 0,
-        liveSessions: agents.length,
-        members: agents.map((agent) => agent.id),
-      }
-    : null;
-
-  const events: EventItem[] = agents.slice(0, 4).map((agent) => ({
-    id: `evt-${agent.id}`,
-    agentId: agent.id,
-    squadId: agent.squadId,
-    severity: agent.status === 'running' ? 'info' : agent.status === 'failed' ? 'critical' : agent.status === 'waiting' ? 'warning' : 'success',
-    title: `${agent.name} • ${agent.surfaceLabel}`,
-    detail: `${agent.currentTask}${agent.runtimeSurface?.lifecycle?.lastOutcome ? ` • last ${agent.runtimeSurface.lifecycle.lastOutcome}` : ''}${agent.runtimeSurface?.reviewContext?.repoSlug ? ` • ${agent.runtimeSurface.reviewContext.repoSlug}` : ''}`,
-    timestamp: agent.lastEventAt,
-  }));
-
-  const artifacts: ReviewArtifact[] = agents.slice(0, 3).map((agent) => ({
-    kind: 'run_log',
-    title: `${agent.name} owned tail`,
-    state: agent.runtimeSurface?.lifecycle?.lastOutcome === 'failed' ? 'new' : 'reviewing',
-    agentId: agent.id,
-    detail: agent.runtimeSurface?.lifecycle?.lastOutcome
-      ? `Readable JSON tail recovered from an IDE-owned Codex exec/resume run. Last outcome: ${agent.runtimeSurface.lifecycle.lastOutcome}.`
-      : 'Readable JSON tail recovered from an IDE-owned Codex exec/resume run.',
-  }));
-
-  return {
-    agents,
-    squads: squad ? [squad] : [],
-    events,
-    artifacts,
-    sourceLabel: 'Owned Codex launch registry',
-    note: agents.length
-      ? 'IDE-owned Codex surfaces can now launch, resume between runs, and interrupt active runs. Discovered Codex terminals remain watch-only.'
-      : undefined,
-    ownedThreadIds: agents.map((agent) => agent.sessionId ?? '').filter((value) => value && !value.startsWith('codex-owned:')),
-  };
-  })();
-
-  ownedFleetInflight = promise;
-  return promise.finally(() => {
-    if (ownedFleetInflight === promise) {
-      ownedFleetInflight = null;
-    }
-  }).then((value) => {
-    if (generation === ownedFleetGeneration) {
-      ownedFleetCache = { value, cachedAt: Date.now() };
-    }
-    return value;
-  });
+) {
+  return codexStore.getFleetAdditions(options);
 }
