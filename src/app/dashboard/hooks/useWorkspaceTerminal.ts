@@ -472,10 +472,12 @@ export function useWorkspaceTerminal({
     throw new Error('Unable to attach the packet to a workspace lane. The workspace surface did not become ready in time.');
   }, [ensureWorkspaceTerminalTile, getPreferredWorkspaceTerminalTarget, setActiveTileId, setTerminalTileRepoScope]);
 
-  // openWorkspaceTabForLane intentionally only supports codex/claude-code as
-  // workspace-tab runtimes — the terminal chat pane opens a CLI session for
-  // monitoring. gemini/opencode sessions map to codex for the tab opener.
-  // Packet dispatch still uses the full OrchestratorRuntime via lane commands.
+  // openWorkspaceTabForLane now supports all four runtimes natively — the
+  // monitoring tab opens with the actual lane.runtime, so the chat pane
+  // labels the agent correctly and /api/mobile/history serves the right
+  // owned-session transcript. Pre-v0.1.27 callers downcast gemini/opencode
+  // to codex which caused "Connecting to Codex session" spinners on real
+  // Gemini packets.
   const openWorkspaceTabForLane = useCallback(async (lane: {
     laneId?: string | null;
     packetId?: string | null;
@@ -550,13 +552,18 @@ export function useWorkspaceTerminal({
       if (!mutation || mutation.action !== 'packet-dispatch' || mutation.status === 'failed') return;
       if (!mutation.sessionKey || !mutation.repoPath) return;
 
+      const mutationRuntime = (mutation.runtime === 'claude-code'
+        || mutation.runtime === 'gemini'
+        || mutation.runtime === 'opencode')
+        ? mutation.runtime
+        : 'codex';
       void openWorkspaceTabForLane({
         laneId: mutation.laneId ?? null,
         packetId: mutation.packetId ?? null,
         packetReferenceLabel: mutation.packetReferenceLabel ?? null,
         packetTitle: mutation.packetTitle ?? null,
         sessionKey: mutation.sessionKey,
-        runtime: mutation.runtime === 'claude-code' ? 'claude-code' : 'codex',
+        runtime: mutationRuntime,
         repoPath: mutation.repoPath,
         status: 'launching',
         branch: mutation.branch ?? null,
@@ -590,13 +597,18 @@ export function useWorkspaceTerminal({
         }>) {
           if (!lane.sessionKey) continue;
           if (lane.status !== 'running' && lane.status !== 'launching') continue;
+          const laneRuntime = (lane.runtime === 'claude-code'
+            || lane.runtime === 'gemini'
+            || lane.runtime === 'opencode')
+            ? lane.runtime
+            : 'codex';
           void openWorkspaceTabForLane({
             laneId: lane.id,
             packetId: lane.packetId,
             packetReferenceLabel: null,
             packetTitle: lane.label,
             sessionKey: lane.sessionKey,
-            runtime: lane.runtime === 'claude-code' ? 'claude-code' : 'codex',
+            runtime: laneRuntime,
             repoPath: lane.repoPath,
             status: lane.status,
             branch: lane.branch ?? null,
