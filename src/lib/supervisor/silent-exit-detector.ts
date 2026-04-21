@@ -79,6 +79,10 @@ const SILENT_EXIT_EVENT_PREFIX = 'silent_exit_';
 // ceiling, so a small extraction is overdue).
 const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT
   || path.join(os.homedir(), '.o8', 'owned-codex');
+const OWNED_GEMINI_ROOT = process.env.O8_OWNED_GEMINI_ROOT
+  || path.join(os.homedir(), '.o8', 'owned-gemini');
+const OWNED_OPENCODE_ROOT = process.env.O8_OWNED_OPENCODE_ROOT
+  || path.join(os.homedir(), '.o8', 'owned-opencode');
 
 function isPidAlive(pid: number | undefined): boolean {
   if (!pid || !Number.isFinite(pid)) return false;
@@ -90,16 +94,17 @@ function isPidAlive(pid: number | undefined): boolean {
   }
 }
 
-async function readOwnedCodexActiveRun(surfaceId: string): Promise<
-  { pid?: number; tmuxSession?: string } | null
-> {
-  const marker = 'codex-owned:';
+async function readOwnedActiveRun(
+  surfaceId: string,
+  marker: string,
+  root: string,
+): Promise<{ pid?: number; tmuxSession?: string } | null> {
   if (!surfaceId.startsWith(marker)) return null;
   try {
-    const entries = await readdir(OWNED_CODEX_ROOT, { withFileTypes: true });
+    const entries = await readdir(root, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const sessionDir = path.join(OWNED_CODEX_ROOT, entry.name);
+      const sessionDir = path.join(root, entry.name);
       const metadataPath = path.join(sessionDir, 'session.json');
       let raw: string;
       try {
@@ -128,8 +133,12 @@ async function readOwnedCodexActiveRun(surfaceId: string): Promise<
   return null;
 }
 
-async function isOwnedCodexSessionAlive(surfaceId: string): Promise<boolean> {
-  const run = await readOwnedCodexActiveRun(surfaceId);
+async function isOwnedSessionAlive(
+  surfaceId: string,
+  marker: string,
+  root: string,
+): Promise<boolean> {
+  const run = await readOwnedActiveRun(surfaceId, marker, root);
   if (!run) return false;
   if (isPidAlive(run.pid)) return true;
   if (run.tmuxSession) return isBridgeSessionAlive(run.tmuxSession);
@@ -159,9 +168,27 @@ async function probeSessionAlive(lane: Lane): Promise<boolean | undefined> {
 
   if (sessionKey.startsWith('codex-owned:')) {
     try {
-      return await isOwnedCodexSessionAlive(sessionKey);
+      return await isOwnedSessionAlive(sessionKey, 'codex-owned:', OWNED_CODEX_ROOT);
     } catch (error) {
       console.warn(`[silent-exit] Owned codex probe failed for ${sessionKey}:`, error);
+      return undefined;
+    }
+  }
+
+  if (sessionKey.startsWith('gemini-owned:')) {
+    try {
+      return await isOwnedSessionAlive(sessionKey, 'gemini-owned:', OWNED_GEMINI_ROOT);
+    } catch (error) {
+      console.warn(`[silent-exit] Owned gemini probe failed for ${sessionKey}:`, error);
+      return undefined;
+    }
+  }
+
+  if (sessionKey.startsWith('opencode-owned:')) {
+    try {
+      return await isOwnedSessionAlive(sessionKey, 'opencode-owned:', OWNED_OPENCODE_ROOT);
+    } catch (error) {
+      console.warn(`[silent-exit] Owned opencode probe failed for ${sessionKey}:`, error);
       return undefined;
     }
   }
