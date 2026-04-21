@@ -14,8 +14,10 @@ export const CLI_AGENTS = [
 ] as const;
 
 export const GEMINI_CLI_MODELS: WorkspaceCliModelOption[] = [
+  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', color: '#4285f4' },
   { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro', color: '#4285f4' },
-  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', color: '#8ab4f8' },
+  { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite', color: '#8ab4f8' },
+  { id: 'gemini-pro-latest', label: 'Gemini Pro (latest)', color: '#4285f4' },
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', color: '#4285f4' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', color: '#8ab4f8' },
 ];
