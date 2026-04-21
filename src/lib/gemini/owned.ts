@@ -389,9 +389,38 @@ function geminiParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
     }
   }
 
+  // Coalesce consecutive assistant message chunks into a single bubble.
+  // Gemini streams text in delta fragments ({ type:'message', delta:true })
+  // and the parser produces one entry per fragment. Without merging, the
+  // transcript renders 5+ avatar-stamped bubbles per turn — ugly + breaks
+  // the <self-review> block across bubbles. Also strips the machine-readable
+  // <self-review>...</self-review> block since operators don't need to see
+  // JSON validation markup in the chat transcript.
+  const coalesced: OwnedTailEntry[] = [];
+  for (const entry of entries) {
+    const prev = coalesced[coalesced.length - 1];
+    const isMergeable = entry.kind === 'message' && entry.label === 'Assistant';
+    if (isMergeable && prev && prev.kind === 'message' && prev.label === 'Assistant') {
+      // Append to the prior bubble; preserve its id/timestamp. Join with a
+      // non-breaking space only if the chunk doesn't already end in whitespace
+      // — Gemini emits deltas mid-word sometimes.
+      const sep = /\s$/.test(prev.text) || /^[\s.,!?:;)]/.test(entry.text) ? '' : '';
+      prev.text = `${prev.text}${sep}${entry.text}`;
+      continue;
+    }
+    coalesced.push({ ...entry });
+  }
+  // Strip the self-review block from each assistant bubble — keep surrounding prose.
+  const SELF_REVIEW_RE = /\s*<self-review>[\s\S]*?<\/self-review>\s*/gi;
+  for (const entry of coalesced) {
+    if (entry.kind === 'message' && entry.label === 'Assistant') {
+      entry.text = entry.text.replace(SELF_REVIEW_RE, ' ').replace(/\s+$/, '').trim();
+    }
+  }
+
   return {
     threadId,
-    entries,
+    entries: coalesced.filter((entry) => !(entry.kind === 'message' && !entry.text.trim())),
     outcome,
     completedTurn,
   };

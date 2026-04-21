@@ -228,6 +228,11 @@ function RepoCardExpandedContentBase({
           {unmatchedRepoPackets.map((packet) => {
             const runtimeTone = orchestratorRuntimeTone(packet.runtime);
             const statusTone = orchestratorStatusTone(packet.status);
+            const isActivePacket = Boolean(
+              activeSessionKey
+              && packet.lane?.sessionKey
+              && packet.lane.sessionKey === activeSessionKey,
+            );
             return (
               <div
                 key={packet.id}
@@ -272,6 +277,9 @@ function RepoCardExpandedContentBase({
                       fontWeight: 600,
                       color: 'var(--t-text)',
                       letterSpacing: '-0.01em',
+                      ...(isActivePacket
+                        ? { animation: 'tab-label-shimmer 2.2s ease-in-out infinite' }
+                        : null),
                     }}
                   >
                     {packet.title}
