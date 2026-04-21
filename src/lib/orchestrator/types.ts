@@ -1,6 +1,6 @@
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 
-export type OrchestratorRuntime = 'codex' | 'claude-code';
+export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 export type OrchestratorPacketReviewSeverity = 'info' | 'warning' | 'high';
 
 export type OrchestratorPacketStatus =

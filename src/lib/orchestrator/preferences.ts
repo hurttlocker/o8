@@ -3,12 +3,19 @@ import type { OrchestratorRuntime } from './types';
 export const ORCHESTRATOR_RUNTIME_STORAGE_KEY = 'o8:orchestrator:runtime';
 export const ORCHESTRATOR_RUNTIME_EVENT = 'cortex:orchestrator-runtime-changed';
 
+const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode']);
+
+function coerceRuntime(value: string | null | undefined): OrchestratorRuntime {
+  if (value && VALID_RUNTIMES.has(value as OrchestratorRuntime)) {
+    return value as OrchestratorRuntime;
+  }
+  return 'codex';
+}
+
 export function readOrchestratorRuntimePreference(): OrchestratorRuntime {
   if (typeof window === 'undefined') return 'codex';
   try {
-    return window.localStorage.getItem(ORCHESTRATOR_RUNTIME_STORAGE_KEY) === 'claude-code'
-      ? 'claude-code'
-      : 'codex';
+    return coerceRuntime(window.localStorage.getItem(ORCHESTRATOR_RUNTIME_STORAGE_KEY));
   } catch {
     return 'codex';
   }
@@ -34,12 +41,12 @@ export function subscribeOrchestratorRuntimePreference(listener: (runtime: Orche
 
   const handleStorage = (event: StorageEvent) => {
     if (event.key !== ORCHESTRATOR_RUNTIME_STORAGE_KEY) return;
-    listener(event.newValue === 'claude-code' ? 'claude-code' : 'codex');
+    listener(coerceRuntime(event.newValue));
   };
 
   const handleCustom = (event: Event) => {
     const detail = (event as CustomEvent<{ runtime?: OrchestratorRuntime }>).detail;
-    listener(detail?.runtime === 'claude-code' ? 'claude-code' : 'codex');
+    listener(coerceRuntime(detail?.runtime));
   };
 
   window.addEventListener('storage', handleStorage);

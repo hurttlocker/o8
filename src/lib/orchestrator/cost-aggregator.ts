@@ -78,6 +78,12 @@ function runtimeFromSessionKey(sessionKey: string | null | undefined): Orchestra
   ) {
     return 'codex';
   }
+  if (normalized.startsWith('gemini:')) {
+    return 'gemini';
+  }
+  if (normalized.startsWith('opencode:')) {
+    return 'opencode';
+  }
   return null;
 }
 
@@ -157,6 +163,8 @@ export async function aggregateMissionCost(state: OrchestratorMissionState): Pro
   const tokensByRuntime: Record<OrchestratorRuntime, RuntimeTokenSummary> = {
     codex: emptyRuntimeTokenSummary(),
     'claude-code': emptyRuntimeTokenSummary(),
+    gemini: emptyRuntimeTokenSummary(),
+    opencode: emptyRuntimeTokenSummary(),
   };
 
   let totalCostUsd = 0;

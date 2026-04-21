@@ -7,9 +7,11 @@ import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_uti
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode']);
+
 function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
-  if (value === 'codex' || value === 'claude-code') {
-    return value;
+  if (typeof value === 'string' && VALID_RUNTIMES.has(value as OrchestratorRuntime)) {
+    return value as OrchestratorRuntime;
   }
   return null;
 }
@@ -52,7 +54,7 @@ export async function POST(request: NextRequest) {
 
   const runtimeValue = normalizeRuntime(record.runtime);
   if (!runtimeValue) {
-    return operatorError('invalid_request', 'runtime must be "codex" or "claude-code".', 400);
+    return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "opencode".', 400);
   }
 
   try {
