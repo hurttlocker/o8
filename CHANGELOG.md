@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-21
 
+- `f3eb16b3` perf: client transcript store + workspace bootstrap ( Packet A)
 - `a9790994` design(chat): collapsible PacketHeaderCard replaces giant packet prompt
 - `da098e4c` design(branch-hover): Rams-style status rows matching repo hover
 - `6aee18d6` design(branch-hover): match repo-hover theme — solid panel, no glass
