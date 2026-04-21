@@ -9,6 +9,8 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-21
 
+- `a9790994` design(chat): collapsible PacketHeaderCard replaces giant packet prompt
+- `da098e4c` design(branch-hover): Rams-style status rows matching repo hover
 - `6aee18d6` design(branch-hover): match repo-hover theme — solid panel, no glass
 - `e53c8be7` feat(workspace): wire AI provider + agent runtime chat-pane transcript + steering
 - `40f2c5eb` design: hide SessionTimeline + punchier shimmer + strip branch tooltip
