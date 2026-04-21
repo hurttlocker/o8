@@ -31,10 +31,12 @@ import type {
   MobileTranscriptThinkingStep,
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
+import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
+import { transcriptStore } from '@/lib/transcripts/store';
+import { useTranscript } from '@/lib/transcripts/useTranscript';
 
 interface UseWorkspaceChatPaneOptions {
   tab: TerminalTab;
-  active: boolean;
   onUpdateMessages: (tabId: string, messages: MobileTranscriptEntry[]) => void;
   onUpdateSessionKey: (tabId: string, sessionKey: string) => void;
   onSelectModel: (tabId: string, modelId: string) => void;
@@ -43,7 +45,6 @@ interface UseWorkspaceChatPaneOptions {
 
 export function useWorkspaceChatPane({
   tab,
-  active,
   onUpdateMessages,
   onUpdateSessionKey,
   onSelectModel,
@@ -76,7 +77,6 @@ export function useWorkspaceChatPane({
   const handledDraftInjectionRef = useRef<string | null>(null);
   const openCodeProvidersLoadedRef = useRef(openCodeProviders.length > 0);
 
-  const messages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
   const tabId = tab.id;
   const chatRuntime = tab.chatRuntime as 'codex' | 'claude-code' | 'gemini' | 'opencode' | undefined;
   const chatSessionKey = tab.chatSessionKey;
@@ -108,6 +108,35 @@ export function useWorkspaceChatPane({
   );
   const isAgentTab = isAgentRuntimeTab(tab);
   const isRuntimeBound = Boolean(normalizedSessionKey && isAgentTab);
+
+  // Packet B: reads go through the transcript store. When the slice is still
+  // `idle` (no bootstrap yet) or we don't have a sessionKey yet, we fall back
+  // to the persisted `tab.chatMessages`. Writes mirror into the store via
+  // `commitMessages` so `useTranscript` subscribers (including this hook)
+  // round-trip the same entries. WS snapshots from `chat.done` refill the
+  // store out-of-band via the Packet A bridge wired in `page.tsx`.
+  const transcriptSlice = useTranscript(normalizedSessionKey);
+  const fallbackMessages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
+  const messages = useMemo(() => {
+    if (normalizedSessionKey && transcriptSlice.status !== 'idle') {
+      return transcriptSlice.messages;
+    }
+    return fallbackMessages;
+  }, [fallbackMessages, normalizedSessionKey, transcriptSlice]);
+
+  const commitMessages = useCallback(
+    (next: MobileTranscriptEntry[]) => {
+      onUpdateMessages(tabId, next);
+      if (normalizedSessionKey) {
+        transcriptStore.setSlice(normalizedSessionKey, {
+          messages: next,
+          status: 'fresh',
+          lastUpdated: Date.now(),
+        });
+      }
+    },
+    [normalizedSessionKey, onUpdateMessages, tabId],
+  );
 
   useEffect(() => {
     if (chatRuntime !== 'opencode' || openCodeProvidersLoadedRef.current) return;
@@ -144,60 +173,29 @@ export function useWorkspaceChatPane({
     setShowScrollToBottom(distFromBottom >= 80);
   }, []);
 
-  const fetchTranscript = useCallback(async () => {
-    if (!chatRuntime || !normalizedSessionKey) return;
-    if (chatRuntime !== 'codex' && chatRuntime !== 'claude-code' && chatRuntime !== 'gemini' && chatRuntime !== 'opencode') return;
-    try {
-      const endpoint = `/api/mobile/history?sessionKey=${encodeURIComponent(normalizedSessionKey)}&limit=80`;
-      const res = await fetch(endpoint);
-      if (!res.ok) return;
-      const data = await res.json() as { transcript?: MobileTranscriptEntry[] };
-      if (Array.isArray(data.transcript)) {
-        onUpdateMessages(tabId, mergeTranscriptEntries(messagesRef.current, data.transcript));
-        requestAnimationFrame(() => scrollToBottom(true));
-      }
-    } catch {
-      return;
-    }
-  }, [chatRuntime, normalizedSessionKey, onUpdateMessages, scrollToBottom, tabId]);
-
-  useEffect(() => {
-    if (active) {
-      void fetchTranscript();
-    }
-  }, [active, fetchTranscript]);
-
   const supervisorActive = (() => {
     const status = tab.supervisorStatus?.trim().toLowerCase();
     return status === 'running' || status === 'launched' || status === 'waiting';
   })();
-  const transcriptPollMs = isAgentRuntimeTab(tab) && supervisorActive ? 2_000 : 5_000;
 
+  // Packet B: previously, four useEffects polled `/api/mobile/history` per tab
+  // (active-flip, transcriptPollMs setInterval, first-load burst, post-send
+  // poke). These are gone — reads come from `useTranscript` above, the Packet
+  // A bootstrap in `page.tsx` hydrates initial state, and the WS bridge
+  // refills via `chat.done`. We keep one belt-and-suspenders one-shot: if we
+  // mount with a sessionKey whose slice is still `idle` (e.g. the tab opened
+  // before `page.tsx`'s bootstrap effect registered this key), fire a single
+  // bootstrap so the first paint isn't empty.
   useEffect(() => {
-    if (!active || !normalizedSessionKey) return undefined;
-    const id = setInterval(() => {
-      void fetchTranscript();
-    }, transcriptPollMs);
-    return () => clearInterval(id);
-  }, [active, fetchTranscript, normalizedSessionKey, transcriptPollMs]);
-
-  useEffect(() => {
-    if (!active || !isRuntimeBound) return undefined;
-    if (messagesRef.current.length > 0) return undefined;
-
-    const id = setInterval(() => {
-      if (messagesRef.current.length > 0) {
-        clearInterval(id);
-        return;
-      }
-      void fetchTranscript();
-    }, 1_500);
-    const timeout = setTimeout(() => clearInterval(id), 60_000);
-    return () => {
-      clearInterval(id);
-      clearTimeout(timeout);
-    };
-  }, [active, fetchTranscript, isRuntimeBound]);
+    if (!normalizedSessionKey) return undefined;
+    if (transcriptStore.getSlice(normalizedSessionKey).status !== 'idle') return undefined;
+    const controller = new AbortController();
+    void bootstrapTranscripts([normalizedSessionKey], {
+      merge: mergeTranscriptEntries,
+      signal: controller.signal,
+    });
+    return () => controller.abort();
+  }, [normalizedSessionKey]);
 
   const sendText = useCallback(async (inputText: string, options?: { baseMessages?: MobileTranscriptEntry[] }) => {
     const text = inputText.trim();
@@ -225,7 +223,7 @@ export function useWorkspaceChatPane({
     };
     const baseMessages = options?.baseMessages ?? messagesRef.current;
     const updated = [...baseMessages, userMsg];
-    onUpdateMessages(tabId, updated);
+    commitMessages(updated);
     scrollToBottom(true);
 
     try {
@@ -260,7 +258,7 @@ export function useWorkspaceChatPane({
           const payload = await res.json().catch(() => null) as { ok?: boolean; note?: string; error?: string } | null;
           if (!res.ok || payload?.ok === false) {
             const errorText = payload?.error ?? payload?.note ?? res.statusText;
-            onUpdateMessages(tabId, [
+            commitMessages([
               ...updated,
               {
                 id: `msg-${Date.now()}-error`,
@@ -272,9 +270,9 @@ export function useWorkspaceChatPane({
             ]);
             return;
           }
-          window.setTimeout(() => {
-            void fetchTranscript();
-          }, 800);
+          if (normalizedSessionKey) {
+            transcriptStore.setStatus(normalizedSessionKey, 'loading');
+          }
           return;
         }
         // Non-owned discovered sessions fall back to the runtime-specific
@@ -308,7 +306,7 @@ export function useWorkspaceChatPane({
         },
       ];
       setLiveAssistantId(assistantId);
-      onUpdateMessages(tabId, nextTranscript);
+      commitMessages(nextTranscript);
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -318,8 +316,7 @@ export function useWorkspaceChatPane({
 
       if (!res.ok || !res.body) {
         const errText = await res.text().catch(() => res.statusText);
-        onUpdateMessages(
-          tabId,
+        commitMessages(
           nextTranscript.map((entry) => entry.id === assistantId ? { ...entry, text: `Error: ${errText || res.statusText}` } : entry),
         );
         return;
@@ -389,7 +386,7 @@ export function useWorkspaceChatPane({
               }
             : entry
         ));
-        onUpdateMessages(tabId, nextTranscript);
+        commitMessages(nextTranscript);
       };
 
       while (true) {
@@ -584,13 +581,12 @@ export function useWorkspaceChatPane({
       }
 
       if (!accumulated) {
-        onUpdateMessages(
-          tabId,
+        commitMessages(
           nextTranscript.map((entry) => entry.id === assistantId ? { ...entry, text: 'No response received' } : entry),
         );
       }
     } catch (err) {
-      onUpdateMessages(tabId, [
+      commitMessages([
         ...updated,
         {
           id: `msg-${Date.now()}-error`,
@@ -607,11 +603,16 @@ export function useWorkspaceChatPane({
       setStreamingText('');
       setActiveThinking(null);
       setStreamMeta({});
-      setTimeout(() => {
-        void fetchTranscript();
-      }, 400);
+      // Packet B: no more post-send poll. Flag the slice as loading so any
+      // observer expecting a refresh can render a hint; the WS bridge
+      // (Packet A) will refill on `chat.done`. If a new sessionKey was
+      // assigned mid-stream, a separate effect below handles the first
+      // bootstrap.
+      if (normalizedSessionKey) {
+        transcriptStore.setStatus(normalizedSessionKey, 'loading');
+      }
     }
-  }, [chatRuntime, fetchTranscript, linkedIssue, normalizedSessionKey, onUpdateMessages, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.chatContinueLatest, tab.repo?.localPath, tabId, transportSessionId]);
+  }, [chatRuntime, commitMessages, linkedIssue, normalizedSessionKey, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.chatContinueLatest, tab.repo?.localPath, tabId, transportSessionId]);
 
   const handleSend = useCallback(async () => {
     const baseDraft = draft.trim();
@@ -690,17 +691,17 @@ export function useWorkspaceChatPane({
     const lastUser = [...previousMessages].reverse().find((entry) => entry.role === 'user');
     if (!lastUser) return;
     const baseMessages = previousMessages.filter((entry) => entry.id !== lastUser.id);
-    onUpdateMessages(tabId, baseMessages);
+    commitMessages(baseMessages);
     void sendText(lastUser.text, { baseMessages });
-  }, [onUpdateMessages, sendText, tabId]);
+  }, [commitMessages, sendText]);
 
   const handleEdit = useCallback((messageId: string, content: string) => {
     const messageIndex = messagesRef.current.findIndex((entry) => entry.id === messageId);
     if (messageIndex < 0) return;
     setDraft(content);
-    onUpdateMessages(tabId, messagesRef.current.slice(0, messageIndex));
+    commitMessages(messagesRef.current.slice(0, messageIndex));
     requestAnimationFrame(() => composeRef.current?.focus());
-  }, [onUpdateMessages, tabId]);
+  }, [commitMessages]);
 
   const handleDelete = useCallback((messageId: string) => {
     const current = messagesRef.current;
@@ -709,15 +710,15 @@ export function useWorkspaceChatPane({
     const message = current[messageIndex];
     if (!message) return;
     if (message.role === 'user' && current[messageIndex + 1]?.role === 'assistant') {
-      onUpdateMessages(tabId, current.filter((_, index) => index !== messageIndex && index !== messageIndex + 1));
+      commitMessages(current.filter((_, index) => index !== messageIndex && index !== messageIndex + 1));
       return;
     }
     if (message.role === 'assistant' && messageIndex > 0 && current[messageIndex - 1]?.role === 'user') {
-      onUpdateMessages(tabId, current.filter((_, index) => index !== messageIndex && index !== messageIndex - 1));
+      commitMessages(current.filter((_, index) => index !== messageIndex && index !== messageIndex - 1));
       return;
     }
-    onUpdateMessages(tabId, current.filter((_, index) => index !== messageIndex));
-  }, [onUpdateMessages, tabId]);
+    commitMessages(current.filter((_, index) => index !== messageIndex));
+  }, [commitMessages]);
 
   const handleRemoveQueuedContext = useCallback((contextId: string) => {
     setQueuedContextCards((previous) => previous.filter((card) => card.id !== contextId));
@@ -732,7 +733,6 @@ export function useWorkspaceChatPane({
     chatRuntime,
     composeRef,
     draft,
-    fetchTranscript,
     handleDelete,
     handleEdit,
     handleRemoveQueuedContext,
