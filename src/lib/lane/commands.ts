@@ -537,6 +537,37 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         // Non-fatal — proceed with the review transition even if the commit check fails
       }
 
+      // Empty-commit guard — if the worktree has zero commits ahead of base
+      // AND the working tree is clean, the runtime reported success but produced
+      // no diff. Surface this as a failed lane with a clear note instead of
+      // opening an empty review packet. (Observed with Gemini 3.1 Pro: emitted
+      // a clean <self-review> block but never actually landed a commit.)
+      try {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const execFileAsync = promisify(execFile);
+        const baseBranch = lane.baseBranch || 'main';
+        const { stdout: countStdout } = await execFileAsync(
+          'git',
+          ['rev-list', '--count', `${baseBranch}..HEAD`],
+          { cwd: reviewCwd, maxBuffer: 10 * 1024 * 1024 },
+        );
+        const commitsAhead = Number.parseInt(countStdout.trim(), 10);
+        if (Number.isFinite(commitsAhead) && commitsAhead === 0) {
+          console.warn(`[lane] request_review: ${command.laneId} has 0 commits ahead of ${baseBranch} — runtime reported success but produced no diff. Marking failed.`);
+          const failed = setLaneStatus(command.laneId, 'paused', 'system', 'empty_diff');
+          return {
+            ok: false,
+            laneId: command.laneId,
+            note: `Runtime reported completion but the worktree has zero commits ahead of ${baseBranch}. No review packet opened.`,
+            lane: failed ?? undefined,
+          };
+        }
+      } catch (err) {
+        console.warn(`[lane] request_review: empty-commit check failed for ${reviewCwd}:`, err);
+        // Non-fatal — proceed; the review panel will show an empty diff at worst
+      }
+
       const updated = setLaneStatus(command.laneId, 'reviewing', actor, 'review_requested');
       return { ok: true, laneId: command.laneId, note: 'Review requested.', lane: updated ?? undefined };
     }
