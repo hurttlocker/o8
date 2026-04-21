@@ -472,6 +472,10 @@ export function useWorkspaceTerminal({
     throw new Error('Unable to attach the packet to a workspace lane. The workspace surface did not become ready in time.');
   }, [ensureWorkspaceTerminalTile, getPreferredWorkspaceTerminalTarget, setActiveTileId, setTerminalTileRepoScope]);
 
+  // openWorkspaceTabForLane intentionally only supports codex/claude-code as
+  // workspace-tab runtimes — the terminal chat pane opens a CLI session for
+  // monitoring. gemini/opencode sessions map to codex for the tab opener.
+  // Packet dispatch still uses the full OrchestratorRuntime via lane commands.
   const openWorkspaceTabForLane = useCallback(async (lane: {
     laneId?: string | null;
     packetId?: string | null;

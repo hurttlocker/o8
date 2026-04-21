@@ -36,7 +36,10 @@ export type LaneStatus =
  */
 export type LaneOwnership = 'managed' | 'attached';
 
-export type LaneRuntime = 'codex' | 'claude-code';
+// LaneRuntime intentionally mirrors OrchestratorRuntime so packets with any
+// runtime can be routed through the lane system. The lane command bus
+// dispatches to the correct CLI adapter at launch time.
+export type LaneRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 
 // ── Lane ──
 

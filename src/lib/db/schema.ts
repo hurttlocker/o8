@@ -143,7 +143,7 @@ export const sessionOutcomes = sqliteTable('session_outcomes', {
   id: text('id').primaryKey(),
   repoPath: text('repo_path').notNull(),
   branch: text('branch'),
-  runtime: text('runtime', { enum: ['codex', 'claude-code'] }).notNull(),
+  runtime: text('runtime', { enum: ['codex', 'claude-code', 'gemini', 'opencode'] }).notNull(),
   sessionKey: text('session_key'),
   laneId: text('lane_id'),
   packetId: text('packet_id'),
@@ -365,7 +365,7 @@ export const lanes = sqliteTable('lanes', {
   worktreePath: text('worktree_path'),
   branch: text('branch').notNull(),
   baseBranch: text('base_branch').notNull(),
-  runtime: text('runtime', { enum: ['codex', 'claude-code'] }).notNull(),
+  runtime: text('runtime', { enum: ['codex', 'claude-code', 'gemini', 'opencode'] }).notNull(),
   sessionKey: text('session_key'),
   packetId: text('packet_id'),
   status: text('status', {
