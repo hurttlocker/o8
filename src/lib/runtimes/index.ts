@@ -43,6 +43,8 @@ import { codexRuntime } from './codex';
 import { claudeCodeRuntime } from './claude-code';
 import { geminiRuntime } from './gemini';
 import { cloudRuntime } from './cloud-adapter';
+import { opencodeRuntime } from './opencode';
+import './opencode-cost-parser';
 
 registerRuntime(codexRuntime);
 registerRuntime(claudeCodeRuntime);
@@ -50,6 +52,10 @@ registerRuntime(claudeCodeRuntime);
 // Code. Surfaces 'gemini-owned:' sessions, uses `gemini -p … --yolo
 // --output-format stream-json` under the hood. See src/lib/gemini/owned.ts.
 registerRuntime(geminiRuntime);
+// Wave 2c: opencode CLI — multi-provider coding runtime via `opencode run
+// --format json --model provider/model`. Sessions 'opencode-owned:' with
+// 'ses_' prefixed threads. See src/lib/opencode/owned.ts.
+registerRuntime(opencodeRuntime);
 // #514 — Cloud runtime adapter (Cursor-style self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires
 // a worker CLI to connect to /api/cloud/worker-poll with a provisioned key.
