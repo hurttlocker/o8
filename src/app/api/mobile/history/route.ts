@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
+import { getOwnedGeminiRuntimeTail } from '@/lib/gemini/owned';
+import { getOwnedOpencodeRuntimeTail } from '@/lib/opencode/owned';
 import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import '@/lib/runtimes'; // Ensure runtimes are registered
@@ -58,16 +60,28 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    if (sessionKey.startsWith('codex-owned:')) {
-      const tail = await getOwnedCodexRuntimeTail(sessionKey);
+    // Owned CLI sessions (codex / gemini / opencode) — identical tail shape
+    // since they share the owned-session-store primitive. Build a chat-style
+    // flat transcript for any of the three owned prefixes.
+    const ownedMatch =
+      sessionKey.startsWith('codex-owned:') ? { tail: await getOwnedCodexRuntimeTail(sessionKey), kind: 'codex' as const }
+      : sessionKey.startsWith('gemini-owned:') ? { tail: await getOwnedGeminiRuntimeTail(sessionKey), kind: 'gemini' as const }
+      : sessionKey.startsWith('opencode-owned:') ? { tail: await getOwnedOpencodeRuntimeTail(sessionKey), kind: 'opencode' as const }
+      : null;
 
-      // Build a chat-style flat transcript (no groups/turns — just user bubbles and assistant bubbles)
+    if (ownedMatch) {
+      const { tail, kind } = ownedMatch;
       const chatTranscript: MobileTranscriptEntry[] = [];
       const groups = tail.groups ?? [];
 
+      // Runtime-specific noise markers — usage stats + launch/resume echoes.
+      const noiseMarkers =
+        kind === 'codex' ? ['Usage •', 'Owned Codex session', 'Codex run launched']
+        : kind === 'gemini' ? ['Usage •', 'Owned Gemini session', 'Gemini run launched', 'Rate limited', 'Silent exit']
+        : ['Usage •', 'Owned opencode session', 'opencode run launched'];
+
       for (const group of groups) {
         const pendingToolCalls: MobileTranscriptToolCall[] = [];
-        // User prompt → user bubble
         const promptText = group.prompt?.trim();
         if (promptText) {
           chatTranscript.push({
@@ -78,14 +92,11 @@ export async function GET(request: NextRequest) {
           });
         }
 
-        // Assistant entries from this turn → assistant bubbles
         for (const entry of group.entries) {
           const text = entry.text.trim();
           if (!text) continue;
-          // Skip entries that just echo the prompt
           if (promptText && text === promptText) continue;
-          // Skip meta noise (usage stats, launch/resume markers)
-          if (text.startsWith('Usage •') || text.includes('Owned Codex session') || text.includes('Codex run launched')) continue;
+          if (noiseMarkers.some((marker) => text.startsWith(marker) || text.includes(marker))) continue;
 
           const role = runtimeTailRole(entry.label);
           if (role === 'assistant') {
@@ -98,7 +109,7 @@ export async function GET(request: NextRequest) {
             });
             pendingToolCalls.length = 0;
           } else if (entry.kind === 'tool') {
-            pendingToolCalls.push(toolCallFromEntry(entry.label || 'exec_command', entry.text));
+            pendingToolCalls.push(toolCallFromEntry(entry.label || 'tool', entry.text));
           }
         }
 
@@ -113,16 +124,8 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const payload: MobileHistoryResponse = {
-        sessionKey,
-        transcript: chatTranscript,
-      };
-
-      return NextResponse.json(payload, {
-        headers: {
-          'Cache-Control': 'no-store, max-age=0',
-        },
-      });
+      const payload: MobileHistoryResponse = { sessionKey, transcript: chatTranscript };
+      return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
     }
 
     // Discovered Codex sessions — read JSONL tail from ~/.codex/sessions/
