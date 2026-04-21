@@ -18,6 +18,7 @@ import type {
   RuntimeCapabilities,
   RuntimeSession,
   RuntimeTranscriptEntry,
+  RuntimeTranscriptToolCall,
   RuntimeChangedFile,
   RuntimeActionResult,
   LaunchOptions,
@@ -384,7 +385,7 @@ type ContentBlock = {
 
 type MessageContent = string | ContentBlock[];
 
-function extractTextFromContent(content: MessageContent, forRole: 'user' | 'assistant' = 'assistant'): string {
+function extractTextFromContent(content: MessageContent): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
 
@@ -392,14 +393,35 @@ function extractTextFromContent(content: MessageContent, forRole: 'user' | 'assi
   for (const block of content) {
     if (block.type === 'text' && block.text) {
       parts.push(block.text);
-    } else if (block.type === 'tool_use' && block.name && forRole === 'assistant') {
-      const desc = block.input && typeof block.input === 'object'
-        ? (block.input as Record<string, unknown>).description ?? (block.input as Record<string, unknown>).command ?? ''
-        : '';
-      parts.push(`[Tool: ${block.name}${desc ? ` — ${String(desc).slice(0, 100)}` : ''}]`);
     }
   }
   return parts.join('\n\n').trim();
+}
+
+function extractToolCallsFromContent(content: MessageContent): RuntimeTranscriptToolCall[] {
+  if (typeof content === 'string' || !Array.isArray(content)) return [];
+  const calls: RuntimeTranscriptToolCall[] = [];
+  for (const block of content) {
+    if (block.type !== 'tool_use' || !block.name) continue;
+    const input = block.input && typeof block.input === 'object'
+      ? (block.input as Record<string, unknown>)
+      : undefined;
+    const preview =
+      (input?.description as string | undefined)
+      ?? (input?.command as string | undefined)
+      ?? (input?.pattern as string | undefined)
+      ?? (input?.file_path as string | undefined)
+      ?? (input?.path as string | undefined)
+      ?? undefined;
+    calls.push({
+      id: (block as { id?: string }).id,
+      name: block.name,
+      args: input,
+      preview: preview ? String(preview).slice(0, 180) : undefined,
+      status: 'done',
+    });
+  }
+  return calls;
 }
 
 function extractToolName(content: MessageContent): string | undefined {
@@ -1093,11 +1115,14 @@ export const claudeCodeRuntime: AgentRuntime = {
       if (parsed.type !== 'user' && parsed.type !== 'assistant') continue;
       if (!parsed.message?.content) continue;
 
-      const text = extractTextFromContent(
-        parsed.message.content,
-        parsed.type === 'user' ? 'user' : 'assistant',
-      );
-      if (!text.trim()) continue;
+      const text = extractTextFromContent(parsed.message.content);
+      const toolCalls = parsed.type === 'assistant'
+        ? extractToolCallsFromContent(parsed.message.content)
+        : [];
+
+      // Skip entries that have neither text nor tool calls (pure tool_result echoes
+      // on user turns, or empty assistant events). Both-empty = no UI surface.
+      if (!text.trim() && toolCalls.length === 0) continue;
 
       const id = parsed.uuid ?? `cc-${entryIndex}`;
       entryIndex++;
@@ -1110,6 +1135,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         type: 'message',
         toolName: parsed.type === 'assistant' ? extractToolName(parsed.message.content) : undefined,
         filePath: parsed.type === 'assistant' ? extractFilePath(parsed.message.content) : undefined,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       });
     }
 
@@ -1117,7 +1143,8 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     // Coalesce consecutive assistant narration entries so the transcript reads
     // as one flowing thought instead of one bubble per JSONL line. Keeps the
-    // LAST tool metadata so the tool chip still renders for the merged bubble.
+    // LAST tool metadata and accumulates toolCalls so italic cards stay grouped
+    // with the surrounding narration.
     const coalesced: RuntimeTranscriptEntry[] = [];
     for (const entry of entries) {
       const prev = coalesced[coalesced.length - 1];
@@ -1127,11 +1154,15 @@ export const claudeCodeRuntime: AgentRuntime = {
         && prev
         && prev.role === 'assistant'
         && prev.type === 'message';
-      if (mergeable) {
-        prev.text = `${prev.text}\n\n${entry.text}`;
+      if (mergeable && prev) {
+        const sep = entry.text.trim().length > 0 && prev.text.trim().length > 0 ? '\n\n' : '';
+        prev.text = `${prev.text}${sep}${entry.text}`;
         prev.toolName = entry.toolName ?? prev.toolName;
         prev.filePath = entry.filePath ?? prev.filePath;
         prev.timestamp = entry.timestamp;
+        if (entry.toolCalls && entry.toolCalls.length > 0) {
+          prev.toolCalls = [...(prev.toolCalls ?? []), ...entry.toolCalls];
+        }
         continue;
       }
       coalesced.push({ ...entry });
@@ -1147,7 +1178,9 @@ export const claudeCodeRuntime: AgentRuntime = {
     }
 
     // sinceId filtering: return only entries after the given id
-    let result = coalesced.filter((entry) => entry.text.trim().length > 0);
+    let result = coalesced.filter(
+      (entry) => entry.text.trim().length > 0 || (entry.toolCalls && entry.toolCalls.length > 0),
+    );
     if (sinceId) {
       const idx = result.findIndex((e) => e.id === sinceId);
       if (idx !== -1) {
