@@ -373,6 +373,19 @@ function geminiParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
         timestamp: fallbackIso,
         timestampLabel: fallbackLabel,
       });
+    } else if (!raw.trim()) {
+      // Silent exit: no stdout and no stderr. Most commonly happens when
+      // many Gemini 3.1 Pro calls land concurrently and upstream drops one
+      // without emitting a 429 line. Surface explicitly so operators know
+      // to retry or reduce parallel load rather than staring at an empty tail.
+      entries.push({
+        id: `${run.id}:silent-exit:${entries.length}`,
+        kind: 'event',
+        label: 'Silent exit',
+        text: 'Gemini exited without emitting any output. Likely a transient upstream drop (parallel-dispatch rate-limit, auth handshake, or network hiccup). Retry; if it persists, reduce concurrent Gemini dispatches.',
+        timestamp: fallbackIso,
+        timestampLabel: fallbackLabel,
+      });
     }
   }
 

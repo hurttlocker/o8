@@ -913,6 +913,25 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     });
   }
 
+  // ── Periodic outcome refresh ───────────────────────────────────────────────
+  // Forces getFleetAdditions({fresh:true}) every 15s so sessions whose CLI
+  // exited between user-driven refreshes stop sitting at outcome:'running'
+  // forever. Cheap — readdir on the runtime root + pid/tmux probes only for
+  // sessions that the fleet code considers running. One timer per runtime,
+  // guarded against HMR via a global symbol so Next dev hot-reload doesn't
+  // leak timers across store factory re-imports.
+  const TIMER_KEY = Symbol.for(`o8.ownedSession.refreshTimer.${runtimeId}`);
+  const globalStore = globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>;
+  if (!globalStore[TIMER_KEY]) {
+    const timer = setInterval(() => {
+      getFleetAdditions({ fresh: true }).catch((err) => {
+        console.warn(`[owned-store] ${runtimeId} refresh tick failed:`, err instanceof Error ? err.message : err);
+      });
+    }, 15_000);
+    if (typeof timer.unref === 'function') timer.unref();
+    globalStore[TIMER_KEY] = timer;
+  }
+
   // ── Assembled store ────────────────────────────────────────────────────────
 
   return {
