@@ -122,7 +122,15 @@ export function optionalString(args: Record<string, unknown>, key: string) {
 
 export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
   if (value === undefined || value === null || value === '') {
-    return 'codex';
+    // Fall back to the operator's configured default — respects users who
+    // don't have a Codex subscription and set e.g. Gemini or Claude Code.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { resolveDefaultDispatchRuntimeSync } = require('@/lib/operator/defaults') as typeof import('@/lib/operator/defaults');
+      return resolveDefaultDispatchRuntimeSync();
+    } catch {
+      return 'codex';
+    }
   }
   if (value === 'codex' || value === 'claude-code' || value === 'gemini' || value === 'opencode') {
     return value;

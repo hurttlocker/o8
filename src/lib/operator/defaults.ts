@@ -6,6 +6,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+
+const DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'gemini', 'opencode'];
+function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
+  return typeof value === 'string' && (DISPATCH_RUNTIMES as string[]).includes(value);
+}
 
 /**
  * Operator defaults — the 7 dispatch/supervision knobs exposed in Settings.
@@ -27,6 +33,7 @@ export interface OperatorDefaults {
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
   orchestratorModel: string;
+  defaultDispatchRuntime: OrchestratorRuntime;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -44,7 +51,15 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   thinkingEffort: 'adaptive',
   promptCachingEnabled: true,
   orchestratorModel: 'claude-opus-4-7',
+  defaultDispatchRuntime: 'codex',
 };
+
+export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label: string; detail: string }> = [
+  { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse.' },
+  { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — use when you have a Claude sub.' },
+  { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3.1 Pro CLI — fastest for parallel fan-out.' },
+  { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
+];
 
 export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'power-user'; label: string; value: number }> = [
   { key: 'conservative', label: 'Conservative', value: 2 },
@@ -117,6 +132,13 @@ function envOrchestratorModel(): string | null {
   return raw?.trim() || null;
 }
 
+function envDefaultDispatchRuntime(): OrchestratorRuntime | null {
+  const raw = process.env.O8_DEFAULT_DISPATCH_RUNTIME?.trim();
+  if (!raw) return null;
+  if (isDispatchRuntime(raw)) return raw;
+  return null;
+}
+
 // ── File helpers ──
 
 interface StoredOperatorDefaults {
@@ -127,6 +149,7 @@ interface StoredOperatorDefaults {
   thinkingEffort?: ThinkingEffort;
   promptCachingEnabled?: boolean;
   orchestratorModel?: string;
+  defaultDispatchRuntime?: OrchestratorRuntime;
 }
 
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
@@ -168,6 +191,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (typeof stored.orchestratorModel === 'string' && stored.orchestratorModel.trim()) {
     result.orchestratorModel = stored.orchestratorModel.trim();
   }
+  if (isDispatchRuntime(stored.defaultDispatchRuntime)) {
+    result.defaultDispatchRuntime = stored.defaultDispatchRuntime;
+  }
   return result;
 }
 
@@ -181,6 +207,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envThink = envThinkingEffort();
   const envCache = envPromptCachingEnabled();
   const envModel = envOrchestratorModel();
+  const envRuntime = envDefaultDispatchRuntime();
 
   const resolved: OperatorDefaults = {
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
@@ -192,6 +219,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
+    defaultDispatchRuntime: envRuntime ?? fileValues.defaultDispatchRuntime ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchRuntime,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -204,6 +232,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
+    defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntime !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -282,6 +311,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.orchestratorModel = trimmed;
   }
+  if (update.defaultDispatchRuntime !== undefined) {
+    if (!isDispatchRuntime(update.defaultDispatchRuntime)) {
+      throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "gemini", "opencode".');
+    }
+    stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
+  }
 
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
@@ -311,4 +346,8 @@ export function resolveHealBotEnabledSync(): boolean {
 
 export function resolvePromptCachingEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.promptCachingEnabled;
+}
+
+export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime {
+  return getOperatorDefaultsSync().values.defaultDispatchRuntime;
 }
