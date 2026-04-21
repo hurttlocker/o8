@@ -21,6 +21,7 @@ import {
   orchestratorRuntimeTone,
   orchestratorStatusTone,
 } from '@/lib/orchestrator/display';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import { INTERNAL_PROTOCOL_TAGS, OPERATOR_COLLAPSE_MARKERS } from './constants';
 import type {
   ChatStarterPrompt,
@@ -79,13 +80,9 @@ export function sessionDisplayModel(session?: SessionSummary) {
   if (session.runtime === 'chat') {
     return formatModelLabel(session.model ?? 'Workspace Chat');
   }
-  if (session.runtime === 'codex') {
-    return formatModelLabel(session.model ?? 'Codex');
-  }
-  if (session.runtime === 'claude-code') {
-    return formatModelLabel(session.model ?? 'Claude Code');
-  }
-  return formatModelLabel(session.model ?? 'Live');
+  // Use capability-map label as the model fallback display; optional chaining guards 'chat' and unknowns.
+  const runtimeLabel = ORCHESTRATOR_RUNTIMES[session.runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label;
+  return formatModelLabel(session.model ?? runtimeLabel ?? 'Live');
 }
 
 export function roleLabel(role: string, agentName?: string): string {
@@ -114,10 +111,8 @@ export function sessionRuntimeLabel(session: SessionSummary) {
   if (session.orchestrationPacket?.runtime) {
     return orchestratorRuntimeTone(session.orchestrationPacket.runtime).label;
   }
-  if (session.runtime === 'claude-code') return 'Claude Code';
-  if (session.runtime === 'codex') return 'Codex';
-  if (session.runtime === 'chat') return 'Chat';
-  return 'Session';
+  // Capability-map lookup; optional chaining guards against 'chat' and other non-OrchestratorRuntime values.
+  return ORCHESTRATOR_RUNTIMES[session.runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label ?? 'Session';
 }
 
 export function sessionRepoLabel(session: SessionSummary) {

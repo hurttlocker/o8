@@ -1,11 +1,12 @@
 # Runtime Adapter Contract
 
 This doc started with issue **#11** and now reflects the shipped
-**RuntimeSurface / TerminalSession** layer from issue **#25**.
+**RuntimeSurface / TerminalSession** layer from issue **#25**, with the
+multi-runtime capability map introduced in Wave 2a-e (2026-04-20).
 
 ## Goal
 
-Cortex IDE should not be trapped inside a single runtime.
+o8 should not be trapped inside a single runtime.
 The control plane needs one stable contract for:
 - spawn
 - attach
@@ -15,34 +16,145 @@ The control plane needs one stable contract for:
 - approvals
 - artifacts
 
-That runtime contract should now be thought of as feeding a higher-level product object:
+That runtime contract feeds a higher-level product object:
 - **RuntimeSurface / TerminalSession**
 
 Why:
 - adapters are backend integration details
 - RuntimeSurface is what the UI should actually reason about when opening terminal depth, runtime watch, interrupt controls, and linked review context
 
-## Current implementation surface
+---
+
+## Adding a new runtime to o8
+
+Adding a 5th (or 6th…) runtime adapter is a **6-file patch**. After step 5 the
+compiler tells you exactly which genuine dispatch switches need a new case.
+
+### 1. `src/lib/<runtime>/owned.ts`
+
+Runtime adapter defining `launchArgs`, `resumeArgs`, `parseRunLog`, `stderrNoise`.
+Implements the `OwnedRuntimeAdapter` interface from
+`src/lib/runtimes/shared/owned-session/types.ts`.
+Creates the owned session store via `createOwnedSessionStore(adapter)` and exports
+public wrappers like `launchOwned<Runtime>Session`, etc.
+
+### 2. `src/lib/runtimes/<runtime>.ts`
+
+Universal `AgentRuntime` implementation. Delegates to the `owned.ts` wrappers.
+Declares `capabilities` + `dispatchCapability`. Size target: 300–400 LoC.
+
+### 3. `src/lib/runtimes/<runtime>-cost-parser.ts`
+
+`CostParser` that parses the runtime's telemetry output and maps to
+`SessionCostData`. Registers itself via `registerCostParser({ runtimeId, parseFiles })`
+at module load.
+
+### 4. `src/lib/orchestrator/types.ts` — line 3
+
+Add the literal to the union:
+
+```ts
+export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode' | '<new>';
+```
+
+Never duplicate this union elsewhere. The compile-time enumeration is the safety net.
+
+### 5. `src/lib/orchestrator/runtime-capabilities.ts`
+
+Add a row to `ORCHESTRATOR_RUNTIMES`:
+
+```ts
+'<new>': {
+  label: 'Display Name',
+  shortLabel: 'DN',
+  dispatchable: true,
+  requiresModel: false,
+  defaultModel: '<default-model-id>',
+  accentColor: '#hexcolor',
+  binaryName: '<cli-binary>',
+  description: 'One-line description for the launch picker tooltip.',
+},
+```
+
+After this step, all UI code that reads label/color via the capability map picks up
+the new runtime automatically — no other UI changes required.
+
+### 6. `src/lib/runtimes/index.ts`
+
+Three lines: import the adapter, import the cost parser for side-effect registration,
+call `registerRuntime(<runtime>Runtime)`.
+
+---
+
+## Why 6 files and not more
+
+- **Duplicate union literals were eliminated in Wave 2a-e (2026-04-20).** Any file
+  that hard-codes `runtime === 'codex' ? 'Codex' : 'Claude Code'` is a bug — label and
+  color come from `ORCHESTRATOR_RUNTIMES[r]`.
+- **Hardcoded UI branches go through the map.** Add one map entry; every label, chip,
+  tint, and description updates automatically.
+- **Dispatch-logic switches stay exhaustive.** `npx tsc --noEmit` after step 4 flags
+  every genuine switch that needs a new case — those are real behavioral differences
+  (e.g., resume semantics, model-flag requirements), not display data.
+
+---
+
+## Distinguishing Problem B (map it) vs Problem C (switch it)
+
+| Pattern | Classification | Action |
+|---|---|---|
+| `if (r === 'codex') return 'Codex'` | **B — label lookup** | Replace with `ORCHESTRATOR_RUNTIMES[r].label` |
+| `if (r === 'codex') return '#2563eb'` | **B — color lookup** | Replace with `ORCHESTRATOR_RUNTIMES[r].accentColor` |
+| `if (r === 'codex') return 'openai'` | **C — billing provider** | Keep switch; it maps runtimes to payment providers, which is real divergent logic |
+| `if (r === 'codex') resumeViaThread(...)` | **C — dispatch logic** | Keep switch; each runtime has a different resume protocol |
+| `if (r === 'codex' && !model) return 'strong'` | **C — tier classification** | Keep switch; default model strength differs per runtime |
+
+---
+
+## Current shipped status (Wave 2e)
+
+Four runtimes in the union:
+- `codex` — GPT-5.4 xhigh, `codex exec --json`, thread resume
+- `claude-code` — Claude Code CLI, session resume, full tool surface
+- `gemini` — Gemini CLI, `--yolo` dispatch, JSONL streaming
+- `opencode` — multi-provider coding CLI, `opencode run`, requires `--model` flag
+
+All label, accentColor, shortLabel, description, and dispatchable data lives in
+`src/lib/orchestrator/runtime-capabilities.ts`. UI must read from the map, not
+inline the values.
+
+Remaining Problem C switches (intentional, exhaustive dispatch logic):
+- `src/lib/dispatch/read-budget.ts` — tier classification by runtime default model
+- `src/lib/orchestrator/cost-persistence.ts:providerForRuntime` — billing provider routing
+- `src/components/desktop/workspace-terminal/utils.ts` — session-key canonicalization per runtime
+- `src/lib/runtime/ide-session-registry.ts` — session-key prefix logic
+- `src/lib/terminal/tab-state.ts` — tab canonicalization logic
+- `src/lib/lane/auto-review.ts` — review dispatch differs per runtime
+- `src/lib/chat/sidebar-events.ts` — capability inference (runtime-gated feature set)
+
+---
+
+## Architecture context
 
 The adapter-facing contract lives in:
-- `src/lib/runtime/adapter.ts`
+- `src/lib/runtimes/types.ts` — `AgentRuntime` interface
 
 The product-facing RuntimeSurface contract lives in:
 - `src/lib/fleet/types.ts`
 
-Current population paths:
-- `src/lib/openclaw/fleet.ts`
-- `src/lib/codex/sessions.ts`
-- `src/lib/codex/owned.ts`
+Capability map (add new runtimes here):
+- `src/lib/orchestrator/runtime-capabilities.ts`
 
-Current UI consumers:
-- `src/components/session-operator-panel.tsx`
-- `src/components/command-center-shell.tsx`
+Runtime union (one source of truth):
+- `src/lib/orchestrator/types.ts` — `OrchestratorRuntime`
+
+Runtime registry (wires adapters to the dispatch layer):
+- `src/lib/runtimes/index.ts`
 
 ## Design rules
 
 ### 1. Runtimes are adapters, not the UI model
-The UI should not know OpenClaw-specific or Codex-specific semantics everywhere.
+The UI should not know runtime-vendor-specific semantics everywhere.
 It should talk to a normalized contract.
 
 ### 2. Capabilities are explicit
@@ -50,64 +162,7 @@ Not every runtime supports every operation cleanly.
 The adapter exposes capability flags so the UI can present only truthful controls.
 
 ### 3. Telemetry is first-class
-Karpathy explicitly called out usage/stats. Cost, context pressure, and state have to survive normalization.
+Cost, context pressure, and state have to survive normalization.
 
 ### 4. Pause is not assumed
 Different runtimes mean different semantics. If pause is not real yet, the adapter should say so instead of lying.
-
-## Current contract surface
-
-### Required methods
-- `spawn(request)`
-- `attach(sessionKey)`
-- `steer(runId, instruction)`
-- `pause(runId)`
-- `stop(runId)`
-- `getTelemetry(runId)`
-
-### Required capability categories
-- spawn / attach / steer / pause / stop
-- terminal / diff / artifacts
-- approvals
-- memory context
-- cost telemetry
-
-### Product-facing outcome
-The adapter layer now populates a truthful RuntimeSurface that includes:
-- identity (`id`, `runtime`, `title`, `cwd`, `branch` when available)
-- state (`running`, `idle`, `blocked`, `exited`, `unknown`)
-- explicit capabilities (`attach`, `readTail`, `sendInput`, `interrupt`, `resize`, `diffContext`, `reviewContext`)
-- linked review context (repo / PR / branch / artifacts)
-
-The UI should present runtime depth from this product-facing surface rather than hard-coding vendor-specific assumptions into every view.
-
-## First target
-
-The first real adapter target is:
-- **OpenClaw / ACP**
-
-Why:
-- strongest native fit with current stack
-- session lifecycle already exists
-- approvals, artifacts, and chat/tool surfaces already exist
-
-## Current shipped status
-
-The live bridge MVP wires the first truthful operator actions through the OpenClaw gateway:
-- `chat.history` for sanitized transcript / session-log viewing
-- `chat.send` for explicit steer actions on an existing session
-- `chat.abort` for explicit interrupt / stop actions on an existing session
-
-Important truth guardrail:
-- **spawn is still intentionally disabled in the live bridge UI**
-- the shell mirrors existing sessions first and only adds runtime control where it is semantically honest
-
-The RuntimeSurface layer is also populated for:
-- discovered Codex terminal sessions
-- IDE-owned Codex sessions with lifecycle metadata
-- discovered Claude Code terminal sessions
-
-## Later targets
-- Codex CLI / app-server
-- Claude Code
-- other runtime bridges as they become useful

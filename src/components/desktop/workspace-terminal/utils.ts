@@ -150,6 +150,9 @@ export function sameOrchestrationPacketBadge(left?: TerminalTab['orchestrationPa
     && left.branchTarget === right.branchTarget;
 }
 
+// Problem C — exhaustive dispatch switch: each runtime has a unique session-key prefix scheme.
+// codex supports multiple prefixes (codex:, codex-owned:, codex-discovered:, codex-live:).
+// Add a new runtime prefix case here when adding a new adapter.
 export function normalizeWorkspaceChatSessionKey(
   runtime?: WorkspaceChatRuntime,
   sessionKey?: string | null,

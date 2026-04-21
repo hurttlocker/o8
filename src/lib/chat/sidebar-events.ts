@@ -43,6 +43,10 @@ export type SidebarRuntimeCapabilities = {
   supportsReasoningSummary: boolean;
 };
 
+// Problem C — capability inference per runtime. These checks express real behavioral divergence:
+// only codex and claude-code expose live-text streaming, tool events, and approvals from this
+// surface layer. gemini/opencode route through different channels. Extend each flag when a new
+// runtime ships the corresponding capability. Cannot be collapsed to a label lookup.
 export function deriveSidebarRuntimeCapabilities(
   session?: AgentSummary,
 ): SidebarRuntimeCapabilities {

@@ -75,9 +75,19 @@ Runs on push/PR to `main`: TypeCheck → Lint → Build (Node 22, `npm ci`). Bui
 
 Universal `AgentRuntime` interface (`types.ts`) with capability-gated discovery. UI never talks to a specific runtime directly — always routes through the registry (`registry.ts`).
 
-Two adapters: `codex.ts`, `claude-code.ts`. Both share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
+Four adapters ship: `codex.ts`, `claude-code.ts`, `gemini.ts`, `opencode.ts`. All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
 
 `discoverAllSessions()` runs all adapters in parallel via `Promise.allSettled`. `routeAction()` dispatches resume/interrupt to the correct runtime.
+
+**Adding a 5th runtime is a 6-file patch.** See [`docs/runtime-adapter-contract.md`](./docs/runtime-adapter-contract.md) for the exact recipe. Short version:
+1. `src/lib/<runtime>/owned.ts` — adapter + owned-session store
+2. `src/lib/runtimes/<runtime>.ts` — `AgentRuntime` implementation
+3. `src/lib/runtimes/<runtime>-cost-parser.ts` — telemetry parser
+4. `src/lib/orchestrator/types.ts` — add literal to `OrchestratorRuntime` union
+5. `src/lib/orchestrator/runtime-capabilities.ts` — add row to `ORCHESTRATOR_RUNTIMES` map (label, accentColor, etc.)
+6. `src/lib/runtimes/index.ts` — register adapter + cost parser
+
+After step 4, `npx tsc --noEmit` points to every genuine dispatch switch needing a new case.
 
 ### WebSocket Server (`src/ws-server.ts`)
 

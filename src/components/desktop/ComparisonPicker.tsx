@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { orchestratorStatusTone } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 interface ComparisonPickerProps {
   groupId: string;
@@ -17,7 +18,8 @@ function modelLabel(packet: OrchestratorPacket) {
   if (packet.assignedModel?.trim()) {
     return packet.assignedModel.trim();
   }
-  return packet.runtime === 'claude-code' ? 'Claude Code' : 'Codex';
+  // Capability-map lookup for runtime display label; packet.runtime is OrchestratorRuntime.
+  return ORCHESTRATOR_RUNTIMES[packet.runtime].label;
 }
 
 async function resolvePacketWorkspacePath(packet: OrchestratorPacket) {

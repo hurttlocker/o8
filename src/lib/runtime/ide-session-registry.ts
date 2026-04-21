@@ -5,6 +5,7 @@ import {
   readIdeTerminalStateFiles,
   type PersistedTabState,
 } from '@/lib/runtime/ide-terminal-state';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 export interface IdeRuntimeSessionDescriptor {
   tabId: string;
@@ -64,7 +65,8 @@ function scoreLabel(label: string) {
 }
 
 function runtimeDisplayName(runtime: 'codex' | 'claude-code') {
-  return runtime === 'codex' ? 'Codex' : 'Claude Code';
+  // runtime is a strict subset of OrchestratorRuntime — direct map access is safe (no ?.needed).
+  return ORCHESTRATOR_RUNTIMES[runtime].label;
 }
 
 function repoDisplayName(repoName?: string, repoPath?: string) {
