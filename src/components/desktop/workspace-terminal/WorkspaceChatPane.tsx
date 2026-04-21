@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, lazy, memo, useMemo, type CSSProperties } from 'react';
+import { Suspense, lazy, memo, useMemo, useState, type CSSProperties } from 'react';
 import {
   AlertCircle,
   ArrowDown,
@@ -46,6 +46,184 @@ function PromptGlyph({ icon }: { icon: string }) {
   if (icon === 'Search') return <Search size={16} />;
   if (icon === 'Test') return <AlertCircle size={16} />;
   return <FileText size={16} />;
+}
+
+// Compact dispatched-packet header — replaces the raw prompt user bubble at the
+// top of a packet-dispatch chat. Collapsed: title row + one-line summary + meta
+// chips. Expanded: full prompt body. Click anywhere on the header row to toggle.
+function PacketHeaderCard({
+  title,
+  branch,
+  runtime,
+  status,
+  prompt,
+}: {
+  title: string;
+  branch?: string | null;
+  runtime?: string | null;
+  status?: string | null;
+  prompt: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const previewLine = useMemo(() => {
+    // Pull out the summary line right after "Summary: <task>" or first non-empty line.
+    const summaryMatch = prompt.match(/Summary:\s*([^\n]+)/i);
+    if (summaryMatch?.[1]) return summaryMatch[1].trim();
+    const firstLine = prompt.split('\n').find((l) => l.trim());
+    return firstLine ? firstLine.trim() : '';
+  }, [prompt]);
+  const statusLabel = status ? status.replace(/_/g, ' ') : null;
+
+  return (
+    <div
+      style={{
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--t-panel-border)',
+        borderRadius: 12,
+        background: 'var(--t-panel-solid)',
+        boxShadow: 'var(--t-panel-shadow)',
+        overflow: 'hidden',
+        marginBottom: 4,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          width: '100%',
+          padding: '12px 16px',
+          background: 'transparent',
+          borderWidth: 0,
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: 'var(--t-text-faint)',
+            }}
+          >
+            Packet
+          </span>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--t-text)',
+              letterSpacing: '-0.01em',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {title}
+          </span>
+          <svg
+            width={10}
+            height={10}
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="var(--t-text-faint)"
+            strokeWidth={1.6}
+            strokeLinecap="round"
+            style={{ flexShrink: 0, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 160ms ease' }}
+          >
+            <path d="M2.5 3.5 L5 6 L7.5 3.5" />
+          </svg>
+        </div>
+        {previewLine ? (
+          <div
+            style={{
+              fontSize: 12,
+              color: 'var(--t-text-secondary)',
+              letterSpacing: '-0.005em',
+              lineHeight: 1.45,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {previewLine}
+          </div>
+        ) : null}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+          {runtime ? <PacketMetaChip label="Runtime" value={runtime} /> : null}
+          {branch ? <PacketMetaChip label="Branch" value={branch} mono /> : null}
+          {statusLabel ? <PacketMetaChip label="Status" value={statusLabel} /> : null}
+        </div>
+      </button>
+      {expanded ? (
+        <div
+          style={{
+            padding: '10px 16px 14px',
+            borderTopWidth: 1,
+            borderTopStyle: 'solid',
+            borderTopColor: 'var(--t-divider-subtle)',
+            background: 'var(--t-panel-hover, transparent)',
+          }}
+        >
+          <pre
+            style={{
+              margin: 0,
+              fontSize: 11.5,
+              lineHeight: 1.5,
+              color: 'var(--t-text-secondary)',
+              fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              letterSpacing: '-0.002em',
+            }}
+          >
+            {prompt}
+          </pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PacketMetaChip({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+      <span
+        style={{
+          fontSize: 9,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: 'var(--t-text-faint)',
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: 11,
+          color: 'var(--t-text)',
+          fontFamily: mono ? '"SF Mono", ui-monospace, Menlo, monospace' : undefined,
+          letterSpacing: '-0.005em',
+          maxWidth: 220,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {value}
+      </span>
+    </span>
+  );
 }
 
 function WorkspaceChatPaneBase({
@@ -262,17 +440,35 @@ function WorkspaceChatPaneBase({
         ) : (
           <Suspense fallback={null}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
-              {chat.visibleMessages.map((message, index) => (
-                <LazyMessageBubble
-                  key={message.id}
-                  message={message}
-                  isLast={index === chat.visibleMessages.length - 1 && !chat.sending}
-                  onRetry={message.role === 'assistant' ? () => chat.handleRetry(message.id) : undefined}
-                  onEdit={message.role === 'user' ? (content) => chat.handleEdit(message.id, content) : undefined}
-                  onDelete={() => chat.handleDelete(message.id)}
-                  onRunInTerminal={onRunInTerminal}
-                />
-              ))}
+              {chat.visibleMessages.map((message, index) => {
+                // For dispatched packets: replace the FIRST user bubble (the
+                // giant packet prompt) with a collapsible PacketHeaderCard so
+                // the transcript doesn't open with a wall of text.
+                const isFirstUser = index === 0 && message.role === 'user';
+                if (isFirstUser && tab.orchestrationPacket) {
+                  return (
+                    <PacketHeaderCard
+                      key={message.id}
+                      title={tab.orchestrationPacket.title ?? tab.label ?? 'Dispatched packet'}
+                      branch={tab.orchestrationPacket.branchTarget ?? null}
+                      runtime={tab.orchestrationPacket.runtime ?? tab.chatRuntime ?? null}
+                      status={tab.orchestrationPacket.status ?? null}
+                      prompt={typeof message.content === 'string' ? message.content : String(message.content ?? '')}
+                    />
+                  );
+                }
+                return (
+                  <LazyMessageBubble
+                    key={message.id}
+                    message={message}
+                    isLast={index === chat.visibleMessages.length - 1 && !chat.sending}
+                    onRetry={message.role === 'assistant' ? () => chat.handleRetry(message.id) : undefined}
+                    onEdit={message.role === 'user' ? (content) => chat.handleEdit(message.id, content) : undefined}
+                    onDelete={() => chat.handleDelete(message.id)}
+                    onRunInTerminal={onRunInTerminal}
+                  />
+                );
+              })}
               {chat.agentRunning && chat.activeThinking && chat.activeThinking.steps.length > 0 ? (
                 <LazyChainOfThought
                   steps={chat.activeThinking.steps}
