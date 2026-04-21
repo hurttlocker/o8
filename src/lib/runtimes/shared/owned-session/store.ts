@@ -1,0 +1,931 @@
+/**
+ * createOwnedSessionStore — the generic primitive.
+ *
+ * Takes a per-runtime `OwnedRuntimeAdapter` and returns a fully-wired
+ * `OwnedSessionStore` covering launch, resume, interrupt, runtime tail,
+ * review packet, fleet additions, telemetry sources, and review disposition.
+ *
+ * Invariants preserved from the Codex implementation:
+ *   - Surface ids keep the adapter's prefix (Codex: 'codex-owned:').
+ *   - tmux session naming uses `cortex-<runtimeId>-<shortId>`.
+ *   - Fleet cache is per-store (20s TTL, generation counter, inflight dedupe).
+ *   - Stale filtering (>24h idle + no active run) removes sessions from fleet.
+ *   - Auto-retry once within 60s of a fresh failure when `autoRetry` is on.
+ */
+
+import { spawn } from 'node:child_process';
+import { closeSync, openSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
+import { getWorktreeManager } from '@/lib/worktree/launch';
+import { tmuxSessionName } from '@/lib/terminal/tmux';
+import {
+  signalBridgeTerminalSession,
+  spawnBridgeTerminalSession,
+} from '@/lib/runtime/pty-bridge';
+import type {
+  AgentSummary,
+  EventItem,
+  ReviewArtifact,
+  RuntimeReviewPacket,
+  RuntimeSurfaceLifecycle,
+  RuntimeSurfaceSummary,
+  SquadSummary,
+} from '@/lib/fleet/types';
+
+import {
+  ACTIVE_WINDOW_MS,
+  AUTO_RETRY_FRESHNESS_MS,
+  DEFAULT_AUTO_RETRY_DELAY_MS,
+  OWNED_FLEET_TTL_MS,
+  OWNED_STALE_WINDOW_MS,
+  RECENT_WINDOW_MS,
+  RUNS_DIR,
+  compactText,
+  deriveRunOutcome,
+  ensureDir,
+  formatClock,
+  isOwnedRunAlive,
+  isPidAlive,
+  lifecycleAvailabilityLabel,
+  metadataPath,
+  nowIso,
+  pathExists,
+  readJsonFile,
+  relativeAge,
+  resolveRepoContext,
+  shortHome,
+  validateWorkspace,
+  writeJsonFile,
+} from './helpers';
+import type {
+  OwnedFleetAdditions,
+  OwnedLaunchRequest,
+  OwnedLaunchResponse,
+  OwnedReviewDisposition,
+  OwnedRunMode,
+  OwnedRunRecord,
+  OwnedRuntimeAdapter,
+  OwnedSessionRecord,
+  OwnedSessionStore,
+  OwnedTailEntry,
+  OwnedTailGroup,
+} from './types';
+
+export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSessionStore {
+  const runtimeId = adapter.runtimeId;
+  const surfacePrefix = adapter.surfaceIdPrefix;
+  const root = process.env[adapter.rootEnvVar] || adapter.rootDefault;
+  const sessionIdPrefix = adapter.sessionIdPrefix ?? `${runtimeId}-owned-`;
+  const squadId = `squad-${runtimeId}-owned`;
+  const squadName = `${adapter.squadShortName} Owned`;
+  const stderrNoise = adapter.stderrNoise ?? [];
+  const retryDelayMs = adapter.retryDelayMs ?? DEFAULT_AUTO_RETRY_DELAY_MS;
+  const humanLabel = adapter.humanLabel;
+  const launchGroupLabel = adapter.launchGroupLabel ?? 'Launch turn';
+  const resumeGroupLabel = adapter.resumeGroupLabel ?? 'Resume turn';
+
+  // Per-store fleet cache + inflight dedupe. Codex and Gemini each get their own.
+  let fleetCache: { value: OwnedFleetAdditions; cachedAt: number } | null = null;
+  let fleetInflight: Promise<OwnedFleetAdditions> | null = null;
+  let fleetGeneration = 0;
+
+  function invalidateFleetCache() {
+    fleetGeneration += 1;
+    fleetCache = null;
+    fleetInflight = null;
+  }
+
+  // ── Root / session-dir helpers ─────────────────────────────────────────────
+
+  async function ensureRoot() {
+    await ensureDir(root);
+    return root;
+  }
+
+  async function listSessionDirs() {
+    const resolvedRoot = await ensureRoot();
+    const entries = await readdir(resolvedRoot, { withFileTypes: true }).catch(() => []);
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => path.join(resolvedRoot, entry.name));
+  }
+
+  async function loadSession(sessionDir: string) {
+    return readJsonFile<OwnedSessionRecord>(metadataPath(sessionDir));
+  }
+
+  async function saveSession(session: OwnedSessionRecord) {
+    session.updatedAt = nowIso();
+    await writeJsonFile(metadataPath(session.sessionDir), session);
+  }
+
+  async function findSession(surfaceId: string) {
+    for (const sessionDir of await listSessionDirs()) {
+      const filePath = metadataPath(sessionDir);
+      if (!(await pathExists(filePath))) continue;
+      const session = await loadSession(sessionDir);
+      if (session.surfaceId === surfaceId) {
+        return session;
+      }
+    }
+    return null;
+  }
+
+  // ── Run artifacts ──────────────────────────────────────────────────────────
+
+  async function readRunArtifacts(run: OwnedRunRecord) {
+    const [stdoutRaw, stderrRaw] = await Promise.all([
+      pathExists(run.stdoutPath).then((exists) => (exists ? readFile(run.stdoutPath, 'utf8').catch(() => '') : '')),
+      pathExists(run.stderrPath).then((exists) => (exists ? readFile(run.stderrPath, 'utf8').catch(() => '') : '')),
+    ]);
+
+    return {
+      stdoutRaw,
+      stderrRaw,
+      parsed: adapter.parseRunLog(stdoutRaw, run),
+    };
+  }
+
+  // ── Session refresh (outcome reconciliation + auto-retry) ─────────────────
+
+  async function refreshSession(session: OwnedSessionRecord) {
+    let dirty = false;
+
+    for (const run of session.recentRuns) {
+      const { stderrRaw, parsed } = await readRunArtifacts(run);
+
+      if (!session.threadId && parsed.threadId) {
+        session.threadId = parsed.threadId;
+        dirty = true;
+      }
+
+      const runAlive = await isOwnedRunAlive(run);
+      if (runAlive) {
+        if (run.outcome !== 'running') {
+          run.outcome = 'running';
+          dirty = true;
+        }
+        continue;
+      }
+
+      const nextOutcome = deriveRunOutcome(run, parsed, stderrRaw, stderrNoise);
+      if (run.outcome !== nextOutcome) {
+        run.outcome = nextOutcome;
+        dirty = true;
+      }
+      if (!run.finishedAt) {
+        run.finishedAt = nowIso();
+        dirty = true;
+      }
+    }
+
+    if (session.activeRun && !(await isOwnedRunAlive(session.activeRun))) {
+      session.activeRun = undefined;
+      dirty = true;
+    }
+
+    if (dirty) {
+      await saveSession(session);
+    }
+
+    // Auto-retry: if the latest run just failed and autoRetry is enabled,
+    // retry once after `retryDelayMs`. Only fires when the failure is fresh
+    // (<60s) so stale failures don't cascade on app reload.
+    if (session.autoRetry && (session.retryCount ?? 0) < 1) {
+      const latestFailedRun = session.recentRuns.find((r) => r.outcome === 'failed');
+      if (latestFailedRun && !session.activeRun) {
+        const failAge = latestFailedRun.finishedAt
+          ? Date.now() - new Date(latestFailedRun.finishedAt).getTime()
+          : Infinity;
+        if (failAge < AUTO_RETRY_FRESHNESS_MS) {
+          session.retryCount = (session.retryCount ?? 0) + 1;
+          await saveSession(session);
+          console.log(`[owned-store] Auto-retrying ${runtimeId} session ${session.surfaceId} after failure (attempt ${session.retryCount})`);
+          setTimeout(async () => {
+            try {
+              await spawnOwnedRun(session, session.latestPrompt, session.threadId ? 'resume' : 'launch');
+              invalidateFleetCache();
+            } catch (err) {
+              console.error(`[owned-store] Auto-retry failed for ${session.surfaceId}:`, err);
+            }
+          }, retryDelayMs);
+        }
+      }
+    }
+
+    return session;
+  }
+
+  // ── Lifecycle derivation ───────────────────────────────────────────────────
+
+  function latestFinishedRun(session: OwnedSessionRecord) {
+    return [...session.recentRuns]
+      .filter((run) => run.outcome !== 'running')
+      .sort((a, b) => (b.finishedAt ?? b.startedAt).localeCompare(a.finishedAt ?? a.startedAt))[0];
+  }
+
+  function latestRun(session: OwnedSessionRecord) {
+    return [...session.recentRuns].sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+  }
+
+  function deriveLifecycle(session: OwnedSessionRecord, activeRunOverride?: boolean): RuntimeSurfaceLifecycle {
+    const activeRun = activeRunOverride === true
+      ? session.activeRun
+      : activeRunOverride === false
+        ? undefined
+        : (session.activeRun && isPidAlive(session.activeRun.pid) ? session.activeRun : undefined);
+    const latest = latestFinishedRun(session);
+
+    if (activeRun) {
+      return {
+        availability: 'running',
+        lastOutcome: latest?.outcome === 'finished' || latest?.outcome === 'interrupted' || latest?.outcome === 'failed'
+          ? latest.outcome
+          : undefined,
+        lastRunMode: activeRun.mode,
+        lastRunStartedAt: activeRun.startedAt,
+        lastRunFinishedAt: latest?.finishedAt,
+        summary: 'Active owned run in flight.',
+      };
+    }
+
+    if (!session.threadId) {
+      return {
+        availability: 'awaiting-thread',
+        lastOutcome: latest?.outcome === 'finished' || latest?.outcome === 'interrupted' || latest?.outcome === 'failed'
+          ? latest.outcome
+          : undefined,
+        lastRunMode: latest?.mode,
+        lastRunStartedAt: latest?.startedAt,
+        lastRunFinishedAt: latest?.finishedAt,
+        summary: `Waiting for the first persistent ${adapter.squadShortName} thread id before resume is available.`,
+      };
+    }
+
+    return {
+      availability: 'ready-for-resume',
+      lastOutcome: latest?.outcome === 'finished' || latest?.outcome === 'interrupted' || latest?.outcome === 'failed'
+        ? latest.outcome
+        : undefined,
+      lastRunMode: latest?.mode,
+      lastRunStartedAt: latest?.startedAt,
+      lastRunFinishedAt: latest?.finishedAt,
+      summary: latest?.outcome === 'interrupted'
+        ? 'Previous run was interrupted. This owned session is ready for the next bounded input.'
+        : latest?.outcome === 'failed'
+          ? 'Previous run failed. This owned session is ready for a corrective follow-up.'
+          : 'Owned session is idle between runs and ready for the next bounded input.',
+    };
+  }
+
+  function reviewDisposition(session: OwnedSessionRecord): OwnedReviewDisposition {
+    return session.reviewDisposition ?? 'watching';
+  }
+
+  // ── Surface / status building ──────────────────────────────────────────────
+
+  function buildRuntimeSurface(session: OwnedSessionRecord, running: boolean): RuntimeSurfaceSummary {
+    const lifecycle = deriveLifecycle(session);
+    const lastOutcomeLabel = lifecycle.lastOutcome ? ` • last ${lifecycle.lastOutcome}` : '';
+
+    return {
+      id: session.surfaceId,
+      runtime: runtimeId,
+      kind: 'runtime-session',
+      ownership: 'owned',
+      title: session.title,
+      cwd: shortHome(session.repoPath),
+      branch: session.branch,
+      sourceLabel: running
+        ? `IDE-owned ${adapter.squadShortName} registry • active pid ${session.activeRun?.pid ?? 'unknown'}${lastOutcomeLabel}`
+        : `IDE-owned ${adapter.squadShortName} registry • ${lifecycleAvailabilityLabel(lifecycle.availability)}${lastOutcomeLabel}`,
+      tailSourceLabel: `${shortHome(session.sessionDir)}/${RUNS_DIR}/*.jsonl`,
+      capabilities: {
+        attach: true,
+        readTail: true,
+        sendInput: lifecycle.availability === 'ready-for-resume',
+        interrupt: lifecycle.availability === 'running',
+        resize: false,
+        diffContext: Boolean(session.branch || session.repoSlug),
+        reviewContext: Boolean(session.branch || session.repoSlug),
+      },
+      lifecycle,
+      reviewContext: {
+        repoSlug: session.repoSlug,
+        branch: session.branch,
+        head: session.head,
+      },
+    };
+  }
+
+  function deriveOwnedStatus(session: OwnedSessionRecord): AgentSummary['status'] {
+    const lifecycle = deriveLifecycle(session);
+    if (lifecycle.availability === 'running') return 'running';
+    if (lifecycle.lastOutcome === 'failed') return 'failed';
+    if (lifecycle.availability === 'awaiting-thread') return 'waiting';
+    if (lifecycle.lastOutcome === 'interrupted') return 'waiting';
+    if (lifecycle.availability === 'ready-for-resume') return 'reviewing';
+
+    const latest = latestRun(session);
+    if (!latest) return 'idle';
+    const ageMs = Math.max(0, Date.now() - new Date(latest.finishedAt ?? latest.startedAt).getTime());
+    if (ageMs < ACTIVE_WINDOW_MS) return 'reviewing';
+    if (ageMs < RECENT_WINDOW_MS) return 'reviewing';
+    return 'idle';
+  }
+
+  function buildCurrentTask(session: OwnedSessionRecord, running: boolean) {
+    const lifecycle = deriveLifecycle(session);
+    if (running) {
+      return `IDE-launched ${adapter.squadShortName} run active. ${session.latestSummary}`;
+    }
+    if (lifecycle.availability === 'awaiting-thread') {
+      return `IDE-owned ${adapter.squadShortName} session launched and waiting for its first thread id. ${session.latestSummary}`;
+    }
+    if (reviewDisposition(session) === 'resolved') {
+      return `Operator marked this owned result resolved. Keep watching only if new evidence appears. ${session.latestSummary}`;
+    }
+    if (lifecycle.lastOutcome === 'interrupted') {
+      return `IDE-owned ${adapter.squadShortName} session is ready for resume after an interrupted run. ${session.latestSummary}`;
+    }
+    if (lifecycle.lastOutcome === 'failed') {
+      return `IDE-owned ${adapter.squadShortName} session is ready for a corrective follow-up after a failed run. ${session.latestSummary}`;
+    }
+    if (session.threadId) {
+      return `IDE-owned ${adapter.squadShortName} session ready for the next input via resume. ${session.latestSummary}`;
+    }
+    return `IDE-owned ${adapter.squadShortName} session is idle. ${session.latestSummary}`;
+  }
+
+  // ── Spawn / launch / resume / interrupt ────────────────────────────────────
+
+  async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
+    await ensureDir(path.join(session.sessionDir, RUNS_DIR));
+
+    const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const stdoutPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.jsonl`);
+    const stderrPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.stderr.log`);
+
+    let args: string[];
+    if (mode === 'launch') {
+      args = adapter.launchArgs({ cwd: session.repoPath, prompt, model: session.model });
+    } else {
+      const built = adapter.resumeArgs({ threadId: session.threadId ?? '', prompt, model: session.model });
+      if (!built) {
+        throw new Error(`Resume is not supported by the ${humanLabel} runtime adapter.`);
+      }
+      args = built;
+    }
+
+    // Resolve CLI binary via the shared resolver (honours env overrides, nvm,
+    // volta, Finder-launched Tauri env, etc.). Caches across calls.
+    const binary = await resolveCli({
+      runtimeId,
+      binaryName: adapter.binaryName,
+      envOverride: adapter.binaryEnvOverride,
+      extraEnvOverrides: adapter.binaryExtraEnvOverrides,
+    }).then((r) => r.path).catch(() => adapter.binaryName);
+
+    let pid = 0;
+    let terminalSessionName: string | undefined;
+
+    const bridgeSessionName = tmuxSessionName(runtimeId, runId);
+    const cliCmd = [binary, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+    const shellCmd = `${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
+
+    try {
+      const result = await spawnBridgeTerminalSession({
+        sessionName: bridgeSessionName,
+        shellCommand: shellCmd,
+        cwd: session.repoPath,
+        env: { FORCE_COLOR: '0', NO_COLOR: '1' },
+      });
+      terminalSessionName = result.sessionName;
+      pid = typeof result.pid === 'number' ? result.pid : 0;
+    } catch {
+      // bridge spawn failed — fall through to detached spawn
+    }
+
+    if (!terminalSessionName) {
+      const stdoutFd = openSync(stdoutPath, 'a');
+      const stderrFd = openSync(stderrPath, 'a');
+      try {
+        const child = spawn(binary, args, {
+          cwd: session.repoPath,
+          detached: true,
+          stdio: ['ignore', stdoutFd, stderrFd],
+        });
+        child.unref();
+        pid = child.pid ?? 0;
+      } finally {
+        closeSync(stdoutFd);
+        closeSync(stderrFd);
+      }
+    }
+
+    const run: OwnedRunRecord = {
+      id: runId,
+      mode,
+      prompt,
+      startedAt: nowIso(),
+      pid,
+      stdoutPath,
+      stderrPath,
+      outcome: 'running',
+      tmuxSession: terminalSessionName,
+    };
+
+    session.latestPrompt = prompt;
+    session.latestSummary = compactText(prompt, 140) || session.latestSummary;
+    session.reviewDisposition = 'watching';
+    session.reviewDispositionUpdatedAt = nowIso();
+    session.activeRun = run;
+    session.recentRuns = [run, ...session.recentRuns].slice(0, 16);
+    await saveSession(session);
+    return run;
+  }
+
+  async function launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse> {
+    const prompt = request.prompt.trim();
+    if (!prompt) {
+      throw new Error('prompt is required');
+    }
+
+    const repoPath = await validateWorkspace(request.cwd);
+    const repo = await resolveRepoContext(repoPath);
+    const id = `${sessionIdPrefix}${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const sessionDir = path.join(await ensureRoot(), id);
+    await ensureDir(sessionDir);
+
+    const session: OwnedSessionRecord = {
+      surfaceId: `${surfacePrefix}${id}`,
+      sessionDir,
+      cwd: repoPath,
+      repoPath,
+      repoSlug: repo.repoSlug,
+      branch: repo.branch,
+      head: repo.head,
+      title: repo.title,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      latestPrompt: prompt,
+      latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from Cortex IDE.`,
+      model: request.model?.trim() || adapter.defaultModel || undefined,
+      reviewDisposition: 'watching',
+      reviewDispositionUpdatedAt: nowIso(),
+      recentRuns: [],
+    };
+
+    await saveSession(session);
+    await spawnOwnedRun(session, prompt, 'launch');
+    invalidateFleetCache();
+
+    return {
+      ok: true,
+      runtime: runtimeId,
+      surfaceId: session.surfaceId,
+      note: `Owned ${adapter.squadShortName} run launched for ${repo.title}. It will become mutable through resume/interrupt only because Cortex IDE owns this surface.`,
+    };
+  }
+
+  async function resume(surfaceId: string, prompt: string) {
+    const session = await findSession(surfaceId);
+    if (!session) {
+      throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
+    }
+    await refreshSession(session);
+
+    if (session.activeRun && isPidAlive(session.activeRun.pid)) {
+      throw new Error(`This owned ${adapter.squadShortName} session still has an active run. Wait for it to settle or interrupt it first.`);
+    }
+    if (!session.threadId) {
+      throw new Error(`This owned ${adapter.squadShortName} session does not have a thread id yet, so resume is not available.`);
+    }
+
+    await spawnOwnedRun(session, prompt.trim(), 'resume');
+    invalidateFleetCache();
+    return {
+      ok: true,
+      note: `Queued a new turn on the IDE-owned ${adapter.squadShortName} session via resume.`,
+    };
+  }
+
+  async function interrupt(surfaceId: string) {
+    const session = await findSession(surfaceId);
+    if (!session) {
+      throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
+    }
+    await refreshSession(session);
+
+    if (!session.activeRun || !isPidAlive(session.activeRun.pid)) {
+      return { interrupted: false, note: `No active owned ${adapter.squadShortName} run was in flight.` };
+    }
+
+    try {
+      if (session.activeRun.tmuxSession) {
+        await signalBridgeTerminalSession(session.activeRun.tmuxSession, 'SIGINT');
+      } else {
+        process.kill(-session.activeRun.pid, 'SIGINT');
+      }
+      session.activeRun = {
+        ...session.activeRun,
+        outcome: 'interrupted',
+        interruptRequestedAt: nowIso(),
+      };
+      session.recentRuns = session.recentRuns.map((run) =>
+        run.id === session.activeRun?.id
+          ? {
+              ...run,
+              outcome: 'interrupted',
+              interruptRequestedAt: session.activeRun?.interruptRequestedAt,
+            }
+          : run,
+      );
+      await saveSession(session);
+      invalidateFleetCache();
+      return { interrupted: true, note: `Interrupt sent to the active IDE-owned ${adapter.squadShortName} run.` };
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : `Unable to interrupt the owned ${adapter.squadShortName} run.`);
+    }
+  }
+
+  async function setReviewDisposition(surfaceId: string, disposition: OwnedReviewDisposition) {
+    const session = await findSession(surfaceId);
+    if (!session) {
+      throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
+    }
+
+    session.reviewDisposition = disposition;
+    session.reviewDispositionUpdatedAt = nowIso();
+    await saveSession(session);
+    invalidateFleetCache();
+
+    return {
+      disposition,
+      note: disposition === 'resolved'
+        ? 'Marked this owned result resolved. It stays visible, but no longer needs active attention unless new evidence appears.'
+        : 'Switched this owned result back to keep-watching mode.',
+    };
+  }
+
+  // ── Telemetry / tail / review ──────────────────────────────────────────────
+
+  async function getTelemetrySources(surfaceId: string) {
+    const session = await findSession(surfaceId);
+    if (!session) {
+      return null;
+    }
+
+    await refreshSession(session);
+
+    return {
+      threadId: session.threadId,
+      stdoutPaths: [...session.recentRuns]
+        .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+        .map((run) => run.stdoutPath),
+    };
+  }
+
+  async function collectTailEntries(session: OwnedSessionRecord) {
+    const runs = [...session.recentRuns].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    const entries: OwnedTailEntry[] = [];
+    const groups: OwnedTailGroup[] = [];
+    let discoveredThreadId = session.threadId;
+
+    for (const run of runs) {
+      const { parsed, stderrRaw } = await readRunArtifacts(run);
+      if (!parsed.entries.length) continue;
+
+      const outcome = deriveRunOutcome(run, parsed, stderrRaw, stderrNoise);
+      discoveredThreadId = discoveredThreadId ?? parsed.threadId;
+      entries.push(...parsed.entries);
+      groups.push({
+        id: run.id,
+        title: `${run.mode === 'launch' ? launchGroupLabel : resumeGroupLabel} • ${outcome}`,
+        mode: run.mode,
+        outcome,
+        prompt: compactText(run.prompt, 260),
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+        startedAtLabel: formatClock(run.startedAt),
+        finishedAtLabel: formatClock(run.finishedAt),
+        summary: outcome === 'interrupted'
+          ? `Interrupted before ${adapter.squadShortName} completed the turn.`
+          : outcome === 'failed'
+            ? 'Run ended without a clean turn completion.'
+            : outcome === 'running'
+              ? 'Run is still in flight.'
+              : 'Run completed and the session can continue from here.',
+        entries: parsed.entries,
+      });
+    }
+
+    return {
+      entries: entries.slice(-24),
+      groups: groups.slice(-8),
+      threadId: discoveredThreadId,
+    };
+  }
+
+  async function getRuntimeTail(surfaceId: string) {
+    const session = await findSession(surfaceId);
+    if (!session) {
+      throw new Error(`Owned ${adapter.squadShortName} runtime surface was not found.`);
+    }
+
+    await refreshSession(session);
+    const tail = await collectTailEntries(session);
+    if (!session.threadId && tail.threadId) {
+      session.threadId = tail.threadId;
+      await saveSession(session);
+    }
+
+    return {
+      surface: buildRuntimeSurface(session, Boolean(session.activeRun)),
+      entries: tail.entries,
+      groups: tail.groups,
+    };
+  }
+
+  function buildReviewActions(packet: Pick<RuntimeReviewPacket, 'dirty' | 'changedFiles' | 'lastRun' | 'reviewDisposition'>) {
+    const actions = [] as string[];
+
+    if (packet.lastRun?.outcome === 'running') {
+      actions.push('Watch the active run', 'Interrupt if it drifts');
+      return actions;
+    }
+
+    if (packet.reviewDisposition === 'resolved') {
+      actions.push('Keep watching for new evidence');
+    }
+
+    if (packet.dirty) {
+      actions.push('Review current repo delta', 'Open desktop diff context');
+    }
+
+    if (packet.lastRun?.outcome === 'failed') {
+      actions.push('Resume with correction context', 'Inspect failing command evidence');
+    } else if (packet.lastRun?.outcome === 'interrupted') {
+      actions.push('Resume from the interrupted state');
+    } else if (packet.lastRun?.outcome === 'finished') {
+      actions.push('Decide whether the result is good enough', 'Resume with a bounded follow-up if needed');
+    }
+
+    if (!actions.length) {
+      actions.push('Review the latest run evidence');
+    }
+
+    return actions.slice(0, 4);
+  }
+
+  function buildReviewNotes(session: OwnedSessionRecord, dirty: boolean) {
+    const notes = [
+      'Current repo delta is shown live from git and is not yet isolated per run when multiple sessions touch the same repo.',
+    ];
+
+    if (!dirty) {
+      notes.push('The repo is currently clean, so this run may have been exploratory, purely read-only, or already reconciled.');
+    }
+
+    if (!session.threadId) {
+      notes.push(`This owned surface is still waiting for its first persistent ${adapter.squadShortName} thread id before resume becomes available.`);
+    }
+
+    return notes;
+  }
+
+  async function getReviewPacket(surfaceId: string): Promise<RuntimeReviewPacket> {
+    const session = await findSession(surfaceId);
+    if (!session) {
+      throw new Error(`Owned ${adapter.squadShortName} review packet was not found.`);
+    }
+
+    await refreshSession(session);
+    const repoReview = await getRuntimeRepoReview(session.repoPath);
+    const lastRun = latestRun(session);
+    const lastRunArtifacts = lastRun ? await readRunArtifacts(lastRun) : null;
+    const lastRunOutcome = lastRun && lastRunArtifacts
+      ? deriveRunOutcome(lastRun, lastRunArtifacts.parsed, lastRunArtifacts.stderrRaw, stderrNoise)
+      : undefined;
+    const lastRunEvidence = lastRunArtifacts && lastRun && adapter.parseRunEvidence
+      ? adapter.parseRunEvidence(lastRunArtifacts.stdoutRaw, lastRun, lastRunOutcome ?? lastRun.outcome)
+      : null;
+    const runtimeSurface = buildRuntimeSurface(session, Boolean(session.activeRun));
+    const linkedWorktree = await getWorktreeManager(session.repoPath).list()
+      .then((worktrees) => worktrees.find((worktree) => worktree.sessionKey === session.surfaceId) ?? null)
+      .catch(() => null);
+
+    const packet: RuntimeReviewPacket = {
+      surfaceId: session.surfaceId,
+      runtime: runtimeId,
+      title: session.title,
+      summary: runtimeSurface.lifecycle?.summary ?? session.latestSummary,
+      repoPath: shortHome(session.repoPath),
+      repoSlug: session.repoSlug,
+      branch: repoReview.branch ?? session.branch,
+      head: repoReview.head ?? session.head,
+      dirty: repoReview.dirty,
+      diffStat: repoReview.diffStat,
+      changedFiles: repoReview.changedFiles,
+      recentCommits: repoReview.recentCommits,
+      reviewDisposition: reviewDisposition(session),
+      reviewDispositionUpdatedAt: session.reviewDispositionUpdatedAt,
+      reviewDispositionUpdatedAtLabel: formatClock(session.reviewDispositionUpdatedAt),
+      worktree: linkedWorktree ? {
+        id: linkedWorktree.id,
+        path: linkedWorktree.path,
+        branch: linkedWorktree.branch,
+        baseBranch: linkedWorktree.baseBranch,
+        status: linkedWorktree.status,
+        dirtyFiles: linkedWorktree.dirtyFiles,
+      } : null,
+      lastRun: lastRun
+        ? {
+            id: lastRun.id,
+            mode: lastRun.mode,
+            outcome: lastRunOutcome ?? lastRun.outcome,
+            prompt: compactText(lastRun.prompt, 260),
+            startedAt: lastRun.startedAt,
+            finishedAt: lastRun.finishedAt,
+            startedAtLabel: formatClock(lastRun.startedAt),
+            finishedAtLabel: formatClock(lastRun.finishedAt),
+            assistantSummary: lastRunEvidence?.assistantSummary,
+            commands: lastRunEvidence?.commands ?? [],
+          }
+        : undefined,
+      nextActions: [],
+      notes: buildReviewNotes(session, repoReview.dirty),
+    };
+
+    packet.nextActions = buildReviewActions(packet);
+    return packet;
+  }
+
+  // ── Fleet additions (TTL cache + inflight dedupe) ──────────────────────────
+
+  async function computeFleetAdditions(): Promise<OwnedFleetAdditions> {
+    const sessionDirs = await listSessionDirs();
+    if (!sessionDirs.length) {
+      return {
+        agents: [],
+        squads: [],
+        events: [],
+        artifacts: [],
+        ownedThreadIds: [],
+      };
+    }
+
+    const allSessions: OwnedSessionRecord[] = [];
+    for (const sessionDir of sessionDirs) {
+      const filePath = metadataPath(sessionDir);
+      if (!(await pathExists(filePath))) continue;
+      const session = await loadSession(sessionDir);
+      await refreshSession(session);
+      allSessions.push(session);
+    }
+
+    // Filter out stale sessions: no active run + last activity > 24h ago.
+    const now = Date.now();
+    const sessions = allSessions.filter((session) => {
+      if (session.activeRun) return true;
+      const latest = latestRun(session);
+      const lastActivityStr = latest?.finishedAt ?? latest?.startedAt ?? session.updatedAt;
+      const ageMs = Math.max(0, now - new Date(lastActivityStr).getTime());
+      return ageMs < OWNED_STALE_WINDOW_MS;
+    });
+
+    const agents: AgentSummary[] = sessions
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((session) => {
+        const running = Boolean(session.activeRun);
+        const status = deriveOwnedStatus(session);
+        const runtimeSurface = buildRuntimeSurface(session, running);
+        const lifecycle = runtimeSurface.lifecycle;
+        const lastRun = latestRun(session);
+        const lifecycleLabel = lifecycle?.availability === 'running'
+          ? 'owned active'
+          : lifecycle?.lastOutcome === 'failed'
+            ? 'owned failed'
+            : lifecycle?.lastOutcome === 'interrupted'
+              ? 'owned interrupted'
+              : lifecycle?.availability === 'awaiting-thread'
+                ? 'owned warming'
+                : 'owned ready';
+        return {
+          id: session.surfaceId,
+          name: session.title,
+          squadId,
+          runtime: runtimeId,
+          model: `${runtimeId} owned`,
+          status,
+          currentTask: buildCurrentTask(session, running),
+          workspace: shortHome(session.repoPath),
+          branch: session.branch ?? 'detached',
+          sessionKey: session.surfaceId,
+          approvalStatus: 'none',
+          lastEventAt: relativeAge(lastRun?.finishedAt ?? lastRun?.startedAt ?? session.createdAt),
+          context: {
+            usedPercent: 0,
+            trend: running ? 'rising' : 'stable',
+          },
+          alerts: lifecycle?.lastOutcome === 'failed' ? 1 : 0,
+          sessionId: session.threadId ?? session.surfaceId,
+          sessionKind: 'owned-runtime',
+          surfaceLabel: `${adapter.squadShortName} terminal • ${lifecycleLabel}`,
+          runtimeSurface,
+          tmuxSession: session.activeRun?.tmuxSession ?? lastRun?.tmuxSession,
+        } satisfies AgentSummary;
+      });
+
+    const squad: SquadSummary | null = agents.length
+      ? {
+          id: squadId,
+          name: squadName,
+          status: agents.some((agent) => agent.status === 'running') ? 'healthy' : 'watching',
+          throughputLabel: `${agents.length} IDE-owned surface${agents.length === 1 ? '' : 's'}`,
+          blockers: 0,
+          alerts: 0,
+          liveSessions: agents.length,
+          members: agents.map((agent) => agent.id),
+        }
+      : null;
+
+    const events: EventItem[] = agents.slice(0, 4).map((agent) => ({
+      id: `evt-${agent.id}`,
+      agentId: agent.id,
+      squadId: agent.squadId,
+      severity: agent.status === 'running' ? 'info' : agent.status === 'failed' ? 'critical' : agent.status === 'waiting' ? 'warning' : 'success',
+      title: `${agent.name} • ${agent.surfaceLabel}`,
+      detail: `${agent.currentTask}${agent.runtimeSurface?.lifecycle?.lastOutcome ? ` • last ${agent.runtimeSurface.lifecycle.lastOutcome}` : ''}${agent.runtimeSurface?.reviewContext?.repoSlug ? ` • ${agent.runtimeSurface.reviewContext.repoSlug}` : ''}`,
+      timestamp: agent.lastEventAt,
+    }));
+
+    const artifacts: ReviewArtifact[] = agents.slice(0, 3).map((agent) => ({
+      kind: 'run_log',
+      title: `${agent.name} owned tail`,
+      state: agent.runtimeSurface?.lifecycle?.lastOutcome === 'failed' ? 'new' : 'reviewing',
+      agentId: agent.id,
+      detail: agent.runtimeSurface?.lifecycle?.lastOutcome
+        ? `Readable JSON tail recovered from an IDE-owned ${adapter.squadShortName} exec/resume run. Last outcome: ${agent.runtimeSurface.lifecycle.lastOutcome}.`
+        : `Readable JSON tail recovered from an IDE-owned ${adapter.squadShortName} exec/resume run.`,
+    }));
+
+    return {
+      agents,
+      squads: squad ? [squad] : [],
+      events,
+      artifacts,
+      sourceLabel: `Owned ${adapter.squadShortName} launch registry`,
+      note: agents.length
+        ? `IDE-owned ${adapter.squadShortName} surfaces can now launch, resume between runs, and interrupt active runs. Discovered ${adapter.squadShortName} terminals remain watch-only.`
+        : undefined,
+      ownedThreadIds: agents.map((agent) => agent.sessionId ?? '').filter((value) => value && !value.startsWith(surfacePrefix)),
+    };
+  }
+
+  async function getFleetAdditions(options: { fresh?: boolean } = {}): Promise<OwnedFleetAdditions> {
+    const fresh = options.fresh ?? false;
+    const now = Date.now();
+    const generation = fleetGeneration;
+    if (!fresh && fleetCache && (now - fleetCache.cachedAt) < OWNED_FLEET_TTL_MS) {
+      return fleetCache.value;
+    }
+
+    if (!fresh && fleetInflight) {
+      return fleetInflight;
+    }
+
+    const promise = computeFleetAdditions();
+
+    fleetInflight = promise;
+    return promise.finally(() => {
+      if (fleetInflight === promise) {
+        fleetInflight = null;
+      }
+    }).then((value) => {
+      if (generation === fleetGeneration) {
+        fleetCache = { value, cachedAt: Date.now() };
+      }
+      return value;
+    });
+  }
+
+  // ── Assembled store ────────────────────────────────────────────────────────
+
+  return {
+    runtimeId,
+    surfaceIdPrefix: surfacePrefix,
+    launch,
+    resume,
+    interrupt,
+    getRuntimeTail,
+    getReviewPacket,
+    getFleetAdditions,
+    getTelemetrySources,
+    setReviewDisposition,
+    invalidateFleetCache,
+  };
+}
