@@ -21,7 +21,8 @@ export type {
   AgentRuntime,
 } from './types';
 
-export type { SessionCostData } from './cost-parser';
+export type { SessionCostData } from './shared/cost-parser-registry';
+export { registerCostParser, getCostParser, parseCost } from './shared/cost-parser-registry';
 
 export {
   registerRuntime,

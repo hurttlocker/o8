@@ -27,7 +27,9 @@ import {
   jsonlUsageTotal,
   type JsonlEntry,
 } from '@/lib/runtimes/compaction-detector';
-import { parseSessionCost } from '@/lib/runtimes/cost-parser';
+// Side-effect import: registers the 'claude-code' cost parser in the registry.
+import '@/lib/runtimes/cost-parser';
+import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { getRuntimeTerminalSession, registerRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
@@ -1367,7 +1369,11 @@ export const claudeCodeRuntime: AgentRuntime = {
       return undefined;
     }
 
-    const sessionCost = await parseSessionCost(sessionProject.jsonlPath);
+    const sessionCost = await parseCost('claude-code', [sessionProject.jsonlPath]);
+    if (!sessionCost) {
+      return undefined;
+    }
+
     const totalTokens = sessionCost.inputTokens
       + sessionCost.outputTokens
       + sessionCost.cacheReadTokens
