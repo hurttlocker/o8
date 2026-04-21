@@ -206,16 +206,7 @@ function RepoCardExpandedContentBase({
                     letterSpacing: '-0.005em',
                     lineHeight: 1.35,
                     ...(isActiveRepo
-                      ? {
-                          backgroundImage:
-                            'linear-gradient(100deg, var(--t-text) 0%, var(--t-text) 38%, var(--t-text-secondary) 50%, var(--t-text) 62%, var(--t-text) 100%)',
-                          backgroundSize: '220% 100%',
-                          backgroundRepeat: 'no-repeat',
-                          WebkitBackgroundClip: 'text',
-                          backgroundClip: 'text',
-                          WebkitTextFillColor: 'transparent',
-                          animation: 'tab-label-shimmer 2.8s linear infinite',
-                        }
+                      ? { animation: 'tab-label-shimmer 2.6s ease-in-out infinite' }
                       : null),
                   }}
                 >
