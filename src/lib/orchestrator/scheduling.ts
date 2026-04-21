@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
+import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
@@ -214,7 +215,10 @@ async function dispatchPacket(
       laneResult.lane?.baseBranch ?? 'main',
       laneResult.lane?.worktreePath ?? null,
     ),
-    model: packet.assignedModel ?? undefined,
+    // Fallback ladder: explicit packet model → capability-map default → undefined.
+    // This ensures Gemini/opencode dispatches actually pin the flagship model
+    // from the capability map instead of letting the CLI pick a cheaper default.
+    model: (packet.assignedModel ?? getRuntimeCapability(packet.runtime).defaultModel) ?? undefined,
     actor: 'orchestrator',
   });
 
