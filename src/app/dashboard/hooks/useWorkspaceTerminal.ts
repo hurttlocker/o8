@@ -13,6 +13,7 @@ import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWe
 import type { TerminalHandle } from '@/components/desktop/LiveOutput';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
+import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
 import {
@@ -84,6 +85,7 @@ export function useWorkspaceTerminal({
   const [workspaceChatSessionByTileId, setWorkspaceChatSessionByTileId] = useState<Record<string, string | undefined>>({});
   const [workspaceChatSessionsByTileId, setWorkspaceChatSessionsByTileId] = useState<Record<string, MobileInboxSnapshot['sessions']>>({});
   const [workspaceLaneByTileId, setWorkspaceLaneByTileId] = useState<Record<string, WorkspaceLaneState | null>>({});
+  const [workspaceActiveTabKindByTileId, setWorkspaceActiveTabKindByTileId] = useState<Record<string, TerminalTab['kind'] | null>>({});
   const [workspaceTerminalResetNonceByTileId, setWorkspaceTerminalResetNonceByTileId] = useState<Record<string, number>>({});
   const [lifecycleEvents, setLifecycleEvents] = useState<Map<string, { state: string; exitCode?: number; ts: number }>>(new Map());
 
@@ -688,10 +690,12 @@ export function useWorkspaceTerminal({
     sendTerminalInput,
     sendTerminalResize,
     setTerminalTileRepoScope,
+    setWorkspaceActiveTabKindByTileId,
     setWorkspaceChatSessionByTileId,
     setWorkspaceChatSessionsByTileId,
     setWorkspaceLaneByTileId,
     setWorkspaceTerminalResetNonceByTileId,
+    workspaceActiveTabKindByTileId,
     termCreatedRef,
     termWsConnected,
     updateSupervisorWorkspaceTab,

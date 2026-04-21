@@ -47,6 +47,9 @@ export interface RepoCardProps {
   isActive?: boolean;
   activeSessionKey?: string | null;
   activeWorkspacePath?: string | null;
+  activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | null;
+  onFocusOrchestratorTab?: () => void;
+  onFocusAssistantTab?: () => void;
 }
 
 export function useRepoCardModel({

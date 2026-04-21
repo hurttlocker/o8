@@ -65,6 +65,7 @@ export function useWorkspaceTerminalController(
     splitCreated = false,
     availableRepos = [],
     onActiveChatSessionChange,
+    onActiveTabKindChange,
     onChatSessionsChange,
     onActiveLaneChange,
     onRepoScopeChange,
@@ -170,6 +171,16 @@ export function useWorkspaceTerminalController(
     chatSessionsChangeRef.current = onChatSessionsChange;
     activeChatSessionChangeRef.current = onActiveChatSessionChange;
   }, [onActiveChatSessionChange, onChatSessionsChange]);
+
+  const reportedActiveTabKindRef = useRef<string>('');
+  useEffect(() => {
+    if (!onActiveTabKindChange) return;
+    const kind = activeTab?.kind ?? null;
+    const signature = `${kind ?? 'null'}::${effectiveActiveTabId}`;
+    if (reportedActiveTabKindRef.current === signature) return;
+    reportedActiveTabKindRef.current = signature;
+    onActiveTabKindChange(kind, effectiveActiveTabId);
+  }, [activeTab, effectiveActiveTabId, onActiveTabKindChange]);
 
   useEffect(() => {
     termWsConnectedRef.current = termWsConnected;

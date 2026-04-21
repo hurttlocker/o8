@@ -7,6 +7,7 @@ import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs'
 import type { TileContentRegistry } from '@/components/desktop/TileContainer';
 import type { WorkspaceSidePanelRepo, WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
+import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type {
@@ -92,6 +93,7 @@ export interface TileRegistryDeps {
   setTileLayout: Dispatch<SetStateAction<TileLayout>>;
   setTileLayoutHydrated: Dispatch<SetStateAction<boolean>>;
   setTerminalTileRepoScope: (tileId: string, repoPath: string | null) => void;
+  setWorkspaceActiveTabKindByTileId: Dispatch<SetStateAction<Record<string, TerminalTab['kind'] | null>>>;
   setWorkspaceChatSessionByTileId: Dispatch<SetStateAction<Record<string, string | undefined>>>;
   setWorkspaceChatSessionsByTileId: Dispatch<SetStateAction<Record<string, MobileInboxSnapshot['sessions']>>>;
   setWorkspaceLaneByTileId: Dispatch<SetStateAction<Record<string, WorkspaceLaneState | null>>>;
@@ -145,6 +147,7 @@ export function createTileRegistry({
   setTileLayout,
   setTileLayoutHydrated,
   setTerminalTileRepoScope,
+  setWorkspaceActiveTabKindByTileId,
   setWorkspaceChatSessionByTileId,
   setWorkspaceChatSessionsByTileId,
   setWorkspaceLaneByTileId,
@@ -294,6 +297,13 @@ export function createTileRegistry({
                 current[tileId] === (sessionKey ?? undefined)
                   ? current
                   : { ...current, [tileId]: sessionKey ?? undefined }
+              ));
+            }}
+            onActiveTabKindChange={(kind) => {
+              setWorkspaceActiveTabKindByTileId((current) => (
+                current[tileId] === (kind ?? null)
+                  ? current
+                  : { ...current, [tileId]: kind ?? null }
               ));
             }}
             onChatSessionsChange={(sessions) => {

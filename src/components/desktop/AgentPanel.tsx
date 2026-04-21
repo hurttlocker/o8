@@ -171,6 +171,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             activeSessionKey={activeSessionKey}
             activeRepoLocalPath={currentLaunchRepoPath}
             activeWorkspacePath={activeWorkspacePath ?? selectedRepoLocalPath ?? null}
+            activeWorkspaceTabKind={props.activeWorkspaceTabKind ?? null}
+            onFocusOrchestratorTab={props.onFocusOrchestratorTab}
+            onFocusAssistantTab={props.onFocusAssistantTab}
             sectionOpen={reposOpen}
             onSectionOpenChange={setReposOpen}
             addIntent={addRepoIntent}

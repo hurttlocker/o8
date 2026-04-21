@@ -29,6 +29,9 @@ interface RepoCardExpandedContentProps {
   orchestratorPackets?: OrchestratorPacket[];
   activeSessionKey?: string | null;
   activeWorkspacePath?: string | null;
+  activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | null;
+  onFocusOrchestratorTab?: () => void;
+  onFocusAssistantTab?: () => void;
   onSelectSession?: (sessionKey: string) => void;
   model: Omit<RepoCardModel, 'cardRef'>;
 }
@@ -39,6 +42,9 @@ function RepoCardExpandedContentBase({
   orchestratorPackets = [],
   activeSessionKey = null,
   activeWorkspacePath = null,
+  activeWorkspaceTabKind = null,
+  onFocusOrchestratorTab,
+  onFocusAssistantTab,
   onSelectSession,
   model,
 }: RepoCardExpandedContentProps) {
@@ -171,32 +177,42 @@ function RepoCardExpandedContentBase({
         </div>
       ) : null}
 
-      {/* Orchestrator fleet brain — single brain across all repos.
-          Shows connection status for this repo's relationship to the orchestrator. */}
+      {/* Workspace tabs — Orchestrator + Assistant entry rows. The shimmer
+          only fires when (a) this repo is the focused workspace AND (b) the
+          matching kind of tab is the active one. That keeps the left rail
+          honest: click an agent tab, the agent row shimmers; click the
+          Assistant tab, only the Assistant row shimmers here. */}
       {(() => {
         const isActiveRepo = activeWorkspacePath === repo.localPath
           || (activeWorkspacePath && activeWorkspacePath.startsWith(repo.localPath + '/'));
-        const spinnerStatus = isActiveRepo ? 'running' : 'idle';
-        const statusLabel = isActiveRepo ? 'Focused' : 'Available';
-        const statusColor = isActiveRepo ? '#22c55e' : 'var(--t-text-faint)';
+        const orchestratorActive = Boolean(isActiveRepo && activeWorkspaceTabKind === 'orchestrator');
+        const assistantActive = Boolean(isActiveRepo && activeWorkspaceTabKind === 'llm-chat');
+        const orchestratorStatus = orchestratorActive ? 'Focused' : isActiveRepo ? 'Available' : 'Idle';
+        const orchestratorStatusColor = orchestratorActive ? '#22c55e' : 'var(--t-text-faint)';
+        const assistantStatus = assistantActive ? 'Focused' : isActiveRepo ? 'Available' : 'Idle';
+        const assistantStatusColor = assistantActive ? '#22c55e' : 'var(--t-text-faint)';
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 4 }}>
-            <div
-              title={isActiveRepo ? 'Orchestrator is focused on this repo' : 'Orchestrator can work on this repo — mention it in conversation'}
+            <button
+              type="button"
+              title={orchestratorActive ? 'Orchestrator tab is active' : 'Switch to the Orchestrator tab'}
+              onClick={() => onFocusOrchestratorTab?.()}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 9,
                 padding: '5px 8px',
                 borderRadius: 7,
-                background: 'transparent',
+                background: orchestratorActive ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))' : 'transparent',
                 borderWidth: 0,
-                cursor: 'default',
+                cursor: onFocusOrchestratorTab ? 'pointer' : 'default',
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                textAlign: 'left',
+                transition: 'background 120ms ease',
               }}
             >
               <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
-                <AgentSpinner status={spinnerStatus} size={6} />
+                <AgentSpinner status={orchestratorActive ? 'running' : 'idle'} size={6} />
               </span>
               <ClaudeIcon size={12} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
@@ -207,18 +223,60 @@ function RepoCardExpandedContentBase({
                     color: 'var(--t-text)',
                     letterSpacing: '-0.005em',
                     lineHeight: 1.35,
-                    ...(isActiveRepo
+                    ...(orchestratorActive
                       ? { animation: 'tab-label-shimmer 2.2s ease-in-out infinite' }
                       : null),
                   }}
                 >
                   Orchestrator
                 </span>
-                <span style={{ fontSize: 10, fontWeight: 400, color: statusColor, letterSpacing: '-0.005em', lineHeight: 1.3 }}>
-                  {statusLabel}
+                <span style={{ fontSize: 10, fontWeight: 400, color: orchestratorStatusColor, letterSpacing: '-0.005em', lineHeight: 1.3 }}>
+                  {orchestratorStatus}
                 </span>
               </div>
-            </div>
+            </button>
+            <button
+              type="button"
+              title={assistantActive ? 'Assistant tab is active' : 'Switch to the Assistant tab'}
+              onClick={() => onFocusAssistantTab?.()}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 9,
+                padding: '5px 8px',
+                borderRadius: 7,
+                background: assistantActive ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))' : 'transparent',
+                borderWidth: 0,
+                cursor: onFocusAssistantTab ? 'pointer' : 'default',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                textAlign: 'left',
+                transition: 'background 120ms ease',
+              }}
+            >
+              <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
+                <AgentSpinner status={assistantActive ? 'running' : 'idle'} size={6} />
+              </span>
+              <ClaudeIcon size={12} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 440,
+                    color: 'var(--t-text)',
+                    letterSpacing: '-0.005em',
+                    lineHeight: 1.35,
+                    ...(assistantActive
+                      ? { animation: 'tab-label-shimmer 2.2s ease-in-out infinite' }
+                      : null),
+                  }}
+                >
+                  Assistant
+                </span>
+                <span style={{ fontSize: 10, fontWeight: 400, color: assistantStatusColor, letterSpacing: '-0.005em', lineHeight: 1.3 }}>
+                  {assistantStatus}
+                </span>
+              </div>
+            </button>
           </div>
         );
       })()}

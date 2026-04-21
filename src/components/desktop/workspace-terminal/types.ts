@@ -116,6 +116,7 @@ export interface WorkspaceTerminalProps {
   availableRepos?: RegisteredRepo[];
   openRepoPaths?: string[];
   onActiveChatSessionChange?: (sessionKey: string | null) => void;
+  onActiveTabKindChange?: (kind: TerminalTab['kind'] | null, tabId: string) => void;
   onChatSessionsChange?: (sessions: MobileInboxSnapshot['sessions']) => void;
   onActiveLaneChange?: (lane: WorkspaceLaneState | null) => void;
   onRepoScopeChange?: (repoPath: string | null) => void;
