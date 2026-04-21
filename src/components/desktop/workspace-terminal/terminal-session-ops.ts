@@ -3,7 +3,7 @@ import {
   laneDisplayTitle,
 } from '@/lib/orchestrator/display';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import { CLAUDE_CLI_MODELS, CODEX_CLI_MODELS } from '@/components/desktop/workspace-terminal/constants';
+import { CLAUDE_CLI_MODELS, CODEX_CLI_MODELS, GEMINI_CLI_MODELS, getOpenCodeModels } from '@/components/desktop/workspace-terminal/constants';
 import type {
   OrchestratorLaneSnapshot,
 } from '@/lib/orchestrator/types';
@@ -36,7 +36,7 @@ export interface CliChatSessionResult {
 function findSupervisorRetryExistingTab(
   currentTabs: TerminalTab[],
   options: Parameters<TerminalTabHandle['openCliChatSession']>[0],
-  resolvedRuntime: 'codex' | 'claude-code',
+  resolvedRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode',
   normalizedTargetSessionKey: string | null,
 ): TerminalTab | null {
   if (!options.createNew || !options.targetSessionKey || options.initialText) return null;
@@ -68,7 +68,11 @@ export function computeCliChatSession(
     ? 'codex'
     : options.targetSessionKey?.startsWith('claude-code:')
       ? 'claude-code'
-      : null;
+      : options.targetSessionKey?.startsWith('gemini-owned:')
+        ? 'gemini'
+        : options.targetSessionKey?.startsWith('opencode-owned:')
+          ? 'opencode'
+          : null;
   const resolvedRuntime = options.runtime
     ?? targetRuntime
     ?? (isAgentRuntimeTab(currentActiveTab) ? currentActiveTab.chatRuntime : (options.createNew ? 'codex' : 'claude-code'));
@@ -163,7 +167,12 @@ export function computeCliChatSession(
     tmuxSession: null,
     chatRuntime: resolvedRuntime,
     chatSessionKey: normalizedTargetSessionKey ?? undefined,
-    chatModel: options.modelId ?? (resolvedRuntime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id),
+    chatModel: options.modelId ?? (
+      resolvedRuntime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id
+        : resolvedRuntime === 'gemini' ? GEMINI_CLI_MODELS[0].id
+        : resolvedRuntime === 'opencode' ? getOpenCodeModels([])[0].id
+        : CODEX_CLI_MODELS[0].id
+    ),
     chatContinueLatest: false,
     chatDraftInjection: injection,
     chatCheckpoints: [],

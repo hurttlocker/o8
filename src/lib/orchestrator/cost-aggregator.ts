@@ -157,6 +157,8 @@ export async function aggregateMissionCost(state: OrchestratorMissionState): Pro
   const tokensByRuntime: Record<OrchestratorRuntime, RuntimeTokenSummary> = {
     codex: emptyRuntimeTokenSummary(),
     'claude-code': emptyRuntimeTokenSummary(),
+    gemini: emptyRuntimeTokenSummary(),
+    opencode: emptyRuntimeTokenSummary(),
   };
 
   let totalCostUsd = 0;

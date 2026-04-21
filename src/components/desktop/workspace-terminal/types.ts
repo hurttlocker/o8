@@ -35,7 +35,7 @@ export interface TerminalTab {
   repo?: RegisteredRepo;
   createdAt: number;
   lastActivity: number;
-  chatRuntime?: 'codex' | 'claude-code';
+  chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'opencode';
   chatSessionKey?: string;
   chatModel?: string;
   chatContinueLatest?: boolean;
@@ -54,7 +54,7 @@ export interface TerminalTab {
 
 export type LocalhostPreview = DetectedLocalhostPreview;
 export type { PreviewSelectionPayload };
-export type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'opencode' | 'chat';
+export type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode' | 'chat';
 
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
@@ -66,7 +66,7 @@ export interface TerminalTabHandle {
   clearDetectedPreview: (port: number) => void;
   isRestoreSettled: () => boolean;
   openCliChatSession: (options: {
-    runtime?: 'codex' | 'claude-code';
+    runtime?: Exclude<WorkspaceChatRuntime, 'chat'>;
     repo?: RegisteredRepo;
     modelId?: string;
     initialText?: string;
@@ -80,7 +80,7 @@ export interface TerminalTabHandle {
     autoArchiveOnIdle?: boolean;
   }) => string;
   injectIntoCliChat: (text: string, options?: {
-    runtime?: 'codex' | 'claude-code';
+    runtime?: Exclude<WorkspaceChatRuntime, 'chat'>;
     repo?: RegisteredRepo;
     modelId?: string;
     draftReason?: string;

@@ -14,6 +14,7 @@ import type {
   RegisteredRepo,
   TerminalTab,
   TerminalTabHandle,
+  WorkspaceChatRuntime,
   WorkspaceTerminalProps,
 } from '@/components/desktop/workspace-terminal/types';
 import {
@@ -588,7 +589,7 @@ export function useWorkspaceTerminalController(
     requestTerminalForTab(result.newTab.id, result.cliCommand ?? undefined);
   }, [requestTerminalForTab]);
 
-  const handleNewChatTab = useCallback((runtime: 'codex' | 'claude-code', repo?: RegisteredRepo) => {
+  const handleNewChatTab = useCallback((runtime: Exclude<WorkspaceChatRuntime, 'chat'>, repo?: RegisteredRepo) => {
     const newTab = buildNewChatTab(runtime, repo);
     setTabs((previous) => [newTab, ...previous]);
     setActiveTabId(newTab.id);
