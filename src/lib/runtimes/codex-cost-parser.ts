@@ -3,7 +3,9 @@ import { access, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import type { SessionCostData } from '@/lib/runtimes/cost-parser';
+import type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
+import { registerCostParser } from '@/lib/runtimes/shared/cost-parser-registry';
+export type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
 
 const TOKENS_PER_MILLION = 1_000_000;
 const LONG_CONTEXT_THRESHOLD = 272_000;
@@ -334,3 +336,10 @@ export async function parseCodexSessionCost(
 
   return totals;
 }
+
+// ── Self-registration ─────────────────────────────────────────────────────────
+// Runs on import so the registry is populated before any caller invokes parseCost.
+registerCostParser({
+  runtimeId: 'codex',
+  parseFiles: (paths, opts) => parseCodexSessionCost(paths, opts?.fallbackModel),
+});

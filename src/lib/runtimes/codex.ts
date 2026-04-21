@@ -15,7 +15,9 @@ import type {
   LaunchOptions,
   RuntimeTelemetry,
 } from './types';
-import { parseCodexSessionCost } from '@/lib/runtimes/codex-cost-parser';
+// Side-effect import: registers the 'codex' cost parser in the registry.
+import '@/lib/runtimes/codex-cost-parser';
+import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
 import { getCodexDiscoveredFleetAdditions, getCodexRolloutPath, getCodexRuntimeTail } from '@/lib/codex/sessions';
 import { monitorUsageDispatch, usageSnapshotFromTelemetry, type UsageSnapshot } from '@/lib/usage-log';
 
@@ -316,9 +318,9 @@ export const codexRuntime: AgentRuntime = {
         ? await getCodexRolloutPath(`codex:${telemetrySources.threadId}`)
         : null;
       const sessionCost = rolloutPath
-        ? await parseCodexSessionCost(rolloutPath)
+        ? await parseCost('codex', [rolloutPath])
         : telemetrySources.stdoutPaths.length > 0
-          ? await parseCodexSessionCost(telemetrySources.stdoutPaths)
+          ? await parseCost('codex', telemetrySources.stdoutPaths)
           : null;
 
       if (!sessionCost) {
@@ -342,7 +344,11 @@ export const codexRuntime: AgentRuntime = {
       return undefined;
     }
 
-    const sessionCost = await parseCodexSessionCost(rolloutPath);
+    const sessionCost = await parseCost('codex', [rolloutPath]);
+    if (!sessionCost) {
+      return undefined;
+    }
+
     const totalTokens = sessionCost.inputTokens + sessionCost.outputTokens + sessionCost.cacheReadTokens;
 
     return {
