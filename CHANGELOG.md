@@ -7,6 +7,15 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-04-20
+
+- `3e66b94f` feat(workspace): wire AI provider + agent runtime into CLI Session live-tail pane
+- `073aa41a` feat(orchestrator): expand OrchestratorRuntime union to four runtimes + capability map
+- `dc61c806` feat(runtimes): add first-class AI provider CLI adapter
+- `f835da1c` feat(runtimes): add first-class agent runtime CLI adapter
+- `23c8ca11` design(chrome): shimmer sweep on active workspace tab label
+- `be784c13` feat(runtimes): add turn-dispatcher primitive (no callers yet)
+
 ## 2026-04-19
 
 - `559a9c98` design(theme): unify midnight chrome glass + solid page surface on Settings/Analytics + inbox pill
