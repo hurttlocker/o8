@@ -1226,6 +1226,14 @@ export const claudeCodeRuntime: AgentRuntime = {
     }
   },
 
+  /**
+   * TODO(turn-dispatcher): migrate via Wave 2b.
+   * Claude Code uses mode=['thread-resume'] — resolveThreadId() will resolve the
+   * session JSONL project path and return the session id (used for --continue or
+   * --resume fallback). The --continue vs --resume flag logic currently embedded
+   * here will move into the DispatchExecutor.spawn() implementation.
+   * Until then this method remains the authoritative resume path for Claude Code.
+   */
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
     const startedAtMs = Date.now();
     let sessionId = sessionKey.replace('claude-code:', '');
