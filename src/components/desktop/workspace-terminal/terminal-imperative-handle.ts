@@ -48,6 +48,7 @@ export interface ImperativeHandleDeps {
   openWorkspaceInspectorTab: (canvasTab: NonNullable<TerminalTab['canvasTab']>, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
   persistTabsNow: (currentTabs: TerminalTab[], currentActiveId: string) => void;
   sendTerminalDetach: (sessionName: string) => void;
+  closeTabById: (tabId: string) => void;
 }
 
 export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabHandle {
@@ -118,6 +119,47 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       deps.persistTabsNow(deps.tabsRef.current, tabId);
       return true;
     },
+    focusTabRelative: (delta) => {
+      const tabs = deps.tabsRef.current;
+      if (tabs.length === 0) return false;
+      const currentIndex = tabs.findIndex((tab) => tab.id === deps.activeTabId);
+      const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+      const step = Number.isFinite(delta) ? Math.trunc(delta) : 0;
+      const nextIndex = ((safeIndex + step) % tabs.length + tabs.length) % tabs.length;
+      const nextTab = tabs[nextIndex];
+      if (!nextTab) return false;
+      deps.setActiveTabId(nextTab.id);
+      deps.persistTabsNow(tabs, nextTab.id);
+      return true;
+    },
+    focusTabAtIndex: (oneBasedIndex) => {
+      const tabs = deps.tabsRef.current;
+      if (tabs.length === 0) return false;
+      const idx = Math.trunc(oneBasedIndex) - 1;
+      if (idx < 0 || idx >= tabs.length) return false;
+      const nextTab = tabs[idx];
+      if (!nextTab) return false;
+      deps.setActiveTabId(nextTab.id);
+      deps.persistTabsNow(tabs, nextTab.id);
+      return true;
+    },
+    closeActiveTab: () => {
+      const activeId = deps.activeTabId;
+      if (!activeId) return false;
+      const exists = deps.tabsRef.current.some((tab) => tab.id === activeId);
+      if (!exists) return false;
+      deps.closeTabById(activeId);
+      return true;
+    },
+    getTabsSnapshot: () => ({
+      tabs: deps.tabsRef.current.map((tab) => ({
+        id: tab.id,
+        label: tab.label,
+        kind: tab.kind,
+        sessionKey: tab.chatSessionKey,
+      })),
+      activeTabId: deps.activeTabId,
+    }),
     setOrchestrationPacket: (tabId, packet) => {
       let found = false;
       deps.setTabs((previous) => previous.map((tab) => {
