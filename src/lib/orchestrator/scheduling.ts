@@ -196,7 +196,7 @@ async function dispatchPacket(
     packetId: packet.id,
     repoPath: packet.workspaceTargetPath!,
     branch: packet.branchTarget,
-    runtime: packet.runtime,
+    runtime: (packet.runtime === 'gemini' || packet.runtime === 'opencode' ? 'codex' : packet.runtime) as import('@/lib/lane/types').LaneRuntime,
     label: packet.title,
     actor: 'orchestrator',
   });
