@@ -384,7 +384,7 @@ type ContentBlock = {
 
 type MessageContent = string | ContentBlock[];
 
-function extractTextFromContent(content: MessageContent): string {
+function extractTextFromContent(content: MessageContent, forRole: 'user' | 'assistant' = 'assistant'): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
 
@@ -392,25 +392,14 @@ function extractTextFromContent(content: MessageContent): string {
   for (const block of content) {
     if (block.type === 'text' && block.text) {
       parts.push(block.text);
-    } else if (block.type === 'tool_use' && block.name) {
+    } else if (block.type === 'tool_use' && block.name && forRole === 'assistant') {
       const desc = block.input && typeof block.input === 'object'
         ? (block.input as Record<string, unknown>).description ?? (block.input as Record<string, unknown>).command ?? ''
         : '';
       parts.push(`[Tool: ${block.name}${desc ? ` — ${String(desc).slice(0, 100)}` : ''}]`);
-    } else if (block.type === 'tool_result') {
-      const resultContent = block.content;
-      if (typeof resultContent === 'string') {
-        parts.push(resultContent.slice(0, 200));
-      } else if (Array.isArray(resultContent)) {
-        for (const sub of resultContent) {
-          if (sub.type === 'text' && sub.text) {
-            parts.push(sub.text.slice(0, 200));
-          }
-        }
-      }
     }
   }
-  return parts.join('\n');
+  return parts.join('\n\n').trim();
 }
 
 function extractToolName(content: MessageContent): string | undefined {
@@ -1104,7 +1093,10 @@ export const claudeCodeRuntime: AgentRuntime = {
       if (parsed.type !== 'user' && parsed.type !== 'assistant') continue;
       if (!parsed.message?.content) continue;
 
-      const text = extractTextFromContent(parsed.message.content);
+      const text = extractTextFromContent(
+        parsed.message.content,
+        parsed.type === 'user' ? 'user' : 'assistant',
+      );
       if (!text.trim()) continue;
 
       const id = parsed.uuid ?? `cc-${entryIndex}`;
@@ -1123,8 +1115,39 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     entries.sort((left, right) => left.timestamp.getTime() - right.timestamp.getTime());
 
+    // Coalesce consecutive assistant narration entries so the transcript reads
+    // as one flowing thought instead of one bubble per JSONL line. Keeps the
+    // LAST tool metadata so the tool chip still renders for the merged bubble.
+    const coalesced: RuntimeTranscriptEntry[] = [];
+    for (const entry of entries) {
+      const prev = coalesced[coalesced.length - 1];
+      const mergeable =
+        entry.role === 'assistant'
+        && entry.type === 'message'
+        && prev
+        && prev.role === 'assistant'
+        && prev.type === 'message';
+      if (mergeable) {
+        prev.text = `${prev.text}\n\n${entry.text}`;
+        prev.toolName = entry.toolName ?? prev.toolName;
+        prev.filePath = entry.filePath ?? prev.filePath;
+        prev.timestamp = entry.timestamp;
+        continue;
+      }
+      coalesced.push({ ...entry });
+    }
+
+    // Strip self-review tags from assistant narration — internal scaffolding
+    // shouldn't appear in the operator-facing transcript.
+    const SELF_REVIEW_RE = /\s*<self-review>[\s\S]*?<\/self-review>\s*/gi;
+    for (const entry of coalesced) {
+      if (entry.role === 'assistant' && entry.type === 'message') {
+        entry.text = entry.text.replace(SELF_REVIEW_RE, ' ').replace(/\s+$/, '').trim();
+      }
+    }
+
     // sinceId filtering: return only entries after the given id
-    let result = entries;
+    let result = coalesced.filter((entry) => entry.text.trim().length > 0);
     if (sinceId) {
       const idx = result.findIndex((e) => e.id === sinceId);
       if (idx !== -1) {
