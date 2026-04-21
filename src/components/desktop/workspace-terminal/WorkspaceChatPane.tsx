@@ -228,7 +228,9 @@ function PacketMetaChip({ label, value, mono }: { label: string; value: string; 
 
 function WorkspaceChatPaneBase({
   tab,
-  active,
+  // `active` is retained on the prop surface for Packet C (visibility/display
+  // wiring) but the hook no longer consumes it — Packet B killed the active-
+  // gated polling that was the only reader.
   onUpdateMessages,
   onUpdateSessionKey,
   onRunInTerminal,
@@ -240,7 +242,6 @@ function WorkspaceChatPaneBase({
 }: WorkspaceChatPaneProps) {
   const chat = useWorkspaceChatPane({
     tab,
-    active,
     onUpdateMessages,
     onUpdateSessionKey,
     onSelectModel,
