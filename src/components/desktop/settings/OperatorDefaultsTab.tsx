@@ -20,6 +20,8 @@ type OverlapGateMode = 'advisory' | 'strict';
 type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 type SettingSource = 'env' | 'file' | 'default';
 
+type DispatchRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
+
 interface OperatorDefaults {
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -28,6 +30,7 @@ interface OperatorDefaults {
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
   orchestratorModel: string;
+  defaultDispatchRuntime: DispatchRuntime;
 }
 
 interface OperatorDefaultsResponse {
@@ -56,6 +59,13 @@ const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
   { value: 'claude-sonnet-4-5', label: 'Sonnet 4.5' },
   { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+];
+
+const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: string; detail: string }> = [
+  { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse.' },
+  { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — use when you have a Claude sub.' },
+  { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3.1 Pro CLI — fastest for parallel fan-out.' },
+  { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
 ];
 
 function sourceLabel(source: SettingSource): string {
@@ -377,6 +387,7 @@ export function OperatorDefaultsTab() {
   const thinkingEnv = sources?.thinkingEffort === 'env';
   const cachingEnv = sources?.promptCachingEnabled === 'env';
   const modelEnv = sources?.orchestratorModel === 'env';
+  const runtimeEnv = sources?.defaultDispatchRuntime === 'env';
 
   const envDisabledReason = 'Controlled by environment variable. Unset to manage from Settings.';
 
@@ -659,9 +670,39 @@ export function OperatorDefaultsTab() {
         />
       </section>
 
-      {/* 05 — SAFETY */}
+      {/* 05 — DISPATCH RUNTIME */}
       <section>
-        <SectionLabel number="05">SAFETY</SectionLabel>
+        <SectionLabel number="05">DISPATCH RUNTIME</SectionLabel>
+        <p style={{
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          maxWidth: 580,
+          margin: 0,
+          marginBottom: 4,
+        }}>
+          Which CLI the orchestrator spawns when you say &quot;dispatch&quot; without naming a runtime. Pick whichever you actually have a subscription or API key for — otherwise every dispatch dies on the CLI boundary.
+        </p>
+        <Row
+          label="Default dispatch runtime"
+          description="Applied to dispatch_codex_task and create-mission when runtime is omitted. The orchestrator can still override per-task."
+          source={sources.defaultDispatchRuntime}
+          disabledReason={runtimeEnv ? envDisabledReason : undefined}
+          right={
+            <PickerMenu<DispatchRuntime>
+              value={values.defaultDispatchRuntime}
+              options={DISPATCH_RUNTIME_OPTIONS}
+              onChange={(next) => { void updateField('defaultDispatchRuntime', next); }}
+              disabled={runtimeEnv || busyField === 'defaultDispatchRuntime'}
+              minWidth={180}
+            />
+          }
+        />
+      </section>
+
+      {/* 06 — SAFETY */}
+      <section>
+        <SectionLabel number="06">SAFETY</SectionLabel>
         <p style={{
           fontSize: 13,
           color: 'var(--t-text-secondary)',

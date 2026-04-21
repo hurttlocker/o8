@@ -142,14 +142,19 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'dispatch_codex_task',
-    description: 'Delegate a coding task to a Codex agent running in an isolated worktree. USE THIS when the user says "dispatch", "hand off to Codex", "assign to an agent", "have Codex do X", or asks you to run a multi-step coding task. The orchestrator model: Claude (this chat) plans and reviews, Codex executes in the background. Creates a new lane, spawns Codex, sends the task, and returns the lane ID. REQUIRES USER APPROVAL.',
+    description: 'Delegate a coding task to an isolated-worktree agent. USE THIS when the user says "dispatch", "hand off", "assign to an agent", or asks you to run a multi-step coding task. The orchestrator model: Claude (this chat) plans and reviews, the delegated agent executes in the background. Runtime defaults to the operator setting (Settings → Operator Defaults → Default dispatch runtime). Pass `runtime` explicitly only when overriding that preference. REQUIRES USER APPROVAL.',
     parameters: {
       type: 'object',
       properties: {
         repoPath: { type: 'string', description: 'Absolute path to the target repository (e.g. "/Users/me/projects/my-repo")' },
         branch: { type: 'string', description: 'Branch name for the worktree (e.g. "main" or a feature branch)' },
         label: { type: 'string', description: 'Short human-readable task label (e.g. "Add formatTokens helper")' },
-        task: { type: 'string', description: 'The full task description for Codex. Be specific about files to create/edit, constraints, and success criteria.' },
+        task: { type: 'string', description: 'The full task description for the agent. Be specific about files to create/edit, constraints, and success criteria.' },
+        runtime: {
+          type: 'string',
+          enum: ['codex', 'claude-code', 'gemini', 'opencode'],
+          description: 'Optional override. When omitted, uses the operator default dispatch runtime.',
+        },
       },
       required: ['repoPath', 'task'],
     },
@@ -384,9 +389,17 @@ async function executeDispatchCodexTask(args: Record<string, unknown>): Promise<
   const task = args.task as string;
   const branch = (args.branch as string) || 'main';
   const label = (args.label as string) || task.slice(0, 60);
+  const runtimeOverride = typeof args.runtime === 'string' ? args.runtime : null;
 
   if (!repoPath) return { content: 'Error: repoPath is required.' };
   if (!task) return { content: 'Error: task is required.' };
+
+  const { resolveDefaultDispatchRuntimeSync } = await import('@/lib/operator/defaults');
+  const validRuntimes = ['codex', 'claude-code', 'gemini', 'opencode'] as const;
+  type DispatchRuntime = (typeof validRuntimes)[number];
+  const runtime: DispatchRuntime = runtimeOverride && (validRuntimes as readonly string[]).includes(runtimeOverride)
+    ? (runtimeOverride as DispatchRuntime)
+    : resolveDefaultDispatchRuntimeSync();
 
   try {
     const { dispatch } = await import('@/lib/lane/commands');
@@ -396,18 +409,18 @@ async function executeDispatchCodexTask(args: Record<string, unknown>): Promise<
       verb: 'open_lane',
       repoPath,
       branch,
-      runtime: 'codex',
+      runtime,
       label,
       actor: 'orchestrator',
     });
 
     if (!openResult.ok || !openResult.lane) {
-      return { content: `Failed to open lane for Codex dispatch: ${openResult.note}` };
+      return { content: `Failed to open lane for ${runtime} dispatch: ${openResult.note}` };
     }
 
     const laneId = openResult.lane.id;
 
-    // Step 2: launch the Codex session with the task as its prompt
+    // Step 2: launch the runtime session with the task as its prompt
     const launchResult = await dispatch({
       verb: 'launch_session',
       laneId,
@@ -416,14 +429,14 @@ async function executeDispatchCodexTask(args: Record<string, unknown>): Promise<
     });
 
     if (!launchResult.ok) {
-      return { content: `Lane ${laneId} opened but Codex launch failed: ${launchResult.note}` };
+      return { content: `Lane ${laneId} opened but ${runtime} launch failed: ${launchResult.note}` };
     }
 
     return {
-      content: `Dispatched to Codex. Lane ${laneId} is executing "${label}" in ${repoPath} on branch ${branch}. Track progress in the Agents panel.`,
+      content: `Dispatched to ${runtime}. Lane ${laneId} is executing "${label}" in ${repoPath} on branch ${branch}. Track progress in the Agents panel.`,
     };
   } catch (err) {
-    return { content: `Error dispatching Codex task: ${err instanceof Error ? err.message : 'unknown'}` };
+    return { content: `Error dispatching ${runtime} task: ${err instanceof Error ? err.message : 'unknown'}` };
   }
 }
 
