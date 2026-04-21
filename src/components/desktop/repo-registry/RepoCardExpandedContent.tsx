@@ -198,7 +198,27 @@ function RepoCardExpandedContentBase({
               </span>
               <ClaudeIcon size={12} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 12, fontWeight: 440, color: 'var(--t-text)', letterSpacing: '-0.005em', lineHeight: 1.35 }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 440,
+                    color: 'var(--t-text)',
+                    letterSpacing: '-0.005em',
+                    lineHeight: 1.35,
+                    ...(isActiveRepo
+                      ? {
+                          backgroundImage:
+                            'linear-gradient(100deg, var(--t-text) 0%, var(--t-text) 38%, var(--t-text-secondary) 50%, var(--t-text) 62%, var(--t-text) 100%)',
+                          backgroundSize: '220% 100%',
+                          backgroundRepeat: 'no-repeat',
+                          WebkitBackgroundClip: 'text',
+                          backgroundClip: 'text',
+                          WebkitTextFillColor: 'transparent',
+                          animation: 'tab-label-shimmer 2.8s linear infinite',
+                        }
+                      : null),
+                  }}
+                >
                   Orchestrator
                 </span>
                 <span style={{ fontSize: 10, fontWeight: 400, color: statusColor, letterSpacing: '-0.005em', lineHeight: 1.3 }}>
