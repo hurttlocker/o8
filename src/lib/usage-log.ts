@@ -11,7 +11,7 @@ const USAGE_LOG_DIR = path.join(os.homedir(), '.cortex-ide');
 const USAGE_LOG_PATH = path.join(USAGE_LOG_DIR, 'usage.jsonl');
 const inFlightUsageDispatches = new Set<string>();
 
-export type DispatchUsageRuntime = 'claude-code' | 'codex' | 'gemini';
+export type DispatchUsageRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode';
 
 export interface UsageSnapshot {
   inputTokens: number;
