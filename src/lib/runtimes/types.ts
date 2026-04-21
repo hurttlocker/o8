@@ -104,6 +104,14 @@ export type TranscriptRole = 'user' | 'assistant' | 'system' | 'tool';
 /**
  * Normalized transcript entry. Every runtime maps its log format to this.
  */
+export interface RuntimeTranscriptToolCall {
+  id?: string;
+  name: string;
+  args?: Record<string, unknown>;
+  preview?: string;
+  status?: 'calling' | 'running' | 'done';
+}
+
 export interface RuntimeTranscriptEntry {
   id: string;
   role: TranscriptRole;
@@ -116,6 +124,8 @@ export interface RuntimeTranscriptEntry {
   filePath?: string;
   /** Structured compaction metadata when type=compaction */
   compaction?: CompactionEvent;
+  /** Structured tool calls — UI renders as italic collapsible cards (Codex parity) */
+  toolCalls?: RuntimeTranscriptToolCall[];
 }
 
 // ── Review ──

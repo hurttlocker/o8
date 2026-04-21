@@ -150,6 +150,15 @@ async function resolveHistory(
         timestampLabel: entry.timestamp
           ? entry.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
           : '',
+        toolCalls: entry.toolCalls && entry.toolCalls.length > 0
+          ? entry.toolCalls.map((tool) => ({
+              id: tool.id,
+              name: tool.name,
+              args: tool.args,
+              preview: tool.preview,
+              status: tool.status,
+            }))
+          : undefined,
         compaction: entry.compaction ? {
           timestamp: entry.compaction.timestamp.getTime(),
           tokensBefore: entry.compaction.tokensBefore,
