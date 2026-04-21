@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-21
 
+- `e53c8be7` feat(workspace): wire AI provider + agent runtime chat-pane transcript + steering
 - `40f2c5eb` design: hide SessionTimeline + punchier shimmer + strip branch tooltip
 - `102e3e8e` design: o8 boot splash + shimmer on active agent panel label
 
