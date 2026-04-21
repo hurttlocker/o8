@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
+import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
@@ -1061,11 +1062,22 @@ async function spawnOwnedRun(session: OwnedCodexSessionRecord, prompt: string, m
     ? runArgsForLaunch(session.repoPath, prompt, session.model)
     : runArgsForResume(session.threadId ?? '', prompt);
 
+  // Resolve codex binary path — honours O8_CODEX_BIN or CODEX_HOME env overrides
+  // before falling back to which/login-shell/static-fallbacks. Never hardcode
+  // ~/.npm-global/bin/codex which breaks on asdf, volta, fnm, and Finder-launched
+  // Tauri apps where PATH is stripped to a minimal set.
+  const codexBin = await resolveCli({
+    runtimeId: 'codex',
+    binaryName: 'codex',
+    envOverride: 'O8_CODEX_BIN',
+    extraEnvOverrides: ['CODEX_HOME'],
+  }).then((r) => r.path).catch(() => 'codex');
+
   let pid = 0;
   let terminalSessionName: string | undefined;
 
   const bridgeSessionName = tmuxSessionName('codex', runId);
-  const codexCmd = ['codex', ...args].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+  const codexCmd = [codexBin, ...args].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
   const shellCmd = `${codexCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
 
   try {
@@ -1082,11 +1094,11 @@ async function spawnOwnedRun(session: OwnedCodexSessionRecord, prompt: string, m
   }
 
   if (!terminalSessionName) {
-    // Fallback: detached spawn (existing behavior)
+    // Fallback: detached spawn using resolved binary path
     const stdoutFd = openSync(stdoutPath, 'a');
     const stderrFd = openSync(stderrPath, 'a');
     try {
-      const child = spawn('codex', args, {
+      const child = spawn(codexBin, args, {
         cwd: session.repoPath,
         detached: true,
         stdio: ['ignore', stdoutFd, stderrFd],
