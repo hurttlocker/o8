@@ -14,11 +14,29 @@ import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { HistoryRowActions } from '@/components/desktop/HistoryRowActions';
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 
+// TODO(icons): replace GeminiIcon + OpencodeIcon with proper brand-matched SVGs
+function GeminiIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#4285f4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
+function OpencodeIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <polyline points="16 18 22 12 16 6" />
+      <polyline points="8 6 2 12 8 18" />
+    </svg>
+  );
+}
+
 interface HistoryThreadRowProps {
   tabId: string;
   title: string;
   messageCount?: number;
-  runtime: 'claude-code' | 'codex' | null;
+  runtime: 'claude-code' | 'codex' | 'gemini' | 'opencode' | null;
   planText?: string | null;
   pinned: boolean;
   isCurrent: boolean;
@@ -144,6 +162,10 @@ function HistoryThreadRowBase({
               <ClaudeIcon size={16} />
             ) : runtime === 'codex' ? (
               <CodexIcon size={16} />
+            ) : runtime === 'gemini' ? (
+              <GeminiIcon size={16} />
+            ) : runtime === 'opencode' ? (
+              <OpencodeIcon size={16} />
             ) : (
               <MessageSquareIcon size={12} />
             )}

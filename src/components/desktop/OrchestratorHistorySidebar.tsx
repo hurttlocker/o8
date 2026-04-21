@@ -40,7 +40,7 @@ interface ArchivedLaneRow {
   repoPath: string;
   branch: string;
   baseBranch: string;
-  runtime: 'codex' | 'claude-code';
+  runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode';
   sessionKey: string | null;
   updatedAt: string;
 }
@@ -52,10 +52,12 @@ type ThreadHistoryMessage = ExportThreadMessage & {
 
 type HistoryMode = 'conversations' | 'archive';
 
-function threadRuntime(model?: string): 'claude-code' | 'codex' | null {
+function threadRuntime(model?: string): 'claude-code' | 'codex' | 'gemini' | 'opencode' | null {
   if (!model) return null;
   const lower = model.toLowerCase();
   if (lower.includes('claude')) return 'claude-code';
+  if (lower.includes('gemini')) return 'gemini';
+  if (lower.includes('opencode')) return 'opencode';
   if (lower.includes('codex') || lower.startsWith('gpt')) return 'codex';
   return null;
 }

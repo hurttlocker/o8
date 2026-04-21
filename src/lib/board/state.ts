@@ -822,6 +822,9 @@ function buildAvailableRuntimeOptions(): BoardRuntimeOption[] {
   for (const runtime of getAllRuntimes()) {
     const runtimeId = runtime.id;
     if (!runtime.capabilities.launch) continue;
+    // BoardRuntimeId intentionally only includes codex + claude-code.
+    // gemini and opencode are dispatched via OrchestratorRuntime through
+    // the lane system, not through the board's worktree-launch path.
     if (runtimeId !== 'codex' && runtimeId !== 'claude-code') continue;
     if (!BOARD_RUNTIME_IDS.has(runtimeId)) continue;
     const boardRuntimeId = runtimeId === 'claude-code' ? 'claude-code' : 'codex';
