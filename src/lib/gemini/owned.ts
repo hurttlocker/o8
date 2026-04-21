@@ -249,6 +249,15 @@ function geminiParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
     }
 
     if (type === 'message') {
+      const role = String(parsed.role ?? '').toLowerCase();
+      // Skip user-role messages — they're the prompt echo that Gemini CLI
+      // emits at the start of each run. The prompt is already surfaced via
+      // group.prompt (from the owned-session-store) and as the
+      // PacketHeaderCard. Letting it in here would duplicate the prompt
+      // as a second bubble below the card.
+      if (role === 'user' || role === 'operator') {
+        continue;
+      }
       const text = compactText(
         readStringField(parsed, 'content', 'text', 'message') ?? extractText(parsed.content),
         500,
