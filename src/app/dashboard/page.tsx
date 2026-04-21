@@ -402,6 +402,19 @@ function DashboardInner() {
     return () => controller.abort();
   }, [transcriptBootstrapKeysKey]);
 
+  // Active-workspace switch — clear the owned-session fleet cache so the next
+  // consumer rebuilds immediately instead of serving a stale (up to 20s) TTL
+  // entry from the previous workspace. Fire-and-forget; idempotent + cheap.
+  useEffect(() => {
+    if (!activeWorkspace) return;
+    const controller = new AbortController();
+    void fetch('/api/panel/fleet/invalidate', {
+      method: 'POST',
+      signal: controller.signal,
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [activeWorkspace]);
+
   const archivedLaneView = useLaneArchivedView();
 
   const activePackets = useMemo(
