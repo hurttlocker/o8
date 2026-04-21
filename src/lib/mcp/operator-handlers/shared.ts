@@ -124,10 +124,10 @@ export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
   if (value === undefined || value === null || value === '') {
     return 'codex';
   }
-  if (value === 'codex' || value === 'claude-code') {
+  if (value === 'codex' || value === 'claude-code' || value === 'gemini' || value === 'opencode') {
     return value;
   }
-  throw new Error('runtime must be "codex" or "claude-code"');
+  throw new Error('runtime must be one of "codex", "claude-code", "gemini", "opencode"');
 }
 
 export function parseIssueList(value: unknown) {

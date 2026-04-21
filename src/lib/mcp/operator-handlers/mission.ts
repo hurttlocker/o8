@@ -51,7 +51,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         runtime: {
           type: 'string',
-          enum: ['codex', 'claude-code'],
+          enum: ['codex', 'claude-code', 'gemini', 'opencode'],
           description: 'Runtime to assign to all mission packets. Defaults to codex.',
         },
         constraints: {
