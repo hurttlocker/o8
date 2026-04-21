@@ -8,6 +8,7 @@ import { claudeCodeRuntime } from '@/lib/runtimes/claude-code';
 import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
 import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 const RUNTIME_INVENTORY_TTL_MS = 15_000;
 const RUNTIME_INVENTORY_FRESH_COALESCE_MS = 2_000;
@@ -45,7 +46,8 @@ function shortenHomePath(filePath: string) {
 }
 
 function defaultRuntimeDisplayName(runtime: AgentRuntime['id']) {
-  return runtime === 'claude-code' ? 'Claude Code' : runtime === 'codex' ? 'Codex' : String(runtime);
+  // Capability-map lookup; optional chaining guards against runtimes not yet in the map.
+  return ORCHESTRATOR_RUNTIMES[runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label ?? String(runtime);
 }
 
 function repoLabelFromSession(session: RuntimeSession, workspace: string) {
@@ -363,7 +365,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
         : agent.status === 'running'
           ? 'info'
           : 'warning',
-      title: `${agent.name} • ${agent.runtime === 'claude-code' ? 'Claude Code' : 'Codex'}`,
+      title: `${agent.name} • ${ORCHESTRATOR_RUNTIMES[agent.runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label ?? agent.runtime}`,
       detail: [agent.currentTask, agent.workspace, agent.lastEventAt].filter(Boolean).join(' • '),
       timestamp: agent.lastEventAt,
     }));

@@ -1,5 +1,6 @@
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { SegmentKind } from './types';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import {
   TIMELINE_ACTIVE_SEGMENT_MIN_PX,
   TIMELINE_BAR_HEIGHT,
@@ -65,9 +66,9 @@ export function timelineSegmentChrome(_kind: SegmentKind, color: string, hovered
 }
 
 export function runtimeLabel(runtime: string | null | undefined): string {
-  if (runtime === 'claude-code') return 'Claude Code';
-  if (runtime === 'codex') return 'Codex';
-  return runtime || 'Runtime';
+  if (!runtime) return 'Runtime';
+  // Capability-map lookup; optional chaining guards against unknown string values.
+  return ORCHESTRATOR_RUNTIMES[runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label ?? runtime;
 }
 
 export function compactWorkspacePath(path: string | null | undefined): string | null {
