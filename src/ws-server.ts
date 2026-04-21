@@ -1616,13 +1616,25 @@ function scheduleRealtimeMobileInboxRefresh(delayMs = 250, fresh = false) {
   }, delayMs);
 }
 
-function scheduleRealtimeSessionHistoryRefresh(sessionKey: string, fresh = false, delayMs = 350) {
+// Urgent debounce for chat.done paths — must beat the 350ms inbox cadence so
+// transcript slices land within ~100ms of the stream completing. Per-session
+// timer map still coalesces; the second caller's `fresh` flag wins via the
+// closure re-capture on the new timer.
+const URGENT_HISTORY_REFRESH_MS = 80;
+
+function scheduleRealtimeSessionHistoryRefresh(
+  sessionKey: string,
+  fresh = false,
+  delayMs?: number,
+  options: { urgent?: boolean } = {},
+) {
+  const resolvedDelay = delayMs ?? (options.urgent ? URGENT_HISTORY_REFRESH_MS : 350);
   const existing = sessionHistoryTimers.get(sessionKey);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
     sessionHistoryTimers.delete(sessionKey);
     void publishSessionHistoryRealtimeSnapshot(sessionKey, fresh);
-  }, delayMs);
+  }, resolvedDelay);
   sessionHistoryTimers.set(sessionKey, timer);
 }
 
@@ -2062,13 +2074,13 @@ function onChatDelta(delta: ChatDelta) {
     broadcast({ channel: 'chat', event: 'done', data: { text, runId: delta.runId, seq: delta.seq } }, sessionFilter);
     setTimeout(() => pushHistoryForSession(delta.sessionKey), 500);
     scheduleEventDrivenInboxPush();
-    scheduleRealtimeSessionHistoryRefresh(delta.sessionKey, true);
+    scheduleRealtimeSessionHistoryRefresh(delta.sessionKey, true, undefined, { urgent: true });
     scheduleRealtimeRuntimeRefresh({ reason: 'chat.done', fresh: true });
     scheduleRealtimeMobileInboxRefresh(250, true);
   } else if (delta.state === 'error' || delta.state === 'aborted') {
     broadcast({ channel: 'chat', event: 'error', data: { state: delta.state, error: delta.error, runId: delta.runId } }, sessionFilter);
     scheduleEventDrivenInboxPush();
-    scheduleRealtimeSessionHistoryRefresh(delta.sessionKey, true);
+    scheduleRealtimeSessionHistoryRefresh(delta.sessionKey, true, undefined, { urgent: true });
     scheduleRealtimeRuntimeRefresh({ reason: `chat.${delta.state}`, fresh: true });
     scheduleRealtimeMobileInboxRefresh(250, true);
   }
