@@ -39,38 +39,150 @@ const loaderHtml = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Cortex IDE</title>
+  <title>o8</title>
   <style>
-    body {
-      margin: 0; background: #09090b; color: #fafafa;
-      font-family: -apple-system, system-ui, sans-serif;
-      display: flex; align-items: center; justify-content: center;
-      height: 100vh; flex-direction: column; gap: 16px;
+    :root {
+      --paper: #F4F2ED;
+      --ink: #111111;
+      --ink-muted: #777777;
+      --ink-quiet: #9A968E;
+      --accent: #FF5A1F;
+      --hairline: rgba(17, 17, 17, 0.18);
+      --dot: rgba(17, 17, 17, 0.055);
     }
-    .orb {
-      width: 48px; height: 48px; border-radius: 14px;
-      background: linear-gradient(135deg, #2563eb, #7c3aed);
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 800; font-size: 20px;
-      animation: pulse 1.5s ease infinite;
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      background: var(--paper);
+      background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
+      background-size: 24px 24px;
+      color: var(--ink);
+      font-family: "Inter", "Neue Haas Grotesk", "Söhne", system-ui, -apple-system, sans-serif;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 48px;
+      -webkit-font-smoothing: antialiased;
+      color-scheme: only light;
+    }
+    .mono {
+      font-family: "iA Writer Mono", "JetBrains Mono", "SF Mono", Menlo, ui-monospace, monospace;
+    }
+    .topbar {
+      position: fixed; top: 0; left: 0; right: 0;
+      display: flex; align-items: baseline; gap: 14px;
+      padding: 20px 28px;
+      font-size: 11px;
+      color: var(--ink-muted);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+    .topbar .brand { color: var(--ink); letter-spacing: -0.01em; text-transform: none; font-size: 13px; font-weight: 500; }
+    .topbar .sep { flex: 1; height: 1px; background: var(--hairline); opacity: 0.6; margin-top: 8px; }
+    .topbar .stamp { font-size: 10px; letter-spacing: 0; text-transform: none; color: var(--ink-quiet); }
+
+    .center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+    }
+    .section-label {
+      font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--ink-muted); font-weight: 500;
+    }
+    .mark {
+      font-size: clamp(72px, 12vw, 140px);
+      line-height: 0.9;
+      font-weight: 500;
+      letter-spacing: -0.04em;
+      color: var(--ink);
+      display: flex; align-items: baseline; gap: 0;
+    }
+    .mark .eight {
+      position: relative;
+      display: inline-block;
+    }
+    .mark .eight::after {
+      content: ""; position: absolute; right: -16px; top: 12px;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1.6s ease-in-out infinite;
     }
     @keyframes pulse {
-      0%, 100% { opacity: 0.6; transform: scale(1); }
-      50% { opacity: 1; transform: scale(1.05); }
+      0%, 100% { opacity: 0.35; transform: scale(0.85); }
+      50% { opacity: 1; transform: scale(1); }
     }
-    p { color: #71717a; font-size: 13px; }
+
+    .ticker {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 11px; color: var(--ink-muted);
+      letter-spacing: 0.04em; text-transform: uppercase;
+      min-height: 14px;
+    }
+    .ticker .bracket { color: var(--ink); }
+    .ticker .dot-row { display: inline-flex; gap: 3px; }
+    .ticker .dot-row span {
+      width: 4px; height: 4px; border-radius: 50%;
+      background: var(--ink-muted); opacity: 0.3;
+      animation: step 1.4s ease-in-out infinite;
+    }
+    .ticker .dot-row span:nth-child(2) { animation-delay: 0.2s; }
+    .ticker .dot-row span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes step {
+      0%, 100% { opacity: 0.3; }
+      40% { opacity: 1; }
+    }
+
+    .footer {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 20px 28px;
+      font-size: 10px; color: var(--ink-quiet);
+      letter-spacing: 0.04em;
+    }
+    .footer .grid { display: flex; gap: 28px; }
   </style>
   <script>
-    // Port candidates — start at the last port the Tauri sidecar allocated
-    // (injected via __O8_PORT_HINT__ when available), then fan out across
-    // the probe range the sidecar uses.
     const HINT = typeof window.__O8_PORT_HINT__ === 'number' ? window.__O8_PORT_HINT__ : null;
     const PROBE_RANGE = [];
     for (let p = 3001; p < 3050; p++) PROBE_RANGE.push(p);
     const CANDIDATES = HINT ? [HINT, ...PROBE_RANGE.filter(p => p !== HINT)] : PROBE_RANGE;
 
+    const STAGES = [
+      '(NODE)  probing runtime',
+      '(PORT)  locating sidecar',
+      '(DB)    opening ledger',
+      '(WS)    warming sockets',
+      '(AGENT) spinning orchestrator',
+    ];
+    let stageIndex = 0;
     let attempts = 0;
-    let candidateIndex = 0;
+
+    function updateStamp() {
+      const el = document.getElementById('stamp');
+      if (!el) return;
+      const n = new Date();
+      el.textContent = 'v' + (window.__O8_VERSION__ || 'dev') + ' · ' +
+        String(n.getHours()).padStart(2,'0') + ':' +
+        String(n.getMinutes()).padStart(2,'0') + ':' +
+        String(n.getSeconds()).padStart(2,'0');
+    }
+    setInterval(updateStamp, 1000);
+    updateStamp();
+
+    function rotateStage() {
+      const el = document.getElementById('stage');
+      if (!el) return;
+      el.textContent = STAGES[stageIndex % STAGES.length];
+      stageIndex++;
+    }
+    setInterval(rotateStage, 900);
+    rotateStage();
 
     async function probe(port) {
       try {
@@ -82,27 +194,48 @@ const loaderHtml = `<!DOCTYPE html>
 
     async function tick() {
       attempts++;
-      // Walk the candidate list once per tick, stop at the first hit.
       for (let i = 0; i < CANDIDATES.length; i++) {
-        const port = CANDIDATES[(candidateIndex + i) % CANDIDATES.length];
+        const port = CANDIDATES[i];
         if (await probe(port)) return;
       }
       if (attempts < 30) {
         setTimeout(tick, 500);
       } else {
-        document.getElementById('status').innerHTML =
-          'Server failed to start.<br><br>' +
-          '<span style="color:#94a3b8;font-size:12px">Make sure Node.js is installed (v22+): ' +
-          '<a href="https://nodejs.org" style="color:#60a5fa">nodejs.org</a></span>';
+        const fail = document.getElementById('stage');
+        if (fail) fail.innerHTML = '<span style="color:#FF5A1F">server failed to start — install node 22+ at <span style="color:#111">nodejs.org</span></span>';
       }
     }
-
     setTimeout(tick, 500);
   </script>
 </head>
 <body>
-  <div class="orb">C</div>
-  <p id="status">Starting Cortex IDE…</p>
+  <div class="topbar">
+    <span class="brand">o8</span>
+    <span class="sep"></span>
+    <span>00 — BOOT</span>
+    <span class="stamp mono" id="stamp">v0.1.16 · 00:00:00</span>
+  </div>
+
+  <div class="center">
+    <span class="section-label">01 — COLD START</span>
+    <div class="mark">
+      o<span class="eight">8</span>
+    </div>
+    <div class="ticker mono">
+      <span class="bracket" id="stage">(NODE)  probing runtime</span>
+      <span class="dot-row"><span></span><span></span><span></span></span>
+    </div>
+  </div>
+
+  <div class="footer mono">
+    <span>orchestrator governance layer</span>
+    <div class="grid">
+      <span>codex</span>
+      <span>claude</span>
+      <span>gemini</span>
+      <span>opencode</span>
+    </div>
+  </div>
 </body>
 </html>`;
 writeFileSync(join(frontend, 'index.html'), loaderHtml);

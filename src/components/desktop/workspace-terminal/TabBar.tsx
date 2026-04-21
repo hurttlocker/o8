@@ -290,18 +290,6 @@ export const TabBar = memo(function TabBar({
                     overflow: 'hidden',
                     whiteSpace: 'nowrap',
                     textOverflow: 'ellipsis',
-                    ...(isActive && !isLatestDispatch
-                      ? {
-                          backgroundImage:
-                            'linear-gradient(100deg, var(--t-text) 0%, var(--t-text) 38%, var(--t-text-secondary) 50%, var(--t-text) 62%, var(--t-text) 100%)',
-                          backgroundSize: '220% 100%',
-                          backgroundRepeat: 'no-repeat',
-                          WebkitBackgroundClip: 'text',
-                          backgroundClip: 'text',
-                          WebkitTextFillColor: 'transparent',
-                          animation: 'tab-label-shimmer 2.8s linear infinite',
-                        }
-                      : null),
                   }}
                 >
                   {primaryLabel}
