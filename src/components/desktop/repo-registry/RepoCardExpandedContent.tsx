@@ -17,6 +17,8 @@ import {
   type RepoRegistryEntry,
   CodexIcon,
   ClaudeIcon,
+  GeminiIcon,
+  OpenCodeIcon,
 } from './shared';
 import { RepoBranchRow } from './RepoBranchRow';
 import type { RepoCardModel } from './useRepoCardModel';
@@ -260,21 +262,38 @@ function RepoCardExpandedContentBase({
                     color: statusTone.dot,
                   }}
                 />
-                <span
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: 'var(--t-text)',
-                    letterSpacing: '-0.01em',
-                  }}
-                >
-                  {packet.title}
-                </span>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span
+                    style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: 'var(--t-text)',
+                      letterSpacing: '-0.01em',
+                    }}
+                  >
+                    {packet.title}
+                  </span>
+                  {packet.branchTarget ? (
+                    <span
+                      title={packet.branchTarget}
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 10,
+                        fontWeight: 440,
+                        color: 'var(--t-text-muted)',
+                        letterSpacing: '-0.005em',
+                        fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+                      }}
+                    >
+                      {packet.branchTarget}
+                    </span>
+                  ) : null}
+                </div>
                 <span
                   title={runtimeTone.label}
                   style={{
@@ -285,8 +304,9 @@ function RepoCardExpandedContentBase({
                     color: runtimeTone.color,
                   }}
                 >
-                  {packet.runtime === 'claude-code'
-                    ? <ClaudeIcon size={18} color={runtimeTone.color} />
+                  {packet.runtime === 'claude-code' ? <ClaudeIcon size={18} color={runtimeTone.color} />
+                    : packet.runtime === 'gemini' ? <GeminiIcon size={18} />
+                    : packet.runtime === 'opencode' ? <OpenCodeIcon size={18} />
                     : <CodexIcon size={18} color={runtimeTone.color} />}
                 </span>
               </div>
