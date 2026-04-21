@@ -11,14 +11,14 @@ import {
 import { CLI_AGENTS, THEME_ACCENT, THEME_ACCENT_SOFT } from '@/components/desktop/workspace-terminal/constants';
 import { AgentDot, PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
 import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
-import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/types';
+import type { RegisteredRepo, WorkspaceChatRuntime } from '@/components/desktop/workspace-terminal/types';
 
 interface WorkspaceLaunchPickerProps {
   launchRequestKey?: number;
   scopedRepo?: RegisteredRepo | null;
   onRegisterRepo?: (localPath: string) => void;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
-  onNewChatTab: (runtime: 'codex' | 'claude-code', repo?: RegisteredRepo) => void;
+  onNewChatTab: (runtime: Exclude<WorkspaceChatRuntime, 'chat'>, repo?: RegisteredRepo) => void;
   onNewLLMChatTab: (repo?: RegisteredRepo) => void;
 }
 
@@ -30,6 +30,7 @@ function WorkspaceLaunchPickerBase({
   onNewChatTab,
   onNewLLMChatTab,
 }: WorkspaceLaunchPickerProps) {
+  type CliSessionRuntime = Exclude<WorkspaceChatRuntime, 'chat'>;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerStep, setPickerStep] = useState<'main' | 'terminal' | 'session' | 'repo'>('main');
   const [selectedAgent, setSelectedAgent] = useState<(typeof CLI_AGENTS)[number] | null>(null);
@@ -253,8 +254,10 @@ function WorkspaceLaunchPickerBase({
                 Back to CLI Session
               </button>
               {([
-                { id: 'codex' as const, label: 'Codex', color: '#10b981' },
-                { id: 'claude-code' as const, label: 'Claude Code', color: '#8b5cf6' },
+                { id: 'codex' as CliSessionRuntime, label: 'Codex', color: '#10b981' },
+                { id: 'claude-code' as CliSessionRuntime, label: 'Claude Code', color: '#8b5cf6' },
+                { id: 'gemini' as CliSessionRuntime, label: 'Gemini', color: '#4285f4' },
+                { id: 'opencode' as CliSessionRuntime, label: 'opencode', color: '#a855f7' },
               ]).map((runtime) => (
                 <button
                   type="button"
@@ -269,8 +272,9 @@ function WorkspaceLaunchPickerBase({
                   onMouseLeave={hoverOff}
                 >
                   <span style={iconSlotStyle}>
-                    {runtime.id === 'claude-code'
-                      ? <ClaudeIcon size={18} />
+                    {runtime.id === 'claude-code' ? <ClaudeIcon size={18} />
+                      : runtime.id === 'gemini' ? <GeminiIcon size={18} />
+                      : runtime.id === 'opencode' ? <OpenCodeIcon size={18} />
                       : <CodexIcon size={18} />}
                   </span>
                   <div>

@@ -30,10 +30,12 @@ function classifyStatus(rawStatus?: string): VisualStatus {
   return 'idle';
 }
 
-function inferRuntime(sessionKey: string, rawRuntime?: string): 'codex' | 'claude-code' {
-  return (rawRuntime ?? '').toLowerCase().includes('claude') || sessionKey.startsWith('claude-code:')
-    ? 'claude-code'
-    : 'codex';
+function inferRuntime(sessionKey: string, rawRuntime?: string): 'codex' | 'claude-code' | 'gemini' | 'opencode' {
+  const normalized = (rawRuntime ?? '').toLowerCase();
+  if (normalized.includes('claude') || sessionKey.startsWith('claude-code:')) return 'claude-code';
+  if (normalized.includes('gemini') || sessionKey.startsWith('gemini-owned:')) return 'gemini';
+  if (normalized.includes('opencode') || sessionKey.startsWith('opencode-owned:')) return 'opencode';
+  return 'codex';
 }
 
 function displayName(agent: FleetAgent | null, sessionKey: string): string {

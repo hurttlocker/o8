@@ -482,7 +482,7 @@ export function useWorkspaceTerminal({
     packetReferenceLabel?: string | null;
     packetTitle?: string | null;
     sessionKey: string;
-    runtime: 'codex' | 'claude-code';
+    runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode';
     repoPath: string;
     status?: string | null;
     branch?: string | null;

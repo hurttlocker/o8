@@ -7,7 +7,7 @@ import {
   persistOrchestratorMissionState,
   readOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
-import { ANSI_RE, CLAUDE_CLI_MODELS, CODEX_CLI_MODELS, CLI_AGENTS, IGNORED_PORTS, LOCALHOST_RE } from '@/components/desktop/workspace-terminal/constants';
+import { ANSI_RE, CLAUDE_CLI_MODELS, CODEX_CLI_MODELS, GEMINI_CLI_MODELS, getOpenCodeModels, CLI_AGENTS, IGNORED_PORTS, LOCALHOST_RE } from '@/components/desktop/workspace-terminal/constants';
 import type {
   LocalhostPreview,
   RegisteredRepo,
@@ -69,11 +69,18 @@ export function computeNewTerminalTab(
 /* ------------------------------------------------------------------ */
 
 export function buildNewChatTab(
-  runtime: 'codex' | 'claude-code',
+  runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode',
   repo?: RegisteredRepo,
 ): TerminalTab {
   const tabId = createWorkspaceTabId('chat');
   const now = Date.now();
+  const defaultModel = runtime === 'claude-code'
+    ? CLAUDE_CLI_MODELS[0].id
+    : runtime === 'gemini'
+      ? GEMINI_CLI_MODELS[0].id
+      : runtime === 'opencode'
+        ? getOpenCodeModels([])[0].id
+        : CODEX_CLI_MODELS[0].id;
   return {
     id: tabId,
     label: adHocLaneTitle('chat'),
@@ -81,7 +88,7 @@ export function buildNewChatTab(
     tmuxSession: null,
     chatRuntime: runtime,
     chatContinueLatest: false,
-    chatModel: runtime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id,
+    chatModel: defaultModel,
     repo,
     linkedIssue: null,
     createdAt: now,
