@@ -93,6 +93,13 @@ export interface TerminalTabHandle {
     autoArchiveOnIdle?: boolean;
   }) => string;
   focusTab: (tabId: string) => boolean;
+  focusTabRelative: (delta: number) => boolean;
+  focusTabAtIndex: (oneBasedIndex: number) => boolean;
+  closeActiveTab: () => boolean;
+  getTabsSnapshot: () => {
+    tabs: Array<{ id: string; label: string; kind: TerminalTab['kind']; sessionKey?: string }>;
+    activeTabId: string;
+  };
   setOrchestrationPacket: (tabId: string, packet: WorkspaceOrchestrationPacketBadge | null) => boolean;
   updateChatRuntimeStatus: (sessionKey: string, status: string, label?: string) => boolean;
   getChatTabSnapshots: () => OrchestratorLaneSnapshot[];

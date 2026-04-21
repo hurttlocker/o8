@@ -402,6 +402,73 @@ function DashboardInner() {
     return () => controller.abort();
   }, [transcriptBootstrapKeysKey]);
 
+  // ── Workspace tab hotkeys ──
+  // Cmd+1..Cmd+9 jump to the Nth workspace tab, Cmd+Opt+Left / Right cycle
+  // previous / next with wrap, Cmd+W closes the active tab. All dispatches
+  // hit the active workspace terminal's imperative handle, which points the
+  // store-backed panes to the target tab. Flash is driven off a custom event
+  // that TabBar listens for and pulses an accent shadow on the target label.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName;
+      const isEditable = target?.isContentEditable
+        || tagName === 'INPUT'
+        || tagName === 'TEXTAREA'
+        || tagName === 'SELECT';
+      const resolveHandle = () => {
+        const handles = workspaceTerminalHandlesRef.current;
+        if (handles.size === 0) return null;
+        if (activeTileId) {
+          const matched = handles.get(activeTileId);
+          if (matched) return matched;
+        }
+        return handles.values().next().value ?? null;
+      };
+      const flash = (tabId: string) => {
+        window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
+      };
+      // Cmd+Opt+Left / Right — cycle (allow inside editable fields too)
+      if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        const handle = resolveHandle();
+        if (!handle) return;
+        const delta = event.key === 'ArrowRight' ? 1 : -1;
+        if (handle.focusTabRelative(delta)) {
+          event.preventDefault();
+          const snap = handle.getTabsSnapshot();
+          flash(snap.activeTabId);
+        }
+        return;
+      }
+      if (isEditable && !event.altKey) {
+        // Digit + Cmd+W shortcuts should not fire while the user is typing.
+        // Cmd+Opt+Arrow bypasses this guard above — consistent with iTerm.
+        return;
+      }
+      if (!event.altKey && event.key >= '1' && event.key <= '9') {
+        const handle = resolveHandle();
+        if (!handle) return;
+        const index = Number.parseInt(event.key, 10);
+        if (handle.focusTabAtIndex(index)) {
+          event.preventDefault();
+          const snap = handle.getTabsSnapshot();
+          flash(snap.activeTabId);
+        }
+        return;
+      }
+      if (!event.altKey && !event.shiftKey && event.key.toLowerCase() === 'w') {
+        const handle = resolveHandle();
+        if (!handle) return;
+        if (handle.closeActiveTab()) {
+          event.preventDefault();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [activeTileId, workspaceTerminalHandlesRef]);
+
   // Active-workspace switch — clear the owned-session fleet cache so the next
   // consumer rebuilds immediately instead of serving a stale (up to 20s) TTL
   // entry from the previous workspace. Fire-and-forget; idempotent + cheap.

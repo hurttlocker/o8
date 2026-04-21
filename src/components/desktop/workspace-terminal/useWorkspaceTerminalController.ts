@@ -547,6 +547,8 @@ export function useWorkspaceTerminalController(
     openWorkspaceInspectorTab(canvasTab, { repo: resolvedRepo });
   }, [openWorkspaceInspectorTab]);
 
+  const handleCloseTabRef = useRef<(tabId: string) => void>(() => undefined);
+
   useImperativeHandle(ref, () => buildTerminalTabHandle({
     tabsRef,
     panelRefs,
@@ -568,6 +570,7 @@ export function useWorkspaceTerminalController(
     openWorkspaceInspectorTab,
     persistTabsNow,
     sendTerminalDetach,
+    closeTabById: (tabId: string) => handleCloseTabRef.current(tabId),
   }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, persistTabsNow, preferredRepo, sendTerminalDetach, stateScope]);
 
   const handleRegisterRepo = useCallback((localPath: string) => {
@@ -703,6 +706,8 @@ export function useWorkspaceTerminalController(
       return prev.filter((p) => p.tabId !== tabId);
     });
   }, [activeTabId, sendTerminalDetach]);
+
+  handleCloseTabRef.current = handleCloseTab;
 
   const archiveWorkspaceTab = useCallback((tabId: string, packetId?: string | null) => {
     handleCloseTab(tabId);
