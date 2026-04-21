@@ -1,5 +1,6 @@
 import type { BrowserSurfaceSummary } from '@/lib/browser/types';
 import type { CompactionEvent } from '@/lib/runtimes/compaction-detector';
+import type { DispatchCapability } from '@/lib/runtimes/shared/turn-dispatcher';
 
 /**
  * Universal Agent Runtime Contract
@@ -184,6 +185,13 @@ export interface AgentRuntime {
   readonly displayName: string;
   /** What this runtime supports */
   readonly capabilities: RuntimeCapabilities;
+  /**
+   * How this runtime handles follow-up turns.
+   * Optional during Wave 2a — adapters declare this as they migrate to
+   * dispatchTurn(). Existing resume() methods remain authoritative until
+   * Wave 2b/2c completes the migration.
+   */
+  readonly dispatchCapability?: DispatchCapability;
 
   // ── Discovery ──
 

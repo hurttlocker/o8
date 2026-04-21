@@ -221,6 +221,13 @@ export const codexRuntime: AgentRuntime = {
     };
   },
 
+  /**
+   * TODO(turn-dispatcher): migrate via Wave 2b.
+   * Owned-session-store extraction will wire this to dispatchTurn() with
+   * mode=['thread-resume'] and a resolveThreadId() that reads the owned
+   * session store. Discovered sessions may fall through to 'append-transcript'.
+   * Until then this method remains the authoritative resume path for Codex.
+   */
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
     const startedAtMs = Date.now();
     const baseline = usageSnapshotFromTelemetry(await codexRuntime.getTelemetry?.(sessionKey));
