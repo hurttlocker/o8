@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-21
 
+- `8c57d71f` perf: kill AgentTilePane polling + fleet invalidate route + urgent WS (Packet D,)
 - `fa6a8ef7` perf: rewire WorkspaceChatPane to transcript store (Packet B,)
 - `3e2e844c` design(AI provider-code-transcript): emit structured toolCalls for agent runtime-parity italic dropdowns
 - `1c82ea51` perf: visibility swap + render memo on tab panes ( Packet C)
