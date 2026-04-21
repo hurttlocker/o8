@@ -137,12 +137,21 @@ async function isOwnedSessionAlive(
   surfaceId: string,
   marker: string,
   root: string,
-): Promise<boolean> {
+): Promise<boolean | undefined> {
   const run = await readOwnedActiveRun(surfaceId, marker, root);
   if (!run) return false;
+  // Trust the tmux/bridge session first — it survives `zsh -l -c CMD` exec-ing
+  // into the CLI, where the wrapper pid is replaced by the child pid and our
+  // stored pid goes stale. If tmux exists AND is dead, we know the session is
+  // gone. If tmux exists AND is alive, the session is alive regardless of pid.
+  if (run.tmuxSession) {
+    return isBridgeSessionAlive(run.tmuxSession);
+  }
+  // No tmux session recorded (e.g. bridge failed to spawn) — fall back to pid.
   if (isPidAlive(run.pid)) return true;
-  if (run.tmuxSession) return isBridgeSessionAlive(run.tmuxSession);
-  return false;
+  // pid is gone AND no tmux to confirm — can't tell. Return undefined so the
+  // caller conservatively bails rather than archiving a running session.
+  return undefined;
 }
 
 let detectorTimer: ReturnType<typeof setInterval> | null = null;
