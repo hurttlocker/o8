@@ -4,7 +4,10 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isTauri, initMcpPlugin } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
-import { DesktopWebSocketProvider } from '@/components/desktop/hooks/DesktopWebSocketContext';
+import { DesktopWebSocketProvider, useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
+import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
+import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
+import { mergeTranscriptEntries } from '@/components/desktop/workspace-terminal/utils';
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
@@ -368,6 +371,36 @@ function DashboardInner() {
     workspaceScopeEntries,
     workspaceTerminalPreferredRepo,
   });
+
+  // ── Client transcript store: seed known workspace sessions + bridge WS fanout ──
+  const transcriptWsCallbacks = useMemo(
+    () => buildTranscriptWsCallbacks({ merge: mergeTranscriptEntries }),
+    [],
+  );
+  useSharedDesktopWs(undefined, transcriptWsCallbacks);
+
+  const transcriptBootstrapKeysKey = useMemo(() => {
+    const keys = new Set<string>();
+    for (const sessions of Object.values(workspaceChatSessionsByTileId)) {
+      for (const session of sessions) {
+        if (session?.sessionKey) keys.add(session.sessionKey);
+      }
+    }
+    if (activeWorkspaceChatSessionKey) keys.add(activeWorkspaceChatSessionKey);
+    return [...keys].sort().join('|');
+  }, [workspaceChatSessionsByTileId, activeWorkspaceChatSessionKey]);
+
+  useEffect(() => {
+    if (!transcriptBootstrapKeysKey) return;
+    const sessionKeys = transcriptBootstrapKeysKey.split('|').filter(Boolean);
+    if (sessionKeys.length === 0) return;
+    const controller = new AbortController();
+    void bootstrapTranscripts(sessionKeys, {
+      merge: mergeTranscriptEntries,
+      signal: controller.signal,
+    });
+    return () => controller.abort();
+  }, [transcriptBootstrapKeysKey]);
 
   const archivedLaneView = useLaneArchivedView();
 
