@@ -538,6 +538,36 @@ const GEMINI_STDERR_NOISE_PATTERNS: RegExp[] = [
   /updating to gemini cli/i,
 ];
 
+// Fallback cascade for Gemini when a model hits its daily quota. Walks the
+// list top → bottom; each retry swaps to the next model and emits a
+// runtime_fallback notification so the chat pane can pill the transition.
+// Keep in sync with GEMINI_CLI_MODELS ordering in constants.ts.
+const GEMINI_FALLBACK_CASCADE: string[] = [
+  'gemini-3-pro-preview',
+  'gemini-3.1-pro-preview',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+];
+
+function chooseNextGeminiModel(currentModel: string | undefined): string | null {
+  const current = currentModel || GEMINI_FALLBACK_CASCADE[0];
+  const idx = GEMINI_FALLBACK_CASCADE.indexOf(current);
+  if (idx === -1) return GEMINI_FALLBACK_CASCADE[0];
+  return GEMINI_FALLBACK_CASCADE[idx + 1] ?? null;
+}
+
+function describeGeminiModel(id: string): string {
+  const labels: Record<string, string> = {
+    'gemini-3-pro-preview': 'Gemini 3 Pro',
+    'gemini-3.1-pro-preview': 'Gemini 3.1 Pro',
+    'gemini-2.5-pro': 'Gemini 2.5 Pro',
+    'gemini-2.5-flash': 'Gemini 2.5 Flash',
+    'gemini-pro-latest': 'Gemini Pro (latest)',
+    'gemini-3.1-flash-lite-preview': 'Gemini 3.1 Flash Lite',
+  };
+  return labels[id] ?? id;
+}
+
 const geminiAdapter: OwnedRuntimeAdapter = {
   runtimeId: 'gemini',
   // Prefix is load-bearing: drives session routing in the runtime registry.
@@ -561,6 +591,21 @@ const geminiAdapter: OwnedRuntimeAdapter = {
   retryDelayMs: 5_000,
   launchGroupLabel: 'Launch turn',
   resumeGroupLabel: 'Resume turn',
+  chooseRetryModel: ({ failedRunRaw, currentModel }) => {
+    // Only cascade on quota / rate-limit. Other failures (crashes, auth,
+    // tool errors) should surface to the operator — keep the same model so
+    // the retry reveals the real cause, not a false "switched models" signal.
+    const quotaSignals = /exhausted your daily quota|quota exceeded|RESOURCE_EXHAUSTED|\b429\b|TerminalQuotaError/i;
+    if (!quotaSignals.test(failedRunRaw)) return null;
+    const nextModel = chooseNextGeminiModel(currentModel);
+    if (!nextModel) return null;
+    const fromLabel = describeGeminiModel(currentModel ?? GEMINI_FALLBACK_CASCADE[0]);
+    const toLabel = describeGeminiModel(nextModel);
+    return {
+      nextModel,
+      reason: `${fromLabel} hit its daily quota — retrying on ${toLabel}.`,
+    };
+  },
 };
 
 const geminiStore = createOwnedSessionStore(geminiAdapter);
