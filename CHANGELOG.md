@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-21
 
+- `8830d978` feat(AI provider): model fallback cascade on quota + in-chat pill
 - `05d5039c` feat(agent-panel): Orchestrator + Assistant rows with accurate shimmer
 - `77184bde` feat(hotkeys): Cmd+1-9 jump, Cmd+Opt+Arrow cycle, Cmd+W close + tab flash
 - `8c57d71f` perf: kill AgentTilePane polling + fleet invalidate route + urgent WS (Packet D,)
