@@ -82,6 +82,14 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.orchestratorModel = body.orchestratorModel.trim();
   }
 
+  if (body.defaultDispatchRuntime !== undefined) {
+    const raw = body.defaultDispatchRuntime;
+    if (raw !== 'codex' && raw !== 'claude-code' && raw !== 'gemini' && raw !== 'opencode') {
+      throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "gemini", "opencode".');
+    }
+    update.defaultDispatchRuntime = raw;
+  }
+
   return update;
 }
 
