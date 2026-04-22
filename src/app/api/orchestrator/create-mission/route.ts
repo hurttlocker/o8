@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { createMission, type LoadedIssue } from '@/lib/orchestrator/operator-mission-service';
+import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
@@ -52,7 +53,11 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'issues must be a non-empty array.', 400);
   }
 
-  const runtimeValue = normalizeRuntime(record.runtime);
+  // When runtime is omitted, fall back to the operator-configured default so
+  // callers that don't want to pin a runtime get the user's preferred CLI.
+  const runtimeValue = record.runtime === undefined || record.runtime === null || record.runtime === ''
+    ? resolveDefaultDispatchRuntimeSync()
+    : normalizeRuntime(record.runtime);
   if (!runtimeValue) {
     return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "opencode".', 400);
   }
