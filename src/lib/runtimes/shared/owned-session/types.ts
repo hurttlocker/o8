@@ -206,6 +206,19 @@ export interface OwnedRuntimeAdapter {
 
   /** Tail group copy for a resume turn. Default `'Resume turn'`. */
   resumeGroupLabel?: string;
+
+  /**
+   * Optional model-fallback hook. Called when a run has just failed and the
+   * store is about to auto-retry. Return a new model id to swap the session's
+   * model before the retry (and emit a `runtime_fallback` notification), or
+   * null to keep the current model. Used by Gemini to cascade from
+   * gemini-3-pro-preview → gemini-3.1-pro-preview → gemini-2.5-pro when a
+   * model hits its daily quota.
+   */
+  chooseRetryModel?(ctx: {
+    failedRunRaw: string;
+    currentModel: string | undefined;
+  }): { nextModel: string; reason: string } | null;
 }
 
 // ── Store contract ───────────────────────────────────────────────────────────

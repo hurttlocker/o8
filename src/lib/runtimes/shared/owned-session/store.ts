@@ -41,6 +41,7 @@ import {
   ACTIVE_WINDOW_MS,
   AUTO_RETRY_FRESHNESS_MS,
   DEFAULT_AUTO_RETRY_DELAY_MS,
+  MAX_AUTO_RETRIES,
   OWNED_FLEET_TTL_MS,
   OWNED_STALE_WINDOW_MS,
   RECENT_WINDOW_MS,
@@ -149,6 +150,50 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     };
   }
 
+  async function readOwnedRunStdout(run: OwnedRunRecord): Promise<string> {
+    const [stdoutRaw, stderrRaw] = await Promise.all([
+      pathExists(run.stdoutPath).then((exists) => (exists ? readFile(run.stdoutPath, 'utf8').catch(() => '') : '')),
+      pathExists(run.stderrPath).then((exists) => (exists ? readFile(run.stderrPath, 'utf8').catch(() => '') : '')),
+    ]);
+    // Fallback chain inspects both streams since Gemini's rate-limit signal
+    // lives on stderr (TerminalQuotaError) while other runtimes may put it
+    // on stdout.
+    return `${stdoutRaw}\n${stderrRaw}`;
+  }
+
+  async function emitRuntimeFallbackNotification(
+    session: OwnedSessionRecord,
+    fromModel: string,
+    toModel: string,
+    reason: string,
+  ) {
+    try {
+      const { publishRealtimeMutation } = await import('@/lib/realtime/publisher');
+      publishRealtimeMutation({
+        mutation: {
+          mutationId: `runtime-fallback-${session.surfaceId}-${Date.now()}`,
+          source: 'server',
+          action: 'runtime-fallback',
+          status: 'completed',
+          runtime: runtimeId as 'codex' | 'claude-code' | 'gemini' | 'opencode',
+          surfaceId: session.surfaceId,
+          sessionKey: session.surfaceId,
+          note: `${runtimeId} ${fromModel} → ${toModel}: ${reason}`,
+          createdAt: nowIso(),
+          settledAt: nowIso(),
+          fromModel,
+          toModel,
+          reason,
+        } as unknown as Parameters<typeof publishRealtimeMutation>[0]['mutation'],
+        refreshTargets: ['global', 'sessionHistory'],
+        sessionKeys: [session.surfaceId],
+        fresh: true,
+      });
+    } catch (err) {
+      console.error(`[owned-store] emitRuntimeFallbackNotification failed:`, err);
+    }
+  }
+
   // ── Session refresh (outcome reconciliation + auto-retry) ─────────────────
 
   async function refreshSession(session: OwnedSessionRecord) {
@@ -193,14 +238,39 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
 
     // Auto-retry: if the latest run just failed and autoRetry is enabled,
     // retry once after `retryDelayMs`. Only fires when the failure is fresh
-    // (<60s) so stale failures don't cascade on app reload.
-    if (session.autoRetry && (session.retryCount ?? 0) < 1) {
+    // (<60s) so stale failures don't cascade on app reload. Allows up to
+    // `MAX_AUTO_RETRIES` attempts when the adapter provides a
+    // `chooseRetryModel` fallback (Gemini walks the model cascade on quota).
+    const retryBudget = adapter.chooseRetryModel ? MAX_AUTO_RETRIES : 1;
+    if (session.autoRetry && (session.retryCount ?? 0) < retryBudget) {
       const latestFailedRun = session.recentRuns.find((r) => r.outcome === 'failed');
       if (latestFailedRun && !session.activeRun) {
         const failAge = latestFailedRun.finishedAt
           ? Date.now() - new Date(latestFailedRun.finishedAt).getTime()
           : Infinity;
         if (failAge < AUTO_RETRY_FRESHNESS_MS) {
+          // Give the adapter a chance to swap the session's model before the
+          // retry (Gemini cascade). When a new model is picked, broadcast a
+          // `runtime_fallback` notification so the chat pane can render a
+          // pill explaining the switch.
+          if (adapter.chooseRetryModel) {
+            try {
+              const failedRaw = await readOwnedRunStdout(latestFailedRun);
+              const decision = adapter.chooseRetryModel({
+                failedRunRaw: failedRaw,
+                currentModel: session.model,
+              });
+              if (decision && decision.nextModel !== session.model) {
+                const fromModel = session.model ?? '(default)';
+                session.model = decision.nextModel;
+                dirty = true;
+                console.log(`[owned-store] ${runtimeId} fallback ${fromModel} → ${decision.nextModel} (${decision.reason})`);
+                void emitRuntimeFallbackNotification(session, fromModel, decision.nextModel, decision.reason);
+              }
+            } catch (hookErr) {
+              console.error(`[owned-store] chooseRetryModel hook failed for ${session.surfaceId}:`, hookErr);
+            }
+          }
           session.retryCount = (session.retryCount ?? 0) + 1;
           await saveSession(session);
           console.log(`[owned-store] Auto-retrying ${runtimeId} session ${session.surfaceId} after failure (attempt ${session.retryCount})`);

@@ -31,6 +31,7 @@ export const OWNED_STALE_WINDOW_MS = 24 * 60 * 60_000;
 export const OWNED_FLEET_TTL_MS = 20_000;
 export const AUTO_RETRY_FRESHNESS_MS = 60_000;
 export const DEFAULT_AUTO_RETRY_DELAY_MS = 5_000;
+export const MAX_AUTO_RETRIES = 4;
 
 // ── Text helpers ─────────────────────────────────────────────────────────────
 
