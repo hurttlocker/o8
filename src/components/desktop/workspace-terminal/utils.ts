@@ -165,25 +165,28 @@ export function normalizeWorkspaceChatSessionKey(
   if (!runtime || !sessionKey) return null;
   const trimmed = sessionKey.trim();
   if (!trimmed) return null;
-  if (runtime === 'chat') return trimmed.startsWith('llm-chat:') ? trimmed : `llm-chat:${trimmed}`;
-  if (runtime === 'claude-code') return trimmed.startsWith('claude-code:') ? trimmed : `claude-code:${trimmed}`;
-  if (runtime === 'codex') {
-    if (
-      trimmed.startsWith('codex:')
-      || trimmed.startsWith('codex-owned:')
-      || trimmed.startsWith('codex-discovered:')
-      || trimmed.startsWith('codex-live:')
-    ) {
-      return trimmed;
-    }
-    return `codex:${trimmed}`;
+  // Defensive: if the sessionKey already carries a recognized runtime prefix,
+  // trust it and pass through verbatim. Prevents double-prefix artifacts like
+  // `codex:gemini-owned:...` when a caller passes runtime='codex' but the lane
+  // is actually gemini-owned (happens when mutation record arrives with a
+  // stale runtime hint).
+  if (
+    trimmed.startsWith('llm-chat:')
+    || trimmed.startsWith('claude-code:')
+    || trimmed.startsWith('codex:')
+    || trimmed.startsWith('codex-owned:')
+    || trimmed.startsWith('codex-discovered:')
+    || trimmed.startsWith('codex-live:')
+    || trimmed.startsWith('gemini-owned:')
+    || trimmed.startsWith('opencode-owned:')
+  ) {
+    return trimmed;
   }
-  if (runtime === 'gemini') {
-    return trimmed.startsWith('gemini-owned:') ? trimmed : `gemini-owned:${trimmed}`;
-  }
-  if (runtime === 'opencode') {
-    return trimmed.startsWith('opencode-owned:') ? trimmed : `opencode-owned:${trimmed}`;
-  }
+  if (runtime === 'chat') return `llm-chat:${trimmed}`;
+  if (runtime === 'claude-code') return `claude-code:${trimmed}`;
+  if (runtime === 'codex') return `codex:${trimmed}`;
+  if (runtime === 'gemini') return `gemini-owned:${trimmed}`;
+  if (runtime === 'opencode') return `opencode-owned:${trimmed}`;
   return trimmed;
 }
 

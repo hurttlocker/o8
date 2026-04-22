@@ -73,8 +73,12 @@ export function computeCliChatSession(
         : options.targetSessionKey?.startsWith('opencode-owned:')
           ? 'opencode'
           : null;
-  const resolvedRuntime = options.runtime
-    ?? targetRuntime
+  // When the targetSessionKey carries a definitive runtime prefix, trust it
+  // over options.runtime. Prevents wrong-runtime tabs when upstream (e.g.
+  // a stale WS mutation) passes runtime='codex' but the actual lane is a
+  // gemini-owned / opencode-owned / claude-code session.
+  const resolvedRuntime = targetRuntime
+    ?? options.runtime
     ?? (isAgentRuntimeTab(currentActiveTab) ? currentActiveTab.chatRuntime : (options.createNew ? 'codex' : 'claude-code'));
   const normalizedTargetSessionKey = options.targetSessionKey
     ? normalizeWorkspaceChatSessionKey(resolvedRuntime, options.targetSessionKey)
@@ -140,13 +144,23 @@ export function computeCliChatSession(
 
   if (matchingExisting) {
     const resolvedTabId = matchingExisting.id;
+    // Pick a model that matches the resolved runtime when the reused tab
+    // previously spoke a different CLI (otherwise GPT-5.4 chip sticks on a
+    // gemini tab). Falls back to the caller's explicit modelId.
+    const fallbackModelForRuntime = resolvedRuntime === 'claude-code'
+      ? CLAUDE_CLI_MODELS[0].id
+      : resolvedRuntime === 'gemini' ? GEMINI_CLI_MODELS[0].id
+      : resolvedRuntime === 'opencode' ? getOpenCodeModels([])[0].id
+      : CODEX_CLI_MODELS[0].id;
     const nextTabs = currentTabs.map((tab) => (
       tab.id === resolvedTabId
         ? {
             ...tab,
             label: options.label ?? options.orchestrationPacket?.title ?? tab.label,
+            chatRuntime: resolvedRuntime,
             chatSessionKey: normalizedTargetSessionKey ?? tab.chatSessionKey,
-            chatModel: options.modelId ?? tab.chatModel,
+            chatModel: options.modelId
+              ?? (tab.chatRuntime === resolvedRuntime ? tab.chatModel : fallbackModelForRuntime),
             chatContinueLatest: tab.chatContinueLatest ?? false,
             chatDraftInjection: injection ?? tab.chatDraftInjection,
             orchestrationPacket: options.orchestrationPacket ?? tab.orchestrationPacket ?? null,
