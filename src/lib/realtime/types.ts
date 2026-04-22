@@ -52,6 +52,10 @@ export interface RealtimeMutationRecord {
   optimistic?: boolean;
   createdAt: string;
   settledAt?: string;
+  /** Populated when action === 'runtime-fallback'. */
+  fromModel?: string;
+  toModel?: string;
+  reason?: string;
 }
 
 export interface RuntimeRealtimeSnapshotPayload {

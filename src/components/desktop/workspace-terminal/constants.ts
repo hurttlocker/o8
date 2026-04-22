@@ -13,13 +13,29 @@ export const CLI_AGENTS = [
   { id: 'gemini', label: 'Gemini CLI', color: '#4285f4', command: 'gemini' },
 ] as const;
 
+// Order matters: the first entry is the default for new Gemini packets/tabs
+// AND the primary model in the auto-fallback cascade. Cascade walks the list
+// top → bottom on quota / rate-limit errors. Gemini 3 Pro goes first because
+// the 3.1-pro daily quota (250/day on free tier) fills up fast under heavy
+// dispatch, and 3 Pro has a separate bucket.
 export const GEMINI_CLI_MODELS: WorkspaceCliModelOption[] = [
-  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', color: '#4285f4' },
   { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro', color: '#4285f4' },
-  { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite', color: '#8ab4f8' },
-  { id: 'gemini-pro-latest', label: 'Gemini Pro (latest)', color: '#4285f4' },
+  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', color: '#4285f4' },
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', color: '#4285f4' },
+  { id: 'gemini-pro-latest', label: 'Gemini Pro (latest)', color: '#4285f4' },
+  { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite', color: '#8ab4f8' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', color: '#8ab4f8' },
+];
+
+/** Cascade order for the rate-limit auto-fallback. The gemini adapter walks
+ * this list top → bottom when the current model returns a quota/rate-limit
+ * error, emitting a runtime_fallback notification so the chat pane can pill
+ * the transition. */
+export const GEMINI_FALLBACK_CASCADE: ReadonlyArray<string> = [
+  'gemini-3-pro-preview',
+  'gemini-3.1-pro-preview',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
 ];
 
 export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [

@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, lazy, memo, useMemo, useState, type CSSProperties } from 'react';
+import { Suspense, lazy, memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   AlertCircle,
   ArrowDown,
@@ -11,7 +11,9 @@ import {
   Search,
 } from '../lucide-shims';
 import { useLaneArchivedView } from '@/app/dashboard/hooks/useLaneArchivedSet';
+import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { IssueLinkPickerModal, type LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
+import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 import {
   CLI_SUGGESTED_PROMPTS,
   THEME_ACCENT,
@@ -260,6 +262,33 @@ function WorkspaceChatPaneBase({
     return sessionKey ? archivedLaneView.sessionKeys.has(sessionKey) : false;
   }, [tab.kind, tab.chatSessionKey, archivedLaneView.sessionKeys]);
 
+  // Runtime fallback notifications: when a Gemini model quotas out, the
+  // adapter picks the next model in GEMINI_FALLBACK_CASCADE before retrying.
+  // The store publishes a `runtime-fallback` mutation; we render it as a
+  // dismissible pill above the transcript for ~12s.
+  const [fallbackPill, setFallbackPill] = useState<{ fromModel: string; toModel: string; reason: string } | null>(null);
+  const tabSessionKey = tab.chatSessionKey ?? null;
+  useSharedDesktopWs(undefined, useMemo(() => ({
+    onRealtimeEvent: (event: RealtimeEventEnvelope) => {
+      if (event.channel !== 'mutation') return;
+      if (event.event !== 'mutation.record' && event.event !== 'mutation.settled') return;
+      const mutation = (event.data as { mutation?: RealtimeMutationRecord }).mutation;
+      if (!mutation || mutation.action !== 'runtime-fallback') return;
+      if (!tabSessionKey) return;
+      if (mutation.sessionKey && !tabSessionKey.endsWith(mutation.sessionKey)) return;
+      const fromModel = mutation.fromModel ?? '';
+      const toModel = mutation.toModel ?? '';
+      const reason = mutation.reason ?? mutation.note ?? '';
+      if (!toModel) return;
+      setFallbackPill({ fromModel, toModel, reason });
+    },
+  }), [tabSessionKey]));
+  useEffect(() => {
+    if (!fallbackPill) return;
+    const timer = window.setTimeout(() => setFallbackPill(null), 12_000);
+    return () => window.clearTimeout(timer);
+  }, [fallbackPill]);
+
   const streamingMessage = useMemo<import('@/components/desktop/LLMChat').LLMMessage>(() => ({
     id: `stream:${chat.tabId}`,
     role: 'assistant',
@@ -290,6 +319,45 @@ function WorkspaceChatPaneBase({
         position: 'relative',
       } as CSSProperties}
     >
+      {fallbackPill ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: 12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 30,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 10,
+            paddingTop: 8,
+            paddingBottom: 8,
+            paddingLeft: 14,
+            paddingRight: 14,
+            borderRadius: 999,
+            background: 'rgba(245, 158, 11, 0.12)',
+            borderWidth: '0.5px',
+            borderStyle: 'solid',
+            borderColor: 'rgba(245, 158, 11, 0.35)',
+            boxShadow: '0 4px 14px rgba(245, 158, 11, 0.18)',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontSize: 12,
+            fontWeight: 500,
+            letterSpacing: '-0.005em',
+            color: '#92400e',
+            cursor: 'pointer',
+            animation: 'llmFadeIn 280ms ease-out',
+          }}
+          onClick={() => setFallbackPill(null)}
+          title="Click to dismiss"
+        >
+          <AlertCircle size={13} style={{ flexShrink: 0 }} />
+          <span>
+            Switched to <strong style={{ fontWeight: 600 }}>{fallbackPill.toModel}</strong>
+            {fallbackPill.reason ? ` — ${fallbackPill.reason.replace(/\.$/, '')}` : ''}
+          </span>
+        </div>
+      ) : null}
       <div
         ref={chat.scrollRef}
         onScroll={chat.handleScroll}
