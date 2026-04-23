@@ -21,7 +21,7 @@ import {
   orchestratorRuntimeTone,
   orchestratorStatusTone,
 } from '@/lib/orchestrator/display';
-import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { WorktreeInfo, WorktreeStatus } from '@/lib/worktree/types';
 
@@ -38,7 +38,7 @@ export interface WorkspaceCreateResult {
 
 export interface WorkspaceAgentLaunchRequest {
   repoPath: string;
-  runtime?: 'codex' | 'claude-code';
+  runtime?: OrchestratorRuntime;
   modelId?: string;
   initialText?: string;
   autoSend?: boolean;
