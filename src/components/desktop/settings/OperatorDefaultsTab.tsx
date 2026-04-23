@@ -466,7 +466,7 @@ export function OperatorDefaultsTab() {
           margin: 0,
           marginBottom: 12,
         }}>
-          How many codex packets the orchestrator runs at once. Env var{' '}
+          How many dispatched packets the orchestrator runs at once. Env var{' '}
           <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12, color: 'var(--t-text-secondary)' }}>O8_MAX_PARALLEL_DISPATCHES</span>
           {' '}overrides.
         </p>

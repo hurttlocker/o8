@@ -14,6 +14,7 @@ import type {
   WorkspaceLlmMessage,
 } from '@/components/desktop/workspace-terminal/types';
 import { getCachedOpenCodeProviders, loadOpenCodeProviders } from '@/lib/setup/detection-cache';
+import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import {
   buildQueuedContextCard,
   buildWorkspaceThinkingStep,
@@ -90,7 +91,7 @@ export function useWorkspaceChatPane({
     [chatRuntime, chatSessionKey],
   );
   const runtimeLabel = useMemo(
-    () => ({ codex: 'Codex', 'claude-code': 'Claude Code', gemini: 'Gemini', opencode: 'OpenCode' } as Record<string, string>)[chatRuntime ?? 'codex'] ?? 'Codex',
+    () => getRuntimeCapability(chatRuntime ?? 'codex').label,
     [chatRuntime],
   );
   const availableModels = useMemo<WorkspaceCliModelOption[]>(

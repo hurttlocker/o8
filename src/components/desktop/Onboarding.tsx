@@ -575,7 +575,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
                 </div>
               ) : runtimes.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
-                  No agent runtimes detected. Install Claude Code or Codex to get started, or add API keys in Settings.
+                  No agent runtimes detected. Install Claude Code, Codex, or Gemini to get started, or add API keys in Settings.
                 </div>
               ) : (
                 runtimes.map((rt) => (
