@@ -332,7 +332,10 @@ export function findLaneByPacket(packetId: string): Lane | null {
   const row = getLaneDb()
     .select()
     .from(lanes)
-    .where(eq(lanes.packetId, packetId))
+    .where(and(
+      eq(lanes.packetId, packetId),
+      notInArray(lanes.status, ['archived', 'completed']),
+    ))
     .get();
   return mapLaneRow(row);
 }

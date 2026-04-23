@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   FOCUS_REPO_SETUP_EVENT,
   OPEN_REPO_WORKSPACE_EVENT,
@@ -110,11 +111,14 @@ function RepoRegistrySectionBase({
   const [workspaceNotice, setWorkspaceNotice] = useState<Record<string, WorkspaceCreateResult>>({});
 
   const [launchRepo, setLaunchRepo] = useState<RepoRegistryEntry | null>(null);
-  const [launchRuntime, setLaunchRuntime] = useState<'codex' | 'claude-code'>(() => {
+  const [launchRuntime, setLaunchRuntime] = useState<OrchestratorRuntime>(() => {
     if (typeof window === 'undefined') return 'codex';
     try {
       const saved = window.localStorage.getItem('cortex-workspace-launch-runtime');
-      return saved === 'claude-code' ? 'claude-code' : 'codex';
+      if (saved === 'codex' || saved === 'claude-code' || saved === 'gemini' || saved === 'opencode') {
+        return saved;
+      }
+      return 'codex';
     } catch {
       return 'codex';
     }
@@ -448,7 +452,7 @@ function RepoRegistrySectionBase({
   const launchIntoWorkspace = useCallback(async (
     repo: RepoRegistryEntry,
     options?: {
-      runtime?: 'codex' | 'claude-code';
+      runtime?: OrchestratorRuntime;
       label?: string;
       initialText?: string;
       autoSend?: boolean;
