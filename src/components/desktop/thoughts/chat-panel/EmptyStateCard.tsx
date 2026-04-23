@@ -87,7 +87,7 @@ export function EmptyStateCard({
         }}>
           {isOrchestratorMode
             ? 'Claude Code is your orchestrator. Your first message spawns a live session with full agent capabilities.'
-            : 'Intervene directly with a live Codex or Claude Code lane without leaving the planner surface.'}
+            : 'Intervene directly with a live CLI lane without leaving the planner surface.'}
         </div>
         <div style={{
           display: 'flex',
@@ -109,7 +109,7 @@ export function EmptyStateCard({
             </>
           ) : (
             <>
-              <div>No live Codex or Claude Code lane is available right now.</div>
+              <div>No live CLI lane is available right now.</div>
               <div>Switch to Claude orchestrator or launch a CLI lane from a workspace tab.</div>
             </>
           )}

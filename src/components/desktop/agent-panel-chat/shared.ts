@@ -67,9 +67,13 @@ export function updateTranscriptEntry(
 export function getAgentName(s: SessionSummary): string {
   if (s.orchestrationPacket?.title?.trim()) return s.orchestrationPacket.title.trim();
   if (s.runtime === 'claude-code') return 'Claude Code';
+  if (s.runtime === 'gemini') return 'Gemini';
+  if (s.runtime === 'opencode') return 'opencode';
   if (s.isCurrentSession) return 'Assistant';
   const name = s.name || s.sessionKey;
   if (name.includes('codex-owned')) return 'Codex';
+  if (name.includes('gemini-owned')) return 'Gemini';
+  if (name.includes('opencode-owned')) return 'opencode';
   if (name.includes('ace')) return 'Niot';
   if (name.includes('hawk')) return 'Hawk';
   return name;

@@ -306,6 +306,7 @@ export function PacketCard({
                 packetId={packet.id}
                 issueUrl={resolvedIssueUrl}
                 prompt={packetPrompt}
+                runtime={packet.runtime}
               />
             </div>
           </div>
