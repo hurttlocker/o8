@@ -12,9 +12,10 @@ See `docs/o8-product-brief.md` for the full product vision, monetization, and Ka
 
 ```bash
 # Development
-npm run dev              # Next.js dev server → http://localhost:3001
-npm run dev:ws           # WebSocket server → ws://localhost:3002
-npm run desktop:dev      # Both together (kills stale ports, concurrently)
+npm run dev              # Next + ws-server together (kills stale ports, concurrently) — default
+npm run dev:next         # Next.js dev server alone → http://localhost:3001
+npm run dev:ws           # WebSocket server alone → ws://localhost:3002
+npm run desktop:dev      # Alias for `npm run dev` (kept for muscle memory + Tauri beforeDevCommand)
 cargo tauri dev          # Tauri native shell (from src-tauri/)
 
 # Verification (run before every commit)
