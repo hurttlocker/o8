@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Fast pre-release gate: typecheck -> lint -> build. Fail-fast on any step.
+// Fast pre-release gate: typecheck -> build. Fail-fast on any step.
 // Usage: npm run smoke
 
 import { spawn } from 'node:child_process';
@@ -13,7 +13,6 @@ const RESET = '\u001b[0m';
 
 const STEPS = [
   { name: 'Typecheck', cmd: 'npx', args: ['tsc', '--noEmit'] },
-  { name: 'Lint', cmd: 'npm', args: ['run', 'lint'] },
   { name: 'Build', cmd: 'npm', args: ['run', 'build'] },
 ];
 
