@@ -12,7 +12,7 @@ import {
 } from '@/components/desktop/workspace-terminal/icons';
 import { WorkspaceLaunchPicker } from '@/components/desktop/workspace-terminal/WorkspaceLaunchPicker';
 import { describeWorkspaceChatTab, workspaceTabPrimaryLabel } from '@/components/desktop/workspace-terminal/utils';
-import { CodexIcon, ClaudeIcon } from '@/components/desktop/repo-registry/shared';
+import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { chromeNeoSurface, chromeNeoHoverSurface } from '@/components/desktop/chrome/ChromeButton';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { compactPacketLabel } from '@/lib/workspace-terminal/compact-packet-label';
@@ -303,6 +303,10 @@ export const TabBar = memo(function TabBar({
                   <ClaudeIcon size={13} />
                 ) : tab.chatRuntime === 'codex' ? (
                   <CodexIcon size={13} />
+                ) : tab.chatRuntime === 'gemini' ? (
+                  <GeminiIcon size={13} />
+                ) : tab.chatRuntime === 'opencode' ? (
+                  <OpenCodeIcon size={13} />
                 ) : null}
                 <span
                   style={{
