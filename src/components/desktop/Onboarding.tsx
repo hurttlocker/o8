@@ -3,12 +3,13 @@
 /**
  * Onboarding — Full-screen multi-step first-run experience.
  *
- * 5 steps, same glass theme throughout:
+ * 6 steps, same glass theme throughout:
  *   1. Welcome + GitHub sign-in (feature carousel)
  *   2. Repo picker (select which repos to manage)
  *   3. Runtime detection (auto-scan installed tools)
- *   4. Bring Your Brain (ChatGPT/Claude import)
- *   5. Ready (summary + enter dashboard)
+ *   4. Default dispatch runtime (Codex / Claude Code / Gemini)
+ *   5. Bring Your Brain (ChatGPT/Claude import)
+ *   6. Ready (summary + enter dashboard)
  *
  * Design ref: Conductor-style glass + feature carousel.
  * Full-screen takeover, frosted glass background, no sidebar.
@@ -16,12 +17,13 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ExtractedProfile, ImportProgress } from '@/lib/connectors/chatgpt/types';
+import { OnboardingDispatchStep } from './onboarding/OnboardingDispatchStep';
 
 // ── Shared constants ──
 
-type OnboardingStep = 'welcome' | 'repos' | 'runtimes' | 'import' | 'ready';
+type OnboardingStep = 'welcome' | 'repos' | 'runtimes' | 'dispatch' | 'import' | 'ready';
 
-const STEP_ORDER: OnboardingStep[] = ['welcome', 'repos', 'runtimes', 'import', 'ready'];
+const STEP_ORDER: OnboardingStep[] = ['welcome', 'repos', 'runtimes', 'dispatch', 'import', 'ready'];
 
 const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif';
 const MONO = '"SF Mono", ui-monospace, monospace';
@@ -370,6 +372,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
             {step === 'welcome' ? 'Governance for autonomous teams'
               : step === 'repos' ? 'Choose your repositories'
               : step === 'runtimes' ? 'Your assistant engine'
+              : step === 'dispatch' ? 'Default dispatch runtime'
               : step === 'import' ? 'Make o8 yours'
               : 'You\'re all set'}
           </div>
@@ -609,7 +612,22 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
           </div>
         )}
 
-        {/* ── Step 4: Bring Your Brain ── */}
+        {/* ── Step 4: Default dispatch runtime ── */}
+        {step === 'dispatch' && (
+          <OnboardingDispatchStep
+            runtimes={runtimes}
+            onContinue={goNext}
+            onSkip={goNext}
+            renderButton={({ label, onClick, disabled }) => (
+              <GlassButton primary onClick={onClick} disabled={disabled}>
+                {label}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              </GlassButton>
+            )}
+          />
+        )}
+
+        {/* ── Step 5: Bring Your Brain ── */}
         {step === 'import' && (
           <div style={{ maxWidth: 560, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5, textAlign: 'center' }}>
@@ -705,7 +723,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
           </div>
         )}
 
-        {/* ── Step 5: Ready ── */}
+        {/* ── Step 6: Ready ── */}
         {step === 'ready' && (
           <div style={{ maxWidth: 480, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
             <GlassCard style={{ width: '100%', padding: 28, textAlign: 'center' }}>
