@@ -1,7 +1,13 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { CheckCircle2, FolderOpen, GitBranch, Globe, Loader2 } from '../lucide-shims';
+import { fetchThoughtsOperatorDefaults } from '@/components/desktop/thoughts/operator-defaults';
+import {
+  ORCHESTRATOR_RUNTIMES,
+  listDispatchableRuntimes,
+} from '@/lib/orchestrator/runtime-capabilities';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   AlertCircle,
   GlassModal,
@@ -10,6 +16,32 @@ import {
   type ValidatedRepoCandidate,
   type WorkspaceCreateResult,
 } from './shared';
+
+// Client-side cache for the experimentalOpencode flag — mirrors the pattern in
+// mission-panel/PacketMetaRows.tsx. Populated once per module lifetime so the
+// launch picker doesn't re-fetch on every modal open.
+let cachedExperimentalOpencode: boolean | null = null;
+function useExperimentalOpencodeFlag(): boolean {
+  const [flag, setFlag] = useState<boolean>(cachedExperimentalOpencode ?? false);
+  useEffect(() => {
+    if (cachedExperimentalOpencode !== null) {
+      // Cache already seeded the initial state via useState — nothing to sync.
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    void fetchThoughtsOperatorDefaults(controller.signal).then((defaults) => {
+      if (cancelled) return;
+      cachedExperimentalOpencode = defaults.experimentalOpencode;
+      setFlag(defaults.experimentalOpencode);
+    });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, []);
+  return flag;
+}
 
 // Normalise a remote URL to a friendly "owner/repo" label.
 // https://github.com/hurttlocker/cortex-ide.git → hurttlocker/cortex-ide
@@ -92,8 +124,8 @@ interface RepoRegistryModalsProps {
   handleCreateWorkspace: () => Promise<void>;
   launchRepo: RepoRegistryEntry | null;
   closeLaunchModal: () => void;
-  launchRuntime: 'codex' | 'claude-code';
-  setLaunchRuntime: React.Dispatch<React.SetStateAction<'codex' | 'claude-code'>>;
+  launchRuntime: OrchestratorRuntime;
+  setLaunchRuntime: React.Dispatch<React.SetStateAction<OrchestratorRuntime>>;
   launchTaskName: string;
   setLaunchTaskName: React.Dispatch<React.SetStateAction<string>>;
   launchPrompt: string;
@@ -151,6 +183,13 @@ function RepoRegistryModalsBase({
   setRemoveBusy,
   handleRemoveRepo,
 }: RepoRegistryModalsProps) {
+  const opencodeEnabled = useExperimentalOpencodeFlag();
+  // When the user already has opencode selected (e.g. via a saved localStorage
+  // preference), keep it visible even if the experimental flag is off so the
+  // picker doesn't silently drop their choice.
+  const launchRuntimeOptions = listDispatchableRuntimes({
+    includeExperimental: opencodeEnabled || launchRuntime === 'opencode',
+  });
   return (
     <>
       <GlassModal
@@ -642,7 +681,7 @@ function RepoRegistryModalsBase({
             id="launch-agent-runtime"
             name="launchAgentRuntime"
             value={launchRuntime}
-            onChange={(event) => setLaunchRuntime(event.currentTarget.value as 'codex' | 'claude-code')}
+            onChange={(event) => setLaunchRuntime(event.currentTarget.value as OrchestratorRuntime)}
             style={{
               width: '100%',
               minHeight: 40,
@@ -656,8 +695,9 @@ function RepoRegistryModalsBase({
               outline: 'none',
             }}
           >
-            <option value="codex">Codex</option>
-            <option value="claude-code">Claude Code</option>
+            {launchRuntimeOptions.map((runtime) => (
+              <option key={runtime} value={runtime}>{ORCHESTRATOR_RUNTIMES[runtime].label}</option>
+            ))}
           </select>
         </div>
 

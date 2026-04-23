@@ -1,6 +1,6 @@
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
@@ -156,7 +156,7 @@ export type FeedFilter = 'all' | 'commit' | 'issue' | 'pr' | 'ci';
 
 export interface WorkspaceAgentLaunchRequest {
   repoPath: string;
-  runtime?: 'codex' | 'claude-code';
+  runtime?: OrchestratorRuntime;
   modelId?: string;
   initialText?: string;
   autoSend?: boolean;
