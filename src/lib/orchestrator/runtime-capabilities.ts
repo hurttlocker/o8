@@ -66,11 +66,21 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
   },
 };
 
-export function listDispatchableRuntimes(): OrchestratorRuntime[] {
+export function listDispatchableRuntimes(options?: { includeExperimental?: boolean }): OrchestratorRuntime[] {
+  const includeExperimental = options?.includeExperimental ?? false;
   return (Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[])
-    .filter((id) => ORCHESTRATOR_RUNTIMES[id].dispatchable);
+    .filter((id) => {
+      if (!ORCHESTRATOR_RUNTIMES[id].dispatchable) return false;
+      // opencode is experimental for v1 — only appears in dispatch pickers
+      // when the operator has flipped `experimentalOpencode` on.
+      if (id === 'opencode' && !includeExperimental) return false;
+      return true;
+    });
 }
 
 export function getRuntimeCapability(runtime: OrchestratorRuntime): OrchestratorRuntimeCapability {
   return ORCHESTRATOR_RUNTIMES[runtime];
 }
+
+/** Runtimes that ship in the v1 dispatch picker. Keep this narrow. */
+export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'gemini'];
