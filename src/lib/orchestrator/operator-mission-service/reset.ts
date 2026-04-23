@@ -9,21 +9,48 @@ export async function resetPacket(input: ResetPacketInput) {
     throw new Error(`Packet ${input.packetId} not found.`);
   }
 
-  // Archive the old lane and clear its packet binding so the reconciler
-  // doesn't re-attach it to this packet
+  // Archive ALL stale lanes bound to this packet and clear their packet
+  // binding so the reconciler doesn't re-attach them to this packet OR
+  // rebind them to the next new mission that happens to share the same
+  // branch slug (v1 ship bug: reconciler was picking up orphan lanes left
+  // behind when `packet.lane` was already null in mission state but SQLite
+  // still held an active row tied to `packet.id`).
+  //
+  // We sweep SQLite directly via listLanes() rather than trusting
+  // packet.lane because store.reconcileOrchestratorMissionState() can
+  // null packet.lane while leaving the SQLite row in a non-terminal status.
   let worktreePath: string | null = null;
-  if (packet.lane?.laneId) {
-    try {
-      const { archiveLane, findLaneByPacket: findLane, updateLane } = await import('@/lib/lane/registry');
-      const lane = findLane(packet.id);
-      worktreePath = lane?.worktreePath ?? null;
-      // Clear packetId first so reconciler won't find this lane
-      updateLane(packet.lane.laneId, { packetId: '' });
-      archiveLane(packet.lane.laneId, 'user');
-      log(`Archived stale lane ${packet.lane.laneId} for packet ${packet.referenceLabel}`);
-    } catch {
-      log(`Could not archive lane ${packet.lane.laneId} — may already be gone`);
+  try {
+    const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
+    const bound = listLanes().filter(
+      (lane) => lane.packetId === packet.id
+        && lane.status !== 'archived'
+        && lane.status !== 'completed',
+    );
+    if (bound.length === 0) {
+      console.log(`[reset-packet] No active lane bound to packet ${packet.referenceLabel} (${packet.id})`);
     }
+    for (const lane of bound) {
+      // First seen worktree wins for the pruning path below — matches the
+      // previous single-lane behavior.
+      if (!worktreePath && lane.worktreePath) {
+        worktreePath = lane.worktreePath;
+      }
+      try {
+        // Clear packetId first so reconciler can't re-bind this lane.
+        updateLane(lane.id, { packetId: '' });
+        archiveLane(lane.id, 'user');
+        console.log(`[reset-packet] Archived stale lane ${lane.id} for packet ${packet.referenceLabel}`);
+      } catch (error) {
+        console.warn(
+          `[reset-packet] Could not archive lane ${lane.id} — may already be gone: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  } catch (error) {
+    console.warn(
+      `[reset-packet] Lane registry lookup failed for packet ${packet.referenceLabel}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   // If clearWorktree requested, prune the old worktree directory
