@@ -5,6 +5,8 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { X, ChevronDown, FileCode, FilePlus, PenLine, Eye, Terminal } from './lucide-shims';
 import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 /* ── Terminal Handle (ref-based API for parent → terminal communication) ── */
 export interface TerminalHandle {
@@ -698,9 +700,7 @@ export function LiveOutput({
   }, [splitPct]);
 
   const runtimeLabel = standaloneTerminal ? ''
-    : agentRuntime === 'claude-code' ? 'Claude Code'
-    : agentRuntime === 'codex' ? 'Codex'
-    : 'Runtime';
+    : (ORCHESTRATOR_RUNTIMES[agentRuntime as OrchestratorRuntime]?.label ?? 'Runtime');
 
   const headerName = standaloneTerminal ? 'Terminal' : (agentName ?? 'Agent');
 

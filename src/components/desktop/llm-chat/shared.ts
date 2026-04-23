@@ -315,7 +315,7 @@ export const SUGGESTED_PROMPTS = [
   { iconKey: 'diff' as const, text: 'Review pending agent changes', description: 'Check diffs waiting for approval' },
   { iconKey: 'search' as const, text: 'What did agents ship today?', description: 'Summarize merged work and activity' },
   { iconKey: 'tree' as const, text: 'Audit today\'s token spend', description: 'Cost breakdown by agent and model' },
-  { iconKey: 'rocket' as const, text: 'Dispatch a task to Codex', description: 'Route a scoped task to the workhorse' },
+  { iconKey: 'rocket' as const, text: 'Dispatch a task', description: 'Route a scoped task to an agent' },
   { iconKey: 'file' as const, text: 'Review the most recent changes', description: 'Analyze recent commits for issues' },
   { iconKey: 'search' as const, text: 'What needs my attention?', description: 'Surface blockers, failures, and stale work' },
 ];

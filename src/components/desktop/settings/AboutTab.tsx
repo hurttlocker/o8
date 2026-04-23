@@ -148,7 +148,7 @@ export function AboutTab() {
           lineHeight: 1.6,
           maxWidth: 620,
         }}>
-          o8 is built on Next.js 16, Tauri v2, and the runtime adapter system. It ships with the Codex and Claude Code adapters and the operator MCP server that lets Claude drive the webview. Design language is Dieter Rams × Swiss-Korean editorial — less, but better.
+          o8 is built on Next.js 16, Tauri v2, and the runtime adapter system. It ships with the Codex, Claude Code, and Gemini adapters and the operator MCP server that lets Claude drive the webview. Design language is Dieter Rams × Swiss-Korean editorial — less, but better.
         </div>
       </section>
 

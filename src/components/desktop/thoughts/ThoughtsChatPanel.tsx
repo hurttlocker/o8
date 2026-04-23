@@ -4,6 +4,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { formatModelLabel } from '@/lib/format';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
+import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
   readAdaptiveThinkingEnabled,
@@ -806,19 +807,20 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
       startPolling();
     } catch {
+      const laneRuntimeLabel = targetAgent ? getRuntimeCapability(targetAgent.runtime).label : 'CLI';
       setChatMessages((prev) => [
         ...prev,
         {
           id: `local-error-${Date.now()}`,
           role: 'system',
-          text: 'Unable to reach the selected CLI lane. Make sure the Codex or Claude Code session is available.',
+          text: `Unable to reach the selected CLI lane. Make sure the ${laneRuntimeLabel} session is available.`,
           timestamp: Date.now(),
           timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
       setWaitingForReply(false);
     }
-  }, [captureServerSnapshot, input, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, startPolling, targetSessionKey, thinkingEffort, waitingForReply]);
+  }, [captureServerSnapshot, input, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, startPolling, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();

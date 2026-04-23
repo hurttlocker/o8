@@ -48,9 +48,9 @@ const QUICK_ACTIONS: QuickAction[] = [
   },
   {
     id: 'dispatch',
-    label: 'Dispatch a task to Codex',
-    detail: 'Scope and route work to the workhorse',
-    prompt: 'Help me scope a task to dispatch to Codex. Ask me what repo and what needs to happen, then draft a tight, one-paragraph task packet I can send.',
+    label: 'Dispatch a task',
+    detail: 'Scope and route work to an agent',
+    prompt: 'Help me scope a task to dispatch. Ask me what repo and what needs to happen, then draft a tight, one-paragraph task packet I can send.',
     tone: 'muted',
   },
 ];

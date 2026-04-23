@@ -330,7 +330,7 @@ export function MCPTab() {
                 <code style={{ fontFamily: MONO_FONT_STACK, fontSize: 11, color: RAMS_ACCENT }}>
                   npm i -g @openai/codex-cli
                 </code>
-                {' '}and sign in with ChatGPT Plus or an OPENAI_API_KEY. Without Codex, mission dispatch won&apos;t work — but o8_status, directives, and the desktop UI still do.
+                {' '}and sign in with ChatGPT Plus or an OPENAI_API_KEY. Without Codex, missions still dispatch via Claude Code or Gemini — but Codex is the recommended default workhorse.
               </div>
             </div>
           ) : null}

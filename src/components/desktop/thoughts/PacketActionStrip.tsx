@@ -12,6 +12,8 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { callResetPacket, callRetryPacket } from '@/lib/orchestrator/packet-actions';
+import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 type ToastTone = 'retry' | 'neutral' | 'error';
 
@@ -19,6 +21,7 @@ interface PacketActionStripProps {
   packetId: string;
   issueUrl: string | null;
   prompt: string | null;
+  runtime?: OrchestratorRuntime;
 }
 
 function RetryIcon({ size = 13 }: { size?: number }) {
@@ -118,7 +121,8 @@ function ActionPill({
   );
 }
 
-function PacketActionStripBase({ packetId, issueUrl, prompt }: PacketActionStripProps) {
+function PacketActionStripBase({ packetId, issueUrl, prompt, runtime }: PacketActionStripProps) {
+  const runtimeLabel = runtime ? getRuntimeCapability(runtime).label : 'agent';
   const [busy, setBusy] = useState<'retry' | 'reset' | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -148,11 +152,11 @@ function PacketActionStripBase({ packetId, issueUrl, prompt }: PacketActionStrip
     const result = await callRetryPacket(packetId);
     setBusy(null);
     if (result.ok) {
-      showToast('Packet retried · waiting for codex', 'retry');
+      showToast(`Packet retried · waiting for ${runtimeLabel}`, 'retry');
     } else {
       showToast(result.note ?? 'Retry failed', 'error');
     }
-  }, [busy, packetId, showToast]);
+  }, [busy, packetId, showToast, runtimeLabel]);
 
   const handleReset = useCallback(async () => {
     if (busy) return;

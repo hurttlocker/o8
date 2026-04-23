@@ -338,7 +338,7 @@ function UnifiedAgentsSidebarBase({
                     maxWidth: 220,
                   }}
                 >
-                  Codex, Claude Code, and other runtime lanes will appear here as soon as they start work.
+                  Codex, Claude Code, Gemini, and other runtime lanes will appear here as soon as they start work.
                 </div>
               </div>
             ) : (

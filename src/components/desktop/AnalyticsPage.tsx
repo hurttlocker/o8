@@ -730,7 +730,7 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
         }}>
           <TabHeading
             title="analytics"
-            subtitle="Spend, token usage, and agent efficiency across Codex, Claude Code, and IDE chat."
+            subtitle="Spend, token usage, and agent efficiency across Codex, Claude Code, Gemini, and IDE chat."
           />
           {/* Time range picker — mono underline links */}
           <div style={{
