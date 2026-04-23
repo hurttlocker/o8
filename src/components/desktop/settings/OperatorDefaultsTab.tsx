@@ -31,6 +31,7 @@ interface OperatorDefaults {
   promptCachingEnabled: boolean;
   orchestratorModel: string;
   defaultDispatchRuntime: DispatchRuntime;
+  experimentalOpencode: boolean;
 }
 
 interface OperatorDefaultsResponse {
@@ -691,10 +692,29 @@ export function OperatorDefaultsTab() {
           right={
             <PickerMenu<DispatchRuntime>
               value={values.defaultDispatchRuntime}
-              options={DISPATCH_RUNTIME_OPTIONS}
+              options={DISPATCH_RUNTIME_OPTIONS.filter((opt) => opt.value !== 'opencode' || values.experimentalOpencode)}
               onChange={(next) => { void updateField('defaultDispatchRuntime', next); }}
               disabled={runtimeEnv || busyField === 'defaultDispatchRuntime'}
               minWidth={180}
+            />
+          }
+        />
+        <Row
+          label="Experimental: opencode"
+          description="Show opencode in dispatch pickers. Off by default for v1 — the adapter ships wired but hidden until we've dogfooded more sessions."
+          source={sources.experimentalOpencode}
+          disabledReason={sources?.experimentalOpencode === 'env' ? envDisabledReason : undefined}
+          right={
+            <ToggleLink
+              checked={values.experimentalOpencode}
+              disabled={sources?.experimentalOpencode === 'env' || busyField === 'experimentalOpencode'}
+              onChange={(next) => {
+                void updateField('experimentalOpencode', next);
+                // If turning off while opencode is the selected default, snap to codex
+                if (!next && values.defaultDispatchRuntime === 'opencode') {
+                  void updateField('defaultDispatchRuntime', 'codex');
+                }
+              }}
             />
           }
         />

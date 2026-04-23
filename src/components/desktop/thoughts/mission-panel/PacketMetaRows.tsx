@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { BranchPickerPopover } from '@/components/desktop/thoughts/BranchPickerPopover';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
@@ -8,7 +9,32 @@ import {
   clearPacketBranchBlockedReason,
   hasPacketBranchTarget,
 } from '@/components/desktop/thoughts/mission-panel/branchTarget';
+import { fetchThoughtsOperatorDefaults } from '@/components/desktop/thoughts/operator-defaults';
 import type { EditingField } from './types';
+
+// Client-side cache for the experimentalOpencode flag. Populated once per
+// component lifetime; refreshed when the Settings toggle fires (the POST
+// endpoint revalidates on its own). Avoids prop-drilling the flag through
+// every mission-panel layer for a single opt-in toggle.
+let cachedExperimentalOpencode: boolean | null = null;
+function useExperimentalOpencodeFlag(override?: boolean): boolean {
+  const [flag, setFlag] = useState<boolean>(
+    override !== undefined ? override : (cachedExperimentalOpencode ?? false),
+  );
+  useEffect(() => {
+    if (override !== undefined) { setFlag(override); return; }
+    if (cachedExperimentalOpencode !== null) { setFlag(cachedExperimentalOpencode); return; }
+    let cancelled = false;
+    const controller = new AbortController();
+    void fetchThoughtsOperatorDefaults(controller.signal).then((defaults) => {
+      if (cancelled) return;
+      cachedExperimentalOpencode = defaults.experimentalOpencode;
+      setFlag(defaults.experimentalOpencode);
+    });
+    return () => { cancelled = true; controller.abort(); };
+  }, [override]);
+  return flag;
+}
 
 interface PacketMetaRowsProps {
   packet: OrchestratorPacket;
@@ -16,6 +42,8 @@ interface PacketMetaRowsProps {
   editingField: EditingField;
   onEditingFieldChange: (next: EditingField) => void;
   onPatch: (updater: (packet: OrchestratorPacket) => OrchestratorPacket) => void;
+  /** When false (v1 default), opencode is hidden from the runtime picker. */
+  experimentalOpencode?: boolean;
 }
 
 export function PacketMetaRows({
@@ -24,7 +52,9 @@ export function PacketMetaRows({
   editingField,
   onEditingFieldChange,
   onPatch,
+  experimentalOpencode,
 }: PacketMetaRowsProps) {
+  const opencodeEnabled = useExperimentalOpencodeFlag(experimentalOpencode);
   const isEditingSummary = editingField?.packetId === packet.id && editingField.field === 'summary';
   const isEditingRuntime = editingField?.packetId === packet.id && editingField.field === 'runtime';
   const isEditingRepo = editingField?.packetId === packet.id && editingField.field === 'repo';
@@ -175,7 +205,7 @@ export function PacketMetaRows({
               overflow: 'hidden',
             }}
           >
-            {listDispatchableRuntimes().map((runtime: OrchestratorRuntime) => (
+            {listDispatchableRuntimes({ includeExperimental: opencodeEnabled || packet.runtime === 'opencode' }).map((runtime: OrchestratorRuntime) => (
               <button
                 key={runtime}
                 type="button"

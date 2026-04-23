@@ -90,6 +90,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.defaultDispatchRuntime = raw;
   }
 
+  if (body.experimentalOpencode !== undefined) {
+    if (typeof body.experimentalOpencode !== 'boolean') {
+      throw new Error('experimentalOpencode must be boolean.');
+    }
+    update.experimentalOpencode = body.experimentalOpencode;
+  }
+
   return update;
 }
 

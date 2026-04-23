@@ -34,6 +34,14 @@ export interface OperatorDefaults {
   promptCachingEnabled: boolean;
   orchestratorModel: string;
   defaultDispatchRuntime: OrchestratorRuntime;
+  /**
+   * Off by default for v1. When true, opencode shows up in the dispatch
+   * runtime picker + packet runtime dropdown + command palette. Kept as an
+   * opt-in while we dogfood the adapter with early users; the owned-session
+   * store stays wired either way so existing opencode lanes keep working
+   * even after the flag flips off.
+   */
+  experimentalOpencode: boolean;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -52,6 +60,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   promptCachingEnabled: true,
   orchestratorModel: 'claude-opus-4-7',
   defaultDispatchRuntime: 'codex',
+  experimentalOpencode: false,
 };
 
 export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label: string; detail: string }> = [
@@ -139,6 +148,13 @@ function envDefaultDispatchRuntime(): OrchestratorRuntime | null {
   return null;
 }
 
+function envExperimentalOpencode(): boolean | null {
+  const raw = process.env.O8_EXPERIMENTAL_OPENCODE;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 // ── File helpers ──
 
 interface StoredOperatorDefaults {
@@ -150,6 +166,7 @@ interface StoredOperatorDefaults {
   promptCachingEnabled?: boolean;
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
+  experimentalOpencode?: boolean;
 }
 
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
@@ -194,6 +211,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (isDispatchRuntime(stored.defaultDispatchRuntime)) {
     result.defaultDispatchRuntime = stored.defaultDispatchRuntime;
   }
+  if (typeof stored.experimentalOpencode === 'boolean') {
+    result.experimentalOpencode = stored.experimentalOpencode;
+  }
   return result;
 }
 
@@ -208,6 +228,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envCache = envPromptCachingEnabled();
   const envModel = envOrchestratorModel();
   const envRuntime = envDefaultDispatchRuntime();
+  const envOpencode = envExperimentalOpencode();
 
   const resolved: OperatorDefaults = {
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
@@ -220,6 +241,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
     defaultDispatchRuntime: envRuntime ?? fileValues.defaultDispatchRuntime ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchRuntime,
+    experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -233,6 +255,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntime !== undefined ? 'file' : 'default',
+    experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -317,6 +340,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
   }
+  if (update.experimentalOpencode !== undefined) {
+    stored.experimentalOpencode = Boolean(update.experimentalOpencode);
+  }
 
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
@@ -350,4 +376,8 @@ export function resolvePromptCachingEnabledSync(): boolean {
 
 export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime {
   return getOperatorDefaultsSync().values.defaultDispatchRuntime;
+}
+
+export function resolveExperimentalOpencodeSync(): boolean {
+  return getOperatorDefaultsSync().values.experimentalOpencode;
 }
