@@ -80,6 +80,15 @@ function transcriptIdFor(prefix: 'user' | 'assistant' | 'tool' | 'system') {
   return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function toolPreviewFromOutput(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() ?? '';
+  if (!firstLine) return undefined;
+  return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
+}
+
 function historyToTranscript(messages: ChatHistoryMessage[]): MobileOrchestratorTranscriptEntry[] {
   const entries: MobileOrchestratorTranscriptEntry[] = [];
   let counter = 0;
@@ -279,27 +288,59 @@ export function useOrchestratorMobile({
         }
         case 'tool-use': {
           const name = typeof data.name === 'string' ? data.name : 'tool';
+          const toolUseId = typeof data.toolUseId === 'string' ? data.toolUseId : null;
           // Seal any in-flight assistant buffer so the tool entry slots in
           // after the assistant's prose, not before it.
           sealStreamingBuffer();
+          // Stable id keyed off toolUseId when we have one, so tool-result
+          // can find the matching entry deterministically.
+          const entryId = toolUseId ? `tool:${toolUseId}` : transcriptIdFor('tool');
           setTranscript((current) => [
             ...current,
             {
-              id: transcriptIdFor('tool'),
+              id: entryId,
               role: 'tool',
               text: name,
               toolName: name,
+              toolDone: false,
               timestamp: Date.now(),
             },
           ]);
           setTurnStatus('busy');
           break;
         }
-        case 'tool-result':
-          // Skip — the assistant prose that follows already includes the
-          // result narrative. Mobile tab is alpha, no need to render raw
-          // tool output.
+        case 'tool-result': {
+          // Flip the matching tool entry from "running" to "done" and attach
+          // a tiny preview so the user gets confirmation the tool finished.
+          // Match by toolUseId when present (deterministic), otherwise fall
+          // back to the most recent unfinished tool entry with the same name.
+          const name = typeof data.name === 'string' ? data.name : null;
+          const toolUseId = typeof data.toolUseId === 'string' ? data.toolUseId : null;
+          const preview = toolPreviewFromOutput(data.output);
+          setTranscript((current) => {
+            const targetId = toolUseId ? `tool:${toolUseId}` : null;
+            // Walk backwards looking for the first matching unfinished tool entry.
+            for (let i = current.length - 1; i >= 0; i -= 1) {
+              const entry = current[i];
+              if (entry.role !== 'tool') continue;
+              if (entry.toolDone) continue;
+              const idMatches = targetId ? entry.id === targetId : true;
+              const nameMatches = name ? entry.toolName === name : true;
+              if (idMatches && nameMatches) {
+                const next = current.slice();
+                next[i] = { ...entry, toolDone: true, toolPreview: preview };
+                return next;
+              }
+              // First-fail-fast: if we have a toolUseId but it didn't match,
+              // keep walking — the matching entry may be earlier in history.
+              if (targetId) continue;
+              // No toolUseId: only match the most recent unfinished entry.
+              break;
+            }
+            return current;
+          });
           break;
+        }
         case 'status': {
           const status = data.status;
           if (status === 'ready') {
