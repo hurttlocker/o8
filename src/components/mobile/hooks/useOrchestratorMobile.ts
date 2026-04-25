@@ -416,6 +416,13 @@ export function useOrchestratorMobile({
       return;
     }
 
+    // Make sure the WS is subscribed to this thread's repoPath before we
+    // fire the send. If the user just tapped a thread for a different repo,
+    // sendSubscription() may not have run yet on this paint.
+    if (subscribedRepoRef.current !== repoPath) {
+      sendSubscription(ws);
+    }
+
     setErrorNote(null);
     setTurnStatus('busy');
     setTranscript((current) => [
@@ -434,7 +441,7 @@ export function useOrchestratorMobile({
       message: trimmed,
       permissionMode: 'full',
     }));
-  }, []);
+  }, [sendSubscription]);
 
   const interrupt = useCallback(() => {
     const ws = wsRef.current;
