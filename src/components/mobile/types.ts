@@ -196,7 +196,7 @@ export interface TopBarProps {
   selectedSession?: SessionSummary;
   headerVisible: boolean;
   pendingApprovalsCount: number;
-  activeView: 'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'issues';
+  activeView: 'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'issues' | 'orchestrator';
   compactLine: CompactLine;
   activeScreen: import('./SpeedDial').MobileScreen;
   enabledViews: ReadonlySet<string>;

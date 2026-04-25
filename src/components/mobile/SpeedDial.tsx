@@ -3,7 +3,7 @@
 import { useState, memo, type CSSProperties } from 'react';
 import { useTheme } from './ThemeContext';
 
-export type MobileScreen = 'chat' | 'fleet' | 'approvals' | 'costs' | 'settings' | 'issues';
+export type MobileScreen = 'chat' | 'fleet' | 'approvals' | 'costs' | 'settings' | 'issues' | 'orchestrator';
 
 interface SpeedDialProps {
   activeScreen: MobileScreen;
@@ -18,6 +18,11 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
     screen: 'chat',
     label: 'Code',
     iconPath: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  },
+  {
+    screen: 'orchestrator',
+    label: 'Orchestrator',
+    iconPath: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z M12 6v6l4 2',
   },
   {
     screen: 'fleet',
@@ -52,6 +57,7 @@ const SCREEN_TO_VIEW: Record<MobileScreen, string> = {
   costs: 'costs',
   settings: 'settings',
   issues: 'issues',
+  orchestrator: 'orchestrator',
 };
 
 const menuFontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
