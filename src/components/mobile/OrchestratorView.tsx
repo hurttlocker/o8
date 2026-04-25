@@ -149,7 +149,12 @@ export function OrchestratorView({ onBack }: OrchestratorViewProps) {
   }, [handleSend]);
 
   const isEmpty = threads.length === 0 && !threadsLoading;
-  const canSend = Boolean(activeThread?.repoPath) && composerDraft.trim().length > 0 && turnStatus !== 'busy';
+  const wsReady = connectionState === 'connected';
+  const canSend =
+    Boolean(activeThread?.repoPath)
+    && composerDraft.trim().length > 0
+    && turnStatus !== 'busy'
+    && wsReady;
 
   // Styles
   const headerStyle: CSSProperties = {
@@ -343,12 +348,14 @@ export function OrchestratorView({ onBack }: OrchestratorViewProps) {
               onChange={(event) => setComposerDraft(event.target.value)}
               onKeyDown={handleComposerKeyDown}
               placeholder={
-                activeThread.repoPath
-                  ? 'Reply to the orchestrator…'
-                  : 'This thread has no repo — open it on desktop to reply.'
+                !activeThread.repoPath
+                  ? 'This thread has no repo — open it on desktop to reply.'
+                  : !wsReady
+                    ? 'Reconnecting…'
+                    : 'Reply to the orchestrator…'
               }
               rows={1}
-              disabled={!activeThread.repoPath}
+              disabled={!activeThread.repoPath || (!wsReady && turnStatus !== 'busy')}
               style={composerTextareaStyle}
             />
             {turnStatus === 'busy' ? (
