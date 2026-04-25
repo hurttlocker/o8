@@ -1226,7 +1226,7 @@ pub fn run() {
                     .arg(&server_js)
                     .current_dir(&server_dir)
                     .env("PORT", api_port.to_string())
-                    .env("HOSTNAME", "127.0.0.1")
+                    .env("HOSTNAME", "0.0.0.0")
                     .env("NODE_ENV", "production")
                     .env("O8_NODE_BIN", &node_bin)
                     .env("O8_API_PORT", api_port.to_string())
