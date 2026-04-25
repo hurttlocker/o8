@@ -18,6 +18,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ExtractedProfile, ImportProgress } from '@/lib/connectors/chatgpt/types';
 import { OnboardingDispatchStep } from './onboarding/OnboardingDispatchStep';
+import { RuntimeRow } from './onboarding/RuntimeRow';
 
 // ── Shared constants ──
 
@@ -578,34 +579,31 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
                   No agent runtimes detected. Install Claude Code, Codex, or Gemini to get started, or add API keys in Settings.
                 </div>
               ) : (
-                runtimes.map((rt) => (
-                  <GlassCard key={rt.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
-                    {/* Status dot */}
-                    <div style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: '50%',
-                      background: rt.detected ? '#22c55e' : 'var(--t-text-faint)',
-                      boxShadow: rt.detected ? '0 0 8px rgba(34, 197, 94, 0.3)' : 'none',
-                      flexShrink: 0,
-                    }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>{rt.name}</div>
-                      <div style={{ fontSize: 11, color: rt.detected ? '#22c55e' : 'var(--t-text-faint)', marginTop: 1 }}>
-                        {rt.detected ? (rt.version ? `v${rt.version} — ready` : 'Ready') : 'Not installed'}
-                      </div>
-                    </div>
-                    {rt.detected && (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-                    )}
-                  </GlassCard>
-                ))
+                runtimes.map((rt) => <RuntimeRow key={rt.id} runtime={rt} />)
               )}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginTop: 8 }}>
+            {/* #633 — surface the zero-detected case so the user can choose
+                to continue without dispatching, instead of silently advancing
+                to a runtime picker that will fail at launch time. */}
+            {!runtimesLoading && runtimes.length > 0 && runtimes.every((rt) => !rt.detected) ? (
+              <div style={{
+                padding: '10px 12px',
+                borderRadius: 10,
+                border: '1px solid rgba(245, 158, 11, 0.24)',
+                background: 'rgba(245, 158, 11, 0.08)',
+                color: 'var(--t-text-secondary)',
+                fontSize: 11,
+                lineHeight: 1.5,
+              }}>
+                No runtimes are installed yet. You can still continue — dispatching packets will be disabled until you install at least one CLI.
+              </div>
+            ) : null}
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+              <button type="button" onClick={goNext} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Skip for now</button>
               <GlassButton primary onClick={goNext}>
-                Continue
+                {!runtimesLoading && runtimes.length > 0 && runtimes.every((rt) => !rt.detected) ? 'Continue without runtimes' : 'Continue'}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
               </GlassButton>
             </div>

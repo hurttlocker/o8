@@ -17,6 +17,7 @@ import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { UpdateBanner } from '@/components/desktop/UpdateBanner';
+import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
 import { ThemeProvider } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
@@ -2220,6 +2221,12 @@ function DashboardInner() {
     }}>
       {/* ── Update Banner ── */}
       <UpdateBanner />
+
+      {/* ── Connection Banner (#634) — surfaces dropped WebSocket so users
+          know why agent statuses, transcripts, and approvals appear frozen.
+          Reuses the existing reconnect/backoff machinery in
+          DesktopWebSocketContext; this only adds the chrome surface. ── */}
+      <ConnectionBanner connectionState={wsStatus} />
 
       {/* ── Title Bar ── */}
       <TitleBar

@@ -24,8 +24,10 @@ import {
   V1_DISPATCH_RUNTIMES,
 } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { getRuntimeInstallInfo } from '@/lib/setup/runtime-install';
 
 const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif';
+const MONO = '"SF Mono", ui-monospace, monospace';
 
 export interface OnboardingRuntimeDetection {
   id: string;
@@ -318,6 +320,66 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
           );
         })}
       </div>
+
+      {/* #633 — when the selected runtime isn't installed, surface the install
+          command inline so the user knows what they're committing to instead
+          of discovering the gap at dispatch time. */}
+      {(() => {
+        const detected = runtimeById.get(selected)?.detected ?? false;
+        if (detected) return null;
+        const info = getRuntimeInstallInfo(selected);
+        if (!info) return null;
+        return (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            padding: '12px 14px',
+            borderRadius: 12,
+            border: '1px solid rgba(245, 158, 11, 0.24)',
+            background: 'rgba(245, 158, 11, 0.08)',
+            color: 'var(--t-text-secondary)',
+            fontSize: 12,
+            lineHeight: 1.5,
+          }}>
+            <div style={{ fontWeight: 600, color: 'var(--t-text-strong)', fontFamily: FONT }}>
+              {info.label} isn&apos;t installed yet.
+            </div>
+            <div style={{ fontFamily: FONT }}>
+              {info.hint} You can still continue — dispatch will be disabled until it&apos;s on your PATH.
+            </div>
+            {info.command ? (
+              <code style={{
+                display: 'block',
+                padding: '6px 10px',
+                borderRadius: 8,
+                background: 'var(--t-glass-muted)',
+                border: '1px solid var(--t-glass-border-strong)',
+                fontFamily: MONO,
+                fontSize: 11.5,
+                color: 'var(--t-text)',
+                userSelect: 'all',
+              }}>{info.command}</code>
+            ) : null}
+            {info.link ? (
+              <a
+                href={info.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  color: 'var(--t-accent)',
+                  textDecoration: 'none',
+                  fontFamily: FONT,
+                }}
+              >
+                {info.link.replace(/^https?:\/\//, '')} →
+              </a>
+            ) : null}
+          </div>
+        );
+      })()}
 
       {error && (
         <div style={{
