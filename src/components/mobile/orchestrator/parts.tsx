@@ -200,10 +200,16 @@ export const TranscriptBubble = memo(function TranscriptBubble({
   }
 
   if (entry.role === 'tool') {
+    const done = entry.toolDone === true;
+    // Glyph mirrors the running/done split desktop uses: tiny dot while the
+    // tool is in flight, check once tool-result arrives.
+    const glyph = done ? '✓' : '·';
+    const glyphColor = done ? '#30D158' : '#A09890';
     return (
       <div
         style={{
           alignSelf: 'flex-start',
+          maxWidth: '88%',
           display: 'inline-flex',
           alignItems: 'center',
           gap: 6,
@@ -214,7 +220,7 @@ export const TranscriptBubble = memo(function TranscriptBubble({
           borderRadius: 999,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: 'rgba(255,248,240,0.10)',
+          borderColor: done ? 'rgba(48,209,88,0.22)' : 'rgba(255,248,240,0.10)',
           background: 'rgba(30,28,26,0.7)',
           color: '#A09890',
           fontSize: 11,
@@ -223,8 +229,22 @@ export const TranscriptBubble = memo(function TranscriptBubble({
           fontFamily: '"SF Mono", Menlo, ui-monospace, monospace',
         }}
       >
-        <span aria-hidden="true">{'·'}</span>
+        <span aria-hidden="true" style={{ color: glyphColor }}>{glyph}</span>
         <span>{entry.toolName ?? entry.text}</span>
+        {entry.toolPreview ? (
+          <span
+            style={{
+              color: '#706860',
+              fontWeight: 500,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+          >
+            {`— ${entry.toolPreview}`}
+          </span>
+        ) : null}
       </div>
     );
   }

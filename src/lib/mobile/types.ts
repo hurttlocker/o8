@@ -284,5 +284,9 @@ export interface MobileOrchestratorTranscriptEntry {
   text: string;
   thinking?: boolean;
   toolName?: string;
+  /** Tool entries flip to true when the matching tool-result arrives. */
+  toolDone?: boolean;
+  /** Short preview of the tool's output (first line, truncated). */
+  toolPreview?: string;
   timestamp: number;
 }
