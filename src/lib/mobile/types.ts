@@ -252,3 +252,37 @@ export interface MobileActionResponse {
   runId?: string;
   aborted?: boolean;
 }
+
+// ── Mobile orchestrator surface ──
+//
+// The mobile Orchestrator tab reads from /api/mobile/orchestrator/threads (a
+// thin projection of ~/.o8/chat-history/thoughts-*.json) and subscribes to
+// the existing `orchestrator` WS channel. These shapes are deliberately
+// minimal — alpha is read-mostly with a single composer.
+
+export type MobileOrchestratorRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode' | 'unknown';
+
+export type MobileOrchestratorThreadStatus = 'idle' | 'ready' | 'busy';
+
+export interface MobileOrchestratorThread {
+  id: string;
+  title: string;
+  lastMessageAt: string;
+  runtime: MobileOrchestratorRuntime;
+  status: MobileOrchestratorThreadStatus;
+  messageCount: number;
+  repoPath: string | null;
+  repoName: string | null;
+  repoBranch: string | null;
+}
+
+export type MobileOrchestratorTranscriptRole = 'user' | 'assistant' | 'tool' | 'system';
+
+export interface MobileOrchestratorTranscriptEntry {
+  id: string;
+  role: MobileOrchestratorTranscriptRole;
+  text: string;
+  thinking?: boolean;
+  toolName?: string;
+  timestamp: number;
+}
