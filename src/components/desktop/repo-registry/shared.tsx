@@ -20,6 +20,7 @@ import {
 import {
   orchestratorRuntimeTone,
   orchestratorStatusTone,
+  resolveDisplayRuntime,
 } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
@@ -953,6 +954,7 @@ export {
   Trash2,
   orchestratorRuntimeTone,
   orchestratorStatusTone,
+  resolveDisplayRuntime,
   type FocusRepoSetupDetail,
   type OpenRepoWorkspaceDetail,
   type OrchestratorPacket,

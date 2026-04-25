@@ -23,6 +23,7 @@ import {
   orchestratorRuntimeTone,
   orchestratorStatusTone,
   packetMatchesBranch,
+  resolveDisplayRuntime,
   resolveFloatingPanelPosition,
   sessionStatusTone,
   AgentSpinner,
@@ -467,7 +468,8 @@ function RepoBranchRowBase({
           {branchPackets.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {branchPackets.map((packet) => {
-                const runtimeTone = orchestratorRuntimeTone(packet.runtime);
+                const displayRuntime = resolveDisplayRuntime(packet);
+                const runtimeTone = orchestratorRuntimeTone(displayRuntime);
                 const statusTone = orchestratorStatusTone(packet.status);
                 const isSelectedPacket = Boolean(packet.lane?.sessionKey && packet.lane.sessionKey === activeSessionKey);
                 const marker = packet.releaseState === 'released'
@@ -533,9 +535,9 @@ function RepoBranchRowBase({
                         marginTop: 1,
                       }}
                     >
-                      {packet.runtime === 'claude-code' ? <ClaudeIcon size={13} />
-                        : packet.runtime === 'gemini' ? <GeminiIcon size={13} />
-                        : packet.runtime === 'opencode' ? <OpenCodeIcon size={13} />
+                      {displayRuntime === 'claude-code' ? <ClaudeIcon size={13} />
+                        : displayRuntime === 'gemini' ? <GeminiIcon size={13} />
+                        : displayRuntime === 'opencode' ? <OpenCodeIcon size={13} />
                         : <CodexIcon size={13} />}
                     </span>
                     <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
