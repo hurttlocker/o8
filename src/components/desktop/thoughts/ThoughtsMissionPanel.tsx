@@ -66,6 +66,12 @@ export function ThoughtsMissionPanel({
   const [issueGroups, setIssueGroups] = useState<RepoIssuesGroup[]>([]);
   const [issueGroupCollapsed, setIssueGroupCollapsed] = useState<Record<string, boolean>>({});
   const [issuesLoading, setIssuesLoading] = useState(false);
+  // #634 — surface fetch errors instead of silently flipping loading off and
+  // rendering an empty state that the operator can't distinguish from "no
+  // open issues". Tracked separately from issuesLoading so a stale error can
+  // remain visible while a retry attempt is in flight.
+  const [issuesError, setIssuesError] = useState<string | null>(null);
+  const [issuesRetryNonce, setIssuesRetryNonce] = useState(0);
   // #626 — cache of workspace localPath → GitHub remoteUrl, reused by PacketCard
   // so its "open" action can derive an issue URL when packet.issue?.url is absent.
   const [repoRemoteUrlByPath, setRepoRemoteUrlByPath] = useState<Record<string, string | null>>({});
@@ -111,7 +117,15 @@ export function ThoughtsMissionPanel({
       try {
         setIssuesLoading(true);
         const reposRes = await fetch('/api/panel/repos');
-        if (!reposRes.ok || cancelled) { setIssuesLoading(false); return; }
+        if (cancelled) { setIssuesLoading(false); return; }
+        if (!reposRes.ok) {
+          // #634 — repos endpoint failed. The whole panel depends on it so
+          // surface a single error rather than silently rendering empty.
+          console.warn(`[error-state] /api/panel/repos returned ${reposRes.status}`);
+          setIssuesError(`Couldn't load repos (HTTP ${reposRes.status}).`);
+          setIssuesLoading(false);
+          return;
+        }
         const reposData = await reposRes.json() as { repos?: Array<{ id: string; name: string; localPath: string; remoteUrl?: string }> };
         const repos = reposData.repos ?? [];
 
@@ -124,13 +138,21 @@ export function ThoughtsMissionPanel({
           setRepoRemoteUrlByPath(nextMap);
         }
 
+        // #634 — track per-repo issue-fetch failures. We keep partial results
+        // (some repos load, others fail) but tell the operator which slugs
+        // didn't make it so they don't think GitHub has nothing for them.
+        let issueFetchFailures = 0;
         const groups = await Promise.all(repos.map(async (repo) => {
           if (!repo.remoteUrl) return null;
           const slug = repo.remoteUrl.replace(/\.git$/, '').split('/').slice(-2).join('/');
           if (!slug || slug === '/') return null;
           try {
             const res = await fetch(`/api/panel/issues?repo=${encodeURIComponent(slug)}${fresh ? '&fresh=1' : ''}`);
-            if (!res.ok) return null;
+            if (!res.ok) {
+              console.warn(`[error-state] /api/panel/issues?repo=${slug} returned ${res.status}`);
+              issueFetchFailures += 1;
+              return null;
+            }
             const data = await res.json() as { issues?: Array<{ number: number; title: string; state: string; url?: string; labels?: Array<{ name: string } | string> }> };
             const openIssues = (data.issues ?? [])
               .filter((issue) => issue.state === 'open')
@@ -142,13 +164,27 @@ export function ThoughtsMissionPanel({
                 labels: (issue.labels ?? []).map((l) => typeof l === 'string' ? l : l.name),
               }));
             return { repoId: repo.id, repoName: repo.name, slug, issues: openIssues } as RepoIssuesGroup;
-          } catch { return null; }
+          } catch (issueErr) {
+            console.warn(`[error-state] issue fetch threw for repo=${slug}:`, issueErr);
+            issueFetchFailures += 1;
+            return null;
+          }
         }));
 
         if (!cancelled) {
           setIssueGroups(groups.filter((g): g is RepoIssuesGroup => g !== null && g.issues.length > 0));
+          if (issueFetchFailures > 0 && repos.length > 0) {
+            const repoWord = issueFetchFailures === 1 ? 'repo' : 'repos';
+            setIssuesError(`Couldn't load issues for ${issueFetchFailures} ${repoWord}.`);
+          } else {
+            setIssuesError(null);
+          }
         }
-      } catch { /* silent */ }
+      } catch (err) {
+        // #634 — top-level network failure (offline, fetch threw, etc).
+        console.warn('[error-state] ThoughtsMissionPanel issue load failed:', err);
+        if (!cancelled) setIssuesError("Couldn't reach the local API. Backend may be offline.");
+      }
       if (!cancelled) setIssuesLoading(false);
     };
 
@@ -160,7 +196,7 @@ export function ThoughtsMissionPanel({
     const fallbackId = setInterval(handler, 300_000);
 
     return () => { cancelled = true; clearInterval(fallbackId); for (const e of wsEvents) window.removeEventListener(e, handler); };
-  }, [open, visible, workspaceTargets]);
+  }, [open, visible, workspaceTargets, issuesRetryNonce]);
 
   const updateMissionState = useCallback((
     updater: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState),
@@ -509,6 +545,79 @@ export function ThoughtsMissionPanel({
       background: thoughtsBodyBackground,
       minHeight: 0,
     }}>
+      {/* #634 — surface fetch errors instead of an indistinguishable empty
+          state. The block is small and inline so it doesn't cover the whole
+          panel; partial results above still render. */}
+      {issuesError ? (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 8,
+            paddingTop: 8,
+            paddingRight: 10,
+            paddingBottom: 8,
+            paddingLeft: 10,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'rgba(239, 68, 68, 0.28)',
+            background: 'rgba(239, 68, 68, 0.06)',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          }}
+        >
+          <svg
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#dc2626"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0, marginTop: 1 }}
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: '#b91c1c', letterSpacing: '-0.01em' }}>
+              Couldn&apos;t load issues
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--t-text-secondary)', marginTop: 2, lineHeight: 1.4 }}>
+              {issuesError}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIssuesRetryNonce((n) => n + 1)}
+            disabled={issuesLoading}
+            style={{
+              flexShrink: 0,
+              paddingTop: 3,
+              paddingRight: 8,
+              paddingBottom: 3,
+              paddingLeft: 8,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'rgba(239, 68, 68, 0.28)',
+              background: issuesLoading ? 'rgba(239, 68, 68, 0.04)' : 'rgba(239, 68, 68, 0.10)',
+              color: '#b91c1c',
+              fontSize: 10,
+              fontWeight: 700,
+              cursor: issuesLoading ? 'wait' : 'pointer',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            }}
+          >
+            {issuesLoading ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      ) : null}
+
       <IssueGroupList
         issueGroups={issueGroups}
         issueGroupCollapsed={issueGroupCollapsed}
