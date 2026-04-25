@@ -67,15 +67,13 @@ interface ChatHistoryMessage {
 
 function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
-  const { hostname, port, protocol } = window.location;
+  const { hostname, protocol } = window.location;
   const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
-  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+  // [mobile-lan] Always hit the ws-server port directly. Next.js's
+  // /ws rewrite does not proxy WebSocket upgrades — see useWebSocket.ts
+  // for the full explanation.
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
-  if (isLocal) {
-    return `ws://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
-  }
-  const wsPort = port ? `:${port}` : '';
-  return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
+  return `${wsProto}://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
 }
 
 function transcriptIdFor(prefix: 'user' | 'assistant' | 'tool' | 'system') {

@@ -64,22 +64,22 @@ const PING_INTERVAL = 20_000;
 
 function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
-  const { hostname, port, protocol } = window.location;
+  const { hostname, protocol } = window.location;
   // Auth token — prevents random network clients from connecting
   const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
 
-  // When accessed via Tailscale / remote, use same-origin (proxied through
-  // Next.js rewrites on /ws). For local dev on localhost, fall back to the
-  // direct WS server port so hot-reload doesn't need the proxy running.
-  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+  // [mobile-lan] Connect directly to the ws-server port on the same host as
+  // the page. We used to try the same-port `/ws` rewrite for LAN/Tailscale
+  // hosts, but Next.js's standalone server does NOT proxy WebSocket upgrades
+  // through `next.config.ts:rewrites()` — only HTTP. The upgrade returns 404
+  // and the client retries forever.
+  //
+  // ws-server already binds 0.0.0.0:<wsPort> (see src/ws-server.ts and the
+  // Tauri sidecar in src-tauri/src/lib.rs), so the LAN IP from the phone's
+  // perspective is reachable on the ws port directly. The token query param
+  // is verified by ws-server's verifyClient before the upgrade completes.
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
-
-  if (isLocal) {
-    return `ws://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
-  }
-  // Remote: connect through the same host:port as the page (Next.js proxies /ws → ws-server)
-  const wsPort = port ? `:${port}` : '';
-  return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
+  return `${wsProto}://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
 }
 
 export function useWebSocket({

@@ -79,9 +79,12 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
-        // Proxy WebSocket upgrade + HTTP requests to the WS server.
-        // This lets mobile clients connect via the same host:port as the
-        // page (no separate port 3002 needed over Tailscale / remote).
+        // [mobile-lan] HTTP-only rewrite to the WS server. Next.js's standalone
+        // `server.js` does NOT proxy WebSocket upgrades through rewrites — only
+        // plain HTTP. Mobile/desktop WS clients therefore connect directly to
+        // ws://<host>:<wsPort>/ws (ws-server binds 0.0.0.0). This rewrite is
+        // kept for any future HTTP probe of the ws-server (e.g. /internal/*),
+        // but is NOT relied on by the live WS bridge.
         source: '/ws',
         destination: 'http://127.0.0.1:3002/ws',
       },
