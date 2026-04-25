@@ -44,8 +44,9 @@ const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) =>
 const CostsDashboard = lazy(async () => ({ default: (await import('./mobile/CostsDashboard')).CostsDashboard }));
 const SettingsView = lazy(async () => ({ default: (await import('./mobile/SettingsView')).SettingsView }));
 const IssuesPage = lazy(() => import('./mobile/IssuesPage'));
+const OrchestratorView = dynamic(() => import('./mobile/OrchestratorView').then((m) => ({ default: m.OrchestratorView })), { ssr: false, ...shimmerFallback });
 
-const BETA_ENABLED_VIEWS = new Set(['fleet', 'activity', 'settings']);
+const BETA_ENABLED_VIEWS = new Set(['fleet', 'activity', 'settings', 'orchestrator']);
 const MOBILE_SESSION_LIST_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MOBILE_SESSION_LIST_LIMIT = 20;
 const MOBILE_INITIAL_INBOX_LIMIT = 15;
@@ -616,7 +617,7 @@ function MobileRemoteShellInner({
           activeView={activeView}
           compactLine={compactLine}
           enabledViews={BETA_ENABLED_VIEWS}
-          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'issues' ? 'issues' : 'chat'}
+          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'issues' ? 'issues' : activeView === 'orchestrator' ? 'orchestrator' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
               case 'chat':
@@ -637,11 +638,18 @@ function MobileRemoteShellInner({
               case 'settings':
                 setActiveView('settings');
                 break;
+              case 'orchestrator':
+                setActiveView('orchestrator');
+                break;
             }
           }}
           onNewChat={showBetaPlaceholder ? undefined : handleCreateNewChat}
           onOpenControls={() => setControlsOpen(true)}
         />
+        {activeView === 'orchestrator' ? (
+          <OrchestratorView onBack={returnToHome} />
+        ) : (
+        <>
         <PullToRefresh onRefresh={async () => { await refreshInbox(true); await new Promise(r => setTimeout(r, 600)); }}>
         <PageTransition activeKey={activeView}>
         <div style={scrollViewStyle}>
@@ -891,6 +899,8 @@ function MobileRemoteShellInner({
             </div>
           ) : null}
         </div>
+        </>
+        )}
       </div>
       <ControlsSheet
         controlsOpen={controlsOpen}

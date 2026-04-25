@@ -38,7 +38,7 @@ export function useMobileState(init: MobileStateInit) {
     sessionKey: initialSession?.sessionKey ?? '',
     fallback: initialSession ?? null,
   }));
-  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'issues'>('squad');
+  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'issues' | 'orchestrator'>('squad');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
 
