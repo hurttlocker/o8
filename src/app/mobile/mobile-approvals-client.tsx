@@ -54,11 +54,13 @@ function getWsBridgeUrl(token: string) {
     return `ws://127.0.0.1:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
   }
 
-  // Use the same host:port as the page — Next.js rewrites /ws → ws-server.
-  // This avoids cross-port issues over Tailscale / remote networks.
+  // [mobile-lan] Connect to the ws-server port on the same host as the page.
+  // We used to attempt the same-port `/ws` rewrite for LAN/Tailscale hosts,
+  // but Next.js's standalone server does NOT proxy WebSocket upgrades through
+  // rewrites. ws-server already binds 0.0.0.0:<wsPort>, so direct host:wsPort
+  // works on LAN; the token query param is verified before upgrade completes.
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const hostPort = window.location.host; // includes port if non-default
-  return `${protocol}//${hostPort}/ws?token=${encodeURIComponent(token)}`;
+  return `${protocol}//${window.location.hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
 }
 
 const WS_RECONNECT_BASE_DELAY_MS = 1_000;
