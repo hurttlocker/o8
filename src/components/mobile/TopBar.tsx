@@ -62,6 +62,8 @@ function screenTitle(activeView: TopBarProps['activeView']) {
       return 'Issues';
     case 'costs':
       return 'Costs';
+    case 'orchestrator':
+      return 'Orchestrator';
     default:
       return 'Code';
   }
