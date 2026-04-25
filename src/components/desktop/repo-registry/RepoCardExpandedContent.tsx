@@ -12,6 +12,7 @@ import {
   orchestratorStatusTone,
   packetMatchesBranch,
   repoOwnsPath,
+  resolveDisplayRuntime,
   type BranchAgent,
   type OrchestratorPacket,
   type RepoRegistryEntry,
@@ -284,7 +285,8 @@ function RepoCardExpandedContentBase({
       {unmatchedRepoPackets.length > 0 ? (
         <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 0 }}>
           {unmatchedRepoPackets.map((packet) => {
-            const runtimeTone = orchestratorRuntimeTone(packet.runtime);
+            const displayRuntime = resolveDisplayRuntime(packet);
+            const runtimeTone = orchestratorRuntimeTone(displayRuntime);
             const statusTone = orchestratorStatusTone(packet.status);
             const isActivePacket = Boolean(
               activeSessionKey
@@ -370,9 +372,9 @@ function RepoCardExpandedContentBase({
                     color: runtimeTone.color,
                   }}
                 >
-                  {packet.runtime === 'claude-code' ? <ClaudeIcon size={18} color={runtimeTone.color} />
-                    : packet.runtime === 'gemini' ? <GeminiIcon size={18} />
-                    : packet.runtime === 'opencode' ? <OpenCodeIcon size={18} />
+                  {displayRuntime === 'claude-code' ? <ClaudeIcon size={18} color={runtimeTone.color} />
+                    : displayRuntime === 'gemini' ? <GeminiIcon size={18} />
+                    : displayRuntime === 'opencode' ? <OpenCodeIcon size={18} />
                     : <CodexIcon size={18} color={runtimeTone.color} />}
                 </span>
               </div>
