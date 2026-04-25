@@ -64,6 +64,93 @@ export type PersistedRuntimeSessionKey =
 
 const API_PATH = '/api/panel/terminal-state';
 
+/**
+ * Hard cap on persisted tabs per scope. Dogfood-week users accumulate dozens of
+ * stale chat tabs (the user hit 84 in `repo-1j19dlc.json`); fresh installs are
+ * fine. The cap is enforced both on save (preventatively) and on load
+ * (defensively, for files already on disk).
+ */
+export const MAX_PERSISTED_TABS = 50;
+
+/** Tabs that should never be dropped, even when over the cap. */
+function isPinnedKind(kind: PersistedTab['kind']): boolean {
+  return kind === 'orchestrator' || kind === 'llm-chat';
+}
+
+/**
+ * A tab is "clearly dead" if it carries no signal of live work. Conservative —
+ * we'd rather keep something stale than drop an in-flight mission. Returns
+ * `true` only for the obvious zombies.
+ */
+function isClearlyDeadTab(tab: PersistedTab): boolean {
+  const kind = tab.kind ?? 'terminal';
+
+  // chat (CLI Session): dead when no runtime session AND no saved checkpoints
+  // AND no live orchestration packet attached. Packets indicate a dispatched
+  // mission — that's live work even if the runtime session has rolled over.
+  if (kind === 'chat') {
+    const hasSessionKey = Boolean(tab.chatSessionKey?.trim());
+    const hasCheckpoints = Boolean(tab.chatCheckpoints?.length);
+    const hasPacket = Boolean(tab.orchestrationPacket);
+    return !hasSessionKey && !hasCheckpoints && !hasPacket;
+  }
+
+  // terminal: drop pure dead leaves — no tmux session AND no repo binding.
+  // Terminal tabs with a tmuxSession but no recent activity are kept because
+  // we can't easily check tmux liveness from this layer (it's a client-side
+  // helper); the restore path already handles that with `checkAliveSessions`.
+  if (kind === 'terminal') {
+    const hasTmuxSession = Boolean(tab.tmuxSession?.trim());
+    const hasRepoPath = Boolean(tab.repoPath?.trim());
+    return !hasTmuxSession && !hasRepoPath;
+  }
+
+  return false;
+}
+
+/**
+ * Trim a persisted tab list down to a sane size. Always preserves the active
+ * tab + Orchestrator + Assistant pins; drops obvious zombies first; falls back
+ * to age-based trimming (array order = recency proxy) if still over cap.
+ */
+export function pruneTabs(
+  tabs: PersistedTab[],
+  activeTabId: string,
+): { tabs: PersistedTab[]; dropped: number } {
+  const original = tabs.length;
+  if (original === 0) return { tabs, dropped: 0 };
+
+  // Phase 1: drop clearly-dead tabs that aren't pinned + aren't the active tab.
+  const survivors = tabs.filter((tab) => {
+    if (tab.id === activeTabId) return true;
+    if (isPinnedKind(tab.kind)) return true;
+    return !isClearlyDeadTab(tab);
+  });
+
+  // Phase 2: if still over cap, trim oldest non-pinned tabs. The persisted
+  // file has no per-tab timestamps, so we treat array order as a recency
+  // proxy — newer tabs are appended later by the controller. Walk from the
+  // FRONT of the array (oldest), dropping non-pinned, non-active tabs until
+  // length <= MAX_PERSISTED_TABS.
+  let pruned = survivors;
+  if (pruned.length > MAX_PERSISTED_TABS) {
+    const overflow = pruned.length - MAX_PERSISTED_TABS;
+    const toDropIds = new Set<string>();
+    for (let i = 0; i < pruned.length && toDropIds.size < overflow; i += 1) {
+      const candidate = pruned[i];
+      if (!candidate) continue;
+      if (candidate.id === activeTabId) continue;
+      if (isPinnedKind(candidate.kind)) continue;
+      toDropIds.add(candidate.id);
+    }
+    if (toDropIds.size > 0) {
+      pruned = pruned.filter((tab) => !toDropIds.has(tab.id));
+    }
+  }
+
+  return { tabs: pruned, dropped: original - pruned.length };
+}
+
 function hashScopeKey(value: string) {
   let hash = 5381;
   for (let i = 0; i < value.length; i += 1) {
@@ -168,10 +255,18 @@ function buildStatePath(scope: string, repoPath?: string | null) {
 /** Save tab state to server */
 export async function saveTabState(state: PersistedTabState, scope = 'tile-root'): Promise<void> {
   try {
+    const beforeCount = state.tabs.length;
+    const { tabs: prunedTabs, dropped } = pruneTabs(state.tabs, state.activeTabId);
+    if (dropped > 0) {
+      console.log(`[tab-state] pruned ${dropped} tabs on save (was ${beforeCount}, now ${prunedTabs.length})`);
+    }
+    const persisted: PersistedTabState = dropped > 0
+      ? { ...state, tabs: prunedTabs }
+      : state;
     await fetch(buildStatePath(scope), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state),
+      body: JSON.stringify(persisted),
     });
   } catch {
     // Non-critical — silent fail
@@ -185,7 +280,15 @@ export async function loadTabState(scope = 'tile-root', repoPath?: string | null
     if (!res.ok) return null;
     const data = await res.json();
     if (data.version !== 1) return null;
-    return data as PersistedTabState;
+    const state = data as PersistedTabState;
+    if (!Array.isArray(state.tabs) || state.tabs.length === 0) return state;
+    const beforeCount = state.tabs.length;
+    const { tabs: prunedTabs, dropped } = pruneTabs(state.tabs, state.activeTabId);
+    if (dropped > 0) {
+      console.log(`[tab-state] pruned ${dropped} tabs on load (was ${beforeCount}, now ${prunedTabs.length})`);
+      return { ...state, tabs: prunedTabs };
+    }
+    return state;
   } catch {
     return null;
   }
