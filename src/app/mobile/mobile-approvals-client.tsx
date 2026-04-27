@@ -18,23 +18,19 @@ import {
   IconArrowLeft,
   IconHamburger,
   IconRefresh,
-  MOBILE_CHAT_MODEL_STORAGE_KEY,
   POLL_INTERVAL,
   generateChatTabId,
   getMobilePalette,
   getModelOption,
-  getStoredEffort,
-  storeEffort,
   glassButtonStyle,
   mobileFontFamily,
   normalizeHistoryList,
   readStoredMobileModel,
   type ApprovalItem,
   type ChatHistoryRecord,
-  type CliEffort,
   type MobileView,
 } from './mobile-approvals-shared';
-import { SettingsView } from './mobile-settings-view';
+import { MobileSettingsSheet } from '@/components/mobile/MobileSettingsSheet';
 import {
   getMobileRepoLabel,
   normalizeMobileRepoList,
@@ -99,15 +95,18 @@ function getReconnectDelayMs(attempt: number) {
 export function MobileApprovalsClient({
   initialApprovals,
   appVersion,
+  hostnameLabel = 'this device',
   initialView = 'chat',
 }: {
   initialApprovals: ApprovalItem[];
   appVersion: string;
+  hostnameLabel?: string;
   initialView?: MobileView;
 }) {
   const { themeId, setTheme } = useTheme();
   const palette = useMemo(() => getMobilePalette(themeId), [themeId]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   const [activeView, setActiveView] = useState<MobileView>(initialView);
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals);
   const [resolving, setResolving] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
@@ -115,11 +114,10 @@ export function MobileApprovalsClient({
   const [currentTabId, setCurrentTabId] = useState<string | null>(null);
   const [recentConversations, setRecentConversations] = useState<ChatHistoryRecord[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
-  const [selectedModelId, setSelectedModelId] = useState(readStoredMobileModel);
+  const [selectedModelId] = useState(readStoredMobileModel);
   const [repoOptions, setRepoOptions] = useState<MobileRepoOption[]>([]);
   const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(readStoredMobileRepoPath);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
-  const [effortLevel, setEffortLevel] = useState<CliEffort | null>(getStoredEffort);
   const [inboxSnapshot, setInboxSnapshot] = useState<MobileInboxSnapshot | null>(null);
   const [inboxError, setInboxError] = useState<string | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -308,6 +306,15 @@ export function MobileApprovalsClient({
   }, []);
 
   const handleNavigate = useCallback((view: MobileView) => {
+    if (view === 'settings') {
+      // Settings now opens as a sheet from the profile button — divert any
+      // stale dispatcher (e.g. saved nav state) to the chat surface and pop
+      // the sheet instead.
+      setActiveView('chat');
+      setCurrentTabId(null);
+      setSettingsSheetOpen(true);
+      return;
+    }
     setActiveView(view);
     if (view === 'chat') {
       setCurrentTabId(null);
@@ -317,21 +324,6 @@ export function MobileApprovalsClient({
   const handleThemeChange = useCallback((nextTheme: 'light' | 'dark') => {
     setTheme(nextTheme);
   }, [setTheme]);
-
-  const handleModelChange = useCallback((modelId: string) => {
-    if (!getModelOption(modelId)) return;
-    setSelectedModelId(modelId);
-    try {
-      window.localStorage.setItem(MOBILE_CHAT_MODEL_STORAGE_KEY, modelId);
-    } catch {
-      // Ignore local storage failures on constrained browsers.
-    }
-  }, []);
-
-  const handleEffortChange = useCallback((effort: CliEffort | null) => {
-    setEffortLevel(effort);
-    storeEffort(effort);
-  }, []);
 
   const handleRepoChange = useCallback((repoPath: string | null) => {
     setSelectedRepoPath(repoPath);
@@ -421,8 +413,20 @@ export function MobileApprovalsClient({
           approvalCount={pendingCount}
           selectedModelLabel={selectedModel.label}
           connectionStatus={connectionStatus}
+          hostnameLabel={hostnameLabel}
           onNavigate={handleNavigate}
           onClose={() => setSidebarOpen(false)}
+          onOpenSettings={() => setSettingsSheetOpen(true)}
+          palette={palette}
+        />
+
+        <MobileSettingsSheet
+          open={settingsSheetOpen}
+          onClose={() => setSettingsSheetOpen(false)}
+          themeId={themeId}
+          onThemeChange={handleThemeChange}
+          appVersion={appVersion}
+          hostnameLabel={hostnameLabel}
           palette={palette}
         />
 
@@ -640,20 +644,6 @@ export function MobileApprovalsClient({
               repoOptions={repoOptions}
               onRepoPathChange={handleRepoChange}
               onRepoPathLoaded={handleRepoChange}
-              palette={palette}
-            />
-          ) : null}
-
-          {activeView === 'settings' ? (
-            <SettingsView
-              themeId={themeId}
-              onThemeChange={handleThemeChange}
-              selectedModel={selectedModel}
-              onModelChange={handleModelChange}
-              effortLevel={effortLevel}
-              onEffortChange={handleEffortChange}
-              connectionStatus={connectionStatus}
-              appVersion={appVersion}
               palette={palette}
             />
           ) : null}
