@@ -64,45 +64,45 @@ export function Sidebar({
     {
       id: 'orchestrator',
       label: 'Orchestrator',
-      description: 'Cross-repo orchestrator threads with a single composer.',
+      description: 'The brain — plan, dispatch, review',
       icon: <IconOrchestrator fill={palette.iconFill} />,
     },
     {
-      id: 'chat',
-      label: 'Chats',
-      description: 'Recent threads, live replies, and saved mobile sessions.',
-      icon: <IconChat fill={palette.iconFill} />,
+      id: 'approvals',
+      label: 'Approvals',
+      description: 'Approve or reject pending actions',
+      badge: approvalCount > 0 ? approvalCount : undefined,
+      icon: <IconShield fill={palette.iconFill} />,
     },
     {
       id: 'agents',
       label: 'Agents',
-      description: 'Live fleet of running and idle sessions across runtimes.',
+      description: 'See and steer running sessions',
       icon: <IconAgents fill={palette.iconFill} />,
     },
     {
       id: 'issues',
       label: 'Issues',
-      description: 'Open issues and PRs across registered repositories.',
+      description: 'Backlog and open tickets',
       icon: <IconIssues fill={palette.iconFill} />,
+    },
+    {
+      id: 'chat',
+      label: 'Assistant',
+      description: 'Personal LLM chat with repo context',
+      icon: <IconChat fill={palette.iconFill} />,
     },
     {
       id: 'activity',
       label: 'Activity',
-      description: 'Approvals, alerts, agent events, and reviews in one feed.',
+      description: 'Recent commits, PRs, deploys',
       icon: <IconActivity fill={palette.iconFill} />,
     },
     {
       id: 'costs',
       label: 'Costs',
-      description: 'Token usage, capacity, and spend by model.',
+      description: 'Tokens and spend by agent',
       icon: <IconCosts fill={palette.iconFill} />,
-    },
-    {
-      id: 'approvals',
-      label: 'Approvals',
-      description: 'Operator actions that need a fast, explicit decision.',
-      badge: approvalCount > 0 ? approvalCount : undefined,
-      icon: <IconShield fill={palette.iconFill} />,
     },
   ];
 
@@ -110,16 +110,18 @@ export function Sidebar({
 
   const navButtonStyle = (active: boolean): CSSProperties => ({
     width: '100%',
-    height: MOBILE_TOUCH_TARGET,
+    minHeight: MOBILE_TOUCH_TARGET,
     borderRadius: 10,
     border: 'none',
     background: active ? palette.accentSoft : 'transparent',
     paddingLeft: 12,
     paddingRight: 12,
+    paddingTop: 8,
+    paddingBottom: 8,
     color: palette.rootText,
     display: 'flex',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     textAlign: 'left',
     cursor: 'pointer',
     fontFamily: mobileFontFamily(),
@@ -215,8 +217,13 @@ export function Sidebar({
                 style={navButtonStyle(active)}
               >
                 {item.icon}
-                <span style={{ flex: 1, fontSize: 15, fontWeight: active ? 700 : 500, color: active ? palette.rootText : palette.mutedText }}>
-                  {item.label}
+                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span style={{ fontSize: 15, fontWeight: active ? 700 : 500, color: active ? palette.rootText : palette.mutedText, lineHeight: 1.2 }}>
+                    {item.label}
+                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: palette.subduedText, letterSpacing: '0.005em', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.description}
+                  </span>
                 </span>
                 {item.badge ? (
                   <span
