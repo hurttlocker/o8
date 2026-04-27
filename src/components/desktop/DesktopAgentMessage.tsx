@@ -394,14 +394,18 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
 
       {hasText ? (
         <div style={{
-          maxWidth: '100%',
+          maxWidth: '90%',
           color: entry.role === 'system' ? 'var(--t-text-secondary)' : 'var(--t-text)',
           fontSize: 13,
           fontWeight: 360,
-          lineHeight: 1.6,
+          lineHeight: 1.55,
           letterSpacing: '-0.005em',
           wordBreak: 'break-word',
-          padding: entry.role === 'system' ? '10px 12px' : 0,
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          paddingTop: entry.role === 'system' ? 10 : 8,
+          paddingBottom: entry.role === 'system' ? 10 : 8,
+          paddingLeft: entry.role === 'system' ? 12 : 0,
+          paddingRight: entry.role === 'system' ? 12 : 0,
           borderRadius: entry.role === 'system' ? 12 : 0,
           background: entry.role === 'system' ? 'var(--t-bg-card, rgba(148, 163, 184, 0.06))' : 'transparent',
           border: entry.role === 'system' ? '1px solid var(--t-divider)' : 'none',
