@@ -10,6 +10,7 @@ interface FleetViewProps {
   onAgentSelect: (sessionKey: string) => void;
   onBack: () => void;
   onLaunch: () => void;
+  hideHeader?: boolean;
 }
 
 function renderFleetSessionName(session: MobileInboxSnapshot['sessions'][number]) {
@@ -40,6 +41,7 @@ export const FleetView = memo(function FleetView({
   onAgentSelect,
   onBack,
   onLaunch,
+  hideHeader = false,
 }: FleetViewProps) {
   const { colors } = useTheme();
 
@@ -67,62 +69,64 @@ export const FleetView = memo(function FleetView({
         background: colors.bg,
       }}
     >
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'auto 1fr auto',
-          alignItems: 'center',
-          gap: 12,
-          padding: '8px 16px 4px',
-        }}
-      >
-        <button
-          type="button"
-          onClick={onBack}
+      {hideHeader ? null : (
+        <div
           style={{
-            minHeight: 44,
-            padding: 0,
-            border: 'none',
-            background: 'transparent',
-            color: colors.blueAccent,
-            fontSize: 16,
-            fontWeight: 500,
-            cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent',
+            display: 'grid',
+            gridTemplateColumns: 'auto 1fr auto',
+            alignItems: 'center',
+            gap: 12,
+            padding: '8px 16px 4px',
           }}
         >
-          Done
-        </button>
+          <button
+            type="button"
+            onClick={onBack}
+            style={{
+              minHeight: 44,
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              color: colors.blueAccent,
+              fontSize: 16,
+              fontWeight: 500,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Done
+          </button>
 
-        <h2
-          style={{
-            margin: 0,
-            textAlign: 'center',
-            color: colors.text,
-            fontSize: 17,
-            fontWeight: 600,
-            letterSpacing: '-0.02em',
-          }}
-        >
-          Sessions
-        </h2>
+          <h2
+            style={{
+              margin: 0,
+              textAlign: 'center',
+              color: colors.text,
+              fontSize: 17,
+              fontWeight: 600,
+              letterSpacing: '-0.02em',
+            }}
+          >
+            Sessions
+          </h2>
 
-        <button
-          type="button"
-          onClick={onLaunch}
-          aria-label="Launch new remote session"
-          style={iconButtonStyle}
-        >
-          <PlusIcon />
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={onLaunch}
+            aria-label="Launch new remote session"
+            style={iconButtonStyle}
+          >
+            <PlusIcon />
+          </button>
+        </div>
+      )}
 
       <GroupedSessionList
         sessions={sessions}
         onSessionSelect={onAgentSelect}
         renderSessionName={renderFleetSessionName}
         emptyMessage="No sessions yet."
-        topPadding={2}
+        topPadding={hideHeader ? 8 : 2}
       />
     </section>
   );
