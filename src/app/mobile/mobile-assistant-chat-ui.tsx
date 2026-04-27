@@ -169,11 +169,11 @@ function TtsButton({
   }, [messageId]);
 
   const glassPill: CSSProperties = {
-    height: 28,
+    minHeight: 44,
     borderRadius: 999,
     border: `1px solid ${palette.cardBorder}`,
-    paddingLeft: 10,
-    paddingRight: 10,
+    paddingLeft: 14,
+    paddingRight: 14,
     fontSize: 12,
     fontWeight: 700,
     fontFamily: mobileFontFamily(),
@@ -181,6 +181,8 @@ function TtsButton({
     alignItems: 'center',
     gap: 6,
     cursor: 'pointer',
+    touchAction: 'manipulation',
+    WebkitTapHighlightColor: 'transparent',
   };
 
   return (
@@ -330,16 +332,16 @@ export function ComposerBar({
       <div
         style={{
           flex: 1,
-          minHeight: 36,
-          borderRadius: 18,
+          minHeight: 48,
+          borderRadius: 22,
           border: `1px solid ${palette.inputBorder}`,
           background: palette.inputBackground,
           display: 'flex',
           alignItems: 'center',
           paddingLeft: 16,
           paddingRight: 12,
-          paddingTop: 6,
-          paddingBottom: 6,
+          paddingTop: 10,
+          paddingBottom: 10,
         }}
       >
         <ComposerPrimitive.Input
@@ -364,10 +366,13 @@ export function ComposerBar({
       </div>
       {isRunning ? (
         <ComposerPrimitive.Cancel
+          aria-label="Stop"
           style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
+            width: 44,
+            height: 44,
+            minWidth: 44,
+            minHeight: 44,
+            borderRadius: 22,
             border: 'none',
             backgroundColor: palette.dangerSoft,
             color: palette.rootText,
@@ -376,6 +381,9 @@ export function ComposerBar({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
+            touchAction: 'manipulation',
+            WebkitTapHighlightColor: 'transparent',
+            padding: 0,
           }}
         >
           <IconStop fill={palette.iconFill} size={16} />
@@ -383,11 +391,14 @@ export function ComposerBar({
       ) : (
         <button
           type="submit"
+          aria-label="Send message"
           disabled={isComposerEmpty || isLoading}
           style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
+            width: 44,
+            height: 44,
+            minWidth: 44,
+            minHeight: 44,
+            borderRadius: 22,
             border: 'none',
             backgroundColor: !isComposerEmpty && !isLoading ? palette.accent : palette.cardBackground,
             color: palette.rootText,
@@ -397,6 +408,9 @@ export function ComposerBar({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
+            touchAction: 'manipulation',
+            WebkitTapHighlightColor: 'transparent',
+            padding: 0,
           }}
         >
           <IconSend fill={palette.iconFill} />
@@ -511,11 +525,16 @@ export function ChatMessageRow({
               event.stopPropagation();
               onCopy(message.id, textContent);
             }}
+            aria-label={isCopied ? 'Copied' : 'Copy message'}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 5,
-              padding: '5px 12px',
+              minHeight: 44,
+              paddingLeft: 14,
+              paddingRight: 14,
+              paddingTop: 0,
+              paddingBottom: 0,
               borderRadius: 14,
               border: `1px solid ${palette.cardBorder}`,
               background: isCopied ? palette.successSoft : palette.cardBackground,
@@ -524,6 +543,8 @@ export function ChatMessageRow({
               fontWeight: 500,
               cursor: 'pointer',
               fontFamily: mobileFontFamily(),
+              touchAction: 'manipulation',
+              WebkitTapHighlightColor: 'transparent',
             }}
           >
             {isCopied ? 'Copied' : 'Copy'}

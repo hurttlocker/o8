@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   IconChat,
   IconPencil,
@@ -18,11 +18,58 @@ import {
 import {
   MobileGlassPanel,
   MobilePillButton,
-  MobileSectionHeading,
   MobileSurfaceRoot,
   MobileThreadListRoot,
   mobileSafeBottom,
 } from './mobile-shell-primitives';
+import { FilterPillRow, type FilterPillOption } from '@/components/mobile/shared/FilterPillRow';
+
+type ChatFilter = 'all' | 'active' | 'idle' | 'errored';
+
+const ACTIVE_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
+
+interface DayBucket {
+  key: 'today' | 'yesterday' | 'week' | 'earlier';
+  label: string;
+  rows: ChatHistoryRecord[];
+}
+
+function startOfDay(timestamp: number): number {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function bucketChats(rows: ChatHistoryRecord[]): DayBucket[] {
+  const now = Date.now();
+  const todayStart = startOfDay(now);
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000;
+
+  const today: ChatHistoryRecord[] = [];
+  const yesterday: ChatHistoryRecord[] = [];
+  const week: ChatHistoryRecord[] = [];
+  const earlier: ChatHistoryRecord[] = [];
+
+  rows.forEach((row) => {
+    const ts = new Date(row.updatedAt).getTime();
+    if (Number.isNaN(ts)) {
+      earlier.push(row);
+      return;
+    }
+    if (ts >= todayStart) today.push(row);
+    else if (ts >= yesterdayStart) yesterday.push(row);
+    else if (ts >= weekStart) week.push(row);
+    else earlier.push(row);
+  });
+
+  const buckets: DayBucket[] = [];
+  if (today.length) buckets.push({ key: 'today', label: 'Today', rows: today });
+  if (yesterday.length) buckets.push({ key: 'yesterday', label: 'Yesterday', rows: yesterday });
+  if (week.length) buckets.push({ key: 'week', label: 'This week', rows: week });
+  if (earlier.length) buckets.push({ key: 'earlier', label: 'Earlier', rows: earlier });
+  return buckets;
+}
 
 interface ContextMenuState {
   tabId: string;
@@ -150,7 +197,45 @@ export function ChatListView({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [filter, setFilter] = useState<ChatFilter>('all');
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const counts = useMemo(() => {
+    const now = Date.now();
+    let active = 0;
+    let idle = 0;
+    conversations.forEach((conversation) => {
+      const ts = new Date(conversation.updatedAt).getTime();
+      if (Number.isNaN(ts)) {
+        idle += 1;
+        return;
+      }
+      if (now - ts < ACTIVE_THRESHOLD_MS) active += 1;
+      else idle += 1;
+    });
+    return { all: conversations.length, active, idle, errored: 0 };
+  }, [conversations]);
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return conversations;
+    if (filter === 'errored') return [];
+    const now = Date.now();
+    return conversations.filter((conversation) => {
+      const ts = new Date(conversation.updatedAt).getTime();
+      if (Number.isNaN(ts)) return filter === 'idle';
+      const recent = now - ts < ACTIVE_THRESHOLD_MS;
+      return filter === 'active' ? recent : !recent;
+    });
+  }, [conversations, filter]);
+
+  const buckets = useMemo(() => bucketChats(filtered), [filtered]);
+
+  const filterOptions: ReadonlyArray<FilterPillOption<ChatFilter>> = useMemo(() => [
+    { value: 'all', label: 'All', count: counts.all },
+    { value: 'active', label: 'Active', count: counts.active },
+    { value: 'idle', label: 'Idle', count: counts.idle },
+    { value: 'errored', label: 'Errored', count: counts.errored },
+  ], [counts]);
 
   const handleLongPressStart = useCallback((
     tabId: string,
@@ -225,31 +310,22 @@ export function ChatListView({
         />
       ) : null}
 
+      <FilterPillRow
+        options={filterOptions}
+        value={filter}
+        onChange={setFilter}
+        palette={palette}
+        style={{ marginLeft: -16, marginRight: -16 }}
+      />
+
       <div
         style={{
           flex: 1,
           minHeight: 0,
           overflowY: 'auto',
-          paddingBottom: mobileSafeBottom(24),
+          paddingBottom: mobileSafeBottom(96),
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px', marginBottom: 10 }}>
-          <button
-            type="button"
-            onClick={onRefresh}
-            style={{ border: 'none', background: 'transparent', color: palette.subduedText, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: mobileFontFamily(), padding: 0 }}
-          >
-            Refresh
-          </button>
-          <button
-            type="button"
-            onClick={onNewChat}
-            style={{ border: 'none', background: palette.accentSoft, color: palette.accent, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: mobileFontFamily(), padding: '6px 14px', borderRadius: 10 }}
-          >
-            New chat
-          </button>
-        </div>
-
         {loading ? (
           <MobileGlassPanel palette={palette} style={{ padding: '28px 20px', textAlign: 'center' }}>
             <div style={{ fontSize: 14, color: palette.subduedText }}>
@@ -279,10 +355,43 @@ export function ChatListView({
               Start new chat
             </MobilePillButton>
           </MobileGlassPanel>
+        ) : filtered.length === 0 ? (
+          <MobileGlassPanel
+            palette={palette}
+            style={{
+              padding: '32px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: 14, color: palette.subduedText }}>
+              No conversations match this filter.
+            </div>
+          </MobileGlassPanel>
         ) : (
-          <MobileThreadListRoot>
-            {conversations.map((conversation) => {
-              const preview = truncateText(conversation.lastMessage || 'No preview yet.', 140);
+          buckets.map((bucket) => (
+            <div key={bucket.key} style={{ marginBottom: 6 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  color: palette.subduedText,
+                  paddingLeft: 16,
+                  paddingRight: 16,
+                  marginTop: 12,
+                  marginBottom: 6,
+                  fontFamily: mobileFontFamily(),
+                }}
+              >
+                {bucket.label}
+              </div>
+              <MobileThreadListRoot style={{ gap: 0 }}>
+                {bucket.rows.map((conversation) => {
 
               if (renaming === conversation.tabId) {
                 return (
@@ -396,10 +505,47 @@ export function ChatListView({
                     </div>
                 </button>
               );
-            })}
-          </MobileThreadListRoot>
+                })}
+              </MobileThreadListRoot>
+            </div>
+          ))
         )}
       </div>
+
+      <button
+        type="button"
+        onClick={onNewChat}
+        aria-label="Start new chat"
+        style={{
+          position: 'fixed',
+          right: 20,
+          bottom: `calc(env(safe-area-inset-bottom, 0px) + 24px)`,
+          width: 56,
+          height: 56,
+          minWidth: 56,
+          minHeight: 56,
+          borderRadius: 999,
+          border: 'none',
+          background: '#e07a3a',
+          color: '#ffffff',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 12px 28px rgba(224, 122, 58, 0.42), 0 4px 10px rgba(0, 0, 0, 0.18)',
+          zIndex: 10,
+          touchAction: 'manipulation',
+          WebkitTapHighlightColor: 'transparent',
+          padding: 0,
+        }}
+      >
+        <svg width="26" height="26" viewBox="0 0 256 256" aria-hidden="true">
+          <path
+            d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM84,116a12,12,0,1,0,12,12A12,12,0,0,0,84,116Zm88,0a12,12,0,1,0,12,12A12,12,0,0,0,172,116Zm60,12A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Zm-16,0A88,88,0,1,0,51.81,172.06a8,8,0,0,1,.66,6.54L40,216,77.4,203.53a7.85,7.85,0,0,1,2.53-.42,8,8,0,0,1,4,1.08A88,88,0,0,0,216,128Z"
+            fill="#ffffff"
+          />
+        </svg>
+      </button>
     </MobileSurfaceRoot>
   );
 }
