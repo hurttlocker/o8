@@ -65,6 +65,7 @@ export interface CostsDashboardProps {
   onBack: () => void;
   onSessionSelect: (sessionId: string) => void;
   compactLine: CompactLine;
+  hideHeader?: boolean;
 }
 
 export interface SquadRailProps {

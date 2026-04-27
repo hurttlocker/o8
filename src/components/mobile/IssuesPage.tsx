@@ -35,6 +35,8 @@ interface PR {
 interface IssuesPageProps {
   onBack: () => void;
   onOpenPR?: (repo: string, prNumber: number) => void;
+  hideHeader?: boolean;
+  refreshSignal?: number;
 }
 
 const STORAGE_KEY = 'o8:registered-repos';
@@ -505,7 +507,7 @@ function SectionHeader({ label }: { label: string }) {
   return <span style={sectionHeaderStyle(colors)}>{label}</span>;
 }
 
-export default function IssuesPage({ onBack, onOpenPR }: IssuesPageProps) {
+export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refreshSignal = 0 }: IssuesPageProps) {
   const { colors } = useTheme();
   const [repos, setRepos] = useState<string[]>(DEFAULT_REPOS);
   const [issues, setIssues] = useState<{ issue: Issue; repo: string }[]>([]);
@@ -557,7 +559,7 @@ export default function IssuesPage({ onBack, onOpenPR }: IssuesPageProps) {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [fetchAll, repos]);
+  }, [fetchAll, repos, refreshSignal]);
 
   const addRepo = useCallback(
     (repo: string) => {
@@ -579,34 +581,40 @@ export default function IssuesPage({ onBack, onOpenPR }: IssuesPageProps) {
 
   return (
     <div style={{ padding: '0 12px 24px', width: '100%', boxSizing: 'border-box', background: colors.bg, minHeight: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', color: colors.text, margin: 0 }}>
-            Issues & PRs
-          </h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: colors.textSecondary, fontWeight: 500 }}>
-            {loading ? 'Loading...' : `${filteredIssues.length} issues · ${filteredPRs.length} PRs`}
-          </p>
+      {hideHeader ? (
+        <p style={{ margin: '8px 4px 12px', fontSize: 13, color: colors.textSecondary, fontWeight: 500 }}>
+          {loading ? 'Loading...' : `${filteredIssues.length} issues · ${filteredPRs.length} PRs`}
+        </p>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+          <div>
+            <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', color: colors.text, margin: 0 }}>
+              Issues & PRs
+            </h1>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: colors.textSecondary, fontWeight: 500 }}>
+              {loading ? 'Loading...' : `${filteredIssues.length} issues · ${filteredPRs.length} PRs`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onBack}
+            style={{
+              minHeight: 44,
+              padding: '0 16px',
+              borderRadius: 12,
+              border: 'none',
+              background: colors.blueAccent,
+              color: colors.text,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Done
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            minHeight: 44,
-            padding: '0 16px',
-            borderRadius: 12,
-            border: 'none',
-            background: colors.blueAccent,
-            color: colors.text,
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent',
-          }}
-        >
-          Done
-        </button>
-      </div>
+      )}
 
       <RepoSwitcher repos={repos} selected={selectedRepo} onSelect={setSelectedRepo} onAddRepo={addRepo} />
 

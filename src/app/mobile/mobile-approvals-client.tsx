@@ -341,13 +341,38 @@ export function MobileApprovalsClient({
   );
   const inConversation = activeView === 'chat' && currentTabId !== null;
   const isFullScreenView = NEW_VIEWS.has(activeView);
+  const newViewTitle: Record<string, string> = {
+    agents: 'Agents',
+    issues: 'Issues',
+    activity: 'Activity',
+    costs: 'Costs',
+    orchestrator: 'Orchestrator',
+  };
   const viewTitle = activeView === 'settings'
     ? 'Settings'
     : activeView === 'approvals'
       ? 'Approvals'
-      : inConversation
-        ? recentConversations.find((conversation) => conversation.tabId === currentTabId)?.title ?? 'Chat'
-        : 'Chats';
+      : isFullScreenView
+        ? newViewTitle[activeView] ?? ''
+        : inConversation
+          ? recentConversations.find((conversation) => conversation.tabId === currentTabId)?.title ?? 'Chat'
+          : 'Chats';
+  const [issuesRefreshSignal, setIssuesRefreshSignal] = useState(0);
+  const [orchRefreshSignal, setOrchRefreshSignal] = useState(0);
+
+  const handleFullScreenRefresh = useCallback(() => {
+    if (activeView === 'agents' || activeView === 'activity' || activeView === 'costs') {
+      void loadInboxSnapshot();
+      return;
+    }
+    if (activeView === 'issues') {
+      setIssuesRefreshSignal((value) => value + 1);
+      return;
+    }
+    if (activeView === 'orchestrator') {
+      setOrchRefreshSignal((value) => value + 1);
+    }
+  }, [activeView, loadInboxSnapshot]);
 
   const handleBackToChats = useCallback(() => {
     setActiveView('chat');
@@ -431,73 +456,19 @@ export function MobileApprovalsClient({
           palette={palette}
         />
 
-        {isFullScreenView ? (
-          <div
-            style={{
-              paddingTop: 'max(env(safe-area-inset-top, 0px), 12px)',
-              paddingRight: 14,
-              paddingBottom: 8,
-              paddingLeft: 14,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'flex-start',
-              flexShrink: 0,
-              background: palette.rootBackground,
-              position: 'relative',
-              zIndex: 5,
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Menu"
-              style={{
-                position: 'relative',
-                width: 36,
-                height: 36,
-                minWidth: 36,
-                minHeight: 36,
-                borderRadius: 999,
-                border: '1px solid rgba(255, 248, 240, 0.12)',
-                background: 'rgba(20, 20, 22, 0.72)',
-                color: '#FAF5F0',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
-                WebkitTapHighlightColor: 'transparent',
-              }}
-            >
-              <IconHamburger fill="#FAF5F0" size={20} />
-              {pendingCount > 0 && activeView !== 'approvals' ? (
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: 4,
-                    right: 4,
-                    width: 7,
-                    height: 7,
-                    borderRadius: 999,
-                    backgroundColor: '#ef4444',
-                  }}
-                />
-              ) : null}
-            </button>
-          </div>
-        ) : null}
-
-        {!isFullScreenView ? (
         <div
           style={{
             paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)',
             paddingBottom: 12,
+            paddingLeft: isFullScreenView ? 16 : 0,
+            paddingRight: isFullScreenView ? 16 : 0,
             display: 'flex',
             alignItems: 'center',
             gap: 12,
             position: 'relative',
             zIndex: 5,
+            flexShrink: 0,
+            background: palette.rootBackground,
           } as CSSProperties}
         >
           {inConversation ? (
@@ -595,11 +566,18 @@ export function MobileApprovalsClient({
             >
               <IconRefresh fill={palette.iconFill} />
             </button>
+          ) : isFullScreenView ? (
+            <button
+              onClick={handleFullScreenRefresh}
+              style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
+              aria-label={`Refresh ${viewTitle.toLowerCase()}`}
+            >
+              <IconRefresh fill={palette.iconFill} />
+            </button>
           ) : (
             <div style={{ width: 44, flexShrink: 0 }} />
           )}
         </div>
-        ) : null}
 
         {!isFullScreenView && error ? (
           <div
@@ -626,9 +604,9 @@ export function MobileApprovalsClient({
             overflow: isFullScreenView ? 'auto' : 'hidden',
             WebkitOverflowScrolling: 'touch',
             // For full-screen views (Agents/Issues/Activity/Costs/Orchestrator)
-            // the per-view header sits at the top under the floating hamburger
-            // chip — fade content behind the bottom edge so long lists don't
-            // cleanly cut off at the safe-area inset.
+            // the standard 44px topbar sits above; the component below renders
+            // its own filter chrome at the top. Fade content behind the bottom
+            // edge so long lists don't cleanly cut off at the safe-area inset.
             ...(isFullScreenView
               ? mobileScrollFadeStyle({ top: 0, bottom: 24 })
               : {}),
@@ -680,6 +658,7 @@ export function MobileApprovalsClient({
                     }}
                     onBack={handleBackToChats}
                     onLaunch={handleBackToChats}
+                    hideHeader
                   />
                 ) : inboxError ? (
                   renderSnapshotPlaceholder(inboxError)
@@ -693,7 +672,7 @@ export function MobileApprovalsClient({
           {activeView === 'issues' ? (
             <MobileViewShell>
               <Suspense fallback={renderSnapshotPlaceholder('Loading issues…')}>
-                <IssuesPage onBack={handleBackToChats} />
+                <IssuesPage onBack={handleBackToChats} hideHeader refreshSignal={issuesRefreshSignal} />
               </Suspense>
             </MobileViewShell>
           ) : null}
@@ -710,6 +689,7 @@ export function MobileApprovalsClient({
                     }}
                     onApprove={(item) => handleSnapshotApprove(item.approvalId)}
                     onDeny={(item) => handleSnapshotDeny(item.approvalId)}
+                    hideHeader
                   />
                 ) : inboxError ? (
                   renderSnapshotPlaceholder(inboxError)
@@ -731,6 +711,7 @@ export function MobileApprovalsClient({
                       handleBackToChats();
                     }}
                     compactLine={mobileCompactLine}
+                    hideHeader
                   />
                 ) : inboxError ? (
                   renderSnapshotPlaceholder(inboxError)
@@ -744,7 +725,7 @@ export function MobileApprovalsClient({
           {activeView === 'orchestrator' ? (
             <MobileViewShell>
               <Suspense fallback={renderSnapshotPlaceholder('Loading orchestrator…')}>
-                <OrchestratorView onBack={handleBackToChats} />
+                <OrchestratorView onBack={handleBackToChats} hideHeader refreshSignal={orchRefreshSignal} />
               </Suspense>
             </MobileViewShell>
           ) : null}

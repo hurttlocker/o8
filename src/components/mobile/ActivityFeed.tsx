@@ -13,6 +13,7 @@ interface ActivityFeedProps {
   onApprove: (item: MobileInboxItem) => void;
   onDeny: (item: MobileInboxItem) => void;
   onReviewPR?: (repoPath: string, prNumber: number) => void;
+  hideHeader?: boolean;
 }
 
 type ActivityFilter = 'all' | 'approvals' | 'alerts' | 'agents' | 'reviews';
@@ -608,6 +609,7 @@ export const ActivityFeed = memo(function ActivityFeed({
   onApprove,
   onDeny,
   onReviewPR,
+  hideHeader = false,
 }: ActivityFeedProps) {
   const [filter, setFilter] = useState<ActivityFilter>('all');
   const { colors } = useTheme();
@@ -673,63 +675,37 @@ export const ActivityFeed = memo(function ActivityFeed({
         background: palette.background,
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 12,
-          paddingTop: 8,
-        }}
-      >
-        <div>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: 28,
-              fontWeight: 800,
-              letterSpacing: '-0.03em',
-              fontFamily: SYSTEM_FONT,
-              color: palette.textPrimary,
-            }}
-          >
-            Activity
-          </h2>
-          <p
-            style={{
-              margin: '4px 0 0',
-              fontSize: 13,
-              fontWeight: 500,
-              color: palette.textSecondary,
-              fontFamily: SYSTEM_FONT,
-            }}
-          >
-            {approvals.length > 0
-              ? `${approvals.length} pending approval${approvals.length === 1 ? '' : 's'}`
-              : 'All caught up'}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            minWidth: 44,
-            minHeight: 44,
-            padding: '0 16px',
-            borderRadius: 14,
-            border: `1px solid ${palette.cardBorder}`,
-            background: palette.cardBg,
-            color: palette.doneText,
-            fontSize: 13,
-            fontWeight: 600,
-            fontFamily: SYSTEM_FONT,
-            cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent',
-          }}
-        >
-          Done
-        </button>
-      </div>
+      {(() => {
+        const subtitle = approvals.length > 0
+          ? `${approvals.length} pending approval${approvals.length === 1 ? '' : 's'}`
+          : 'All caught up';
+        if (hideHeader) {
+          return (
+            <p style={{ margin: '8px 0 0', fontSize: 13, fontWeight: 500, color: palette.textSecondary, fontFamily: SYSTEM_FONT }}>
+              {subtitle}
+            </p>
+          );
+        }
+        return (
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, paddingTop: 8 }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', fontFamily: SYSTEM_FONT, color: palette.textPrimary }}>
+                Activity
+              </h2>
+              <p style={{ margin: '4px 0 0', fontSize: 13, fontWeight: 500, color: palette.textSecondary, fontFamily: SYSTEM_FONT }}>
+                {subtitle}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onBack}
+              style={{ minWidth: 44, minHeight: 44, padding: '0 16px', borderRadius: 14, border: `1px solid ${palette.cardBorder}`, background: palette.cardBg, color: palette.doneText, fontSize: 13, fontWeight: 600, fontFamily: SYSTEM_FONT, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+            >
+              Done
+            </button>
+          </div>
+        );
+      })()}
 
       <div
         style={{
