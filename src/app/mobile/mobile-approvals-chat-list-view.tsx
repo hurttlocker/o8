@@ -10,6 +10,7 @@ import {
   MOBILE_CARD_RADIUS,
   MOBILE_HEADING_TRACKING,
   mobileFontFamily,
+  mobileScrollFadeStyle,
   truncateText,
   type ChatHistoryRecord,
   type MobilePalette,
@@ -324,7 +325,11 @@ export function ChatListView({
           minHeight: 0,
           overflowY: 'auto',
           paddingBottom: mobileSafeBottom(96),
-        }}
+          // Top fades behind the filter pill row above; bottom fades behind
+          // the floating "new chat" FAB so transcripts don't cleanly cut off
+          // underneath either chrome strip.
+          ...mobileScrollFadeStyle({ top: 16, bottom: 80 }),
+        } as CSSProperties}
       >
         {loading ? (
           <MobileGlassPanel palette={palette} style={{ padding: '28px 20px', textAlign: 'center' }}>

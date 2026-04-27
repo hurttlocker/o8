@@ -19,6 +19,7 @@ import {
   IconCaretDown,
   MobilePalette,
   getConversationTitle,
+  mobileScrollFadeStyle,
   type ModelOption,
 } from './mobile-approvals-shared';
 import { getRepoBasename, type MobileRepoOption } from './mobile-chat-repos';
@@ -124,6 +125,10 @@ function MobileAssistantThreadSurface({
           overflowY: 'auto',
           paddingTop: 8,
           paddingBottom: 0,
+          // Top fades behind the model badge + repo picker row above; bottom
+          // fades behind the composer/scroll-to-bottom FAB so messages don't
+          // cleanly cut off behind either strip.
+          ...mobileScrollFadeStyle({ top: 24, bottom: 24 }),
         }}
       >
         <ThreadPrimitive.Empty>

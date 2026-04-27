@@ -187,12 +187,17 @@ export function OrchestratorView({ onBack }: OrchestratorViewProps) {
     scrollbarWidth: 'none',
     WebkitOverflowScrolling: 'touch',
   };
+  const transcriptFadeGradient = 'linear-gradient(to bottom, transparent 0px, black 24px, black calc(100% - 24px), transparent 100%)';
   const transcriptWrapStyle: CSSProperties = {
     flex: 1, minHeight: 0, overflowY: 'auto',
     paddingTop: 8, paddingRight: 14, paddingBottom: 12, paddingLeft: 14,
     display: 'flex', flexDirection: 'column', gap: 8,
     background: 'transparent',
     WebkitOverflowScrolling: 'touch',
+    // Top fades behind the thread strip above (~92px reserve); bottom fades
+    // behind the composer so messages don't cleanly cut off there.
+    maskImage: transcriptFadeGradient,
+    WebkitMaskImage: transcriptFadeGradient,
   };
   const composerWrapStyle: CSSProperties = {
     paddingTop: 10, paddingRight: 12,
