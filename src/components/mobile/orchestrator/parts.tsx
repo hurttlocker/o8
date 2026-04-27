@@ -98,7 +98,7 @@ export const ThreadCard = memo(function ThreadCard({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: active ? colors.accent : colors.cardBorder,
-    background: active ? colors.elevatedSurface : colors.cardBg,
+    background: colors.frostStrong,
     color: colors.text,
     display: 'flex',
     flexDirection: 'column',
