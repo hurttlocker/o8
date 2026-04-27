@@ -341,7 +341,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
             style={{
               width: 32, height: 32, minWidth: 32, minHeight: 32,
               borderRadius: 999, borderWidth: 1, borderStyle: 'solid',
-              borderColor: colors.surfaceBorder, background: colors.surface,
+              borderColor: colors.surfaceBorder, background: colors.frostStrong,
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer', flexShrink: 0,
               WebkitTapHighlightColor: 'transparent',
@@ -362,7 +362,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
               width: 32, height: 32, minWidth: 32, minHeight: 32,
               borderRadius: 999, borderWidth: 1, borderStyle: 'solid',
               borderColor: activeThread?.repoPath ? colors.accent : colors.surfaceBorder,
-              background: activeThread?.repoPath ? colors.blueGlass : colors.surface,
+              background: activeThread?.repoPath ? colors.blueGlass : colors.frostStrong,
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               cursor: activeThread?.repoPath ? 'pointer' : 'default', flexShrink: 0,
               WebkitTapHighlightColor: 'transparent',
