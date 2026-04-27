@@ -35,7 +35,7 @@ interface ActivityPalette {
 const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif';
 const INLINE_CODE_PATTERN = /(`[^`\n]+`)/g;
 
-function renderInlineCodeText(text: string): ReactNode {
+function renderInlineCodeText(text: string, codeBg: string): ReactNode {
   const parts = text.split(INLINE_CODE_PATTERN);
   if (parts.length === 1) {
     return text;
@@ -54,7 +54,7 @@ function renderInlineCodeText(text: string): ReactNode {
           font: FONTS.mono,
           fontFamily: '"SF Mono", Menlo, ui-monospace, monospace',
           fontSize: 12,
-          background: 'rgba(30,28,26,0.8)',
+          background: codeBg,
           padding: '2px 6px',
           borderRadius: 4,
         }}
@@ -365,7 +365,7 @@ function ApprovalCard({
           <span style={timestampStyle(palette)}>{item.timestampLabel || ''}</span>
         </div>
         <p style={{ ...bodyTextStyle(palette), marginTop: 10 }}>
-          {renderInlineCodeText(detailText)}
+          {renderInlineCodeText(detailText, palette.cardBg)}
         </p>
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button
@@ -429,7 +429,7 @@ function AlertCard({
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={headerTextStyle(palette)}>{item.title}</p>
             <p style={{ ...bodyTextStyle(palette), marginTop: 4 }}>
-              {renderInlineCodeText(`${item.detail.slice(0, 120)}${item.detail.length > 120 ? '…' : ''}`)}
+              {renderInlineCodeText(`${item.detail.slice(0, 120)}${item.detail.length > 120 ? '…' : ''}`, palette.cardBg)}
             </p>
           </div>
           <span style={timestampStyle(palette)}>{item.timestampLabel || ''}</span>
@@ -476,7 +476,7 @@ function ReviewCard({
                 whiteSpace: 'nowrap',
               }}
             >
-              {renderInlineCodeText(item.detail)}
+              {renderInlineCodeText(item.detail, palette.cardBg)}
             </p>
           </div>
           <span style={timestampStyle(palette)}>{item.timestampLabel || ''}</span>
@@ -541,7 +541,7 @@ function AgentEventCard({
                   whiteSpace: 'nowrap',
                 }}
               >
-                {renderInlineCodeText(agent.currentTask)}
+                {renderInlineCodeText(agent.currentTask, palette.cardBg)}
               </p>
             ) : null}
           </div>
@@ -658,6 +658,8 @@ export const ActivityFeed = memo(function ActivityFeed({
     display: 'grid',
     gap: 12,
     marginLeft: 20,
+    width: 'calc(100% - 20px)',
+    boxSizing: 'border-box',
     borderLeft: `1px solid ${palette.timelineLine}`,
   };
 
