@@ -7,6 +7,7 @@ import {
   MOBILE_CARD_RADIUS,
   MOBILE_HEADING_TRACKING,
   RISK_COLORS,
+  mobileScrollFadeStyle,
   type ApprovalItem,
   type MobilePalette,
   timeAgo,
@@ -435,6 +436,9 @@ export function ApprovalsView({
           minHeight: 0,
           overflowY: 'auto',
           paddingBottom: mobileSafeBottom(24),
+          // Top fades behind the filter pill row above; bottom fades into the
+          // safe-area inset so long approval lists don't cleanly cut off.
+          ...mobileScrollFadeStyle({ top: 16, bottom: 24 }),
         }}
       >
         <MobileGlassPanel palette={palette} style={{ padding: 20, marginBottom: 14 }}>

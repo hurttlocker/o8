@@ -222,6 +222,54 @@ export const MAX_RECENT_CONVERSATIONS = 10;
 export const CHAT_TITLE_MAX_LENGTH = 50;
 export const SIDEBAR_TITLE_MAX_LENGTH = 40;
 
+/**
+ * Build a vertical scroll-fade mask for a scroll container so content fades
+ * out behind sticky headers / composers / FABs instead of cleanly cutting off.
+ *
+ * Pass the actual visible offsets in px:
+ *  - `top`: distance from the top of the scroll container that should fade in
+ *           (matches the height of any sticky header that overlays content).
+ *           Pass 0 to skip the top fade.
+ *  - `bottom`: distance from the bottom that should fade out (matches the
+ *              height of a composer / FAB that overlays content). Pass 0 to
+ *              skip the bottom fade.
+ *  - `edge`: pixels of solid clear area at the very edge before the gradient
+ *            starts (default 0 — fade begins immediately at the edge).
+ *
+ * Returns both `maskImage` and `WebkitMaskImage` because Safari still needs
+ * the prefix. Callers spread the result into an existing style object.
+ */
+export function mobileScrollFadeStyle({
+  top = 0,
+  bottom = 0,
+  edge = 0,
+}: {
+  top?: number;
+  bottom?: number;
+  edge?: number;
+} = {}): CSSProperties {
+  const stops: string[] = [];
+  if (top > 0) {
+    if (edge > 0) stops.push(`transparent 0px`);
+    stops.push(`transparent ${edge}px`);
+    stops.push(`black ${edge + top}px`);
+  } else {
+    stops.push(`black 0px`);
+  }
+  if (bottom > 0) {
+    stops.push(`black calc(100% - ${edge + bottom}px)`);
+    if (edge > 0) stops.push(`transparent calc(100% - ${edge}px)`);
+    stops.push(`transparent 100%`);
+  } else {
+    stops.push(`black 100%`);
+  }
+  const gradient = `linear-gradient(to bottom, ${stops.join(', ')})`;
+  return {
+    maskImage: gradient,
+    WebkitMaskImage: gradient,
+  } as CSSProperties;
+}
+
 function renderIcon(pathData: string, size: number, fill: IconFill, style?: CSSProperties) {
   return (
     <svg width={size} height={size} viewBox="0 0 256 256" style={style} aria-hidden="true">
