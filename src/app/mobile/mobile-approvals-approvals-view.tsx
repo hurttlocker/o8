@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   IconCheck,
   MOBILE_BODY_TRACKING,
@@ -19,6 +19,18 @@ import {
   MobileThreadListRoot,
   mobileSafeBottom,
 } from './mobile-shell-primitives';
+import { FilterPillRow, type FilterPillOption } from '@/components/mobile/shared/FilterPillRow';
+
+type ApprovalFilter = 'all' | 'pending' | 'approved' | 'rejected';
+
+function isVisibleApproval(approval: ApprovalItem): boolean {
+  // Hide Claude Code runtime approvals — user runs with bypass permissions
+  if (approval.source === 'runtime') return false;
+  if (approval.continuation?.kind === 'runtime') return false;
+  // Hide LLM chat low-risk approvals (auto-resolved)
+  if (approval.source === 'llm-chat' && approval.risk === 'low') return false;
+  return true;
+}
 
 function RiskBadge({ risk }: { risk: string }) {
   return (
@@ -61,12 +73,17 @@ function MobileGateReport({ approval, palette }: { approval: ApprovalItem; palet
       <button
         type="button"
         onClick={() => setOpen((p) => !p)}
+        aria-expanded={open}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
           width: '100%',
-          padding: '8px 12px',
+          minHeight: 44,
+          paddingLeft: 12,
+          paddingRight: 12,
+          paddingTop: 8,
+          paddingBottom: 8,
           borderRadius: MOBILE_CARD_RADIUS,
           border: `1px solid ${palette.dangerBorder}`,
           background: palette.dangerSoft,
@@ -75,6 +92,8 @@ function MobileGateReport({ approval, palette }: { approval: ApprovalItem; palet
           fontWeight: 700,
           color: palette.danger,
           letterSpacing: MOBILE_BODY_TRACKING,
+          touchAction: 'manipulation',
+          WebkitTapHighlightColor: 'transparent',
         }}
       >
         <span style={{
@@ -191,7 +210,11 @@ function MobileConflictSection({
             onClick={() => setStrategy(opt.value)}
             style={{
               flex: 1,
-              padding: '8px 4px',
+              minHeight: 44,
+              paddingTop: 8,
+              paddingBottom: 8,
+              paddingLeft: 4,
+              paddingRight: 4,
               borderRadius: MOBILE_CARD_RADIUS,
               border: strategy === opt.value
                 ? '1.5px solid rgba(37, 99, 235, 0.35)'
@@ -205,6 +228,12 @@ function MobileConflictSection({
               color: strategy === opt.value ? '#2563eb' : palette.mutedText,
               textAlign: 'center',
               lineHeight: 1.3,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              touchAction: 'manipulation',
+              WebkitTapHighlightColor: 'transparent',
             }}
           >
             {opt.label}
@@ -350,18 +379,56 @@ export function ApprovalsView({
   resolving: { id: string; action: 'approve' | 'reject' } | null;
   palette: MobilePalette;
 }) {
-  const pending = approvals.filter((approval) => {
-    if (approval.status !== 'pending') return false;
-    // Hide Claude Code runtime approvals — user runs with bypass permissions
-    if (approval.source === 'runtime') return false;
-    if (approval.continuation?.kind === 'runtime') return false;
-    // Hide LLM chat approvals (low-risk, auto-resolved)
-    if (approval.source === 'llm-chat' && approval.risk === 'low') return false;
-    return true;
-  });
+  const [filter, setFilter] = useState<ApprovalFilter>('pending');
+
+  const visible = useMemo(() => approvals.filter(isVisibleApproval), [approvals]);
+
+  const counts = useMemo(() => {
+    let pending = 0;
+    let approved = 0;
+    let rejected = 0;
+    visible.forEach((approval) => {
+      if (approval.status === 'pending') pending += 1;
+      else if (approval.status === 'approved') approved += 1;
+      else if (approval.status === 'rejected') rejected += 1;
+    });
+    return { all: visible.length, pending, approved, rejected };
+  }, [visible]);
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return visible;
+    return visible.filter((approval) => approval.status === filter);
+  }, [filter, visible]);
+
+  const filterOptions: ReadonlyArray<FilterPillOption<ApprovalFilter>> = useMemo(() => [
+    { value: 'all', label: 'All', count: counts.all },
+    { value: 'pending', label: 'Pending', count: counts.pending },
+    { value: 'approved', label: 'Approved', count: counts.approved },
+    { value: 'rejected', label: 'Rejected', count: counts.rejected },
+  ], [counts]);
+
+  const headingTitle = filter === 'pending'
+    ? (counts.pending > 0 ? `${counts.pending} pending` : 'Queue clear')
+    : filter === 'approved'
+      ? `${counts.approved} approved`
+      : filter === 'rejected'
+        ? `${counts.rejected} rejected`
+        : `${counts.all} total`;
+  const headingSubtitle = filter === 'pending'
+    ? (counts.pending > 0
+      ? 'Review the request, then approve or reject it from the same surface.'
+      : 'New approval requests will appear here as they arrive.')
+    : 'Filtered view of resolved approvals.';
 
   return (
     <MobileSurfaceRoot>
+      <FilterPillRow
+        options={filterOptions}
+        value={filter}
+        onChange={setFilter}
+        palette={palette}
+      />
+
       <div
         style={{
           flex: 1,
@@ -373,17 +440,15 @@ export function ApprovalsView({
         <MobileGlassPanel palette={palette} style={{ padding: 20, marginBottom: 14 }}>
           <MobileSectionHeading
             eyebrow="Approvals Queue"
-            title={pending.length > 0 ? `${pending.length} pending` : 'Queue clear'}
-            subtitle={pending.length > 0
-              ? 'Review the request, then approve or reject it from the same surface.'
-              : 'New approval requests will appear here as they arrive.'}
+            title={headingTitle}
+            subtitle={headingSubtitle}
             palette={palette}
           />
         </MobileGlassPanel>
 
-        {pending.length > 0 ? (
+        {filtered.length > 0 ? (
           <MobileThreadListRoot>
-            {pending.map((approval) => (
+            {filtered.map((approval) => (
               <ApprovalCard
                 key={approval.id}
                 approval={approval}
@@ -407,10 +472,12 @@ export function ApprovalsView({
           >
             <IconCheck fill={palette.iconFill} style={{ opacity: 0.34 }} />
             <div style={{ fontSize: 20, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING, marginTop: 16, marginBottom: 6 }}>
-              All clear
+              {filter === 'pending' ? 'All clear' : 'Nothing to show'}
             </div>
             <div style={{ fontSize: 13, lineHeight: 1.7, letterSpacing: MOBILE_BODY_TRACKING, color: palette.subduedText, maxWidth: 260 }}>
-              There are no pending approvals right now. This page will refresh as new requests land.
+              {filter === 'pending'
+                ? 'There are no pending approvals right now. This page will refresh as new requests land.'
+                : 'No approvals match this filter yet.'}
             </div>
           </MobileGlassPanel>
         )}
