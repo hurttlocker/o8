@@ -179,8 +179,16 @@ export function useOrchestratorMobile({
   }, [flushStreamingBuffer]);
 
   // ── Load thread history when the active thread changes ──
+  // IMPORTANT: depend on activeThread?.id (not the object). The threads
+  // strip polls every 8s which produces a fresh `threads` array → new
+  // `activeThread` object reference → if we depend on the object we
+  // re-fetch history and clobber the in-memory transcript (including the
+  // user message + streaming assistant reply that haven't been persisted
+  // server-side yet). Keying on .id keeps the transcript stable across
+  // polling refreshes for the same thread.
+  const activeThreadId = activeThread?.id ?? null;
   useEffect(() => {
-    if (!activeThread) {
+    if (!activeThreadId) {
       /* eslint-disable react-hooks/set-state-in-effect -- clearing transcript when the active thread is removed must run synchronously to avoid showing stale messages from the previous thread. */
       setTranscript([]);
       setTranscriptLoading(false);
@@ -193,7 +201,7 @@ export function useOrchestratorMobile({
     setTranscriptLoading(true);
     setErrorNote(null);
 
-    fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(activeThread.id)}`, { cache: 'no-store' })
+    fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(activeThreadId)}`, { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json() as { messages?: ChatHistoryMessage[] };
@@ -216,7 +224,7 @@ export function useOrchestratorMobile({
     return () => {
       cancelled = true;
     };
-  }, [activeThread]);
+  }, [activeThreadId]);
 
   // ── Subscribe / re-subscribe to orchestrator channel for the active repoPath ──
   const sendSubscription = useCallback((ws: WebSocket | null) => {
