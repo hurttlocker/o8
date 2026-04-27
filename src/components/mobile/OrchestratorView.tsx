@@ -134,6 +134,26 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     setActiveThreadId(id);
   }, []);
 
+  const handleNewConversation = useCallback(async () => {
+    const repoPath = activeThread?.repoPath ?? null;
+    try {
+      const response = await fetch('/api/orchestrator/reset-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(repoPath ? { repoPath } : {}),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(payload?.error?.message ?? 'Unable to reset orchestrator session.');
+      }
+      setActiveThreadId(null);
+      void fetchThreads();
+      requestAnimationFrame(() => composerRef.current?.focus());
+    } catch (error) {
+      console.log('[mobile-orchestrator] reset failed', error);
+    }
+  }, [activeThread?.repoPath, fetchThreads]);
+
   const handleSend = useCallback(() => {
     const trimmed = composerDraft.trim();
     if (!trimmed) return;
@@ -273,6 +293,24 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
             <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: connectionDot(connectionState) }} />
             {connectionLabel(connectionState)}
           </div>
+          <button
+            type="button"
+            onClick={() => { void handleNewConversation(); }}
+            aria-label="New conversation"
+            title="New conversation"
+            disabled={!activeThread?.repoPath}
+            style={{
+              width: 28, height: 28, minWidth: 28, minHeight: 28,
+              borderRadius: 999, borderWidth: 1, borderStyle: 'solid',
+              borderColor: colors.surfaceBorder, background: colors.surface,
+              color: activeThread?.repoPath ? colors.text : colors.textTertiary,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              cursor: activeThread?.repoPath ? 'pointer' : 'default', flexShrink: 0,
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            <PlusIcon />
+          </button>
         </div>
       ) : (
         <div style={headerStyle}>
