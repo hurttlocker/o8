@@ -62,6 +62,12 @@ export function Sidebar({
 
   const navItems: SidebarNavItem[] = [
     {
+      id: 'orchestrator',
+      label: 'Orchestrator',
+      description: 'Cross-repo orchestrator threads with a single composer.',
+      icon: <IconOrchestrator fill={palette.iconFill} />,
+    },
+    {
       id: 'chat',
       label: 'Chats',
       description: 'Recent threads, live replies, and saved mobile sessions.',
@@ -97,12 +103,6 @@ export function Sidebar({
       description: 'Operator actions that need a fast, explicit decision.',
       badge: approvalCount > 0 ? approvalCount : undefined,
       icon: <IconShield fill={palette.iconFill} />,
-    },
-    {
-      id: 'orchestrator',
-      label: 'Orchestrator',
-      description: 'Cross-repo orchestrator threads with a single composer.',
-      icon: <IconOrchestrator fill={palette.iconFill} />,
     },
   ];
 
