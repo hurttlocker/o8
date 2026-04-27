@@ -1,8 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { useTheme } from '@/lib/theme/context';
+import { ThemeProvider as MobileThemeProvider } from '@/components/mobile/ThemeContext';
+import { compactLine as mobileCompactLine } from '@/components/mobile/utils';
 import { MobileAuroraBg } from './mobile-aurora-bg';
 import { AssistantChatView } from './mobile-assistant-chat-view';
 import { ApprovalsView } from './mobile-approvals-approvals-view';
@@ -40,6 +43,29 @@ import {
   type MobileRepoOption,
 } from './mobile-chat-repos';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
+
+const FleetView = lazy(async () => ({
+  default: (await import('@/components/mobile/FleetView')).FleetView,
+}));
+const IssuesPage = lazy(async () => ({
+  default: (await import('@/components/mobile/IssuesPage')).default,
+}));
+const ActivityFeed = lazy(async () => ({
+  default: (await import('@/components/mobile/ActivityFeed')).ActivityFeed,
+}));
+const CostsDashboard = lazy(async () => ({
+  default: (await import('@/components/mobile/CostsDashboard')).CostsDashboard,
+}));
+const OrchestratorView = lazy(async () => ({
+  default: (await import('@/components/mobile/OrchestratorView')).OrchestratorView,
+}));
+
+const NEW_VIEWS: ReadonlySet<MobileView> = new Set(['agents', 'issues', 'activity', 'costs', 'orchestrator']);
+const SNAPSHOT_VIEWS: ReadonlySet<MobileView> = new Set(['agents', 'activity', 'costs']);
+
+function MobileViewShell({ children }: { children: ReactNode }) {
+  return <MobileThemeProvider>{children}</MobileThemeProvider>;
+}
 
 function getWsToken() {
   if (typeof document === 'undefined') return null;
@@ -94,6 +120,8 @@ export function MobileApprovalsClient({
   const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(readStoredMobileRepoPath);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
   const [effortLevel, setEffortLevel] = useState<CliEffort | null>(getStoredEffort);
+  const [inboxSnapshot, setInboxSnapshot] = useState<MobileInboxSnapshot | null>(null);
+  const [inboxError, setInboxError] = useState<string | null>(null);
   const reconnectAttemptRef = useRef(0);
 
   const selectedModel = useMemo(
@@ -143,6 +171,26 @@ export function MobileApprovalsClient({
       void loadRecentConversations();
     }
   }, [activeView, currentTabId, loadRecentConversations]);
+
+  const loadInboxSnapshot = useCallback(async () => {
+    try {
+      const response = await fetch('/api/mobile/inbox', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as MobileInboxSnapshot;
+      setInboxSnapshot(data);
+      setInboxError(null);
+    } catch (error) {
+      console.log('[mobile-nav] inbox snapshot fetch failed', error);
+      setInboxError('Unable to load fleet snapshot');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!SNAPSHOT_VIEWS.has(activeView)) return;
+    void loadInboxSnapshot();
+    const timer = setInterval(loadInboxSnapshot, POLL_INTERVAL);
+    return () => clearInterval(timer);
+  }, [activeView, loadInboxSnapshot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,6 +347,7 @@ export function MobileApprovalsClient({
     [approvals],
   );
   const inConversation = activeView === 'chat' && currentTabId !== null;
+  const isFullScreenView = NEW_VIEWS.has(activeView);
   const viewTitle = activeView === 'settings'
     ? 'Settings'
     : activeView === 'approvals'
@@ -306,6 +355,38 @@ export function MobileApprovalsClient({
       : inConversation
         ? recentConversations.find((conversation) => conversation.tabId === currentTabId)?.title ?? 'Chat'
         : 'Chats';
+
+  const handleBackToChats = useCallback(() => {
+    setActiveView('chat');
+    setCurrentTabId(null);
+  }, []);
+
+  const handleSnapshotApprove = useCallback((approvalId?: string) => {
+    if (!approvalId) return;
+    void handleResolve(approvalId, 'approve');
+  }, [handleResolve]);
+
+  const handleSnapshotDeny = useCallback((approvalId?: string) => {
+    if (!approvalId) return;
+    void handleResolve(approvalId, 'reject');
+  }, [handleResolve]);
+
+  const renderSnapshotPlaceholder = useCallback((message: string) => (
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        color: palette.subduedText,
+        fontSize: 14,
+        textAlign: 'center',
+      }}
+    >
+      {message}
+    </div>
+  ), [palette.subduedText]);
 
   return (
     <div
@@ -324,7 +405,16 @@ export function MobileApprovalsClient({
     >
       {palette.isDark ? <MobileAuroraBg /> : null}
 
-      <div style={{ position: 'relative', zIndex: 1, height: '100%', padding: '0 16px', display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{
+          position: 'relative',
+          zIndex: 1,
+          height: '100%',
+          padding: isFullScreenView ? 0 : '0 16px',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         <Sidebar
           open={sidebarOpen}
           activeView={activeView}
@@ -336,6 +426,51 @@ export function MobileApprovalsClient({
           palette={palette}
         />
 
+        {isFullScreenView ? (
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Menu"
+            style={{
+              position: 'absolute',
+              top: 'max(env(safe-area-inset-top, 0px), 12px)',
+              left: 12,
+              zIndex: 10,
+              width: 36,
+              height: 36,
+              minWidth: 36,
+              minHeight: 36,
+              borderRadius: 999,
+              border: '1px solid rgba(255, 248, 240, 0.12)',
+              background: 'rgba(20, 20, 22, 0.72)',
+              color: '#FAF5F0',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            <IconHamburger fill="#FAF5F0" size={20} />
+            {pendingCount > 0 && activeView !== 'approvals' ? (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 4,
+                  right: 4,
+                  width: 7,
+                  height: 7,
+                  borderRadius: 999,
+                  backgroundColor: '#ef4444',
+                }}
+              />
+            ) : null}
+          </button>
+        ) : null}
+
+        {!isFullScreenView ? (
         <div
           style={{
             paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)',
@@ -446,8 +581,9 @@ export function MobileApprovalsClient({
             <div style={{ width: 44, flexShrink: 0 }} />
           )}
         </div>
+        ) : null}
 
-        {error ? (
+        {!isFullScreenView && error ? (
           <div
             style={{
               backgroundColor: palette.dangerSoft,
@@ -463,7 +599,16 @@ export function MobileApprovalsClient({
           </div>
         ) : null}
 
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: isFullScreenView ? 'auto' : 'hidden',
+            WebkitOverflowScrolling: 'touch',
+          } as CSSProperties}
+        >
           {activeView === 'approvals' ? (
             <ApprovalsView approvals={approvals} onResolve={handleResolve} resolving={resolving} palette={palette} />
           ) : null}
@@ -511,6 +656,86 @@ export function MobileApprovalsClient({
               appVersion={appVersion}
               palette={palette}
             />
+          ) : null}
+
+          {activeView === 'agents' ? (
+            <MobileViewShell>
+              <Suspense fallback={renderSnapshotPlaceholder('Loading sessions…')}>
+                {inboxSnapshot ? (
+                  <FleetView
+                    sessions={inboxSnapshot.sessions}
+                    onAgentSelect={() => {
+                      handleBackToChats();
+                    }}
+                    onBack={handleBackToChats}
+                    onLaunch={handleBackToChats}
+                  />
+                ) : inboxError ? (
+                  renderSnapshotPlaceholder(inboxError)
+                ) : (
+                  renderSnapshotPlaceholder('Loading sessions…')
+                )}
+              </Suspense>
+            </MobileViewShell>
+          ) : null}
+
+          {activeView === 'issues' ? (
+            <MobileViewShell>
+              <Suspense fallback={renderSnapshotPlaceholder('Loading issues…')}>
+                <IssuesPage onBack={handleBackToChats} />
+              </Suspense>
+            </MobileViewShell>
+          ) : null}
+
+          {activeView === 'activity' ? (
+            <MobileViewShell>
+              <Suspense fallback={renderSnapshotPlaceholder('Loading activity…')}>
+                {inboxSnapshot ? (
+                  <ActivityFeed
+                    snapshot={inboxSnapshot}
+                    onBack={handleBackToChats}
+                    onAgentSelect={() => {
+                      handleBackToChats();
+                    }}
+                    onApprove={(item) => handleSnapshotApprove(item.approvalId)}
+                    onDeny={(item) => handleSnapshotDeny(item.approvalId)}
+                  />
+                ) : inboxError ? (
+                  renderSnapshotPlaceholder(inboxError)
+                ) : (
+                  renderSnapshotPlaceholder('Loading activity…')
+                )}
+              </Suspense>
+            </MobileViewShell>
+          ) : null}
+
+          {activeView === 'costs' ? (
+            <MobileViewShell>
+              <Suspense fallback={renderSnapshotPlaceholder('Loading costs…')}>
+                {inboxSnapshot ? (
+                  <CostsDashboard
+                    snapshot={inboxSnapshot}
+                    onBack={handleBackToChats}
+                    onSessionSelect={() => {
+                      handleBackToChats();
+                    }}
+                    compactLine={mobileCompactLine}
+                  />
+                ) : inboxError ? (
+                  renderSnapshotPlaceholder(inboxError)
+                ) : (
+                  renderSnapshotPlaceholder('Loading costs…')
+                )}
+              </Suspense>
+            </MobileViewShell>
+          ) : null}
+
+          {activeView === 'orchestrator' ? (
+            <MobileViewShell>
+              <Suspense fallback={renderSnapshotPlaceholder('Loading orchestrator…')}>
+                <OrchestratorView onBack={handleBackToChats} />
+              </Suspense>
+            </MobileViewShell>
           ) : null}
         </div>
       </div>
