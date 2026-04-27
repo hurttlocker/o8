@@ -473,7 +473,7 @@ export function MobileApprovalsClient({
             position: 'relative',
             zIndex: 5,
             flexShrink: 0,
-            background: palette.rootBackground,
+            background: 'transparent',
           } as CSSProperties}
         >
           {inConversation ? (
