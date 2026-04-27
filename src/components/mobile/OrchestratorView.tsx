@@ -183,6 +183,28 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     }
   }, [threads, localThread, setLocalThread]);
 
+  // The orchestrator stores chat-history under its own server-side tabId
+  // (not the one we mint client-side). When the user sends their first
+  // message after tap-"+", the orchestrator turn completes server-side and
+  // a NEW thread shows up in the polling response with the same repoPath
+  // but a different id. Swap to it so the transcript loads correctly on
+  // the next reload — otherwise we'd be stuck on the empty local thread.
+  useEffect(() => {
+    if (!localThread) return;
+    if (!localThread.repoPath) return;
+    const localMintedAt = new Date(localThread.lastMessageAt).getTime();
+    const serverThread = threads.find((thread) => (
+      thread.id !== localThread.id
+      && thread.repoPath === localThread.repoPath
+      && new Date(thread.lastMessageAt).getTime() >= localMintedAt
+    ));
+    if (serverThread) {
+      console.log('[mobile-orchestrator] swapping local thread → server thread', { from: localThread.id, to: serverThread.id });
+      setActiveThreadId(serverThread.id);
+      setLocalThread(null);
+    }
+  }, [threads, localThread, setLocalThread, setActiveThreadId]);
+
   const activeThread = useMemo(
     () => visibleThreads.find((thread) => thread.id === activeThreadId) ?? null,
     [visibleThreads, activeThreadId],
@@ -298,7 +320,10 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
       // Mint a brand-new client-side thread (fresh tabId, same repoPath) so
       // the history-load effect fetches a non-existent tabId → empty
       // transcript. The first message we send creates the new history file.
-      const freshThreadId = `mobile-orchestrator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // Use the `thoughts-` prefix so the threads-list endpoint (which
+      // filters on `thoughts-`) picks up this thread once it's persisted,
+      // and so mobile + desktop share one storage namespace.
+      const freshThreadId = `thoughts-${Date.now()}-mobile-${Math.random().toString(36).slice(2, 6)}`;
       const freshThread: MobileOrchestratorThread = {
         id: freshThreadId,
         title: 'New conversation',

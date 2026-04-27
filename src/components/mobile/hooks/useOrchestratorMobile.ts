@@ -59,6 +59,7 @@ const INITIAL_BACKOFF = 1_000;
 const MAX_BACKOFF = 30_000;
 const PING_INTERVAL = 20_000;
 const STREAM_FLUSH_MS = 60;
+const PERSIST_DEBOUNCE_MS = 800;
 
 interface ChatHistoryMessage {
   role?: string;
@@ -146,6 +147,55 @@ export function useOrchestratorMobile({
   useEffect(() => {
     repoPathRef.current = activeThread?.repoPath ?? null;
   }, [activeThread?.repoPath]);
+
+  // ── Persistence (debounced) ──
+  // Mobile transcripts must round-trip to disk so they survive reloads,
+  // process restarts, and switching back from desktop. The desktop persists
+  // via usePersistChatThread; mobile owns the same job here. We POST the
+  // user/assistant entries to /api/v2/chat-history under the active thread's
+  // tabId, keyed off the thread metadata so the threads-list endpoint can
+  // surface it on the next fetch.
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistThread = useCallback((entries: MobileOrchestratorTranscriptEntry[], thread: MobileOrchestratorThread) => {
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null;
+      const messages = entries
+        .filter((entry) => entry.role === 'user' || entry.role === 'assistant')
+        .map((entry) => ({
+          id: entry.id,
+          role: entry.role,
+          content: entry.text,
+          timestamp: entry.timestamp ?? Date.now(),
+        }));
+      if (messages.length === 0) return;
+      const firstUserText = entries.find((entry) => entry.role === 'user')?.text ?? '';
+      const fallbackTitle = firstUserText
+        ? firstUserText.slice(0, 60).replace(/\n/g, ' ') + (firstUserText.length > 60 ? '...' : '')
+        : undefined;
+      const wsToken = typeof document !== 'undefined'
+        ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
+        : '';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
+      void fetch('/api/v2/chat-history', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          tabId: thread.id,
+          messages,
+          model: 'claude-code',
+          repoPath: thread.repoPath ?? undefined,
+          repoName: thread.repoName ?? undefined,
+          repoBranch: thread.repoBranch ?? undefined,
+          title: thread.title && thread.title !== 'New conversation' ? thread.title : fallbackTitle,
+        }),
+      }).catch((error) => console.log('[mobile-orchestrator] persist failed', error));
+    }, PERSIST_DEBOUNCE_MS);
+  }, []);
 
   const flushStreamingBuffer = useCallback(() => {
     const buffer = streamingBufferRef.current;
