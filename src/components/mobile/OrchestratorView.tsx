@@ -158,6 +158,8 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
 
   const handleNewConversation = useCallback(async () => {
     const repoPath = activeThread?.repoPath ?? null;
+    const repoName = activeThread?.repoName ?? null;
+    const runtime = activeThread?.runtime ?? 'claude-code';
     console.log('[mobile-orchestrator] new conversation requested', { repoPath });
     try {
       const wsToken = typeof document !== 'undefined'
@@ -174,17 +176,35 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
         const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
         throw new Error(payload?.error?.message ?? `Unable to reset orchestrator session (HTTP ${response.status}).`);
       }
-      console.log('[mobile-orchestrator] reset OK — clearing transcript');
-      setActiveThreadId(null);
+      console.log('[mobile-orchestrator] reset OK — minting fresh thread');
+
+      // The reset-session call wipes the orchestrator process state but the
+      // server-side chat-history file for the prior tabId still exists.
+      // Mint a brand-new client-side thread (fresh tabId, same repoPath) so
+      // the history-load effect fetches a non-existent tabId → empty
+      // transcript. The first message we send creates the new history file.
+      const freshThreadId = `mobile-orchestrator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const freshThread: MobileOrchestratorThread = {
+        id: freshThreadId,
+        title: 'New conversation',
+        repoPath: repoPath,
+        repoName: repoName,
+        repoBranch: activeThread?.repoBranch ?? null,
+        runtime,
+        status: 'ready',
+        lastMessageAt: new Date().toISOString(),
+        messageCount: 0,
+      };
+      setThreads((current) => [freshThread, ...current]);
+      setActiveThreadId(freshThreadId);
       setThreadsError(null);
-      void fetchThreads();
       requestAnimationFrame(() => composerRef.current?.focus());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to reset orchestrator session.';
       console.log('[mobile-orchestrator] reset failed', error);
       setThreadsError(message);
     }
-  }, [activeThread?.repoPath, fetchThreads]);
+  }, [activeThread?.repoPath, activeThread?.repoName, activeThread?.runtime]);
 
   const handleToggleStrip = useCallback(() => {
     setStripOpen((current) => {
