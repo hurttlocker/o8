@@ -11,6 +11,7 @@ import type {
   MobileOrchestratorThread,
   MobileOrchestratorTranscriptEntry,
 } from '@/lib/mobile/types';
+import { useTheme } from '../ThemeContext';
 
 export function PlusIcon({ size = 14 }: { size?: number }) {
   return (
@@ -78,10 +79,11 @@ export const ThreadCard = memo(function ThreadCard({
   active: boolean;
   onSelect: (id: string) => void;
 }) {
+  const { colors } = useTheme();
   const dotColor =
-    thread.status === 'busy' ? '#FFD60A'
-      : thread.status === 'ready' ? '#30D158'
-        : '#706860';
+    thread.status === 'busy' ? colors.amber
+      : thread.status === 'ready' ? colors.success
+        : colors.textTertiary;
 
   const cardStyle: CSSProperties = {
     flex: '0 0 auto',
@@ -94,9 +96,9 @@ export const ThreadCard = memo(function ThreadCard({
     borderRadius: 14,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: active ? 'rgba(255,248,240,0.32)' : 'rgba(255,248,240,0.07)',
-    background: active ? 'rgba(255,248,240,0.10)' : 'rgba(30,28,26,0.82)',
-    color: '#FAF5F0',
+    borderColor: active ? colors.accent : colors.cardBorder,
+    background: active ? colors.elevatedSurface : colors.cardBg,
+    color: colors.text,
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
@@ -120,7 +122,7 @@ export const ThreadCard = memo(function ThreadCard({
             fontWeight: 700,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
-            color: '#A09890',
+            color: colors.textSecondary,
           }}
         >
           {runtimeLabel(thread.runtime)}
@@ -130,7 +132,7 @@ export const ThreadCard = memo(function ThreadCard({
             marginLeft: 'auto',
             fontSize: 10,
             fontWeight: 500,
-            color: '#706860',
+            color: colors.textTertiary,
             flexShrink: 0,
           }}
         >
@@ -142,7 +144,7 @@ export const ThreadCard = memo(function ThreadCard({
           fontSize: 13,
           fontWeight: 600,
           lineHeight: 1.3,
-          color: '#FAF5F0',
+          color: colors.text,
           letterSpacing: '-0.01em',
           display: '-webkit-box',
           WebkitLineClamp: 2,
@@ -157,7 +159,7 @@ export const ThreadCard = memo(function ThreadCard({
         <div
           style={{
             fontSize: 10,
-            color: '#706860',
+            color: colors.textTertiary,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -175,21 +177,26 @@ export const TranscriptBubble = memo(function TranscriptBubble({
 }: {
   entry: MobileOrchestratorTranscriptEntry;
 }) {
+  const { colors } = useTheme();
   if (entry.role === 'user') {
     return (
       <div
         style={{
           alignSelf: 'flex-end',
-          maxWidth: '85%',
-          paddingTop: 9,
+          maxWidth: '82%',
+          paddingTop: 10,
           paddingRight: 14,
-          paddingBottom: 9,
+          paddingBottom: 10,
           paddingLeft: 14,
-          borderRadius: 14,
-          background: 'rgba(10,132,255,0.18)',
-          color: '#FAF5F0',
+          borderRadius: 18,
+          borderBottomRightRadius: 8,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: colors.cardBorder,
+          background: colors.msgUserBg,
+          color: colors.text,
           fontSize: 14,
-          lineHeight: 1.45,
+          lineHeight: 1.55,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
@@ -201,10 +208,8 @@ export const TranscriptBubble = memo(function TranscriptBubble({
 
   if (entry.role === 'tool') {
     const done = entry.toolDone === true;
-    // Glyph mirrors the running/done split desktop uses: tiny dot while the
-    // tool is in flight, check once tool-result arrives.
     const glyph = done ? '✓' : '·';
-    const glyphColor = done ? '#30D158' : '#A09890';
+    const glyphColor = done ? colors.success : colors.textTertiary;
     return (
       <div
         style={{
@@ -220,9 +225,9 @@ export const TranscriptBubble = memo(function TranscriptBubble({
           borderRadius: 999,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: done ? 'rgba(48,209,88,0.22)' : 'rgba(255,248,240,0.10)',
-          background: 'rgba(30,28,26,0.7)',
-          color: '#A09890',
+          borderColor: done ? colors.success : colors.cardBorder,
+          background: colors.cardBg,
+          color: colors.textSecondary,
           fontSize: 11,
           fontWeight: 600,
           letterSpacing: '0.02em',
@@ -234,7 +239,7 @@ export const TranscriptBubble = memo(function TranscriptBubble({
         {entry.toolPreview ? (
           <span
             style={{
-              color: '#706860',
+              color: colors.textTertiary,
               fontWeight: 500,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -255,7 +260,7 @@ export const TranscriptBubble = memo(function TranscriptBubble({
         style={{
           alignSelf: 'center',
           fontSize: 11,
-          color: '#706860',
+          color: colors.textTertiary,
           fontStyle: 'italic',
         }}
       >
@@ -268,19 +273,12 @@ export const TranscriptBubble = memo(function TranscriptBubble({
     <div
       style={{
         alignSelf: 'flex-start',
-        maxWidth: '88%',
-        paddingTop: 10,
-        paddingRight: 14,
-        paddingBottom: 10,
-        paddingLeft: 14,
-        borderRadius: 14,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'rgba(255,248,240,0.07)',
-        background: 'rgba(30,28,26,0.82)',
-        color: '#FAF5F0',
+        width: '100%',
+        paddingTop: 2,
+        paddingRight: 18,
+        color: colors.text,
         fontSize: 14,
-        lineHeight: 1.45,
+        lineHeight: 1.55,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
         opacity: entry.thinking ? 0.7 : 1,

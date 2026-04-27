@@ -214,7 +214,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
   const composerInputRowStyle: CSSProperties = {
     display: 'flex', alignItems: 'flex-end', gap: 8,
     borderRadius: 14, borderWidth: 1, borderStyle: 'solid',
-    borderColor: colors.surfaceBorder, background: 'rgba(30,28,26,0.82)',
+    borderColor: colors.surfaceBorder, background: colors.composeBg,
     paddingTop: 8, paddingRight: 8, paddingBottom: 8, paddingLeft: 12,
   };
   const composerTextareaStyle: CSSProperties = {
@@ -226,7 +226,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
   const sendButtonStyle: CSSProperties = {
     width: 36, height: 36, minWidth: 36, minHeight: 36,
     borderRadius: 999, borderWidth: 0,
-    background: canSend ? '#0A84FF' : 'rgba(255,248,240,0.10)',
+    background: canSend ? colors.accent : colors.blueGlass,
     color: canSend ? '#FFFFFF' : colors.textTertiary,
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
     cursor: canSend ? 'pointer' : 'default', flexShrink: 0,
@@ -309,7 +309,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
           />
         ))}
         {threadsLoading && threads.length === 0 ? (
-          <div style={{ flex: '0 0 auto', width: 200, height: 80, borderRadius: 14, background: 'rgba(46,42,38,0.7)' }} />
+          <div style={{ flex: '0 0 auto', width: 200, height: 80, borderRadius: 14, background: colors.elevatedSurface }} />
         ) : null}
       </div>
 
@@ -358,7 +358,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
             style={{
               alignSelf: 'flex-start',
               paddingTop: 6, paddingRight: 12, paddingBottom: 6, paddingLeft: 12,
-              borderRadius: 12, background: 'rgba(30,28,26,0.7)',
+              borderRadius: 12, background: colors.cardBg,
               color: colors.textSecondary, fontSize: 12, fontWeight: 600, letterSpacing: '0.02em',
               animation: 'mobile-orchestrator-pulse 1.4s ease-in-out infinite',
             }}
