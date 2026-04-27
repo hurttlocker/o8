@@ -24,6 +24,7 @@ import {
   getModelOption,
   glassButtonStyle,
   mobileFontFamily,
+  mobileScrollFadeStyle,
   normalizeHistoryList,
   readStoredMobileModel,
   type ApprovalItem,
@@ -431,47 +432,60 @@ export function MobileApprovalsClient({
         />
 
         {isFullScreenView ? (
-          <button
-            type="button"
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Menu"
+          <div
             style={{
-              position: 'absolute',
-              top: 'max(env(safe-area-inset-top, 0px), 12px)',
-              left: 12,
-              zIndex: 10,
-              width: 36,
-              height: 36,
-              minWidth: 36,
-              minHeight: 36,
-              borderRadius: 999,
-              border: '1px solid rgba(255, 248, 240, 0.12)',
-              background: 'rgba(20, 20, 22, 0.72)',
-              color: '#FAF5F0',
-              display: 'inline-flex',
+              paddingTop: 'max(env(safe-area-inset-top, 0px), 12px)',
+              paddingRight: 14,
+              paddingBottom: 8,
+              paddingLeft: 14,
+              display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
-              WebkitTapHighlightColor: 'transparent',
+              justifyContent: 'flex-start',
+              flexShrink: 0,
+              background: palette.rootBackground,
+              position: 'relative',
+              zIndex: 5,
             }}
           >
-            <IconHamburger fill="#FAF5F0" size={20} />
-            {pendingCount > 0 && activeView !== 'approvals' ? (
-              <span
-                style={{
-                  position: 'absolute',
-                  top: 4,
-                  right: 4,
-                  width: 7,
-                  height: 7,
-                  borderRadius: 999,
-                  backgroundColor: '#ef4444',
-                }}
-              />
-            ) : null}
-          </button>
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Menu"
+              style={{
+                position: 'relative',
+                width: 36,
+                height: 36,
+                minWidth: 36,
+                minHeight: 36,
+                borderRadius: 999,
+                border: '1px solid rgba(255, 248, 240, 0.12)',
+                background: 'rgba(20, 20, 22, 0.72)',
+                color: '#FAF5F0',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              <IconHamburger fill="#FAF5F0" size={20} />
+              {pendingCount > 0 && activeView !== 'approvals' ? (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 4,
+                    right: 4,
+                    width: 7,
+                    height: 7,
+                    borderRadius: 999,
+                    backgroundColor: '#ef4444',
+                  }}
+                />
+              ) : null}
+            </button>
+          </div>
         ) : null}
 
         {!isFullScreenView ? (
@@ -611,6 +625,13 @@ export function MobileApprovalsClient({
             flexDirection: 'column',
             overflow: isFullScreenView ? 'auto' : 'hidden',
             WebkitOverflowScrolling: 'touch',
+            // For full-screen views (Agents/Issues/Activity/Costs/Orchestrator)
+            // the per-view header sits at the top under the floating hamburger
+            // chip — fade content behind the bottom edge so long lists don't
+            // cleanly cut off at the safe-area inset.
+            ...(isFullScreenView
+              ? mobileScrollFadeStyle({ top: 0, bottom: 24 })
+              : {}),
           } as CSSProperties}
         >
           {activeView === 'approvals' ? (
