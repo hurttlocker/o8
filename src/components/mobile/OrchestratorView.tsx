@@ -44,6 +44,8 @@ import {
 
 interface OrchestratorViewProps {
   onBack: () => void;
+  hideHeader?: boolean;
+  refreshSignal?: number;
 }
 
 const POLL_INTERVAL_MS = 8_000;
@@ -61,7 +63,7 @@ function connectionDot(state: MobileOrchestratorConnectionState): string {
   return '#A09890';
 }
 
-export function OrchestratorView({ onBack }: OrchestratorViewProps) {
+export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0 }: OrchestratorViewProps) {
   const { colors } = useTheme();
   const [threads, setThreads] = useState<MobileOrchestratorThread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
@@ -104,7 +106,7 @@ export function OrchestratorView({ onBack }: OrchestratorViewProps) {
 
   useEffect(() => {
     void fetchThreads();
-  }, [fetchThreads]);
+  }, [fetchThreads, refreshSignal]);
 
   // Polling fallback so the strip stays roughly current even if the user
   // doesn't pull-to-refresh.
@@ -247,31 +249,55 @@ export function OrchestratorView({ onBack }: OrchestratorViewProps) {
     <div
       style={{
         display: 'flex', flexDirection: 'column',
-        minHeight: '100vh', background: colors.bg, color: colors.text,
+        minHeight: hideHeader ? '100%' : '100vh',
+        height: hideHeader ? '100%' : undefined,
+        background: colors.bg, color: colors.text,
       }}
     >
-      <div style={headerStyle}>
-        <button type="button" aria-label="Back" onClick={onBack} style={backButtonStyle}>
-          <ChevronLeftIcon size={16} />
-        </button>
-        <div style={titleStackStyle}>
-          <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em', color: colors.text }}>
-            Orchestrator
-          </span>
+      {hideHeader ? (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+            paddingTop: 8, paddingRight: 18, paddingBottom: 6, paddingLeft: 18,
+          }}
+        >
           <span
             style={{
-              fontSize: 11, color: colors.textSecondary, fontWeight: 500,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              fontSize: 12, color: colors.textSecondary, fontWeight: 500,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0,
             }}
           >
             {activeThread ? activeThread.title : isEmpty ? 'No active threads' : 'Pick a thread'}
           </span>
+          <div style={connectionPillStyle}>
+            <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: connectionDot(connectionState) }} />
+            {connectionLabel(connectionState)}
+          </div>
         </div>
-        <div style={connectionPillStyle}>
-          <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: connectionDot(connectionState) }} />
-          {connectionLabel(connectionState)}
+      ) : (
+        <div style={headerStyle}>
+          <button type="button" aria-label="Back" onClick={onBack} style={backButtonStyle}>
+            <ChevronLeftIcon size={16} />
+          </button>
+          <div style={titleStackStyle}>
+            <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em', color: colors.text }}>
+              Orchestrator
+            </span>
+            <span
+              style={{
+                fontSize: 11, color: colors.textSecondary, fontWeight: 500,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}
+            >
+              {activeThread ? activeThread.title : isEmpty ? 'No active threads' : 'Pick a thread'}
+            </span>
+          </div>
+          <div style={connectionPillStyle}>
+            <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: connectionDot(connectionState) }} />
+            {connectionLabel(connectionState)}
+          </div>
         </div>
-      </div>
+      )}
 
       <div style={stripWrapStyle}>
         {threads.map((thread) => (

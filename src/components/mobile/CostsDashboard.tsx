@@ -109,6 +109,7 @@ export const CostsDashboard = memo(function CostsDashboard({
   onBack,
   onSessionSelect,
   compactLine,
+  hideHeader = false,
 }: CostsDashboardProps) {
   const { colors } = useTheme();
   const ocSessions = useMemo(
@@ -180,58 +181,71 @@ export const CostsDashboard = memo(function CostsDashboard({
         minHeight: '100%',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingTop: 8,
-          marginBottom: 16,
-          gap: 12,
-        }}
-      >
-        <div>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: 28,
-              fontWeight: 800,
-              color: colors.text,
-              letterSpacing: '-0.03em',
-            }}
-          >
-            Costs
-          </h2>
-          <p
-            style={{
-              margin: '4px 0 0',
-              fontSize: 13,
-              color: colors.textSecondary,
-              fontWeight: 500,
-            }}
-          >
-            {totalSessionCount} active session{totalSessionCount !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onBack}
+      {hideHeader ? (
+        <p
           style={{
-            minHeight: 44,
-            padding: '0 16px',
-            borderRadius: 12,
-            border: 'none',
-            background: colors.blueAccent,
-            color: colors.text,
+            margin: '8px 0 16px',
             fontSize: 13,
-            fontWeight: 600,
-            cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent',
+            color: colors.textSecondary,
+            fontWeight: 500,
           }}
         >
-          Done
-        </button>
-      </div>
+          {totalSessionCount} active session{totalSessionCount !== 1 ? 's' : ''}
+        </p>
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingTop: 8,
+            marginBottom: 16,
+            gap: 12,
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 28,
+                fontWeight: 800,
+                color: colors.text,
+                letterSpacing: '-0.03em',
+              }}
+            >
+              Costs
+            </h2>
+            <p
+              style={{
+                margin: '4px 0 0',
+                fontSize: 13,
+                color: colors.textSecondary,
+                fontWeight: 500,
+              }}
+            >
+              {totalSessionCount} active session{totalSessionCount !== 1 ? 's' : ''}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onBack}
+            style={{
+              minHeight: 44,
+              padding: '0 16px',
+              borderRadius: 12,
+              border: 'none',
+              background: colors.blueAccent,
+              color: colors.text,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Done
+          </button>
+        </div>
+      )}
 
       <div
         style={{
