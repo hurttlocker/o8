@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-27
 
+- `6a7058ef` feat(mobile): wire 5 unwired tabs (agents/issues/activity/costs/orchestrator)
 - `d521569e` design(mobile): filter pills, day groupings, FAB, HIG touch-target sweep
 
 ## 2026-04-25
