@@ -35,12 +35,12 @@ import {
 } from './hooks/useOrchestratorMobile';
 import {
   ChevronLeftIcon,
-  PlusIcon,
   SendIcon,
   StopIcon,
   ThreadCard,
   TranscriptBubble,
 } from './orchestrator/parts';
+import { IconCaretUp, IconPlus } from '@/app/mobile/mobile-approvals-shared';
 
 interface OrchestratorViewProps {
   onBack: () => void;
@@ -160,9 +160,14 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     const repoPath = activeThread?.repoPath ?? null;
     console.log('[mobile-orchestrator] new conversation requested', { repoPath });
     try {
+      const wsToken = typeof document !== 'undefined'
+        ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
+        : '';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
       const response = await fetch('/api/orchestrator/reset-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(repoPath ? { repoPath } : {}),
       });
       if (!response.ok) {
@@ -337,17 +342,15 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
               width: 32, height: 32, minWidth: 32, minHeight: 32,
               borderRadius: 999, borderWidth: 1, borderStyle: 'solid',
               borderColor: colors.surfaceBorder, background: colors.surface,
-              color: colors.text,
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer', flexShrink: 0,
               WebkitTapHighlightColor: 'transparent',
               transition: 'transform 180ms ease',
               transform: stripOpen ? 'rotate(0deg)' : 'rotate(180deg)',
+              padding: 0,
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <polyline points="18 15 12 9 6 15" />
-            </svg>
+            <IconCaretUp fill={colors.text} size={14} />
           </button>
           <button
             type="button"
@@ -360,13 +363,13 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
               borderRadius: 999, borderWidth: 1, borderStyle: 'solid',
               borderColor: activeThread?.repoPath ? colors.accent : colors.surfaceBorder,
               background: activeThread?.repoPath ? colors.blueGlass : colors.surface,
-              color: activeThread?.repoPath ? colors.accent : colors.textTertiary,
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               cursor: activeThread?.repoPath ? 'pointer' : 'default', flexShrink: 0,
               WebkitTapHighlightColor: 'transparent',
+              padding: 0,
             }}
           >
-            <PlusIcon size={16} />
+            <IconPlus fill={activeThread?.repoPath ? colors.accent : colors.textTertiary} size={16} />
           </button>
         </div>
       ) : (
@@ -440,7 +443,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
                 fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
               }}
             >
-              <PlusIcon size={11} />
+              <IconPlus fill={colors.textTertiary} size={11} />
               <span>No threads</span>
             </div>
             <p style={{ margin: 0 }}>Dispatch a packet from desktop to see it here.</p>
