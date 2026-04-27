@@ -57,6 +57,17 @@ function connectionLabel(state: MobileOrchestratorConnectionState): string {
   return 'Offline';
 }
 
+function compactModelLabel(model: string): string {
+  // claude-opus-4-7 → Opus 4.7, claude-sonnet-4-6 → Sonnet 4.6
+  const stripped = model.replace(/^claude-/, '');
+  const match = stripped.match(/^(opus|sonnet|haiku)-(\d+)-(\d+)/i);
+  if (match) {
+    const [, family, major, minor] = match;
+    return `${family.charAt(0).toUpperCase() + family.slice(1)} ${major}.${minor}`;
+  }
+  return model;
+}
+
 function connectionDot(state: MobileOrchestratorConnectionState): string {
   if (state === 'connected') return '#30D158';
   if (state === 'connecting' || state === 'reconnecting') return '#FFD60A';
@@ -186,6 +197,31 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     sendMessage,
     interrupt,
   } = useOrchestratorMobile({ activeThread });
+
+  // Pull the orchestrator brain model from operator-defaults so the user
+  // can see what the orchestrator and any spawned agents will use.
+  const [orchestratorModel, setOrchestratorModel] = useState<string | null>(null);
+  const [defaultDispatchRuntime, setDefaultDispatchRuntime] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const wsToken = typeof document !== 'undefined'
+      ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
+      : '';
+    const headers: Record<string, string> = {};
+    if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
+    fetch('/api/panel/operator-defaults', { headers, cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = await response.json() as {
+          values?: { orchestratorModel?: string; defaultDispatchRuntime?: string };
+        };
+        if (cancelled) return;
+        setOrchestratorModel(data.values?.orchestratorModel ?? null);
+        setDefaultDispatchRuntime(data.values?.defaultDispatchRuntime ?? null);
+      })
+      .catch((error) => console.log('[mobile-orchestrator] operator-defaults fetch failed', error));
+    return () => { cancelled = true; };
+  }, [refreshSignal]);
 
   const fetchThreads = useCallback(async () => {
     setThreadsLoading(true);
@@ -428,6 +464,22 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
           >
             {activeThread ? activeThread.title : isEmpty ? 'No active threads' : 'Pick a thread'}
           </span>
+          {orchestratorModel ? (
+            <span
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8,
+                borderRadius: 999, borderWidth: 1, borderStyle: 'solid',
+                borderColor: colors.surfaceBorder, background: colors.frostStrong,
+                color: colors.textSecondary,
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase',
+                flexShrink: 0,
+              }}
+              title={`Orchestrator brain: ${orchestratorModel}${defaultDispatchRuntime ? ` · spawns ${defaultDispatchRuntime}` : ''}`}
+            >
+              {compactModelLabel(orchestratorModel)}
+            </span>
+          ) : null}
           <div style={connectionPillStyle}>
             <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: connectionDot(connectionState) }} />
             {connectionLabel(connectionState)}
