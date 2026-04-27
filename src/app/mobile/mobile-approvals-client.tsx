@@ -60,8 +60,13 @@ const OrchestratorView = lazy(async () => ({
 const NEW_VIEWS: ReadonlySet<MobileView> = new Set(['agents', 'issues', 'activity', 'costs', 'orchestrator']);
 const SNAPSHOT_VIEWS: ReadonlySet<MobileView> = new Set(['agents', 'activity', 'costs']);
 
-function MobileViewShell({ children }: { children: ReactNode }) {
-  return <MobileThemeProvider>{children}</MobileThemeProvider>;
+function MobileViewShell({ children, themeId }: { children: ReactNode; themeId: string }) {
+  // Forward the desktop themeId (resolved from cortex-theme localStorage in
+  // the parent's useTheme hook) so the legacy mobile ThemeProvider stays in
+  // lock-step on same-tab theme changes — storage events fire only across
+  // tabs. Without this, switching to Light flipped the topbar but left the
+  // 5 wired tabs (Agents/Issues/Activity/Costs/Orchestrator) on dark colors.
+  return <MobileThemeProvider themeId={themeId}>{children}</MobileThemeProvider>;
 }
 
 function getWsToken() {
@@ -648,7 +653,7 @@ export function MobileApprovalsClient({
           ) : null}
 
           {activeView === 'agents' ? (
-            <MobileViewShell>
+            <MobileViewShell themeId={themeId}>
               <Suspense fallback={renderSnapshotPlaceholder('Loading sessions…')}>
                 {inboxSnapshot ? (
                   <FleetView
@@ -670,7 +675,7 @@ export function MobileApprovalsClient({
           ) : null}
 
           {activeView === 'issues' ? (
-            <MobileViewShell>
+            <MobileViewShell themeId={themeId}>
               <Suspense fallback={renderSnapshotPlaceholder('Loading issues…')}>
                 <IssuesPage onBack={handleBackToChats} hideHeader refreshSignal={issuesRefreshSignal} />
               </Suspense>
@@ -678,7 +683,7 @@ export function MobileApprovalsClient({
           ) : null}
 
           {activeView === 'activity' ? (
-            <MobileViewShell>
+            <MobileViewShell themeId={themeId}>
               <Suspense fallback={renderSnapshotPlaceholder('Loading activity…')}>
                 {inboxSnapshot ? (
                   <ActivityFeed
@@ -701,7 +706,7 @@ export function MobileApprovalsClient({
           ) : null}
 
           {activeView === 'costs' ? (
-            <MobileViewShell>
+            <MobileViewShell themeId={themeId}>
               <Suspense fallback={renderSnapshotPlaceholder('Loading costs…')}>
                 {inboxSnapshot ? (
                   <CostsDashboard
@@ -723,7 +728,7 @@ export function MobileApprovalsClient({
           ) : null}
 
           {activeView === 'orchestrator' ? (
-            <MobileViewShell>
+            <MobileViewShell themeId={themeId}>
               <Suspense fallback={renderSnapshotPlaceholder('Loading orchestrator…')}>
                 <OrchestratorView onBack={handleBackToChats} hideHeader refreshSignal={orchRefreshSignal} />
               </Suspense>
