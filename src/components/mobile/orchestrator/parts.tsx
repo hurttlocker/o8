@@ -12,6 +12,7 @@ import type {
   MobileOrchestratorTranscriptEntry,
 } from '@/lib/mobile/types';
 import { useTheme } from '../ThemeContext';
+import { MobileMarkdown } from '@/app/mobile/mobile-markdown';
 
 export function PlusIcon({ size = 14 }: { size?: number }) {
   return (
@@ -177,7 +178,7 @@ export const TranscriptBubble = memo(function TranscriptBubble({
 }: {
   entry: MobileOrchestratorTranscriptEntry;
 }) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   if (entry.role === 'user') {
     return (
       <div
@@ -276,16 +277,11 @@ export const TranscriptBubble = memo(function TranscriptBubble({
         width: '100%',
         paddingTop: 2,
         paddingRight: 18,
-        color: colors.text,
-        fontSize: 14,
-        lineHeight: 1.55,
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
         opacity: entry.thinking ? 0.7 : 1,
         fontStyle: entry.thinking ? 'italic' : undefined,
       }}
     >
-      {entry.text}
+      <MobileMarkdown content={entry.text} textColor={colors.text} light={!isDark} />
     </div>
   );
 });
