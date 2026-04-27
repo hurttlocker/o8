@@ -361,7 +361,7 @@ export function MobileApprovalsClient({
         ? newViewTitle[activeView] ?? ''
         : inConversation
           ? recentConversations.find((conversation) => conversation.tabId === currentTabId)?.title ?? 'Chat'
-          : 'Chats';
+          : 'Assistant';
   const [issuesRefreshSignal, setIssuesRefreshSignal] = useState(0);
   const [orchRefreshSignal, setOrchRefreshSignal] = useState(0);
 
@@ -473,7 +473,7 @@ export function MobileApprovalsClient({
             position: 'relative',
             zIndex: 5,
             flexShrink: 0,
-            background: 'transparent',
+            background: palette.rootBackground,
           } as CSSProperties}
         >
           {inConversation ? (
