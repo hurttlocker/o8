@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   MOBILE_BODY_TRACKING,
@@ -9,7 +10,6 @@ import {
   IconAgents,
   IconChat,
   IconCosts,
-  IconGear,
   IconIssues,
   IconOrchestrator,
   IconShield,
@@ -28,8 +28,10 @@ interface SidebarProps {
   approvalCount: number;
   selectedModelLabel: string;
   connectionStatus: 'connected' | 'disconnected';
+  hostnameLabel: string;
   onNavigate: (view: MobileView) => void;
   onClose: () => void;
+  onOpenSettings: () => void;
   palette: MobilePalette;
 }
 
@@ -47,10 +49,17 @@ export function Sidebar({
   approvalCount,
   selectedModelLabel,
   connectionStatus,
+  hostnameLabel,
   onNavigate,
   onClose,
+  onOpenSettings,
   palette,
 }: SidebarProps) {
+  const initials = useMemo(() => {
+    const trimmed = hostnameLabel.replace(/[^a-zA-Z0-9]/g, '');
+    return trimmed.slice(0, 2).toUpperCase() || 'O8';
+  }, [hostnameLabel]);
+
   const navItems: SidebarNavItem[] = [
     {
       id: 'chat',
@@ -94,12 +103,6 @@ export function Sidebar({
       label: 'Orchestrator',
       description: 'Cross-repo orchestrator threads with a single composer.',
       icon: <IconOrchestrator fill={palette.iconFill} />,
-    },
-    {
-      id: 'settings',
-      label: 'Settings',
-      description: 'Model, transport, and shell status controls.',
-      icon: <IconGear fill={palette.iconFill} />,
     },
   ];
 
@@ -240,11 +243,86 @@ export function Sidebar({
           })}
         </div>
 
-        <div style={{ marginTop: 'auto', padding: '0 12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: palette.subduedText }}>
+        <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: palette.subduedText, paddingLeft: 12, paddingRight: 12 }}>
             <MobileStatusDot color={connectionColor} />
             <span>{selectedModelLabel}</span>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              onOpenSettings();
+              onClose();
+            }}
+            aria-label="Open settings"
+            style={{
+              width: '100%',
+              minHeight: MOBILE_TOUCH_TARGET,
+              borderRadius: 12,
+              border: `1px solid ${palette.cardBorder}`,
+              background: palette.panelElevated,
+              paddingLeft: 8,
+              paddingRight: 12,
+              paddingTop: 6,
+              paddingBottom: 6,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              cursor: 'pointer',
+              fontFamily: mobileFontFamily(),
+              color: palette.rootText,
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            <span
+              style={{
+                width: 32,
+                height: 32,
+                minWidth: 32,
+                minHeight: 32,
+                borderRadius: 999,
+                background: palette.accentSoft,
+                border: `1px solid ${palette.accentBorder}`,
+                color: palette.accent,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 12,
+                fontWeight: 800,
+                letterSpacing: MOBILE_HEADING_TRACKING,
+                flexShrink: 0,
+              }}
+            >
+              {initials}
+            </span>
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontSize: 13,
+                fontWeight: 700,
+                color: palette.rootText,
+                letterSpacing: MOBILE_BODY_TRACKING,
+                textAlign: 'left',
+              }}
+            >
+              {hostnameLabel}
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: palette.subduedText,
+                letterSpacing: MOBILE_BODY_TRACKING,
+                flexShrink: 0,
+              }}
+            >
+              Settings
+            </span>
+          </button>
         </div>
       </div>
     </>

@@ -1,3 +1,4 @@
+import os from 'node:os';
 import packageJson from '../../../package.json';
 import { ThemeProvider } from '@/lib/theme/context';
 import { MobileApprovalsClient } from './mobile-approvals-client';
@@ -34,6 +35,17 @@ async function fetchPendingApprovals(): Promise<PrefetchedApproval[]> {
   }
 }
 
+function readHostnameLabel(): string {
+  try {
+    const raw = os.hostname();
+    if (!raw) return 'this device';
+    const stripped = raw.replace(/\.local$/i, '').trim();
+    return stripped || 'this device';
+  } catch {
+    return 'this device';
+  }
+}
+
 export default async function MobilePage() {
   const approvals = await fetchPendingApprovals();
   const buildRevision = process.env.VERCEL_GIT_COMMIT_SHA
@@ -43,9 +55,14 @@ export default async function MobilePage() {
   const appVersion = buildRevision
     ? `${packageJson.version} (${buildRevision.slice(0, 7)})`
     : packageJson.version;
+  const hostnameLabel = readHostnameLabel();
   return (
     <ThemeProvider>
-      <MobileApprovalsClient initialApprovals={approvals} appVersion={appVersion} />
+      <MobileApprovalsClient
+        initialApprovals={approvals}
+        appVersion={appVersion}
+        hostnameLabel={hostnameLabel}
+      />
     </ThemeProvider>
   );
 }
