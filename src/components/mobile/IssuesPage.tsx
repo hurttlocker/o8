@@ -465,7 +465,7 @@ function RepoSwitcher({
               padding: '0 12px',
               borderRadius: 12,
               border: `1px solid ${colors.cardBorder}`,
-              background: 'rgba(255,255,255,0.04)',
+              background: colors.blueSoft,
               fontSize: 13,
               color: colors.text,
               fontFamily: '"SF Mono", ui-monospace, monospace',
