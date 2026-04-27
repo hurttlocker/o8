@@ -128,10 +128,12 @@ if (existsSync(TAR_SIG)) rmSync(TAR_SIG);
 execFileSync('tar', ['czf', TAR, '-C', join(BUNDLE, 'macos'), 'o8.app'], { stdio: 'inherit' });
 
 console.log('[sign-and-notarize] minisign-signing the new tar.gz');
+// `cargo tauri signer sign` rejects `--password ""`; pass an empty
+// password via env var instead. The minisign key was generated without
+// a password so this is intentional.
 execFileSync('cargo', [
   'tauri', 'signer', 'sign',
   '--private-key-path', SIGNING_KEY,
-  '--password', '',
   TAR,
 ], {
   stdio: 'inherit',
