@@ -7,6 +7,25 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-04-27
+
+- `d521569e` design(mobile): filter pills, day groupings, FAB, HIG touch-target sweep
+
+## 2026-04-25
+
+- `c8547569` feat(mobile): orchestrator tool bubble flips to done with output preview
+- `f9684e54` feat(mobile): bind bundled Next server to 0.0.0.0 for LAN access
+- `6f5388b8` feat(mobile): orchestrator composer wiring polish
+- `17518b30` feat(mobile): orchestrator tab — thread strip + transcript + composer
+- `49482d9f` feat(settings): factory reset button in Diagnostics tab
+- `25c74382` feat(mobile): orchestrator WS hook with transcript buffer
+- `6dedea6b` feat(mobile): orchestrator threads list API + types
+
+## 2026-04-23
+
+- `84460bc5` feat(onboarding): add default dispatch runtime step to first-run wizard
+- `e3374aa8` feat(v1): gate agent runtime behind experimentalagent runtime flag
+
 ## 2026-04-21
 
 - `8830d978` feat(AI provider): model fallback cascade on quota + in-chat pill
