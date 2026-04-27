@@ -64,6 +64,8 @@ function connectionDot(state: MobileOrchestratorConnectionState): string {
 }
 
 const STRIP_OPEN_KEY = 'o8:mobile:orchestrator-strip-open';
+const LOCAL_THREAD_KEY = 'o8:mobile:orchestrator-local-thread';
+const ACTIVE_THREAD_KEY = 'o8:mobile:orchestrator-active-thread';
 
 function readStripOpen(): boolean {
   if (typeof window === 'undefined') return true;
@@ -84,20 +86,95 @@ function writeStripOpen(open: boolean): void {
   }
 }
 
+function readLocalThread(): MobileOrchestratorThread | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(LOCAL_THREAD_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as MobileOrchestratorThread;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalThread(thread: MobileOrchestratorThread | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (thread) window.localStorage.setItem(LOCAL_THREAD_KEY, JSON.stringify(thread));
+    else window.localStorage.removeItem(LOCAL_THREAD_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function readStoredActiveThreadId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(ACTIVE_THREAD_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredActiveThreadId(id: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (id) window.localStorage.setItem(ACTIVE_THREAD_KEY, id);
+    else window.localStorage.removeItem(ACTIVE_THREAD_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0 }: OrchestratorViewProps) {
   const { colors } = useTheme();
   const [threads, setThreads] = useState<MobileOrchestratorThread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [threadsError, setThreadsError] = useState<string | null>(null);
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [activeThreadId, setActiveThreadIdState] = useState<string | null>(() => readStoredActiveThreadId());
+  const [localThread, setLocalThreadState] = useState<MobileOrchestratorThread | null>(() => readLocalThread());
   const [composerDraft, setComposerDraft] = useState('');
   const [stripOpen, setStripOpen] = useState<boolean>(() => readStripOpen());
+
+  const setActiveThreadId = useCallback((id: string | null | ((prev: string | null) => string | null)) => {
+    setActiveThreadIdState((prev) => {
+      const next = typeof id === 'function' ? id(prev) : id;
+      writeStoredActiveThreadId(next);
+      return next;
+    });
+  }, []);
+
+  const setLocalThread = useCallback((thread: MobileOrchestratorThread | null) => {
+    setLocalThreadState(thread);
+    writeLocalThread(thread);
+  }, []);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
 
+  // Visible threads = the locally-minted "fresh" thread (if any) + the
+  // server-side threads. The local thread sits at index 0 until the user
+  // sends a message; once the server reports a thread with the same id,
+  // we drop the local copy.
+  const visibleThreads = useMemo<MobileOrchestratorThread[]>(() => {
+    if (!localThread) return threads;
+    if (threads.some((thread) => thread.id === localThread.id)) {
+      return threads;
+    }
+    return [localThread, ...threads];
+  }, [localThread, threads]);
+
+  // Once the server has the local thread, retire the local copy so we
+  // don't duplicate it forever.
+  useEffect(() => {
+    if (!localThread) return;
+    if (threads.some((thread) => thread.id === localThread.id)) {
+      setLocalThread(null);
+    }
+  }, [threads, localThread, setLocalThread]);
+
   const activeThread = useMemo(
-    () => threads.find((thread) => thread.id === activeThreadId) ?? null,
-    [threads, activeThreadId],
+    () => visibleThreads.find((thread) => thread.id === activeThreadId) ?? null,
+    [visibleThreads, activeThreadId],
   );
 
   const {
@@ -138,12 +215,14 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
   }, [fetchThreads]);
 
   // Auto-pick the most recent thread on first load so the user lands on
-  // SOMETHING instead of an empty stage.
+  // SOMETHING instead of an empty stage. We pull from visibleThreads so
+  // the locally-minted "New conversation" thread takes precedence after
+  // a reset.
   useEffect(() => {
     if (activeThreadId) return;
-    if (threads.length === 0) return;
-    setActiveThreadId(threads[0].id);
-  }, [activeThreadId, threads]);
+    if (visibleThreads.length === 0) return;
+    setActiveThreadId(visibleThreads[0].id);
+  }, [activeThreadId, visibleThreads, setActiveThreadId]);
 
   // Auto-scroll transcript to bottom when entries arrive.
   useEffect(() => {
@@ -195,7 +274,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
         lastMessageAt: new Date().toISOString(),
         messageCount: 0,
       };
-      setThreads((current) => [freshThread, ...current]);
+      setLocalThread(freshThread);
       setActiveThreadId(freshThreadId);
       setThreadsError(null);
       requestAnimationFrame(() => composerRef.current?.focus());
@@ -230,7 +309,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     }
   }, [handleSend]);
 
-  const isEmpty = threads.length === 0 && !threadsLoading;
+  const isEmpty = visibleThreads.length === 0 && !threadsLoading;
   const wsReady = connectionState === 'connected';
   const canSend =
     Boolean(activeThread?.repoPath)
@@ -426,7 +505,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
         aria-hidden={!stripOpen}
       >
         <div style={stripWrapStyle}>
-          {threads.map((thread) => (
+          {visibleThreads.map((thread) => (
             <ThreadCard
               key={thread.id}
               thread={thread}
@@ -434,7 +513,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
               onSelect={handleSelectThread}
             />
           ))}
-          {threadsLoading && threads.length === 0 ? (
+          {threadsLoading && visibleThreads.length === 0 ? (
             <div style={{ flex: '0 0 auto', width: 200, height: 80, borderRadius: 14, background: colors.elevatedSurface }} />
           ) : null}
         </div>
