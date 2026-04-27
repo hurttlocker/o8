@@ -63,6 +63,27 @@ function connectionDot(state: MobileOrchestratorConnectionState): string {
   return '#A09890';
 }
 
+const STRIP_OPEN_KEY = 'o8:mobile:orchestrator-strip-open';
+
+function readStripOpen(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const raw = window.localStorage.getItem(STRIP_OPEN_KEY);
+    return raw === null ? true : raw === '1';
+  } catch {
+    return true;
+  }
+}
+
+function writeStripOpen(open: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STRIP_OPEN_KEY, open ? '1' : '0');
+  } catch {
+    // ignore
+  }
+}
+
 export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0 }: OrchestratorViewProps) {
   const { colors } = useTheme();
   const [threads, setThreads] = useState<MobileOrchestratorThread[]>([]);
@@ -70,6 +91,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
   const [threadsError, setThreadsError] = useState<string | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [composerDraft, setComposerDraft] = useState('');
+  const [stripOpen, setStripOpen] = useState<boolean>(() => readStripOpen());
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
 
@@ -136,6 +158,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
 
   const handleNewConversation = useCallback(async () => {
     const repoPath = activeThread?.repoPath ?? null;
+    console.log('[mobile-orchestrator] new conversation requested', { repoPath });
     try {
       const response = await fetch('/api/orchestrator/reset-session', {
         method: 'POST',
@@ -144,15 +167,27 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-        throw new Error(payload?.error?.message ?? 'Unable to reset orchestrator session.');
+        throw new Error(payload?.error?.message ?? `Unable to reset orchestrator session (HTTP ${response.status}).`);
       }
+      console.log('[mobile-orchestrator] reset OK — clearing transcript');
       setActiveThreadId(null);
+      setThreadsError(null);
       void fetchThreads();
       requestAnimationFrame(() => composerRef.current?.focus());
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to reset orchestrator session.';
       console.log('[mobile-orchestrator] reset failed', error);
+      setThreadsError(message);
     }
   }, [activeThread?.repoPath, fetchThreads]);
+
+  const handleToggleStrip = useCallback(() => {
+    setStripOpen((current) => {
+      const next = !current;
+      writeStripOpen(next);
+      return next;
+    });
+  }, []);
 
   const handleSend = useCallback(() => {
     const trimmed = composerDraft.trim();
@@ -277,8 +312,8 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
       {hideHeader ? (
         <div
           style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-            paddingTop: 8, paddingRight: 18, paddingBottom: 6, paddingLeft: 18,
+            display: 'flex', alignItems: 'center', gap: 8,
+            paddingTop: 8, paddingRight: 14, paddingBottom: 6, paddingLeft: 14,
           }}
         >
           <span
@@ -295,21 +330,43 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
           </div>
           <button
             type="button"
+            onClick={handleToggleStrip}
+            aria-label={stripOpen ? 'Collapse threads' : 'Expand threads'}
+            title={stripOpen ? 'Collapse threads' : 'Expand threads'}
+            style={{
+              width: 32, height: 32, minWidth: 32, minHeight: 32,
+              borderRadius: 999, borderWidth: 1, borderStyle: 'solid',
+              borderColor: colors.surfaceBorder, background: colors.surface,
+              color: colors.text,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', flexShrink: 0,
+              WebkitTapHighlightColor: 'transparent',
+              transition: 'transform 180ms ease',
+              transform: stripOpen ? 'rotate(0deg)' : 'rotate(180deg)',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="18 15 12 9 6 15" />
+            </svg>
+          </button>
+          <button
+            type="button"
             onClick={() => { void handleNewConversation(); }}
             aria-label="New conversation"
             title="New conversation"
             disabled={!activeThread?.repoPath}
             style={{
-              width: 28, height: 28, minWidth: 28, minHeight: 28,
+              width: 32, height: 32, minWidth: 32, minHeight: 32,
               borderRadius: 999, borderWidth: 1, borderStyle: 'solid',
-              borderColor: colors.surfaceBorder, background: colors.surface,
-              color: activeThread?.repoPath ? colors.text : colors.textTertiary,
+              borderColor: activeThread?.repoPath ? colors.accent : colors.surfaceBorder,
+              background: activeThread?.repoPath ? colors.blueGlass : colors.surface,
+              color: activeThread?.repoPath ? colors.accent : colors.textTertiary,
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               cursor: activeThread?.repoPath ? 'pointer' : 'default', flexShrink: 0,
               WebkitTapHighlightColor: 'transparent',
             }}
           >
-            <PlusIcon />
+            <PlusIcon size={16} />
           </button>
         </div>
       ) : (
@@ -337,18 +394,27 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
         </div>
       )}
 
-      <div style={stripWrapStyle}>
-        {threads.map((thread) => (
-          <ThreadCard
-            key={thread.id}
-            thread={thread}
-            active={thread.id === activeThreadId}
-            onSelect={handleSelectThread}
-          />
-        ))}
-        {threadsLoading && threads.length === 0 ? (
-          <div style={{ flex: '0 0 auto', width: 200, height: 80, borderRadius: 14, background: colors.elevatedSurface }} />
-        ) : null}
+      <div
+        style={{
+          maxHeight: stripOpen ? 132 : 0,
+          overflow: 'hidden',
+          transition: 'max-height 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+        }}
+        aria-hidden={!stripOpen}
+      >
+        <div style={stripWrapStyle}>
+          {threads.map((thread) => (
+            <ThreadCard
+              key={thread.id}
+              thread={thread}
+              active={thread.id === activeThreadId}
+              onSelect={handleSelectThread}
+            />
+          ))}
+          {threadsLoading && threads.length === 0 ? (
+            <div style={{ flex: '0 0 auto', width: 200, height: 80, borderRadius: 14, background: colors.elevatedSurface }} />
+          ) : null}
+        </div>
       </div>
 
       {threadsError ? (
