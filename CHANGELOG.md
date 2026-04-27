@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-27
 
+- `edf81be4` design(orchestrator): match Assistant chat breathing room and typography
 - `ecb1fa2f` design(mobile): unify standard topbar across all 5 new tabs
 - `83daf55c` design(mobile): scroll-fade masks on chat list/transcript/orchestrator/approvals scroll surfaces
 - `a625c992` feat(mobile): profile button + Settings sheet under drawer footer
