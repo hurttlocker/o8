@@ -136,18 +136,27 @@ export function Sidebar({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close menu"
             style={{
-              height: 32,
-              paddingLeft: 12,
-              paddingRight: 12,
-              borderRadius: 10,
+              minWidth: MOBILE_TOUCH_TARGET,
+              minHeight: MOBILE_TOUCH_TARGET,
+              paddingLeft: 16,
+              paddingRight: 16,
+              paddingTop: 0,
+              paddingBottom: 0,
+              borderRadius: 12,
               border: `1px solid ${palette.cardBorder}`,
               background: palette.panelBackground,
               color: palette.subduedText,
               cursor: 'pointer',
-              fontSize: 12,
+              fontSize: 13,
               fontWeight: 600,
               fontFamily: mobileFontFamily(),
+              touchAction: 'manipulation',
+              WebkitTapHighlightColor: 'transparent',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             Done

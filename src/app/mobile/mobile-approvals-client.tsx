@@ -428,7 +428,17 @@ export function MobileApprovalsClient({
                 void refresh();
               }}
               style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
-              aria-label="Refresh"
+              aria-label="Refresh approvals"
+            >
+              <IconRefresh fill={palette.iconFill} />
+            </button>
+          ) : activeView === 'chat' && !inConversation ? (
+            <button
+              onClick={() => {
+                void loadRecentConversations();
+              }}
+              style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
+              aria-label="Refresh conversations"
             >
               <IconRefresh fill={palette.iconFill} />
             </button>
