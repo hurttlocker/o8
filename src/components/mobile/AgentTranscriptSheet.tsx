@@ -8,9 +8,13 @@
  * No composer, no interrupt button — those live on desktop.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTheme } from './ThemeContext';
+
+const MobileDiffViewer = lazy(async () => ({
+  default: (await import('./MobileDiffViewer')).MobileDiffViewer,
+}));
 
 interface AgentTranscriptEntry {
   id: string;
@@ -51,8 +55,11 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
   const [entries, setEntries] = useState<AgentTranscriptEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [diffOpen, setDiffOpen] = useState(false);
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+
+  const canViewDiff = Boolean(workspace && sessionKey);
 
   const fetchTranscript = useCallback(async () => {
     if (!sessionKey) return;
@@ -279,10 +286,47 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
             background: colors.cardBg,
             fontSize: 11, color: colors.textSecondary, lineHeight: 1.45,
             flexShrink: 0,
+            display: 'flex', flexDirection: 'column', gap: 8,
           }}
         >
-          Read-only on mobile. Steer this agent from the Orchestrator on desktop.
+          {canViewDiff ? (
+            <button
+              type="button"
+              onClick={() => setDiffOpen(true)}
+              onTouchEnd={(event) => {
+                setDiffOpen(true);
+                event.preventDefault();
+              }}
+              style={{
+                alignSelf: 'flex-start',
+                minHeight: 36, paddingTop: 8, paddingBottom: 8, paddingLeft: 14, paddingRight: 14,
+                borderRadius: 12,
+                borderWidth: 1, borderStyle: 'solid', borderColor: colors.surfaceBorder,
+                background: colors.cardBg,
+                color: colors.text,
+                fontSize: 13, fontWeight: 600,
+                cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+                touchAction: 'manipulation',
+              }}
+            >
+              View diff
+            </button>
+          ) : null}
+          <span>Read-only on mobile. Steer this agent from the Orchestrator on desktop.</span>
         </div>
+
+        {diffOpen && canViewDiff ? (
+          <Suspense fallback={null}>
+            <MobileDiffViewer
+              open
+              onClose={() => setDiffOpen(false)}
+              source={{ kind: 'worktree', sessionKey, worktreePath: workspace ?? null }}
+              title={agentName}
+              subtitle={runtime}
+            />
+          </Suspense>
+        ) : null}
       </div>
     </div>
   );
