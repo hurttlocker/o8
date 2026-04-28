@@ -37,6 +37,26 @@ function pathBelongsToRegisteredRepo(candidatePath?: string | null, repoRoots?: 
   return false;
 }
 
+function stripOrchestratorZombies(data: unknown) {
+  if (!data || typeof data !== 'object') return data;
+  const tabs = (data as { tabs?: Array<{ id?: string; kind?: string }> }).tabs;
+  if (!Array.isArray(tabs)) return data;
+  const sanitized = tabs.filter((tab) => {
+    if (!tab || typeof tab !== 'object') return false;
+    const id = typeof tab.id === 'string' ? tab.id : '';
+    const kind = typeof tab.kind === 'string' ? tab.kind : '';
+    return !(kind !== 'orchestrator' && id.startsWith('orchestrator-'));
+  });
+  if (sanitized.length === tabs.length) return data;
+  const current = data as { activeTabId?: string };
+  const activeStillPresent = sanitized.some((tab) => (tab as { id?: string }).id === current.activeTabId);
+  return {
+    ...current,
+    tabs: sanitized,
+    activeTabId: activeStillPresent ? current.activeTabId : ((sanitized[0] as { id?: string } | undefined)?.id ?? ''),
+  };
+}
+
 function filterStateToRegisteredRepos(data: unknown, repoRoots: Set<string>) {
   const tabs = Array.isArray((data as { tabs?: Array<{ repoPath?: string | null }> })?.tabs)
     ? (data as { tabs: Array<{ repoPath?: string | null; id?: string }> }).tabs
@@ -174,7 +194,7 @@ export async function GET(request: Request) {
     const stateFile = getStateFile(scope);
 
     if (existsSync(stateFile)) {
-      const data = filterStateToRegisteredRepos(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots);
+      const data = stripOrchestratorZombies(filterStateToRegisteredRepos(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots));
       if (!data) {
         return NextResponse.json(null, { status: 404 });
       }
@@ -252,7 +272,8 @@ export async function POST(request: Request) {
     if (!existsSync(STATE_SCOPE_DIR)) {
       mkdirSync(STATE_SCOPE_DIR, { recursive: true });
     }
-    const serialized = JSON.stringify(state, null, 2);
+    const cleaned = stripOrchestratorZombies(state);
+    const serialized = JSON.stringify(cleaned, null, 2);
     writeFileSync(getStateFile(scope), serialized);
     if (scope === 'tile-root') {
       writeFileSync(LEGACY_STATE_FILE, serialized);
