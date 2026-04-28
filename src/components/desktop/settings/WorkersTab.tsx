@@ -586,6 +586,9 @@ export function WorkersTab() {
             onClick={() => { if (!envControlled && !flagBusy) { setDraftRemoteEnabled(!draftRemoteEnabled); setNotice(null); } }}
             disabled={envControlled || flagBusy}
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              minHeight: 44,
               fontFamily: MONO_FONT_STACK,
               fontSize: 11,
               fontWeight: 400,
@@ -717,9 +720,9 @@ function accentLinkStyle(disabled: boolean): React.CSSProperties {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 8,
-    height: 30,
-    paddingLeft: 12,
-    paddingRight: 12,
+    minHeight: 44,
+    paddingLeft: 14,
+    paddingRight: 14,
     borderRadius: 8,
     borderWidth: 1,
     borderStyle: 'solid',
@@ -739,6 +742,9 @@ function accentLinkStyle(disabled: boolean): React.CSSProperties {
 
 function quietLinkStyle(disabled: boolean): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 44,
     fontFamily: APP_FONT_STACK,
     fontSize: 13,
     fontWeight: 400,

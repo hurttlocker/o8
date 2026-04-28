@@ -347,6 +347,7 @@ export function GitHubTab({
                       display: 'flex',
                       alignItems: 'center',
                       gap: 12,
+                      minHeight: 44,
                       paddingTop: 10,
                       paddingBottom: 10,
                       paddingLeft: 2,
@@ -583,6 +584,9 @@ function DiagnosticRow({
 
 function primaryLinkStyle(disabled: boolean): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 44,
     fontFamily: APP_FONT_STACK,
     fontSize: 13,
     fontWeight: 500,
@@ -603,6 +607,9 @@ function primaryLinkStyle(disabled: boolean): React.CSSProperties {
 
 function quietActionStyle(disabled: boolean): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 44,
     fontFamily: APP_FONT_STACK,
     fontSize: 12,
     fontWeight: 400,
