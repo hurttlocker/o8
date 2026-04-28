@@ -470,15 +470,28 @@ export function useWorkspaceTerminalController(
   // Migration: if restored state is missing an Orchestrator tab, inject one
   // at the front. Ensures existing users get the new tab automatically and
   // don't have to manually add it.
+  //
+  // Issue #714 — this effect MUST be idempotent against any remount (theme
+  // switch, HMR, parent re-render that unmounts TileContainer, etc.). The
+  // contract: never produce a duplicate orchestrator. Two layers of dedup:
+  //   1. State-side: bail if `tabs` already has an orchestrator-kind tab.
+  //   2. Ref-side: also bail if `tabsRef.current` has one. Covers the window
+  //      where another setTabs has scheduled an update we haven't rendered.
+  // Setting via the functional updater form gives us a third guard against
+  // batched / out-of-order state writes that could otherwise stack two
+  // injectors onto the same base.
   useEffect(() => {
     if (defaultTab !== 'llm-chat') return;
     if (tabs.length === 0) return;
-    const hasOrchestrator = tabs.some((tab) => tab.kind === 'orchestrator');
-    if (hasOrchestrator) return;
-    const orchestratorTab = createDefaultOrchestratorTab();
-    const nextTabs = [orchestratorTab, ...tabs];
-    tabsRef.current = nextTabs;
-    setTabs(nextTabs);
+    if (tabs.some((tab) => tab.kind === 'orchestrator')) return;
+    if (tabsRef.current.some((tab) => tab.kind === 'orchestrator')) return;
+    setTabs((previous) => {
+      if (previous.some((tab) => tab.kind === 'orchestrator')) return previous;
+      const orchestratorTab = createDefaultOrchestratorTab();
+      const nextTabs = [orchestratorTab, ...previous];
+      tabsRef.current = nextTabs;
+      return nextTabs;
+    });
     // Don't steal focus from whatever the user was on — just inject the tab.
   }, [createDefaultOrchestratorTab, defaultTab, tabs]);
 
