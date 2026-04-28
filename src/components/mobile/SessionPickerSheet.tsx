@@ -208,7 +208,7 @@ function SectionHeader({
             justifyContent: 'center',
             color: colors.textSecondary,
             transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 220ms ease',
+            transition: 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -445,7 +445,7 @@ export const SessionPickerSheet = memo(function SessionPickerSheet({
           width: 'min(100dvw, 430px)',
           maxHeight: '78dvh',
           transform: open ? 'translate(-50%, 0)' : 'translate(-50%, 100%)',
-          transition: 'transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
           borderRadius: '20px 20px 0 0',
           background: 'rgba(30,28,26,0.95)',
           backdropFilter: 'blur(40px)',

@@ -368,7 +368,7 @@ export function ActivityDock({
           style={{
             flexShrink: 0,
             transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
-            transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+            transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         />
         <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--t-text-secondary)' }}>{title}</span>

@@ -534,7 +534,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer', flexShrink: 0,
               WebkitTapHighlightColor: 'transparent',
-              transition: 'transform 180ms ease',
+              transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
               transform: stripOpen ? 'rotate(0deg)' : 'rotate(180deg)',
               padding: 0,
             }}
@@ -591,7 +591,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
           style={{
             maxHeight: stripOpen ? 132 : 0,
             overflow: 'hidden',
-            transition: 'max-height 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+            transition: 'max-height 220ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
           aria-hidden={!stripOpen}
         >

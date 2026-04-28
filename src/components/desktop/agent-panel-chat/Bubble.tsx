@@ -635,7 +635,7 @@ function CollapsibleToolCalls({ toolCalls, marginTop }: { toolCalls: MobileTrans
           strokeWidth={2}
           style={{
             transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-            transition: 'transform 150ms ease',
+            transition: 'transform 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             flexShrink: 0,
           }}
         />

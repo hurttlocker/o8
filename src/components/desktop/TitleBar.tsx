@@ -367,7 +367,7 @@ export function TitleBar({
         <div style={{
           width: '100%',
           maxWidth: searchExpanded ? 640 : 320,
-          transition: 'max-width 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: 'max-width 250ms cubic-bezier(0.22, 1, 0.36, 1)',
           position: 'relative',
         }}>
           {!searchExpanded ? (

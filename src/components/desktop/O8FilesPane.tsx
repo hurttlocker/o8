@@ -28,7 +28,7 @@ interface O8FilesPaneProps {
 
 function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', transition: 'transform 120ms ease', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', transition: 'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>
       <polyline points="9 18 15 12 9 6" />
     </svg>
   );

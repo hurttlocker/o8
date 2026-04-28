@@ -140,7 +140,7 @@ function PacketHeaderCard({
             stroke="var(--t-text-faint)"
             strokeWidth={1.6}
             strokeLinecap="round"
-            style={{ flexShrink: 0, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 160ms ease' }}
+            style={{ flexShrink: 0, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1)' }}
           >
             <path d="M2.5 3.5 L5 6 L7.5 3.5" />
           </svg>

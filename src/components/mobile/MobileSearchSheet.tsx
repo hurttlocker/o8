@@ -384,7 +384,7 @@ export function MobileSearchSheet({
         letterSpacing: MOBILE_BODY_TRACKING,
         display: 'flex',
         flexDirection: 'column',
-        animation: 'mobileSearchSheetIn 0.24s cubic-bezier(0.32, 0.72, 0, 1)',
+        animation: 'mobileSearchSheetIn 0.24s cubic-bezier(0.22, 1, 0.36, 1)',
       } as CSSProperties}
     >
       <style>{`

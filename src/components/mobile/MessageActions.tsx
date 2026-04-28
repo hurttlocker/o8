@@ -104,7 +104,7 @@ export const MessageActions = memo(function MessageActions({
         maxHeight: visible ? 36 : 0,
         opacity: visible ? 1 : 0,
         overflow: 'hidden',
-        transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+        transition: 'all 250ms cubic-bezier(0.22, 1, 0.36, 1)',
         pointerEvents: visible ? 'auto' : 'none',
       }}
     >
