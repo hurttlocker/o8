@@ -44,6 +44,16 @@ export const FleetView = memo(function FleetView({
   hideHeader = false,
 }: FleetViewProps) {
   const { colors } = useTheme();
+  // The mobile inbox snapshot includes workspace LLM chat tabs (runtime: 'chat')
+  // alongside spawned agents — those are orchestrator + assistant chats and
+  // shouldn't appear in the Agents fleet view. Filter to spawned-agent
+  // runtimes only.
+  const spawnedAgents = sessions.filter((session) => (
+    session.runtime === 'codex'
+    || session.runtime === 'claude-code'
+    || session.runtime === 'gemini'
+    || session.runtime === 'opencode'
+  ));
 
   const iconButtonStyle: CSSProperties = {
     width: 36,
@@ -122,10 +132,10 @@ export const FleetView = memo(function FleetView({
       )}
 
       <GroupedSessionList
-        sessions={sessions}
+        sessions={spawnedAgents}
         onSessionSelect={onAgentSelect}
         renderSessionName={renderFleetSessionName}
-        emptyMessage="No sessions yet."
+        emptyMessage="No spawned agents yet. Dispatch a packet from the Orchestrator."
         topPadding={hideHeader ? 8 : 2}
       />
     </section>

@@ -659,10 +659,17 @@ export function MobileApprovalsClient({
                   <FleetView
                     sessions={inboxSnapshot.sessions}
                     onAgentSelect={() => {
-                      handleBackToChats();
+                      // No agent-detail view on mobile yet — stay on the
+                      // Agents tab. Was previously bouncing to Assistant
+                      // which read as a navigation bug.
                     }}
                     onBack={handleBackToChats}
-                    onLaunch={handleBackToChats}
+                    onLaunch={() => {
+                      // Launching new agents happens via Orchestrator
+                      // dispatch — surface that path instead of dropping
+                      // the user on the Assistant.
+                      setActiveView('orchestrator');
+                    }}
                     hideHeader
                   />
                 ) : inboxError ? (
