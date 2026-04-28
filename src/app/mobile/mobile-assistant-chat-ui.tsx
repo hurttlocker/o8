@@ -1,11 +1,13 @@
 'use client';
 
-import { ComposerPrimitive, MessagePrimitive, useAuiState, type MessageState } from '@assistant-ui/react';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { ComposerPrimitive, MessagePrimitive, useAuiState, useComposerRuntime, type MessageState } from '@assistant-ui/react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { MobileMarkdown } from './mobile-markdown';
 import { getMessageTextContent, getMessageThinkingBlocks, getMessageToolCalls } from './mobile-assistant-chat-runtime';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
 import { playSendClick } from '@/lib/mobile/sounds';
+import { usePressToDictate } from '@/lib/mobile/use-press-to-dictate';
+import { MicWaveformIndicator } from '@/components/mobile/orchestrator/parts';
 import {
   IconCaretDown,
   IconCaretRight,
@@ -311,6 +313,27 @@ export function ComposerBar({
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const isLoading = useAuiState((state) => state.thread.isLoading);
   const isComposerEmpty = useAuiState((state) => state.thread.composer.isEmpty);
+  const composerRuntime = useComposerRuntime();
+  const composerText = useAuiState((state) => state.thread.composer.text);
+
+  const voice = usePressToDictate();
+  const baseTextAtRecordingStartRef = useRef('');
+  // Snapshot composer text on the rising edge of recording so the
+  // transcript appends to whatever the user already typed.
+  useEffect(() => {
+    if (voice.isRecording) baseTextAtRecordingStartRef.current = composerText ?? '';
+    // composerText intentionally omitted — only sample on rising edge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.isRecording]);
+
+  // Append final transcript into the composer when it lands. Don't
+  // auto-submit (packet acceptance #3 — user must tap to send).
+  useEffect(() => {
+    if (!voice.transcript) return;
+    const base = baseTextAtRecordingStartRef.current;
+    const sep = base && !base.endsWith(' ') ? ' ' : '';
+    composerRuntime.setText(`${base}${sep}${voice.transcript}`);
+  }, [voice.transcript, composerRuntime]);
 
   return (
     <ComposerPrimitive.Root
@@ -389,32 +412,81 @@ export function ComposerBar({
           <IconStop fill={palette.iconFill} size={16} />
         </ComposerPrimitive.Cancel>
       ) : (
-        <button
-          type="submit"
-          aria-label="Send message"
-          disabled={isComposerEmpty || isLoading}
-          style={{
-            width: 44,
-            height: 44,
-            minWidth: 44,
-            minHeight: 44,
-            borderRadius: 22,
-            border: 'none',
-            backgroundColor: !isComposerEmpty && !isLoading ? palette.accent : palette.cardBackground,
-            color: palette.rootText,
-            cursor: !isComposerEmpty && !isLoading ? 'pointer' : 'default',
-            opacity: !isComposerEmpty && !isLoading ? 1 : 0.58,
-            flexShrink: 0,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            touchAction: 'manipulation',
-            WebkitTapHighlightColor: 'transparent',
-            padding: 0,
-          }}
-        >
-          <IconSend fill={palette.iconFill} />
-        </button>
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <button
+            type="submit"
+            aria-label={voice.isRecording ? 'Recording — release to stop' : 'Send (hold to dictate)'}
+            title={voice.supported ? 'Tap to send · hold to dictate' : 'Voice not supported on this device'}
+            // NOTE: never `disabled` on iOS — disabled buttons swallow
+            // pointerdown so long-press can't start from an empty composer
+            // (the primary dictation use case). We gate submit in onClick.
+            {...voice.pointerHandlers}
+            onContextMenu={(event) => event.preventDefault()}
+            onClick={(event) => {
+              if (voice.claimSuppressedClick()) {
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+              }
+              if (isComposerEmpty || isLoading) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!voice.supported && isComposerEmpty) {
+                  voice.flashTooltip('Voice not supported on this device');
+                }
+              }
+            }}
+            style={{
+              width: 44,
+              height: 44,
+              minWidth: 44,
+              minHeight: 44,
+              borderRadius: 22,
+              border: 'none',
+              backgroundColor: voice.isRecording
+                ? 'rgba(255,69,58,0.18)'
+                : (!isComposerEmpty && !isLoading ? palette.accent : palette.cardBackground),
+              color: palette.rootText,
+              cursor: voice.isRecording || (!isComposerEmpty && !isLoading) ? 'pointer' : 'default',
+              opacity: voice.isRecording || (!isComposerEmpty && !isLoading) ? 1 : 0.58,
+              flexShrink: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              touchAction: 'manipulation',
+              WebkitTapHighlightColor: 'transparent',
+              WebkitUserSelect: 'none',
+              userSelect: 'none',
+              WebkitTouchCallout: 'none',
+              padding: 0,
+            }}
+          >
+            {voice.isRecording ? (
+              <MicWaveformIndicator size={20} color="#FF453A" />
+            ) : (
+              <IconSend fill={palette.iconFill} />
+            )}
+          </button>
+          {voice.tooltip ? (
+            <div
+              role="status"
+              style={{
+                position: 'absolute',
+                bottom: 'calc(100% + 6px)',
+                right: 0,
+                whiteSpace: 'nowrap',
+                paddingTop: 4, paddingBottom: 4, paddingLeft: 8, paddingRight: 8,
+                borderRadius: 8,
+                background: 'rgba(28,28,30,0.92)',
+                color: '#FFFFFF',
+                fontSize: 11, fontWeight: 600,
+                pointerEvents: 'none',
+              }}
+            >
+              {voice.tooltip}
+            </div>
+          ) : null}
+        </div>
       )}
     </ComposerPrimitive.Root>
   );
