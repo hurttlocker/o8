@@ -162,6 +162,9 @@ export function AgentTileLayout({
             />
           </div>
           {index < sessions.length - 1 ? (
+            // Apple HIG drag handle: visible bar stays at 4px to keep panes
+            // tight, but the draggable region is widened via transparent
+            // padding so the cursor zone meets the 44pt minimum.
             <div
               role="separator"
               aria-orientation="vertical"
@@ -170,16 +173,47 @@ export function AgentTileLayout({
               onMouseEnter={() => setHoveredDivider(index)}
               onMouseLeave={() => setHoveredDivider((current) => current === index ? null : current)}
               style={{
+                position: 'relative',
                 width: DIVIDER_WIDTH,
                 minWidth: DIVIDER_WIDTH,
                 cursor: 'col-resize',
-                borderRadius: 999,
-                background: hoveredDivider === index || draggingDivider === index
-                  ? 'var(--t-border-hover, var(--t-accent-border))'
-                  : 'var(--t-border)',
+                background: 'transparent',
                 flexShrink: 0,
               }}
-            />
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: '50%',
+                  width: DIVIDER_WIDTH,
+                  transform: 'translateX(-50%)',
+                  borderRadius: 999,
+                  background: hoveredDivider === index || draggingDivider === index
+                    ? 'var(--t-border-hover, var(--t-accent-border))'
+                    : 'var(--t-border)',
+                  pointerEvents: 'none',
+                }}
+              />
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: '50%',
+                  // Hit zone widened to 12px per side (24px total) — full HIG
+                  // 44 would overhang the panes and steal pane-internal clicks.
+                  // The handle is full-height vertically so the long-axis
+                  // dimension already exceeds 44pt for any pane > 44 tall.
+                  width: 24,
+                  transform: 'translateX(-50%)',
+                  background: 'transparent',
+                }}
+              />
+            </div>
           ) : null}
         </Fragment>
       ))}
