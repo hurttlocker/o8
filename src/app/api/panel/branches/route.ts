@@ -100,6 +100,32 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
+      // `worktree-agent-*` is the Claude harness's internal worktree-branch
+      // naming convention for sub-agent runs. They are never user-facing
+      // workspaces — hide them unconditionally so the sidebar doesn't
+      // accumulate one row per completed sub-agent.
+      if (trimmedName.startsWith('worktree-agent-')) {
+        continue;
+      }
+
+      // Hide branches whose tip is already an ancestor of the default branch
+      // (i.e. fully merged into main). The current branch and any branch
+      // backing a live worktree are always preserved so the operator never
+      // loses their seat. `--is-ancestor` exits 0 for ancestor / 1 for not /
+      // 128 for missing ref, so only treat exitStatus 0 as "merged".
+      if (!isCurrent && !isWt && trimmedName !== defaultBranch) {
+        try {
+          execSync(
+            `git -C "${repoPath}" merge-base --is-ancestor "${trimmedName}" "${defaultBranch}"`,
+            { encoding: 'utf-8', timeout: 2000, stdio: 'pipe' },
+          );
+          // Exit code 0 → trimmedName is reachable from defaultBranch → merged.
+          continue;
+        } catch {
+          // Non-zero exit (or missing ref) → not merged. Keep the branch.
+        }
+      }
+
       // Get ahead/behind vs origin
       let ahead = 0, behind = 0;
       try {
