@@ -26,6 +26,7 @@ import {
   mobileSafeBottom,
 } from './mobile-shell-primitives';
 import { FilterPillRow, type FilterPillOption } from '@/components/mobile/shared/FilterPillRow';
+import { SwipeActions } from '@/components/mobile/SwipeActions';
 
 type ApprovalFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
@@ -374,7 +375,34 @@ function ApprovalCard({
     </MobileGlassPanel>
   );
 
-  if (!canViewDiff) return cardContent;
+  // Conflict cards keep their explicit strategy-picker buttons — swipe doesn't
+  // make sense when the merge strategy needs an explicit choice.
+  if (hasConflict) return cardContent;
+
+  // Non-conflict approval cards: wrap in swipe-to-action so right-swipe →
+  // confirm Approve, left-swipe → confirm Reject. Existing buttons stay
+  // visible for users who'd rather tap. A real swipe suppresses the click,
+  // so opening the diff via tap still works on idle cards.
+  const swipeWrapped = (
+    <SwipeActions
+      palette={palette}
+      onRightSwipe={() => onResolve(approval.id, 'approve')}
+      onLeftSwipe={() => onResolve(approval.id, 'reject')}
+      rightLabel="Approve"
+      leftLabel="Reject"
+      rightConfirmLabel="Confirm approve"
+      leftConfirmLabel="Confirm reject"
+      rightColor={palette.success}
+      leftColor={palette.danger}
+      rightConfirmHaptic={20}
+      leftConfirmHaptic={[10, 30, 10]}
+      disabled={isBusy}
+    >
+      {cardContent}
+    </SwipeActions>
+  );
+
+  if (!canViewDiff) return swipeWrapped;
 
   return (
     <div
@@ -394,7 +422,7 @@ function ApprovalCard({
       style={{ cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
       aria-label="View diff for this approval"
     >
-      {cardContent}
+      {swipeWrapped}
     </div>
   );
 }
