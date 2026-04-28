@@ -1,10 +1,21 @@
 'use client';
 
-import { memo, useEffect, useMemo, useRef } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
+import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
 
 interface AgentTilePaneProps {
@@ -62,17 +73,86 @@ function entryContent(entry: MobileTranscriptEntry): string {
   return toolCalls.length > 0 ? toolCalls.map((toolCall) => `tool: ${toolCall.name}`).join('\n') : '';
 }
 
+// Spring curve matches Apple HIG (stiffness 400, damping 30) — used for the
+// composer reveal animation when a lane flips to running/awaiting_input.
+const COMPOSER_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
+
 function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: AgentTilePaneProps) {
   const slice = useTranscript(sessionKey);
   const entries = slice.messages;
   const loading = slice.status === 'loading' || slice.status === 'idle';
   const error = slice.status === 'error' ? slice.error ?? 'Unable to load transcript.' : null;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const name = useMemo(() => displayName(agent, sessionKey), [agent, sessionKey]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
   const runtimeTone = useMemo(() => orchestratorRuntimeTone(runtime), [runtime]);
   const status = useMemo(() => classifyStatus(agent?.status), [agent?.status]);
+  const canSteer = status === 'running' || status === 'waiting';
+  const trimmedDraft = draft.trim();
+  const canSend = canSteer && !sending && trimmedDraft.length > 0;
   const lastEntryKey = entries.length > 0 ? `${entries[entries.length - 1]?.id}:${entryContent(entries[entries.length - 1]!)}` : '';
+
+  const submitSteer = useCallback(async () => {
+    const message = trimmedDraft;
+    if (!message || !canSteer || sending) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      const response = await fetch('/api/runtime/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'steer',
+          surfaceId: sessionKey,
+          message,
+        }),
+      });
+      const payload = await response
+        .json()
+        .catch(() => null) as { ok?: boolean; note?: string; error?: string } | null;
+      if (!response.ok || payload?.ok === false) {
+        const note = payload?.error ?? payload?.note ?? response.statusText ?? 'Unable to send steer.';
+        setSendError(note);
+        return;
+      }
+      setDraft('');
+      transcriptStore.setStatus(sessionKey, 'loading');
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Unable to send steer.');
+    } finally {
+      setSending(false);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+  }, [canSteer, sending, sessionKey, trimmedDraft]);
+
+  const handleTextareaKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key !== 'Enter') return;
+      if (event.shiftKey) return;
+      // Cmd/Ctrl+Enter or plain Enter both submit; Shift+Enter inserts newline.
+      event.preventDefault();
+      void submitSteer();
+    },
+    [submitSteer],
+  );
+
+  const handleFormSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      void submitSteer();
+    },
+    [submitSteer],
+  );
+
+  // When the lane stops accepting input, drop any error so the composer
+  // doesn't carry stale state into the next live run.
+  useEffect(() => {
+    if (!canSteer) setSendError(null);
+  }, [canSteer]);
 
   // One-shot seed for agents not in the workspace bootstrap list. After this,
   // WS pushes via transcriptStore keep the slice live — no per-agent polling.
@@ -234,6 +314,146 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
           );
         })}
       </div>
+
+      <AnimatePresence initial={false}>
+        {canSteer ? (
+          <motion.form
+            key="steer-composer"
+            onSubmit={handleFormSubmit}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={COMPOSER_SPRING}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              paddingTop: 10,
+              paddingRight: 10,
+              paddingBottom: 10,
+              paddingLeft: 10,
+              borderTopWidth: 1,
+              borderTopStyle: 'solid',
+              borderTopColor: focused ? 'var(--t-accent-border)' : 'var(--t-border)',
+              background: 'var(--t-bg-card)',
+              flexShrink: 0,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-end',
+                gap: 8,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'var(--t-border)',
+                background: 'var(--t-input-bg)',
+                paddingTop: 6,
+                paddingRight: 6,
+                paddingBottom: 6,
+                paddingLeft: 10,
+              }}
+            >
+              <textarea
+                ref={textareaRef}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={handleTextareaKeyDown}
+                placeholder="Steer this agent…"
+                rows={1}
+                disabled={sending}
+                aria-label={`Steer ${name}`}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  minHeight: 32,
+                  maxHeight: 140,
+                  resize: 'none',
+                  borderWidth: 0,
+                  background: 'transparent',
+                  color: 'var(--t-text)',
+                  fontSize: 12.5,
+                  lineHeight: 1.5,
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  outline: 'none',
+                  paddingTop: 6,
+                  paddingRight: 0,
+                  paddingBottom: 6,
+                  paddingLeft: 0,
+                }}
+              />
+              <button
+                type="submit"
+                disabled={!canSend}
+                aria-label={`Send steer to ${name}`}
+                title={canSend ? 'Send (Enter)' : 'Type a steer to send'}
+                style={{
+                  width: 44,
+                  height: 44,
+                  flexShrink: 0,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: canSend ? 'var(--t-accent-border)' : 'var(--t-border)',
+                  background: canSend ? 'var(--t-accent)' : 'var(--t-panel)',
+                  color: canSend ? '#ffffff' : 'var(--t-text-secondary)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: canSend ? 'pointer' : 'default',
+                  opacity: canSend ? 1 : 0.7,
+                  transition: 'background 160ms ease, border-color 160ms ease, color 160ms ease',
+                }}
+              >
+                {sending ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 3a9 9 0 1 0 9 9" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden="true">
+                    <path
+                      d="M223.87,114l-168-95.89A16,16,0,0,0,32.93,37.32L57.85,128,32.93,218.7A16,16,0,0,0,48,240a16.13,16.13,0,0,0,7.92-2.1l167.95-96A16,16,0,0,0,223.87,114Zm-168,110L78.07,144H136a8,8,0,0,0,0-16H78.07L55.85,32l.06,0L216,128Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                )}
+              </button>
+            </div>
+            {sendError ? (
+              <div
+                role="alert"
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#ef4444',
+                  paddingTop: 0,
+                  paddingRight: 4,
+                  paddingBottom: 0,
+                  paddingLeft: 4,
+                }}
+              >
+                {sendError}
+              </div>
+            ) : (
+              <div
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 500,
+                  color: 'var(--t-text-secondary)',
+                  paddingTop: 0,
+                  paddingRight: 4,
+                  paddingBottom: 0,
+                  paddingLeft: 4,
+                  letterSpacing: '-0.005em',
+                }}
+              >
+                Enter to send · Shift+Enter for newline
+              </div>
+            )}
+          </motion.form>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
