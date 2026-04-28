@@ -69,7 +69,13 @@ async function resolveClaudeBin(): Promise<string> {
   }
 }
 const RECENT_WINDOW_MS = 6 * 60 * 60_000; // 6 hours
-const LAUNCH_SESSION_ID_TIMEOUT_MS = 12_000;
+// 45s was 12s. Under parallel dispatch (5+ claude-code procs spawning at
+// once), the cold-start of `claude --print` can take 8-15s before the first
+// jsonl write hits ~/.claude/projects/<encoded-cwd>/. Lanes were timing out
+// with "could not resolve the persistent session id" and the lane retry
+// loop minted fresh worktrees on every miss, leaking ~150 worktrees in one
+// dispatch. 45s gives the parallel cold-starts comfortable headroom.
+const LAUNCH_SESSION_ID_TIMEOUT_MS = 45_000;
 const CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
 const CLAUDE_ONE_MILLION_CONTEXT_WINDOW_TOKENS = 1_000_000;
 const CLAUDE_CONTEXT_RESERVE_MAX_OUTPUT_TOKENS = 20_000;
