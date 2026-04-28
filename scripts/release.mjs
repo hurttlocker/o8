@@ -26,6 +26,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const REPO = 'hurttlocker/cortex-ide';
+const PUBLIC_MIRROR = 'hurttlocker/o8';
 const root = process.cwd();
 
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -48,7 +49,10 @@ for (const path of [DMG, APP_TAR, APP_SIG]) {
 
 const signature = readFileSync(APP_SIG, 'utf8').trim();
 const pubDate = new Date().toISOString();
-const downloadBase = `https://github.com/${REPO}/releases/download/${tag}`;
+// Point latest.json download URLs at the PUBLIC MIRROR so the Tauri updater
+// can fetch artifacts anonymously. The private repo (REPO) returns 404 for
+// anonymous download requests even when the release is published.
+const downloadBase = `https://github.com/${PUBLIC_MIRROR}/releases/download/${tag}`;
 
 // Same signed binary works on x86_64 natively and aarch64 under Rosetta, so
 // point both platforms at the same artifact until a native arm64 runner
@@ -107,5 +111,43 @@ if (releaseExists) {
 }
 
 console.log(`[release] published ${tag}`);
+
+// Mirror artifacts to the public repo so the Tauri updater can fetch
+// latest.json + the .app.tar.gz anonymously. The private REPO is the source
+// of truth for code + full release notes; PUBLIC_MIRROR only carries the
+// updater payload. Failures here are logged but non-fatal — the private
+// publish above already succeeded.
+const mirrorNotes = `Auto-update artifacts for o8 ${tag}. See https://github.com/${REPO}/releases/tag/${tag} for details.`;
+
+try {
+  let mirrorExists = false;
+  try {
+    execFileSync('gh', ['release', 'view', tag, '-R', PUBLIC_MIRROR], { stdio: 'pipe' });
+    mirrorExists = true;
+  } catch {}
+
+  if (mirrorExists) {
+    console.log(`[release-mirror] ${tag} already exists on ${PUBLIC_MIRROR} — replacing assets`);
+    execFileSync('gh', [
+      'release', 'upload', tag, ...uploadArgs,
+      '--clobber',
+      '-R', PUBLIC_MIRROR,
+    ], { stdio: 'inherit' });
+  } else {
+    console.log(`[release-mirror] creating ${tag} on ${PUBLIC_MIRROR}`);
+    execFileSync('gh', [
+      'release', 'create', tag, ...uploadArgs,
+      '--title', `o8 ${tag}`,
+      '--notes', mirrorNotes,
+      '-R', PUBLIC_MIRROR,
+    ], { stdio: 'inherit' });
+  }
+
+  console.log(`[release-mirror] mirrored ${tag} to ${PUBLIC_MIRROR}`);
+} catch (err) {
+  console.error(`[release-mirror] failed to mirror ${tag} to ${PUBLIC_MIRROR}:`, err?.message ?? err);
+  console.error(`[release-mirror] private publish above is unaffected — auto-update will not pick up this version until the mirror succeeds`);
+}
+
 console.log(`[release] the installed o8.app will pick up the update on next launch`);
 console.log(`[release] (or within 30 min via the UpdateBanner poll).`);
