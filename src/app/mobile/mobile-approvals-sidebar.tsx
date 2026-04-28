@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { triggerHaptic } from '@/lib/mobile/haptic';
 import {
   MOBILE_BODY_TRACKING,
   MOBILE_HEADING_TRACKING,
@@ -175,7 +176,10 @@ export function Sidebar({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              triggerHaptic('tap');
+              onClose();
+            }}
             aria-label="Close menu"
             style={{
               minWidth: MOBILE_TOUCH_TARGET,
@@ -211,6 +215,7 @@ export function Sidebar({
                 key={item.id}
                 type="button"
                 onClick={() => {
+                  triggerHaptic('tap');
                   onNavigate(item.id);
                   onClose();
                 }}
@@ -258,6 +263,7 @@ export function Sidebar({
           <button
             type="button"
             onClick={() => {
+              triggerHaptic('tap');
               onOpenSettings();
               onClose();
             }}

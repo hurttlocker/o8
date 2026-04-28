@@ -24,6 +24,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type { MobileTranscriptMedia } from '@/lib/mobile/types';
+import { triggerHaptic } from '@/lib/mobile/haptic';
 import { formatTokens } from '@/lib/util/format-tokens';
 import { mediaHref } from './utils';
 
@@ -256,7 +257,7 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
   // Haptic feedback on open
   useEffect(() => {
     if (open) {
-      try { navigator?.vibrate?.(10); } catch { /* no vibrate support */ }
+      triggerHaptic('tap');
     }
   }, [open]);
 

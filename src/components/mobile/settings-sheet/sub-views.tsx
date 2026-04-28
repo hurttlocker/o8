@@ -11,6 +11,7 @@ import {
   type MobilePalette,
 } from '@/app/mobile/mobile-approvals-shared';
 import { mobileSafeBottom } from '@/app/mobile/mobile-shell-primitives';
+import { isHapticEnabled, setHapticEnabled, triggerHaptic } from '@/lib/mobile/haptic';
 import {
   ICON_GITHUB,
   ICON_INFO,
@@ -22,8 +23,6 @@ import {
   ICON_VIBRATE,
 } from './icons';
 import { Row, SectionCard, SectionLabel, ToggleRow } from './primitives';
-
-export const HAPTIC_STORAGE_KEY = 'cortex-ide:mobile:haptic';
 
 interface OperatorDefaultsState {
   parallelCap: number;
@@ -293,12 +292,7 @@ export function PermissionsSubView({ palette }: { palette: MobilePalette }) {
   const [haptic, setHaptic] = useState<boolean>(true);
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(HAPTIC_STORAGE_KEY);
-      if (stored === '0') setHaptic(false);
-    } catch {
-      // ignore
-    }
+    setHaptic(isHapticEnabled());
   }, []);
 
   useEffect(() => {
@@ -336,11 +330,9 @@ export function PermissionsSubView({ palette }: { palette: MobilePalette }) {
 
   const updateHaptic = useCallback((next: boolean) => {
     setHaptic(next);
-    try {
-      window.localStorage.setItem(HAPTIC_STORAGE_KEY, next ? '1' : '0');
-    } catch {
-      // ignore
-    }
+    setHapticEnabled(next);
+    // Preview the buzz so the user feels what they just enabled.
+    if (next) triggerHaptic('success');
   }, []);
 
   if (!defaults) {

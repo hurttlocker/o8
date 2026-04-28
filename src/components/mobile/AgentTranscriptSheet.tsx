@@ -10,6 +10,7 @@
 
 import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { triggerHaptic } from '@/lib/mobile/haptic';
 import { useTheme } from './ThemeContext';
 import { MobileMarkdown } from '@/app/mobile/mobile-markdown';
 
@@ -94,6 +95,8 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
 
   useEffect(() => {
     if (open && sessionKey) {
+      // Tap on open — confirms the sheet is animating in.
+      triggerHaptic('tap');
       void fetchTranscript();
     } else {
       setEntries([]);
@@ -120,7 +123,10 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
   }, [open, onClose]);
 
   const handleBackdropClick = useCallback((event: React.MouseEvent) => {
-    if (event.target === event.currentTarget) onClose();
+    if (event.target === event.currentTarget) {
+      triggerHaptic('tick');
+      onClose();
+    }
   }, [onClose]);
 
   const grouped = useMemo(() => entries, [entries]);
@@ -187,7 +193,10 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              triggerHaptic('tick');
+              onClose();
+            }}
             aria-label="Close transcript"
             style={{
               minWidth: 60, minHeight: 32,
