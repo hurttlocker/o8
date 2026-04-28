@@ -1,3 +1,4 @@
+// Capability map for orchestrator runtime adapters. See docs/runtime-adapter-contract.md.
 import type { OrchestratorRuntime } from './types';
 
 export interface OrchestratorRuntimeCapability {
