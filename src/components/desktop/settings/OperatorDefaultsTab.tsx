@@ -271,7 +271,7 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
           stroke="currentColor"
           strokeWidth={1.5}
           strokeLinecap="round"
-          style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease', color: RAMS_INK_QUIET }}
+          style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1)', color: RAMS_INK_QUIET }}
         >
           <polyline points="6 9 12 15 18 9" />
         </svg>

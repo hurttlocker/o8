@@ -250,7 +250,7 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
             style={{
               transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
               transformOrigin: 'center center',
-              transition: dragging.current ? 'none' : 'transform 100ms ease',
+              transition: dragging.current ? 'none' : 'transform 100ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           />
         </div>
@@ -591,7 +591,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid
           strokeWidth={2}
           style={{
             color: 'var(--t-text-muted)',
-            transition: 'transform 200ms ease',
+            transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
             transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
           }}
         />

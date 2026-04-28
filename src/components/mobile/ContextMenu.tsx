@@ -89,7 +89,7 @@ export const ContextMenu = memo(function ContextMenu({
           WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
           boxShadow: '0 8px 32px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.06)',
           overflow: 'hidden',
-          animation: 'ctxScaleIn 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+          animation: 'ctxScaleIn 200ms cubic-bezier(0.34, 1.36, 0.64, 1)',
           transformOrigin: `${x - safeX}px ${y < safeY ? 'bottom' : 'top'}`,
           padding: '6px 0',
         }}

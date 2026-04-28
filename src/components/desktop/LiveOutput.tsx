@@ -109,7 +109,7 @@ function DiffCard({ diff, isLatest }: { diff: DiffEntry; isLatest: boolean }) {
       background: isLatest
         ? 'rgba(147, 197, 253, 0.04)'
         : 'rgba(255, 255, 255, 0.015)',
-      animation: isLatest ? 'diffCardSlideIn 400ms cubic-bezier(0.32, 0.72, 0, 1)' : 'none',
+      animation: isLatest ? 'diffCardSlideIn 400ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
       transition: 'border-color 200ms ease',
     }}>
       {/* File header */}
@@ -177,7 +177,7 @@ function DiffCard({ diff, isLatest }: { diff: DiffEntry; isLatest: boolean }) {
           size={12}
           color="rgba(148, 163, 184, 0.3)"
           style={{
-            transition: 'transform 200ms ease',
+            transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
             transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)',
             flexShrink: 0,
           }}

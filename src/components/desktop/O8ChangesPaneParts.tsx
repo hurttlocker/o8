@@ -19,7 +19,7 @@ export function ChevronIcon({ open, size = 10, color = 'currentColor' }: { open:
         display: 'block',
         flexShrink: 0,
         transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-        transition: 'transform 140ms ease',
+        transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       <polyline points="9 6 15 12 9 18" />

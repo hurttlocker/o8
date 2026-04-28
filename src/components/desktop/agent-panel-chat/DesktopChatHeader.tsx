@@ -114,7 +114,7 @@ export const DesktopChatHeader = memo(function DesktopChatHeader({
               color="var(--t-text-faint)"
               style={{
                 flexShrink: 0,
-                transition: 'transform 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+                transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
                 transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
               }}
             />
@@ -258,7 +258,7 @@ export const DesktopChatHeader = memo(function DesktopChatHeader({
                       style={{
                         flexShrink: 0,
                         color: 'var(--t-text-muted)',
-                        transition: 'transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+                        transition: 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
                         transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
                       }}
                     />

@@ -16,7 +16,7 @@ export function PageTransition({ activeKey, children }: PageTransitionProps) {
     <div
       key={activeKey}
       style={{
-        animation: 'page-transition-in 280ms cubic-bezier(0.32, 0.72, 0, 1)',
+        animation: 'page-transition-in 280ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       <style>{`@keyframes page-transition-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }`}</style>

@@ -394,7 +394,7 @@ function OrchestratorHistorySidebarBase({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        transition: 'width 200ms ease, min-width 200ms ease',
+        transition: 'width 200ms cubic-bezier(0.22, 1, 0.36, 1), min-width 200ms cubic-bezier(0.22, 1, 0.36, 1)',
         background: 'var(--t-chat-surface-bg, #ffffff)',
         flexShrink: 0,
       }}
