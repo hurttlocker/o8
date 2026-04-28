@@ -96,26 +96,19 @@ function RepoCardExpandedContentBase({
     )),
     [orchestratorPackets, repo.localPath],
   );
-  // Active-work-only visibility rule (#workspace-prune-v2):
-  // Show current branch, anything an agent is on, anything a packet targets,
-  // and worktrees with a commit in the last 24h that aren't flagged stale.
-  // Everything else (idle worktrees, plain non-current branches) collapses
-  // under the "+ N idle" disclosure below — the rail is not a branch picker.
+  // Active-work-only visibility rule (#735 tightening):
+  // Show current branch + anything an agent is on + anything a packet targets.
+  // Drops the "recent worktree" allowance — recency != activity. A 30-min-old
+  // completed worktree is just as stale as a 14h-old one. Everything else
+  // (idle worktrees, plain non-current branches) collapses under the "+ N idle"
+  // disclosure below.
   const visibleBranches = useMemo(
-    () => {
-      const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
-      const cutoff = Date.now() - ACTIVE_WINDOW_MS;
-      return branches.filter((branch) => {
-        if (branch.current) return true;
-        const branchAgents = agentsByBranch?.get(branch.name) ?? [];
-        const hasAgent = Boolean(branchAgents.length);
-        if (hasAgent) return true;
-        const isPacketTarget = repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
-        if (isPacketTarget) return true;
-        if (branch.isWorktree && !branch.isStale && branch.lastCommitUnix > cutoff) return true;
-        return false;
-      });
-    },
+    () => branches.filter((branch) => {
+      if (branch.current) return true;
+      const branchAgents = agentsByBranch?.get(branch.name) ?? [];
+      if (branchAgents.length) return true;
+      return repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
+    }),
     [agentsByBranch, branches, repoScopedPackets],
   );
   const hiddenBranchCount = useMemo(
