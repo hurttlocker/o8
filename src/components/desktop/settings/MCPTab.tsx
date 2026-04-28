@@ -361,11 +361,20 @@ export function MCPTab() {
           {d.nodeInstalled && d.codexInstalled && !d.ghInstalled ? (
             <div style={{
               marginTop: 14,
-              borderLeft: `2px solid ${RAMS_HAIRLINE_SOFT}`,
-              paddingLeft: 12,
             }}>
               <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', marginBottom: 4 }}>
-                GitHub CLI not found (optional)
+                <span style={{
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: RAMS_INK_QUIET,
+                  marginRight: 8,
+                }}>
+                  [optional]
+                </span>
+                GitHub CLI not found
               </div>
               <div style={{ color: 'var(--t-text-muted)', fontSize: 12, lineHeight: 1.55 }}>
                 Install with{' '}
