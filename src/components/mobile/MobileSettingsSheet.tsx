@@ -13,6 +13,7 @@ import {
 } from '@/app/mobile/mobile-approvals-shared';
 import { mobileSafeBottom } from '@/app/mobile/mobile-shell-primitives';
 import {
+  ICON_BELL,
   ICON_CHART,
   ICON_INFO,
   ICON_LOCK,
@@ -33,6 +34,7 @@ import {
   ProfileSubView,
   UsageSubView,
 } from './settings-sheet/sub-views';
+import { NotificationsSubView } from './settings-sheet/notifications-sub-view';
 
 /* ─────────────────────────────────────────────────────────────────────────
  * MobileSettingsSheet
@@ -56,6 +58,7 @@ type SubView =
   | 'connectors'
   | 'permissions'
   | 'appearance'
+  | 'notifications'
   | 'privacy';
 
 interface MobileSettingsSheetProps {
@@ -202,6 +205,12 @@ function RootView({
           palette={palette}
         />
         <Row
+          iconPath={ICON_BELL}
+          label="Notifications"
+          onClick={() => onSubViewChange('notifications')}
+          palette={palette}
+        />
+        <Row
           iconPath={ICON_LOCK}
           label="Privacy"
           onClick={() => onSubViewChange('privacy')}
@@ -248,6 +257,8 @@ export function MobileSettingsSheet({
         return 'Permissions';
       case 'appearance':
         return 'Appearance';
+      case 'notifications':
+        return 'Notifications';
       case 'privacy':
         return 'Privacy';
       default:
@@ -436,6 +447,8 @@ export function MobileSettingsSheet({
             palette={palette}
           />
         ) : null}
+
+        {subView === 'notifications' ? <NotificationsSubView palette={palette} /> : null}
 
         {subView === 'privacy' ? <PrivacySubView palette={palette} /> : null}
       </div>

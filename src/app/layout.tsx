@@ -65,7 +65,13 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                   Promise.all([
                     navigator.serviceWorker.getRegistrations()
                       .then(function(registrations) {
-                        return Promise.all(registrations.map(function(registration) {
+                        // Preserve sw-push.js — it's the push notification SW
+                        // (issue #639) and isn't part of the asset-cache reset.
+                        var doomed = registrations.filter(function(registration) {
+                          var url = registration.active && registration.active.scriptURL || '';
+                          return url.indexOf('sw-push.js') === -1;
+                        });
+                        return Promise.all(doomed.map(function(registration) {
                           return registration.unregister();
                         })).then(function(results) {
                           return results.some(Boolean);
