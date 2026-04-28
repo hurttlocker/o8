@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.63"
+version = "0.1.64"
 dependencies = [
  "log",
  "rusqlite",
