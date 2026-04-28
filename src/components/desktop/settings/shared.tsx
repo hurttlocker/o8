@@ -247,20 +247,19 @@ export function TabButton({ label, icon, active, onClick, comingSoon = false }: 
         paddingLeft: 14,
         borderRadius: 0,
         border: 'none',
-        borderLeft: active ? `2px solid ${RAMS_ACCENT}` : '2px solid transparent',
         background: 'transparent',
-        color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        color: active ? RAMS_ACCENT : 'var(--t-text-secondary)',
         fontSize: 13,
         fontWeight: active ? 500 : 400,
         cursor: 'pointer',
         textAlign: 'left',
         fontFamily: APP_FONT_STACK,
         letterSpacing: '-0.01em',
-        transition: 'color 120ms, border-color 120ms',
+        transition: 'color 120ms',
         opacity: comingSoon && !active ? 0.55 : 1,
       }}
     >
-      <span style={{ flexShrink: 0, color: active ? 'var(--t-text)' : 'var(--t-text-muted)', display: 'inline-flex' }}>
+      <span style={{ flexShrink: 0, color: active ? RAMS_ACCENT : 'var(--t-text-muted)', display: 'inline-flex' }}>
         {icon}
       </span>
       <span style={{ flex: 1 }}>{label}</span>
