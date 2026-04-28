@@ -96,17 +96,20 @@ function RepoCardExpandedContentBase({
     )),
     [orchestratorPackets, repo.localPath],
   );
-  // Active-work-only visibility rule (#735 tightening):
-  // Show current branch + anything an agent is on + anything a packet targets.
-  // Drops the "recent worktree" allowance — recency != activity. A 30-min-old
-  // completed worktree is just as stale as a 14h-old one. Everything else
-  // (idle worktrees, plain non-current branches) collapses under the "+ N idle"
-  // disclosure below.
+  // Active-work-only visibility rule (#750 — root cause):
+  // hasAgent counts only agents in a live state (running/reviewing/awaiting_review).
+  // Without this gate, every worktree that ever had an agent stays visible forever
+  // because agent records aren't pruned on teardown. Completed/idle/terminated
+  // agents don't qualify a branch for the rail.
   const visibleBranches = useMemo(
     () => branches.filter((branch) => {
       if (branch.current) return true;
       const branchAgents = agentsByBranch?.get(branch.name) ?? [];
-      if (branchAgents.length) return true;
+      const hasRunningAgent = branchAgents.some((agent) => {
+        const status = (agent.status ?? '').toLowerCase();
+        return status === 'running' || status === 'reviewing' || status === 'awaiting_review';
+      });
+      if (hasRunningAgent) return true;
       return repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
     }),
     [agentsByBranch, branches, repoScopedPackets],
