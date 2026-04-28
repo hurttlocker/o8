@@ -32,6 +32,7 @@ import {
 const AuditLogPanel = lazy(() => import('@/components/desktop/AuditLogPanel').then(m => ({ default: m.AuditLogPanel })));
 const CommitViewer = lazy(() => import('@/components/desktop/CommitViewer').then(m => ({ default: m.CommitViewer })));
 const FileViewer = lazy(() => import('@/components/desktop/FileViewer').then(m => ({ default: m.FileViewer })));
+const InlineDiffViewer = lazy(() => import('@/components/desktop/InlineDiffViewer').then(m => ({ default: m.InlineDiffViewer })));
 const IssueCreator = lazy(() => import('@/components/desktop/IssueCreator').then(m => ({ default: m.IssueCreator })));
 const IssueViewer = lazy(() => import('@/components/desktop/IssueViewer').then(m => ({ default: m.IssueViewer })));
 const PRViewer = lazy(() => import('@/components/desktop/PRViewer').then(m => ({ default: m.PRViewer })));
@@ -392,8 +393,30 @@ const TabContent = memo(function TabContent({
             return <TranscriptViewer sessionKey={tab.resourceId} />;
           case 'file':
             return <FileViewer filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
-          case 'diff':
+          case 'diff': {
+            // #659 — when the diff tab carries packet/session metadata
+            // (sessionKey / worktreePath / packetId), open the new inline
+            // diff viewer wired to the awaiting_review review pipeline.
+            // Otherwise keep the workspace-clean DiffViewer (uncommitted
+            // changes against HEAD) so existing callers don't regress.
+            const meta = tab.meta;
+            const hasPacketContext = Boolean(
+              meta?.sessionKey || meta?.worktreePath || meta?.packetId,
+            );
+            if (hasPacketContext) {
+              return (
+                <InlineDiffViewer
+                  packetId={meta?.packetId ?? null}
+                  sessionKey={meta?.sessionKey ?? null}
+                  worktreePath={meta?.worktreePath ?? null}
+                  baseBranch={meta?.baseBranch ?? null}
+                  laneId={meta?.laneId ?? null}
+                  title={tab.label || meta?.title || null}
+                />
+              );
+            }
             return <DiffViewer />;
+          }
           case 'commit':
             return <CommitViewer commitHash={tab.resourceId} workspace={tab.meta?.workspace} />;
           case 'pr':
