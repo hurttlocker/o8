@@ -230,7 +230,7 @@ export function PacketCard({
                 background: detailsAnchor ? 'var(--t-divider-subtle)' : 'transparent',
                 textAlign: 'left',
                 cursor: 'pointer',
-                transition: 'background 120ms ease',
+                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
               onMouseEnter={(e) => { if (!detailsAnchor) e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
