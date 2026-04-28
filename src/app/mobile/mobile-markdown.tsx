@@ -335,7 +335,7 @@ export function codeTheme(light: boolean) {
     copiedColor: '#2563eb',
     btnColor: '#6b7280',
   } : {
-    bg: '#1e1e2e',
+    bg: '#0A0A0A',
     border: 'rgba(148,163,184,0.16)',
     headerColor: '#8b96a5',
     headerBorder: 'rgba(148,163,184,0.12)',

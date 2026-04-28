@@ -47,7 +47,7 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
   status,
   workspace,
 }: AgentTranscriptSheetProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [entries, setEntries] = useState<AgentTranscriptEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -230,6 +230,10 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
             const isUser = entry.role === 'user';
             const isTool = entry.role === 'tool' || entry.type === 'tool';
             const text = entry.text || (entry.toolName ? `${entry.toolName}${entry.filePath ? ` · ${entry.filePath}` : ''}` : '');
+            const toolBg = isDark ? 'rgba(48,209,88,0.10)' : 'rgba(34,197,94,0.10)';
+            const toolBorder = isDark ? 'rgba(48,209,88,0.24)' : 'rgba(34,197,94,0.24)';
+            const assistantBg = isDark ? colors.frostStrong : colors.cardBg;
+            const showAssistantRing = isDark && !isUser && !isTool;
             return (
               <div
                 key={entry.id}
@@ -242,9 +246,10 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
                   style={{
                     paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12,
                     borderRadius: isUser ? 16 : 12,
-                    borderWidth: isTool ? 1 : 0, borderStyle: 'solid',
-                    borderColor: isTool ? 'rgba(34,197,94,0.24)' : 'transparent',
-                    background: isUser ? colors.msgUserBg : isTool ? 'rgba(34,197,94,0.10)' : colors.cardBg,
+                    borderWidth: isTool || showAssistantRing || (isDark && isUser) ? 1 : 0,
+                    borderStyle: 'solid',
+                    borderColor: isTool ? toolBorder : showAssistantRing || (isDark && isUser) ? colors.cardBorder : 'transparent',
+                    background: isUser ? colors.msgUserBg : isTool ? toolBg : assistantBg,
                     color: colors.text,
                     fontSize: 13, lineHeight: 1.45, whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
