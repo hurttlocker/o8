@@ -5,7 +5,7 @@
  * from OrchestratorView so the main file stays under the 500-line spec.
  */
 
-import { memo, type CSSProperties } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type {
   MobileOrchestratorRuntime,
   MobileOrchestratorThread,
@@ -36,6 +36,71 @@ export function StopIcon({ size = 14 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
       <rect x="6" y="6" width="12" height="12" rx="2" />
     </svg>
+  );
+}
+
+/**
+ * Pulsing waveform shown in place of the send icon while a long-press
+ * dictation session is active. Animates via requestAnimationFrame (NOT
+ * setInterval) per packet constraint — battery-friendly.
+ */
+export function MicWaveformIndicator({ size = 18, color = '#FF453A' }: { size?: number; color?: string }) {
+  const BAR_COUNT = 4;
+  const [phase, setPhase] = useState(0);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const tick = (now: number) => {
+      if (!mounted) return;
+      setPhase(now / 1000);
+      rafRef.current = window.requestAnimationFrame(tick);
+    };
+    rafRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      mounted = false;
+      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  const barWidth = Math.max(1, Math.round(size / 7));
+  const gap = Math.max(1, Math.round(size / 10));
+  const minH = Math.round(size * 0.2);
+  const maxH = Math.round(size * 0.92);
+  const range = maxH - minH;
+
+  return (
+    <span
+      role="img"
+      aria-label="Recording"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap,
+        width: size,
+        height: size,
+      }}
+    >
+      {Array.from({ length: BAR_COUNT }).map((_, i) => {
+        const offset = i * 0.45;
+        const t = (Math.sin(phase * 4 + offset) + 1) / 2; // 0..1
+        const h = Math.round(minH + range * (0.35 + 0.65 * t));
+        return (
+          <span
+            key={i}
+            style={{
+              display: 'inline-block',
+              width: barWidth,
+              height: h,
+              borderRadius: barWidth,
+              background: color,
+              transition: 'none',
+            }}
+          />
+        );
+      })}
+    </span>
   );
 }
 

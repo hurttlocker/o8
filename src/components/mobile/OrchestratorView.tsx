@@ -35,12 +35,14 @@ import {
 } from './hooks/useOrchestratorMobile';
 import {
   ChevronLeftIcon,
+  MicWaveformIndicator,
   SendIcon,
   StopIcon,
   ThreadCard,
   TranscriptBubble,
 } from './orchestrator/parts';
 import { IconCaretUp, IconPlus } from '@/app/mobile/mobile-approvals-shared';
+import { usePressToDictate } from '@/lib/mobile/use-press-to-dictate';
 
 interface OrchestratorViewProps {
   onBack: () => void;
@@ -349,6 +351,25 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     // Refocus so power users can keep typing if needed.
     requestAnimationFrame(() => composerRef.current?.focus());
   }, [composerDraft, sendMessage]);
+
+  // ── Voice input (long-press send to dictate) ──────────────────────────────
+  const voice = usePressToDictate();
+  const draftAtRecordingStartRef = useRef('');
+  // Snapshot the draft when recording starts so the transcript appends to
+  // what the user already typed instead of replacing it.
+  useEffect(() => {
+    if (voice.isRecording) draftAtRecordingStartRef.current = composerDraft;
+    // composerDraft intentionally omitted: only capture on the rising edge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.isRecording]);
+
+  useEffect(() => {
+    if (!voice.transcript) return;
+    const base = draftAtRecordingStartRef.current;
+    const sep = base && !base.endsWith(' ') ? ' ' : '';
+    setComposerDraft(`${base}${sep}${voice.transcript}`);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [voice.transcript]);
 
   const handleComposerKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
@@ -664,9 +685,65 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
                 <StopIcon size={14} />
               </button>
             ) : (
-              <button type="button" aria-label="Send" onClick={handleSend} disabled={!canSend} style={sendButtonStyle}>
-                <SendIcon size={16} />
-              </button>
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  aria-label={voice.isRecording ? 'Recording — release to stop' : 'Send (hold to dictate)'}
+                  title={voice.supported ? 'Tap to send · hold to dictate' : 'Voice not supported on this device'}
+                  {...voice.pointerHandlers}
+                  onContextMenu={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    if (voice.claimSuppressedClick()) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      return;
+                    }
+                    if (!canSend) {
+                      if (!voice.supported) voice.flashTooltip('Voice not supported on this device');
+                      return;
+                    }
+                    handleSend();
+                  }}
+                  // NOTE: never `disabled` — disabled buttons swallow
+                  // pointerdown on iOS so long-press can't start from an
+                  // empty composer (the primary dictation use case).
+                  style={{
+                    ...sendButtonStyle,
+                    background: voice.isRecording ? 'rgba(255,69,58,0.18)' : sendButtonStyle.background,
+                    cursor: voice.isRecording || canSend ? 'pointer' : sendButtonStyle.cursor,
+                    WebkitUserSelect: 'none',
+                    userSelect: 'none',
+                    WebkitTouchCallout: 'none',
+                    touchAction: 'manipulation',
+                    padding: 0,
+                  }}
+                >
+                  {voice.isRecording ? (
+                    <MicWaveformIndicator size={18} color="#FF453A" />
+                  ) : (
+                    <SendIcon size={16} />
+                  )}
+                </button>
+                {voice.tooltip ? (
+                  <div
+                    role="status"
+                    style={{
+                      position: 'absolute',
+                      bottom: 'calc(100% + 6px)',
+                      right: 0,
+                      whiteSpace: 'nowrap',
+                      paddingTop: 4, paddingBottom: 4, paddingLeft: 8, paddingRight: 8,
+                      borderRadius: 8,
+                      background: 'rgba(28,28,30,0.92)',
+                      color: '#FFFFFF',
+                      fontSize: 11, fontWeight: 600,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    {voice.tooltip}
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         </div>
