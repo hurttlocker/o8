@@ -20,7 +20,7 @@ type OverlapGateMode = 'advisory' | 'strict';
 type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 type SettingSource = 'env' | 'file' | 'default';
 
-type DispatchRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
+type DispatchRuntime = 'codex' | 'gemini' | 'opencode';
 
 interface OperatorDefaults {
   parallelCap: number;
@@ -64,10 +64,17 @@ const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
 
 const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: string; detail: string }> = [
   { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse.' },
-  { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — use when you have a Claude sub.' },
-  { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3.1 Pro CLI — fastest for parallel fan-out.' },
+  { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3 Pro CLI — fastest for parallel fan-out.' },
   { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
 ];
+
+// Note for the operator: the orchestrator chat itself is Claude Code under
+// the hood. If you don't have another CLI (Codex / Gemini / opencode), don't
+// have a second sub, or just don't want a fleet of dispatched agents, the
+// orchestrator can do the work inline via native Claude sub-agents (Agent
+// tool, isolated worktrees, etc.). Dispatch is for fanning work out to a
+// non-Claude runtime — Anthropic ships Claude-on-Claude better than we can
+// wrap, so we don't dispatch claude-code anymore. See issue #650.
 
 function sourceLabel(source: SettingSource): string {
   if (source === 'env') return 'env override';

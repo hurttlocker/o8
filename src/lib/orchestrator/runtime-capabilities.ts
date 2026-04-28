@@ -33,12 +33,16 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
   'claude-code': {
     label: 'Claude Code',
     shortLabel: 'Claude',
-    dispatchable: true,
+    // dispatchable=false: the orchestrator no longer dispatches claude-code
+    // packets (decision locked 2026-04-28, issue #650). The adapter still
+    // ships for read-only discovery of user-spawned terminal sessions.
+    // Native Claude sub-agents stay available via the Agent tool inline.
+    dispatchable: false,
     requiresModel: false,
     defaultModel: 'claude-sonnet-4-5',
     accentColor: '#e07a3a', // orange — matches existing claude-code tone in display.ts
     binaryName: 'claude',
-    description: 'Anthropic Claude Code CLI with session resume and full tool surface.',
+    description: 'Anthropic Claude Code CLI — read-only inventory only. Use Codex / Gemini / opencode for dispatch.',
   },
   gemini: {
     label: 'Gemini',
@@ -83,4 +87,4 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): Orchestrator
 }
 
 /** Runtimes that ship in the v1 dispatch picker. Keep this narrow. */
-export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'gemini'];
+export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'gemini', 'opencode'];

@@ -8,10 +8,14 @@ import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_uti
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode']);
+// claude-code is intentionally excluded from dispatch runtimes (issue #650).
+// The orchestrator (which is itself Claude) can spawn native Claude
+// sub-agents inline via the Agent tool when that's the right fit; we don't
+// need to wrap claude-code as a dispatched fleet worker.
+const VALID_DISPATCH_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'gemini', 'opencode']);
 
 function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
-  if (typeof value === 'string' && VALID_RUNTIMES.has(value as OrchestratorRuntime)) {
+  if (typeof value === 'string' && VALID_DISPATCH_RUNTIMES.has(value as OrchestratorRuntime)) {
     return value as OrchestratorRuntime;
   }
   return null;
@@ -59,7 +63,14 @@ export async function POST(request: NextRequest) {
     ? resolveDefaultDispatchRuntimeSync()
     : normalizeRuntime(record.runtime);
   if (!runtimeValue) {
-    return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "opencode".', 400);
+    if (typeof record.runtime === 'string' && record.runtime === 'claude-code') {
+      return operatorError(
+        'invalid_request',
+        'claude-code is no longer dispatchable (#650). Use "codex", "gemini", or "opencode" — or run the work inline via the orchestrator (it is Claude Code under the hood and can spawn native Claude sub-agents).',
+        400,
+      );
+    }
+    return operatorError('invalid_request', 'runtime must be one of: "codex", "gemini", "opencode".', 400);
   }
 
   try {
