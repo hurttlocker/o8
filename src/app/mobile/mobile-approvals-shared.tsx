@@ -38,6 +38,7 @@ export const ICON_PATHS = {
   Plus: 'M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z',
   CaretUp: 'M213.66,165.66a8,8,0,0,1-11.32,0L128,91.31,53.66,165.66a8,8,0,0,1-11.32-11.32l80-80a8,8,0,0,1,11.32,0l80,80A8,8,0,0,1,213.66,165.66Z',
   X: 'M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z',
+  Clock: 'M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm64-88a8,8,0,0,1-8,8H128a8,8,0,0,1-8-8V72a8,8,0,0,1,16,0v48h48A8,8,0,0,1,192,128Z',
 } as const;
 
 export type MobileView =
@@ -397,6 +398,10 @@ export function IconPencil({ fill, size = 18, style }: MobileIconProps) {
 
 export function IconCopy({ fill, size = 18, style }: MobileIconProps) {
   return renderIcon(ICON_PATHS.Copy, size, fill, style);
+}
+
+export function IconClock({ fill, size = 12, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.Clock, size, fill, style);
 }
 
 export function getModelOption(modelId: string): ModelOption | null {
