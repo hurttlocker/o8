@@ -18,6 +18,7 @@ import {
   IconArrowLeft,
   IconHamburger,
   IconRefresh,
+  IconSearch,
   POLL_INTERVAL,
   generateChatTabId,
   getMobilePalette,
@@ -32,6 +33,7 @@ import {
   type MobileView,
 } from './mobile-approvals-shared';
 import { MobileSettingsSheet } from '@/components/mobile/MobileSettingsSheet';
+import { MobileSearchSheet, useMobileSearchHotkey, type MobileSearchTarget } from '@/components/mobile/MobileSearchSheet';
 import {
   getMobileRepoLabel,
   normalizeMobileRepoList,
@@ -116,6 +118,7 @@ export function MobileApprovalsClient({
   const palette = useMemo(() => getMobilePalette(themeId), [themeId]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
+  const [searchSheetOpen, setSearchSheetOpen] = useState(false);
   const [activeView, setActiveView] = useState<MobileView>(initialView);
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals);
   const [resolving, setResolving] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
@@ -398,6 +401,34 @@ export function MobileApprovalsClient({
     setCurrentTabId(null);
   }, []);
 
+  const handleSearchSelect = useCallback((target: MobileSearchTarget) => {
+    if (target.category === 'chat') {
+      // Open the assistant chat for this saved tabId. Mobile chat uses the
+      // tabId directly (mobile-chat-*).
+      setActiveView('chat');
+      setCurrentTabId(target.id);
+      return;
+    }
+    if (target.category === 'thread') {
+      // Persist the active thread id so OrchestratorView reads it on mount,
+      // then route to the orchestrator surface.
+      try {
+        window.localStorage.setItem('o8:mobile:orchestrator-active-thread', target.id);
+      } catch {
+        // ignore — view falls back to recent thread list
+      }
+      setActiveView('orchestrator');
+      return;
+    }
+    if (target.category === 'activity') {
+      setActiveView('activity');
+    }
+  }, []);
+
+  // Global "/" hardware-keyboard shortcut to open search.
+  const openSearchSheet = useCallback(() => setSearchSheetOpen(true), []);
+  useMobileSearchHotkey(openSearchSheet);
+
   const handleSnapshotApprove = useCallback((approvalId?: string) => {
     if (!approvalId) return;
     void handleResolve(approvalId, 'approve');
@@ -472,6 +503,13 @@ export function MobileApprovalsClient({
           onThemeChange={handleThemeChange}
           appVersion={appVersion}
           hostnameLabel={hostnameLabel}
+          palette={palette}
+        />
+
+        <MobileSearchSheet
+          open={searchSheetOpen}
+          onClose={() => setSearchSheetOpen(false)}
+          onResultSelect={handleSearchSelect}
           palette={palette}
         />
 
@@ -565,37 +603,44 @@ export function MobileApprovalsClient({
             ) : null}
           </div>
 
-          {activeView === 'approvals' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             <button
-              onClick={() => {
-                void refresh();
-              }}
+              onClick={() => setSearchSheetOpen(true)}
               style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
-              aria-label="Refresh approvals"
+              aria-label="Search"
             >
-              <IconRefresh fill={palette.iconFill} />
+              <IconSearch fill={palette.iconFill} />
             </button>
-          ) : activeView === 'chat' && !inConversation ? (
-            <button
-              onClick={() => {
-                void loadRecentConversations();
-              }}
-              style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
-              aria-label="Refresh conversations"
-            >
-              <IconRefresh fill={palette.iconFill} />
-            </button>
-          ) : isFullScreenView ? (
-            <button
-              onClick={handleFullScreenRefresh}
-              style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
-              aria-label={`Refresh ${viewTitle.toLowerCase()}`}
-            >
-              <IconRefresh fill={palette.iconFill} />
-            </button>
-          ) : (
-            <div style={{ width: 44, flexShrink: 0 }} />
-          )}
+            {activeView === 'approvals' ? (
+              <button
+                onClick={() => {
+                  void refresh();
+                }}
+                style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
+                aria-label="Refresh approvals"
+              >
+                <IconRefresh fill={palette.iconFill} />
+              </button>
+            ) : activeView === 'chat' && !inConversation ? (
+              <button
+                onClick={() => {
+                  void loadRecentConversations();
+                }}
+                style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
+                aria-label="Refresh conversations"
+              >
+                <IconRefresh fill={palette.iconFill} />
+              </button>
+            ) : isFullScreenView ? (
+              <button
+                onClick={handleFullScreenRefresh}
+                style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
+                aria-label={`Refresh ${viewTitle.toLowerCase()}`}
+              >
+                <IconRefresh fill={palette.iconFill} />
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {!isFullScreenView && error ? (
