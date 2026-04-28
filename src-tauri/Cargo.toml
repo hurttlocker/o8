@@ -36,6 +36,8 @@ tauri-plugin-process = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
 tauri-plugin-window-state = "2"
+# Issue #730: Cmd+Shift+O global shortcut to summon the dispatch popover.
+tauri-plugin-global-shortcut = "2"
 # Optional: see [features].dev-mcp-plugin above. Relative path so clones can
 # opt in by placing the plugin repo next to cortex-ide.
 tauri-plugin-mcp = { path = "../../tauri-plugin-mcp", optional = true }

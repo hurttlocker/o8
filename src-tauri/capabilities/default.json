@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "o8 default capabilities",
-  "windows": ["main"],
+  "windows": ["main", "dispatch-popover"],
   "permissions": [
     "core:default",
     "core:event:default",
@@ -12,12 +12,21 @@
     "core:event:allow-emit-to",
     "core:window:allow-start-dragging",
     "core:window:allow-start-resize-dragging",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "core:webview:allow-create-webview-window",
     "shell:allow-open",
     "shell:allow-execute",
     "process:default",
     "notification:default",
     "store:default",
     "log:default",
-    "updater:default"
+    "updater:default",
+    "global-shortcut:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered"
   ]
 }
