@@ -22,6 +22,7 @@ const runtimeInventoryCache = new Map<string, { snapshot: FleetSnapshot; cachedA
 const runtimeInventoryInflight = new Map<string, { generation: number; promise: Promise<FleetSnapshot> }>();
 let runtimeInventoryGeneration = 0;
 
+/** @returns {void} */
 export function invalidateRuntimeInventoryCache() {
   runtimeInventoryGeneration += 1;
   runtimeInventoryCache.clear();
