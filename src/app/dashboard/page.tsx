@@ -11,7 +11,6 @@ import { mergeTranscriptEntries } from '@/components/desktop/workspace-terminal/
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
-// WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
