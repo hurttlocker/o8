@@ -24,7 +24,7 @@ export function UpdateBanner() {
   const checkForUpdate = useCallback(async () => {
     try {
       // Try Tauri native updater first
-      if (typeof window !== 'undefined' && '__TAURI__' in window) {
+      if (typeof window !== 'undefined' && 'isTauri' in window && (window as { isTauri?: boolean }).isTauri) {
         const { check } = await import('@tauri-apps/plugin-updater');
         const result = await check();
         if (result?.available) {
@@ -56,7 +56,7 @@ export function UpdateBanner() {
   }, [checkForUpdate]);
 
   const handleInstall = useCallback(async () => {
-    if (typeof window !== 'undefined' && '__TAURI__' in window) {
+    if (typeof window !== 'undefined' && 'isTauri' in window && (window as { isTauri?: boolean }).isTauri) {
       try {
         setInstalling(true);
         const { check } = await import('@tauri-apps/plugin-updater');
@@ -120,7 +120,7 @@ export function UpdateBanner() {
             Installing…
           </>
         ) : (
-          '__TAURI__' in (typeof window !== 'undefined' ? window : {})
+          typeof window !== 'undefined' && 'isTauri' in window && (window as { isTauri?: boolean }).isTauri
             ? 'Install & Restart'
             : 'Download'
         )}
