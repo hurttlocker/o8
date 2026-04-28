@@ -96,23 +96,30 @@ function RepoCardExpandedContentBase({
     )),
     [orchestratorPackets, repo.localPath],
   );
+  // Active-work-only visibility rule (#workspace-prune-v2):
+  // Show current branch, anything an agent is on, anything a packet targets,
+  // and worktrees with a commit in the last 24h that aren't flagged stale.
+  // Everything else (idle worktrees, plain non-current branches) collapses
+  // under the "+ N idle" disclosure below — the rail is not a branch picker.
   const visibleBranches = useMemo(
-    () => branches.filter((branch) => {
-      const branchAgents = agentsByBranch?.get(branch.name) ?? [];
-      const hasAgent = Boolean(branchAgents.length);
-      const isPacketTarget = repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
-      return (
-        branch.isWorktree
-        || !branch.current
-        || hasAgent
-        || isPacketTarget
-        || (branch.current && repoScopedPackets.some((packet) => packet.branchTarget.trim() === '' || packet.branchTarget.trim() === branch.name))
-      );
-    }),
+    () => {
+      const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+      const cutoff = Date.now() - ACTIVE_WINDOW_MS;
+      return branches.filter((branch) => {
+        if (branch.current) return true;
+        const branchAgents = agentsByBranch?.get(branch.name) ?? [];
+        const hasAgent = Boolean(branchAgents.length);
+        if (hasAgent) return true;
+        const isPacketTarget = repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
+        if (isPacketTarget) return true;
+        if (branch.isWorktree && !branch.isStale && branch.lastCommitUnix > cutoff) return true;
+        return false;
+      });
+    },
     [agentsByBranch, branches, repoScopedPackets],
   );
   const hiddenBranchCount = useMemo(
-    () => branches.filter((branch) => branch.isWorktree && !visibleBranches.some((visibleBranch) => visibleBranch.name === branch.name)).length,
+    () => branches.length - visibleBranches.length,
     [branches, visibleBranches],
   );
   const unmatchedRepoPackets = useMemo(
@@ -576,7 +583,7 @@ function RepoCardExpandedContentBase({
                 target.style.background = 'transparent';
               }}
             >
-              + {hiddenBranchCount} worktree{hiddenBranchCount !== 1 ? 's' : ''}
+              + {hiddenBranchCount} idle
             </button>
           ) : null}
           <button
