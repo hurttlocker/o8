@@ -1,3 +1,4 @@
+// Inventory aggregation. See docs/runtime-adapter-contract.md
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
