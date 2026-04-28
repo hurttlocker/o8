@@ -667,6 +667,10 @@ export function MobileApprovalsClient({
             flexDirection: 'column',
             overflow: isFullScreenView ? 'auto' : 'hidden',
             WebkitOverflowScrolling: 'touch',
+            // Contain overscroll on the full-screen scroller so pull-to-refresh
+            // attached to the child views fires only from the top of THIS list,
+            // not the page chrome above it.
+            overscrollBehavior: isFullScreenView ? 'contain' : undefined,
             // For full-screen views (Agents/Issues/Activity/Costs/Orchestrator)
             // the standard 44px topbar sits above; the component below renders
             // its own filter chrome at the top. Fade content behind the bottom
@@ -677,7 +681,13 @@ export function MobileApprovalsClient({
           } as CSSProperties}
         >
           {activeView === 'approvals' ? (
-            <ApprovalsView approvals={approvals} onResolve={handleResolve} resolving={resolving} palette={palette} />
+            <ApprovalsView
+              approvals={approvals}
+              onResolve={handleResolve}
+              resolving={resolving}
+              palette={palette}
+              onRefresh={refresh}
+            />
           ) : null}
 
           {activeView === 'chat' && !currentTabId ? (
@@ -688,9 +698,7 @@ export function MobileApprovalsClient({
               onNewChat={() => {
                 setCurrentTabId(generateChatTabId());
               }}
-              onRefresh={() => {
-                void loadRecentConversations();
-              }}
+              onRefresh={loadRecentConversations}
               palette={palette}
             />
           ) : null}
@@ -783,6 +791,7 @@ export function MobileApprovalsClient({
                     }}
                     onApprove={(item) => handleSnapshotApprove(item.approvalId)}
                     onDeny={(item) => handleSnapshotDeny(item.approvalId)}
+                    onRefresh={loadInboxSnapshot}
                     hideHeader
                   />
                 ) : inboxError ? (
@@ -805,6 +814,7 @@ export function MobileApprovalsClient({
                       handleBackToChats();
                     }}
                     compactLine={mobileCompactLine}
+                    onRefresh={loadInboxSnapshot}
                     hideHeader
                   />
                 ) : inboxError ? (

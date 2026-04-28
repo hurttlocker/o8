@@ -65,6 +65,7 @@ export interface CostsDashboardProps {
   onBack: () => void;
   onSessionSelect: (sessionId: string) => void;
   compactLine: CompactLine;
+  onRefresh?: () => Promise<void> | void;
   hideHeader?: boolean;
 }
 
