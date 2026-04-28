@@ -50,11 +50,10 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     shortLabel: 'Gemini',
     dispatchable: true,
     requiresModel: false,
-    // gemini-3-pro-preview sits at the top of the fallback cascade — see
-    // GEMINI_FALLBACK_CASCADE. Switched from 3.1-pro because the 3.1 daily
-    // quota (250/day free tier) fills up under heavy dispatch, while 3-pro
-    // has its own bucket.
-    defaultModel: 'gemini-3-pro-preview',
+    // 2026-04-28: bumped back to gemini-3.1-pro per user preference for
+    // best-shot dispatch quality. Watch quota — the GEMINI_FALLBACK_CASCADE
+    // automatically rolls to gemini-3-pro-preview if 3.1 is rate-limited.
+    defaultModel: 'gemini-3.1-pro',
     accentColor: '#4285f4', // Google blue
     binaryName: 'gemini',
     description: 'Google Gemini CLI with --yolo autonomous dispatch and JSONL streaming.',
