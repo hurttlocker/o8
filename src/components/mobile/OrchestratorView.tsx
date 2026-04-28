@@ -183,27 +183,14 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     }
   }, [threads, localThread, setLocalThread]);
 
-  // The orchestrator stores chat-history under its own server-side tabId
-  // (not the one we mint client-side). When the user sends their first
-  // message after tap-"+", the orchestrator turn completes server-side and
-  // a NEW thread shows up in the polling response with the same repoPath
-  // but a different id. Swap to it so the transcript loads correctly on
-  // the next reload — otherwise we'd be stuck on the empty local thread.
-  useEffect(() => {
-    if (!localThread) return;
-    if (!localThread.repoPath) return;
-    const localMintedAt = new Date(localThread.lastMessageAt).getTime();
-    const serverThread = threads.find((thread) => (
-      thread.id !== localThread.id
-      && thread.repoPath === localThread.repoPath
-      && new Date(thread.lastMessageAt).getTime() >= localMintedAt
-    ));
-    if (serverThread) {
-      console.log('[mobile-orchestrator] swapping local thread → server thread', { from: localThread.id, to: serverThread.id });
-      setActiveThreadId(serverThread.id);
-      setLocalThread(null);
-    }
-  }, [threads, localThread, setLocalThread, setActiveThreadId]);
+  // NOTE: we used to swap activeThreadId from the local mint to the first
+  // server thread that appeared for the same repoPath. That was wrong —
+  // the orchestrator's server-side "thread" file is an append-only
+  // assistant-only log, not a per-conversation file. Swapping there meant
+  // the user's typed messages vanished on reload because they were never
+  // in the orchestrator's file. The mobile-side persistence now writes
+  // user + assistant entries under the local mint id (see useOrchestratorMobile),
+  // so the local thread is the canonical record. Keep it.
 
   const activeThread = useMemo(
     () => visibleThreads.find((thread) => thread.id === activeThreadId) ?? null,
