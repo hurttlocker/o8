@@ -1,10 +1,11 @@
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager,
+    Emitter, Manager, RunEvent,
 };
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
@@ -395,6 +396,151 @@ fn kill_orphan_and_wait(pid: u32, port: u16) -> bool {
         port, pid
     );
     false
+}
+
+// ── Child PID registry + probe-kill (issue #719) ──
+//
+// The Tauri parent spawns Node children (Next.js + ws-server) but doesn't
+// own their lifecycle on quit. When the user Cmd-Q's, force-quits via
+// osascript, or the parent panics, the children get reparented to launchd
+// and survive — holding ports 3001/3002 indefinitely. The next launch then
+// spawns a new Next on a different port (3003+), but the webview keeps
+// hitting whatever served on 3001 — the old orphan with stale code.
+//
+// Fix is two layers:
+//   1. On launch, force-kill anything bound to 3001 / 3002 BEFORE spawning.
+//   2. On quit (RunEvent::Exit, panic, SIGTERM/SIGINT), TERM then KILL every
+//      tracked child PID.
+//
+// `CHILD_PIDS` is a global registry written when each child is spawned and
+// drained on every exit path. We use `OnceLock<Mutex<Vec<u32>>>` rather than
+// a static `Mutex::new(...)` because const-init for `Mutex` is gated and
+// `OnceLock` is the std-stable path.
+
+fn child_pids() -> &'static Mutex<Vec<u32>> {
+    static CHILD_PIDS: OnceLock<Mutex<Vec<u32>>> = OnceLock::new();
+    CHILD_PIDS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Track a freshly-spawned child so we can kill it on quit.
+fn register_child(pid: u32) {
+    if let Ok(mut guard) = child_pids().lock() {
+        guard.push(pid);
+    }
+}
+
+/// Probe-kill any process holding `port`. Used at launch — if a previous
+/// install crashed and left an orphan Next/ws-server bound to 3001 or 3002,
+/// or if the user is launching a second copy of o8 over a still-live first
+/// copy, we kill the holder so the new sidecar can bind cleanly. Sends TERM
+/// first, polls 200ms, escalates to KILL if the port is still held.
+///
+/// Safe because:
+///   - A legit user-visible o8 instance that's still running means the user
+///     is launching a SECOND copy → killing the first child cleanly is what
+///     Finder does anyway.
+///   - An orphan from a prior crash → exactly what we want to kill.
+///   - A user-running `npm run desktop:dev` → the bundled-spawn path is
+///     never reached (we defer to the dev server upstream of this).
+fn probe_kill_port(port: u16) {
+    // Cheap probe: if nothing answers, return early.
+    if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_err() {
+        return;
+    }
+
+    // lsof -ti :PORT returns one PID per line listening on the port. -sTCP:LISTEN
+    // narrows to listeners (skips clients connected to the port).
+    let pids = match Command::new("lsof")
+        .args(["-ti", &format!(":{}", port), "-sTCP:LISTEN"])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            raw.lines()
+                .filter_map(|s| s.trim().parse::<u32>().ok())
+                .collect::<Vec<_>>()
+        }
+        _ => Vec::new(),
+    };
+
+    if pids.is_empty() {
+        log::warn!(
+            "[probe-kill] :{} appears bound but lsof returned no PIDs — skipping",
+            port
+        );
+        return;
+    }
+
+    log::info!("[probe-kill] :{} held by PIDs {:?} — killing", port, pids);
+    for pid in &pids {
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+    }
+
+    // Poll up to ~3s for the port to release (TIME_WAIT can hold even after
+    // the process is gone). If a TERM didn't take, escalate to KILL.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(3000);
+    let mut escalated = false;
+    while std::time::Instant::now() < deadline {
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            log::info!("[probe-kill] :{} released", port);
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        if !escalated && std::time::Instant::now() + std::time::Duration::from_millis(1000) < deadline {
+            // After ~1s of TERM not working, send KILL alongside.
+            for pid in &pids {
+                let _ = Command::new("kill")
+                    .args(["-KILL", &pid.to_string()])
+                    .status();
+            }
+            escalated = true;
+        }
+    }
+    log::warn!(
+        "[probe-kill] :{} still held after 3s — sidecar will probe higher port",
+        port
+    );
+}
+
+/// TERM + (after 1s) KILL every tracked child PID. Idempotent — once a PID
+/// is reaped, kill() with a stale PID is a harmless ESRCH. Drained on call
+/// so a re-entry (panic during exit, repeat exit event) is a no-op.
+fn kill_tracked_children() {
+    let pids = match child_pids().lock() {
+        Ok(mut guard) => std::mem::take(&mut *guard),
+        Err(_) => return, // poisoned mutex — best-effort cleanup, skip
+    };
+    if pids.is_empty() {
+        return;
+    }
+    log::info!("[shutdown] terminating {} tracked child PIDs: {:?}", pids.len(), pids);
+
+    for pid in &pids {
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+    }
+
+    // Give children a beat to flush + exit gracefully.
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+
+    // Anything still alive gets KILL. `kill -0 <pid>` is the standard
+    // "is this process alive" probe — exits 0 if alive, non-zero otherwise.
+    for pid in &pids {
+        let alive = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if alive {
+            log::info!("[shutdown] PID {} survived TERM — sending KILL", pid);
+            let _ = Command::new("kill")
+                .args(["-KILL", &pid.to_string()])
+                .status();
+        }
+    }
 }
 
 // ── Child process log capture ──
@@ -1039,6 +1185,15 @@ fn sanitize_window_state() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     sanitize_window_state();
+
+    // ── Shutdown safety net (issue #719) ──
+    // Install panic + Unix-signal handlers BEFORE building Tauri so any
+    // crash, SIGTERM, or SIGINT during startup still tears down children.
+    // The normal Cmd-Q / app.exit() / CloseRequested paths are handled in
+    // the RunEvent callback below; this is the belt-and-suspenders layer
+    // for ungraceful exits.
+    install_shutdown_handlers();
+
     #[allow(unused_mut)] // `mut` is needed only when `dev-mcp-plugin` feature is enabled
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default()
@@ -1218,6 +1373,17 @@ pub fn run() {
                 // Persist for child processes (MCP server, ws-server, etc.)
                 std::env::set_var("O8_NODE_BIN", &node_bin);
 
+                // ── Probe-kill orphans on default ports (issue #719) ──
+                // If a previous install crashed or was killed in a way that
+                // left its Node children reparented to launchd, they're
+                // still serving on 3001/3002 right now. The naive
+                // find_free_port() below would step around them and pick
+                // 3003+ — but the webview keeps loading from 3001 and gets
+                // the stale orphan. Force-clear the default ports first so
+                // the new sidecar binds them cleanly.
+                probe_kill_port(3001);
+                probe_kill_port(3002);
+
                 // ── Port allocation ──
                 // Probe for free ports starting at the legacy defaults. If the
                 // user has something else on 3001/3002 (another o8 instance, a
@@ -1266,7 +1432,9 @@ pub fn run() {
                     .spawn()
                 {
                     Ok(child) => {
-                        log::info!("Next.js server started (pid: {})", child.id());
+                        let pid = child.id();
+                        log::info!("Next.js server started (pid: {})", pid);
+                        register_child(pid);
                     }
                     Err(e) => {
                         log::error!("Failed to start server: {}", e);
@@ -1295,7 +1463,9 @@ pub fn run() {
                         .spawn()
                     {
                         Ok(child) => {
-                            log::info!("WS server started (pid: {})", child.id());
+                            let pid = child.id();
+                            log::info!("WS server started (pid: {})", pid);
+                            register_child(pid);
                         }
                         Err(e) => {
                             log::error!("Failed to start WS server: {}", e);
@@ -1324,6 +1494,73 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Cortex IDE");
+        .build(tauri::generate_context!())
+        .expect("error while building Cortex IDE")
+        .run(|_app_handle, event| match event {
+            // ExitRequested fires on Cmd-Q, app.exit(), tray Quit menu, etc.
+            // We tear down children here so they don't outlive the parent.
+            // Children also see a TERM via the OS process group on graceful
+            // exits, but the explicit kill is what catches detached/launchd
+            // reparenting.
+            RunEvent::ExitRequested { .. } => {
+                kill_tracked_children();
+            }
+            // Final event before the loop terminates. Idempotent with the
+            // ExitRequested handler — kill_tracked_children() drains the
+            // registry on first call.
+            RunEvent::Exit => {
+                kill_tracked_children();
+            }
+            _ => {}
+        });
+}
+
+// ── Shutdown handler installation ──
+//
+// Called once from `run()` before the Tauri builder is constructed. Installs
+// three layers that all converge on `kill_tracked_children()`:
+//   1. Panic hook  — preserves any prior hook (e.g. tauri-plugin-log) and
+//      runs cleanup AFTER the original. Catches startup panics.
+//   2. SIGTERM/SIGINT (Unix) — `signal-hook` registers a clean handler that
+//      runs in a dedicated thread; we kill children then re-raise the
+//      default disposition so the process actually exits.
+//   3. Tauri RunEvent::Exit — wired in `run()` itself, the normal path.
+fn install_shutdown_handlers() {
+    // Panic hook: chain after the existing hook so default backtraces still
+    // print, then drain children so they don't outlive a panicking parent.
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        prev(info);
+        kill_tracked_children();
+    }));
+
+    // Unix-only signal handler. signal-hook is already in our transitive
+    // dep graph; promoting it to a direct dep adds zero binary cost.
+    #[cfg(unix)]
+    {
+        use signal_hook::consts::{SIGINT, SIGTERM};
+        use signal_hook::iterator::Signals;
+        match Signals::new([SIGTERM, SIGINT]) {
+            Ok(mut signals) => {
+                std::thread::spawn(move || {
+                    if let Some(sig) = signals.forever().next() {
+                        log::info!("[shutdown] received signal {} — killing children", sig);
+                        kill_tracked_children();
+                        // Re-raise the default disposition so the process
+                        // actually exits with the signal's exit code. Using
+                        // exit() here would lose the signal-vs-clean-exit
+                        // distinction; raise() puts us back on the standard
+                        // "killed by signal N" path.
+                        unsafe {
+                            libc::signal(sig, libc::SIG_DFL);
+                            libc::raise(sig);
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                log::warn!("[shutdown] could not install signal handler: {}", e);
+            }
+        }
+    }
 }

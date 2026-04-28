@@ -2690,12 +2690,14 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
+ "libc",
  "log",
  "rusqlite",
  "serde",
  "serde_json",
+ "signal-hook",
  "tauri",
  "tauri-build",
  "tauri-plugin-log",

@@ -41,3 +41,11 @@ tauri-plugin-window-state = "2"
 tauri-plugin-mcp = { path = "../../tauri-plugin-mcp", optional = true }
 window-vibrancy = "0.6"
 rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Shutdown safety net (issue #719). Both crates are already in the lock graph
+# transitively; promoting them to direct deps is zero binary cost. Used to
+# tear down spawned Node children on SIGTERM / SIGINT so they don't outlive
+# the parent and orphan onto launchd while still holding ports 3001/3002.
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+libc = "0.2"
