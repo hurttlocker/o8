@@ -42,6 +42,7 @@ import {
   type MobileRepoOption,
 } from './mobile-chat-repos';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
+import { triggerHaptic } from '@/lib/mobile/haptic';
 
 const FleetView = lazy(async () => ({
   default: (await import('@/components/mobile/FleetView')).FleetView,
@@ -168,6 +169,12 @@ export function MobileApprovalsClient({
     const timer = setInterval(refresh, POLL_INTERVAL);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  // Buzz the device when an error toast appears so the user notices.
+  // Only fires on transitions into a non-null error string.
+  useEffect(() => {
+    if (error) triggerHaptic('error');
+  }, [error]);
 
   const loadRecentConversations = useCallback(async () => {
     setRecentLoading(true);
@@ -306,6 +313,7 @@ export function MobileApprovalsClient({
 
   const handleResolve = useCallback(async (id: string, action: 'approve' | 'reject', strategy?: string) => {
     setResolving({ id, action });
+    triggerHaptic(action === 'approve' ? 'success' : 'warn');
     try {
       const payload: Record<string, string> = { action, id };
       if (strategy) payload.strategy = strategy;
@@ -530,7 +538,7 @@ export function MobileApprovalsClient({
         >
           {inConversation ? (
             <button
-              onClick={() => setCurrentTabId(null)}
+              onClick={() => { triggerHaptic('tap'); setCurrentTabId(null); }}
               style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
               aria-label="Back to chats"
             >
@@ -538,7 +546,7 @@ export function MobileApprovalsClient({
             </button>
           ) : (
             <button
-              onClick={() => setSidebarOpen(true)}
+              onClick={() => { triggerHaptic('tap'); setSidebarOpen(true); }}
               style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS, position: 'relative' }}
               aria-label="Menu"
             >
@@ -605,7 +613,7 @@ export function MobileApprovalsClient({
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             <button
-              onClick={() => setSearchSheetOpen(true)}
+              onClick={() => { triggerHaptic('tap'); setSearchSheetOpen(true); }}
               style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
               aria-label="Search"
             >
@@ -613,9 +621,7 @@ export function MobileApprovalsClient({
             </button>
             {activeView === 'approvals' ? (
               <button
-                onClick={() => {
-                  void refresh();
-                }}
+                onClick={() => { triggerHaptic('tap'); void refresh(); }}
                 style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
                 aria-label="Refresh approvals"
               >
@@ -623,9 +629,7 @@ export function MobileApprovalsClient({
               </button>
             ) : activeView === 'chat' && !inConversation ? (
               <button
-                onClick={() => {
-                  void loadRecentConversations();
-                }}
+                onClick={() => { triggerHaptic('tap'); void loadRecentConversations(); }}
                 style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
                 aria-label="Refresh conversations"
               >
@@ -633,7 +637,7 @@ export function MobileApprovalsClient({
               </button>
             ) : isFullScreenView ? (
               <button
-                onClick={handleFullScreenRefresh}
+                onClick={() => { triggerHaptic('tap'); handleFullScreenRefresh(); }}
                 style={{ ...glassButtonStyle(44, 'neutral', true, palette), borderRadius: MOBILE_CARD_RADIUS }}
                 aria-label={`Refresh ${viewTitle.toLowerCase()}`}
               >

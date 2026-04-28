@@ -6,6 +6,7 @@ import type { ComposeBarProps } from './types';
 import { useTheme } from './ThemeContext';
 import { ownedLifecycleLabel, ownedReviewDispositionLabel } from './utils';
 import { autocompleteSlashCommand, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
+import { triggerHaptic } from '@/lib/mobile/haptic';
 
 const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif';
 const MONO_FONT = '"SF Mono", "SFMono-Regular", ui-monospace, Menlo, monospace';
@@ -143,14 +144,17 @@ export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
       return;
     }
     if (isStopState) {
+      triggerHaptic('warn');
       void handlers.onStop();
       return;
     }
     if (isChatSession) {
+      triggerHaptic('success');
       void handlers.onSend(sessionKey);
       return;
     }
     if (canResumeOwnedCodex) {
+      triggerHaptic('success');
       void handlers.onOwnedResume(sessionKey);
     }
   };

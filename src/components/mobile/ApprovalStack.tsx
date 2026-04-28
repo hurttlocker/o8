@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { MobileApprovalCard } from '@/lib/approvals/types';
+import { triggerHaptic } from '@/lib/mobile/haptic';
 import { useTheme } from './ThemeContext';
 import type { ApprovalStackProps } from './types';
 
@@ -277,7 +278,10 @@ function ApprovalCard({
               background: '#FF453A',
               color: '#FFFFFF',
             }}
-            onClick={() => onReject?.(approval)}
+            onClick={() => {
+              triggerHaptic('warn');
+              onReject?.(approval);
+            }}
           >
             {approval.actions.reject.label}
           </button>
@@ -288,7 +292,10 @@ function ApprovalCard({
               background: '#30D158',
               color: '#FFFFFF',
             }}
-            onClick={() => onApprove?.(approval)}
+            onClick={() => {
+              triggerHaptic('success');
+              onApprove?.(approval);
+            }}
           >
             {approval.actions.approve.label}
           </button>
