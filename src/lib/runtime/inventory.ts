@@ -423,6 +423,7 @@ function buildEmptyInventorySnapshot(): FleetSnapshot {
   };
 }
 
+/** @returns {Promise<FleetSnapshot>} The runtime inventory snapshot */
 export async function getRuntimeInventorySnapshot(
   options: { fresh?: boolean } = {},
 ): Promise<FleetSnapshot> {
