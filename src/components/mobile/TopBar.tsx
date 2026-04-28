@@ -105,8 +105,12 @@ export const TopBar = memo(function TopBar({
     zIndex: 110,
     opacity: headerVisible ? 1 : 0,
     pointerEvents: headerVisible ? 'auto' : 'none',
-    transition: 'opacity 220ms ease, transform 220ms ease',
-    background: 'transparent',
+    transition: 'opacity 220ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+    // Header bg must NOT be 'transparent' on mobile — breaks iOS PWA height
+    // calc (safe-area + 100dvh produces a blank strip at the bottom). Use a
+    // near-zero-opacity token instead so layout still draws but the chrome
+    // glass behind comes through. See feedback_pwa_topbar_solid.md (Apr 27).
+    background: 'rgba(0, 0, 0, 0.001)',
   };
   const iconButtonStyle: CSSProperties = {
     width: 44,
