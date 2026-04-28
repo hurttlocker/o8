@@ -4,12 +4,23 @@ import { memo, useMemo } from 'react';
 import type { FleetAgent } from './thoughts/types';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
+export interface SessionPillContextMenuRequest {
+  sessionKey: string;
+  sessionName: string;
+  isTiled: boolean;
+  clientX: number;
+  clientY: number;
+}
+
 interface SessionVisualizerProps {
   agents: FleetAgent[];
   tiledSessions?: string[];
   onSelectSession?: (sessionKey: string) => void;
   onToggleTileSession?: (sessionKey: string) => void;
   onClearTiles?: () => void;
+  /** Right-click on a session pill (issue #663). Receives cursor coordinates
+   * so the consumer can render a context menu portal. */
+  onRequestContextMenu?: (request: SessionPillContextMenuRequest) => void;
 }
 
 export type VisualStatus = 'running' | 'waiting' | 'idle' | 'error';
@@ -110,6 +121,7 @@ function SessionVisualizerBase({
   onSelectSession,
   onToggleTileSession,
   onClearTiles,
+  onRequestContextMenu,
 }: SessionVisualizerProps) {
   const sessions = useMemo(() => agents.map(toVisualSession), [agents]);
   const tiledSet = useMemo(() => new Set(tiledSessions), [tiledSessions]);
@@ -284,6 +296,16 @@ function SessionVisualizerBase({
               <div
                 key={session.key}
                 title={`${session.name} — ${session.headline}`}
+                onContextMenu={onRequestContextMenu ? (event) => {
+                  event.preventDefault();
+                  onRequestContextMenu({
+                    sessionKey: session.key,
+                    sessionName: session.name,
+                    isTiled: tiled,
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                  });
+                } : undefined}
                 style={{
                   position: 'relative',
                   minWidth: 148,
@@ -460,3 +482,8 @@ function SessionVisualizerBase({
 }
 
 export const SessionVisualizer = memo(SessionVisualizerBase);
+
+// Re-export the per-session transcript surface so consumers can mount it in
+// any tile (issue #663). Implementation lives next to it for cohesion; this
+// file is the discoverable home.
+export { SessionTranscriptPane } from './SessionTranscriptPane';
