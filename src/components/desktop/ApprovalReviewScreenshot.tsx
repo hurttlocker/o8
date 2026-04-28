@@ -250,7 +250,8 @@ export function ApprovalReviewScreenshot({ approval }: { approval: ApprovalRecor
                 onClick={() => setExpanded(false)}
                 style={{
                   minWidth: 86,
-                  height: 38,
+                  minHeight: 44,
+                  height: 44,
                   paddingTop: 0,
                   paddingBottom: 0,
                   paddingLeft: 14,

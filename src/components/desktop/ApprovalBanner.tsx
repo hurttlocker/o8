@@ -79,7 +79,10 @@ const summaryLead: CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
+// Visual chip stays 24px tall; an invisible 44×44pt overlay child extends the
+// click region (Apple HIG minimum). Buttons are `position: relative` hosts.
 const expandButton: CSSProperties = {
+  position: 'relative',
   height: 24,
   paddingTop: 0,
   paddingBottom: 0,
@@ -106,6 +109,7 @@ const expandButton: CSSProperties = {
 };
 
 const compactReject: CSSProperties = {
+  position: 'relative',
   height: 24,
   paddingTop: 0,
   paddingBottom: 0,
@@ -130,6 +134,19 @@ const compactReject: CSSProperties = {
   boxSizing: 'border-box',
 };
 
+// Invisible overlay child that expands a button's click region to >=44×44pt
+// without changing the visual chip. Clicks land on the parent <button> via
+// DOM bubbling. Spans must NOT have pointer-events: none.
+const hitZoneOverlay: CSSProperties = {
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
+  width: '100%',
+  minWidth: 44,
+  height: 44,
+  transform: 'translate(-50%, -50%)',
+};
+
 const compactApprove: CSSProperties = {
   ...compactReject,
   borderColor: ACCENT_ORANGE,
@@ -152,7 +169,9 @@ const listRow: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 10,
-  height: 32,
+  // Row grows to 44pt so adjacent button hit zones don't overlap across rows.
+  // The button chips stay visually compact via their own height: 24.
+  minHeight: 44,
   paddingLeft: 14,
   paddingRight: 10,
   borderBottomWidth: 1,
@@ -252,6 +271,7 @@ export function ApprovalBanner() {
               style={expandButton}
               title={expanded ? 'Collapse queue' : 'Show remaining approvals'}
             >
+              <span aria-hidden="true" style={hitZoneOverlay} />
               {expanded ? `Hide ${extraCount}` : `Show ${extraCount} more`}
               <span aria-hidden="true" style={{ fontSize: 8, opacity: 0.7 }}>{expanded ? '▴' : '▾'}</span>
             </button>
@@ -262,6 +282,7 @@ export function ApprovalBanner() {
             onClick={() => resolve(leading.id, 'reject')}
             style={{ ...compactReject, opacity: leadingBusy ? 0.55 : 1, cursor: leadingBusy ? 'wait' : 'pointer' }}
           >
+            <span aria-hidden="true" style={hitZoneOverlay} />
             Reject
           </button>
           <button
@@ -270,6 +291,7 @@ export function ApprovalBanner() {
             onClick={() => resolve(leading.id, 'approve')}
             style={{ ...compactApprove, opacity: leadingBusy ? 0.7 : 1, cursor: leadingBusy ? 'wait' : 'pointer' }}
           >
+            <span aria-hidden="true" style={hitZoneOverlay} />
             {leadingBusy ? '…' : 'Approve'}
           </button>
         </div>
@@ -290,6 +312,7 @@ export function ApprovalBanner() {
                     onClick={() => resolve(approval.id, 'reject')}
                     style={{ ...compactReject, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'wait' : 'pointer' }}
                   >
+                    <span aria-hidden="true" style={hitZoneOverlay} />
                     Reject
                   </button>
                   <button
@@ -298,6 +321,7 @@ export function ApprovalBanner() {
                     onClick={() => resolve(approval.id, 'approve')}
                     style={{ ...compactApprove, opacity: isBusy ? 0.7 : 1, cursor: isBusy ? 'wait' : 'pointer' }}
                   >
+                    <span aria-hidden="true" style={hitZoneOverlay} />
                     {isBusy ? '…' : 'Approve'}
                   </button>
                 </div>
