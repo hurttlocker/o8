@@ -11,6 +11,7 @@ import { PacketDetailsPopover } from '@/components/desktop/thoughts/PacketDetail
 import type { EditingField, ReviewPanelState } from './types';
 import { PacketMetaRows } from './PacketMetaRows';
 import { PacketReviewPanel } from './PacketReviewPanel';
+import { RejectedFeedbackPanel } from './RejectedFeedbackPanel';
 
 interface PacketCardProps {
   packet: OrchestratorPacket;
@@ -69,6 +70,10 @@ export function PacketCard({
     packet.status === 'awaiting_review'
     || (packet.status === 'blocked' && packet.blockedReason === 'Awaiting operator input')
   );
+  // #662 — Rejected packets get a one-click rerun-with-feedback panel.
+  // Detect via packet.review?.approved === false rather than packet.status,
+  // since submitPacketReview leaves status untouched.
+  const isRejected = packet.review?.approved === false;
 
   const packetPrompt = [packet.title, packet.summary].map((part) => part.trim()).filter(Boolean).join('\n\n') || null;
 
@@ -515,6 +520,22 @@ export function PacketCard({
               onReviewAction={onReviewAction}
               onToggleShowAllFiles={onToggleShowAllFiles}
             />
+          ) : null}
+
+          {isRejected ? (
+            <div
+              style={{
+                paddingTop: 8,
+                paddingRight: 10,
+                paddingBottom: 10,
+                paddingLeft: 10,
+                borderTopWidth: showReviewSection ? 0 : 1,
+                borderTopStyle: 'solid',
+                borderTopColor: 'var(--t-divider-subtle)',
+              }}
+            >
+              <RejectedFeedbackPanel packet={packet} />
+            </div>
           ) : null}
         </div>
       ) : (
