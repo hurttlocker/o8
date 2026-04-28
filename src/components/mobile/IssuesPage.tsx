@@ -3,6 +3,7 @@
 import { Suspense, lazy, memo, useCallback, useEffect, useState } from 'react';
 import { useTheme } from './ThemeContext';
 import { MobileIssuesPRCard, repoShortLabel, type IssuesPagePR } from './MobileIssuesPRCard';
+import { PullToRefresh } from './PullToRefresh';
 
 const DeployStatus = lazy(() => import('./DeployStatus'));
 const MobileDiffViewer = lazy(async () => ({
@@ -479,7 +480,12 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
     { key: 'issues', label: 'Issues', count: filteredIssues.length },
   ];
 
+  const handleRefresh = useCallback(async () => {
+    await fetchAll(repos);
+  }, [fetchAll, repos]);
+
   return (
+   <PullToRefresh onRefresh={handleRefresh}>
     <div style={{ padding: '0 12px 24px', width: '100%', boxSizing: 'border-box', background: colors.bg, minHeight: '100%' }}>
       {hideHeader ? (
         <p style={{ margin: '8px 4px 12px', fontSize: 13, color: colors.textSecondary, fontWeight: 500 }}>
@@ -681,5 +687,6 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
         </Suspense>
       ) : null}
     </div>
+   </PullToRefresh>
   );
 }

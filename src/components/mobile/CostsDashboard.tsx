@@ -3,6 +3,7 @@
 import { memo, useMemo, type ReactNode } from 'react';
 import { useTheme } from './ThemeContext';
 import type { CostsDashboardProps } from './types';
+import { PullToRefresh } from './PullToRefresh';
 
 type ThemeColors = ReturnType<typeof useTheme>['colors'];
 
@@ -109,6 +110,7 @@ export const CostsDashboard = memo(function CostsDashboard({
   onBack,
   onSessionSelect,
   compactLine,
+  onRefresh,
   hideHeader = false,
 }: CostsDashboardProps) {
   const { colors } = useTheme();
@@ -171,7 +173,7 @@ export const CostsDashboard = memo(function CostsDashboard({
     border: `1px solid ${colors.cardBorder}`,
   };
 
-  return (
+  const content = (
     <div
       style={{
         padding: '0 14px 40px',
@@ -631,4 +633,7 @@ export const CostsDashboard = memo(function CostsDashboard({
       ) : null}
     </div>
   );
+
+  if (!onRefresh) return content;
+  return <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh>;
 });
