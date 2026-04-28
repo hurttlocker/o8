@@ -207,14 +207,23 @@ export function DiagnosticsTab() {
       {error ? (
         <div style={{
           marginBottom: 28,
-          borderLeft: `2px solid #ef4444`,
-          paddingLeft: 14,
           paddingTop: 2,
           paddingBottom: 2,
           fontSize: 13,
           color: 'var(--t-text)',
           lineHeight: 1.55,
         }}>
+          <span style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: '#ef4444',
+            marginRight: 8,
+          }}>
+            [error]
+          </span>
           {error}
         </div>
       ) : null}
@@ -286,14 +295,23 @@ export function DiagnosticsTab() {
         {pruneError ? (
           <div style={{
             marginTop: 14,
-            borderLeft: `2px solid #ef4444`,
-            paddingLeft: 14,
             paddingTop: 2,
             paddingBottom: 2,
             fontSize: 13,
             color: 'var(--t-text)',
             lineHeight: 1.55,
           }}>
+            <span style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: '#ef4444',
+              marginRight: 8,
+            }}>
+              [error]
+            </span>
             {pruneError}
           </div>
         ) : null}
@@ -578,14 +596,23 @@ function ResetConfirmModal({
         {error ? (
           <div style={{
             marginBottom: 14,
-            borderLeft: `2px solid #ef4444`,
-            paddingLeft: 12,
             paddingTop: 2,
             paddingBottom: 2,
             fontSize: 12,
             color: 'var(--t-text)',
             lineHeight: 1.5,
           }}>
+            <span style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: '#ef4444',
+              marginRight: 8,
+            }}>
+              [error]
+            </span>
             {error}
           </div>
         ) : null}
