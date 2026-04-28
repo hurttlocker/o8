@@ -56,6 +56,9 @@ const CostsDashboard = lazy(async () => ({
 const OrchestratorView = lazy(async () => ({
   default: (await import('@/components/mobile/OrchestratorView')).OrchestratorView,
 }));
+const AgentTranscriptSheet = lazy(async () => ({
+  default: (await import('@/components/mobile/AgentTranscriptSheet')).AgentTranscriptSheet,
+}));
 
 const NEW_VIEWS: ReadonlySet<MobileView> = new Set(['agents', 'issues', 'activity', 'costs', 'orchestrator']);
 const SNAPSHOT_VIEWS: ReadonlySet<MobileView> = new Set(['agents', 'activity', 'costs']);
@@ -120,6 +123,13 @@ export function MobileApprovalsClient({
   const [currentTabId, setCurrentTabId] = useState<string | null>(null);
   const [recentConversations, setRecentConversations] = useState<ChatHistoryRecord[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
+  const [agentTranscriptSheet, setAgentTranscriptSheet] = useState<{
+    sessionKey: string;
+    name: string;
+    runtime: string;
+    status: string;
+    workspace?: string;
+  } | null>(null);
   const [selectedModelId] = useState(readStoredMobileModel);
   const [repoOptions, setRepoOptions] = useState<MobileRepoOption[]>([]);
   const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(readStoredMobileRepoPath);
@@ -662,10 +672,19 @@ export function MobileApprovalsClient({
                 {inboxSnapshot ? (
                   <FleetView
                     sessions={inboxSnapshot.sessions}
-                    onAgentSelect={() => {
-                      // No agent-detail view on mobile yet — stay on the
-                      // Agents tab. Was previously bouncing to Assistant
-                      // which read as a navigation bug.
+                    onAgentSelect={(sessionKey) => {
+                      // v1 mobile model: agent transcripts are read-only.
+                      // Tap an agent → open the transcript sheet. Steering
+                      // happens from the desktop orchestrator.
+                      const session = inboxSnapshot.sessions.find((s) => s.sessionKey === sessionKey);
+                      if (!session) return;
+                      setAgentTranscriptSheet({
+                        sessionKey: session.sessionKey,
+                        name: session.name?.trim() || session.surfaceLabel?.trim() || 'Untitled session',
+                        runtime: session.runtime,
+                        status: session.status,
+                        workspace: session.workspace,
+                      });
                     }}
                     onBack={handleBackToChats}
                     onLaunch={() => {
@@ -683,6 +702,20 @@ export function MobileApprovalsClient({
                 )}
               </Suspense>
             </MobileViewShell>
+          ) : null}
+
+          {agentTranscriptSheet ? (
+            <Suspense fallback={null}>
+              <AgentTranscriptSheet
+                open
+                onClose={() => setAgentTranscriptSheet(null)}
+                sessionKey={agentTranscriptSheet.sessionKey}
+                agentName={agentTranscriptSheet.name}
+                runtime={agentTranscriptSheet.runtime}
+                status={agentTranscriptSheet.status}
+                workspace={agentTranscriptSheet.workspace}
+              />
+            </Suspense>
           ) : null}
 
           {activeView === 'issues' ? (
