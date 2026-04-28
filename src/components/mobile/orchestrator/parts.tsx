@@ -13,6 +13,7 @@ import type {
 } from '@/lib/mobile/types';
 import { useTheme } from '../ThemeContext';
 import { MobileMarkdown } from '@/app/mobile/mobile-markdown';
+import { IconClock } from '@/app/mobile/mobile-approvals-shared';
 
 export function PlusIcon({ size = 14 }: { size?: number }) {
   return (
@@ -238,36 +239,118 @@ export const ThreadCard = memo(function ThreadCard({
   );
 });
 
+function QueuedBadge({
+  stale,
+  queueId,
+  onRetry,
+  onDiscard,
+}: {
+  stale: boolean;
+  queueId: string | null;
+  onRetry?: (queueId: string) => void;
+  onDiscard?: (queueId: string) => void;
+}) {
+  const { colors } = useTheme();
+  const pillStyle: CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    paddingTop: 3,
+    paddingRight: 8,
+    paddingBottom: 3,
+    paddingLeft: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.cardBorder,
+    background: colors.cardBg,
+    color: colors.textTertiary,
+    fontSize: 10,
+    fontWeight: 600,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+  };
+  const actionButtonStyle: CSSProperties = {
+    minHeight: 28,
+    minWidth: 56,
+    paddingTop: 4,
+    paddingBottom: 4,
+    paddingLeft: 10,
+    paddingRight: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.cardBorder,
+    background: colors.cardBg,
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+  };
+  if (stale && queueId) {
+    return (
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <span style={pillStyle}>
+          <IconClock fill={colors.textTertiary} size={11} />
+          <span>Queued · {">"} 1h</span>
+        </span>
+        <button type="button" style={actionButtonStyle} onClick={() => onRetry?.(queueId)}>Retry</button>
+        <button type="button" style={actionButtonStyle} onClick={() => onDiscard?.(queueId)}>Discard</button>
+      </div>
+    );
+  }
+  return (
+    <span style={pillStyle}>
+      <IconClock fill={colors.textTertiary} size={11} />
+      <span>Queued</span>
+    </span>
+  );
+}
+
 export const TranscriptBubble = memo(function TranscriptBubble({
   entry,
+  onRetryQueued,
+  onDiscardQueued,
 }: {
   entry: MobileOrchestratorTranscriptEntry;
+  onRetryQueued?: (queueId: string) => void;
+  onDiscardQueued?: (queueId: string) => void;
 }) {
   const { colors, isDark } = useTheme();
   if (entry.role === 'user') {
     return (
-      <div
-        style={{
-          alignSelf: 'flex-end',
-          maxWidth: '82%',
-          paddingTop: 10,
-          paddingRight: 14,
-          paddingBottom: 10,
-          paddingLeft: 14,
-          borderRadius: 18,
-          borderBottomRightRadius: 8,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: colors.cardBorder,
-          background: colors.msgUserBg,
-          color: colors.text,
-          fontSize: 14,
-          lineHeight: 1.55,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}
-      >
-        {entry.text}
+      <div style={{ alignSelf: 'flex-end', maxWidth: '82%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+        <div
+          style={{
+            paddingTop: 10,
+            paddingRight: 14,
+            paddingBottom: 10,
+            paddingLeft: 14,
+            borderRadius: 18,
+            borderBottomRightRadius: 8,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: entry.queued ? colors.textTertiary : colors.cardBorder,
+            background: colors.msgUserBg,
+            color: colors.text,
+            fontSize: 14,
+            lineHeight: 1.55,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            opacity: entry.queued ? 0.78 : 1,
+          }}
+        >
+          {entry.text}
+        </div>
+        {entry.queued ? (
+          <QueuedBadge
+            stale={entry.queueStale === true}
+            queueId={entry.queueId ?? null}
+            onRetry={onRetryQueued}
+            onDiscard={onDiscardQueued}
+          />
+        ) : null}
       </div>
     );
   }

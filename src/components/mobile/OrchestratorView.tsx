@@ -208,6 +208,8 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     errorNote,
     sendMessage,
     interrupt,
+    retryQueued,
+    discardQueued,
   } = useOrchestratorMobile({ activeThread });
 
   // Pull the orchestrator brain model from operator-defaults so the user
@@ -381,11 +383,12 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
 
   const isEmpty = visibleThreads.length === 0 && !threadsLoading;
   const wsReady = connectionState === 'connected';
+  // Allow sending while offline — sendMessage routes to the offline queue
+  // and the user sees a "Queued" bubble that drains on reconnect.
   const canSend =
     Boolean(activeThread?.repoPath)
     && composerDraft.trim().length > 0
-    && turnStatus !== 'busy'
-    && wsReady;
+    && turnStatus !== 'busy';
 
   // Styles
   const headerStyle: CSSProperties = {
@@ -644,7 +647,12 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
         ) : null}
 
         {transcript.map((entry) => (
-          <TranscriptBubble key={entry.id} entry={entry} />
+          <TranscriptBubble
+            key={entry.id}
+            entry={entry}
+            onRetryQueued={retryQueued}
+            onDiscardQueued={discardQueued}
+          />
         ))}
 
         {turnStatus === 'busy' ? (
@@ -676,11 +684,11 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
                 !activeThread.repoPath
                   ? 'This thread has no repo — open it on desktop to reply.'
                   : !wsReady
-                    ? 'Reconnecting…'
+                    ? 'Offline — messages will queue and send on reconnect…'
                     : 'Reply to the orchestrator…'
               }
               rows={1}
-              disabled={!activeThread.repoPath || (!wsReady && turnStatus !== 'busy')}
+              disabled={!activeThread.repoPath}
               style={composerTextareaStyle}
             />
             {turnStatus === 'busy' ? (
