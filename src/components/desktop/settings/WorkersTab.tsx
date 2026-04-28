@@ -252,14 +252,23 @@ export function WorkersTab() {
       {notice ? (
         <div style={{
           marginBottom: 28,
-          borderLeft: `2px solid #ef4444`,
-          paddingLeft: 14,
           paddingTop: 2,
           paddingBottom: 2,
           fontSize: 13,
           color: 'var(--t-text)',
           lineHeight: 1.55,
         }}>
+          <span style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: '#ef4444',
+            marginRight: 8,
+          }}>
+            [error]
+          </span>
           {notice}
         </div>
       ) : null}
@@ -300,13 +309,24 @@ export function WorkersTab() {
 
         {createdToken ? (
           <div style={{
-            borderLeft: `2px solid ${RAMS_ACCENT}`,
-            paddingLeft: 14,
             paddingTop: 12,
             paddingBottom: 12,
             marginBottom: 16,
           }}>
-            <FieldLabel>token created — copy now</FieldLabel>
+            <div style={{ marginBottom: 4 }}>
+              <span style={{
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                color: RAMS_ACCENT,
+                marginRight: 8,
+              }}>
+                [active]
+              </span>
+              <FieldLabel>token created — copy now</FieldLabel>
+            </div>
             <div style={{
               fontSize: 12,
               color: 'var(--t-text-secondary)',
@@ -628,8 +648,6 @@ export function WorkersTab() {
 
         {restartRequired ? (
           <div style={{
-            borderLeft: `2px solid #f59e0b`,
-            paddingLeft: 14,
             paddingTop: 2,
             paddingBottom: 2,
             fontSize: 12,
@@ -637,6 +655,17 @@ export function WorkersTab() {
             lineHeight: 1.55,
             marginBottom: 14,
           }}>
+            <span style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: '#f59e0b',
+              marginRight: 8,
+            }}>
+              [warn]
+            </span>
             Restart o8 to {restartAction} remote runtime adapters. This session stays {remoteRuntimeRegistered ? 'loaded' : 'unloaded'} until restart.
           </div>
         ) : (

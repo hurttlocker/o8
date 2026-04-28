@@ -306,24 +306,42 @@ export function ExternalMcpServersSection() {
 
         {note ? (
           <div style={{
-            borderLeft: `2px solid ${note.ok ? '#22c55e' : '#ef4444'}`,
-            paddingLeft: 12,
             fontSize: 12,
             color: note.ok ? '#15803d' : '#dc2626',
             lineHeight: 1.55,
           }}>
+            <span style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: note.ok ? '#22c55e' : '#ef4444',
+              marginRight: 8,
+            }}>
+              {note.ok ? '[ok]' : '[error]'}
+            </span>
             {note.message}
           </div>
         ) : null}
 
         {error ? (
           <div style={{
-            borderLeft: `2px solid #ef4444`,
-            paddingLeft: 12,
             fontSize: 12,
             color: '#dc2626',
             lineHeight: 1.55,
           }}>
+            <span style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: '#ef4444',
+              marginRight: 8,
+            }}>
+              [error]
+            </span>
             {error}
           </div>
         ) : null}
