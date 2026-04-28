@@ -27,6 +27,7 @@ import {
 } from './mobile-shell-primitives';
 import { FilterPillRow, type FilterPillOption } from '@/components/mobile/shared/FilterPillRow';
 import { SwipeActions } from '@/components/mobile/SwipeActions';
+import { PullToRefresh } from '@/components/mobile/PullToRefresh';
 
 type ApprovalFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
@@ -434,11 +435,13 @@ export function ApprovalsView({
   onResolve,
   resolving,
   palette,
+  onRefresh,
 }: {
   approvals: ApprovalItem[];
   onResolve: (id: string, action: 'approve' | 'reject', strategy?: string) => void;
   resolving: { id: string; action: 'approve' | 'reject' } | null;
   palette: MobilePalette;
+  onRefresh?: () => Promise<void> | void;
 }) {
   const [filter, setFilter] = useState<ApprovalFilter>('pending');
   const [diffSheet, setDiffSheet] = useState<{
@@ -501,63 +504,68 @@ export function ApprovalsView({
           minHeight: 0,
           overflowY: 'auto',
           paddingBottom: mobileSafeBottom(24),
+          // Contain overscroll so the pull-to-refresh gesture only fires
+          // from the top of THIS list, not the page chrome above it.
+          overscrollBehavior: 'contain',
           // Top fades behind the filter pill row above; bottom fades into the
           // safe-area inset so long approval lists don't cleanly cut off.
           ...mobileScrollFadeStyle({ top: 16, bottom: 24 }),
         }}
       >
-        <MobileGlassPanel palette={palette} style={{ padding: 20, marginBottom: 14 }}>
-          <MobileSectionHeading
-            eyebrow="Approvals Queue"
-            title={headingTitle}
-            subtitle={headingSubtitle}
-            palette={palette}
-          />
-        </MobileGlassPanel>
-
-        {filtered.length > 0 ? (
-          <MobileThreadListRoot>
-            {filtered.map((approval) => (
-              <ApprovalCard
-                key={approval.id}
-                approval={approval}
-                onResolve={onResolve}
-                resolving={resolving}
-                palette={palette}
-                onOpenDiff={(target) => {
-                  if (!target.sessionKey) return;
-                  setDiffSheet({
-                    source: { kind: 'worktree', sessionKey: target.sessionKey },
-                    title: target.title || 'Approval diff',
-                    subtitle: target.metadata?.agent ?? target.toolName,
-                  });
-                }}
-              />
-            ))}
-          </MobileThreadListRoot>
-        ) : (
-          <MobileGlassPanel
-            palette={palette}
-            style={{
-              padding: '44px 20px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              textAlign: 'center',
-            }}
-          >
-            <IconCheck fill={palette.iconFill} style={{ opacity: 0.34 }} />
-            <div style={{ fontSize: 20, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING, marginTop: 16, marginBottom: 6 }}>
-              {filter === 'pending' ? 'All clear' : 'Nothing to show'}
-            </div>
-            <div style={{ fontSize: 13, lineHeight: 1.7, letterSpacing: MOBILE_BODY_TRACKING, color: palette.subduedText, maxWidth: 260 }}>
-              {filter === 'pending'
-                ? 'There are no pending approvals right now. This page will refresh as new requests land.'
-                : 'No approvals match this filter yet.'}
-            </div>
+        <PullToRefresh onRefresh={onRefresh ?? (() => {})} enabled={Boolean(onRefresh)}>
+          <MobileGlassPanel palette={palette} style={{ padding: 20, marginBottom: 14 }}>
+            <MobileSectionHeading
+              eyebrow="Approvals Queue"
+              title={headingTitle}
+              subtitle={headingSubtitle}
+              palette={palette}
+            />
           </MobileGlassPanel>
-        )}
+
+          {filtered.length > 0 ? (
+            <MobileThreadListRoot>
+              {filtered.map((approval) => (
+                <ApprovalCard
+                  key={approval.id}
+                  approval={approval}
+                  onResolve={onResolve}
+                  resolving={resolving}
+                  palette={palette}
+                  onOpenDiff={(target) => {
+                    if (!target.sessionKey) return;
+                    setDiffSheet({
+                      source: { kind: 'worktree', sessionKey: target.sessionKey },
+                      title: target.title || 'Approval diff',
+                      subtitle: target.metadata?.agent ?? target.toolName,
+                    });
+                  }}
+                />
+              ))}
+            </MobileThreadListRoot>
+          ) : (
+            <MobileGlassPanel
+              palette={palette}
+              style={{
+                padding: '44px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+              }}
+            >
+              <IconCheck fill={palette.iconFill} style={{ opacity: 0.34 }} />
+              <div style={{ fontSize: 20, fontWeight: 800, color: palette.rootText, letterSpacing: MOBILE_HEADING_TRACKING, marginTop: 16, marginBottom: 6 }}>
+                {filter === 'pending' ? 'All clear' : 'Nothing to show'}
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.7, letterSpacing: MOBILE_BODY_TRACKING, color: palette.subduedText, maxWidth: 260 }}>
+                {filter === 'pending'
+                  ? 'There are no pending approvals right now. This page will refresh as new requests land.'
+                  : 'No approvals match this filter yet.'}
+              </div>
+            </MobileGlassPanel>
+          )}
+        </PullToRefresh>
       </div>
 
       {diffSheet ? (

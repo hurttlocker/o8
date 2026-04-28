@@ -24,6 +24,7 @@ import {
   mobileSafeBottom,
 } from './mobile-shell-primitives';
 import { FilterPillRow, type FilterPillOption } from '@/components/mobile/shared/FilterPillRow';
+import { PullToRefresh } from '@/components/mobile/PullToRefresh';
 
 type ChatFilter = 'all' | 'active' | 'idle' | 'errored';
 
@@ -192,7 +193,7 @@ export function ChatListView({
   loading: boolean;
   onSelect: (tabId: string) => void;
   onNewChat: () => void;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void> | void;
   palette: MobilePalette;
 }) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -325,12 +326,16 @@ export function ChatListView({
           minHeight: 0,
           overflowY: 'auto',
           paddingBottom: mobileSafeBottom(96),
+          // Contain overscroll so pull-to-refresh fires only from the top of
+          // this list, not the page chrome above it.
+          overscrollBehavior: 'contain',
           // Top fades behind the filter pill row above; bottom fades behind
           // the floating "new chat" FAB so transcripts don't cleanly cut off
           // underneath either chrome strip.
           ...mobileScrollFadeStyle({ top: 16, bottom: 80 }),
         } as CSSProperties}
       >
+       <PullToRefresh onRefresh={onRefresh}>
         {loading ? (
           <MobileGlassPanel palette={palette} style={{ padding: '28px 20px', textAlign: 'center' }}>
             <div style={{ fontSize: 14, color: palette.subduedText }}>
@@ -515,6 +520,7 @@ export function ChatListView({
             </div>
           ))
         )}
+       </PullToRefresh>
       </div>
 
       <button
