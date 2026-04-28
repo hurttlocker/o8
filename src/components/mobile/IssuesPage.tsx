@@ -40,7 +40,19 @@ interface IssuesPageProps {
 }
 
 const STORAGE_KEY = 'o8:registered-repos';
-const DEFAULT_REPOS = ['', 'hurttlocker/cortex'];
+const DEFAULT_REPOS: string[] = [];
+
+interface PanelRepo {
+  remoteUrl?: string;
+  name?: string;
+}
+
+function repoSlugFromRemoteUrl(url: string | undefined): string | null {
+  if (!url) return null;
+  // https://github.com/hurttlocker/cortex-ide.git → hurttlocker/cortex-ide
+  const match = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+  return match ? match[1] : null;
+}
 
 function sectionHeaderStyle(colors: ThemeColors) {
   return {
@@ -516,29 +528,57 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
   const [activeTab, setActiveTab] = useState<'all' | 'issues' | 'prs'>('all');
   const [selectedRepo, setSelectedRepo] = useState('all');
 
+  // Pull the real registered repos from the panel registry. Fallback to
+  // sessionStorage cache so the list isn't empty during the fetch.
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setRepos(loadRegisteredRepos());
-    }, 0);
+    const cached = loadRegisteredRepos();
+    if (cached.length > 0) setRepos(cached.filter((r) => r.length > 0));
 
-    return () => {
-      window.clearTimeout(timer);
-    };
+    const wsToken = typeof document !== 'undefined'
+      ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
+      : '';
+    const headers: Record<string, string> = {};
+    if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
+    void fetch('/api/panel/repos', { cache: 'no-store', headers })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: { repos?: PanelRepo[] } | null) => {
+        if (!data?.repos) return;
+        const slugs = data.repos
+          .map((r) => repoSlugFromRemoteUrl(r.remoteUrl))
+          .filter((s): s is string => Boolean(s));
+        if (slugs.length > 0) {
+          setRepos(slugs);
+          saveRegisteredRepos(slugs);
+        }
+      })
+      .catch((error) => console.log('[mobile-issues] repos fetch failed', error));
   }, []);
 
   const fetchAll = useCallback(async (repoList: string[]) => {
+    const validRepos = repoList.filter((r) => r && r.length > 0);
+    if (validRepos.length === 0) {
+      setIssues([]);
+      setPRs([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    const wsToken = typeof document !== 'undefined'
+      ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
+      : '';
+    const headers: Record<string, string> = {};
+    if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
     const issueResults: { issue: Issue; repo: string }[] = [];
     const prResults: { pr: PR; repo: string }[] = [];
     await Promise.all(
-      repoList.map(async (repo) => {
+      validRepos.map(async (repo) => {
         try {
-          const issueResponse = await fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`);
+          const issueResponse = await fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`, { headers });
           const issueData = await issueResponse.json();
           for (const issue of issueData.issues ?? []) issueResults.push({ issue, repo });
         } catch {}
         try {
-          const prResponse = await fetch(`/api/panel/prs?repo=${encodeURIComponent(repo)}`);
+          const prResponse = await fetch(`/api/panel/prs?repo=${encodeURIComponent(repo)}`, { headers });
           const prData = await prResponse.json();
           for (const pr of prData.prs ?? []) prResults.push({ pr, repo });
         } catch {}
