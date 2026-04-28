@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- lightweight markdown renderer needs raw img support */
 
-import { Fragment, useState, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 
 type MarkdownBlock =
   | { type: 'code'; code: string; language: string }
@@ -11,6 +11,91 @@ type MarkdownBlock =
   | { type: 'list'; ordered: boolean; items: string[] };
 
 export type HighlightToken = { type: 'plain' | 'keyword' | 'string' | 'number' | 'comment' | 'function'; value: string };
+
+// File-path heuristic for tappable inline code (e.g. `src/lib/orchestrator/store.ts`)
+// — must contain a slash and end with a 1–6 char extension. Excludes URLs and pkg@ver.
+const FILE_PATH_RE = /^[\w@\-./]+\/[\w@\-.]+\.[a-zA-Z0-9]{1,6}$/;
+function looksLikeFilePath(value: string): boolean {
+  if (!value || value.length > 200) return false;
+  if (value.includes(' ') || value.includes('://')) return false;
+  return FILE_PATH_RE.test(value);
+}
+
+interface FilePathCodeProps {
+  path: string;
+  onTap?: (path: string) => void;
+}
+
+function FilePathCode({ path, onTap }: FilePathCodeProps) {
+  const [copied, setCopied] = useState(false);
+  const longPressFired = useRef(false);
+  const timerRef = useRef<number | null>(null);
+
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    longPressFired.current = false;
+    clearTimer();
+    timerRef.current = window.setTimeout(() => {
+      longPressFired.current = true;
+      void navigator.clipboard.writeText(path).then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+      }).catch(() => undefined);
+    }, 600);
+  };
+
+  const handlePointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    clearTimer();
+    if (longPressFired.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (onTap) onTap(path);
+  };
+
+  const handlePointerCancel = () => {
+    clearTimer();
+    longPressFired.current = false;
+  };
+
+  return (
+    <code
+      role="button"
+      tabIndex={0}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      onPointerLeave={handlePointerCancel}
+      onContextMenu={(event) => event.preventDefault()}
+      aria-label={copied ? `Copied ${path}` : `File path ${path}`}
+      style={{
+        backgroundColor: copied ? 'rgba(48,209,88,0.18)' : 'rgba(96,165,250,0.14)',
+        borderRadius: 7,
+        color: copied ? '#86efac' : '#93c5fd',
+        cursor: 'pointer',
+        fontFamily: '"SF Mono", Menlo, monospace',
+        fontSize: '0.92em',
+        padding: '0.18em 0.42em',
+        textDecoration: 'none',
+        transition: 'background-color 160ms ease, color 160ms ease',
+        WebkitTapHighlightColor: 'transparent',
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
+        touchAction: 'manipulation',
+      }}
+    >
+      {copied ? `${path} · copied` : path}
+    </code>
+  );
+}
 
 const KEYWORDS = new Set([
   'as', 'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'default', 'delete',
@@ -124,7 +209,12 @@ function tokenizeCodeLine(line: string, inBlockComment: boolean) {
   return { tokens, inBlockComment: nextInBlockComment };
 }
 
-function renderInline(text: string, keyPrefix = 'inline', textColor = '#e5e7eb'): ReactNode[] {
+function renderInline(
+  text: string,
+  keyPrefix = 'inline',
+  textColor = '#e5e7eb',
+  onFilePathTap?: (path: string) => void,
+): ReactNode[] {
   const nodes: ReactNode[] = [];
   const pattern = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([\s\S]+?)\*\*|\*([^*\n]+)\*/g;
   let lastIndex = 0;
@@ -160,25 +250,32 @@ function renderInline(text: string, keyPrefix = 'inline', textColor = '#e5e7eb')
           rel="noreferrer"
           style={{ color: '#60a5fa', textDecoration: 'none' }}
         >
-          {renderInline(match[3], `${key}-link`, textColor)}
+          {renderInline(match[3], `${key}-link`, textColor, onFilePathTap)}
         </a>,
       );
     } else if (match[5] !== undefined) {
-      nodes.push(
-        <code key={key} style={inlineCodeStyle(textColor)}>
-          {match[5]}
-        </code>,
-      );
+      const inlineValue = match[5];
+      if (looksLikeFilePath(inlineValue)) {
+        nodes.push(
+          <FilePathCode key={key} path={inlineValue} onTap={onFilePathTap} />,
+        );
+      } else {
+        nodes.push(
+          <code key={key} style={inlineCodeStyle(textColor)}>
+            {inlineValue}
+          </code>,
+        );
+      }
     } else if (match[6] !== undefined) {
       nodes.push(
         <strong key={key} style={{ color: textColor, fontWeight: 600 }}>
-          {renderInline(match[6], `${key}-bold`, textColor)}
+          {renderInline(match[6], `${key}-bold`, textColor, onFilePathTap)}
         </strong>,
       );
     } else if (match[7] !== undefined) {
       nodes.push(
         <em key={key} style={{ color: textColor, fontStyle: 'italic', opacity: 0.82 }}>
-          {renderInline(match[7], `${key}-italic`, textColor)}
+          {renderInline(match[7], `${key}-italic`, textColor, onFilePathTap)}
         </em>,
       );
     }
@@ -485,7 +582,17 @@ function CodeBlock({ code, language, light }: { code: string; language: string; 
   );
 }
 
-export function MobileMarkdown({ content, textColor, light }: { content: string; textColor?: string; light?: boolean }) {
+export function MobileMarkdown({
+  content,
+  textColor,
+  light,
+  onFilePathTap,
+}: {
+  content: string;
+  textColor?: string;
+  light?: boolean;
+  onFilePathTap?: (path: string) => void;
+}) {
   const blocks = parseBlocks(content);
   const baseColor = textColor ?? '#e5e7eb';
   const isLight = light ?? false;
@@ -512,7 +619,7 @@ export function MobileMarkdown({ content, textColor, light }: { content: string;
                 marginBottom: 10,
               }}
             >
-              {renderInline(stripEmoji(block.text), `heading-${index}`, baseColor)}
+              {renderInline(stripEmoji(block.text), `heading-${index}`, baseColor, onFilePathTap)}
             </div>
           );
         }
@@ -532,7 +639,7 @@ export function MobileMarkdown({ content, textColor, light }: { content: string;
             >
               {quoteParagraphs.map((paragraph, paragraphIndex) => (
                 <div key={`quote-${index}-${paragraphIndex}`} style={{ marginBottom: paragraphIndex === quoteParagraphs.length - 1 ? 0 : 10 }}>
-                  {renderInline(paragraph.replace(/\n/g, ' '), `quote-${index}-${paragraphIndex}`, baseColor)}
+                  {renderInline(paragraph.replace(/\n/g, ' '), `quote-${index}-${paragraphIndex}`, baseColor, onFilePathTap)}
                 </div>
               ))}
             </div>
@@ -553,7 +660,7 @@ export function MobileMarkdown({ content, textColor, light }: { content: string;
             >
               {block.items.map((item, itemIndex) => (
                 <li key={`list-${index}-${itemIndex}`} style={{ marginBottom: 8, paddingLeft: 4 }}>
-                  {renderInline(stripEmoji(item), `list-${index}-${itemIndex}`, baseColor)}
+                  {renderInline(stripEmoji(item), `list-${index}-${itemIndex}`, baseColor, onFilePathTap)}
                 </li>
               ))}
             </ListTag>
@@ -562,7 +669,7 @@ export function MobileMarkdown({ content, textColor, light }: { content: string;
 
         return (
           <p key={`paragraph-${index}`} style={{ marginTop: 0, marginBottom: 14 }}>
-            {renderInline(stripEmoji(block.text), `paragraph-${index}`, baseColor)}
+            {renderInline(stripEmoji(block.text), `paragraph-${index}`, baseColor, onFilePathTap)}
           </p>
         );
       })}
