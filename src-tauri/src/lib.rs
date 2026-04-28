@@ -1013,8 +1013,32 @@ fn read_workspaces() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "workspaces": workspaces }))
 }
 
+// Sanity-bounds the saved window-state.json before tauri-plugin-window-state restores
+// from it. Multi-monitor reconfigs or virtual-desktop bugs can save dimensions like
+// 17000x2820 — wider than any real screen — and the plugin restores them blindly.
+// Drop the file if its main window size is outside reasonable bounds; the plugin then
+// falls back to the configured defaults from tauri.conf.json.
+fn sanitize_window_state() {
+    let Some(home) = std::env::var_os("HOME") else { return };
+    let path = std::path::PathBuf::from(home)
+        .join("Library/Application Support/ai.o8.desktop/.window-state.json");
+    let Ok(content) = std::fs::read_to_string(&path) else { return };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        let _ = std::fs::remove_file(&path);
+        return;
+    };
+    let main = json.get("main");
+    let width = main.and_then(|m| m.get("width")).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let height = main.and_then(|m| m.get("height")).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    if width > 6000.0 || height > 4000.0 || width < 400.0 || height < 300.0 {
+        eprintln!("[o8] discarding off-bounds window state ({}x{})", width, height);
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    sanitize_window_state();
     #[allow(unused_mut)] // `mut` is needed only when `dev-mcp-plugin` feature is enabled
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default()
