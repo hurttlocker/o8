@@ -96,22 +96,25 @@ function RepoCardExpandedContentBase({
     )),
     [orchestratorPackets, repo.localPath],
   );
-  // Active-work-only visibility rule (#750 — root cause):
-  // hasAgent counts only agents in a live state (running/reviewing/awaiting_review).
-  // Without this gate, every worktree that ever had an agent stays visible forever
-  // because agent records aren't pruned on teardown. Completed/idle/terminated
-  // agents don't qualify a branch for the rail.
+  // Active-work-only visibility rule (#750 — activity-window gate):
+  // hasAgent alone is unreliable because agent records persist after teardown
+  // with stale status='running'. Gate on lastActivityAt — an agent counts only
+  // if it's reported activity in the last 5 minutes. Pairs with future server-
+  // side pruning (#750-B) but works without it.
   const visibleBranches = useMemo(
-    () => branches.filter((branch) => {
-      if (branch.current) return true;
-      const branchAgents = agentsByBranch?.get(branch.name) ?? [];
-      const hasRunningAgent = branchAgents.some((agent) => {
-        const status = (agent.status ?? '').toLowerCase();
-        return status === 'running' || status === 'reviewing' || status === 'awaiting_review';
+    () => {
+      const ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
+      const cutoff = Date.now() - ACTIVITY_WINDOW_MS;
+      return branches.filter((branch) => {
+        if (branch.current) return true;
+        const branchAgents = agentsByBranch?.get(branch.name) ?? [];
+        const hasLiveAgent = branchAgents.some((agent) => (
+          typeof agent.lastActivityAt === 'number' && agent.lastActivityAt >= cutoff
+        ));
+        if (hasLiveAgent) return true;
+        return repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
       });
-      if (hasRunningAgent) return true;
-      return repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
-    }),
+    },
     [agentsByBranch, branches, repoScopedPackets],
   );
   const hiddenBranchCount = useMemo(
