@@ -107,7 +107,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
     boxShadow: open
       ? '0 14px 30px rgba(0, 0, 0, 0.30)'
       : '0 10px 24px rgba(0, 0, 0, 0.22)',
-    transition: 'background 220ms ease, box-shadow 220ms ease, transform 180ms ease',
+    transition: 'background 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
     WebkitTapHighlightColor: 'transparent',
     position: 'relative',
     padding: 0,
@@ -206,7 +206,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           <span style={{
             display: 'block', width: 12, height: 1.5, borderRadius: 1,
             background: 'currentColor',
-            transition: 'all 200ms ease',
+            transition: 'all 200ms cubic-bezier(0.22, 1, 0.36, 1)',
             opacity: open ? 0 : 1,
           }} />
           <span style={{

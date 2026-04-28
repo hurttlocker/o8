@@ -91,7 +91,7 @@ export const MessageActions = memo(function MessageActions({
     cursor: 'pointer',
     padding: 0,
     WebkitTapHighlightColor: 'transparent',
-    transition: 'all 120ms ease',
+    transition: 'all 120ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 
   return (

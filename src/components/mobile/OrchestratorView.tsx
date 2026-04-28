@@ -464,7 +464,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
     cursor: canSend ? 'pointer' : 'default', flexShrink: 0,
     WebkitTapHighlightColor: 'transparent',
-    transition: 'background 180ms ease, color 180ms ease',
+    transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
   const stopButtonStyle: CSSProperties = {
     ...sendButtonStyle,

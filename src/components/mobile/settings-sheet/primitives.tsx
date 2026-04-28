@@ -227,7 +227,7 @@ export function ToggleRow({
           cursor: 'pointer',
           padding: 0,
           flexShrink: 0,
-          transition: 'background-color 0.18s ease',
+          transition: 'background-color 0.18s cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
         <span
@@ -240,7 +240,7 @@ export function ToggleRow({
             borderRadius: 999,
             background: '#ffffff',
             boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-            transition: 'left 0.18s ease',
+            transition: 'left 0.18s cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         />
       </button>

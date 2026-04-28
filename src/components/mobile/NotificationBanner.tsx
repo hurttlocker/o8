@@ -81,7 +81,7 @@ function BannerCard({ notification, onDismiss, onTap }: {
         if (dismissed) {
           // Animate out before removing
           if (cardRef.current) {
-            cardRef.current.style.transition = 'transform 200ms ease, opacity 200ms ease';
+            cardRef.current.style.transition = 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms cubic-bezier(0.22, 1, 0.36, 1)';
             if (axis.current === 'y') {
               cardRef.current.style.transform = 'translateY(-80px)';
             } else {
@@ -91,7 +91,7 @@ function BannerCard({ notification, onDismiss, onTap }: {
           }
           setTimeout(onDismiss, 180);
         } else if (cardRef.current) {
-          cardRef.current.style.transition = 'transform 250ms cubic-bezier(0.22, 1, 0.36, 1), opacity 250ms ease';
+          cardRef.current.style.transition = 'transform 250ms cubic-bezier(0.22, 1, 0.36, 1), opacity 250ms cubic-bezier(0.22, 1, 0.36, 1)';
           cardRef.current.style.transform = 'translate(0, 0)';
           cardRef.current.style.opacity = '1';
           // Clear transition after spring-back
@@ -116,7 +116,7 @@ function BannerCard({ notification, onDismiss, onTap }: {
         boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
-        transition: 'transform 200ms ease, opacity 200ms ease',
+        transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms cubic-bezier(0.22, 1, 0.36, 1)',
         animation: 'bannerSlideDown 350ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
