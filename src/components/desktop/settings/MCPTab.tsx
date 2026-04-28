@@ -368,8 +368,13 @@ export function MCPTab() {
                 onClick={() => { void copyToClipboard(); }}
                 style={{
                   position: 'absolute',
-                  top: 10,
-                  right: 10,
+                  top: 4,
+                  right: 4,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: 44,
+                  minWidth: 44,
                   paddingTop: 3,
                   paddingBottom: 3,
                   paddingLeft: 10,
@@ -437,6 +442,7 @@ function Disclosure({
           alignItems: 'center',
           gap: 8,
           width: '100%',
+          minHeight: 44,
           paddingTop: 8,
           paddingBottom: 8,
           paddingLeft: 0,
@@ -623,6 +629,9 @@ function DiagnosticRow({ label, ok, detail }: { label: string; ok: boolean; deta
 
 function accentActionStyle(disabled: boolean): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 44,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11,
     fontWeight: 400,
@@ -642,6 +651,9 @@ function accentActionStyle(disabled: boolean): React.CSSProperties {
 
 function quietActionStyle(disabled: boolean): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 44,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11,
     fontWeight: 400,

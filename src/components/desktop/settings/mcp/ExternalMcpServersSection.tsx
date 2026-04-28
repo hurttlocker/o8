@@ -253,6 +253,7 @@ export function ExternalMcpServersSection() {
                     justifyContent: 'space-between',
                     gap: 12,
                     width: '100%',
+                    minHeight: 44,
                     paddingTop: 10,
                     paddingBottom: 10,
                     paddingLeft: 14,
@@ -651,6 +652,9 @@ function ServerRow({
                 type="button"
                 onClick={onToggleStderr}
                 style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  minHeight: 44,
                   fontFamily: MONO_FONT_STACK,
                   fontSize: 10,
                   fontWeight: 400,
@@ -738,6 +742,11 @@ function textareaStyle(): React.CSSProperties {
 
 function transportPillStyle(active: boolean): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    minWidth: 44,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11,
     fontWeight: 400,
@@ -749,8 +758,8 @@ function transportPillStyle(active: boolean): React.CSSProperties {
     borderRadius: 4,
     paddingTop: 4,
     paddingBottom: 4,
-    paddingLeft: 10,
-    paddingRight: 10,
+    paddingLeft: 12,
+    paddingRight: 12,
     cursor: 'pointer',
     outline: 'none',
   };
@@ -758,6 +767,9 @@ function transportPillStyle(active: boolean): React.CSSProperties {
 
 function parseButtonStyle(disabled: boolean): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 44,
     fontFamily: APP_FONT_STACK,
     fontSize: 13,
     fontWeight: 500,
@@ -780,7 +792,7 @@ function submitButtonStyle(disabled: boolean): React.CSSProperties {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 8,
-    height: 32,
+    minHeight: 44,
     paddingLeft: 14,
     paddingRight: 14,
     borderRadius: 8,
@@ -802,6 +814,9 @@ function submitButtonStyle(disabled: boolean): React.CSSProperties {
 
 function quietActionStyle(disabled: boolean): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 44,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11,
     fontWeight: 400,
@@ -821,6 +836,9 @@ function quietActionStyle(disabled: boolean): React.CSSProperties {
 
 function rowLinkStyle(disabled: boolean): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 44,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11,
     fontWeight: 400,
