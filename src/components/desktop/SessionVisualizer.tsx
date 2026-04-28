@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import type { FleetAgent } from './thoughts/types';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
@@ -114,6 +114,245 @@ function SplitTileIcon({
     </svg>
   );
 }
+
+interface SessionPillProps {
+  session: VisualSession;
+  tiled: boolean;
+  onSelectSession?: (sessionKey: string) => void;
+  onToggleTileSession?: (sessionKey: string) => void;
+  onRequestContextMenu?: (request: SessionPillContextMenuRequest) => void;
+}
+
+function SessionPillBase({
+  session,
+  tiled,
+  onSelectSession,
+  onToggleTileSession,
+  onRequestContextMenu,
+}: SessionPillProps) {
+  const statusColor = STATUS_COLORS[session.status];
+  const tint = runtimeTint(session.runtime);
+
+  const handleContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!onRequestContextMenu) return;
+    event.preventDefault();
+    onRequestContextMenu({
+      sessionKey: session.key,
+      sessionName: session.name,
+      isTiled: tiled,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+  }, [onRequestContextMenu, session.key, session.name, tiled]);
+
+  const handleSelect = useCallback(() => {
+    onSelectSession?.(session.key);
+  }, [onSelectSession, session.key]);
+
+  const handleToggleTile = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onToggleTileSession?.(session.key);
+  }, [onToggleTileSession, session.key]);
+
+  const handleWrapperEnter = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.currentTarget.style.borderColor = 'var(--t-accent-border)';
+    if (!tiled) event.currentTarget.style.background = 'var(--t-panel-hover)';
+  }, [tiled]);
+
+  const handleWrapperLeave = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)';
+    event.currentTarget.style.background = tiled ? 'var(--t-panel)' : 'transparent';
+  }, [tiled]);
+
+  const handleToggleEnter = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.style.background = tiled ? 'var(--t-accent-soft)' : 'var(--t-panel)';
+    event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'var(--t-border)';
+    event.currentTarget.style.color = tiled ? 'var(--t-accent)' : 'var(--t-text)';
+  }, [tiled]);
+
+  const handleToggleLeave = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.style.background = tiled ? 'var(--t-accent-soft)' : 'transparent';
+    event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'transparent';
+    event.currentTarget.style.color = tiled ? 'var(--t-accent)' : 'var(--t-text-secondary)';
+  }, [tiled]);
+
+  return (
+    <div
+      title={`${session.name} — ${session.headline}`}
+      onContextMenu={onRequestContextMenu ? handleContextMenu : undefined}
+      style={{
+        position: 'relative',
+        minWidth: 148,
+        maxWidth: 188,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: tiled ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)',
+        background: tiled ? 'var(--t-panel)' : 'transparent',
+        color: 'var(--t-text)',
+        flexShrink: 0,
+        boxShadow: 'none',
+        transition: 'border-color 120ms ease, background 120ms ease',
+      }}
+      onMouseEnter={handleWrapperEnter}
+      onMouseLeave={handleWrapperLeave}
+    >
+      <button
+        type="button"
+        onClick={handleSelect}
+        style={{
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 3,
+          paddingTop: 6,
+          paddingRight: 32,
+          paddingBottom: 6,
+          paddingLeft: 8,
+          borderRadius: 8,
+          borderWidth: 0,
+          background: 'transparent',
+          color: 'inherit',
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            minWidth: 0,
+          }}
+        >
+          <span
+            style={{
+              width: 5,
+              height: 5,
+              borderRadius: '50%',
+              background: statusColor,
+              flexShrink: 0,
+              boxShadow: session.status === 'running' ? `0 0 0 2px ${statusColor}22` : 'none',
+            }}
+          />
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: tint,
+              flexShrink: 0,
+            }}
+          >
+            {runtimeLabel(session.runtime)}
+          </span>
+          <span
+            style={{
+              fontSize: 10.5,
+              fontWeight: 500,
+              color: 'var(--t-text-muted)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+          >
+            {session.workspace ?? session.name}
+          </span>
+        </div>
+
+        <div
+          style={{
+            fontSize: 10.5,
+            fontWeight: 500,
+            color: 'var(--t-text-muted)',
+            lineHeight: 1.3,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {session.headline}
+        </div>
+
+        {session.contextPct !== null ? (
+          <div
+            style={{
+              marginTop: 1,
+              height: 2,
+              borderRadius: 1,
+              background: 'var(--t-divider-subtle)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.min(100, Math.max(0, session.contextPct))}%`,
+                height: '100%',
+                background: session.contextPct > 85
+                  ? '#ef4444'
+                  : session.contextPct > 65
+                    ? '#f59e0b'
+                    : 'var(--t-accent)',
+              }}
+            />
+          </div>
+        ) : null}
+      </button>
+
+      <button
+        type="button"
+        aria-label={tiled ? `Remove ${session.name} from tiled view` : `Add ${session.name} to tiled view`}
+        title={tiled ? 'Remove from tiled view' : 'Add to tiled view'}
+        onClick={handleToggleTile}
+        style={{
+          position: 'absolute',
+          top: 4,
+          right: 4,
+          width: 22,
+          height: 22,
+          borderRadius: 6,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: tiled ? 'var(--t-accent-border)' : 'transparent',
+          background: tiled ? 'var(--t-accent-soft)' : 'transparent',
+          color: tiled ? 'var(--t-accent)' : 'var(--t-text-faint)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+        }}
+        onMouseEnter={handleToggleEnter}
+        onMouseLeave={handleToggleLeave}
+      >
+        <SplitTileIcon active={tiled} />
+      </button>
+    </div>
+  );
+}
+
+const SessionPill = memo(SessionPillBase, (prev, next) => {
+  // Identity-stable callback refs from parent are expected (useCallback in
+  // use-session-tiles + handleSelectSession). Compare visually-relevant fields.
+  if (prev.tiled !== next.tiled) return false;
+  if (prev.onSelectSession !== next.onSelectSession) return false;
+  if (prev.onToggleTileSession !== next.onToggleTileSession) return false;
+  if (prev.onRequestContextMenu !== next.onRequestContextMenu) return false;
+  const a = prev.session;
+  const b = next.session;
+  if (a === b) return true;
+  return (
+    a.key === b.key
+    && a.runtime === b.runtime
+    && a.name === b.name
+    && a.workspace === b.workspace
+    && a.status === b.status
+    && a.headline === b.headline
+    && a.contextPct === b.contextPct
+  );
+});
 
 function SessionVisualizerBase({
   agents,
@@ -287,194 +526,16 @@ function SessionVisualizerBase({
             scrollbarWidth: 'thin',
           }}
         >
-          {sessions.map((session) => {
-            const statusColor = STATUS_COLORS[session.status];
-            const tint = runtimeTint(session.runtime);
-            const tiled = tiledSet.has(session.key);
-
-            return (
-              <div
-                key={session.key}
-                title={`${session.name} — ${session.headline}`}
-                onContextMenu={onRequestContextMenu ? (event) => {
-                  event.preventDefault();
-                  onRequestContextMenu({
-                    sessionKey: session.key,
-                    sessionName: session.name,
-                    isTiled: tiled,
-                    clientX: event.clientX,
-                    clientY: event.clientY,
-                  });
-                } : undefined}
-                style={{
-                  position: 'relative',
-                  minWidth: 148,
-                  maxWidth: 188,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: tiled ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)',
-                  background: tiled ? 'var(--t-panel)' : 'transparent',
-                  color: 'var(--t-text)',
-                  flexShrink: 0,
-                  boxShadow: 'none',
-                  transition: 'border-color 120ms ease, background 120ms ease',
-                }}
-                onMouseEnter={(event) => {
-                  event.currentTarget.style.borderColor = 'var(--t-accent-border)';
-                  if (!tiled) event.currentTarget.style.background = 'var(--t-panel-hover)';
-                }}
-                onMouseLeave={(event) => {
-                  event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)';
-                  event.currentTarget.style.background = tiled ? 'var(--t-panel)' : 'transparent';
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => onSelectSession?.(session.key)}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 3,
-                    paddingTop: 6,
-                    paddingRight: 32,
-                    paddingBottom: 6,
-                    paddingLeft: 8,
-                    borderRadius: 8,
-                    borderWidth: 0,
-                    background: 'transparent',
-                    color: 'inherit',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      minWidth: 0,
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 5,
-                        height: 5,
-                        borderRadius: '50%',
-                        background: statusColor,
-                        flexShrink: 0,
-                        boxShadow: session.status === 'running' ? `0 0 0 2px ${statusColor}22` : 'none',
-                      }}
-                    />
-                    <span
-                      style={{
-                        fontSize: 9,
-                        fontWeight: 700,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        color: tint,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {runtimeLabel(session.runtime)}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 10.5,
-                        fontWeight: 500,
-                        color: 'var(--t-text-muted)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        minWidth: 0,
-                      }}
-                    >
-                      {session.workspace ?? session.name}
-                    </span>
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 10.5,
-                      fontWeight: 500,
-                      color: 'var(--t-text-muted)',
-                      lineHeight: 1.3,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {session.headline}
-                  </div>
-
-                  {session.contextPct !== null ? (
-                    <div
-                      style={{
-                        marginTop: 1,
-                        height: 2,
-                        borderRadius: 1,
-                        background: 'var(--t-divider-subtle)',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${Math.min(100, Math.max(0, session.contextPct))}%`,
-                          height: '100%',
-                          background: session.contextPct > 85
-                            ? '#ef4444'
-                            : session.contextPct > 65
-                              ? '#f59e0b'
-                              : 'var(--t-accent)',
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                </button>
-
-                <button
-                  type="button"
-                  aria-label={tiled ? `Remove ${session.name} from tiled view` : `Add ${session.name} to tiled view`}
-                  title={tiled ? 'Remove from tiled view' : 'Add to tiled view'}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onToggleTileSession?.(session.key);
-                  }}
-                  style={{
-                    position: 'absolute',
-                    top: 4,
-                    right: 4,
-                    width: 22,
-                    height: 22,
-                    borderRadius: 6,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: tiled ? 'var(--t-accent-border)' : 'transparent',
-                    background: tiled ? 'var(--t-accent-soft)' : 'transparent',
-                    color: tiled ? 'var(--t-accent)' : 'var(--t-text-faint)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                  }}
-                  onMouseEnter={(event) => {
-                    event.currentTarget.style.background = tiled ? 'var(--t-accent-soft)' : 'var(--t-panel)';
-                    event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'var(--t-border)';
-                    event.currentTarget.style.color = tiled ? 'var(--t-accent)' : 'var(--t-text)';
-                  }}
-                  onMouseLeave={(event) => {
-                    event.currentTarget.style.background = tiled ? 'var(--t-accent-soft)' : 'transparent';
-                    event.currentTarget.style.borderColor = tiled ? 'var(--t-accent-border)' : 'transparent';
-                    event.currentTarget.style.color = tiled ? 'var(--t-accent)' : 'var(--t-text-secondary)';
-                  }}
-                >
-                  <SplitTileIcon active={tiled} />
-                </button>
-              </div>
-            );
-          })}
+          {sessions.map((session) => (
+            <SessionPill
+              key={session.key}
+              session={session}
+              tiled={tiledSet.has(session.key)}
+              onSelectSession={onSelectSession}
+              onToggleTileSession={onToggleTileSession}
+              onRequestContextMenu={onRequestContextMenu}
+            />
+          ))}
         </div>
       )}
     </div>
