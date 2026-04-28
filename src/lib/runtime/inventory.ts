@@ -302,6 +302,14 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     session.sessionKey?.startsWith('codex-owned:')
     || ideSessionByKey.has(session.sessionKey)
     || isRegistryBackedRuntimeSession(session.sessionKey)
+    // #658 — Orchestrator-spawned lanes mark themselves with ownership='owned'
+    // when their cwd lives inside `.cortex-worktrees/packet-*`. Surface them
+    // so the desktop SessionVisualizer + AgentPanel can show their pills and
+    // route transcript reads. Without this they'd be filtered out because
+    // they're not in the IDE registry (orchestrator dispatch doesn't touch
+    // the IDE workspace tabs) and not in the terminal-session registry
+    // (orchestrator goes through the bridge terminal, not user PTY).
+    || (session.ownership === 'owned' && session.runtimeId === 'claude-code')
   ));
 
   const agents = discovered.map(({ runtime, session }) => mapRuntimeSessionToAgent(runtime, session, ideSessionByKey.get(session.sessionKey)));
