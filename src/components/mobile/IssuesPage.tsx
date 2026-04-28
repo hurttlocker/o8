@@ -2,8 +2,14 @@
 
 import { Suspense, lazy, memo, useCallback, useEffect, useState } from 'react';
 import { useTheme } from './ThemeContext';
+import { MobileIssuesPRCard, repoShortLabel, type IssuesPagePR } from './MobileIssuesPRCard';
 
 const DeployStatus = lazy(() => import('./DeployStatus'));
+const MobileDiffViewer = lazy(async () => ({
+  default: (await import('./MobileDiffViewer')).MobileDiffViewer,
+}));
+
+type PR = IssuesPagePR;
 
 type ThemeColors = ReturnType<typeof useTheme>['colors'];
 
@@ -15,21 +21,6 @@ interface Issue {
   author?: { login: string };
   body?: string;
   createdAt?: string;
-}
-
-interface PR {
-  number: number;
-  title: string;
-  author: { login: string };
-  headRefName: string;
-  baseRefName: string;
-  state: string;
-  additions: number;
-  deletions: number;
-  changedFiles: number;
-  statusCheckRollup: { name: string; status: string; conclusion: string }[];
-  reviewDecision: string;
-  url: string;
 }
 
 interface IssuesPageProps {
@@ -95,24 +86,7 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function repoShort(repo: string): string {
-  const map: Record<string, string> = {
-    '': 'Cortex IDE',
-    'hurttlocker/cortex': 'Cortex',
-    'LavonTMCQ/spear-production': 'Spear',
-    'LavonTMCQ/mybeautifulwife': 'Antiflammi',
-  };
-  return map[repo] ?? repo.split('/').pop() ?? repo;
-}
-
-function checksRollup(checks: { status: string; conclusion: string }[]): { color: string; label: string } {
-  if (!checks || checks.length === 0) return { color: '#A09890', label: 'No CI' };
-  const failed = checks.some((check) => check.conclusion === 'FAILURE');
-  const pending = checks.some((check) => check.status !== 'COMPLETED');
-  if (failed) return { color: '#ff453a', label: 'CI Failed' };
-  if (pending) return { color: '#ff9f0a', label: 'CI Running' };
-  return { color: '#30d158', label: 'CI Passed' };
-}
+const repoShort = repoShortLabel;
 
 const IssueCard = memo(function IssueCard({ issue, repo }: { issue: Issue; repo: string }) {
   const { colors } = useTheme();
@@ -213,132 +187,6 @@ const IssueCard = memo(function IssueCard({ issue, repo }: { issue: Issue; repo:
         </p>
       ) : null}
     </div>
-  );
-});
-
-const PRCard = memo(function PRCard({
-  pr,
-  repo,
-  onOpen,
-}: {
-  pr: PR;
-  repo: string;
-  onOpen: () => void;
-}) {
-  const { colors } = useTheme();
-  const ci = checksRollup(pr.statusCheckRollup);
-
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        onOpen();
-      }}
-      onTouchEnd={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onOpen();
-      }}
-      style={{
-        width: '100%',
-        minHeight: 44,
-        padding: '14px',
-        borderRadius: 14,
-        background: colors.cardBg,
-        border: `1px solid ${colors.cardBorder}`,
-        cursor: 'pointer',
-        WebkitTapHighlightColor: 'transparent',
-        touchAction: 'manipulation',
-        textAlign: 'left',
-        display: 'block',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={colors.blueAccent}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{ flexShrink: 0, marginTop: 2 }}
-        >
-          <circle cx="18" cy="18" r="3" />
-          <circle cx="6" cy="6" r="3" />
-          <path d="M13 6h3a2 2 0 0 1 2 2v7" />
-          <line x1="6" y1="9" x2="6" y2="21" />
-        </svg>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, lineHeight: 1.4 }}>{pr.title}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: colors.textSecondary, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-              #{pr.number}
-            </span>
-            <span
-              style={{
-                fontSize: 10,
-                color: colors.blueAccent,
-                padding: '3px 8px',
-                borderRadius: 999,
-                background: colors.blueGlass,
-                border: `1px solid ${colors.blueGlassBorder}`,
-                fontWeight: 600,
-              }}
-            >
-              {repoShort(repo)}
-            </span>
-            <span style={{ fontSize: 10, color: colors.textSecondary }}>{pr.headRefName}</span>
-          </div>
-        </div>
-        <span
-          style={{
-            fontSize: 9,
-            fontWeight: 700,
-            padding: '4px 8px',
-            borderRadius: 999,
-            background: `${ci.color}18`,
-            color: ci.color,
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}
-        >
-          {ci.label}
-        </span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, marginLeft: 22, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: colors.textSecondary }}>{pr.changedFiles} files</span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: '#30d158', fontFamily: '"SF Mono", monospace' }}>
-          +{pr.additions}
-        </span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: '#ff453a', fontFamily: '"SF Mono", monospace' }}>
-          -{pr.deletions}
-        </span>
-        {pr.reviewDecision ? (
-          <span
-            style={{
-              fontSize: 9,
-              fontWeight: 600,
-              marginLeft: 'auto',
-              color:
-                pr.reviewDecision === 'APPROVED'
-                  ? '#30d158'
-                  : pr.reviewDecision === 'CHANGES_REQUESTED'
-                    ? '#ff453a'
-                    : '#ff9f0a',
-            }}
-          >
-            {pr.reviewDecision === 'APPROVED'
-              ? 'Approved'
-              : pr.reviewDecision === 'CHANGES_REQUESTED'
-                ? 'Changes requested'
-                : 'Review needed'}
-          </span>
-        ) : null}
-      </div>
-    </button>
   );
 });
 
@@ -527,6 +375,18 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'all' | 'issues' | 'prs'>('all');
   const [selectedRepo, setSelectedRepo] = useState('all');
+  const [diffSheet, setDiffSheet] = useState<{ repo: string; pr: PR } | null>(null);
+
+  const handleOpenPRDiff = useCallback(
+    (repo: string, pr: PR) => {
+      setDiffSheet({ repo, pr });
+      // Legacy navigator hook (no current callers wire it). The diff sheet is
+      // the primary action — onOpenPR fires alongside if a parent wants to
+      // also push their own route.
+      if (onOpenPR) onOpenPR(repo, pr.number);
+    },
+    [onOpenPR],
+  );
 
   // Pull the real registered repos from the panel registry. Fallback to
   // sessionStorage cache so the list isn't empty during the fetch.
@@ -740,7 +600,7 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
               <>
                 {activeTab === 'all' ? <SectionHeader label="Pull Requests" /> : null}
                 {filteredPRs.map(({ pr, repo }) => (
-                  <PRCard key={`pr-${repo}-${pr.number}`} pr={pr} repo={repo} onOpen={() => onOpenPR?.(repo, pr.number)} />
+                  <MobileIssuesPRCard key={`pr-${repo}-${pr.number}`} pr={pr} repo={repo} onOpen={() => handleOpenPRDiff(repo, pr)} />
                 ))}
               </>
             ) : null}
@@ -808,6 +668,18 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
           <DeployStatus repos={repos} />
         </Suspense>
       </div>
+
+      {diffSheet ? (
+        <Suspense fallback={null}>
+          <MobileDiffViewer
+            open
+            onClose={() => setDiffSheet(null)}
+            source={{ kind: 'pr', repo: diffSheet.repo, number: diffSheet.pr.number }}
+            title={diffSheet.pr.title}
+            subtitle={`${repoShort(diffSheet.repo)} #${diffSheet.pr.number}`}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }
