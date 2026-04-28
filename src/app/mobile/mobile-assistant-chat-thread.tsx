@@ -8,6 +8,7 @@ import {
   toPersistedChatMessages,
   type PersistedMobileChatMessage,
 } from './mobile-assistant-chat-runtime';
+import { useDrainAssistantQueueOnline, wrapWithOfflineQueue } from './mobile-assistant-offline';
 import { ChatMessageRow, ComposerBar, EmptyState, ModelBadge } from './mobile-assistant-chat-ui';
 import { MobileRepoPicker } from './mobile-repo-picker';
 import { initSounds } from '@/lib/mobile/sounds';
@@ -63,6 +64,9 @@ function MobileAssistantThreadSurface({
   useEffect(() => {
     initSounds();
   }, []);
+
+  // Drain the assistant pending queue on reconnect (packet #646).
+  useDrainAssistantQueueOnline(tabId);
 
   const persistConversation = useCallback(async (messages: PersistedMobileChatMessage[], signature: string) => {
     if (!tabId || messages.length === 0) return;
@@ -208,8 +212,8 @@ export function MobileAssistantChatThread({
   palette: MobilePalette;
 }) {
   const chatModel = useMemo(
-    () => createMobileChatModel(selectedModel, repoPath),
-    [repoPath, selectedModel],
+    () => wrapWithOfflineQueue(createMobileChatModel(selectedModel, repoPath), tabId),
+    [repoPath, selectedModel, tabId],
   );
   const runtime = useLocalRuntime(chatModel, {
     initialMessages: toAssistantUiMessages(initialMessages),

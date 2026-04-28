@@ -30,6 +30,15 @@ import type {
   MobileOrchestratorThread,
   MobileOrchestratorTranscriptEntry,
 } from '@/lib/mobile/types';
+import {
+  enqueuePending,
+  generatePendingId,
+  getPendingQueue,
+  isPendingStale,
+  removePending,
+  PENDING_QUEUE_MAX,
+  type PendingQueueItem,
+} from '@/lib/mobile/pending-queue';
 
 export type MobileOrchestratorConnectionState =
   | 'disconnected'
@@ -53,6 +62,8 @@ interface UseOrchestratorMobileResult {
   sendMessage: (text: string) => void;
   interrupt: () => void;
   resetTranscript: () => void;
+  retryQueued: (queueId: string) => void;
+  discardQueued: (queueId: string) => void;
 }
 
 const INITIAL_BACKOFF = 1_000;
@@ -164,7 +175,10 @@ export function useOrchestratorMobile({
     persistTimerRef.current = setTimeout(() => {
       persistTimerRef.current = null;
       const messages = entries
-        .filter((entry) => entry.role === 'user' || entry.role === 'assistant')
+        // Skip queued entries — they live in the pending-queue localStorage
+        // until reconnect commits them; persisting both would duplicate the
+        // bubble on reload (once from chat-history, once from queue).
+        .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && !entry.queued)
         .map((entry) => ({
           id: entry.id,
           role: entry.role,
@@ -335,6 +349,9 @@ export function useOrchestratorMobile({
       if (channel === 'system' && raw.event === 'connected') {
         setConnectionState('connected');
         backoffRef.current = INITIAL_BACKOFF;
+        // Flush any pending offline-queued user sends in FIFO order.
+        // Defer one tick so the subscription send above lands first.
+        setTimeout(() => drainQueueRef.current?.(), 0);
       }
       if (channel !== 'orchestrator') return;
 
@@ -520,20 +537,134 @@ export function useOrchestratorMobile({
     };
   }, [flushStreamingBuffer, sealStreamingBuffer, sendSubscription]);
 
+  // ── Pending offline-queue (packet #646) ──
+  // When the WS is disconnected/reconnecting, user sends are persisted to
+  // localStorage under `o8:mobile:orchestrator-pending:<tabId>` and replayed
+  // on the next `system/connected` event. The transcript also carries a
+  // `queued` flag so the user sees their message immediately with a "queued"
+  // pill, and stale-queued items (>1h) surface Retry/Discard.
+  const activeThreadIdForQueue = activeThread?.id ?? null;
+  const pendingItemsRef = useRef<Map<string, PendingQueueItem>>(new Map());
+
+  const buildQueuedTranscriptEntry = useCallback(
+    (item: PendingQueueItem): MobileOrchestratorTranscriptEntry => ({
+      id: `queued:${item.id}`,
+      role: 'user',
+      text: item.text,
+      timestamp: item.queuedAt,
+      queued: true,
+      queueId: item.id,
+      queueStale: isPendingStale(item),
+    }),
+    [],
+  );
+
+  // Load any persisted queued items into transcript so a page reload
+  // mid-offline-state still shows the queued bubbles. Wait for the history
+  // fetch to settle (transcriptLoading flips false) so we don't race the
+  // history setTranscript() and lose the appended queued bubbles.
+  useEffect(() => {
+    if (!activeThreadIdForQueue) {
+      pendingItemsRef.current = new Map();
+      return;
+    }
+    if (transcriptLoading) return;
+    const stored = getPendingQueue('orchestrator', activeThreadIdForQueue);
+    pendingItemsRef.current = new Map(stored.map((item) => [item.id, item]));
+    if (stored.length === 0) return;
+    setTranscript((current) => {
+      const existingIds = new Set(
+        current
+          .filter((entry) => entry.queueId)
+          .map((entry) => entry.queueId as string),
+      );
+      const additions = stored
+        .filter((item) => !existingIds.has(item.id))
+        .map(buildQueuedTranscriptEntry);
+      return additions.length > 0 ? [...current, ...additions] : current;
+    });
+  }, [activeThreadIdForQueue, buildQueuedTranscriptEntry, transcriptLoading]);
+
+  const dispatchOverWs = useCallback((message: string, queueId: string | null) => {
+    const ws = wsRef.current;
+    const repoPath = repoPathRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !repoPath) return false;
+    if (subscribedRepoRef.current !== repoPath) {
+      sendSubscription(ws);
+    }
+    ws.send(JSON.stringify({
+      type: 'orchestrator-send',
+      repoPath,
+      message,
+      permissionMode: 'full',
+      ...(queueId ? { clientMutationId: queueId } : {}),
+    }));
+    return true;
+  }, [sendSubscription]);
+
+  const drainQueueRef = useRef<(() => void) | null>(null);
+  const drainQueue = useCallback(() => {
+    const tabId = activeThreadIdForQueue;
+    if (!tabId) return;
+    const pending = getPendingQueue('orchestrator', tabId);
+    if (pending.length === 0) return;
+    let drainedAny = false;
+    let promotedBusy = false;
+    for (const item of pending) {
+      if (isPendingStale(item)) continue;
+      const sent = dispatchOverWs(item.text, item.id);
+      if (!sent) break;
+      removePending('orchestrator', tabId, item.id);
+      pendingItemsRef.current.delete(item.id);
+      drainedAny = true;
+      if (!promotedBusy) {
+        setTurnStatus('busy');
+        promotedBusy = true;
+      }
+      // Flip the queued bubble into a normal user bubble so the message
+      // commits visually as it commits over the wire.
+      setTranscript((current) => current.map((entry) =>
+        entry.queueId === item.id
+          ? { ...entry, queued: false, queueId: undefined, queueStale: undefined }
+          : entry,
+      ));
+    }
+    if (drainedAny) {
+      setErrorNote(null);
+      streamingBufferRef.current = null;
+    }
+  }, [activeThreadIdForQueue, dispatchOverWs]);
+
   // ── Imperative actions ──
   const sendMessage = useCallback((text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     const ws = wsRef.current;
     const repoPath = repoPathRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !repoPath) {
-      setErrorNote(repoPath ? 'Not connected — try again in a moment.' : 'Pick a thread with a repo first.');
+    const tabId = activeThreadIdForQueue;
+    if (!repoPath) {
+      setErrorNote('Pick a thread with a repo first.');
+      return;
+    }
+    const wsOpen = ws && ws.readyState === WebSocket.OPEN;
+    if (!wsOpen) {
+      // Offline path — enqueue + show a queued bubble.
+      if (!tabId) {
+        setErrorNote('Not connected — try again in a moment.');
+        return;
+      }
+      const queueId = generatePendingId();
+      const item = enqueuePending('orchestrator', tabId, trimmed, queueId);
+      if (!item) {
+        setErrorNote(`Queue full (${PENDING_QUEUE_MAX}). Wait for reconnect.`);
+        return;
+      }
+      pendingItemsRef.current.set(item.id, item);
+      setErrorNote(null);
+      setTranscript((current) => [...current, buildQueuedTranscriptEntry(item)]);
       return;
     }
 
-    // Make sure the WS is subscribed to this thread's repoPath before we
-    // fire the send. If the user just tapped a thread for a different repo,
-    // sendSubscription() may not have run yet on this paint.
     if (subscribedRepoRef.current !== repoPath) {
       sendSubscription(ws);
     }
@@ -556,7 +687,45 @@ export function useOrchestratorMobile({
       message: trimmed,
       permissionMode: 'full',
     }));
-  }, [sendSubscription]);
+  }, [activeThreadIdForQueue, buildQueuedTranscriptEntry, sendSubscription]);
+
+  const retryQueued = useCallback((queueId: string) => {
+    const tabId = activeThreadIdForQueue;
+    if (!tabId) return;
+    const item = pendingItemsRef.current.get(queueId)
+      ?? getPendingQueue('orchestrator', tabId).find((entry) => entry.id === queueId)
+      ?? null;
+    if (!item) return;
+    // Reset queuedAt so it's no longer stale, then immediately try to drain.
+    removePending('orchestrator', tabId, queueId);
+    const replacement = enqueuePending('orchestrator', tabId, item.text, generatePendingId());
+    if (!replacement) {
+      setErrorNote(`Queue full (${PENDING_QUEUE_MAX}). Wait for reconnect.`);
+      return;
+    }
+    pendingItemsRef.current.delete(queueId);
+    pendingItemsRef.current.set(replacement.id, replacement);
+    setTranscript((current) => current.map((entry) =>
+      entry.queueId === queueId
+        ? { ...entry, queueId: replacement.id, queueStale: false, timestamp: replacement.queuedAt, id: `queued:${replacement.id}` }
+        : entry,
+    ));
+    drainQueue();
+  }, [activeThreadIdForQueue, drainQueue]);
+
+  const discardQueued = useCallback((queueId: string) => {
+    const tabId = activeThreadIdForQueue;
+    if (!tabId) return;
+    removePending('orchestrator', tabId, queueId);
+    pendingItemsRef.current.delete(queueId);
+    setTranscript((current) => current.filter((entry) => entry.queueId !== queueId));
+  }, [activeThreadIdForQueue]);
+
+  // Keep the latest drainQueue closure addressable from the WS message handler
+  // (which only closes over the initial render's value).
+  useEffect(() => {
+    drainQueueRef.current = drainQueue;
+  }, [drainQueue]);
 
   const interrupt = useCallback(() => {
     const ws = wsRef.current;
@@ -582,5 +751,7 @@ export function useOrchestratorMobile({
     sendMessage,
     interrupt,
     resetTranscript,
+    retryQueued,
+    discardQueued,
   };
 }
