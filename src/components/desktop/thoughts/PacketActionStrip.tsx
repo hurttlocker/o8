@@ -102,7 +102,7 @@ function ActionPill({
         letterSpacing: '-0.005em',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.5 : 1,
-        transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
+        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(event) => {
         if (disabled) return;

@@ -81,7 +81,7 @@ export function PacketMetaRows({
     background: 'transparent',
     textAlign: 'left' as const,
     cursor: 'pointer',
-    transition: 'background 120ms ease',
+    transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
   const rowLabelStyle: React.CSSProperties = {
     fontSize: 9,
