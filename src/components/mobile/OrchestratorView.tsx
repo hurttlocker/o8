@@ -43,6 +43,7 @@ import {
 } from './orchestrator/parts';
 import { IconCaretUp, IconPlus } from '@/app/mobile/mobile-approvals-shared';
 import { usePressToDictate } from '@/lib/mobile/use-press-to-dictate';
+import { PullToRefresh } from './PullToRefresh';
 
 interface OrchestratorViewProps {
   onBack: () => void;
@@ -581,28 +582,30 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
         </div>
       )}
 
-      <div
-        style={{
-          maxHeight: stripOpen ? 132 : 0,
-          overflow: 'hidden',
-          transition: 'max-height 220ms cubic-bezier(0.32, 0.72, 0, 1)',
-        }}
-        aria-hidden={!stripOpen}
-      >
-        <div style={stripWrapStyle}>
-          {visibleThreads.map((thread) => (
-            <ThreadCard
-              key={thread.id}
-              thread={thread}
-              active={thread.id === activeThreadId}
-              onSelect={handleSelectThread}
-            />
-          ))}
-          {threadsLoading && visibleThreads.length === 0 ? (
-            <div style={{ flex: '0 0 auto', width: 200, height: 80, borderRadius: 14, background: colors.elevatedSurface }} />
-          ) : null}
+      <PullToRefresh onRefresh={fetchThreads} enabled={stripOpen}>
+        <div
+          style={{
+            maxHeight: stripOpen ? 132 : 0,
+            overflow: 'hidden',
+            transition: 'max-height 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}
+          aria-hidden={!stripOpen}
+        >
+          <div style={stripWrapStyle}>
+            {visibleThreads.map((thread) => (
+              <ThreadCard
+                key={thread.id}
+                thread={thread}
+                active={thread.id === activeThreadId}
+                onSelect={handleSelectThread}
+              />
+            ))}
+            {threadsLoading && visibleThreads.length === 0 ? (
+              <div style={{ flex: '0 0 auto', width: 200, height: 80, borderRadius: 14, background: colors.elevatedSurface }} />
+            ) : null}
+          </div>
         </div>
-      </div>
+      </PullToRefresh>
 
       {threadsError ? (
         <div style={{ paddingTop: 0, paddingRight: 18, paddingBottom: 8, paddingLeft: 18 }}>

@@ -5,6 +5,7 @@ import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
 import type { MobileInboxItem, MobileInboxSnapshot } from '@/lib/mobile/types';
 import { FONTS, usePretextTruncation } from '@/lib/pretext';
 import { useTheme } from './ThemeContext';
+import { PullToRefresh } from './PullToRefresh';
 
 interface ActivityFeedProps {
   snapshot: MobileInboxSnapshot;
@@ -13,6 +14,7 @@ interface ActivityFeedProps {
   onApprove: (item: MobileInboxItem) => void;
   onDeny: (item: MobileInboxItem) => void;
   onReviewPR?: (repoPath: string, prNumber: number) => void;
+  onRefresh?: () => Promise<void> | void;
   hideHeader?: boolean;
 }
 
@@ -609,6 +611,7 @@ export const ActivityFeed = memo(function ActivityFeed({
   onApprove,
   onDeny,
   onReviewPR,
+  onRefresh,
   hideHeader = false,
 }: ActivityFeedProps) {
   const [filter, setFilter] = useState<ActivityFilter>('all');
@@ -663,7 +666,7 @@ export const ActivityFeed = memo(function ActivityFeed({
     borderLeft: `1px solid ${palette.timelineLine}`,
   };
 
-  return (
+  const content = (
     <div
       style={{
         padding: '0 14px 24px',
@@ -861,4 +864,7 @@ export const ActivityFeed = memo(function ActivityFeed({
       ) : null}
     </div>
   );
+
+  if (!onRefresh) return content;
+  return <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh>;
 });
