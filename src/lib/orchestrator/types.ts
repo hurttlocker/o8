@@ -1,3 +1,4 @@
+// Orchestrator domain types — runtimes, packets, lanes
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 
 export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';

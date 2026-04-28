@@ -1,3 +1,4 @@
+// Workspace canvas — diff/transcript/file viewer router.
 'use client';
 
 /**
