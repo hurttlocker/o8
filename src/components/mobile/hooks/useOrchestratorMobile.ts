@@ -276,6 +276,24 @@ export function useOrchestratorMobile({
     };
   }, [activeThreadId]);
 
+  // ── Persist transcript whenever it changes for the active thread ──
+  // Skip while the initial history fetch is in flight (otherwise we'd race
+  // the load and write a blank file before the prior messages arrive).
+  useEffect(() => {
+    if (!activeThread) return;
+    if (transcriptLoading) return;
+    if (transcript.length === 0) return;
+    persistThread(transcript, activeThread);
+  }, [transcript, activeThread, transcriptLoading, persistThread]);
+
+  // Cancel any pending persist on unmount.
+  useEffect(() => () => {
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+  }, []);
+
   // ── Subscribe / re-subscribe to orchestrator channel for the active repoPath ──
   const sendSubscription = useCallback((ws: WebSocket | null) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
