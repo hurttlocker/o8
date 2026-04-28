@@ -5,6 +5,7 @@ import {
   buildRepoStateScope,
   loadTabState,
   saveTabState,
+  scrubLocalStorageTabZombies,
   type PersistedTabState,
 } from '@/lib/terminal/tab-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -334,6 +335,14 @@ export function useWorkspaceTerminalController(
     restoredRef.current = true;
     restoreInFlightRef.current = true;
     let cancelled = false;
+
+    // #717 — one-time, no-op-if-already-clean scrub of any localStorage values
+    // shaped like `{ tabs: [...] }` BEFORE we call the API. There's no current
+    // localStorage tab cache, but the user's #717 audit showed pre-fix zombies
+    // surviving WebKit wipes; this is the future-proof guarantee that any
+    // localStorage-backed persist middleware added later inherits the strip
+    // without rediscovering #717.
+    scrubLocalStorageTabZombies();
 
     urlDetectionEnabledRef.current = false;
     const timer = window.setTimeout(() => {

@@ -1,4 +1,4 @@
-import type { PersistedChatCheckpoint, PersistedTabState } from '@/lib/terminal/tab-state';
+import { stripPersistedTabs, type PersistedChatCheckpoint, type PersistedTabState } from '@/lib/terminal/tab-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import {
   adHocLaneTitle,
@@ -306,16 +306,15 @@ export function buildHistoryChatTab(
 /* ------------------------------------------------------------------ */
 
 export function serializeTabsForPersistence(currentTabs: TerminalTab[]) {
-  // Issue #714 — strip zombies before they hit disk:
+  // Issue #714 / #717 — strip zombies before they hit disk:
   //   - canvas:ci tabs (legacy, never persisted)
   //   - orchestrator-prefixed tabs whose `kind` was mutated away from
-  //     'orchestrator' (the disk artifact that triggered #714). These are
-  //     stale stubs that the migration effect will replace on next mount;
-  //     persisting them resurrects them as fake "Orchestrator"-labeled
-  //     terminals across remounts.
-  return currentTabs
-    .filter((tab) => !(tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci'))
-    .filter((tab) => !(tab.kind !== 'orchestrator' && tab.id.startsWith('orchestrator-')))
+  //     'orchestrator' (the disk artifact that triggered #714). The canonical
+  //     `stripPersistedTabs` helper lives in `@/lib/terminal/tab-state` and is
+  //     applied at every layer (server GET/POST, client load/save, in-memory)
+  //     so zombies can never sneak through any path.
+  const withoutCanvasCi = currentTabs.filter((tab) => !(tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci'));
+  return stripPersistedTabs(withoutCanvasCi)
     .map((tab) => ({
       id: tab.id,
       label: tab.label,
