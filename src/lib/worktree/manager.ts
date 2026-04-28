@@ -497,6 +497,46 @@ export class WorktreeManager {
       });
     }
 
+    // Surface worktrees that exist in git but lost their metadata entry
+    // (dev-server restart, accidental .meta deletion). Without this fallback,
+    // path-based lookups in lane/commands.ts merge path fail with
+    // "Worktree not found on disk" even when the worktree is fully on disk
+    // and registered with git.
+    const knownPaths = new Set(results.map((r) => r.path));
+    for (const gitWt of gitWorktrees) {
+      if (knownPaths.has(gitWt.path)) continue;
+      if (gitWt.path === this.repoRoot) continue;
+      const exists = await this.pathExists(gitWt.path);
+      if (!exists) continue;
+
+      const id = path.basename(gitWt.path);
+      const branch = gitWt.branch ?? `worktree/unknown/${id}`;
+      const agentType = branch.includes('/codex/') ? 'codex' : 'claude-code';
+      const lastActivity = await this.getLastModified(gitWt.path).catch(() => Date.now());
+      const dirtyFiles = await this.getDirtyFiles(gitWt.path, 'main').catch(() => []);
+      const ageMs = Date.now() - lastActivity;
+      const status: WorktreeStatus = ageMs > STALE_THRESHOLD_MS
+        ? 'stale'
+        : dirtyFiles.length > 0 && ageMs < 5 * 60_000
+          ? 'active'
+          : 'ready';
+
+      results.push({
+        id,
+        path: gitWt.path,
+        branch,
+        baseBranch: 'main',
+        agentType,
+        sessionKey: undefined,
+        status,
+        createdAt: lastActivity,
+        lastActivityAt: lastActivity,
+        diskUsageBytes: 0,
+        dirtyFiles,
+        claudeManaged: false,
+      });
+    }
+
     // Sort by most recent activity
     results.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
     return results;
