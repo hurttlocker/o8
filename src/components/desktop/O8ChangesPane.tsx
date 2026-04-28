@@ -223,6 +223,35 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
     void fetchChanges();
   }, [fetchChanges]);
 
+  // Live refresh: subscribe to filesystem events on `.git/HEAD` and `.git/index`
+  // so the panel reflects external `git commit`s within ~250ms (200ms server
+  // debounce + RTT). No tight polling — server-side fs.watch drives this.
+  // Keep `fetchChanges` in a ref so the EventSource only reconnects when the
+  // repo path changes, not on every filter toggle.
+  const fetchChangesRef = useRef(fetchChanges);
+  useEffect(() => { fetchChangesRef.current = fetchChanges; }, [fetchChanges]);
+
+  useEffect(() => {
+    if (!repoPath) return;
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+
+    const url = `/api/panel/git-watch?workspace=${encodeURIComponent(repoPath)}`;
+    let source: EventSource | null = null;
+    try {
+      source = new EventSource(url);
+    } catch {
+      return;
+    }
+
+    const handleChanged = () => { void fetchChangesRef.current(); };
+    source.addEventListener('changed', handleChanged);
+
+    return () => {
+      source?.removeEventListener('changed', handleChanged);
+      source?.close();
+    };
+  }, [repoPath]);
+
   useEffect(() => {
     setExpandedFile(null);
     setExpandedDiff(null);
