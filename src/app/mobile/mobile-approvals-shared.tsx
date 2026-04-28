@@ -37,6 +37,7 @@ export const ICON_PATHS = {
   Compass: 'M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm60.85-130.08a8,8,0,0,0-9.69-1.57L116.91,113.79a8.05,8.05,0,0,0-3.85,3.85L84.19,179.7a8,8,0,0,0,9.69,11.49l62.25-29a8.05,8.05,0,0,0,3.85-3.85l29-62.25A8,8,0,0,0,188.85,85.92ZM149.3,149.32l-31.5,14.69,14.69-31.5,31.5-14.69Z',
   Plus: 'M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z',
   CaretUp: 'M213.66,165.66a8,8,0,0,1-11.32,0L128,91.31,53.66,165.66a8,8,0,0,1-11.32-11.32l80-80a8,8,0,0,1,11.32,0l80,80A8,8,0,0,1,213.66,165.66Z',
+  X: 'M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z',
 } as const;
 
 export type MobileView =
@@ -328,6 +329,14 @@ export function IconMoon({ fill, size = 18, style }: MobileIconProps) {
 
 export function IconRefresh({ fill, size = 18, style }: MobileIconProps) {
   return renderIcon(ICON_PATHS.ArrowClockwiseThin, size, fill, style);
+}
+
+export function IconSearch({ fill, size = 20, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.MagnifyingGlass, size, fill, style);
+}
+
+export function IconClose({ fill, size = 20, style }: MobileIconProps) {
+  return renderIcon(ICON_PATHS.X, size, fill, style);
 }
 
 export function IconSend({ fill, size = 16, style }: MobileIconProps) {
