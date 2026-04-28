@@ -313,9 +313,8 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
                   paddingLeft: 12,
                   paddingRight: 12,
                   border: 'none',
-                  borderLeft: isActive ? `2px solid ${RAMS_ACCENT}` : '2px solid transparent',
                   background: 'transparent',
-                  color: 'var(--t-text)',
+                  color: isActive ? RAMS_ACCENT : 'var(--t-text)',
                   fontSize: 13,
                   fontWeight: isActive ? 500 : 400,
                   cursor: 'pointer',
@@ -461,14 +460,23 @@ export function OperatorDefaultsTab() {
       {notice ? (
         <div style={{
           marginBottom: 28,
-          borderLeft: `2px solid #ef4444`,
-          paddingLeft: 14,
           paddingTop: 2,
           paddingBottom: 2,
           fontSize: 13,
           color: 'var(--t-text)',
           lineHeight: 1.55,
         }}>
+          <span style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: '#ef4444',
+            marginRight: 8,
+          }}>
+            [error]
+          </span>
           {notice}
         </div>
       ) : null}
