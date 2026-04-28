@@ -94,6 +94,28 @@ const capabilities: RuntimeCapabilities = {
 // ── Path helpers ──
 
 /**
+ * Detect orchestrator-spawned Claude Code sessions whose CWD lives inside an
+ * o8-managed worktree. The worktree manager creates these under
+ * `<repo>/.cortex-worktrees/packet-<slug>/` (see `src/lib/worktree/manager.ts`
+ * `WORKTREE_DIR_NAME = '.cortex-worktrees'`). Sessions that match this pattern
+ * are owned by the orchestrator — they're never spawned manually by the user.
+ *
+ * Marking these as `ownership: 'owned'` lets the runtime inventory filter
+ * surface them on the desktop SessionVisualizer + AgentPanel. Without this
+ * tag they'd be dropped because there's no terminal-session-registry entry
+ * (orchestrator dispatch goes through the bridge terminal, not the user PTY)
+ * and no IDE-session-registry entry (orchestrator lanes aren't IDE workspace
+ * tabs). See #649 / #658 for the full context.
+ */
+function isOrchestratorWorktreeCwd(cwd: string | undefined | null): boolean {
+  if (!cwd) return false;
+  // Match `.cortex-worktrees/packet-...` anywhere in the path. Tolerate both
+  // forward and reverse slashes for safety on alien filesystems even though
+  // the worktree manager only writes POSIX paths.
+  return /\.cortex-worktrees[\/\\]packet-/.test(cwd);
+}
+
+/**
  * Decode Claude Code's project directory name back to a filesystem path.
  * e.g., "-Users-alice-projects" → "/Users/alice/projects"
  */
@@ -957,6 +979,13 @@ export const claudeCodeRuntime: AgentRuntime = {
       }
       const status = isLiveSession ? 'running' : inferHistoricalClaudeStatus(meta);
       const name = `${projectDisplayName(meta.projectPath)}${meta.gitBranch ? ` • ${meta.gitBranch}` : ''}`;
+      // #658 — Orchestrator-dispatched lanes spawn `claude` with cwd inside
+      // `.cortex-worktrees/packet-*`. Mark them as 'owned' so the runtime
+      // inventory filter surfaces them on the desktop SessionVisualizer.
+      // User-launched terminal sessions stay 'discovered'.
+      const ownership: RuntimeSession['ownership'] = isOrchestratorWorktreeCwd(meta.cwd ?? meta.projectPath)
+        ? 'owned'
+        : 'discovered';
 
       return {
         sessionKey: `claude-code:${meta.sessionId}`,
@@ -965,7 +994,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         cwd: meta.cwd ?? meta.projectPath,
         branch: meta.gitBranch,
         status,
-        ownership: 'discovered',
+        ownership,
         sessionCapabilities: {
           canSendInput: status !== 'failed',
           canInterrupt: status === 'running',
@@ -1044,6 +1073,12 @@ export const claudeCodeRuntime: AgentRuntime = {
       const dirName = proc.cwd.split('/').pop() || 'unknown';
       const displayName = `${dirName}${gitBranch ? ` • ${gitBranch}` : ''}`;
 
+      // #658 — Same orchestrator-vs-user distinction as above; a live process
+      // running under `.cortex-worktrees/packet-*` is an orchestrator lane.
+      const ownership: RuntimeSession['ownership'] = isOrchestratorWorktreeCwd(proc.cwd)
+        ? 'owned'
+        : 'discovered';
+
       results.push({
         sessionKey: realSessionId ? `claude-code:${realSessionId}` : `claude-code:live-${proc.pid}`,
         runtimeId: 'claude-code',
@@ -1051,7 +1086,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         cwd: proc.cwd,
         branch: gitBranch,
         status: 'running',
-        ownership: 'discovered',
+        ownership,
         sessionCapabilities: {
           canSendInput: true,
           canInterrupt: true,
