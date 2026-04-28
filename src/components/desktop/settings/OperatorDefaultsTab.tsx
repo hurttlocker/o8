@@ -147,6 +147,9 @@ function ToggleLink({ checked, onChange, disabled }: {
       onClick={() => { if (!disabled) onChange(!checked); }}
       disabled={disabled}
       style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        minHeight: 44,
         fontFamily: MONO_FONT_STACK,
         fontSize: 11,
         fontWeight: 400,
@@ -188,6 +191,11 @@ function SegmentedControl<T extends string>({ value, options, onChange, disabled
             onClick={() => onChange(opt.value)}
             style={{
               position: 'relative',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: 44,
+              minWidth: 44,
               fontFamily: MONO_FONT_STACK,
               fontSize: 11,
               fontWeight: 400,
@@ -232,6 +240,7 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
         onBlur={() => { window.setTimeout(() => setOpen(false), 120); }}
         style={{
           minWidth: minWidth ?? 140,
+          minHeight: 44,
           paddingTop: 4,
           paddingBottom: 4,
           paddingLeft: 0,
@@ -297,6 +306,8 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
                 type="button"
                 onClick={() => { onChange(opt.value); setOpen(false); }}
                 style={{
+                  minHeight: 44,
+                  justifyContent: 'center',
                   paddingTop: 8,
                   paddingBottom: 8,
                   paddingLeft: 12,
