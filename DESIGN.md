@@ -549,3 +549,4 @@ If you're ever unsure whether a treatment is shared or diverges, ask. Don't gues
 If this doc conflicts with the code, **the doc wins** and the code is a bug. File an issue, fix it.
 
 If this doc conflicts with `CLAUDE.md`, `CLAUDE.md` wins — it's the single source of truth for hard invariants. This doc summarizes and explains.
+<!-- Last reviewed: 2026-04-28 -->
