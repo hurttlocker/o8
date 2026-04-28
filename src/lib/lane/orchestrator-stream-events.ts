@@ -21,11 +21,21 @@ type ContentBlock = {
 interface ToolCallTracker {
   recordToolUse: (tool: { id?: string | null; name: string; input: unknown }) => void;
   resolveToolResult: (toolUseId?: string | null) => { id?: string | null; name: string; input: unknown } | null;
+  /**
+   * Mark a content block index as having streamed text via a `content_block_delta`
+   * event. Used to dedupe the trailing `assistant` summary event, which re-emits
+   * the full assembled text for every block — without this guard, every
+   * delta-streamed turn would render the response twice in the chat bubble.
+   */
+  recordTextDelta: (index: number) => void;
+  /** True if `recordTextDelta` was called for this content block index this turn. */
+  hasStreamedText: (index: number) => boolean;
 }
 
 export function createToolCallTracker(): ToolCallTracker {
   const pendingById = new Map<string, { id?: string | null; name: string; input: unknown }>();
   const pendingQueue: Array<{ id?: string | null; name: string; input: unknown }> = [];
+  const streamedTextIndices = new Set<number>();
 
   return {
     recordToolUse(tool) {
@@ -51,6 +61,12 @@ export function createToolCallTracker(): ToolCallTracker {
       if (!matched) return null;
       if (matched.id) pendingById.delete(matched.id);
       return matched;
+    },
+    recordTextDelta(index) {
+      streamedTextIndices.add(index);
+    },
+    hasStreamedText(index) {
+      return streamedTextIndices.has(index);
     },
   };
 }
@@ -93,7 +109,9 @@ export function processStreamEvent(
     case 'content_block_delta': {
       const delta = event.delta as Record<string, unknown> | undefined;
       if (!delta) break;
+      const blockIndex = typeof event.index === 'number' ? event.index : -1;
       if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+        if (blockIndex >= 0) tracker.recordTextDelta(blockIndex);
         onEvent({ type: 'text', text: delta.text });
       } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
         onEvent({ type: 'thinking', text: delta.thinking });
@@ -127,11 +145,22 @@ export function processStreamEvent(
     }
 
     case 'assistant': {
+      // Claude Code's stream-json mode emits `content_block_delta` events for
+      // text as it streams, AND a final `assistant` event containing the full
+      // assembled message. Re-emitting text from the assistant event after
+      // deltas already flowed produces "OK, still here.OK, still here." in
+      // the chat bubble. We dedupe per-block-index: if any text_delta already
+      // emitted for this content block, skip the assistant copy.
       const message = event.message as Record<string, unknown> | undefined;
       const content = message?.content;
       if (!Array.isArray(content)) break;
-      for (const block of content as ContentBlock[]) {
+      content.forEach((rawBlock, index) => {
+        const block = rawBlock as ContentBlock;
         if (block.type === 'text' && typeof block.text === 'string') {
+          if (tracker.hasStreamedText(index)) {
+            console.log(`[stream-dedupe] skipping assistant text block ${index} (already streamed via deltas, ${block.text.length} chars)`);
+            return;
+          }
           onEvent({ type: 'text', text: block.text });
         } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
           onEvent({ type: 'thinking', text: block.thinking });
@@ -144,7 +173,7 @@ export function processStreamEvent(
           tracker.recordToolUse(nextTool);
           onEvent({ type: 'tool_use', ...nextTool });
         }
-      }
+      });
       break;
     }
 
