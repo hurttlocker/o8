@@ -33,18 +33,40 @@ export interface NewTerminalTabResult {
   cliCommand: string | null;
 }
 
+/**
+ * Issue #708 — pick the lowest unused `Terminal N` number among existing
+ * shell terminal tabs. Only labels matching `Terminal <integer>` participate;
+ * agent-named terminals (Claude Code, Codex, etc.) keep their own labels.
+ */
+export function nextTerminalLabel(tabs: TerminalTab[]): string {
+  const used = new Set<number>();
+  for (const tab of tabs) {
+    if (tab.kind !== 'terminal') continue;
+    const match = /^Terminal\s+(\d+)$/.exec(tab.label?.trim() ?? '');
+    if (match) used.add(Number(match[1]));
+  }
+  let n = 1;
+  while (used.has(n)) n += 1;
+  return `Terminal ${n}`;
+}
+
 export function computeNewTerminalTab(
   agentId: string,
   repo?: RegisteredRepo,
+  currentTabs: TerminalTab[] = [],
 ): NewTerminalTabResult {
   const agent = CLI_AGENTS.find((candidate) => candidate.id === agentId);
   if (!agent) return { newTab: null, activeTabId: '', cliCommand: null };
 
   const tabId = createWorkspaceTabId('terminal');
   const now = Date.now();
+  // Generic shell terminals get unique `Terminal N` labels; agent CLIs
+  // (Claude Code, Codex, OpenCode, Gemini CLI) keep their named labels so
+  // the user can tell at a glance which CLI is loaded.
+  const label = agentId === 'shell' ? nextTerminalLabel(currentTabs) : agent.label;
   const newTab: TerminalTab = {
     id: tabId,
-    label: agent.label,
+    label,
     kind: 'terminal',
     tmuxSession: null,
     cliAgent: agentId,
@@ -351,15 +373,15 @@ export function resolveRunCommandTarget(tabs: TerminalTab[]): RunCommandResult {
   if (pendingShell) {
     return { kind: 'pending-shell', pendingTabId: pendingShell.id };
   }
-  return { kind: 'new-tab', newTab: buildRunCommandTab() };
+  return { kind: 'new-tab', newTab: buildRunCommandTab(tabs) };
 }
 
-export function buildRunCommandTab(): TerminalTab {
+export function buildRunCommandTab(currentTabs: TerminalTab[] = []): TerminalTab {
   const nextTabId = createWorkspaceTabId('terminal');
   const now = Date.now();
   return {
     id: nextTabId,
-    label: 'Terminal',
+    label: nextTerminalLabel(currentTabs),
     kind: 'terminal',
     tmuxSession: null,
     cliAgent: 'shell',
