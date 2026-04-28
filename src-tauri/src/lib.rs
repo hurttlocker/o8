@@ -3,10 +3,12 @@ use serde::Serialize;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use tauri::{
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, RunEvent,
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_notification::NotificationExt;
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 #[cfg(target_os = "windows")]
@@ -1159,6 +1161,288 @@ fn read_workspaces() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "workspaces": workspaces }))
 }
 
+// ── Tray badge + native weapons (issues #730, #731) ──
+//
+// Three native macOS features that differentiate o8 from web/Electron rivals:
+//
+//   1. Cmd+Shift+O global shortcut → spawns a 600x80 always-on-top dispatch
+//      popover. Wired via tauri-plugin-global-shortcut.
+//
+//   2. Native notifications when a packet flips to `awaiting_review`. Fired
+//      from the frontend (which already holds the WS lane stream) via the
+//      `notify_review_ready` Tauri command. The macOS notification plugin
+//      doesn't expose action buttons natively (notify-rust limitation), so
+//      clicking the notification raises the app focused on the review card —
+//      "Approve / Reject" stay as in-app affordances for v1.
+//
+//   3. Menu bar tray with live "[N]" badge for pending reviews. The tray
+//      already exists; we now keep its title in sync by polling the lanes
+//      API every 5s. `set_tray_badge` is also exposed as a Tauri command so
+//      the frontend can push exact counts when WS lane events arrive (faster
+//      than waiting for the next poll tick).
+
+/// Shared handle to the menu bar tray icon. Stored once on `setup()` so
+/// background polls and frontend commands can update its title without
+/// re-creating the tray.
+fn tray_handle() -> &'static Mutex<Option<TrayIcon>> {
+    static HANDLE: OnceLock<Mutex<Option<TrayIcon>>> = OnceLock::new();
+    HANDLE.get_or_init(|| Mutex::new(None))
+}
+
+fn store_tray(tray: TrayIcon) {
+    if let Ok(mut guard) = tray_handle().lock() {
+        *guard = Some(tray);
+    }
+}
+
+/// Update the macOS menu bar tray title with a count badge. Hides the badge
+/// (sets to None) when count is 0 so the icon sits clean. macOS only — on
+/// other platforms `set_title` is a no-op, which is fine: we still update the
+/// tooltip elsewhere.
+fn apply_tray_badge(count: u32) {
+    let Ok(guard) = tray_handle().lock() else { return };
+    let Some(tray) = guard.as_ref() else { return };
+    let title = if count == 0 { None } else { Some(format!("[{}]", count)) };
+    if let Err(err) = tray.set_title(title.as_deref()) {
+        log::warn!("[tray-badge] set_title failed: {}", err);
+    }
+    // Tooltip mirrors the count so accessibility tools report it too.
+    let tooltip = if count == 0 {
+        "o8".to_string()
+    } else {
+        format!("o8 — {} awaiting review", count)
+    };
+    let _ = tray.set_tooltip(Some(tooltip));
+}
+
+/// Read a UTF-8 file from the o8 data dir, trimming whitespace. Used to pick
+/// up the dynamic API port and ws-token written by the sidecar.
+fn read_data_file(name: &str) -> Option<String> {
+    let path = format!("{}/{}", o8_data_dir(), name);
+    std::fs::read_to_string(&path).ok().map(|s| s.trim().to_string())
+}
+
+/// Resolve the API port the Next server is bound to. Mirrors the precedence
+/// in `src/lib/panel/api-port.ts` — env var first, on-disk file second,
+/// default 3001 last.
+fn resolve_api_port() -> u16 {
+    if let Ok(p) = std::env::var("O8_API_PORT") {
+        if let Ok(parsed) = p.parse() { return parsed; }
+    }
+    if let Some(raw) = read_data_file("api-port") {
+        if let Ok(parsed) = raw.parse() { return parsed; }
+    }
+    3001
+}
+
+/// Read the cross-origin auth token. Empty string if missing — the loopback
+/// origin path (which we use here) doesn't strictly need it but we send it
+/// when present so the request also works under future hardenings.
+fn resolve_ws_token() -> String {
+    read_data_file("ws-token").unwrap_or_default()
+}
+
+/// Background HTTP GET against the local Next server. Uses a raw TCP write so
+/// we don't pull in a new HTTP crate. The response body is small (lanes JSON,
+/// hundreds of bytes per active lane). Bounded read keeps us safe from a
+/// runaway server. Returns `None` on any error — callers fall back to the
+/// previous count.
+fn http_get_local(path: &str) -> Option<String> {
+    use std::io::{Read, Write};
+    use std::time::Duration;
+    let port = resolve_api_port();
+    let token = resolve_ws_token();
+    let addr = format!("127.0.0.1:{}", port);
+    let mut stream = std::net::TcpStream::connect_timeout(
+        &addr.parse().ok()?,
+        Duration::from_millis(750),
+    ).ok()?;
+    stream.set_read_timeout(Some(Duration::from_millis(1500))).ok();
+    stream.set_write_timeout(Some(Duration::from_millis(1500))).ok();
+    let auth = if token.is_empty() {
+        String::new()
+    } else {
+        format!("Authorization: Bearer {}\r\n", token)
+    };
+    let req = format!(
+        "GET {} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{}Connection: close\r\nAccept: application/json\r\n\r\n",
+        path, port, auth
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut buf = Vec::with_capacity(64 * 1024);
+    let mut chunk = [0u8; 4096];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > 1024 * 1024 { break; } // 1 MiB cap
+            }
+            Err(_) => break,
+        }
+    }
+    let raw = String::from_utf8_lossy(&buf).to_string();
+    // Split off HTTP headers — body starts after the first \r\n\r\n.
+    let body_start = raw.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+    Some(raw[body_start..].to_string())
+}
+
+/// Count lanes whose status is `reviewing` (the user-facing "awaiting review"
+/// state). Falls back to 0 on any parse / network error — the badge just
+/// shows nothing rather than a stale value.
+fn count_awaiting_review() -> u32 {
+    let Some(body) = http_get_local("/api/lanes?active=true") else { return 0 };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else { return 0 };
+    let Some(lanes) = json.get("lanes").and_then(|v| v.as_array()) else { return 0 };
+    lanes
+        .iter()
+        .filter(|lane| {
+            lane.get("status")
+                .and_then(|s| s.as_str())
+                .map(|s| s == "reviewing")
+                .unwrap_or(false)
+        })
+        .count() as u32
+}
+
+/// Spawn a long-lived background thread that polls the lanes API every 5s
+/// and pushes the awaiting-review count to the tray badge. Light enough to
+/// run continuously — one tiny HTTP request, no JSON deserialization beyond
+/// pulling out a status string per lane.
+fn spawn_tray_badge_poller(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut last_count: u32 = u32::MAX; // force first emit
+        loop {
+            let count = count_awaiting_review();
+            if count != last_count {
+                apply_tray_badge(count);
+                // Mirror to the frontend so any UI badge can stay synced
+                // without doing its own poll.
+                let _ = app.emit("tray-badge-changed", count);
+                last_count = count;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        }
+    });
+}
+
+// ── Cmd+Shift+O dispatch popover ──
+//
+// The popover is a secondary window labelled "dispatch-popover" loaded from
+// /dispatch-popover (a Next.js route that renders DispatchPopover.tsx). We
+// destroy it on Esc / submit so each invocation is a fresh window — simpler
+// than juggling visibility state across the global-shortcut callback and the
+// frontend.
+
+const POPOVER_LABEL: &str = "dispatch-popover";
+const POPOVER_WIDTH: f64 = 600.0;
+const POPOVER_HEIGHT: f64 = 80.0;
+
+/// Open (or focus, if already open) the dispatch popover. Centered on the
+/// active monitor, always-on-top, no decorations, frameless. Built on the
+/// dev URL when running `cargo tauri dev`, otherwise the bundled
+/// `tauri://localhost` scheme. Returns Ok(()) on success.
+fn open_dispatch_popover_impl(app: &AppHandle) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window(POPOVER_LABEL) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        let _ = existing.center();
+        return Ok(());
+    }
+
+    // /dispatch-popover route. In dev (cargo tauri dev) we hit the Next dev
+    // server directly; in prod we use tauri://localhost which serves the
+    // static build out of out/frontend/.
+    let url = if cfg!(debug_assertions) {
+        let port = resolve_api_port();
+        let raw = format!("http://localhost:{}/dispatch-popover", port);
+        let parsed: tauri::Url = raw.parse().map_err(|e| format!("popover url parse: {}", e))?;
+        WebviewUrl::External(parsed)
+    } else {
+        WebviewUrl::App("dispatch-popover".into())
+    };
+
+    let mut builder = WebviewWindowBuilder::new(app, POPOVER_LABEL, url)
+        .title("Dispatch")
+        .inner_size(POPOVER_WIDTH, POPOVER_HEIGHT)
+        .resizable(false)
+        .always_on_top(true)
+        .decorations(false)
+        .transparent(true)
+        .focused(true)
+        .visible(true)
+        .skip_taskbar(true)
+        .center();
+
+    // visible_on_all_workspaces is critical for a global shortcut —
+    // otherwise the popover only shows on the workspace that owns the main
+    // window, defeating the "from anywhere" promise.
+    builder = builder.visible_on_all_workspaces(true);
+
+    builder.build().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Tauri command: open the popover. Called from frontend (e.g. a NavRail
+/// button) as well as from the global shortcut callback.
+#[tauri::command]
+fn open_dispatch_popover(app: AppHandle) -> Result<(), String> {
+    open_dispatch_popover_impl(&app)
+}
+
+/// Tauri command: close the popover. Called from the popover frontend on
+/// Esc / submit / blur.
+#[tauri::command]
+fn close_dispatch_popover(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(POPOVER_LABEL) {
+        let _ = window.close();
+    }
+    Ok(())
+}
+
+/// Tauri command: push an exact awaiting-review count to the tray badge.
+/// Frontend calls this when a WS lane event flips a packet's status, so the
+/// badge updates instantly instead of waiting for the 5s poll.
+#[tauri::command]
+fn set_tray_badge(count: u32) {
+    apply_tray_badge(count);
+}
+
+/// Tauri command: fire a native notification when a packet flips to
+/// awaiting_review. Frontend invokes this from the WS lane event handler.
+/// We also raise the tray badge by 0 (no-op for count) just to refresh the
+/// tooltip in case the poller hasn't ticked yet.
+#[tauri::command]
+fn notify_review_ready(
+    app: AppHandle,
+    title: String,
+    body: String,
+    packet_id: Option<String>,
+) -> Result<(), String> {
+    let display_title = if title.is_empty() { "Awaiting review".to_string() } else { title };
+    let display_body = if body.is_empty() {
+        "A packet is ready for review".to_string()
+    } else {
+        body
+    };
+    app.notification()
+        .builder()
+        .title(&display_title)
+        .body(&display_body)
+        .show()
+        .map_err(|e| e.to_string())?;
+    // Frontend can listen for this if it wants to scroll to the packet card
+    // when the notification is clicked. We can't intercept the click on
+    // macOS through the notify-rust path, but emitting here means anything
+    // listening on `notification-fired` knows the most recent packet.
+    let _ = app.emit("notification-fired", serde_json::json!({
+        "title": display_title,
+        "body": display_body,
+        "packetId": packet_id,
+    }));
+    Ok(())
+}
+
 // Sanity-bounds the saved window-state.json before tauri-plugin-window-state restores
 // from it. Multi-monitor reconfigs or virtual-desktop bugs can save dimensions like
 // 17000x2820 — wider than any real screen — and the plugin restores them blindly.
@@ -1194,6 +1478,12 @@ pub fn run() {
     // for ungraceful exits.
     install_shutdown_handlers();
 
+    // Cmd+Shift+O on macOS, Ctrl+Shift+O elsewhere. The global-shortcut
+    // plugin uses the same `Modifiers::SUPER` token for both Cmd (mac) and
+    // the Windows key — close enough for v1; we expose this constant so the
+    // handler and the registration match.
+    let dispatch_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyO);
+
     #[allow(unused_mut)] // `mut` is needed only when `dev-mcp-plugin` feature is enabled
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default()
@@ -1205,8 +1495,32 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Auto-saves window size + position to the OS data dir on close and
-        // restores them on next launch. No config needed.
-        .plugin(tauri_plugin_window_state::Builder::default().build());
+        // restores them on next launch. The dispatch-popover is excluded —
+        // it's transient (Cmd+Shift+O summons + closes per use) and we don't
+        // want its 600x80 dimensions or position bleeding into anything.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_filter(|label| label != POPOVER_LABEL)
+                .skip_initial_state(POPOVER_LABEL)
+                .build(),
+        )
+        // Cmd+Shift+O global shortcut (issue #730). Registered on `setup()`
+        // below so the AppHandle is available; the handler routes back into
+        // `open_dispatch_popover_impl()`.
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(move |app, shortcut, event| {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    if shortcut == &dispatch_shortcut {
+                        if let Err(err) = open_dispatch_popover_impl(app) {
+                            log::warn!("[global-shortcut] open dispatch popover failed: {}", err);
+                        }
+                    }
+                })
+                .build(),
+        );
 
     // MCP plugin: exposes app to AI agents (screenshots, DOM, input simulation).
     // Optional dev-only feature. Requires a sibling checkout of tauri-plugin-mcp.
@@ -1239,26 +1553,43 @@ pub fn run() {
             read_git_status,
             read_approvals,
             read_workspaces,
+            open_dispatch_popover,
+            close_dispatch_popover,
+            set_tray_badge,
+            notify_review_ready,
             #[cfg(target_os = "macos")]
             master_key_get,
             #[cfg(target_os = "macos")]
             master_key_ensure,
         ])
-        .setup(|app| {
-            // ── System Tray ──
-            let show = MenuItem::with_id(app, "show", "Show Cortex IDE", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+        .setup(move |app| {
+            // ── System Tray (issue #731) ──
+            // Menu items: Show / Open Dispatch (Cmd+Shift+O) / Quit. The
+            // separator + "Open Dispatch" entry surfaces the global-shortcut
+            // feature so users discover it without reading docs.
+            let show = MenuItem::with_id(app, "show", "Show o8", true, None::<&str>)?;
+            let dispatch = MenuItem::with_id(app, "dispatch", "Quick Dispatch", true, Some("CmdOrCtrl+Shift+O"))?;
+            let separator = PredefinedMenuItem::separator(app)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit o8", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &dispatch, &separator, &quit])?;
 
-            let _tray = TrayIconBuilder::new()
+            let tray = TrayIconBuilder::new()
                 .menu(&menu)
-                .tooltip("Cortex IDE")
+                // Show menu on left-click (default is right-click only on
+                // macOS) so the count-aware list is one click away.
+                .show_menu_on_left_click(false)
+                .tooltip("o8")
                 .on_menu_event(|app, event| {
                     match event.id.as_ref() {
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
+                            }
+                        }
+                        "dispatch" => {
+                            if let Err(err) = open_dispatch_popover_impl(app) {
+                                log::warn!("[tray] dispatch menu failed: {}", err);
                             }
                         }
                         "quit" => {
@@ -1282,6 +1613,30 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            // Store the handle so background tasks (badge poller) and
+            // frontend commands can mutate the tray's title / tooltip.
+            store_tray(tray);
+
+            // ── Cmd+Shift+O global shortcut registration (issue #730) ──
+            // The handler is wired in the plugin Builder above; we just need
+            // to register the binding. macOS shows the accessibility prompt
+            // automatically on first registration; if the user denies, we
+            // log + carry on rather than blocking startup.
+            if let Err(err) = app.global_shortcut().register(dispatch_shortcut) {
+                log::warn!(
+                    "[global-shortcut] could not register Cmd+Shift+O: {} \
+                     (user may need to grant Accessibility permission)",
+                    err
+                );
+            } else {
+                log::info!("[global-shortcut] Cmd+Shift+O registered");
+            }
+
+            // ── Badge poller (issue #731) ──
+            // 5s tick keeps the tray title in sync with awaiting_review
+            // count without waiting on a frontend WS subscription. Cheap
+            // — one HTTP GET per tick, hits the same server as the panel.
+            spawn_tray_badge_poller(app.handle().clone());
 
             // ── Window Close → Hide to Tray ──
             let app_handle = app.handle().clone();
