@@ -54,7 +54,12 @@ import {
 import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/components/desktop/thoughts/useOrchestratorStream';
 import { ThoughtsMissionPanel } from '@/components/desktop/thoughts/ThoughtsMissionPanel';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
-import { AgentTileLayout } from './AgentTileLayout';
+import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
+import { SessionVisualizer } from '@/components/desktop/SessionVisualizer';
+import { SessionTileSurface } from './SessionTileSurface';
+import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
+// Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
+// row. The old layout component is no longer imported here.
 
 interface OrchestratorTabProps {
   tabId: string;
@@ -245,8 +250,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
   const [agentsOpen, setAgentsOpen] = useState(() => readBooleanPref(AGENTS_OPEN_KEY));
   const [missionOpen, setMissionOpen] = useState(() => readBooleanPref(MISSION_OPEN_KEY));
-  const [tiledSessions, setTiledSessions] = useState<string[]>([]);
-  const [tileDockExpanded, setTileDockExpanded] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
@@ -293,22 +296,11 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     () => buildAgentTargets(agents, preferredRuntime),
     [agents, preferredRuntime],
   );
-  const isTiled = tiledSessions.length > 1;
-
-  useEffect(() => {
-    const activeSessions = new Set(
-      agents.map((agent) => agent.sessionKey).filter((sessionKey): sessionKey is string => Boolean(sessionKey)),
-    );
-    setTiledSessions((current) => {
-      const next = current.filter((sessionKey) => activeSessions.has(sessionKey));
-      return next.length === current.length ? current : next;
-    });
-  }, [agents]);
-
-  useEffect(() => {
-    if (!isTiled) return;
-    setTileDockExpanded(true);
-  }, [isTiled]);
+  const liveSessionKeys = useMemo(
+    () => agents.map((agent) => agent.sessionKey).filter((key): key is string => Boolean(key)),
+    [agents],
+  );
+  const sessionTiles = useSessionTiles({ tabId, liveSessionKeys });
 
   useEffect(() => {
     const activeGroupIds = comparisonGroups.map((group) => group.groupId);
@@ -336,9 +328,9 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     }
 
     autoTiledComparisonGroupIdRef.current = nextAutoTileGroup.groupId;
-    setTiledSessions(sessionKeys);
+    sessionTiles.autoTileSessions(sessionKeys);
     console.log(`[best-of-n] Auto-tiled comparison group ${nextAutoTileGroup.groupId}`);
-  }, [comparisonGroups]);
+  }, [comparisonGroups, sessionTiles]);
 
   const handleTogglePermission = useCallback(() => {
     setPermissionMode((current) => {
@@ -389,13 +381,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     }
   }, [missionOpen, residency]);
 
-  const handleCloseTileSession = useCallback((sessionKey: string) => {
-    setTiledSessions((current) => current.filter((key) => key !== sessionKey));
-  }, []);
-
-  const handleToggleTileDock = useCallback(() => {
-    setTileDockExpanded((current) => !current);
-  }, []);
 
   const handleSelectThread = useCallback((threadTabId: string) => {
     chatPanelRef.current?.loadThread(threadTabId);
@@ -690,8 +675,18 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
         </div>
       </div>
 
-      {/* SESSIONS strip retired — the workspace tab strip above already
-          represents active agents. See issue #604. */}
+      {/* Sessions strip — pills for active agents. Right-click to split a
+          transcript into a tile beside the chat (issue #663). */}
+      {agents.length > 0 ? (
+        <SessionVisualizer
+          agents={agents}
+          tiledSessions={sessionTiles.tiledSessions}
+          onSelectSession={data.onSelectSession}
+          onToggleTileSession={sessionTiles.toggleTileSession}
+          onClearTiles={sessionTiles.clearAllTiles}
+          onRequestContextMenu={sessionTiles.requestPillContextMenu}
+        />
+      ) : null}
 
       {readyComparisonGroups.length > 0 ? (
         <div
@@ -758,124 +753,15 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
             position: 'relative',
           }}
         >
-          {isTiled ? (
-            <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              <AgentTileLayout
-                sessions={tiledSessions}
-                agents={agents}
-                onCloseSession={handleCloseTileSession}
-              />
-              <div
-                style={{
-                  height: tileDockExpanded ? 232 : 160,
-                  minHeight: tileDockExpanded ? 232 : 160,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  borderTopWidth: 1,
-                  borderTopStyle: 'solid',
-                  borderTopColor: 'var(--t-divider-subtle)',
-                  background: 'var(--t-bg-card)',
-                  flexShrink: 0,
-                }}
-              >
-                <div
-                  style={{
-                    height: 44,
-                    minHeight: 44,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    paddingTop: 0,
-                    paddingRight: 12,
-                    paddingBottom: 0,
-                    paddingLeft: 16,
-                    borderBottomWidth: 1,
-                    borderBottomStyle: 'solid',
-                    borderBottomColor: 'var(--t-border)',
-                    background: 'var(--t-panel)',
-                  }}
-                >
-                  <div
-                    style={{
-                      minWidth: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 2,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 700,
-                        color: 'var(--t-text)',
-                        letterSpacing: '-0.01em',
-                      }}
-                    >
-                      Orchestrator chat
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 10.5,
-                        fontWeight: 500,
-                        color: 'var(--t-text-secondary)',
-                      }}
-                    >
-                      Send follow-ups here while monitoring live agent panes.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label={tileDockExpanded ? 'Collapse orchestrator chat dock' : 'Expand orchestrator chat dock'}
-                    title={tileDockExpanded ? 'Collapse chat dock' : 'Expand chat dock'}
-                    onClick={handleToggleTileDock}
-                    style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 12,
-                      borderWidth: 0,
-                      background: 'transparent',
-                      color: 'var(--t-text-secondary)',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      flexShrink: 0,
-                    }}
-                    onMouseEnter={(event) => {
-                      event.currentTarget.style.background = 'var(--t-bg-card)';
-                      event.currentTarget.style.color = 'var(--t-text)';
-                    }}
-                    onMouseLeave={(event) => {
-                      event.currentTarget.style.background = 'transparent';
-                      event.currentTarget.style.color = 'var(--t-text-secondary)';
-                    }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
-                      {tileDockExpanded ? <path d="M18 14l-6-6-6 6" /> : <path d="M6 10l6 6 6-6" />}
-                    </svg>
-                  </button>
-                </div>
-                <div
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {thoughtsChatPanel}
-                </div>
-              </div>
-            </div>
+          {sessionTiles.isTiled ? (
+            <SessionTileSurface
+              layout={sessionTiles.layout}
+              focusedSessionKey={sessionTiles.focusedSessionKey}
+              chatSlot={thoughtsChatPanel}
+              onResizeSplit={sessionTiles.resizeSplit}
+              onCloseLeaf={sessionTiles.closeSessionLeafById}
+              onFocusSession={sessionTiles.setFocusedSessionKey}
+            />
           ) : thoughtsChatPanel}
         </div>
 
@@ -928,6 +814,20 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
         onClose={() => setPaletteOpen(false)}
         onPick={handlePalettePick}
       />
+      {sessionTiles.pillContextMenu ? (
+        <SessionPillContextMenu
+          open
+          x={sessionTiles.pillContextMenu.request.clientX}
+          y={sessionTiles.pillContextMenu.request.clientY}
+          items={buildPillContextMenuItems(
+            sessionTiles.pillContextMenu.request,
+            sessionTiles.sessionLeaves,
+            sessionTiles.splitSessionFromMenu,
+            sessionTiles.closeSessionLeafById,
+          )}
+          onClose={sessionTiles.closePillContextMenu}
+        />
+      ) : null}
     </div>
   );
 }

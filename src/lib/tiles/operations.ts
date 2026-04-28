@@ -9,7 +9,11 @@ import type {
 } from '@/lib/tiles/types';
 import { isTileLeafNode, isTileSplitNode } from '@/lib/tiles/types';
 
-const TILE_LAYOUT_VERSION = 4; // v4: thoughts/mission/history tile kinds retired; Orchestrator lives as a tab now
+// v4: thoughts/mission/history tile kinds retired; Orchestrator lives as a tab now.
+// Issue #663 added split-pane orchestrator transcripts but uses a separate
+// SessionTileLayout tree (lib/orchestrator/session-tiles.ts) so this version
+// stays at 4 — no new kinds added here.
+const TILE_LAYOUT_VERSION = 4;
 const MIN_SPLIT_RATIO = 0.2;
 const MAX_SPLIT_RATIO = 0.8;
 
