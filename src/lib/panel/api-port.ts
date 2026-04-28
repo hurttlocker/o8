@@ -1,3 +1,4 @@
+// API port resolver — picks free port from sidecar handshake.
 /**
  * Shared port resolver — answers "where is the o8 backend?"
  *
