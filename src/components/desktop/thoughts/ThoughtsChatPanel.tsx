@@ -437,7 +437,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       void poll();
       pollRef.current = window.setInterval(() => {
         void poll();
-      }, 1200);
+      }, 2000);
     }, 400);
   }, [clearPolling, transcriptUrl]);
 

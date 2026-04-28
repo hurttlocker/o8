@@ -219,13 +219,13 @@ export function ApprovalBanner() {
       const data = (await res.json()) as { approvals?: ApprovalRecord[] };
       setApprovals(data.approvals ?? []);
     } catch {
-      // silent — poll ticks again in 3s
+      // silent — poll ticks again on next interval
     }
   }, []);
 
   useEffect(() => {
     void load();
-    const id = setInterval(load, 3000);
+    const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, [load]);
 
