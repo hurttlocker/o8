@@ -100,7 +100,16 @@ export async function computeRestoredTabs(
     //   (a) duplicate Orchestrator tabs after restore;
     //   (b) silent fallthrough to the default `terminal` branch below, which
     //       would carry the "Orchestrator" label onto a real terminal tab.
-    if (tabKind === 'orchestrator') {
+    //
+    // Issue #714 — also skip any tab whose ID begins with `orchestrator-`,
+    // regardless of its persisted `kind`. The `orchestrator-` prefix is only
+    // ever produced by `createWorkspaceTabId('orchestrator')`, so a saved tab
+    // with that prefix was originally an orchestrator. If a downstream code
+    // path mutated its `kind` to `terminal` (the disk artifact that triggered
+    // #714), it is still a zombie that the migration effect will replace —
+    // resurrecting it as a real terminal would produce the duplicate-tab
+    // symptom on every controller remount.
+    if (tabKind === 'orchestrator' || (savedTab.id ?? '').startsWith('orchestrator-')) {
       continue;
     }
 
