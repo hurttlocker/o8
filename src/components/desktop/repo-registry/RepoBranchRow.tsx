@@ -492,7 +492,7 @@ function RepoBranchRowBase({
               color: 'var(--t-text-faint)',
               cursor: 'pointer',
               opacity: rowHovered ? 1 : 0,
-              transition: 'opacity 120ms ease, color 120ms ease',
+              transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             onMouseEnter={(event) => {
               (event.currentTarget as HTMLButtonElement).style.color = '#c97070';
