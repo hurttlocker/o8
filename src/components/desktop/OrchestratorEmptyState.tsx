@@ -21,7 +21,6 @@ interface QuickAction {
   label: string;
   detail: string;
   prompt: string;
-  tone: 'primary' | 'muted';
 }
 
 const QUICK_ACTIONS: QuickAction[] = [
@@ -30,28 +29,24 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: "What's active right now?",
     detail: 'Live fleet status, running sessions, blockers',
     prompt: 'Give me a snapshot of every active agent session right now — what runtime, what task, what status, and what needs my attention.',
-    tone: 'primary',
   },
   {
     id: 'review-pending',
     label: 'Review pending changes',
     detail: 'Diffs waiting for approval across lanes',
     prompt: 'Walk me through every pending diff waiting for approval. For each one: what repo, what the agent changed, and whether it looks safe to merge.',
-    tone: 'primary',
   },
   {
     id: 'ship-status',
     label: 'What shipped today?',
     detail: 'Merged work and momentum across agents',
     prompt: 'Summarize everything that merged into main today across all agents. Group by repo, highlight anything risky, and tell me the overall momentum.',
-    tone: 'muted',
   },
   {
     id: 'dispatch',
     label: 'Dispatch a task',
     detail: 'Scope and route work to an agent',
     prompt: 'Help me scope a task to dispatch. Ask me what repo and what needs to happen, then draft a tight, one-paragraph task packet I can send.',
-    tone: 'muted',
   },
 ];
 
@@ -128,7 +123,7 @@ function OrchestratorEmptyStateBase({
         </div>
       </div>
 
-      {/* Quick actions — 2×2 grid, primary actions on top row */}
+      {/* Quick actions — 2×2 grid, uniform baseline; hover lifts each card identically */}
       <div
         style={{
           display: 'grid',
@@ -139,7 +134,6 @@ function OrchestratorEmptyStateBase({
         }}
       >
         {QUICK_ACTIONS.map((action) => {
-          const isPrimary = action.tone === 'primary';
           return (
             <button
               key={action.id}
@@ -157,8 +151,8 @@ function OrchestratorEmptyStateBase({
                 borderRadius: 12,
                 borderWidth: 1,
                 borderStyle: 'solid',
-                borderColor: isPrimary ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)',
-                background: isPrimary ? 'var(--t-accent-soft)' : 'var(--t-bg-card)',
+                borderColor: 'var(--t-divider-subtle)',
+                background: 'var(--t-bg-card)',
                 color: 'var(--t-text)',
                 cursor: 'pointer',
                 textAlign: 'left',
@@ -168,18 +162,12 @@ function OrchestratorEmptyStateBase({
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.borderColor = 'var(--t-accent-border)';
-                e.currentTarget.style.background = isPrimary
-                  ? 'var(--t-accent-soft-strong)'
-                  : 'var(--t-panel-hover)';
+                e.currentTarget.style.background = 'var(--t-panel-hover)';
                 e.currentTarget.style.transform = 'translateY(-1px)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = isPrimary
-                  ? 'var(--t-accent-border)'
-                  : 'var(--t-divider-subtle)';
-                e.currentTarget.style.background = isPrimary
-                  ? 'var(--t-accent-soft)'
-                  : 'var(--t-bg-card)';
+                e.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+                e.currentTarget.style.background = 'var(--t-bg-card)';
                 e.currentTarget.style.transform = 'translateY(0)';
               }}
             >
