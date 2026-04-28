@@ -428,7 +428,7 @@ export const SessionPickerSheet = memo(function SessionPickerSheet({
           background: 'rgba(0,0,0,0.5)',
           opacity: open ? 1 : 0,
           pointerEvents: open ? 'auto' : 'none',
-          transition: 'opacity 220ms ease',
+          transition: 'opacity 220ms cubic-bezier(0.22, 1, 0.36, 1)',
           zIndex: 60,
         }}
       />

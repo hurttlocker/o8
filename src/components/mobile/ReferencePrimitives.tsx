@@ -137,7 +137,7 @@ export function MobileChromeButton({
     backdropFilter: 'blur(18px)',
     WebkitBackdropFilter: 'blur(18px)',
     WebkitTapHighlightColor: 'transparent',
-    transition: 'transform 180ms ease, background 180ms ease, border-color 180ms ease',
+    transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
     flexShrink: 0,
   };
 
@@ -202,7 +202,7 @@ export function MobileListRow({
     backdropFilter: 'blur(18px)',
     WebkitBackdropFilter: 'blur(18px)',
     WebkitTapHighlightColor: 'transparent',
-    transition: 'background 180ms ease, border-color 180ms ease, transform 180ms ease',
+    transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
     cursor: onClick ? 'pointer' : 'default',
   };
 

@@ -296,7 +296,7 @@ export const MobileDiffViewer = memo(function MobileDiffViewer({
         background: 'rgba(0,0,0,0.4)',
         opacity: open ? 1 : 0,
         pointerEvents: open ? 'auto' : 'none',
-        transition: 'opacity 240ms ease',
+        transition: 'opacity 240ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       <div style={sheetStyle} onClick={(event) => event.stopPropagation()}>
