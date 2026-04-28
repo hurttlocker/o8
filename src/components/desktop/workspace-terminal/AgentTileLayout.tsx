@@ -12,6 +12,14 @@ interface AgentTileLayoutProps {
 
 const DIVIDER_WIDTH = 4;
 const MIN_PANE_WIDTH = 280;
+const STORAGE_KEY = 'cortex-ide:agent-tile-widths';
+const PRUNE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface StoredWidthEntry {
+  widths: number[];
+  updatedAt: number;
+}
+type StoredWidthMap = Record<string, StoredWidthEntry>;
 
 function evenWidths(count: number): number[] {
   if (count <= 0) return [];
@@ -20,6 +28,59 @@ function evenWidths(count: number): number[] {
   const sum = widths.reduce((total, value) => total + value, 0);
   widths[count - 1] = Number((widths[count - 1] + (100 - sum)).toFixed(2));
   return widths;
+}
+
+function hashSessions(sessions: string[]): string {
+  return sessions.slice().sort().join('|');
+}
+
+function loadStoredWidthMap(): StoredWidthMap {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return {};
+    const result: StoredWidthMap = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object') continue;
+      const candidate = value as { widths?: unknown; updatedAt?: unknown };
+      if (
+        Array.isArray(candidate.widths)
+        && candidate.widths.every((n) => typeof n === 'number' && Number.isFinite(n))
+        && typeof candidate.updatedAt === 'number'
+      ) {
+        result[key] = { widths: candidate.widths as number[], updatedAt: candidate.updatedAt };
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredWidthMap(hash: string, widths: number[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const map = loadStoredWidthMap();
+    const now = Date.now();
+    map[hash] = { widths, updatedAt: now };
+    for (const [key, entry] of Object.entries(map)) {
+      if (now - entry.updatedAt > PRUNE_AGE_MS) {
+        delete map[key];
+      }
+    }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // localStorage may be full or disabled; silently ignore.
+  }
+}
+
+function readWidthsForHash(hash: string, count: number): number[] | null {
+  const map = loadStoredWidthMap();
+  const entry = map[hash];
+  if (entry && entry.widths.length === count) return entry.widths;
+  return null;
 }
 
 function cycleSession(sessions: string[], current: string | null, direction: 1 | -1): string | null {
@@ -36,10 +97,25 @@ export function AgentTileLayout({
   onCloseSession,
 }: AgentTileLayoutProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [storedWidths, setStoredWidths] = useState<number[]>(() => evenWidths(sessions.length));
+  const sessionsHash = useMemo(() => hashSessions(sessions), [sessions]);
+  const [storedWidths, setStoredWidths] = useState<number[]>(() => {
+    const persisted = readWidthsForHash(sessionsHash, sessions.length);
+    return persisted ?? evenWidths(sessions.length);
+  });
+  const lastHashRef = useRef<string>(sessionsHash);
   const [focusedSession, setFocusedSession] = useState<string | null>(sessions[0] ?? null);
   const [hoveredDivider, setHoveredDivider] = useState<number | null>(null);
   const [draggingDivider, setDraggingDivider] = useState<number | null>(null);
+
+  // When the session set changes (agent spawn/die), rehydrate widths for the
+  // new hash from localStorage if available, else fall back to even widths.
+  useEffect(() => {
+    if (lastHashRef.current === sessionsHash) return;
+    lastHashRef.current = sessionsHash;
+    const persisted = readWidthsForHash(sessionsHash, sessions.length);
+    setStoredWidths(persisted ?? evenWidths(sessions.length));
+  }, [sessionsHash, sessions.length]);
+
   const widths = useMemo(
     () => storedWidths.length === sessions.length ? storedWidths : evenWidths(sessions.length),
     [sessions.length, storedWidths],
@@ -100,6 +176,7 @@ export function AgentTileLayout({
     const startRight = startWidths[dividerIndex + 1] ?? 0;
     const pairTotal = startLeft + startRight;
     const minPercent = Math.min((MIN_PANE_WIDTH / availableWidth) * 100, pairTotal / 2);
+    let latestWidths = startWidths;
 
     setDraggingDivider(dividerIndex);
 
@@ -113,6 +190,7 @@ export function AgentTileLayout({
       const nextWidths = [...startWidths];
       nextWidths[dividerIndex] = Number(nextLeft.toFixed(2));
       nextWidths[dividerIndex + 1] = Number(nextRight.toFixed(2));
+      latestWidths = nextWidths;
       setStoredWidths(nextWidths);
     };
 
@@ -120,6 +198,11 @@ export function AgentTileLayout({
       setDraggingDivider(null);
       document.removeEventListener('mousemove', handleMove);
       document.removeEventListener('mouseup', handleUp);
+      // Persist final widths once the user releases the divider so layout
+      // survives unmount/remount and full app restarts.
+      if (latestWidths.length === sessions.length) {
+        saveStoredWidthMap(sessionsHash, latestWidths);
+      }
     };
 
     document.addEventListener('mousemove', handleMove);
