@@ -492,7 +492,11 @@ function RepoBranchRowBase({
               color: 'var(--t-text-faint)',
               cursor: 'pointer',
               opacity: rowHovered ? 1 : 0,
-              transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+              // Pop curve for the hover-reveal — matches SessionPillContextMenu,
+              // RejectedFeedbackPanel, setup-wizard atoms. Subtle overshoot so
+              // the trash icon "appears" rather than fades, signalling that the
+              // affordance is intentional and clickable. (#720)
+              transition: 'opacity 220ms cubic-bezier(0.34, 1.36, 0.64, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             onMouseEnter={(event) => {
               (event.currentTarget as HTMLButtonElement).style.color = '#c97070';
