@@ -42,7 +42,7 @@ function ChainOfThoughtBase({
           width: 'auto',
           minWidth: 0,
           textAlign: 'left',
-          transition: 'all 150ms ease',
+          transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
           fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         }}
       >

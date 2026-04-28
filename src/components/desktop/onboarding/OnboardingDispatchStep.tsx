@@ -124,7 +124,7 @@ function RuntimeTile({
     boxShadow: selected
       ? `0 14px 32px ${accent}33, inset 0 1px 0 rgba(255,255,255,0.08)`
       : '0 8px 20px rgba(0,0,0,0.05)',
-    transition: 'background 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
+    transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1)',
     position: 'relative',
     overflow: 'hidden',
   };

@@ -407,7 +407,7 @@ function SendPill({
         fontVariantNumeric: 'tabular-nums',
         fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
         flexShrink: 0,
-        transition: 'background 180ms ease, border-color 180ms ease, color 180ms ease',
+        transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       {/* status dot — pulses during working */}
@@ -420,7 +420,7 @@ function SendPill({
           flexShrink: 0,
           background: stateColor,
           animation: working ? 'sendpill-pulse 1.6s ease-in-out infinite' : 'none',
-          transition: 'background 180ms ease',
+          transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       />
       <span style={{ color: stateColor }}>{label}</span>

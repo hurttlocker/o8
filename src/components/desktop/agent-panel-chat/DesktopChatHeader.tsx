@@ -63,7 +63,7 @@ export const DesktopChatHeader = memo(function DesktopChatHeader({
             cursor: 'pointer',
             textAlign: 'left' as const,
             WebkitTapHighlightColor: 'transparent',
-            transition: 'background-color 150ms ease',
+            transition: 'background-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.03)';
@@ -211,7 +211,7 @@ export const DesktopChatHeader = memo(function DesktopChatHeader({
                       : 'transparent',
                     cursor: 'pointer',
                     textAlign: 'left' as const,
-                    transition: 'background-color 120ms ease',
+                    transition: 'background-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                     minHeight: 44,
                   }}
                 >
@@ -312,7 +312,7 @@ export const DesktopChatHeader = memo(function DesktopChatHeader({
                             backgroundColor: isActive ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
                             cursor: 'pointer',
                             textAlign: 'left' as const,
-                            transition: 'background-color 120ms ease',
+                            transition: 'background-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                             minHeight: 44,
                           }}
                         >
@@ -395,7 +395,7 @@ export const DesktopChatHeader = memo(function DesktopChatHeader({
             fontSize: 11,
             fontWeight: 500,
             cursor: 'pointer',
-            transition: 'background 150ms ease',
+            transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             fontFamily: '"SF Mono", ui-monospace, monospace',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0, 0, 0, 0.04)'; }}

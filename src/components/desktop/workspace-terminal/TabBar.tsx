@@ -300,7 +300,7 @@ export const TabBar = memo(function TabBar({
                   letterSpacing: '-0.01em',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
-                  transition: 'background 150ms ease, box-shadow 150ms ease, color 120ms ease',
+                  transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   position: 'relative',
                 }}
                 onMouseEnter={(event) => {

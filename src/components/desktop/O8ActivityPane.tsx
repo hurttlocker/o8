@@ -372,7 +372,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   fontWeight: 600,
                   cursor: 'pointer',
                   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                  transition: 'all 120ms ease',
+                  transition: 'all 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   letterSpacing: '-0.01em',
                 }}
               >
@@ -474,7 +474,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                         background: isExpanded ? 'rgba(37,99,235,0.06)' : 'transparent',
                         cursor: 'pointer',
                         textAlign: 'left',
-                        transition: 'background 100ms ease',
+                        transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1)',
                       }}
                       onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'rgba(37,99,235,0.04)'; }}
                       onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}

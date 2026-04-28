@@ -235,7 +235,7 @@ function RepoCardHeaderBase({
                       fontFamily: '"SF Mono", ui-monospace, monospace',
                       flexShrink: 0,
                       opacity: hoveringHeader ? 1 : 0.7,
-                      transition: 'opacity 140ms ease',
+                      transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
                     }}
                   >
                     {openPrCount}PR
@@ -249,7 +249,7 @@ function RepoCardHeaderBase({
                       justifyContent: 'center',
                       flexShrink: 0,
                       opacity: hoveringHeader ? 1 : 0.7,
-                      transition: 'opacity 140ms ease',
+                      transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
                     }}
                     title={
                       previewCheckCounts.failed > 0
@@ -324,7 +324,7 @@ function RepoCardHeaderBase({
                 WebkitAppearance: 'none',
                 marginRight: -2,
                 opacity: hoveringHeader ? 1 : 0,
-                transition: 'opacity 140ms ease, background 140ms ease, color 140ms ease',
+                transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1), background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
               } as React.CSSProperties}
               onMouseEnter={(event) => {
                 event.currentTarget.style.color = '#ef4444';

@@ -113,7 +113,7 @@ export function TimelineEmptyState({
               fontWeight: 600,
               letterSpacing: '-0.01em',
               flexShrink: 0,
-              transition: 'background 140ms ease, border-color 140ms ease, transform 140ms ease',
+              transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms cubic-bezier(0.22, 1, 0.36, 1), transform 140ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = 'var(--t-accent-soft)';

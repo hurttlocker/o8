@@ -192,7 +192,7 @@ function SessionPillBase({
         color: 'var(--t-text)',
         flexShrink: 0,
         boxShadow: 'none',
-        transition: 'border-color 120ms ease, background 120ms ease',
+        transition: 'border-color 120ms cubic-bezier(0.22, 1, 0.36, 1), background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={handleWrapperEnter}
       onMouseLeave={handleWrapperLeave}
