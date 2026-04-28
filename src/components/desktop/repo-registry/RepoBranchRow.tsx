@@ -145,6 +145,15 @@ function RepoBranchRowBase({
   branchDeleteConfirm,
   setBranchDeleteConfirm,
 }: RepoBranchRowProps) {
+  // Per-row hover flag — gates the inline trash icon so it only appears on
+  // the entered row instead of every sibling. Local state is fine here; the
+  // hover doesn't need to coordinate across rows.
+  const [rowHovered, setRowHovered] = useState(false);
+  // Two-step delete confirm strip lives directly under the row. Soft-delete
+  // returns `canForce: true` when the branch isn't merged → reuses the
+  // existing `branchDeleteConfirm` flow. Pre-soft-delete confirm is local.
+  const [pendingDelete, setPendingDelete] = useState(false);
+
   // ── Agent hover state — opens the AgentStatusHover popover after a short
   // dwell so flicking past agent rows doesn't flash the card. The hover
   // only tracks the currently-entered row via `hoveredAgentKey`; the rect
@@ -305,10 +314,12 @@ function RepoBranchRowBase({
         onMouseEnter={(event) => {
           const target = event.currentTarget as HTMLDivElement;
           target.style.background = branchHoverBackground;
+          setRowHovered(true);
           scheduleBranchHover(branch.name, target, event.clientX, event.clientY);
         }}
         onMouseLeave={(event) => {
           (event.currentTarget as HTMLDivElement).style.background = branchBaseBackground;
+          setRowHovered(false);
           closeBranchHover();
         }}
         style={{
@@ -449,8 +460,118 @@ function RepoBranchRowBase({
             </span>
           );
         })()}
+
+        {/* Hover-revealed trash — manual prune for any branch the API kept
+            (e.g. unmerged branches still showing). Hidden on the current
+            branch + default branch (protected). 44pt minimum touch target
+            via the wrapper button; the icon itself is 12px to keep the row
+            compact. Click → pendingDelete strip; Confirm → handleDeleteBranch
+            (which itself escalates to force-delete via the existing
+            branchDeleteConfirm strip if the branch isn't merged). */}
+        {!branch.current && branch.name !== repo.defaultBranch ? (
+          <button
+            type="button"
+            aria-label={`Delete ${branch.name}`}
+            title={`Delete ${branch.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setPendingDelete(true);
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 44,
+              height: 44,
+              marginTop: -14,
+              marginBottom: -14,
+              marginRight: -10,
+              flexShrink: 0,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--t-text-faint)',
+              cursor: 'pointer',
+              opacity: rowHovered ? 1 : 0,
+              transition: 'opacity 120ms ease, color 120ms ease',
+            }}
+            onMouseEnter={(event) => {
+              (event.currentTarget as HTMLButtonElement).style.color = '#c97070';
+            }}
+            onMouseLeave={(event) => {
+              (event.currentTarget as HTMLButtonElement).style.color = 'var(--t-text-faint)';
+            }}
+          >
+            <Trash2 size={12} strokeWidth={2} />
+          </button>
+        ) : null}
       </div>
       )}
+
+      {pendingDelete ? (
+        <div
+          style={{
+            marginLeft: 36,
+            marginTop: 4,
+            marginBottom: 4,
+            paddingTop: 6,
+            paddingBottom: 6,
+            paddingLeft: 8,
+            paddingRight: 8,
+            borderRadius: 8,
+            border: '1px solid rgba(239,68,68,0.15)',
+            background: 'rgba(254,242,242,0.9)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <AlertCircle size={11} strokeWidth={2} style={{ color: '#dc2626', flexShrink: 0 }} />
+          <span style={{ fontSize: 10, color: '#991b1b', flex: 1 }}>
+            Delete {branch.isWorktree ? 'worktree + branch' : 'branch'} {branch.name}?
+          </span>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setPendingDelete(false);
+            }}
+            style={{
+              fontSize: 10,
+              fontWeight: 500,
+              color: 'var(--t-text-muted)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px 6px',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setPendingDelete(false);
+              if (worktree?.status === 'stale') {
+                void handleCleanupWorktree(worktree);
+                return;
+              }
+              void handleDeleteBranch(branch.name);
+            }}
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: '#dc2626',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px 6px',
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
 
       {branchPackets.length > 0 || orderedBranchAgents.length > 0 ? (
         <div
