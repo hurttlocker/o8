@@ -150,7 +150,7 @@ function ContextBar({ percent }: { percent: number }) {
         height: '100%',
         borderRadius: 2,
         background: color,
-        transition: 'width 400ms cubic-bezier(0.32, 0.72, 0, 1), background 400ms ease',
+        transition: 'width 400ms cubic-bezier(0.22, 1, 0.36, 1), background 400ms ease',
       }} />
     </div>
   );
@@ -281,7 +281,7 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
   const prefersReducedMotion = typeof window !== 'undefined'
     && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-  const springCurve = 'cubic-bezier(0.32, 0.72, 0, 1)';
+  const springCurve = 'cubic-bezier(0.22, 1, 0.36, 1)';
   const sheetTransition = prefersReducedMotion ? 'none' : `transform 400ms ${springCurve}`;
   const backdropTransition = prefersReducedMotion ? 'none' : 'opacity 300ms ease';
 

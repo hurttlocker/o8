@@ -139,7 +139,7 @@ function CheckCircleIcon() {
 function ChevronIcon({ collapsed }: { collapsed: boolean }) {
   return (
     <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{
-      display: 'block', flexShrink: 0, transition: 'transform 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+      display: 'block', flexShrink: 0, transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
       transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
     }}>
       <polyline points="6 9 12 15 18 9"/>
@@ -159,7 +159,7 @@ function ProgressRing({ progress, size = 20 }: { progress: number; size?: number
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--t-divider)" strokeWidth={2.5} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#2563eb" strokeWidth={2.5}
         strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
-        style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.32, 0.72, 0, 1)' }}
+        style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.22, 1, 0.36, 1)' }}
       />
     </svg>
   );
@@ -407,7 +407,7 @@ export function WorkspacesPanel() {
       {!collapsed && (
         <div style={{
           padding: '0 12px 12px',
-          transition: 'max-height 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: 'max-height 250ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}>
           <StatusSection status="in_progress" cards={grouped.in_progress} />
           <StatusSection status="done" cards={grouped.done} />

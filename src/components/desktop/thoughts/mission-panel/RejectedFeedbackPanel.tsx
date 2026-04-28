@@ -144,7 +144,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
           letterSpacing: '-0.005em',
           outline: 'none',
           opacity: submitting ? 0.6 : 1,
-          transition: 'border-color 200ms cubic-bezier(0.4, 1.4, 0.6, 1)',
+          transition: 'border-color 200ms cubic-bezier(0.34, 1.36, 0.64, 1)',
         }}
         aria-label="Operator feedback for rerun"
       />
@@ -173,7 +173,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
             letterSpacing: '-0.01em',
             cursor: canSubmit ? 'pointer' : 'not-allowed',
             opacity: submitting ? 0.7 : 1,
-            transition: 'background 200ms cubic-bezier(0.4, 1.4, 0.6, 1), transform 150ms cubic-bezier(0.4, 1.4, 0.6, 1)',
+            transition: 'background 200ms cubic-bezier(0.34, 1.36, 0.64, 1), transform 150ms cubic-bezier(0.34, 1.36, 0.64, 1)',
             fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
           onMouseDown={(event) => {

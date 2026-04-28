@@ -91,7 +91,7 @@ function BannerCard({ notification, onDismiss, onTap }: {
           }
           setTimeout(onDismiss, 180);
         } else if (cardRef.current) {
-          cardRef.current.style.transition = 'transform 250ms cubic-bezier(0.32, 0.72, 0, 1), opacity 250ms ease';
+          cardRef.current.style.transition = 'transform 250ms cubic-bezier(0.22, 1, 0.36, 1), opacity 250ms ease';
           cardRef.current.style.transform = 'translate(0, 0)';
           cardRef.current.style.opacity = '1';
           // Clear transition after spring-back
@@ -117,7 +117,7 @@ function BannerCard({ notification, onDismiss, onTap }: {
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         transition: 'transform 200ms ease, opacity 200ms ease',
-        animation: 'bannerSlideDown 350ms cubic-bezier(0.32, 0.72, 0, 1)',
+        animation: 'bannerSlideDown 350ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       {/* Icon — small colored dot */}

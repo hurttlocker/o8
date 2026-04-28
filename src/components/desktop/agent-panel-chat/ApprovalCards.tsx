@@ -52,7 +52,7 @@ function GateReportSection({ approval }: { approval: SidebarApproval }) {
           display: 'inline-block',
           width: 12,
           textAlign: 'center',
-          transition: 'transform 150ms ease',
+          transition: 'transform 150ms cubic-bezier(0.22, 1, 0.36, 1)',
           transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
         }}>
           {'\u25B6'}

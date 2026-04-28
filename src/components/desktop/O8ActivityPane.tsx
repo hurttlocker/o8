@@ -484,7 +484,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                         width: 10, height: 20,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         flexShrink: 0, color: 'var(--t-text-faint)', fontSize: 10,
-                        transition: 'transform 150ms ease',
+                        transition: 'transform 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                         transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
                       }}>
                         <svg width="7" height="7" viewBox="0 0 7 7" fill="currentColor"><path d="M1.5 0.5L5.5 3.5L1.5 6.5Z" /></svg>

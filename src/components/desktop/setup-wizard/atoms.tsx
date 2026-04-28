@@ -36,7 +36,7 @@ export function AnimatedCheck({ delay = 0 }: { delay?: number }) {
       height: 20,
       borderRadius: '50%',
       background: visible ? '#22c55e' : 'rgba(34,197,94,0.15)',
-      transition: 'all 400ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+      transition: 'all 400ms cubic-bezier(0.34, 1.36, 0.64, 1)',
       transform: visible ? 'scale(1)' : 'scale(0.5)',
       opacity: visible ? 1 : 0.3,
       flexShrink: 0,
@@ -130,7 +130,7 @@ export function StepDots({ total, current }: { total: number; current: number })
           background: i === current
             ? THEME_ACCENT
             : i < current ? THEME_ACCENT_SOFT_STRONG : THEME_DIVIDER,
-          transition: 'all 300ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+          transition: 'all 300ms cubic-bezier(0.34, 1.36, 0.64, 1)',
         }} />
       ))}
     </div>
@@ -218,7 +218,7 @@ export function SetupWizardStepFrame({
             ? 'translateY(12px) scale(0.985)'
             : 'translateY(-12px) scale(0.985)'
           : 'translateY(0) scale(1)',
-        transition: 'opacity 220ms ease, transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+        transition: 'opacity 220ms ease, transform 220ms cubic-bezier(0.34, 1.36, 0.64, 1)',
       }}
     >
       {children}

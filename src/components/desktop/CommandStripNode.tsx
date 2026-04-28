@@ -133,7 +133,7 @@ export function CommandStripNode({
             style={{
               flexShrink: 0,
               transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-              transition: 'transform 180ms ease',
+              transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             aria-hidden="true"
           >

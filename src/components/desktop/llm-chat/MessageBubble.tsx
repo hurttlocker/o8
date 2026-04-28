@@ -116,7 +116,7 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
         onClick={() => setExpanded((value) => !value)}
         style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', paddingTop: 10, paddingRight: 12, paddingBottom: 10, paddingLeft: 12, background: THEME_BG_CARD, border: '1px solid var(--t-panel-border)', borderRadius: 12, cursor: 'pointer', textAlign: 'left' }}
       >
-        <ChevronRight size={14} style={{ color: 'var(--t-text-secondary)', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 160ms ease', flexShrink: 0 }} />
+        <ChevronRight size={14} style={{ color: 'var(--t-text-secondary)', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1)', flexShrink: 0 }} />
         <FileText size={14} style={{ color: 'var(--t-text-secondary)', flexShrink: 0 }} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>1 file changed</div>

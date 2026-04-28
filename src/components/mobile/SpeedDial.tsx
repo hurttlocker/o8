@@ -200,7 +200,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           <span style={{
             display: 'block', width: 18, height: 1.5, borderRadius: 1,
             background: 'currentColor',
-            transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+            transition: 'all 250ms cubic-bezier(0.22, 1, 0.36, 1)',
             transform: open ? 'translateY(5.25px) rotate(45deg)' : 'none',
           }} />
           <span style={{
@@ -212,7 +212,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           <span style={{
             display: 'block', width: 16, height: 1.5, borderRadius: 1,
             background: 'currentColor',
-            transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+            transition: 'all 250ms cubic-bezier(0.22, 1, 0.36, 1)',
             transform: open ? 'translateY(-5.25px) rotate(-45deg)' : 'none',
           }} />
         </div>

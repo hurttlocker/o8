@@ -3,7 +3,7 @@ import type { BoardColumnId } from '@/lib/board/types';
 import type { BoardComposerState } from './types';
 
 export const COLUMN_ORDER: BoardColumnId[] = ['backlog', 'in_progress', 'review', 'trash'];
-export const CARD_TRANSITION = 'all 180ms cubic-bezier(0.32, 0.72, 0, 1)';
+export const CARD_TRANSITION = 'all 180ms cubic-bezier(0.22, 1, 0.36, 1)';
 
 export const DEFAULT_COMPOSER_STATE: BoardComposerState = {
   title: '',

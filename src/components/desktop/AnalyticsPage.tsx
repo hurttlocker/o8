@@ -384,7 +384,7 @@ const BreakdownRows = memo(function BreakdownRows({
                 borderRadius: 1,
                 background: RAMS_ACCENT,
                 opacity: 0.7,
-                transition: 'width 300ms cubic-bezier(0.32, 0.72, 0, 1)',
+                transition: 'width 300ms cubic-bezier(0.22, 1, 0.36, 1)',
               }} />
             </div>
             <div style={{ display: 'flex', gap: 14 }}>

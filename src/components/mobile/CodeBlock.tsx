@@ -173,7 +173,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockPr
         createElement('span', {
           style: {
             fontSize: '0.6rem',
-            transition: 'transform 200ms ease',
+            transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
             transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
           },
         }, '▼'),

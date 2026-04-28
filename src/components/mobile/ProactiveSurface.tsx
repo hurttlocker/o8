@@ -49,7 +49,7 @@ const ProactiveCard = memo(function ProactiveCard({
       padding: '10px 12px', borderRadius: 14,
       background: `${item.color}06`,
       border: `1px solid ${item.color}15`,
-      animation: exiting ? 'proactiveExit 250ms ease forwards' : 'proactiveEnter 350ms cubic-bezier(0.32, 0.72, 0, 1)',
+      animation: exiting ? 'proactiveExit 250ms ease forwards' : 'proactiveEnter 350ms cubic-bezier(0.22, 1, 0.36, 1)',
       touchAction: 'manipulation',
     }}>
       {/* Icon */}

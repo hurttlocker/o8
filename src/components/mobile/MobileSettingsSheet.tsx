@@ -294,7 +294,7 @@ export function MobileSettingsSheet({
         letterSpacing: MOBILE_BODY_TRACKING,
         display: 'flex',
         flexDirection: 'column',
-        animation: 'mobileSettingsSheetIn 0.28s cubic-bezier(0.32, 0.72, 0, 1)',
+        animation: 'mobileSettingsSheetIn 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
       } as CSSProperties}
     >
       <style>{`
