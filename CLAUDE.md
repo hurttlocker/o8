@@ -475,3 +475,5 @@ Using subagents saves main context and runs cheaper models on tasks that don't n
 - `docs/system-architecture.md` — Mermaid diagram of the full system
 - `docs/runtime-adapter-contract.md` — AgentRuntime interface evolution
 - `docs/performance-architecture-principles.md` — Render speed, bootstrap, streaming
+
+<!-- Last reviewed: 2026-04-28 (gemini 3.1-pro test) -->
