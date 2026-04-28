@@ -346,7 +346,7 @@ function ApprovalCard({
               fontWeight: 600,
               cursor: resolving ? 'wait' : 'pointer',
               opacity: resolving ? 0.6 : 1,
-              transition: 'opacity 150ms ease',
+              transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
               letterSpacing: '-0.01em',
             }}
           >
@@ -372,7 +372,7 @@ function ApprovalCard({
               fontWeight: 600,
               cursor: resolving ? 'wait' : 'pointer',
               opacity: resolving ? 0.6 : 1,
-              transition: 'opacity 150ms ease',
+              transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
               letterSpacing: '-0.01em',
             }}
           >
@@ -590,7 +590,7 @@ export function ApprovalQueuePanel({ onClose, embedded }: { onClose?: () => void
               background: 'transparent',
               cursor: 'pointer',
               color: 'var(--t-text-secondary)',
-              transition: 'background 140ms ease',
+              transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--t-panel-hover)'; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}

@@ -110,7 +110,7 @@ function DiffCard({ diff, isLatest }: { diff: DiffEntry; isLatest: boolean }) {
         ? 'rgba(147, 197, 253, 0.04)'
         : 'rgba(255, 255, 255, 0.015)',
       animation: isLatest ? 'diffCardSlideIn 400ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
-      transition: 'border-color 200ms ease',
+      transition: 'border-color 200ms cubic-bezier(0.22, 1, 0.36, 1)',
     }}>
       {/* File header */}
       <button

@@ -124,7 +124,7 @@ function O8TabButton({ icon, active, onClick, label }: {
         borderRadius: 8,
         background: active ? 'rgba(255,255,255,0.14)' : 'transparent',
         cursor: 'pointer',
-        transition: 'background 120ms ease',
+        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         position: 'relative',
       }}
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
@@ -205,7 +205,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
             background: 'transparent',
             color: 'var(--t-text-secondary)',
             cursor: 'pointer',
-            transition: 'background 120ms ease',
+            transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}

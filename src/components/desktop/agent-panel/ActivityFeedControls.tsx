@@ -297,7 +297,7 @@ function ActivityFeedControlsBase({
                     color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
                     cursor: 'pointer',
                     fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                    transition: 'all 120ms ease',
+                    transition: 'all 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   }}
                 >
                   {tab.icon}

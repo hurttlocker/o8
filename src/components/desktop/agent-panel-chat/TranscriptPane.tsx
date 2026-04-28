@@ -180,7 +180,7 @@ export const AgentTurnGroup = memo(function AgentTurnGroup({
                       border: '1px solid var(--t-panel-border)',
                       background: expandedSourceId === card.id ? THEME_PANEL_GLASS : THEME_BG_CARD,
                       boxShadow: expandedSourceId === card.id ? 'var(--t-panel-shadow)' : 'none',
-                      transition: 'transform 180ms ease, box-shadow 180ms ease, background 180ms ease, border-color 180ms ease',
+                      transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1), background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
                       cursor: 'pointer',
                       textAlign: 'left',
                       animation: 'sidebarSourceCardIn 220ms ease-out',
@@ -283,7 +283,7 @@ export const AgentTurnGroup = memo(function AgentTurnGroup({
                             fontSize: 11,
                             fontWeight: 700,
                             cursor: 'pointer',
-                            transition: 'transform 160ms ease, box-shadow 160ms ease',
+                            transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1)',
                           }}
                         >
                           <SlidersHorizontal size={12} strokeWidth={2} />
@@ -433,7 +433,7 @@ export const ActiveTurnCard = memo(function ActiveTurnCard({
       border: `1px solid ${THEME_ACCENT_BORDER}`,
       boxShadow: 'var(--t-panel-shadow)',
       animation: 'sidebarActiveTurnIn 220ms ease-out',
-      transition: 'box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease',
+      transition: 'box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
     }}>
       <div style={{
         display: 'flex',
@@ -757,7 +757,7 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
               cursor: 'pointer',
               letterSpacing: '-0.01em',
               boxShadow: 'var(--t-panel-shadow)',
-              transition: 'all 150ms ease',
+              transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
             <ChevronDown size={11} />

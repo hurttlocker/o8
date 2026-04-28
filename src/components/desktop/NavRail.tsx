@@ -110,7 +110,7 @@ function neoIconStyle(active: boolean, useTauri = true): React.CSSProperties {
     flexShrink: 0,
     background: preset.background,
     boxShadow: preset.boxShadow,
-    transition: 'box-shadow 150ms ease, background 150ms ease',
+    transition: 'box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1), background 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }
 

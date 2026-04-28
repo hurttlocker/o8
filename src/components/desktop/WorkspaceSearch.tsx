@@ -122,7 +122,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
         WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
         border: focused ? '1px solid rgba(59, 130, 246, 0.2)' : '1px solid var(--t-divider-subtle)',
         boxShadow: focused ? '0 4px 24px var(--t-panel-shadow)' : 'none',
-        transition: 'all 200ms ease',
+        transition: 'all 200ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}>
         <Search size={14} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)', flexShrink: 0 }} />
         <input
@@ -227,7 +227,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
                     cursor: 'pointer',
                     textAlign: 'left',
                     fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                    transition: 'background 80ms ease',
+                    transition: 'background 80ms cubic-bezier(0.22, 1, 0.36, 1)',
                   }}
                 >
                   <FileText size={14} strokeWidth={1.5} style={{

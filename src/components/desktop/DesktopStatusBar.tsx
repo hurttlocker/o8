@@ -129,7 +129,7 @@ function FooterPorts({ onPortPreview }: { onPortPreview?: DesktopStatusBarProps[
           fontWeight: 700,
           fontFamily: '"SF Mono", ui-monospace, monospace',
           cursor: 'pointer',
-          transition: 'background 140ms ease',
+          transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
         onClick={() => setOpen((v) => !v)}
       >

@@ -157,7 +157,7 @@ export const ThoughtsHistoryPanel = forwardRef<ThoughtsHistoryPanelHandle, {
                 background: isActive ? 'var(--t-accent-soft)' : 'transparent',
                 cursor: 'pointer',
                 textAlign: 'left',
-                transition: 'background 120ms ease, border-color 120ms ease',
+                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               <div style={{
@@ -208,7 +208,7 @@ export const ThoughtsHistoryPanel = forwardRef<ThoughtsHistoryPanelHandle, {
                     lineHeight: 1,
                     color: 'var(--t-text-faint)',
                     opacity: deletingId === entry.tabId ? 0.3 : 0.6,
-                    transition: 'opacity 120ms ease',
+                    transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   }}
                 >
                   -

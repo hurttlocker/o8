@@ -74,7 +74,7 @@ function GlassButton({ children, style, primary, ...props }: React.ButtonHTMLAtt
         fontFamily: FONT,
         cursor: props.disabled ? 'default' : 'pointer',
         letterSpacing: '-0.01em',
-        transition: 'background 200ms ease, transform 100ms ease',
+        transition: 'background 200ms cubic-bezier(0.22, 1, 0.36, 1), transform 100ms cubic-bezier(0.22, 1, 0.36, 1)',
         opacity: props.disabled ? 0.5 : 1,
         ...style,
       } as React.CSSProperties}
@@ -110,7 +110,7 @@ function StepIndicator({ steps, current }: { steps: OnboardingStep[]; current: O
             height: 8,
             borderRadius: 4,
             background: i < idx ? 'var(--t-accent)' : i === idx ? 'var(--t-text-secondary)' : 'var(--t-text-faint)',
-            transition: 'width 300ms ease, background 300ms ease',
+            transition: 'width 300ms cubic-bezier(0.22, 1, 0.36, 1), background 300ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         />
       ))}
@@ -385,9 +385,9 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
               {FEATURES.map((f, i) => (
                 <button key={i} type="button" onClick={() => { setActiveSlide(i); if (slideTimerRef.current) clearInterval(slideTimerRef.current); slideTimerRef.current = setInterval(() => setActiveSlide(p => (p + 1) % FEATURES.length), SLIDE_MS); }}
-                  style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '14px 18px', borderRadius: 14, border: 'none', background: i === activeSlide ? 'var(--t-glass-muted-strong)' : 'transparent', backdropFilter: i === activeSlide ? 'blur(12px)' : 'none', WebkitBackdropFilter: i === activeSlide ? 'blur(12px)' : 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 300ms ease', fontFamily: FONT } as React.CSSProperties}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: i === activeSlide ? 'var(--t-text-strong)' : 'var(--t-text-secondary)', letterSpacing: '-0.01em', transition: 'color 300ms ease' }}>{f.title}</div>
-                  <div style={{ fontSize: 13, color: i === activeSlide ? 'var(--t-text-secondary)' : 'var(--t-text-faint)', lineHeight: 1.5, transition: 'color 300ms ease' }}>{f.subtitle}</div>
+                  style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '14px 18px', borderRadius: 14, border: 'none', background: i === activeSlide ? 'var(--t-glass-muted-strong)' : 'transparent', backdropFilter: i === activeSlide ? 'blur(12px)' : 'none', WebkitBackdropFilter: i === activeSlide ? 'blur(12px)' : 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 300ms cubic-bezier(0.22, 1, 0.36, 1)', fontFamily: FONT } as React.CSSProperties}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: i === activeSlide ? 'var(--t-text-strong)' : 'var(--t-text-secondary)', letterSpacing: '-0.01em', transition: 'color 300ms cubic-bezier(0.22, 1, 0.36, 1)' }}>{f.title}</div>
+                  <div style={{ fontSize: 13, color: i === activeSlide ? 'var(--t-text-secondary)' : 'var(--t-text-faint)', lineHeight: 1.5, transition: 'color 300ms cubic-bezier(0.22, 1, 0.36, 1)' }}>{f.subtitle}</div>
                 </button>
               ))}
 
@@ -515,7 +515,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
                         cursor: 'pointer',
                         textAlign: 'left',
                         fontFamily: FONT,
-                        transition: 'background 150ms ease, border-color 150ms ease',
+                        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                       }}
                     >
                       {/* Checkbox */}
@@ -529,7 +529,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
                         alignItems: 'center',
                         justifyContent: 'center',
                         flexShrink: 0,
-                        transition: 'all 150ms ease',
+                        transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                       }}>
                         {selected && (
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>

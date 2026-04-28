@@ -90,7 +90,7 @@ export function IssueGroupList({
                         paddingRight: 8,
                         paddingBottom: 0,
                         paddingLeft: 8,
-                        transition: 'background 120ms ease',
+                        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                       }}
                       onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
                       onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}

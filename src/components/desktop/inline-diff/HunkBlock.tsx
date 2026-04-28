@@ -91,7 +91,7 @@ export const HunkBlock = memo(function HunkBlock({
         marginBottom: 10,
         overflow: 'hidden',
         opacity: accepted ? 1 : 0.55,
-        transition: 'opacity 150ms ease',
+        transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       <div

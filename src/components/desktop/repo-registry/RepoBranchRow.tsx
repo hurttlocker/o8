@@ -331,7 +331,7 @@ function RepoBranchRowBase({
           background: branchBaseBackground,
           border: 'none',
           cursor: branch.current ? 'default' : checkoutBusy ? 'wait' : 'pointer',
-          transition: 'background 120ms ease',
+          transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
         {/* Status indicator — fixed-width slot to the left of the branch
@@ -627,7 +627,7 @@ function RepoBranchRowBase({
                       cursor: packet.lane?.sessionKey && onSelectSession ? 'pointer' : 'default',
                       fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                       textAlign: 'left',
-                      transition: 'background 120ms ease',
+                      transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                       opacity: packet.lane?.sessionKey && onSelectSession ? 1 : 0.82,
                     }}
                     onMouseEnter={(event) => {
@@ -753,7 +753,7 @@ function RepoBranchRowBase({
                           cursor: onSelectSession ? 'pointer' : 'default',
                           fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                           textAlign: 'left',
-                          transition: 'background 120ms ease',
+                          transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                         }}
                       >
                         <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>

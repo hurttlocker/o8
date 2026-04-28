@@ -53,7 +53,7 @@ function CopyChip({ command }: { command: string }) {
         fontFamily: MONO,
         cursor: 'pointer',
         flexShrink: 0,
-        transition: 'background 150ms ease, color 150ms ease',
+        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       title={copied ? 'Copied' : 'Copy install command'}
     >
