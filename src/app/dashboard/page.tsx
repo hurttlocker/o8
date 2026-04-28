@@ -15,6 +15,7 @@ import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
+import { CommandPalette } from '@/components/desktop/CommandPalette';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
@@ -220,6 +221,13 @@ function DashboardInner() {
   const [latestDispatchedTabId, setLatestDispatchedTabId] = useState<string | null>(null);
   const [latestDispatchedAt, setLatestDispatchedAt] = useState<number | null>(null);
   const lastMarkedWorkspaceReadRef = useRef<string>('');
+
+  // ── Cmd+K command palette (#661) — full-screen overlay search across
+  // issues, files, agents, with localStorage LRU recents. The keydown
+  // listener below skips when the user is typing in inputs/textarea/
+  // contentEditable so existing native shortcuts (Cmd+K text-link in
+  // markdown editors, etc.) don't break.
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
   const {
     activeFtuxMilestone,
@@ -484,6 +492,37 @@ function DashboardInner() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [activeTileId, workspaceTerminalHandlesRef]);
+
+  // ── Cmd+K command palette hotkey (#661) ──
+  // Toggles the full-screen palette overlay. Skips while the user is
+  // typing in <input>, <textarea>, or contentEditable so existing native
+  // shortcuts inside editors don't break. Esc closes the overlay (handled
+  // inside the CommandPalette component).
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const isPaletteShortcut = (event.metaKey || event.ctrlKey)
+        && !event.altKey
+        && !event.shiftKey
+        && event.key.toLowerCase() === 'k';
+      if (!isPaletteShortcut) return;
+
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName;
+      const isEditable = Boolean(
+        target?.isContentEditable
+          || tagName === 'INPUT'
+          || tagName === 'TEXTAREA'
+          || tagName === 'SELECT',
+      );
+      if (isEditable) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      setCommandPaletteOpen((current) => !current);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Active-workspace switch — clear the owned-session fleet cache so the next
   // consumer rebuilds immediately instead of serving a stale (up to 20s) TTL
@@ -2280,6 +2319,31 @@ function DashboardInner() {
         onSelectionChange={designMode.setSelection}
         onCapture={handleDesignModeCapture}
         onClose={designMode.close}
+      />
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        workspace={activeWorkspace ?? null}
+        repo={globalRepo ?? null}
+        onSelectIssue={(issueNumber, repo) => {
+          handleSelectIssue(issueNumber, repo);
+        }}
+        onSelectFile={(filePath, line) => {
+          openCanvasTab({
+            id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
+            kind: 'file',
+            label: filePath.split('/').pop() ?? filePath,
+            resourceId: filePath,
+            meta: {
+              ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
+              ...(line ? { line: String(line) } : {}),
+            },
+          });
+        }}
+        onSelectAgent={(sessionKey) => {
+          handleSelectSession(sessionKey);
+        }}
       />
 
       <AnimatePresence initial={false}>
