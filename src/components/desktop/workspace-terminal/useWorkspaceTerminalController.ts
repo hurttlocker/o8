@@ -467,20 +467,38 @@ export function useWorkspaceTerminalController(
     }
   }, [sendTerminalAttach, termWsConnected]);
 
-  // Migration: if restored state is missing an Orchestrator tab, inject one
-  // at the front. Ensures existing users get the new tab automatically and
-  // don't have to manually add it.
+  // Migration: ensure exactly one Orchestrator tab exists at the front. This
+  // covers two cases:
+  //   (a) restored state missing an Orchestrator entirely → inject a fresh one
+  //       so existing users get the new tab automatically.
+  //   (b) restored state with multiple stale Orchestrator entries (issue
+  //       #708 / #713) → keep only the first and drop the duplicates so the
+  //       user never sees three "Orchestrator" tabs.
+  // Idempotent — when there's exactly one Orchestrator at index 0 and no
+  // duplicates, this effect is a no-op.
   useEffect(() => {
     if (defaultTab !== 'llm-chat') return;
     if (tabs.length === 0) return;
-    const hasOrchestrator = tabs.some((tab) => tab.kind === 'orchestrator');
-    if (hasOrchestrator) return;
-    const orchestratorTab = createDefaultOrchestratorTab();
-    const nextTabs = [orchestratorTab, ...tabs];
+    const orchestratorTabs = tabs.filter((tab) => tab.kind === 'orchestrator');
+    const nonOrchestratorTabs = tabs.filter((tab) => tab.kind !== 'orchestrator');
+
+    if (orchestratorTabs.length === 1 && tabs[0]?.kind === 'orchestrator') {
+      return; // Already canonical.
+    }
+
+    const pinnedOrchestrator = orchestratorTabs[0] ?? createDefaultOrchestratorTab();
+    const nextTabs = [pinnedOrchestrator, ...nonOrchestratorTabs];
     tabsRef.current = nextTabs;
     setTabs(nextTabs);
-    // Don't steal focus from whatever the user was on — just inject the tab.
-  }, [createDefaultOrchestratorTab, defaultTab, tabs]);
+    // If the active tab was a duplicate orchestrator we just dropped, keep
+    // the surviving pinned orchestrator active. Otherwise leave the pointer
+    // alone so we don't steal focus.
+    const droppedActive = orchestratorTabs.length > 1
+      && orchestratorTabs.slice(1).some((tab) => tab.id === activeTabId);
+    if (droppedActive) {
+      setActiveTabId(pinnedOrchestrator.id);
+    }
+  }, [activeTabId, createDefaultOrchestratorTab, defaultTab, tabs]);
 
   const handleSessionCreated = useCallback((sessionName: string, requestId?: string) => {
     const directTabId = requestId ? pendingRequestRef.current.get(requestId) : undefined;

@@ -78,6 +78,106 @@ function isPinnedKind(kind: PersistedTab['kind']): boolean {
 }
 
 /**
+ * Pick the next available "Terminal N" label given an existing list of
+ * persisted tabs. Mirrors `nextTerminalLabel` from
+ * `workspace-terminal/terminal-tab-handlers.ts` so server-side sanitization
+ * (in the API route) can run without importing client-only modules.
+ */
+function nextPersistedTerminalLabel(tabs: PersistedTab[]): string {
+  const used = new Set<number>();
+  for (const tab of tabs) {
+    if ((tab.kind ?? 'terminal') !== 'terminal') continue;
+    const match = /^Terminal\s+(\d+)$/.exec(tab.label?.trim() ?? '');
+    if (match) used.add(Number(match[1]));
+  }
+  let n = 1;
+  while (used.has(n)) n += 1;
+  return `Terminal ${n}`;
+}
+
+/**
+ * Sanitize a persisted tab list:
+ *
+ *   1. Keep at most ONE `kind: 'orchestrator'` entry, and only if it sits at
+ *      index 0. Any extra orchestrator entries (or one in a non-leading
+ *      position) get dropped — the controller's migration effect always
+ *      ensures a single pinned orchestrator at the front, so anything else
+ *      is a stale duplicate from older builds.
+ *   2. Relabel surviving `kind: 'terminal'` tabs whose label is empty or the
+ *      literal string "Orchestrator" to the next free `Terminal N`. Existing
+ *      affected users were left with mislabeled terminal tabs after the
+ *      pre-#709 fallthrough; this scrub corrects them in-place.
+ *
+ * Idempotent — applying it twice is a no-op. Runs on BOTH the load path
+ * (server route + client `loadTabState`) and the save path (`saveTabState`)
+ * so a stale persisted file gets corrected even if the load path returns
+ * early before reaching `computeRestoredTabs`. Issue #713.
+ */
+export function sanitizePersistedTabs(tabs: PersistedTab[]): { tabs: PersistedTab[]; mutated: boolean } {
+  if (!Array.isArray(tabs) || tabs.length === 0) return { tabs, mutated: false };
+
+  let mutated = false;
+  const survivors: PersistedTab[] = [];
+  let keptOrchestrator = false;
+  for (let i = 0; i < tabs.length; i += 1) {
+    const tab = tabs[i];
+    const kind = tab.kind ?? 'terminal';
+    if (kind === 'orchestrator') {
+      // Only keep the very first orchestrator, AND only if it's at index 0.
+      // An orchestrator entry at a later index is treated as stale because
+      // the controller always pins it to the front; preserving it would
+      // re-introduce duplicate-tab UI bugs.
+      if (i === 0 && !keptOrchestrator) {
+        keptOrchestrator = true;
+        survivors.push(tab);
+      } else {
+        mutated = true;
+      }
+      continue;
+    }
+    survivors.push(tab);
+  }
+
+  // Second pass: relabel terminal tabs whose label was lost or carried
+  // "Orchestrator" forward from the legacy fallthrough. Walk the surviving
+  // list and assign each affected entry the next available `Terminal N`
+  // among the survivors. We mutate copies, never the original objects.
+  const result: PersistedTab[] = [];
+  for (const tab of survivors) {
+    const kind = tab.kind ?? 'terminal';
+    if (kind !== 'terminal') {
+      result.push(tab);
+      continue;
+    }
+    const label = tab.label?.trim() ?? '';
+    if (label && label !== 'Orchestrator') {
+      result.push(tab);
+      continue;
+    }
+    mutated = true;
+    result.push({ ...tab, label: nextPersistedTerminalLabel(result) });
+  }
+
+  return { tabs: result, mutated };
+}
+
+/**
+ * Sanitize the full persisted state (tabs + activeTabId). If sanitization
+ * dropped the previously-active tab, picks the first surviving tab as the
+ * new active tab. Idempotent.
+ */
+export function sanitizePersistedState(state: PersistedTabState): { state: PersistedTabState; mutated: boolean } {
+  const { tabs, mutated } = sanitizePersistedTabs(state.tabs);
+  if (!mutated) return { state, mutated: false };
+  const activeStillThere = tabs.some((tab) => tab.id === state.activeTabId);
+  const nextActiveTabId = activeStillThere ? state.activeTabId : (tabs[0]?.id ?? '');
+  return {
+    state: { ...state, tabs, activeTabId: nextActiveTabId },
+    mutated: true,
+  };
+}
+
+/**
  * A tab is "clearly dead" if it carries no signal of live work. Conservative —
  * we'd rather keep something stale than drop an in-flight mission. Returns
  * `true` only for the obvious zombies.
@@ -255,13 +355,19 @@ function buildStatePath(scope: string, repoPath?: string | null) {
 /** Save tab state to server */
 export async function saveTabState(state: PersistedTabState, scope = 'tile-root'): Promise<void> {
   try {
-    const beforeCount = state.tabs.length;
-    const { tabs: prunedTabs, dropped } = pruneTabs(state.tabs, state.activeTabId);
+    // Issue #713 — scrub stale orchestrator entries + mislabeled terminals
+    // BEFORE pruning so the prune-survivor pass sees corrected labels.
+    const { state: sanitized, mutated: sanitizeMutated } = sanitizePersistedState(state);
+    if (sanitizeMutated) {
+      console.log('[tab-state] sanitized stale orchestrator/terminal labels on save');
+    }
+    const beforeCount = sanitized.tabs.length;
+    const { tabs: prunedTabs, dropped } = pruneTabs(sanitized.tabs, sanitized.activeTabId);
     if (dropped > 0) {
       console.log(`[tab-state] pruned ${dropped} tabs on save (was ${beforeCount}, now ${prunedTabs.length})`);
     }
-    const persisted: PersistedTabState = dropped > 0
-      ? { ...state, tabs: prunedTabs }
+    const persisted: PersistedTabState = dropped > 0 || sanitizeMutated
+      ? { ...sanitized, tabs: prunedTabs }
       : state;
     await fetch(buildStatePath(scope), {
       method: 'POST',
@@ -282,13 +388,21 @@ export async function loadTabState(scope = 'tile-root', repoPath?: string | null
     if (data.version !== 1) return null;
     const state = data as PersistedTabState;
     if (!Array.isArray(state.tabs) || state.tabs.length === 0) return state;
-    const beforeCount = state.tabs.length;
-    const { tabs: prunedTabs, dropped } = pruneTabs(state.tabs, state.activeTabId);
+    // Issue #713 — sanitize FIRST so the prune phase + downstream
+    // computeRestoredTabs both see corrected labels. Defensive: even if the
+    // server-side route already applied the same sanitizer, this is
+    // idempotent and a no-op when the data is clean.
+    const { state: sanitized, mutated: sanitizeMutated } = sanitizePersistedState(state);
+    if (sanitizeMutated) {
+      console.log('[tab-state] sanitized stale orchestrator/terminal labels on load');
+    }
+    const beforeCount = sanitized.tabs.length;
+    const { tabs: prunedTabs, dropped } = pruneTabs(sanitized.tabs, sanitized.activeTabId);
     if (dropped > 0) {
       console.log(`[tab-state] pruned ${dropped} tabs on load (was ${beforeCount}, now ${prunedTabs.length})`);
-      return { ...state, tabs: prunedTabs };
+      return { ...sanitized, tabs: prunedTabs };
     }
-    return state;
+    return sanitizeMutated ? sanitized : state;
   } catch {
     return null;
   }

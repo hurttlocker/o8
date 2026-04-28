@@ -4,7 +4,11 @@ import { NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 import { listRepos } from '@/lib/repos/registry';
-import { buildRepoStateScope } from '@/lib/terminal/tab-state';
+import {
+  buildRepoStateScope,
+  sanitizePersistedState,
+  type PersistedTabState,
+} from '@/lib/terminal/tab-state';
 
 const HOME = process.env.HOME ?? '/tmp';
 const STATE_DIR = path.join(HOME, '.o8');
@@ -18,6 +22,46 @@ function sanitizeScope(rawScope: string | null) {
 
 function getStateFile(scope: string) {
   return path.join(STATE_SCOPE_DIR, `${scope}.json`);
+}
+
+type StateFilePayload = Record<string, unknown>;
+
+/**
+ * Read a persisted-state file, apply the issue #713 sanitizer (drop stale
+ * `kind: 'orchestrator'` entries + relabel `kind: 'terminal'` tabs whose
+ * label is "Orchestrator"), and write the corrected payload back to disk
+ * whenever the sanitizer mutated anything. This is the migration step —
+ * once any client touches the file, it heals permanently.
+ *
+ * Returns the sanitized payload (or the original parsed JSON if it didn't
+ * have the persisted shape). On any IO error or non-object payload, returns
+ * null.
+ */
+function readAndSanitizeStateFile(filePath: string): StateFilePayload | null {
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    const obj = parsed as StateFilePayload;
+    if (obj.version !== 1 || !Array.isArray(obj.tabs)) {
+      return obj;
+    }
+    const state = obj as unknown as PersistedTabState;
+    const { state: sanitized, mutated } = sanitizePersistedState(state);
+    if (mutated) {
+      try {
+        writeFileSync(filePath, JSON.stringify(sanitized, null, 2));
+        console.log(`[terminal-state] sanitized stale orchestrator/terminal labels in ${path.basename(filePath)}`);
+      } catch {
+        // Sanitized in-memory copy still wins for this response; the next
+        // save will rewrite the file anyway.
+      }
+    }
+    return sanitized as unknown as StateFilePayload;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeScopePath(value?: string | null) {
@@ -100,13 +144,14 @@ function findLatestRepoState(repoPath: string, excludeFile?: string | null) {
         return null;
       }
       try {
-        const parsed = JSON.parse(readFileSync(fullPath, 'utf-8'));
+        const parsed = readAndSanitizeStateFile(fullPath);
+        if (!parsed) return null;
         const stats = repoStateStats(parsed, repoPath);
         if (stats.matchingCount === 0) {
           return null;
         }
-        const savedAt = typeof parsed?.savedAt === 'string'
-          ? Date.parse(parsed.savedAt)
+        const savedAt = typeof (parsed as { savedAt?: string })?.savedAt === 'string'
+          ? Date.parse((parsed as { savedAt: string }).savedAt)
           : statSync(fullPath).mtimeMs;
         return {
           matchingCount: stats.matchingCount,
@@ -117,7 +162,7 @@ function findLatestRepoState(repoPath: string, excludeFile?: string | null) {
         return null;
       }
     })
-    .filter((entry): entry is { matchingCount: number; savedAt: number; data: unknown } => Boolean(entry))
+    .filter((entry): entry is { matchingCount: number; savedAt: number; data: StateFilePayload } => Boolean(entry))
     .sort((a, b) => {
       if (b.matchingCount !== a.matchingCount) return b.matchingCount - a.matchingCount;
       return b.savedAt - a.savedAt;
@@ -139,13 +184,16 @@ function findLatestNonEmptyState(excludeFile?: string | null) {
         return null;
       }
       try {
-        const parsed = JSON.parse(readFileSync(fullPath, 'utf-8'));
-        const tabs = Array.isArray(parsed?.tabs) ? parsed.tabs : [];
+        const parsed = readAndSanitizeStateFile(fullPath);
+        if (!parsed) return null;
+        const tabs = Array.isArray((parsed as { tabs?: unknown[] })?.tabs)
+          ? (parsed as { tabs: unknown[] }).tabs
+          : [];
         if (tabs.length === 0) {
           return null;
         }
-        const savedAt = typeof parsed?.savedAt === 'string'
-          ? Date.parse(parsed.savedAt)
+        const savedAt = typeof (parsed as { savedAt?: string })?.savedAt === 'string'
+          ? Date.parse((parsed as { savedAt: string }).savedAt)
           : statSync(fullPath).mtimeMs;
         return {
           savedAt: Number.isFinite(savedAt) ? savedAt : statSync(fullPath).mtimeMs,
@@ -155,7 +203,7 @@ function findLatestNonEmptyState(excludeFile?: string | null) {
         return null;
       }
     })
-    .filter((entry): entry is { savedAt: number; data: unknown } => Boolean(entry))
+    .filter((entry): entry is { savedAt: number; data: StateFilePayload } => Boolean(entry))
     .sort((a, b) => b.savedAt - a.savedAt);
 
   return candidates[0]?.data ?? null;
@@ -174,7 +222,8 @@ export async function GET(request: Request) {
     const stateFile = getStateFile(scope);
 
     if (existsSync(stateFile)) {
-      const data = filterStateToRegisteredRepos(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots);
+      const sanitizedFile = readAndSanitizeStateFile(stateFile);
+      const data = sanitizedFile ? filterStateToRegisteredRepos(sanitizedFile, repoRoots) : null;
       if (!data) {
         return NextResponse.json(null, { status: 404 });
       }
@@ -189,7 +238,8 @@ export async function GET(request: Request) {
         if (canonicalScope && canonicalScope !== scope) {
           const canonicalFile = getStateFile(canonicalScope);
           if (existsSync(canonicalFile)) {
-            const canonicalData = filterStateToRegisteredRepos(JSON.parse(readFileSync(canonicalFile, 'utf-8')), repoRoots);
+            const canonicalSanitized = readAndSanitizeStateFile(canonicalFile);
+            const canonicalData = canonicalSanitized ? filterStateToRegisteredRepos(canonicalSanitized, repoRoots) : null;
             if (canonicalData) {
               return NextResponse.json(canonicalData);
             }
@@ -214,7 +264,8 @@ export async function GET(request: Request) {
     }
 
     if (scope === 'tile-root' && existsSync(LEGACY_STATE_FILE)) {
-      const data = filterStateToRegisteredRepos(JSON.parse(readFileSync(LEGACY_STATE_FILE, 'utf-8')), repoRoots);
+      const sanitizedLegacy = readAndSanitizeStateFile(LEGACY_STATE_FILE);
+      const data = sanitizedLegacy ? filterStateToRegisteredRepos(sanitizedLegacy, repoRoots) : null;
       if (!data) {
         return NextResponse.json(null, { status: 404 });
       }
@@ -245,14 +296,33 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const scope = sanitizeScope(new URL(request.url).searchParams.get('scope'));
-    const state = await request.json();
+    const incoming = await request.json();
+    // Issue #713 — server-side scrub on every save. The client also
+    // sanitizes (via `saveTabState` in lib/terminal/tab-state.ts), but a
+    // stale or older client could still POST a payload with `kind:
+    // 'orchestrator'` entries or "Orchestrator"-labeled terminals. Catching
+    // it here means the file on disk is always clean regardless of who
+    // wrote it.
+    let payload = incoming;
+    if (
+      incoming
+      && typeof incoming === 'object'
+      && (incoming as { version?: number }).version === 1
+      && Array.isArray((incoming as { tabs?: unknown }).tabs)
+    ) {
+      const { state: sanitized, mutated } = sanitizePersistedState(incoming as PersistedTabState);
+      if (mutated) {
+        console.log('[terminal-state] sanitized stale orchestrator/terminal labels in POST payload');
+        payload = sanitized;
+      }
+    }
     if (!existsSync(STATE_DIR)) {
       mkdirSync(STATE_DIR, { recursive: true });
     }
     if (!existsSync(STATE_SCOPE_DIR)) {
       mkdirSync(STATE_SCOPE_DIR, { recursive: true });
     }
-    const serialized = JSON.stringify(state, null, 2);
+    const serialized = JSON.stringify(payload, null, 2);
     writeFileSync(getStateFile(scope), serialized);
     if (scope === 'tile-root') {
       writeFileSync(LEGACY_STATE_FILE, serialized);
