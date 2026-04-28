@@ -223,10 +223,15 @@ export function PacketReviewPanel({
                 onClick={() => { void resolveMergeApproval('approve'); }}
                 disabled={approvalBusyAction !== null}
                 style={{
+                  minHeight: 44,
+                  minWidth: 44,
                   border: '1px solid rgba(34, 197, 94, 0.28)',
                   background: 'rgba(34, 197, 94, 0.1)',
                   color: '#15803d',
-                  padding: '6px 10px',
+                  paddingTop: 6,
+                  paddingRight: 10,
+                  paddingBottom: 6,
+                  paddingLeft: 10,
                   borderRadius: 8,
                   fontSize: 11,
                   fontWeight: 700,
@@ -241,10 +246,15 @@ export function PacketReviewPanel({
                 onClick={() => { void resolveMergeApproval('reject'); }}
                 disabled={approvalBusyAction !== null}
                 style={{
+                  minHeight: 44,
+                  minWidth: 44,
                   border: '1px solid rgba(239, 68, 68, 0.24)',
                   background: 'rgba(239, 68, 68, 0.08)',
                   color: '#b91c1c',
-                  padding: '6px 10px',
+                  paddingTop: 6,
+                  paddingRight: 10,
+                  paddingBottom: 6,
+                  paddingLeft: 10,
                   borderRadius: 8,
                   fontSize: 11,
                   fontWeight: 700,
@@ -374,14 +384,20 @@ export function PacketReviewPanel({
               type="button"
               onClick={onToggleShowAllFiles}
               style={{
+                minHeight: 44,
+                minWidth: 44,
                 border: 'none',
                 background: 'transparent',
                 color: '#2563eb',
                 fontSize: 11,
                 fontWeight: 700,
                 cursor: 'pointer',
-                padding: 0,
+                paddingTop: 0,
+                paddingRight: 8,
+                paddingBottom: 0,
+                paddingLeft: 0,
                 alignSelf: 'flex-start',
+                textAlign: 'left',
               }}
             >
               {reviewState?.showAllFiles ? 'Show less' : `Show all ${reviewFiles.length} files`}
@@ -402,10 +418,15 @@ export function PacketReviewPanel({
           onClick={() => onReviewAction('create_pr')}
           disabled={reviewState?.action === 'create_pr' || reviewState?.loading}
           style={{
+            minHeight: 44,
+            minWidth: 44,
             border: '1px solid rgba(34, 197, 94, 0.25)',
             background: 'rgba(34, 197, 94, 0.08)',
             color: '#16a34a',
-            padding: '6px 10px',
+            paddingTop: 6,
+            paddingRight: 10,
+            paddingBottom: 6,
+            paddingLeft: 10,
             borderRadius: 8,
             fontSize: 11,
             fontWeight: 700,
@@ -420,10 +441,15 @@ export function PacketReviewPanel({
           onClick={() => onReviewAction('merge')}
           disabled={reviewState?.action === 'merge' || reviewState?.loading}
           style={{
+            minHeight: 44,
+            minWidth: 44,
             border: '1px solid rgba(37, 99, 235, 0.2)',
             background: 'rgba(37, 99, 235, 0.06)',
             color: '#2563eb',
-            padding: '6px 10px',
+            paddingTop: 6,
+            paddingRight: 10,
+            paddingBottom: 6,
+            paddingLeft: 10,
             borderRadius: 8,
             fontSize: 11,
             fontWeight: 700,
@@ -438,7 +464,21 @@ export function PacketReviewPanel({
             href={reviewState.prUrl}
             target="_blank"
             rel="noreferrer"
-            style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', textDecoration: 'none' }}
+            style={{
+              minHeight: 44,
+              minWidth: 44,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingTop: 0,
+              paddingRight: 8,
+              paddingBottom: 0,
+              paddingLeft: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#2563eb',
+              textDecoration: 'none',
+            }}
           >
             Open PR
           </a>

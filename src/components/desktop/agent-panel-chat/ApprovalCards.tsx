@@ -28,11 +28,16 @@ function GateReportSection({ approval }: { approval: SidebarApproval }) {
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
         style={{
+          position: 'relative',
+          minHeight: 44,
           display: 'flex',
           alignItems: 'center',
           gap: 6,
           width: '100%',
-          padding: '6px 8px',
+          paddingTop: 6,
+          paddingRight: 8,
+          paddingBottom: 6,
+          paddingLeft: 8,
           borderRadius: 8,
           border: '1px solid rgba(239, 68, 68, 0.12)',
           background: 'rgba(239, 68, 68, 0.04)',
@@ -156,7 +161,11 @@ function ConflictSection({
             onClick={() => setSelectedStrategy(opt.value)}
             style={{
               flex: 1,
-              padding: '6px 4px',
+              minHeight: 44,
+              paddingTop: 6,
+              paddingRight: 4,
+              paddingBottom: 6,
+              paddingLeft: 4,
               borderRadius: 8,
               border: selectedStrategy === opt.value
                 ? '1px solid rgba(37, 99, 235, 0.3)'
@@ -192,7 +201,11 @@ function ConflictSection({
           disabled={resolvingId === approval.id}
           style={{
             flex: 1,
-            padding: '7px 0',
+            minHeight: 44,
+            paddingTop: 7,
+            paddingRight: 0,
+            paddingBottom: 7,
+            paddingLeft: 0,
             borderRadius: 8,
             border: 'none',
             background: '#16a34a',
@@ -210,7 +223,12 @@ function ConflictSection({
           onClick={() => onResolve(approval.id, 'reject')}
           disabled={resolvingId === approval.id}
           style={{
-            padding: '7px 12px',
+            minHeight: 44,
+            minWidth: 44,
+            paddingTop: 7,
+            paddingRight: 12,
+            paddingBottom: 7,
+            paddingLeft: 12,
             borderRadius: 8,
             border: '1px solid rgba(239, 68, 68, 0.18)',
             background: 'rgba(239, 68, 68, 0.06)',
@@ -415,7 +433,11 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
                       disabled={resolvingId === approval.id}
                       style={{
                         flex: 1,
-                        padding: '8px 0',
+                        minHeight: 44,
+                        paddingTop: 8,
+                        paddingRight: 0,
+                        paddingBottom: 8,
+                        paddingLeft: 0,
                         borderRadius: 10,
                         border: 'none',
                         background: '#16a34a',
@@ -445,7 +467,11 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
                       disabled={resolvingId === approval.id}
                       style={{
                         flex: 1,
-                        padding: '8px 0',
+                        minHeight: 44,
+                        paddingTop: 8,
+                        paddingRight: 0,
+                        paddingBottom: 8,
+                        paddingLeft: 0,
                         borderRadius: 10,
                         border: '1px solid rgba(239, 68, 68, 0.18)',
                         background: 'rgba(239, 68, 68, 0.06)',
