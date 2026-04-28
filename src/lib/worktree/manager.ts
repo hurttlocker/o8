@@ -170,14 +170,48 @@ export class WorktreeManager {
     const baseBranch = opts.baseBranch ?? await this.getCurrentBranch();
     const now = Date.now();
 
-    // Avoid ID collisions — append suffix if already exists
+    // Avoid ID collisions — append suffix if already exists in metadata,
+    // OR on disk as a worktree directory, OR as a git branch. The metadata-
+    // only check missed cases where a prior dispatch attempt created the
+    // branch + worktree but never wrote meta (lane retry storms hit this
+    // hard — see #TBD). We probe all three and bump the suffix until we
+    // find a free slot.
     const existingMeta = await this.loadAllMeta();
-    if (existingMeta[taskId]) {
+    const desiredBranch = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
+    const isClaudeUnmanaged = opts.agentType === 'claude-code' && !opts.managed;
+    const probeWorktreeDir = (id: string) => isClaudeUnmanaged
+      ? path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)
+      : path.join(this.worktreeBase, id);
+    const branchExists = async (name: string) => {
+      try {
+        await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], { cwd: this.repoRoot, timeout: 5_000 });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const dirExists = async (p: string) => {
+      try {
+        const fs = await import('node:fs/promises');
+        await fs.access(p);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let attemptBranch = desiredBranch;
+    let collided = existingMeta[taskId]
+      || (await dirExists(probeWorktreeDir(taskId)))
+      || (await branchExists(attemptBranch));
+    while (collided) {
       const suffix = Math.random().toString(36).slice(2, 6);
-      taskId = `${taskId}-${suffix}`;
+      taskId = `${sanitizeTaskName(opts.taskName)}-${suffix}`;
+      attemptBranch = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
+      collided = existingMeta[taskId]
+        || (await dirExists(probeWorktreeDir(taskId)))
+        || (await branchExists(attemptBranch));
     }
-
-    const branchName = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
+    const branchName = attemptBranch;
 
     if (opts.agentType === 'claude-code' && !opts.managed) {
       // Claude manages its own worktree — we just track it
