@@ -14,7 +14,6 @@ import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
-import { CommandPalette } from '@/components/desktop/CommandPalette';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
@@ -25,12 +24,16 @@ import { TitleBar } from '@/components/desktop/TitleBar';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { ApprovalBanner } from '@/components/desktop/ApprovalBanner';
-import { DesignModeOverlay } from '@/components/desktop/DesignModeOverlay';
 import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
-import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
-import { O8Panel, type O8Tab } from '@/components/desktop/O8Panel';
+import type { WorkspaceSidePanelRepo, WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
+import type { O8Tab } from '@/components/desktop/O8Panel';
+import {
+  markDashboardScriptStart,
+  markDashboardFirstRender,
+  markDashboardInteractive,
+} from '@/lib/perf/dashboard-marks';
 import {
   publishO8PanelToast,
   subscribeO8PanelFocus,
@@ -98,11 +101,25 @@ import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
 import { useDesignMode } from '@/hooks/useDesignMode';
 import { createTileRegistry } from './tileRegistry';
 
-/* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
+// Mark the dashboard module load as early as possible. Runs once when the
+// bundle is first parsed, before the React component is even invoked, so
+// the "script-start" anchor really does represent the moment the JS bundle
+// is parsed. Subsequent calls are no-ops.
+markDashboardScriptStart();
+
+/* ── Lazy-loaded heavy components (code-split for faster initial paint) ──
+   Anything below is *not* on the critical bootstrap path — the user has to
+   open a panel, hit Cmd+K, or trigger design mode before its chunk needs to
+   load. Keeping these out of the main dashboard chunk shaves real ms off
+   first-render on cold launch. */
 const LazySettingsPage = lazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage').then(m => ({ default: m.AnalyticsPage })));
 const LazySetupWizard = lazy(() => import('@/components/desktop/SetupWizard').then(m => ({ default: m.SetupWizard })));
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
+const LazyCommandPalette = lazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })));
+const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })));
+const LazyWorkspaceSidePanel = lazy(() => import('@/components/desktop/WorkspaceSidePanel').then(m => ({ default: m.WorkspaceSidePanel })));
+const LazyO8Panel = lazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })));
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
 import { TileContainer } from '@/components/desktop/TileContainer';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
@@ -150,8 +167,32 @@ export default function DashboardPage() {
 }
 
 function DashboardInner() {
+  // Perf mark — capture the moment the dashboard component begins its first
+  // render. Pairs with markDashboardScriptStart() (called at module load)
+  // and markDashboardInteractive() (scheduled below on the next idle tick)
+  // to produce the [perf] bootstrap log.
+  markDashboardFirstRender();
+
   const [inTauri, setInTauri] = useState(false);
-  useEffect(() => { setInTauri(isTauri()); initMcpPlugin(); }, []);
+  useEffect(() => {
+    setInTauri(isTauri());
+    initMcpPlugin();
+    // Schedule the "interactive" mark on the first idle tick after mount.
+    // requestIdleCallback is unavailable in some webview / older browser
+    // environments, so we fall back to setTimeout(_, 0). Either way the
+    // measure runs after React has flushed the initial render and the
+    // browser has finished its first round of layout/paint.
+    const schedule: (cb: () => void) => () => void = (cb) => {
+      if (typeof window === 'undefined') return () => {};
+      if (typeof window.requestIdleCallback === 'function') {
+        const handle = window.requestIdleCallback(cb, { timeout: 1500 });
+        return () => window.cancelIdleCallback(handle);
+      }
+      const handle = window.setTimeout(cb, 0);
+      return () => window.clearTimeout(handle);
+    };
+    return schedule(() => markDashboardInteractive());
+  }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
   const designMode = useDesignMode();
 
@@ -245,20 +286,24 @@ function DashboardInner() {
   });
 
   // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
+  // Workspace + side-panel chunks are deferred off the critical path so the
+  // initial render is small. We then warm them on the first idle frame so
+  // when the user actually clicks (or the right rail mounts), the chunk is
+  // already parsed. WorkspaceSidePanel + O8Panel are both candidates because
+  // the right rail starts open by default.
   useEffect(() => {
-    if (typeof requestIdleCallback === 'undefined') {
-      const timer = setTimeout(() => {
-        import('@/components/desktop/WorkspaceTerminal');
-        import('@/components/desktop/Canvas');
-        import('@/components/desktop/workspace-terminal/OrchestratorTab');
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-    const id = requestIdleCallback(() => {
+    const prefetch = () => {
       import('@/components/desktop/WorkspaceTerminal');
       import('@/components/desktop/Canvas');
       import('@/components/desktop/workspace-terminal/OrchestratorTab');
-    });
+      import('@/components/desktop/WorkspaceSidePanel');
+      import('@/components/desktop/O8Panel');
+    };
+    if (typeof requestIdleCallback === 'undefined') {
+      const timer = setTimeout(prefetch, 100);
+      return () => clearTimeout(timer);
+    }
+    const id = requestIdleCallback(prefetch);
     return () => cancelIdleCallback(id);
   }, []);
 
@@ -526,14 +571,30 @@ function DashboardInner() {
   // Active-workspace switch — clear the owned-session fleet cache so the next
   // consumer rebuilds immediately instead of serving a stale (up to 20s) TTL
   // entry from the previous workspace. Fire-and-forget; idempotent + cheap.
+  // Deferred to an idle tick so it doesn't compete with synchronous bootstrap
+  // work during the initial mount.
   useEffect(() => {
     if (!activeWorkspace) return;
     const controller = new AbortController();
-    void fetch('/api/panel/fleet/invalidate', {
-      method: 'POST',
-      signal: controller.signal,
-    }).catch(() => {});
-    return () => controller.abort();
+    const run = () => {
+      if (controller.signal.aborted) return;
+      void fetch('/api/panel/fleet/invalidate', {
+        method: 'POST',
+        signal: controller.signal,
+      }).catch(() => {});
+    };
+    let cancel: () => void;
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      const handle = window.requestIdleCallback(run, { timeout: 2000 });
+      cancel = () => window.cancelIdleCallback(handle);
+    } else {
+      const handle = setTimeout(run, 0);
+      cancel = () => clearTimeout(handle);
+    }
+    return () => {
+      cancel();
+      controller.abort();
+    };
   }, [activeWorkspace]);
 
   const archivedLaneView = useLaneArchivedView();
@@ -2311,39 +2372,54 @@ function DashboardInner() {
 
       <ApprovalBanner />
 
-      <DesignModeOverlay
-        active={designMode.state.active}
-        selection={designMode.state.selection}
-        captureRequestId={designMode.captureRequestId}
-        onSelectionChange={designMode.setSelection}
-        onCapture={handleDesignModeCapture}
-        onClose={designMode.close}
-      />
+      {/* DesignModeOverlay only renders the actual overlay when design mode
+          is active. Wrapping it in a guarded Suspense + lazy() keeps its
+          ~500-line module out of the initial dashboard chunk; the chunk is
+          only fetched once the user toggles design mode (Cmd+Shift+D). */}
+      {designMode.state.active ? (
+        <Suspense fallback={null}>
+          <LazyDesignModeOverlay
+            active={designMode.state.active}
+            selection={designMode.state.selection}
+            captureRequestId={designMode.captureRequestId}
+            onSelectionChange={designMode.setSelection}
+            onCapture={handleDesignModeCapture}
+            onClose={designMode.close}
+          />
+        </Suspense>
+      ) : null}
 
-      <CommandPalette
-        open={commandPaletteOpen}
-        onClose={() => setCommandPaletteOpen(false)}
-        workspace={activeWorkspace ?? null}
-        repo={globalRepo ?? null}
-        onSelectIssue={(issueNumber, repo) => {
-          handleSelectIssue(issueNumber, repo);
-        }}
-        onSelectFile={(filePath, line) => {
-          openCanvasTab({
-            id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
-            kind: 'file',
-            label: filePath.split('/').pop() ?? filePath,
-            resourceId: filePath,
-            meta: {
-              ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
-              ...(line ? { line: String(line) } : {}),
-            },
-          });
-        }}
-        onSelectAgent={(sessionKey) => {
-          handleSelectSession(sessionKey);
-        }}
-      />
+      {/* CommandPalette is opened on Cmd+K. The dashboard owns the hotkey
+          listener (above) so the palette chunk only needs to be present
+          once the user opens it. */}
+      {commandPaletteOpen ? (
+        <Suspense fallback={null}>
+          <LazyCommandPalette
+            open={commandPaletteOpen}
+            onClose={() => setCommandPaletteOpen(false)}
+            workspace={activeWorkspace ?? null}
+            repo={globalRepo ?? null}
+            onSelectIssue={(issueNumber, repo) => {
+              handleSelectIssue(issueNumber, repo);
+            }}
+            onSelectFile={(filePath, line) => {
+              openCanvasTab({
+                id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
+                kind: 'file',
+                label: filePath.split('/').pop() ?? filePath,
+                resourceId: filePath,
+                meta: {
+                  ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
+                  ...(line ? { line: String(line) } : {}),
+                },
+              });
+            }}
+            onSelectAgent={(sessionKey) => {
+              handleSelectSession(sessionKey);
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       <AnimatePresence initial={false}>
         {showApprovalFtux ? (
@@ -2729,28 +2805,30 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <O8Panel
-                      onClose={handleToggleO8Panel}
-                      repoPath={o8CommitRepoPath ?? globalRepoEntry?.localPath}
-                      previews={workspacePreviews}
-                      activeTab={o8ActiveTab}
-                      onActiveTabChange={setO8ActiveTab}
-                      prNumber={o8PrNumber}
-                      prRepo={o8PrRepo}
-                      repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
-                      browserUrl={o8BrowserUrl}
-                      commitSha={o8CommitSha}
-                      onClearCommit={handleClearCommit}
-                      onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
-                      onOpenFile={(filePath) => {
-                        const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
-                        void (async () => {
-                          const target = await waitForWorkspaceTerminalTarget({});
-                          if (target) target.handle.openInspectorTab(tab);
-                          else openCanvasTab(tab);
-                        })();
-                      }}
-                    />
+                    <Suspense fallback={null}>
+                      <LazyO8Panel
+                        onClose={handleToggleO8Panel}
+                        repoPath={o8CommitRepoPath ?? globalRepoEntry?.localPath}
+                        previews={workspacePreviews}
+                        activeTab={o8ActiveTab}
+                        onActiveTabChange={setO8ActiveTab}
+                        prNumber={o8PrNumber}
+                        prRepo={o8PrRepo}
+                        repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
+                        browserUrl={o8BrowserUrl}
+                        commitSha={o8CommitSha}
+                        onClearCommit={handleClearCommit}
+                        onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
+                        onOpenFile={(filePath) => {
+                          const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
+                          void (async () => {
+                            const target = await waitForWorkspaceTerminalTarget({});
+                            if (target) target.handle.openInspectorTab(tab);
+                            else openCanvasTab(tab);
+                          })();
+                        }}
+                      />
+                    </Suspense>
                   </motion.div>
                 ) : (
                   <motion.div
@@ -2766,14 +2844,16 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <WorkspaceSidePanel
-                      view={workspaceSidePanelView}
-                      repo={workspaceSidePanelRepo}
-                      agentContext={workspaceSidePanelAgentContext}
-                      onClearView={() => setChatVisible(false)}
-                      onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
-                      onSelectCommit={handleSelectCommit}
-                    />
+                    <Suspense fallback={null}>
+                      <LazyWorkspaceSidePanel
+                        view={workspaceSidePanelView}
+                        repo={workspaceSidePanelRepo}
+                        agentContext={workspaceSidePanelAgentContext}
+                        onClearView={() => setChatVisible(false)}
+                        onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
+                        onSelectCommit={handleSelectCommit}
+                      />
+                    </Suspense>
                   </motion.div>
                 )}
               </AnimatePresence>
