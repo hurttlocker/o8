@@ -659,7 +659,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
   const activeTargetLabel = isOrchestratorMode ? 'Claude Code' : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
   const activeTargetColor = isOrchestratorMode ? '#e07a3a' : (targetAgent?.color ?? orchestratorRuntimeTone(preferredRuntime).color);
-  const transcriptTopContent = displayPlanText ? (
+  // Memoize so a render triggered by composer state (input typing) doesn't
+  // hand ChatMessageList a fresh `topContent` ref each keystroke.
+  const transcriptTopContent = useMemo(() => displayPlanText ? (
     <div
       style={{
         display: 'flex',
@@ -669,7 +671,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     >
       <CollapsiblePlanCard key={`plan-${threadId ?? 'active'}`} text={displayPlanText} />
     </div>
-  ) : null;
+  ) : null, [displayPlanText, threadId]);
 
   useEffect(() => {
     onChromeChange({
@@ -858,7 +860,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     copyAsMarkdown: () => handleCopyMarkdownRef.current(),
   }), [handleReset, handleLoadThread, sendNow]);
 
-  const fallbackEmptyState = (
+  const fallbackEmptyState = useMemo(() => (
     <EmptyStateCard
       isOrchestratorMode={isOrchestratorMode}
       targetAgent={targetAgent}
@@ -874,7 +876,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setTimeout(() => inputRef.current?.focus(), 50);
       }}
     />
-  );
+  ), [
+    activeTargetColor,
+    activeTargetLabel,
+    isOrchestratorMode,
+    suggestions,
+    targetAgent,
+    thoughtsElevatedBorder,
+    thoughtsElevatedShadow,
+    thoughtsElevatedSurface,
+  ]);
 
   const handleSlashCommand = useCallback((cmd: string) => {
     setInput(cmd);
