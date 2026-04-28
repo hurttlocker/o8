@@ -11,6 +11,7 @@
 import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTheme } from './ThemeContext';
+import { MobileMarkdown } from '@/app/mobile/mobile-markdown';
 
 const MobileDiffViewer = lazy(async () => ({
   default: (await import('./MobileDiffViewer')).MobileDiffViewer,
@@ -56,8 +57,13 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
+  const [filePathPopover, setFilePathPopover] = useState<string | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+
+  const handleFilePathTap = useCallback((path: string) => {
+    setFilePathPopover(path);
+  }, []);
 
   const canViewDiff = Boolean(workspace && sessionKey);
 
@@ -236,17 +242,19 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
           {grouped.map((entry) => {
             const isUser = entry.role === 'user';
             const isTool = entry.role === 'tool' || entry.type === 'tool';
+            const isAssistant = !isUser && !isTool;
             const text = entry.text || (entry.toolName ? `${entry.toolName}${entry.filePath ? ` · ${entry.filePath}` : ''}` : '');
             const toolBg = isDark ? 'rgba(48,209,88,0.10)' : 'rgba(34,197,94,0.10)';
             const toolBorder = isDark ? 'rgba(48,209,88,0.24)' : 'rgba(34,197,94,0.24)';
             const assistantBg = isDark ? colors.frostStrong : colors.cardBg;
-            const showAssistantRing = isDark && !isUser && !isTool;
+            const showAssistantRing = isDark && isAssistant;
             return (
               <div
                 key={entry.id}
                 style={{
                   alignSelf: isUser ? 'flex-end' : 'flex-start',
-                  maxWidth: '88%',
+                  maxWidth: isAssistant ? '95%' : '88%',
+                  width: isAssistant ? '100%' : undefined,
                 }}
               >
                 <div
@@ -258,7 +266,8 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
                     borderColor: isTool ? toolBorder : showAssistantRing || (isDark && isUser) ? colors.cardBorder : 'transparent',
                     background: isUser ? colors.msgUserBg : isTool ? toolBg : assistantBg,
                     color: colors.text,
-                    fontSize: 13, lineHeight: 1.45, whiteSpace: 'pre-wrap',
+                    fontSize: 13, lineHeight: 1.45,
+                    whiteSpace: isAssistant ? 'normal' : 'pre-wrap',
                     wordBreak: 'break-word',
                   }}
                 >
@@ -267,7 +276,16 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
                       {entry.toolName}
                     </div>
                   ) : null}
-                  {text}
+                  {isAssistant ? (
+                    <MobileMarkdown
+                      content={text}
+                      textColor={colors.text}
+                      light={!isDark}
+                      onFilePathTap={handleFilePathTap}
+                    />
+                  ) : (
+                    text
+                  )}
                 </div>
                 {entry.timestampLabel ? (
                   <div style={{ fontSize: 10, color: colors.textTertiary, marginTop: 2, paddingLeft: isUser ? 0 : 4, paddingRight: isUser ? 4 : 0, textAlign: isUser ? 'right' : 'left' }}>
@@ -326,6 +344,97 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
               subtitle={runtime}
             />
           </Suspense>
+        ) : null}
+
+        {filePathPopover ? (
+          <div
+            role="dialog"
+            aria-label="File path actions"
+            onClick={() => setFilePathPopover(null)}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 30,
+              background: 'rgba(0,0,0,0.36)',
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'center',
+              paddingBottom: 24,
+              paddingLeft: 16,
+              paddingRight: 16,
+            }}
+          >
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: 420,
+                background: isDark ? colors.frostStrong : colors.cardBg,
+                borderRadius: 16,
+                borderWidth: 1, borderStyle: 'solid', borderColor: colors.surfaceBorder,
+                paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14,
+                display: 'flex', flexDirection: 'column', gap: 10,
+                boxShadow: '0 12px 32px rgba(0,0,0,0.32)',
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: '"SF Mono", Menlo, ui-monospace, monospace',
+                  fontSize: 12,
+                  color: colors.textSecondary,
+                  wordBreak: 'break-all',
+                  lineHeight: 1.4,
+                }}
+              >
+                {filePathPopover}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(filePathPopover).catch(() => undefined);
+                    setFilePathPopover(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: 44,
+                    borderRadius: 12,
+                    borderWidth: 1, borderStyle: 'solid', borderColor: colors.surfaceBorder,
+                    background: 'transparent',
+                    color: colors.text,
+                    fontSize: 14, fontWeight: 600,
+                    cursor: 'pointer',
+                    WebkitTapHighlightColor: 'transparent',
+                    touchAction: 'manipulation',
+                  }}
+                >
+                  Copy path
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Deep-link wiring is tracked separately. For now, log + close.
+                    console.log('[agent-transcript] open in editor:', filePathPopover);
+                    setFilePathPopover(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: 44,
+                    borderRadius: 12,
+                    borderWidth: 1, borderStyle: 'solid', borderColor: colors.accent,
+                    background: colors.accent,
+                    color: '#ffffff',
+                    fontSize: 14, fontWeight: 600,
+                    cursor: 'pointer',
+                    WebkitTapHighlightColor: 'transparent',
+                    touchAction: 'manipulation',
+                  }}
+                >
+                  Open in editor
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
     </div>
