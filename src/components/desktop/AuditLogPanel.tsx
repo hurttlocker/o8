@@ -295,7 +295,8 @@ function PillSelect({
       value={value}
       onChange={(event) => onChange(event.target.value)}
       style={{
-        minHeight: 32,
+        minHeight: 44,
+        minWidth: 44,
         borderRadius: 10,
         borderWidth: 1,
         borderStyle: 'solid',
@@ -498,18 +499,20 @@ export function AuditLogPanel() {
               onClick={() => { void loadApprovals(true); }}
               disabled={refreshing}
               style={{
-                minHeight: 32,
+                minHeight: 44,
+                minWidth: 44,
                 borderRadius: 10,
                 borderWidth: 0,
                 borderStyle: 'none',
                 backgroundColor: 'transparent',
                 color: refreshing ? '#8b95a3' : '#6b7280',
                 paddingTop: 4,
-                paddingRight: 0,
+                paddingRight: 8,
                 paddingBottom: 4,
-                paddingLeft: 0,
+                paddingLeft: 8,
                 display: 'inline-flex',
                 alignItems: 'center',
+                justifyContent: 'center',
                 gap: 5,
                 fontSize: 12,
                 fontWeight: 500,
@@ -673,16 +676,17 @@ export function AuditLogPanel() {
                 setSelectedRange('all');
               }}
               style={{
-                minHeight: 32,
+                minHeight: 44,
+                minWidth: 44,
                 borderRadius: 10,
                 borderWidth: 0,
                 borderStyle: 'none',
                 backgroundColor: 'transparent',
                 color: '#2563eb',
                 paddingTop: 4,
-                paddingRight: 8,
+                paddingRight: 10,
                 paddingBottom: 4,
-                paddingLeft: 8,
+                paddingLeft: 10,
                 fontSize: 12,
                 fontWeight: 500,
                 letterSpacing: '-0.01em',
