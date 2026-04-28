@@ -173,7 +173,7 @@ export const ThreadCard = memo(function ThreadCard({
     textAlign: 'left',
     WebkitTapHighlightColor: 'transparent',
     boxShadow: active ? '0 12px 24px rgba(0,0,0,0.3)' : 'none',
-    transition: 'background 180ms ease, border-color 180ms ease',
+    transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 
   return (
