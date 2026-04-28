@@ -231,8 +231,6 @@ export function MCPTab() {
       {!ready ? (
         <div style={{
           marginBottom: 28,
-          borderLeft: `2px solid #ef4444`,
-          paddingLeft: 14,
           paddingTop: 2,
           paddingBottom: 2,
         }}>
@@ -243,6 +241,17 @@ export function MCPTab() {
             marginBottom: 4,
             letterSpacing: '-0.005em',
           }}>
+            <span style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: '#ef4444',
+              marginRight: 8,
+            }}>
+              [error]
+            </span>
             Install Node.js first
           </div>
           <div style={{ color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
@@ -325,10 +334,19 @@ export function MCPTab() {
           {d.nodeInstalled && !d.codexInstalled ? (
             <div style={{
               marginTop: 14,
-              borderLeft: `2px solid #f59e0b`,
-              paddingLeft: 12,
             }}>
               <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', marginBottom: 4 }}>
+                <span style={{
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: '#f59e0b',
+                  marginRight: 8,
+                }}>
+                  [warn]
+                </span>
                 Codex CLI not found
               </div>
               <div style={{ color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
