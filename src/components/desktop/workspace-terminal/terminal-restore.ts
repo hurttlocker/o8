@@ -12,6 +12,7 @@ import type {
   RegisteredRepo,
   TerminalTab,
 } from '@/components/desktop/workspace-terminal/types';
+import { nextTerminalLabel } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
 import {
   claimWorkspaceTabId,
 } from '@/components/desktop/workspace-terminal/utils';
@@ -91,6 +92,17 @@ export async function computeRestoredTabs(
     if (cancelled?.()) return null;
     const now = Date.now();
     const tabKind = savedTab.kind ?? 'terminal';
+
+    // Issue #708 — orchestrator tabs are never restored from persistence.
+    // The pinned Orchestrator is injected fresh by the migration effect in
+    // useWorkspaceTerminalController, so any persisted `kind: 'orchestrator'`
+    // entries are stale duplicates. Skipping them avoids two failure modes:
+    //   (a) duplicate Orchestrator tabs after restore;
+    //   (b) silent fallthrough to the default `terminal` branch below, which
+    //       would carry the "Orchestrator" label onto a real terminal tab.
+    if (tabKind === 'orchestrator') {
+      continue;
+    }
 
     if (tabKind === 'llm-chat') {
       const tabId = claimWorkspaceTabId('llm-chat', seenTabIds, savedTab.id);
@@ -240,6 +252,17 @@ export async function computeRestoredTabs(
       });
     }
     if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
+  }
+
+  // Issue #708 — backfill terminal tabs whose label was lost or inherited
+  // the literal string "Orchestrator" from an earlier persisted-orchestrator
+  // fallthrough. We assign each one the next available `Terminal N` label so
+  // the result never collides with an existing valid number.
+  for (const restored of restoredTabs) {
+    if (restored.kind !== 'terminal') continue;
+    const trimmed = restored.label?.trim() ?? '';
+    if (trimmed && trimmed !== 'Orchestrator') continue;
+    restored.label = nextTerminalLabel(restoredTabs);
   }
 
   const restoredActiveTab = restoredActiveTabId ? restoredTabs.find((tab) => tab.id === restoredActiveTabId) : null;

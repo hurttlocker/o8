@@ -593,7 +593,8 @@ export function useWorkspaceTerminalController(
   }, []);
 
   const handleNewTab = useCallback((agentId: string, repo?: RegisteredRepo) => {
-    const result = computeNewTerminalTab(agentId, repo);
+    // Pass the current tabs so `Terminal N` numbering picks the next free slot.
+    const result = computeNewTerminalTab(agentId, repo, tabsRef.current);
     if (!result.newTab) return;
     if (result.cliCommand) {
       pendingCliCommands.current.set(result.newTab.id, result.cliCommand);
