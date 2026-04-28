@@ -2156,10 +2156,24 @@ function startPollingLoops() {
       // Only push if conflicts changed (compare hash of file list)
       const hash = JSON.stringify(report.files?.map((f: { file: string; severity: string }) => `${f.file}:${f.severity}`).sort());
       if (hash === lastConflictHash) return;
+      const previousHash = lastConflictHash;
       lastConflictHash = hash;
 
       // Push to all clients (pre-stringify once)
       broadcast({ channel: 'conflicts', event: 'update', data: report });
+
+      // Mobile push — only when we transition from "no conflicts" to "has
+      // conflicts" so users don't get a notification per file change.
+      const fileCount = Array.isArray(report.files) ? report.files.length : 0;
+      if (fileCount > 0 && (previousHash === '' || previousHash === '[]')) {
+        void import('@/lib/push/notify')
+          .then(({ notifyMergeConflict }) => {
+            notifyMergeConflict({ repo: process.cwd().split('/').pop() ?? 'repo', fileCount });
+          })
+          .catch((error) => {
+            console.warn('[ws-server] push notify (conflicts) failed', error);
+          });
+      }
     } catch {
       // Non-critical — conflict scanning is best-effort
     }
@@ -2536,6 +2550,17 @@ function broadcastLifecycle(sessionName: string, state: LifecycleState, exitCode
   scheduleRealtimeRuntimeRefresh({ reason: `terminal.${state}`, fresh: true });
   scheduleRealtimeMobileInboxRefresh(250, true);
   console.log(`[ws-server] Agent lifecycle: ${sessionName} → ${state}${exitCode !== undefined ? ` (exit ${exitCode})` : ''}`);
+
+  // Fire mobile push for terminal lifecycle states (best-effort).
+  if (state === 'completed' || state === 'failed' || state === 'killed' || state === 'stalled') {
+    void import('@/lib/push/notify')
+      .then(({ notifyAgentFinished }) => {
+        notifyAgentFinished({ sessionName, state, exitCode });
+      })
+      .catch((error) => {
+        console.warn('[ws-server] push notify (agent-lifecycle) failed', error);
+      });
+  }
 }
 
 function handleAgentKill(_client: ClientState, msg: Record<string, unknown>) {

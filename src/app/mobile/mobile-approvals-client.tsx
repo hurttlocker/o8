@@ -311,6 +311,18 @@ export function MobileApprovalsClient({
     };
   }, [refresh]);
 
+  // [push] Register sw-push.js + handle notification deep-links. Issue #639.
+  useEffect(() => {
+    let detach: (() => void) | null = null;
+    void import('@/lib/mobile/push-client').then((mod) => {
+      detach = mod.attachPushHandlers((url) => {
+        const view = mod.parsePushDeepLinkView(url) as MobileView | null;
+        if (view) setActiveView(view);
+      });
+    });
+    return () => { if (detach) detach(); };
+  }, []);
+
   const handleResolve = useCallback(async (id: string, action: 'approve' | 'reject', strategy?: string) => {
     setResolving({ id, action });
     triggerHaptic(action === 'approve' ? 'success' : 'warn');

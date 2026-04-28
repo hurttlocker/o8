@@ -78,6 +78,9 @@ const ALLOWLIST_READ_ONLY: RegExp[] = [
   /^\/api\/panel\/status(\/|$)/,
   // v2 auth endpoints (login, callback) must be reachable.
   /^\/api\/v2\/auth(\/|$)/,
+  // VAPID public key — public by definition; the mobile client needs it
+  // to call pushManager.subscribe before any token handshake.
+  /^\/api\/mobile\/push\/public-key(\/|$)/,
 ];
 
 const ALLOWLIST_ANY_METHOD: RegExp[] = [
@@ -120,6 +123,9 @@ const GATED_PREFIXES = [
   // or a token (so an evil cross-origin page can't POST to /api/setup/claude-desktop
   // and silently write to the user's Claude config).
   '/api/setup/',
+  // Push subscription writes mutate stored push endpoints + can fan out test
+  // notifications. /api/mobile/push/public-key is read-only allow-listed above.
+  '/api/mobile/push/',
 ];
 
 function isLoopbackHost(hostname?: string | null): boolean {

@@ -446,7 +446,27 @@ export function createApproval(input: CreateApprovalInput) {
 
   const approval = createApprovalRecord(input);
   insertApprovalRecord(approval);
+  notifyApprovalCreatedAsync(approval);
   return approval;
+}
+
+/**
+ * Fire-and-forget push notification for a freshly-created approval.
+ * Dynamic import keeps the push subsystem out of the approvals cold-path.
+ */
+function notifyApprovalCreatedAsync(approval: ApprovalRecord): void {
+  void import('@/lib/push/notify')
+    .then(({ notifyApprovalCreated }) => {
+      notifyApprovalCreated({
+        approvalId: approval.id,
+        title: approval.title,
+        risk: approval.risk,
+      });
+    })
+    .catch((error) => {
+      // Push is best-effort; never block approval creation on notification failure.
+      console.warn('[approval-store] push notify failed', error);
+    });
 }
 
 export function recordApprovalAudit(
