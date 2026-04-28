@@ -114,11 +114,20 @@ export function GitHubTab({
           color: 'var(--t-text-secondary)',
           fontFamily: APP_FONT_STACK,
           lineHeight: 1.5,
-          borderLeft: `2px solid ${RAMS_ACCENT}`,
-          paddingLeft: 12,
           paddingTop: 2,
           paddingBottom: 2,
         }}>
+          <span style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: RAMS_ACCENT,
+            marginRight: 8,
+          }}>
+            [note]
+          </span>
           {actionNote}
         </div>
       ) : null}
