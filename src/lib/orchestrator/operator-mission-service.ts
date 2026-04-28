@@ -24,3 +24,6 @@ export {
 } from './operator-mission-service/merge';
 
 export { resetPacket } from './operator-mission-service/reset';
+
+export { rerunWithFeedback } from './operator-mission-service/rerun-with-feedback';
+export type { RerunWithFeedbackInput } from './operator-mission-service/rerun-with-feedback';
