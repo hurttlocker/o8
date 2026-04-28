@@ -33,7 +33,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 9;
+const DB_SCHEMA_VERSION = 10;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -86,6 +86,7 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureUsageLogSchema(sqlite);
   ensureApprovalEventsTable(sqlite);
   ensureExternalMcpServerColumns(sqlite);
+  ensurePushSubscriptionsTable(sqlite);
 }
 
 /**
@@ -525,6 +526,20 @@ function ensureTables(sqlite: Database.Database): void {
       last_event_at INTEGER NOT NULL DEFAULT 0,
       last_activity_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_agent TEXT,
+      label TEXT,
+      webhook_url TEXT,
+      last_delivered_at INTEGER,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_push_subscriptions_created_at ON push_subscriptions(created_at);
   `);
 
   ensureApprovalContextColumns(sqlite);
@@ -720,6 +735,28 @@ function ensureApprovalContextIndexes(sqlite: Database.Database): void {
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_approvals_packet_id ON approvals(packet_id);
     CREATE INDEX IF NOT EXISTS idx_approvals_lane_id ON approvals(lane_id);
+  `);
+}
+
+/**
+ * Schema v10 — push_subscriptions table for mobile Web Push (issue #639).
+ * Creates the table if missing on existing databases. Idempotent.
+ */
+function ensurePushSubscriptionsTable(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_agent TEXT,
+      label TEXT,
+      webhook_url TEXT,
+      last_delivered_at INTEGER,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_push_subscriptions_created_at ON push_subscriptions(created_at);
   `);
 }
 

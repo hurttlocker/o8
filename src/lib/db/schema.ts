@@ -542,3 +542,30 @@ export const supervisorInbox = sqliteTable('supervisor_inbox', {
   packetIdIdx: index('idx_supervisor_inbox_packet_id').on(table.packetId),
   repoCreatedIdx: index('idx_supervisor_inbox_repo_created').on(table.repoPath, table.createdAt),
 }));
+
+// ══════════════════════════════════════════════════════════════════
+//  Push Subscriptions — mobile Web Push (issue #639)
+// ══════════════════════════════════════════════════════════════════
+
+export const pushSubscriptions = sqliteTable('push_subscriptions', {
+  /** PushSubscription endpoint URL — uniquely identifies the browser */
+  endpoint: text('endpoint').primaryKey(),
+  /** Base64url-encoded P256DH public key (browser key) */
+  p256dh: text('p256dh').notNull(),
+  /** Base64url-encoded auth secret */
+  auth: text('auth').notNull(),
+  /** Optional user agent string for diagnostics */
+  userAgent: text('user_agent'),
+  /** Optional human label (e.g. "iPhone 15 — Safari") */
+  label: text('label'),
+  /** Optional webhook URL for fallback delivery (ntfy.sh / Pushover / Discord) */
+  webhookUrl: text('webhook_url'),
+  /** Last successful delivery timestamp (ms epoch) */
+  lastDeliveredAt: integer('last_delivered_at'),
+  /** Number of consecutive delivery failures (used to expire subs) */
+  failureCount: integer('failure_count').notNull().default(0),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  createdAtIdx: index('idx_push_subscriptions_created_at').on(table.createdAt),
+}));
