@@ -159,7 +159,11 @@ export function MobileApprovalsClient({
   const loadRecentConversations = useCallback(async () => {
     setRecentLoading(true);
     try {
-      const response = await fetch('/api/v2/chat-history/list', { cache: 'no-store' });
+      // surface=mobile-assistant filters out desktop LLM tabs (llm-*),
+      // orchestrator threads (thoughts-*), legacy mobile-orchestrator-*,
+      // and o8-operator-modeled chats so the Assistant tab only shows
+      // real mobile-side LLM conversations.
+      const response = await fetch('/api/v2/chat-history/list?surface=mobile-assistant', { cache: 'no-store' });
       if (!response.ok) throw new Error('Failed to load conversations');
       const data = await response.json();
       setRecentConversations(normalizeHistoryList(data));

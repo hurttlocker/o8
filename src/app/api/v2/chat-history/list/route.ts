@@ -36,6 +36,13 @@ interface ChatHistoryEntry {
 export async function GET(request: NextRequest) {
   const searchQuery = request.nextUrl.searchParams.get('q')?.toLowerCase();
   const includeOrchestrator = request.nextUrl.searchParams.get('include') === 'orchestrator';
+  // surface=mobile-assistant restricts the list to mobile-chat-* files where
+  // the model is NOT an orchestrator brand. The mobile Assistant tab uses
+  // this so desktop LLM tabs (llm-*), orchestrator threads (thoughts-*),
+  // legacy mobile-orchestrator-*, and o8-operator-modeled files don't
+  // pollute the conversations list.
+  const surface = request.nextUrl.searchParams.get('surface');
+  const isMobileAssistantOnly = surface === 'mobile-assistant';
 
   try {
     const files = readdirSync(HISTORY_DIR).filter(f => f.endsWith('.json'));
@@ -53,6 +60,16 @@ export async function GET(request: NextRequest) {
         // Skip orchestrator threads unless explicitly requested
         const tabId = basename(file, '.json');
         if (!includeOrchestrator && tabId.startsWith('thoughts-')) continue;
+
+        if (isMobileAssistantOnly) {
+          // Only mobile-chat-* files for the mobile Assistant tab.
+          if (!tabId.startsWith('mobile-chat-')) continue;
+          // Skip any file whose model brand reads as orchestrator (the
+          // o8-operator brand string is the orchestrator label) so even
+          // a mistitled mobile-chat- file with that model gets excluded.
+          const model = typeof data.model === 'string' ? data.model : '';
+          if (model === 'o8-operator' || model === 'claude-code') continue;
+        }
 
         const messages = (data.messages ?? []) as { role: string; content: string }[];
         const firstUserMsg = messages.find(m => m.role === 'user');
