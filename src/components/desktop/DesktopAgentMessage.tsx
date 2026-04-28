@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { FileText } from './lucide-shims';
 import { CommandStripNode } from '@/components/desktop/CommandStripNode';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
@@ -50,7 +50,7 @@ function PinGlyph() {
   );
 }
 
-function MediaGrid({
+const MediaGrid = memo(function MediaGrid({
   media,
   tint,
 }: {
@@ -170,7 +170,7 @@ function MediaGrid({
       ))}
     </div>
   );
-}
+});
 
 export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   entry,
@@ -181,7 +181,13 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   onRunInTerminal,
 }: DesktopAgentMessageProps) {
   const isUser = entry.role === 'user';
-  const displayText = sanitizeTranscriptText(entry.text);
+  // Sanitize regex chain runs on every render unless memoized — heavy on
+  // long transcripts where entry text is stable but parent re-renders fire.
+  const displayText = useMemo(() => sanitizeTranscriptText(entry.text), [entry.text]);
+  const sanitizedThinking = useMemo(
+    () => entry.thinking ? sanitizeTranscriptText(entry.thinking) : '',
+    [entry.thinking],
+  );
   const hasText = Boolean(displayText.trim());
   const hasMedia = Boolean(entry.media?.length);
   const hasToolCalls = Boolean(entry.toolCalls?.length);
@@ -247,6 +253,20 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       console.error('[diff-card] Failed to apply diff:', error);
     }
   }, [repoPath]);
+
+  // renderLLMMarkdown does heavy line-by-line parsing + regex matching to
+  // produce React nodes. Memoize per (text + handler identity) so renders
+  // triggered by sibling state (e.g. hover on meta row) skip re-parsing.
+  // Hook must live before any early returns to keep call order stable.
+  const renderedMarkdown = useMemo(
+    () => hasText ? renderLLMMarkdown(displayText, {
+      onApplyToFile,
+      onApplyDiff: repoPath ? handleApplyDiff : undefined,
+      onOpenInCanvas,
+      onRunInTerminal,
+    }) : null,
+    [hasText, displayText, onApplyToFile, onOpenInCanvas, onRunInTerminal, repoPath, handleApplyDiff],
+  );
 
   const handlePinToggle = useCallback(() => {
     const trimmedRepoPath = repoPath?.trim();
@@ -386,7 +406,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       {evictedEyebrow}
       {hasThinking ? (
         <ThinkingStrip
-          thinking={sanitizeTranscriptText(entry.thinking!)}
+          thinking={sanitizedThinking}
           live={thinkingLive}
           style={{ maxWidth: '100%' }}
         />
@@ -411,12 +431,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
           border: entry.role === 'system' ? '1px solid var(--t-divider)' : 'none',
           boxShadow: entry.role === 'system' ? 'var(--t-panel-shadow)' : 'none',
         }}>
-          {renderLLMMarkdown(displayText, {
-            onApplyToFile,
-            onApplyDiff: repoPath ? handleApplyDiff : undefined,
-            onOpenInCanvas,
-            onRunInTerminal,
-          })}
+          {renderedMarkdown}
         </div>
       ) : null}
 
