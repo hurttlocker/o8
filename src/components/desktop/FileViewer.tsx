@@ -297,8 +297,8 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
   // Agent model mapping
   const agentModels: Record<string, { provider: string; model: string }> = {
     flash: { provider: 'google', model: 'gemini-2.5-flash' },
-    sonnet: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
-    opus: { provider: 'anthropic', model: 'claude-opus-4-6-20250929' },
+    sonnet: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    opus: { provider: 'anthropic', model: 'claude-opus-4-7' },
   };
 
   // Handle inline edit submission
