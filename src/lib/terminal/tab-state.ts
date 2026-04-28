@@ -72,6 +72,50 @@ const API_PATH = '/api/panel/terminal-state';
  */
 export const MAX_PERSISTED_TABS = 50;
 
+/**
+ * Issue #717 — canonical "is this a valid persisted tab?" filter. Applied at
+ * EVERY layer (server GET, server POST, client load, client save, in-memory
+ * mutations, hydration migration) so a zombie can never sneak in from any
+ * direction. Currently the only zombie shape we know about:
+ *
+ *   `id.startsWith('orchestrator-')` AND `kind !== 'orchestrator'`
+ *
+ * These come from older builds (pre-#714) that mutated an orchestrator tab's
+ * `kind` away from 'orchestrator' while leaving the orchestrator-prefixed ID
+ * on disk. The migration effect in the controller injects a fresh pinned
+ * Orchestrator on every mount, so the persisted stub becomes a duplicate the
+ * user sees as "two Orchestrator tabs."
+ *
+ * Extend this function — not bespoke filters elsewhere — when new zombie
+ * shapes are discovered. That's the whole point of having one source of truth.
+ */
+export function stripPersistedTabs<T extends { id?: string; kind?: string }>(tabs: T[]): T[] {
+  return tabs.filter((tab) => {
+    if (!tab || typeof tab !== 'object') return false;
+    const id = typeof tab.id === 'string' ? tab.id : '';
+    const kind = typeof tab.kind === 'string' ? tab.kind : '';
+    return !(kind !== 'orchestrator' && id.startsWith('orchestrator-'));
+  });
+}
+
+/**
+ * Apply `stripPersistedTabs` to a `PersistedTabState`-shaped payload. Drops
+ * zombie tabs and re-points `activeTabId` if the previously-active tab was
+ * one of the zombies. Returns the same reference when the input is already
+ * clean, so callers can cheaply skip redundant work.
+ */
+export function sanitizePersistedTabState(state: PersistedTabState): PersistedTabState {
+  if (!state || !Array.isArray(state.tabs) || state.tabs.length === 0) return state;
+  const sanitized = stripPersistedTabs(state.tabs);
+  if (sanitized.length === state.tabs.length) return state;
+  const activeStillPresent = sanitized.some((tab) => tab.id === state.activeTabId);
+  return {
+    ...state,
+    tabs: sanitized,
+    activeTabId: activeStillPresent ? state.activeTabId : (sanitized[0]?.id ?? ''),
+  };
+}
+
 /** Tabs that should never be dropped, even when over the cap. */
 function isPinnedKind(kind: PersistedTab['kind']): boolean {
   return kind === 'orchestrator' || kind === 'llm-chat';
@@ -252,17 +296,142 @@ function buildStatePath(scope: string, repoPath?: string | null) {
   return `${API_PATH}?${params.toString()}`;
 }
 
+const LOCALSTORAGE_SCRUB_MARKER_KEY = 'o8:tab-state:localstorage-scrubbed';
+const LOCALSTORAGE_SCRUB_VERSION = '717-v1';
+
+/**
+ * Issue #717 — one-time, no-op-if-already-clean migration.
+ *
+ * Walk every localStorage key whose value looks like a serialized tab list
+ * (object/array containing a `tabs` array of `{id, kind}`) and run
+ * `stripPersistedTabs` on it. Writes back only when something actually
+ * changed. The marker key gates re-runs so the scrub costs ~one storage
+ * iteration per app launch, then becomes a single getItem on subsequent
+ * mounts.
+ *
+ * No tab persistence currently lives in localStorage, but the user's audit of
+ * #717 found pre-fix zombies in WebKit-cached state and asked for a defensive
+ * scrub here so the repo never has to open a 9th ship cycle if a future
+ * persist middleware lands on top of localStorage.
+ */
+export function scrubLocalStorageTabZombies(): void {
+  if (typeof window === 'undefined') return;
+  let storage: Storage;
+  try {
+    storage = window.localStorage;
+  } catch {
+    return;
+  }
+  try {
+    if (storage.getItem(LOCALSTORAGE_SCRUB_MARKER_KEY) === LOCALSTORAGE_SCRUB_VERSION) return;
+  } catch {
+    return;
+  }
+
+  const keys: string[] = [];
+  try {
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (key) keys.push(key);
+    }
+  } catch {
+    return;
+  }
+
+  for (const key of keys) {
+    let raw: string | null = null;
+    try {
+      raw = storage.getItem(key);
+    } catch {
+      continue;
+    }
+    if (!raw || raw.length < 16) continue;
+    if (!raw.includes('"tabs"')) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    const cleaned = scrubTabZombiesInValue(parsed);
+    if (cleaned.changed) {
+      try {
+        storage.setItem(key, JSON.stringify(cleaned.value));
+      } catch {
+        // localStorage may be full; ignore
+      }
+    }
+  }
+
+  try {
+    storage.setItem(LOCALSTORAGE_SCRUB_MARKER_KEY, LOCALSTORAGE_SCRUB_VERSION);
+  } catch {
+    // Marker write failed — re-running on next mount is a no-op-if-already-clean,
+    // so the worst case is we walk localStorage once more.
+  }
+}
+
+interface ScrubResult {
+  value: unknown;
+  changed: boolean;
+}
+
+function scrubTabZombiesInValue(value: unknown): ScrubResult {
+  if (!value || typeof value !== 'object') return { value, changed: false };
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((entry) => {
+      const result = scrubTabZombiesInValue(entry);
+      if (result.changed) changed = true;
+      return result.value;
+    });
+    return { value: changed ? next : value, changed };
+  }
+
+  const obj = value as Record<string, unknown>;
+  const tabs = obj.tabs;
+  let changed = false;
+  let next: Record<string, unknown> | null = null;
+
+  if (Array.isArray(tabs)) {
+    const sanitized = stripPersistedTabs(tabs as Array<{ id?: string; kind?: string }>);
+    if (sanitized.length !== tabs.length) {
+      next = { ...obj, tabs: sanitized };
+      const activeTabId = typeof obj.activeTabId === 'string' ? obj.activeTabId : '';
+      if (activeTabId && !sanitized.some((tab) => (tab as { id?: string }).id === activeTabId)) {
+        next.activeTabId = (sanitized[0] as { id?: string } | undefined)?.id ?? '';
+      }
+      changed = true;
+    }
+  }
+
+  for (const [k, v] of Object.entries(next ?? obj)) {
+    if (k === 'tabs') continue;
+    const result = scrubTabZombiesInValue(v);
+    if (result.changed) {
+      next = { ...(next ?? obj), [k]: result.value };
+      changed = true;
+    }
+  }
+
+  return { value: changed ? next : value, changed };
+}
+
 /** Save tab state to server */
 export async function saveTabState(state: PersistedTabState, scope = 'tile-root'): Promise<void> {
   try {
-    const beforeCount = state.tabs.length;
-    const { tabs: prunedTabs, dropped } = pruneTabs(state.tabs, state.activeTabId);
+    // #717 — apply the canonical zombie filter on save too. The server already
+    // strips, but doing it here keeps the round-trip stable: in-memory ->
+    // serialized -> server matches what we'll see on next load. Cheap, idempotent.
+    const sanitized = sanitizePersistedTabState(state);
+    const beforeCount = sanitized.tabs.length;
+    const { tabs: prunedTabs, dropped } = pruneTabs(sanitized.tabs, sanitized.activeTabId);
     if (dropped > 0) {
       console.log(`[tab-state] pruned ${dropped} tabs on save (was ${beforeCount}, now ${prunedTabs.length})`);
     }
     const persisted: PersistedTabState = dropped > 0
-      ? { ...state, tabs: prunedTabs }
-      : state;
+      ? { ...sanitized, tabs: prunedTabs }
+      : sanitized;
     await fetch(buildStatePath(scope), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -276,11 +445,21 @@ export async function saveTabState(state: PersistedTabState, scope = 'tile-root'
 /** Load tab state from server */
 export async function loadTabState(scope = 'tile-root', repoPath?: string | null): Promise<PersistedTabState | null> {
   try {
-    const res = await fetch(buildStatePath(scope, repoPath));
+    // #717 — `cache: 'no-store'` so WebKit's HTTP response cache can never
+    // serve a pre-#716 (un-sanitized) copy of this endpoint. Without this,
+    // ~/Library/WebKit/<bundle>/WebsiteData/Default/ could keep returning the
+    // zombie state for hours after the server-side strip shipped.
+    const res = await fetch(buildStatePath(scope, repoPath), {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    });
     if (!res.ok) return null;
     const data = await res.json();
     if (data.version !== 1) return null;
-    const state = data as PersistedTabState;
+    // #717 — apply the canonical zombie filter on load. Server already strips,
+    // but a stale HTTP cache or an old build's response shape could still
+    // contain zombies; this is the last-mile defense.
+    const state = sanitizePersistedTabState(data as PersistedTabState);
     if (!Array.isArray(state.tabs) || state.tabs.length === 0) return state;
     const beforeCount = state.tabs.length;
     const { tabs: prunedTabs, dropped } = pruneTabs(state.tabs, state.activeTabId);

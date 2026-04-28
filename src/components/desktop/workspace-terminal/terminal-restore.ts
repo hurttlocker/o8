@@ -4,6 +4,7 @@ import {
   formatPersistedRuntimeSessionKey,
   loadLiveRuntimeSessionKeys,
   loadTabState,
+  sanitizePersistedTabState,
   stripPersistedRuntimeSessionKey,
   type PersistedRuntimeSessionKey,
   type PersistedTabState,
@@ -40,10 +41,15 @@ export interface ApplyPersistedStateResult {
  * (terminal attach/create).
  */
 export async function computeRestoredTabs(
-  saved: PersistedTabState,
+  rawSaved: PersistedTabState,
   options: ApplyPersistedStateOptions,
   cancelled?: () => boolean,
 ): Promise<ApplyPersistedStateResult | null> {
+  // #717 — third defensive strip on the in-memory boundary between API/cache
+  // and the restore pipeline. `loadTabState` already runs the strip, but a
+  // caller who hands us a `PersistedTabState` from any other source must still
+  // produce zombie-free output.
+  const saved = sanitizePersistedTabState(rawSaved);
   const tmuxNames = saved.tabs.map((tab) => tab.tmuxSession).filter(Boolean) as string[];
   const needsLivenessCheck = saved.tabs.some((tab) => {
     const kind = tab.kind ?? 'terminal';
