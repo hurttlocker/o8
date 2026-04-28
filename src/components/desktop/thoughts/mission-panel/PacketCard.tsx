@@ -10,6 +10,7 @@ import { PacketActionStrip } from '@/components/desktop/thoughts/PacketActionStr
 import { PacketDetailsPopover } from '@/components/desktop/thoughts/PacketDetailsPopover';
 import type { EditingField, ReviewPanelState } from './types';
 import { PacketMetaRows } from './PacketMetaRows';
+import { PacketReviewCard } from './PacketReviewCard';
 import { PacketReviewPanel } from './PacketReviewPanel';
 import { RejectedFeedbackPanel } from './RejectedFeedbackPanel';
 
@@ -70,6 +71,11 @@ export function PacketCard({
     packet.status === 'awaiting_review'
     || (packet.status === 'blocked' && packet.blockedReason === 'Awaiting operator input')
   );
+  // #729 — Hero review surface for `awaiting_review` packets. The lighter
+  // PacketReviewPanel still owns the `blocked + Awaiting operator input` case
+  // (where the orchestrator hasn't moved the packet to awaiting_review yet but
+  // is gated on operator input).
+  const showHeroReviewCard = Boolean(packet.lane?.laneId) && packet.status === 'awaiting_review';
   // #662 — Rejected packets get a one-click rerun-with-feedback panel.
   // Detect via packet.review?.approved === false rather than packet.status,
   // since submitPacketReview leaves status untouched.
@@ -513,7 +519,12 @@ export function PacketCard({
             )}
           </div>
 
-          {showReviewSection ? (
+          {showHeroReviewCard ? (
+            <PacketReviewCard
+              packet={packet}
+              reviewState={reviewState}
+            />
+          ) : showReviewSection ? (
             <PacketReviewPanel
               packet={packet}
               reviewState={reviewState}
@@ -529,7 +540,7 @@ export function PacketCard({
                 paddingRight: 10,
                 paddingBottom: 10,
                 paddingLeft: 10,
-                borderTopWidth: showReviewSection ? 0 : 1,
+                borderTopWidth: showReviewSection || showHeroReviewCard ? 0 : 1,
                 borderTopStyle: 'solid',
                 borderTopColor: 'var(--t-divider-subtle)',
               }}
