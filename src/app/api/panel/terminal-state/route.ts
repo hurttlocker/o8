@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 import { listRepos } from '@/lib/repos/registry';
-import { buildRepoStateScope } from '@/lib/terminal/tab-state';
+import { buildRepoStateScope, stripPersistedTabs } from '@/lib/terminal/tab-state';
 
 const HOME = process.env.HOME ?? '/tmp';
 const STATE_DIR = path.join(HOME, '.o8');
@@ -37,23 +37,21 @@ function pathBelongsToRegisteredRepo(candidatePath?: string | null, repoRoots?: 
   return false;
 }
 
+// #717 — server-side zombie strip delegates to the canonical filter in
+// @/lib/terminal/tab-state. Keep this single source of truth so a new zombie
+// shape only has to be added in one place.
 function stripOrchestratorZombies(data: unknown) {
   if (!data || typeof data !== 'object') return data;
   const tabs = (data as { tabs?: Array<{ id?: string; kind?: string }> }).tabs;
   if (!Array.isArray(tabs)) return data;
-  const sanitized = tabs.filter((tab) => {
-    if (!tab || typeof tab !== 'object') return false;
-    const id = typeof tab.id === 'string' ? tab.id : '';
-    const kind = typeof tab.kind === 'string' ? tab.kind : '';
-    return !(kind !== 'orchestrator' && id.startsWith('orchestrator-'));
-  });
+  const sanitized = stripPersistedTabs(tabs);
   if (sanitized.length === tabs.length) return data;
   const current = data as { activeTabId?: string };
-  const activeStillPresent = sanitized.some((tab) => (tab as { id?: string }).id === current.activeTabId);
+  const activeStillPresent = sanitized.some((tab) => tab.id === current.activeTabId);
   return {
     ...current,
     tabs: sanitized,
-    activeTabId: activeStillPresent ? current.activeTabId : ((sanitized[0] as { id?: string } | undefined)?.id ?? ''),
+    activeTabId: activeStillPresent ? current.activeTabId : (sanitized[0]?.id ?? ''),
   };
 }
 
