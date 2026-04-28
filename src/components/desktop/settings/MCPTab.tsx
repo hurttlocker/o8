@@ -151,6 +151,12 @@ export function MCPTab() {
       } else {
         setInstallNote({ target, message: body.error || body.detail || 'Failed.', ok: false });
       }
+    } catch (e) {
+      setInstallNote({
+        target,
+        message: e instanceof Error ? e.message : 'Request failed.',
+        ok: false,
+      });
     } finally {
       setInstalling(null);
     }
