@@ -191,10 +191,15 @@ export async function GET(req: NextRequest) {
 }
 
 // ── DELETE: Remove branch (+ worktree if applicable) ──
+//
+// Local-only by default. The sidebar prune UI never deletes the remote ref —
+// pass `deleteRemote: true` only when the caller explicitly opts in (a future
+// "delete remote too" toggle). See #720 for the rationale: the prune gesture
+// is for tidying the local sidebar, not for force-publishing branch removal.
 export async function DELETE(req: NextRequest) {
   try {
-    const body = await req.json() as { path: string; branch: string; force?: boolean };
-    const { path: repoPath, branch, force } = body;
+    const body = await req.json() as { path: string; branch: string; force?: boolean; deleteRemote?: boolean };
+    const { path: repoPath, branch, force, deleteRemote } = body;
 
     if (!repoPath || !branch) {
       return NextResponse.json({ error: 'path and branch required' }, { status: 400 });
@@ -235,15 +240,19 @@ export async function DELETE(req: NextRequest) {
       timeout: 5000,
     });
 
-    // Try to delete remote branch too
+    // Optionally delete the remote branch — opt-in only. Local prune does not
+    // touch origin so a YC-reviewer-style "tidy my sidebar" click can't
+    // accidentally drop a remote ref another collaborator is depending on.
     let remoteDeleted = false;
-    try {
-      execSync(`git -C "${repoPath}" push origin --delete "${branch}" 2>/dev/null`, {
-        encoding: 'utf-8',
-        timeout: 10000,
-      });
-      remoteDeleted = true;
-    } catch { /* no remote branch or no permission */ }
+    if (deleteRemote) {
+      try {
+        execSync(`git -C "${repoPath}" push origin --delete "${branch}" 2>/dev/null`, {
+          encoding: 'utf-8',
+          timeout: 10000,
+        });
+        remoteDeleted = true;
+      } catch { /* no remote branch or no permission */ }
+    }
 
     return NextResponse.json({
       deleted: branch,
