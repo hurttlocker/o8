@@ -222,7 +222,7 @@ export function useRepoCardModel({
         .catch(() => {});
     }
     fetchLogs();
-    const id = setInterval(fetchLogs, 3000);
+    const id = setInterval(fetchLogs, 5000);
     return () => clearInterval(id);
   }, [devLogsOpen, devServerRunning, repo.localPath]);
 

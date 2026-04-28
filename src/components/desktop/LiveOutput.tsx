@@ -658,7 +658,7 @@ export function LiveOutput({
       debounceTimer = setTimeout(() => { void fetchDiffs(); }, 150);
     };
     fetchNowRef.current();
-    pollRef.current = setInterval(() => { void fetchDiffs(); }, reviewWsConnected ? 15_000 : 4_000);
+    pollRef.current = setInterval(() => { void fetchDiffs(); }, reviewWsConnected ? 15_000 : 8_000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (debounceTimer) clearTimeout(debounceTimer);
