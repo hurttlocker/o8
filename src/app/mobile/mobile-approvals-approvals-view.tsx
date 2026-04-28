@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import {
   IconCheck,
   MOBILE_BODY_TRACKING,
@@ -12,6 +12,11 @@ import {
   type MobilePalette,
   timeAgo,
 } from './mobile-approvals-shared';
+import type { MobileDiffSource } from '@/lib/mobile/diff-fetch';
+
+const MobileDiffViewer = lazy(async () => ({
+  default: (await import('@/components/mobile/MobileDiffViewer')).MobileDiffViewer,
+}));
 import {
   MobileGlassPanel,
   MobilePillButton,
@@ -276,19 +281,22 @@ function ApprovalCard({
   onResolve,
   resolving,
   palette,
+  onOpenDiff,
 }: {
   approval: ApprovalItem;
   onResolve: (id: string, action: 'approve' | 'reject', strategy?: string) => void;
   resolving: { id: string; action: 'approve' | 'reject' } | null;
   palette: MobilePalette;
+  onOpenDiff: (approval: ApprovalItem) => void;
 }) {
   const isApproving = resolving?.id === approval.id && resolving.action === 'approve';
   const isRejecting = resolving?.id === approval.id && resolving.action === 'reject';
   const isBusy = resolving?.id === approval.id;
   const agent = approval.metadata?.agent ?? approval.sessionKey?.split(':').pop() ?? 'operator';
   const hasConflict = approval.conflictReport && approval.conflictReport.files.length > 0;
+  const canViewDiff = !hasConflict && Boolean(approval.sessionKey);
 
-  return (
+  const cardContent = (
     <MobileGlassPanel palette={palette} style={{ padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -365,6 +373,30 @@ function ApprovalCard({
       )}
     </MobileGlassPanel>
   );
+
+  if (!canViewDiff) return cardContent;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest('button')) return;
+        onOpenDiff(approval);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          if ((event.target as HTMLElement).closest('button')) return;
+          event.preventDefault();
+          onOpenDiff(approval);
+        }
+      }}
+      style={{ cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+      aria-label="View diff for this approval"
+    >
+      {cardContent}
+    </div>
+  );
 }
 
 // ── Main View ──
@@ -381,6 +413,11 @@ export function ApprovalsView({
   palette: MobilePalette;
 }) {
   const [filter, setFilter] = useState<ApprovalFilter>('pending');
+  const [diffSheet, setDiffSheet] = useState<{
+    source: MobileDiffSource;
+    title: string;
+    subtitle?: string;
+  } | null>(null);
 
   const visible = useMemo(() => approvals.filter(isVisibleApproval), [approvals]);
 
@@ -459,6 +496,14 @@ export function ApprovalsView({
                 onResolve={onResolve}
                 resolving={resolving}
                 palette={palette}
+                onOpenDiff={(target) => {
+                  if (!target.sessionKey) return;
+                  setDiffSheet({
+                    source: { kind: 'worktree', sessionKey: target.sessionKey },
+                    title: target.title || 'Approval diff',
+                    subtitle: target.metadata?.agent ?? target.toolName,
+                  });
+                }}
               />
             ))}
           </MobileThreadListRoot>
@@ -486,6 +531,18 @@ export function ApprovalsView({
           </MobileGlassPanel>
         )}
       </div>
+
+      {diffSheet ? (
+        <Suspense fallback={null}>
+          <MobileDiffViewer
+            open
+            onClose={() => setDiffSheet(null)}
+            source={diffSheet.source}
+            title={diffSheet.title}
+            subtitle={diffSheet.subtitle}
+          />
+        </Suspense>
+      ) : null}
     </MobileSurfaceRoot>
   );
 }
