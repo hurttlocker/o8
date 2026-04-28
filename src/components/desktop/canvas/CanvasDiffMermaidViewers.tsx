@@ -243,7 +243,7 @@ function MermaidViewerBase({ code }: { code: string }) {
             style={{
               transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
               transformOrigin: 'center center',
-              transition: dragging.current ? 'none' : 'transform 100ms ease',
+              transition: dragging.current ? 'none' : 'transform 100ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           />
         ) : (

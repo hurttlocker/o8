@@ -473,7 +473,7 @@ export function ApprovalStack({
                 fontSize: 16,
                 lineHeight: 1,
                 transform: resolvedExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                transition: 'transform 180ms ease',
+                transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               ˅

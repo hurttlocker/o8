@@ -65,7 +65,7 @@ function ChainOfThoughtBase({
             {isLive && activeStep ? activeStep.label : `Thought for ${durationSec ? `${durationSec}s` : `${completedCount} step${completedCount !== 1 ? 's' : ''}`}`}
           </div>
         </div>
-        <ChevronRight size={12} style={{ color: 'var(--t-text-muted)', transform: expanded ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform 200ms ease', flexShrink: 0 }} />
+        <ChevronRight size={12} style={{ color: 'var(--t-text-muted)', transform: expanded ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)', flexShrink: 0 }} />
       </button>
       {expanded ? (
         <div style={{ marginTop: 4, marginLeft: 23, paddingLeft: 12, borderLeft: '2px solid var(--t-divider)', animation: 'llmFadeIn 200ms ease-out' }}>
@@ -121,7 +121,7 @@ function ThinkingText({ text }: { text: string }) {
         onClick={() => setShowRaw((value) => !value)}
         style={{ display: 'flex', alignItems: 'center', gap: 4, border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 11, cursor: 'pointer', paddingTop: 4, paddingRight: 0, paddingBottom: 4, paddingLeft: 0 }}
       >
-        <ChevronRight size={10} style={{ transform: showRaw ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform 200ms ease' }} />
+        <ChevronRight size={10} style={{ transform: showRaw ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)' }} />
         View raw thinking
       </button>
       {showRaw ? (

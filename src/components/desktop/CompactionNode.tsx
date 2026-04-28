@@ -128,7 +128,7 @@ export function CompactionNode({
               style={{
                 opacity: hasDetails ? 1 : 0.45,
                 transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                transition: 'transform 200ms ease',
+                transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               <polyline points="6 9 12 15 18 9" />

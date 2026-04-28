@@ -174,7 +174,7 @@ export function SwipeActions({
           transform: `translate3d(${pinnedOffset}px, 0, 0)`,
           transition: swipe.swiping
             ? 'none'
-            : 'transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+            : 'transform 220ms cubic-bezier(0.34, 1.36, 0.64, 1)',
           willChange: swipe.swiping ? 'transform' : undefined,
           // Hide swipe-revealed visuals during confirmation so the strip below
           // is the unambiguous next step.

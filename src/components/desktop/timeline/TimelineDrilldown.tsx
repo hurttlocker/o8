@@ -297,7 +297,7 @@ export function TimelineDrilldown({
         WebkitBackdropFilter: 'blur(28px) saturate(1.42)',
         display: 'flex',
         flexDirection: 'column',
-        animation: 'drillFadeIn 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+        animation: 'drillFadeIn 180ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}>
         <div
           style={{
@@ -418,7 +418,7 @@ export function TimelineDrilldown({
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            animation: 'drillFadeIn 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+            animation: 'drillFadeIn 180ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
           <div
@@ -662,7 +662,7 @@ export function TimelineDrilldown({
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            animation: 'drillFadeIn 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+            animation: 'drillFadeIn 180ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
           <div

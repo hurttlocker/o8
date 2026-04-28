@@ -663,7 +663,7 @@ export function ApprovalQueuePanel({ onClose, embedded }: { onClose?: () => void
               }}
             >
               <span style={{
-                transition: 'transform 150ms ease',
+                transition: 'transform 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                 transform: showHistory ? 'rotate(90deg)' : 'rotate(0deg)',
                 display: 'inline-block',
               }}>

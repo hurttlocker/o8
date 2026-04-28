@@ -575,7 +575,7 @@ const PremiumCodeBlock = memo(function PremiumCodeBlock({
           <ChevronDown
             size={14}
             strokeWidth={2}
-            style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 180ms ease' }}
+            style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)' }}
           />
         </span>
       </button>
@@ -925,7 +925,7 @@ const MessageBubble = memo(function MessageBubble({
                       color: palette.tertiaryText,
                       flexShrink: 0,
                       transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                      transition: 'transform 180ms ease',
+                      transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
                     }}
                   />
                 </div>

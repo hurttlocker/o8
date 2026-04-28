@@ -99,7 +99,7 @@ const ThinkingXray = memo(function ThinkingXray({
           {(isThinking || isStreaming) && (
             <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="2.5" strokeLinecap="round" style={{
-                transition: 'transform 200ms ease',
+                transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
                 transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
                 opacity: 0.5,
               }}>

@@ -43,7 +43,7 @@ export function PullToRefresh({
         transform: `translateX(-50%) translateY(${Math.max(pullDistance - 20, 0)}px)`,
         zIndex: 50,
         opacity: progress > 0.1 ? Math.min(progress * 1.5, 1) : 0,
-        transition: isPulling ? 'none' : 'all 300ms cubic-bezier(0.32, 0.72, 0, 1)',
+        transition: isPulling ? 'none' : 'all 300ms cubic-bezier(0.22, 1, 0.36, 1)',
         pointerEvents: 'none',
       }}>
         <div style={{
@@ -73,7 +73,7 @@ export function PullToRefresh({
               strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
               style={{
                 transform: `rotate(${progress * 180}deg)`,
-                transition: isPulling ? 'none' : 'transform 200ms ease',
+                transition: isPulling ? 'none' : 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}>
               <line x1="12" y1="19" x2="12" y2="5" />
               <polyline points="5 12 12 5 19 12" />
