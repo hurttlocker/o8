@@ -19,7 +19,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const REQUIRED = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
@@ -128,16 +128,17 @@ if (existsSync(TAR_SIG)) rmSync(TAR_SIG);
 execFileSync('tar', ['czf', TAR, '-C', join(BUNDLE, 'macos'), 'o8.app'], { stdio: 'inherit' });
 
 console.log('[sign-and-notarize] minisign-signing the new tar.gz');
-// `cargo tauri signer sign` rejects `--password ""`; pass an empty
-// password via env var instead. The minisign key was generated without
-// a password so this is intentional.
-execFileSync('cargo', [
-  'tauri', 'signer', 'sign',
-  '--private-key-path', SIGNING_KEY,
-  TAR,
-], {
-  stdio: 'inherit',
-  env: { ...process.env, TAURI_SIGNING_PRIVATE_KEY: '', TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '' },
+// Newer cargo-tauri-cli rejects `--private-key-path` when
+// TAURI_SIGNING_PRIVATE_KEY env var is also set ("cannot be used with").
+// Read the key into the env var, drop the flag, force empty password,
+// and close stdin so the signer doesn't prompt.
+execFileSync('cargo', ['tauri', 'signer', 'sign', TAR], {
+  stdio: ['ignore', 'inherit', 'inherit'],
+  env: {
+    ...process.env,
+    TAURI_SIGNING_PRIVATE_KEY: readFileSync(SIGNING_KEY, 'utf8').trim(),
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '',
+  },
 });
 
 console.log('[sign-and-notarize] rebuilding DMG with stapled app');
