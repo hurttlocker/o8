@@ -108,21 +108,22 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      // Hide branches whose tip is already an ancestor of the default branch
-      // (i.e. fully merged into main). The current branch and any branch
-      // backing a live worktree are always preserved so the operator never
-      // loses their seat. `--is-ancestor` exits 0 for ancestor / 1 for not /
-      // 128 for missing ref, so only treat exitStatus 0 as "merged".
+      // Hide branches whose working diff vs default branch is empty — i.e.
+      // every change on the branch already exists on default. Catches BOTH
+      // fast-forward / regular merges AND squash merges (where the branch
+      // tip is NOT an ancestor of default but the diff is still empty).
+      // `git diff --quiet A..B` exits 0 when no diff, 1 when there is diff,
+      // 128 on missing ref. Treat exit 0 as "merged → drop".
       if (!isCurrent && !isWt && trimmedName !== defaultBranch) {
         try {
           execSync(
-            `git -C "${repoPath}" merge-base --is-ancestor "${trimmedName}" "${defaultBranch}"`,
-            { encoding: 'utf-8', timeout: 2000, stdio: 'pipe' },
+            `git -C "${repoPath}" diff --quiet "${defaultBranch}".."${trimmedName}"`,
+            { encoding: 'utf-8', timeout: 3000, stdio: 'pipe' },
           );
-          // Exit code 0 → trimmedName is reachable from defaultBranch → merged.
+          // Exit 0 → no diff → branch is fully landed on default.
           continue;
         } catch {
-          // Non-zero exit (or missing ref) → not merged. Keep the branch.
+          // Non-zero exit (has diff, or missing ref) → keep the branch.
         }
       }
 
