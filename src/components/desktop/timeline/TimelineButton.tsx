@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 
+const GEOMETRY = 'cubic-bezier(0.22, 1, 0.36, 1)';
+
 export function TimelineButton({ icon, label, onClick }: { icon: ReactNode; label: string; onClick?: () => void }) {
   return (
     <button
@@ -7,6 +9,7 @@ export function TimelineButton({ icon, label, onClick }: { icon: ReactNode; labe
       aria-label={label}
       onClick={onClick}
       style={{
+        position: 'relative',
         width: 24,
         height: 24,
         borderRadius: 12,
@@ -15,7 +18,7 @@ export function TimelineButton({ icon, label, onClick }: { icon: ReactNode; labe
         color: 'var(--t-text)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'pointer',
-        transition: 'background 140ms ease, border-color 140ms ease, transform 140ms ease',
+        transition: `background 140ms ${GEOMETRY}, border-color 140ms ${GEOMETRY}, transform 140ms ${GEOMETRY}`,
         flexShrink: 0,
         padding: 0,
       }}
@@ -31,6 +34,17 @@ export function TimelineButton({ icon, label, onClick }: { icon: ReactNode; labe
       }}
     >
       {icon}
+      <span
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          width: 44,
+          height: 44,
+          transform: 'translate(-50%, -50%)',
+        }}
+      />
     </button>
   );
 }
