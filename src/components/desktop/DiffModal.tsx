@@ -291,7 +291,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                       cursor: 'pointer',
                       textAlign: 'left',
                       fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                      transition: 'all 100ms ease',
+                      transition: 'all 100ms cubic-bezier(0.22, 1, 0.36, 1)',
                     }}
                   >
                     <StatusIcon status={file.status} />

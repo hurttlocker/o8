@@ -118,7 +118,7 @@ function ChatSurfaceBase({
           in the empty greeting below. */}
       {!isEmpty ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 5, paddingRight: 14, paddingBottom: 5, paddingLeft: 14, minHeight: 28, borderBottomWidth: '0.5px', borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)' }}>
-          <button type="button" onClick={onToggleHistory} title="Chat history" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 24, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 8, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 500, cursor: 'pointer', transition: 'background 120ms ease, color 120ms ease' }} onMouseEnter={(event) => { event.currentTarget.style.background = THEME_BG_CARD; event.currentTarget.style.color = 'var(--t-text-secondary)'; }} onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}>
+          <button type="button" onClick={onToggleHistory} title="Chat history" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 24, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 8, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 500, cursor: 'pointer', transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)' }} onMouseEnter={(event) => { event.currentTarget.style.background = THEME_BG_CARD; event.currentTarget.style.color = 'var(--t-text-secondary)'; }} onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}>
             <HistoryIcon size={12} />
             History
           </button>
@@ -172,7 +172,7 @@ function ChatSurfaceBase({
               fontSize: 11,
               fontWeight: 500,
               cursor: 'pointer',
-              transition: 'background 120ms ease, color 120ms ease',
+              transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
               zIndex: 2,
             }}
             onMouseEnter={(event) => { event.currentTarget.style.background = THEME_BG_CARD; event.currentTarget.style.color = 'var(--t-text-secondary)'; }}
@@ -215,7 +215,7 @@ function ChatSurfaceBase({
             {shouldShowSuggestedPrompts ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 1, maxWidth: 520, width: '100%', border: '0.5px solid var(--t-divider-subtle)', borderRadius: 14, overflow: 'hidden' }}>
                 {SUGGESTED_PROMPTS.map((prompt, index) => (
-                  <button key={prompt.text} type="button" onClick={() => { onSuggestedPromptSelect(prompt.text); setTimeout(() => inputRef.current?.focus(), 50); }} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16, background: 'transparent', border: 'none', borderRight: index % 2 === 0 ? '0.5px solid var(--t-divider-subtle)' : 'none', borderBottom: index < 4 ? '0.5px solid var(--t-divider-subtle)' : 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 150ms ease', animation: `llmFadeIn 400ms ease-out ${100 + index * 50}ms both` }} onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(37, 99, 235, 0.04)'; }} onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}>
+                  <button key={prompt.text} type="button" onClick={() => { onSuggestedPromptSelect(prompt.text); setTimeout(() => inputRef.current?.focus(), 50); }} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16, background: 'transparent', border: 'none', borderRight: index % 2 === 0 ? '0.5px solid var(--t-divider-subtle)' : 'none', borderBottom: index < 4 ? '0.5px solid var(--t-divider-subtle)' : 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1)', animation: `llmFadeIn 400ms ease-out ${100 + index * 50}ms both` }} onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(37, 99, 235, 0.04)'; }} onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}>
                     <div style={{ color: 'var(--t-text-faint)', marginTop: 1 }}><PromptIcon d={PROMPT_ICONS[prompt.iconKey]} size={16} /></div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                       <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text-secondary)', letterSpacing: '-0.01em', lineHeight: '1.3' }}>{prompt.text}</span>
@@ -266,7 +266,7 @@ function ChatSurfaceBase({
                   Thinking of follow-ups...
                 </div>
               ) : followUps.map((question, index) => (
-                <button key={`${question}-${index}`} type="button" onClick={() => { onFollowUpSelect(question); onClearFollowUps(); setTimeout(() => inputRef.current?.focus(), 50); }} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingRight: 14, paddingBottom: 8, paddingLeft: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 20, fontSize: 12, color: '#475569', cursor: 'pointer', transition: 'all 150ms ease', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', animation: `llmFadeIn 300ms ease-out ${index * 80}ms both` }} onMouseEnter={(event) => { event.currentTarget.style.borderColor = '#3b82f6'; event.currentTarget.style.background = '#f0f9ff'; event.currentTarget.style.color = '#1e40af'; }} onMouseLeave={(event) => { event.currentTarget.style.borderColor = '#e2e8f0'; event.currentTarget.style.background = '#f8fafc'; event.currentTarget.style.color = '#475569'; }}>
+                <button key={`${question}-${index}`} type="button" onClick={() => { onFollowUpSelect(question); onClearFollowUps(); setTimeout(() => inputRef.current?.focus(), 50); }} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingRight: 14, paddingBottom: 8, paddingLeft: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 20, fontSize: 12, color: '#475569', cursor: 'pointer', transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', animation: `llmFadeIn 300ms ease-out ${index * 80}ms both` }} onMouseEnter={(event) => { event.currentTarget.style.borderColor = '#3b82f6'; event.currentTarget.style.background = '#f0f9ff'; event.currentTarget.style.color = '#1e40af'; }} onMouseLeave={(event) => { event.currentTarget.style.borderColor = '#e2e8f0'; event.currentTarget.style.background = '#f8fafc'; event.currentTarget.style.color = '#475569'; }}>
                   <SparklesIcon size={11} />
                   {question}
                 </button>

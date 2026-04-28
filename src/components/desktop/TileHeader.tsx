@@ -251,7 +251,7 @@ export function TileHeader({
             textOverflow: 'ellipsis',
             maxWidth: 180,
             cursor: onOpenPicker ? 'pointer' : 'default',
-            transition: 'background-color 150ms ease, color 150ms ease',
+            transition: 'background-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             flexShrink: 0,
             fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             boxShadow: active
@@ -289,7 +289,7 @@ export function TileHeader({
                 opacity: pillHovered ? (closeHovered ? 1 : 0.5) : 0,
                 width: pillHovered ? 14 : 0,
                 overflow: 'hidden',
-                transition: 'opacity 120ms ease, width 120ms ease',
+                transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1), width 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 color: 'inherit',
                 flexShrink: 0,
               }}
@@ -320,7 +320,7 @@ export function TileHeader({
             color: menuBtnHovered ? '#5b6475' : '#9ca3af',
             cursor: 'pointer',
             flexShrink: 0,
-            transition: 'background-color 120ms ease, color 120ms ease',
+            transition: 'background-color 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
           <DotsThreeIcon size={16} />

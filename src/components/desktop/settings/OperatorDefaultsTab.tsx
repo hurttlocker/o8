@@ -210,7 +210,7 @@ function SegmentedControl<T extends string>({ value, options, onChange, disabled
               paddingRight: 14,
               cursor: disabled ? 'not-allowed' : 'pointer',
               opacity: disabled ? 0.6 : 1,
-              transition: 'background 150ms ease',
+              transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
             {active ? <CornerBrackets inset={3} armLength={6} /> : null}
@@ -531,7 +531,7 @@ export function OperatorDefaultsTab() {
                   gap: 4,
                   textAlign: 'left',
                   opacity: parallelCapEnv ? 0.55 : 1,
-                  transition: 'background 150ms ease',
+                  transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
               >
                 {active ? <CornerBrackets /> : null}

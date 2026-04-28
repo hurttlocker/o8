@@ -137,7 +137,7 @@ function HistoryThreadRowBase({
                   ? 'var(--t-accent)'
                   : 'var(--t-bg-card)',
               color: isCurrent ? '#ffffff' : 'var(--t-text-muted)',
-              transition: 'background 120ms ease, color 120ms ease',
+              transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
             {runtime === 'claude-code' ? (

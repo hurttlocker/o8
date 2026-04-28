@@ -317,7 +317,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
                 borderRadius: 6, cursor: 'pointer',
                 background: isActive ? 'rgba(255,255,255,0.1)' : isHovered ? 'rgba(255,255,255,0.05)' : 'transparent',
                 maxWidth: 180, minWidth: 0, flexShrink: 1,
-                transition: 'background 100ms ease',
+                transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               {/* Globe favicon */}
@@ -499,7 +499,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
                       paddingTop: 10, paddingRight: 16, paddingBottom: 10, paddingLeft: 14,
                       borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)',
                       background: 'rgba(255,255,255,0.04)', cursor: 'pointer',
-                      transition: 'background 120ms ease, border-color 120ms ease',
+                      transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = 'rgba(255,255,255,0.08)';

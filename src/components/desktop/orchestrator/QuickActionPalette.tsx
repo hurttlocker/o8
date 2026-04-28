@@ -232,7 +232,7 @@ function QuickActionRow({ action, selected, onHover, onPick }: QuickActionRowPro
     borderRadius: 10,
     cursor: 'pointer',
     background: selected ? 'var(--t-bg-card-hover, var(--t-panel-hover))' : 'transparent',
-    transition: 'background 120ms ease',
+    transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
     borderWidth: 0,
     textAlign: 'left',
     fontFamily: FONT_STACK,

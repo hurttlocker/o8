@@ -91,7 +91,7 @@ function PRChecksSectionBase({
                 gap: 10,
                 padding: '8px 12px',
                 borderRadius: 8,
-                transition: 'background 120ms ease',
+                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 cursor: check.detailsUrl ? 'pointer' : 'default',
                 background: rowBackground,
                 border: activeItemIndex === i ? '1px solid rgba(37,99,235,0.16)' : '1px solid transparent',

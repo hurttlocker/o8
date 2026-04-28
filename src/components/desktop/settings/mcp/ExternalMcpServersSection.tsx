@@ -825,7 +825,7 @@ function submitButtonStyle(disabled: boolean): React.CSSProperties {
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     cursor: disabled ? 'default' : 'pointer',
-    transition: 'background 150ms ease, border-color 150ms ease',
+    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
     opacity: disabled ? 0.6 : 1,
   };
 }

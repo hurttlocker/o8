@@ -209,7 +209,7 @@ function RepoCardExpandedContentBase({
                 cursor: onFocusOrchestratorTab ? 'pointer' : 'default',
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 textAlign: 'left',
-                transition: 'background 120ms ease',
+                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
@@ -251,7 +251,7 @@ function RepoCardExpandedContentBase({
                 cursor: onFocusAssistantTab ? 'pointer' : 'default',
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 textAlign: 'left',
-                transition: 'background 120ms ease',
+                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
@@ -563,7 +563,7 @@ function RepoCardExpandedContentBase({
                 cursor: 'pointer',
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 borderRadius: 8,
-                transition: 'background 140ms ease, color 140ms ease',
+                transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
               onMouseEnter={(event) => {
                 const target = event.currentTarget as HTMLButtonElement;
@@ -606,7 +606,7 @@ function RepoCardExpandedContentBase({
               cursor: 'pointer',
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               borderRadius: 8,
-              transition: 'background 140ms ease, color 140ms ease',
+              transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             onMouseEnter={(event) => {
               const target = event.currentTarget as HTMLButtonElement;

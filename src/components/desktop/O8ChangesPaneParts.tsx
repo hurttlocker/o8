@@ -137,7 +137,7 @@ export function ActionButton({
         fontSize: 11,
         fontWeight: 600,
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-        transition: 'background 140ms ease, border-color 140ms ease',
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(event) => {
         if (disabled) return;

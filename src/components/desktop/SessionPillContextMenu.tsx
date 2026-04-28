@@ -101,7 +101,7 @@ export function SessionPillContextMenu({
     transform: entered ? 'scale(1) translateY(0)' : 'scale(0.96) translateY(-4px)',
     opacity: entered ? 1 : 0,
     // Apple HIG-ish spring curve for the pop-in.
-    transition: 'transform 220ms cubic-bezier(0.34, 1.36, 0.64, 1), opacity 160ms ease',
+    transition: 'transform 220ms cubic-bezier(0.34, 1.36, 0.64, 1), opacity 160ms cubic-bezier(0.22, 1, 0.36, 1)',
     fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
   };
 

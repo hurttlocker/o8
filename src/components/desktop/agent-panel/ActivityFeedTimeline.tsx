@@ -204,7 +204,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                   padding: '7px 14px',
                   position: 'relative',
                   cursor: clickable ? 'pointer' : 'default',
-                  transition: 'background 100ms ease',
+                  transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
                 onMouseEnter={(event) => {
                   onOpenHoverCard(key, (event.currentTarget as HTMLDivElement).getBoundingClientRect());

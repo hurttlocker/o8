@@ -403,7 +403,7 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
                   justifyContent: 'center',
                   cursor: canSend ? 'pointer' : 'default',
                   opacity: canSend ? 1 : 0.7,
-                  transition: 'background 160ms ease, border-color 160ms ease, color 160ms ease',
+                  transition: 'background 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
               >
                 {sending ? (

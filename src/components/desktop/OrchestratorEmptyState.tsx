@@ -162,7 +162,7 @@ function OrchestratorEmptyStateBase({
                 color: 'var(--t-text)',
                 cursor: 'pointer',
                 textAlign: 'left',
-                transition: 'border-color 120ms ease, background 120ms ease, transform 120ms ease',
+                transition: 'border-color 120ms cubic-bezier(0.22, 1, 0.36, 1), background 120ms cubic-bezier(0.22, 1, 0.36, 1), transform 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 minHeight: 60,
               }}

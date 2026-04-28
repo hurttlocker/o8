@@ -337,7 +337,7 @@ function FileMutationLine({ tool }: { tool: MobileTranscriptToolCall }) {
           fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           textAlign: 'left',
           cursor: canExpand ? 'pointer' : 'default',
-          transition: 'background 180ms ease, border-color 180ms ease',
+          transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
         <span

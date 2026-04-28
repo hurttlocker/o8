@@ -167,7 +167,7 @@ export function ChatEmptyState({
               letterSpacing: '-0.01em',
               cursor: 'pointer',
               fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif',
-              transition: 'transform 160ms ease, background-color 160ms ease, border-color 160ms ease',
+              transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -213,7 +213,7 @@ export function ChatEmptyState({
                   gap: 12,
                   textAlign: 'left',
                   fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif',
-                  transition: 'transform 160ms ease, background-color 160ms ease, border-color 160ms ease',
+                  transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
               >
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
