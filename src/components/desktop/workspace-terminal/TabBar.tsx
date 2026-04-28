@@ -112,7 +112,12 @@ export const TabBar = memo(function TabBar({
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        height: 36,
+        // Apple HIG 44px hit-zone minimum for tabs + scroll affordances + chrome
+        // buttons living inside this strip. Visible tab pills stay compact via
+        // their own padding; the bar height ensures every interactive child has
+        // room to grow to 44.
+        height: 44,
+        minHeight: 44,
         // Match the chat-surface bg so the TabBar blends with the workspace
         // content below instead of reading as a separate gray strip.
         background: 'var(--t-chat-surface-bg, #ffffff)',
@@ -128,13 +133,18 @@ export const TabBar = memo(function TabBar({
       <div style={{ position: 'relative', display: 'flex', flex: 1, overflow: 'hidden' }}>
         {canScrollLeft ? (
           <div
+            role="button"
+            tabIndex={0}
+            aria-label="Scroll tabs left"
             onClick={() => scrollTabs('left')}
+            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); scrollTabs('left'); } }}
             style={{
               position: 'absolute',
               left: 0,
               top: 0,
               bottom: 0,
-              width: 28,
+              width: 44,
+              minWidth: 44,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -149,13 +159,18 @@ export const TabBar = memo(function TabBar({
         ) : null}
         {canScrollRight ? (
           <div
+            role="button"
+            tabIndex={0}
+            aria-label="Scroll tabs right"
             onClick={() => scrollTabs('right')}
+            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); scrollTabs('right'); } }}
             style={{
               position: 'absolute',
               right: 0,
               top: 0,
               bottom: 0,
-              width: 28,
+              width: 44,
+              minWidth: 44,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -258,12 +273,16 @@ export const TabBar = memo(function TabBar({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  paddingTop: 4,
-                  paddingBottom: 4,
+                  // Tab button fills the full 44px tab-bar height to satisfy
+                  // Apple HIG. The visible pill background sits inside via the
+                  // internal padding so the label still reads compact.
+                  minHeight: 44,
+                  paddingTop: 10,
+                  paddingBottom: 10,
                   paddingLeft: 10,
                   paddingRight: 8,
-                  marginTop: 4,
-                  marginBottom: 4,
+                  marginTop: 0,
+                  marginBottom: 0,
                   marginLeft: 2,
                   marginRight: 2,
                   borderWidth: 0,
@@ -322,6 +341,7 @@ export const TabBar = memo(function TabBar({
                   <span
                     role="button"
                     tabIndex={0}
+                    aria-label={`Close ${primaryLabel} tab`}
                     onClick={(event) => {
                       event.stopPropagation();
                       onCloseTab(tab.id);
@@ -333,6 +353,11 @@ export const TabBar = memo(function TabBar({
                       }
                     }}
                     style={{
+                      // Apple HIG hit-zone: visible glyph stays small (14x14) but
+                      // the click region expands to 44x44 via the transparent
+                      // overlay child below. Position relative so the absolute
+                      // overlay anchors to this element.
+                      position: 'relative',
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -346,14 +371,26 @@ export const TabBar = memo(function TabBar({
                       transition: 'background 100ms, color 100ms',
                     }}
                     onMouseEnter={(event) => {
-                      (event.target as HTMLElement).style.background = 'rgba(239, 68, 68, 0.15)';
-                      (event.target as HTMLElement).style.color = '#ef4444';
+                      event.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
+                      event.currentTarget.style.color = '#ef4444';
                     }}
                     onMouseLeave={(event) => {
-                      (event.target as HTMLElement).style.background = 'transparent';
-                      (event.target as HTMLElement).style.color = '#475569';
+                      event.currentTarget.style.background = 'transparent';
+                      event.currentTarget.style.color = '#475569';
                     }}
                   >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        width: 44,
+                        height: 44,
+                        transform: 'translate(-50%, -50%)',
+                        background: 'transparent',
+                      }}
+                    />
                     <PhosphorXBold size={9} />
                   </span>
                 ) : null}
@@ -392,6 +429,7 @@ export const TabBar = memo(function TabBar({
               onMouseEnter={hoverChromeOn}
               onMouseLeave={hoverChromeOff}
             >
+              <span aria-hidden="true" style={chromeButtonHitZoneStyle} />
               <PhosphorSplitVertical size={14} />
             </button>
           ) : null}
@@ -404,6 +442,7 @@ export const TabBar = memo(function TabBar({
               onMouseEnter={closeHoverOn}
               onMouseLeave={closeHoverOff}
             >
+              <span aria-hidden="true" style={chromeButtonHitZoneStyle} />
               <PhosphorXCircle size={14} />
             </button>
           ) : null}
@@ -413,7 +452,11 @@ export const TabBar = memo(function TabBar({
   );
 });
 
+// Visible chrome button stays at 24x24 so the split/close glyphs read as
+// compact chrome rather than primary actions; the transparent overlay below
+// expands the click region to the HIG 44x44 minimum.
 const chromeButtonStyle = {
+  position: 'relative',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -426,7 +469,17 @@ const chromeButtonStyle = {
   color: 'var(--t-text-muted)',
   cursor: 'pointer',
   transition: 'background 100ms, color 100ms',
-};
+} as const;
+
+const chromeButtonHitZoneStyle = {
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
+  width: 44,
+  height: 44,
+  transform: 'translate(-50%, -50%)',
+  background: 'transparent',
+} as const;
 
 function hoverChromeOn(event: MouseEvent<HTMLButtonElement>) {
   event.currentTarget.style.background = 'var(--t-hover)';

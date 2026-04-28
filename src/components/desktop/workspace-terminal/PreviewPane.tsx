@@ -31,11 +31,16 @@ function PreviewToolbar({
       style={{
         display: 'flex',
         alignItems: 'center',
-        height: 32,
+        // Apple HIG 44pt hit-zone — toolbar holds three interactive controls
+        // (Select / Refresh / Close), each needs a 44x44 region.
+        height: 44,
+        minHeight: 44,
         paddingLeft: 12,
         paddingRight: 8,
         background: 'var(--t-bg-subtle)',
-        borderBottom: '1px solid var(--t-divider)',
+        borderBottomWidth: 1,
+        borderBottomStyle: 'solid',
+        borderBottomColor: 'var(--t-divider)',
         gap: 8,
         flexShrink: 0,
       }}
@@ -59,6 +64,7 @@ function PreviewToolbar({
         onClick={onToggleSelection}
         title={selectionEnabled ? 'Element selection is active' : 'Select an element in the preview'}
         style={{
+          position: 'relative',
           display: 'inline-flex',
           alignItems: 'center',
           gap: 6,
@@ -68,8 +74,10 @@ function PreviewToolbar({
           paddingLeft: 9,
           paddingRight: 9,
           borderRadius: 999,
-          border: selectionEnabled ? '1px solid rgba(37,99,235,0.28)' : '1px solid rgba(148,163,184,0.18)',
-          background: selectionEnabled ? 'rgba(37,99,235,0.08)' : 'rgba(255,255,255,0.82)',
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: selectionEnabled ? 'rgba(37,99,235,0.28)' : 'rgba(148,163,184,0.18)',
+          background: selectionEnabled ? 'rgba(37,99,235,0.08)' : 'var(--t-bg-card)',
           color: selectionEnabled ? '#1d4ed8' : '#475569',
           cursor: 'pointer',
           fontSize: 11,
@@ -77,6 +85,7 @@ function PreviewToolbar({
           flexShrink: 0,
         }}
       >
+        <span aria-hidden="true" style={previewHitZoneStyle} />
         <Crosshair size={12} />
         Select
       </button>
@@ -84,43 +93,50 @@ function PreviewToolbar({
         type="button"
         onClick={onRefresh}
         title="Refresh"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          border: 'none',
-          background: 'transparent',
-          color: '#64748b',
-          cursor: 'pointer',
-          borderRadius: 4,
-        }}
+        style={previewIconButtonStyle}
       >
+        <span aria-hidden="true" style={previewHitZoneStyle} />
         <RefreshCw size={14} />
       </button>
       <button
         type="button"
         onClick={onClose}
         title="Close preview"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          border: 'none',
-          background: 'transparent',
-          color: '#64748b',
-          cursor: 'pointer',
-          borderRadius: 4,
-        }}
+        style={previewIconButtonStyle}
       >
+        <span aria-hidden="true" style={previewHitZoneStyle} />
         <X size={14} />
       </button>
     </div>
   );
 }
+
+// Visible toolbar buttons stay at 24x24 to fit the 32px preview strip; the
+// transparent overlay below expands the click region to 44x44 for HIG.
+const previewIconButtonStyle = {
+  position: 'relative',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 24,
+  height: 24,
+  borderWidth: 0,
+  borderStyle: 'none',
+  background: 'transparent',
+  color: '#64748b',
+  cursor: 'pointer',
+  borderRadius: 4,
+} as const;
+
+const previewHitZoneStyle = {
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
+  width: 44,
+  height: 44,
+  transform: 'translate(-50%, -50%)',
+  background: 'transparent',
+} as const;
 
 interface PreviewPaneProps {
   previews: LocalhostPreview[];
