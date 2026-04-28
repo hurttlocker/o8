@@ -315,7 +315,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
               opacity: showPinAction ? 1 : 0,
               pointerEvents: showPinAction ? 'auto' : 'none',
               cursor: 'pointer',
-              transition: 'opacity 180ms ease, color 180ms ease',
+              transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
             <PinGlyph />
@@ -349,7 +349,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         alignItems: 'flex-end',
         gap: 8,
         opacity: evictedOpacity,
-        transition: 'opacity 180ms ease',
+        transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={() => setShowMetaActions(true)}
       onMouseLeave={() => {
@@ -396,7 +396,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       gap: 8,
       animation: isLast ? 'llmFadeIn 180ms ease-out' : undefined,
       opacity: evictedOpacity,
-      transition: 'opacity 180ms ease',
+      transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
     }}
     onMouseEnter={() => setShowMetaActions(true)}
     onMouseLeave={() => {

@@ -252,7 +252,7 @@ function ResizeHandle({
           borderRadius: 999,
           backgroundColor: 'var(--t-drag-handle)',
           opacity: 0,
-          transition: 'opacity 150ms ease',
+          transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       />
     </div>

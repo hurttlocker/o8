@@ -45,7 +45,7 @@ export function chromeNeoStyle(active: boolean, size = 32, radius = 10): CSSProp
     flexShrink: 0,
     background: active ? BG_ACTIVE : BG_INACTIVE,
     boxShadow: active ? SHADOW_ACTIVE : SHADOW_INACTIVE,
-    transition: 'box-shadow 150ms ease, background 150ms ease',
+    transition: 'box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1), background 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }
 

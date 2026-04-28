@@ -134,7 +134,7 @@ export const rowStyleBase: CSSProperties = {
   fontFamily: 'inherit',
   color: 'var(--t-text)',
   minHeight: 44,
-  transition: 'background 80ms ease',
+  transition: 'background 80ms cubic-bezier(0.22, 1, 0.36, 1)',
 };
 
 export const iconWrapStyle: CSSProperties = {

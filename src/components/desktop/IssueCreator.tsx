@@ -192,7 +192,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               alignItems: 'center',
               gap: 5,
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-              transition: 'all 150ms ease',
+              transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
             {enhancing ? (
@@ -225,7 +225,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               alignItems: 'center',
               gap: 5,
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-              transition: 'all 150ms ease',
+              transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
             {creating ? <Loader2 size={14} className="spin" /> : null}

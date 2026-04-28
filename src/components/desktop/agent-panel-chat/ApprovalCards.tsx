@@ -446,7 +446,7 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
                         fontWeight: 800,
                         cursor: 'pointer',
                         opacity: resolvingId === approval.id ? 0.55 : 1,
-                        transition: 'transform 160ms ease, box-shadow 160ms ease',
+                        transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1)',
                         boxShadow: '0 10px 18px rgba(22, 163, 74, 0.18)',
                       }}
                       onMouseEnter={(e) => {
@@ -480,7 +480,7 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
                         fontWeight: 800,
                         cursor: 'pointer',
                         opacity: resolvingId === approval.id ? 0.55 : 1,
-                        transition: 'transform 160ms ease, background 160ms ease',
+                        transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 160ms cubic-bezier(0.22, 1, 0.36, 1)',
                       }}
                       onMouseEnter={(e) => {
                         if (resolvingId === approval.id) return;

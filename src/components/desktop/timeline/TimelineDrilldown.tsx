@@ -527,7 +527,7 @@ export function TimelineDrilldown({
                   borderRadius: 10,
                   padding: 10,
                   cursor: 'pointer',
-                  transition: 'all 120ms ease',
+                  transition: 'all 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   animation: session.active ? 'sessionPulse 3s ease-in-out infinite' : 'none',
                 }}
                 onMouseEnter={(e) => {

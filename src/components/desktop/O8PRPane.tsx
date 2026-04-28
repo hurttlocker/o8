@@ -138,7 +138,7 @@ function PRListItem({ pr, active, onClick }: { pr: PRSummary; active: boolean; o
         cursor: 'pointer',
         textAlign: 'left',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-        transition: 'background 80ms ease',
+        transition: 'background 80ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}

@@ -173,7 +173,7 @@ function RightPanelMorphButton({
         cursor: 'pointer',
         flexShrink: 0,
         WebkitTapHighlightColor: 'transparent',
-        transition: 'background 140ms ease, color 140ms ease',
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
       onMouseEnter={(e) => {
@@ -391,7 +391,7 @@ export function TitleBar({
                 letterSpacing: '-0.01em',
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
-                transition: 'background 150ms ease',
+                transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                 width: '100%',
                 justifyContent: 'center',
                 ['WebkitAppRegion' as string]: 'no-drag',

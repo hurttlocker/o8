@@ -50,7 +50,7 @@ function HeaderToggleButton({
         fontSize: 12,
         fontWeight: 700,
         letterSpacing: '-0.01em',
-        transition: 'background 180ms ease, border-color 180ms ease, color 180ms ease',
+        transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}
       onMouseEnter={(event) => {
@@ -296,7 +296,7 @@ export function OrchestratorHeader({
               fontSize: 12,
               fontWeight: 700,
               letterSpacing: '-0.01em',
-              transition: 'background 180ms ease, border-color 180ms ease, color 180ms ease',
+              transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
             onMouseEnter={(event) => {

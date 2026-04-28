@@ -72,7 +72,7 @@ const ThinkingXray = memo(function ThinkingXray({
             fontSize: 11, fontWeight: 600,
             fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             color: isThinking || isStreaming ? '#3b82f6' : 'var(--t-text-muted)',
-            transition: 'all 200ms ease',
+            transition: 'all 200ms cubic-bezier(0.22, 1, 0.36, 1)',
             letterSpacing: '-0.01em',
           }}
         >
@@ -445,7 +445,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
                 fontSize: '0.84rem',
                 fontWeight: 700,
                 cursor: stopping ? 'default' : 'pointer',
-                transition: 'all 150ms ease',
+                transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               {stopping ? (
@@ -475,7 +475,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
                 background: chatSendDisabled ? 'var(--t-divider-subtle)' : THEME_ACCENT,
                 color: chatSendDisabled ? 'var(--t-text-faint)' : '#ffffff',
                 cursor: chatSendDisabled ? 'default' : 'pointer',
-                transition: 'background 150ms ease, box-shadow 150ms ease',
+                transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                 boxShadow: chatSendDisabled ? 'none' : '0 2px 8px rgba(37, 99, 235, 0.2)',
               }}
             >

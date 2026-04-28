@@ -541,7 +541,7 @@ export const Bubble = memo(function Bubble({ entry, previousEntry, agentName, is
                   paddingLeft: 8,
                   marginLeft: -10,
                   borderRadius: 2,
-                  transition: 'border-color 200ms ease, background 200ms ease',
+                  transition: 'border-color 200ms cubic-bezier(0.22, 1, 0.36, 1), background 200ms cubic-bezier(0.22, 1, 0.36, 1)',
                   background: activeBlock === idx ? THEME_ACCENT_SOFT : 'transparent',
                 }}
                 title="Click to play from here"
@@ -625,7 +625,7 @@ function CollapsibleToolCalls({ toolCalls, marginTop }: { toolCalls: MobileTrans
           fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           cursor: 'pointer',
           letterSpacing: '-0.01em',
-          transition: 'background 120ms ease',
+          transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
         onMouseLeave={(e) => { e.currentTarget.style.background = expanded ? 'var(--t-hover)' : 'transparent'; }}

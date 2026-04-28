@@ -158,7 +158,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
         overflow: 'auto',
         transform: isVisible ? 'translateY(0)' : 'translateY(14px)',
         opacity: isVisible ? 1 : 0,
-        transition: 'transform 220ms ease, opacity 220ms ease',
+        transition: 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       <div

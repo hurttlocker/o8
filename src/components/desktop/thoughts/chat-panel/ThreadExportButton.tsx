@@ -75,7 +75,7 @@ export function ThreadExportButton({ state, onClick }: ThreadExportButtonProps) 
         fontSize: 11.5,
         fontWeight: 700,
         letterSpacing: '-0.01em',
-        transition: 'background-color 140ms ease, border-color 140ms ease, color 140ms ease',
+        transition: 'background-color 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         boxShadow: state === 'copied' ? 'var(--t-glass-shadow)' : 'none',
       }}
       onMouseEnter={(event) => {

@@ -98,7 +98,7 @@ function ActionButton({
         background: active ? 'var(--t-accent-soft)' : 'transparent',
         color: active ? (accentColor ?? 'var(--t-accent)') : 'var(--t-text-muted)',
         cursor: disabled ? 'default' : 'pointer',
-        transition: 'background 120ms ease, color 120ms ease',
+        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         flexShrink: 0,
       }}
       onMouseEnter={(event) => {
@@ -129,7 +129,7 @@ function HistoryRowActionsBase({ visible, pinned, isDeleting, exportStatus, onPi
         alignItems: 'center',
         gap: 2,
         opacity: showStrip ? 1 : 0,
-        transition: 'opacity 120ms ease',
+        transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         flexShrink: 0,
         paddingRight: 4,
       }}

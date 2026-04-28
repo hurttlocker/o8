@@ -476,7 +476,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
               fontWeight: 600,
               cursor: 'pointer',
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-              transition: 'background 120ms ease',
+              transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
               flexShrink: 0,
             }}
             onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}

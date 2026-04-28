@@ -49,7 +49,7 @@ export function PathChoiceCard({
         textAlign: 'left',
         fontFamily: 'inherit',
         width: '100%',
-        transition: 'all 200ms ease',
+        transition: 'all 200ms cubic-bezier(0.22, 1, 0.36, 1)',
         boxShadow: selected ? `0 14px 30px ${THEME_ACCENT_RING}` : 'none',
       }}
     >

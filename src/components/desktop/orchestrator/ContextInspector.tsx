@@ -150,7 +150,7 @@ function actionPillStyle(active: boolean): CSSProperties {
     letterSpacing: '0.02em',
     textTransform: 'uppercase',
     fontFamily: JAKARTA_STACK,
-    transition: 'opacity 140ms ease, color 140ms ease, border-color 140ms ease, background 140ms ease',
+    transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms cubic-bezier(0.22, 1, 0.36, 1), background 140ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }
 
@@ -175,7 +175,7 @@ function RowActions({
         alignItems: 'center',
         gap: 4,
         opacity: isPinned || isEvicted ? 1 : 0,
-        transition: 'opacity 140ms ease',
+        transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       <button
@@ -417,7 +417,7 @@ function ContextInspectorRow({
         borderBottomStyle: 'solid',
         borderBottomColor: 'var(--t-divider-subtle)',
         opacity: row.isEvicted ? 0.55 : 1,
-        transition: 'opacity 160ms ease',
+        transition: 'opacity 160ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(event) => {
         const actions = event.currentTarget.querySelector<HTMLElement>('[data-context-inspector-actions]');

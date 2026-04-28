@@ -124,7 +124,7 @@ function TreeNode({
           fontWeight: isDir ? 600 : 400,
           textAlign: 'left',
           letterSpacing: '-0.01em',
-          transition: 'background 80ms ease',
+          transition: 'background 80ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
         onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
         onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
