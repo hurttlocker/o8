@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useRef, memo, useCallback } from 'react';
+import { triggerHaptic } from '@/lib/mobile/haptic';
 
 export interface ContextMenuItem {
   id: string;
@@ -97,8 +98,8 @@ export const ContextMenu = memo(function ContextMenu({
           <button
             key={item.id}
             type="button"
-            onClick={() => { onSelect(item.id); onClose(); }}
-            onTouchEnd={(e) => { e.preventDefault(); onSelect(item.id); onClose(); }}
+            onClick={() => { triggerHaptic(item.destructive ? 'warn' : 'tap'); onSelect(item.id); onClose(); }}
+            onTouchEnd={(e) => { e.preventDefault(); triggerHaptic(item.destructive ? 'warn' : 'tap'); onSelect(item.id); onClose(); }}
             style={{
               width: '100%',
               display: 'flex', alignItems: 'center', gap: 10,
@@ -158,7 +159,7 @@ export function useLongPress(onLongPress: (x: number, y: number) => void, delay 
     posRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     timerRef.current = setTimeout(() => {
       if (!movedRef.current) {
-        if ('vibrate' in navigator) navigator.vibrate(10);
+        triggerHaptic('tap');
         callbackRef.current(posRef.current.x, posRef.current.y);
       }
     }, delay);

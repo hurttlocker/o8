@@ -25,6 +25,7 @@ import {
 } from './mobile-shell-primitives';
 import { FilterPillRow, type FilterPillOption } from '@/components/mobile/shared/FilterPillRow';
 import { PullToRefresh } from '@/components/mobile/PullToRefresh';
+import { triggerHaptic } from '@/lib/mobile/haptic';
 
 type ChatFilter = 'all' | 'active' | 'idle' | 'errored';
 
@@ -525,7 +526,10 @@ export function ChatListView({
 
       <button
         type="button"
-        onClick={onNewChat}
+        onClick={() => {
+          triggerHaptic('tap');
+          onNewChat();
+        }}
         aria-label="Start new chat"
         style={{
           position: 'fixed',
