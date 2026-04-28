@@ -96,26 +96,21 @@ function RepoCardExpandedContentBase({
     )),
     [orchestratorPackets, repo.localPath],
   );
-  // Active-work-only visibility rule (#750 — activity-window gate):
-  // hasAgent alone is unreliable because agent records persist after teardown
-  // with stale status='running'. Gate on lastActivityAt — an agent counts only
-  // if it's reported activity in the last 5 minutes. Pairs with future server-
-  // side pruning (#750-B) but works without it.
+  // Active-work-only visibility rule (#750 — currentTask gate):
+  // The reliable signal is "agent has a non-empty currentTask string" —
+  // running agents set this; idle/completed agents clear it. agent.status
+  // and agent.lastActivityAt are both stale (records aren't pruned).
+  // branch.additions/deletions reflect divergence-from-main, not active work,
+  // so completed-but-unmerged branches still have +N -M and would qualify
+  // wrongly. Branch rail shows: current branch + branches with a live agent
+  // task. Mission Control owns packet visibility separately.
   const visibleBranches = useMemo(
-    () => {
-      const ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
-      const cutoff = Date.now() - ACTIVITY_WINDOW_MS;
-      return branches.filter((branch) => {
-        if (branch.current) return true;
-        const branchAgents = agentsByBranch?.get(branch.name) ?? [];
-        const hasLiveAgent = branchAgents.some((agent) => (
-          typeof agent.lastActivityAt === 'number' && agent.lastActivityAt >= cutoff
-        ));
-        if (hasLiveAgent) return true;
-        return repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
-      });
-    },
-    [agentsByBranch, branches, repoScopedPackets],
+    () => branches.filter((branch) => {
+      if (branch.current) return true;
+      const branchAgents = agentsByBranch?.get(branch.name) ?? [];
+      return branchAgents.some((agent) => Boolean(agent.currentTask?.trim()));
+    }),
+    [agentsByBranch, branches],
   );
   const hiddenBranchCount = useMemo(
     () => branches.length - visibleBranches.length,
