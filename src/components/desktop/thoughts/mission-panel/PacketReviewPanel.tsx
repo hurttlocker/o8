@@ -12,7 +12,7 @@ interface PacketReviewPanelProps {
   onToggleShowAllFiles: () => void;
 }
 
-const APPROVAL_POLL_INTERVAL_MS = 3_000;
+const APPROVAL_POLL_INTERVAL_MS = 5_000;
 
 function isMergeApproval(approval: ApprovalRecord) {
   return approval.continuation?.kind === 'lane' && approval.continuation.verb === 'merge';

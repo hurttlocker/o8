@@ -81,7 +81,7 @@ function ComposerStatusBar({
       setElapsed(anchor === null ? 0 : Date.now() - anchor);
     };
     const frame = window.requestAnimationFrame(tick);
-    const id = window.setInterval(tick, 500);
+    const id = window.setInterval(tick, 1000);
     return () => {
       window.cancelAnimationFrame(frame);
       window.clearInterval(id);

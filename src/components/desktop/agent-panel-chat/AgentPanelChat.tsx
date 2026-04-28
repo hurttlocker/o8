@@ -712,7 +712,7 @@ export function AgentPanelChat({
     const handler = () => { void fetchSessions(); };
     const wsEvents = ['o8:inbox', 'o8:agent-lifecycle'];
     for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = setInterval(() => void fetchSessions(), wsConnected ? 120_000 : 8_000);
+    const fallbackId = setInterval(() => void fetchSessions(), wsConnected ? 120_000 : 15_000);
     return () => { clearInterval(fallbackId); for (const e of wsEvents) window.removeEventListener(e, handler); };
   }, [fetchSessions, wsConnected]);
 
