@@ -289,4 +289,10 @@ export interface MobileOrchestratorTranscriptEntry {
   /** Short preview of the tool's output (first line, truncated). */
   toolPreview?: string;
   timestamp: number;
+  /** User entry waiting for a reconnect/replay (offline send queue). */
+  queued?: boolean;
+  /** Stable id matching the pending-queue entry — used for retry/discard. */
+  queueId?: string;
+  /** Queued >= 1h — UI shows Retry / Discard instead of auto-replaying. */
+  queueStale?: boolean;
 }
