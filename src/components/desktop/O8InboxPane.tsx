@@ -68,7 +68,7 @@ export function O8InboxPane() {
     refresh();
     const handleEvent = () => refresh();
     window.addEventListener(REFRESH_EVENT, handleEvent);
-    const interval = window.setInterval(refresh, 8000);
+    const interval = window.setInterval(refresh, 15000);
     return () => {
       window.removeEventListener(REFRESH_EVENT, handleEvent);
       window.clearInterval(interval);
