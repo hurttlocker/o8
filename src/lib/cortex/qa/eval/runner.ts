@@ -140,21 +140,26 @@ async function persistRun(row: RunRow): Promise<void> {
     // Dynamic import so fresh-clone CI doesn't crash on missing DB.
     const { getSqlite } = await import('@/lib/db');
     const db = getSqlite();
+    // Schema: id(TEXT PK), question_id, category, expected_answer, actual_answer,
+    //         citations_json, factual_accuracy, citation_correctness,
+    //         hallucination_count, run_at(INTEGER).
+    // `id` uses questionId + runAt so each eval run per question overwrites cleanly.
+    const id = `${row.questionId}::${row.runAt}`;
     db.prepare(
       `INSERT OR REPLACE INTO qa_eval_runs
-         (question_id, category, expected, actual, factual_accuracy,
-          citation_correctness, hallucination_count, notes, run_at)
+         (id, question_id, category, expected_answer, actual_answer,
+          factual_accuracy, citation_correctness, hallucination_count, run_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
+      id,
       row.questionId,
       row.category,
-      row.expected,
+      row.expected ?? '',
       row.actual,
       row.factualAccuracy,
       row.citationCorrectness,
       row.hallucinationCount,
-      row.notes,
-      row.runAt,
+      new Date(row.runAt).getTime(),
     );
   } catch {
     // Table may not exist yet (schema v14 not migrated). Skip silently.

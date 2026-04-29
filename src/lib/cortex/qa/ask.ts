@@ -108,6 +108,21 @@ export async function askCortex(
   const topRows = unionMerge(results);
   const retrievalMs = Date.now() - retrievalStart;
 
+  // [qa-debug] Log retrieval diagnostics so we can trace empty-answer false-positives.
+  const isDebug = process.env.QA_DEBUG === '1';
+  if (isDebug) {
+    console.log('[qa-debug] question:', question);
+    console.log('[qa-debug] bm25Variants:', classification.bm25Variants);
+    for (const r of results) {
+      console.log(`[qa-debug] retriever=${r.retriever} rows=${r.rows.length} durationMs=${r.durationMs}`);
+    }
+    console.log('[qa-debug] topRows after unionMerge:', topRows.length);
+    console.log('[qa-debug] composer class:', classification.class);
+    if (topRows.length === 0) {
+      console.warn('[qa-debug] topRows is EMPTY — composer will respond "no data"');
+    }
+  }
+
   // 3. Compose (collect via emit accumulator)
   let answer = '';
   const citations: Citation[] = [];
