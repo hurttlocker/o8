@@ -10,9 +10,11 @@
  *   - On unmount, attempt `screen.orientation.unlock()` (same try/catch).
  *   - In landscape, mount MobileSplitShell as-is — children become the left
  *     pane, DevHostFrame ships on the right (the existing #779 layout).
- *   - In portrait, render a dismissible banner ("Rotate to landscape") +
- *     a vertical stack of children (chat) on top and the iframe below.
- *     Banner dismissal persists to localStorage.
+ *   - In portrait, render DevHostFrame full-screen with a 32px dismissible
+ *     "Rotate to landscape for split view" banner pinned at top. The
+ *     children prop (chat shell) is intentionally ignored in portrait —
+ *     users have the Chat tab for chat. Banner dismissal persists to
+ *     localStorage (closes #828).
  *
  * What we don't do:
  *   - Modify MobileSplitShell.tsx, DevHostFrame.tsx, landscape-controller.ts,
@@ -135,30 +137,31 @@ export function MobileBrowserTabRoot({ children, onBack }: MobileBrowserTabRootP
     return <MobileSplitShell>{children}</MobileSplitShell>;
   }
 
-  // Portrait fallback — vertical stack: chat on top, iframe below, with an
-  // optional hint banner offering rotation. Dismissal is sticky so the
-  // user only ever sees it once. We mount the URL-push listener inside the
-  // fallback (and not at the root of MobileBrowserTabRoot) so we don't open
-  // a duplicate WS to the one MobileSplitShell already opens in landscape.
+  // Portrait fallback — DevHostFrame fills the full screen with an optional
+  // hint banner at the top. The chat children are intentionally not rendered
+  // in portrait (the user has the Chat tab for chat). The URL-push listener
+  // is mounted inside PortraitFallback so we don't open a duplicate WebSocket
+  // alongside the one MobileSplitShell opens in landscape.
   return (
     <PortraitFallback
       hintDismissed={hintDismissed}
       onDismissHint={dismissHint}
       onBack={onBack}
-    >
-      {children}
-    </PortraitFallback>
+    />
   );
 }
 
 interface PortraitFallbackProps {
-  children: ReactNode;
   hintDismissed: boolean;
   onDismissHint: () => void;
   onBack?: () => void;
 }
 
-function PortraitFallback({ children, hintDismissed, onDismissHint, onBack }: PortraitFallbackProps) {
+// children prop is intentionally absent — in portrait the Browser tab shows
+// DevHostFrame full-screen. Users who want chat use the Chat tab. This fixes
+// the blank-screen regression (#828) where the portrait split rendered an
+// empty chat shell on top with no visible iframe.
+function PortraitFallback({ hintDismissed, onDismissHint, onBack }: PortraitFallbackProps) {
   // Subscribe to send-to-mobile URL pushes (#782) so the iframe re-points
   // when desktop fires a long-press push. We mount it here (instead of at
   // the MobileBrowserTabRoot level) because in landscape MobileSplitShell
@@ -166,22 +169,19 @@ function PortraitFallback({ children, hintDismissed, onDismissHint, onBack }: Po
   // device.
   useMobileUrlPushListener();
 
-  // We use a fixed full-viewport container so the chat surface and iframe
-  // live in their own scroll/positioning contexts. iOS dynamic viewport is
-  // covered by 100dvh with a 100vh fallback for older Safaris. The top
-  // padding leaves room for the floating TopBar (44px button + 8px offset
-  // above safe-area), so the hint banner and chat pane don't slide under
-  // it.
+  // Full-screen fixed container: hint banner (32px) + DevHostFrame fills
+  // the remaining height. iOS dynamic viewport covered by 100dvh + 100vh
+  // fallback. Safe-area insets keep content clear of the notch / home bar.
   const containerStyle: CSSProperties = {
     position: 'fixed',
     inset: 0,
     height: '100dvh',
     minHeight: '100vh',
     width: '100vw',
-    display: 'grid',
-    gridTemplateRows: hintDismissed ? '1fr 1fr' : 'auto 1fr 1fr',
+    display: 'flex',
+    flexDirection: 'column',
     background: 'var(--t-bg, #111111)',
-    paddingTop: 'calc(env(safe-area-inset-top, 0px) + 64px)',
+    paddingTop: 'env(safe-area-inset-top, 0px)',
     paddingBottom: 'env(safe-area-inset-bottom, 0px)',
     paddingLeft: 'env(safe-area-inset-left, 0px)',
     paddingRight: 'env(safe-area-inset-right, 0px)',
@@ -189,21 +189,11 @@ function PortraitFallback({ children, hintDismissed, onDismissHint, onBack }: Po
     overflow: 'hidden',
   };
 
-  const chatPaneStyle: CSSProperties = {
-    position: 'relative',
+  const iframeWrapStyle: CSSProperties = {
+    flex: 1,
     minHeight: 0,
-    overflow: 'hidden',
-    transform: 'translateZ(0)',
-    isolation: 'isolate',
-  };
-
-  const iframePaneStyle: CSSProperties = {
     position: 'relative',
-    minHeight: 0,
     overflow: 'hidden',
-    background: 'var(--t-panel, rgba(30,28,26,0.82))',
-    color: 'var(--t-text, #FAF5F0)',
-    borderTop: '1px solid var(--t-border, rgba(255,248,240,0.08))',
     transform: 'translateZ(0)',
   };
 
@@ -212,8 +202,7 @@ function PortraitFallback({ children, hintDismissed, onDismissHint, onBack }: Po
       {hintDismissed ? null : (
         <RotateHintBanner onDismiss={onDismissHint} onBack={onBack} />
       )}
-      <div style={chatPaneStyle}>{children}</div>
-      <div style={iframePaneStyle}>
+      <div style={iframeWrapStyle}>
         <DevHostFrame />
       </div>
     </div>
