@@ -32,6 +32,14 @@ export interface OrchestratorDataValue {
   latestDispatchedTabId?: string | null;
   /** Epoch ms timestamp of the most-recent dispatch — surfaced in tab tooltips. */
   latestDispatchedAt?: number | null;
+  /**
+   * #746 — Auto-directive proposer hook. The DirectiveProposalRow injects
+   * the candidate's draft text into the orchestrator chat composer when the
+   * operator clicks Accept. Drilling this through `draftInjection` directly
+   * would conflict with quick-action palette drafts; a dedicated hook keeps
+   * the two surfaces independent.
+   */
+  onAcceptDirectiveProposal?: (draft: { id: string; text: string }) => void;
 }
 
 const OrchestratorDataContext = createContext<OrchestratorDataValue | null>(null);
