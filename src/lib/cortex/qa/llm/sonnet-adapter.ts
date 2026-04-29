@@ -115,14 +115,22 @@ export function resetSonnetProviderCache(): void {
 // ── CLI streaming parser ──────────────────────────────────────────────────────
 
 /**
- * Parse a stream-json output line from the Claude CLI.
- * Returns delta text when available; null otherwise.
+ * Parse a stream-json output line from the Claude CLI (streaming mode).
+ * Returns text from assistant events; null for all other event types.
+ *
+ * With --verbose the relevant event shapes are:
+ *   - content_block_delta { delta: { type: 'text_delta', text } }   — API streaming
+ *   - assistant { message: { content: [{ type: 'text', text }] } }  — verbose fallback
+ *
+ * We skip `result` events here to avoid duplicating text that already came
+ * through the assistant event.
  */
-function extractCliDeltaText(line: string): string | null {
+function extractCliStreamingText(line: string): string | null {
   if (!line.trim()) return null;
   try {
     const evt = JSON.parse(line) as Record<string, unknown>;
-    // stream-json format: { type: 'content_block_delta', delta: { type: 'text_delta', text: '...' } }
+
+    // API streaming delta — { type: 'content_block_delta', delta: { type: 'text_delta', text } }
     if (
       evt['type'] === 'content_block_delta' &&
       typeof evt['delta'] === 'object' &&
@@ -133,7 +141,41 @@ function extractCliDeltaText(line: string): string | null {
         return delta['text'];
       }
     }
-    // result message: { type: 'result', result: '...' } — used for non-streaming
+
+    // Verbose assistant event — { type: 'assistant', message: { content: [{ type: 'text', text }] } }
+    if (evt['type'] === 'assistant' && typeof evt['message'] === 'object' && evt['message'] !== null) {
+      const msg = evt['message'] as Record<string, unknown>;
+      const content = msg['content'];
+      if (Array.isArray(content)) {
+        const parts: string[] = [];
+        for (const block of content) {
+          if (
+            typeof block === 'object' &&
+            block !== null &&
+            (block as Record<string, unknown>)['type'] === 'text' &&
+            typeof (block as Record<string, unknown>)['text'] === 'string'
+          ) {
+            parts.push((block as Record<string, unknown>)['text'] as string);
+          }
+        }
+        if (parts.length > 0) return parts.join('');
+      }
+    }
+  } catch {
+    // not JSON — skip
+  }
+  return null;
+}
+
+/**
+ * Parse a stream-json output line for the non-streaming (batch) path.
+ * Extracts text only from the terminal `result` event, which contains the
+ * complete response text. Skips assistant events to avoid double-counting.
+ */
+function extractCliResultText(line: string): string | null {
+  if (!line.trim()) return null;
+  try {
+    const evt = JSON.parse(line) as Record<string, unknown>;
     if (evt['type'] === 'result' && typeof evt['result'] === 'string') {
       return evt['result'];
     }
@@ -145,16 +187,15 @@ function extractCliDeltaText(line: string): string | null {
 
 /**
  * Full text extractor for non-streaming CLI output.
- * Scans all lines for delta text or a result line and concatenates.
+ * Scans all lines for the terminal `result` event and returns its text.
  */
 function extractCliFullText(output: string): string {
   const lines = output.split('\n').filter(Boolean);
-  const parts: string[] = [];
   for (const line of lines) {
-    const text = extractCliDeltaText(line);
-    if (text) parts.push(text);
+    const text = extractCliResultText(line);
+    if (text !== null) return text;
   }
-  return parts.join('');
+  return '';
 }
 
 // ── callSonnet public API ─────────────────────────────────────────────────────
@@ -213,12 +254,15 @@ async function callSonnetCli(
   // Always use tmpdir so no project .claude/ config is inherited.
   const cwd = os.tmpdir();
 
+  // --verbose is required when combining --print and --output-format stream-json.
+  // Prompt is fed via stdin so multi-line content never gets mangled by shell arg
+  // parsing (positional args with newlines confuse the CLI's argv parser).
   const cliArgs = [
     '--print',
+    '--verbose',
     '--dangerously-skip-permissions',
     '--output-format', 'stream-json',
     '--model', 'claude-sonnet-4-6',
-    prompt,
   ];
 
   const env = {
@@ -234,8 +278,12 @@ async function callSonnetCli(
       const child = spawn(claudeBin, cliArgs, {
         cwd,
         env,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
+
+      // Write prompt to stdin, then close so the CLI knows input is done.
+      child.stdin!.write(prompt, 'utf-8');
+      child.stdin!.end();
 
       let lineBuffer = '';
       const decoder = new TextDecoder();
@@ -246,14 +294,14 @@ async function callSonnetCli(
         const lines = lineBuffer.split('\n');
         lineBuffer = lines.pop() ?? '';
         for (const line of lines) {
-          const text = extractCliDeltaText(line);
+          const text = extractCliStreamingText(line);
           if (text) yield text;
         }
       }
 
       // Flush remaining buffer.
       if (lineBuffer.trim()) {
-        const text = extractCliDeltaText(lineBuffer);
+        const text = extractCliStreamingText(lineBuffer);
         if (text) yield text;
       }
 
@@ -264,16 +312,42 @@ async function callSonnetCli(
     return { tokens, tier: 'cli' };
   }
 
-  // Non-streaming: run to completion and return full text.
+  // Non-streaming: spawn, write prompt to stdin, collect stdout to completion.
+  // Using spawn (not execFileAsync) so we can write to stdin — execFile's type
+  // definition doesn't expose the `input` option even though the runtime accepts it.
   try {
-    const { stdout } = await execFileAsync(claudeBin, cliArgs, {
-      cwd,
-      env,
-      timeout: 60_000,
-      maxBuffer: 4 * 1024 * 1024, // 4MB
+    const text = await new Promise<string>((resolve, reject) => {
+      const { spawn: spawnSync } = require('node:child_process') as typeof import('node:child_process');
+      const child = spawnSync(claudeBin, cliArgs, {
+        cwd,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      child.stdin!.write(prompt, 'utf-8');
+      child.stdin!.end();
+
+      let stdout = '';
+      let stderr = '';
+      child.stdout!.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+      child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
+      const timer = setTimeout(() => {
+        child.kill();
+        reject(new Error('[qa] Claude CLI timed out after 60s'));
+      }, 60_000);
+
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code !== 0 && stdout.trim() === '') {
+          reject(new Error(`[qa] Claude CLI exited with code ${code}: ${stderr.slice(0, 400)}`));
+        } else {
+          resolve(stdout);
+        }
+      });
     });
-    const text = extractCliFullText(stdout);
-    return { text, tier: 'cli' };
+
+    return { text: extractCliFullText(text), tier: 'cli' };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`[qa] Claude CLI invocation failed: ${message}`);
