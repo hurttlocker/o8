@@ -35,12 +35,21 @@ export interface RecentOutcome {
   durationMs: number | null;
 }
 
+export type SymbolEdgeReasonView =
+  | 'no-definition-recorded'
+  | 'unknown-symbol'
+  | 'trace-error';
+
 export interface SymbolEdgeView {
   symbol: string;
+  /** Indexer label (Function / Interface / Type / etc.) when known. */
+  kind?: string | null;
   file?: string | null;
   line?: number | null;
   neighbours: string[];
   error?: string | null;
+  /** Why `file`/`line` is unset, when it is. Phase 4 #739–#741. */
+  reason?: SymbolEdgeReasonView | null;
 }
 
 export interface IndexEntry {
