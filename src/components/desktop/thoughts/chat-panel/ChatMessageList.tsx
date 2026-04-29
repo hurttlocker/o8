@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef } from 'react';
+import { Fragment, forwardRef } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { SuggestedReplies } from '../SuggestedReplies';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -58,6 +58,16 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
     && onSelectSuggestion
     && onDismissSuggestions,
   );
+  // #845 — chips must render directly under the assistant message they belong
+  // to (not at the list tail). Find the index of the LAST assistant entry; the
+  // map below renders the chip row right after that bubble.
+  let lastAssistantIndex = -1;
+  for (let i = displayMessages.length - 1; i >= 0; i -= 1) {
+    if (displayMessages[i]?.role === 'assistant') {
+      lastAssistantIndex = i;
+      break;
+    }
+  }
   const showEmptyWithOverride = displayMessages.length === 0 && !displayWaiting && emptyStateOverride;
   const showEmptyWithFallback = displayMessages.length === 0 && !displayWaiting && !emptyStateOverride;
   const isCompacting = displayWaiting && displayMessages.length > 0 &&
@@ -87,23 +97,32 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
 
       {topContent}
 
-      {displayMessages.map((msg, index) => (
-        <DesktopAgentMessage
-          key={msg.id}
-          entry={msg}
-          isLast={index === displayMessages.length - 1 && !displayWaiting}
-          repoPath={repoPath}
-        />
-      ))}
-
-      {hasSuggestedReplies && suggestedReplies && onSelectSuggestion && onDismissSuggestions ? (
-        <SuggestedReplies
-          chips={suggestedReplies}
-          disabled={displayWaiting}
-          onSelect={onSelectSuggestion}
-          onDismiss={onDismissSuggestions}
-        />
-      ) : null}
+      {displayMessages.map((msg, index) => {
+        const isLatestAssistant = index === lastAssistantIndex;
+        const showChipsHere = isLatestAssistant
+          && hasSuggestedReplies
+          && msg.id === suggestedReplyMessageId
+          && suggestedReplies
+          && onSelectSuggestion
+          && onDismissSuggestions;
+        return (
+          <Fragment key={msg.id}>
+            <DesktopAgentMessage
+              entry={msg}
+              isLast={index === displayMessages.length - 1 && !displayWaiting}
+              repoPath={repoPath}
+            />
+            {showChipsHere ? (
+              <SuggestedReplies
+                chips={suggestedReplies}
+                disabled={displayWaiting}
+                onSelect={onSelectSuggestion}
+                onDismiss={onDismissSuggestions}
+              />
+            ) : null}
+          </Fragment>
+        );
+      })}
 
       {isCompacting ? (
         <div style={{
