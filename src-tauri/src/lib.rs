@@ -1605,13 +1605,51 @@ fn spawn_tray_badge_poller(app: AppHandle) {
 
 const POPOVER_LABEL: &str = "dispatch-popover";
 const POPOVER_WIDTH: f64 = 600.0;
-const POPOVER_HEIGHT: f64 = 80.0;
+const POPOVER_HEIGHT: f64 = 280.0;
+const POPOVER_STATE_FILE: &str = "popover-state.json";
 
-/// Open (or focus, if already open) the dispatch popover. Spotlight-style:
-/// horizontally centered, anchored at 25% from the top of the active monitor.
-/// Always-on-top, no decorations, frameless. Built on the dev URL when running
-/// `cargo tauri dev`, otherwise the bundled `tauri://localhost` scheme.
-/// Returns Ok(()) on success.
+/// Read the saved popover position from `~/.o8/popover-state.json`.
+/// Returns None when the file is missing, malformed, or contains values that
+/// don't fit on any plausible screen — in which case the open path falls back
+/// to the Spotlight-style top-center anchor.
+fn read_saved_popover_position() -> Option<(f64, f64)> {
+    let path = std::path::PathBuf::from(o8_data_dir()).join(POPOVER_STATE_FILE);
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let x = json.get("x")?.as_f64()?;
+    let y = json.get("y")?.as_f64()?;
+    // Reject obviously broken values — multi-monitor reconfigs sometimes save
+    // off-screen coordinates we can't recover from. Same defensive bounds as
+    // sanitize_window_state(), just looser.
+    if !x.is_finite() || !y.is_finite() { return None; }
+    if x < -10000.0 || x > 20000.0 || y < -10000.0 || y > 10000.0 { return None; }
+    Some((x, y))
+}
+
+/// Persist the popover position to `~/.o8/popover-state.json`. Called from
+/// the frontend after a drag finishes (via `save_dispatch_popover_position`).
+/// Best-effort: any IO error is logged and swallowed so the popover never
+/// becomes unusable just because a write failed.
+fn write_saved_popover_position(x: f64, y: f64) {
+    let dir = o8_data_dir();
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        log::warn!("[popover] mkdir {} failed: {}", dir, e);
+        return;
+    }
+    let path = std::path::PathBuf::from(&dir).join(POPOVER_STATE_FILE);
+    let payload = serde_json::json!({ "x": x, "y": y });
+    if let Err(e) = std::fs::write(&path, payload.to_string()) {
+        log::warn!("[popover] write {:?} failed: {}", path, e);
+    }
+}
+
+/// Open (or focus, if already open) the dispatch popover. Spotlight-style on
+/// first launch: horizontally centered, anchored at 25% from the top of the
+/// active monitor. Subsequent opens honor a position the user dragged the
+/// popover to (persisted to `~/.o8/popover-state.json`). Always-on-top, no
+/// decorations, frameless. Built on the dev URL when running `cargo tauri
+/// dev`, otherwise the bundled `tauri://localhost` scheme. Returns Ok(()) on
+/// success.
 fn open_dispatch_popover_impl(app: &AppHandle) -> Result<(), String> {
     // Compute Spotlight-style position on the primary monitor: horizontally
     // centered, 25% from the top. Falls back to .center() if monitor info is
@@ -1632,10 +1670,14 @@ fn open_dispatch_popover_impl(app: &AppHandle) -> Result<(), String> {
         _ => None,
     };
 
+    // Saved drag position wins over the Spotlight default — this is what
+    // makes the popover "remember where I put it" across summons.
+    let preferred_position = read_saved_popover_position().or(spotlight_position);
+
     if let Some(existing) = app.get_webview_window(POPOVER_LABEL) {
         let _ = existing.show();
         let _ = existing.set_focus();
-        if let Some((x, y)) = spotlight_position {
+        if let Some((x, y)) = preferred_position {
             let _ = existing.set_position(tauri::PhysicalPosition::new(x, y));
         } else {
             let _ = existing.center();
@@ -1666,7 +1708,7 @@ fn open_dispatch_popover_impl(app: &AppHandle) -> Result<(), String> {
         .visible(true)
         .skip_taskbar(true);
 
-    builder = if let Some((x, y)) = spotlight_position {
+    builder = if let Some((x, y)) = preferred_position {
         builder.position(x, y)
     } else {
         builder.center()
@@ -1696,6 +1738,15 @@ fn close_dispatch_popover(app: AppHandle) -> Result<(), String> {
         let _ = window.close();
     }
     Ok(())
+}
+
+/// Tauri command: persist the dispatch popover's last-known physical
+/// position. The popover frontend calls this after a drag finishes (mouseup
+/// on the header) so the next Cmd+Shift+O opens at the same spot. Coordinates
+/// are physical pixels relative to the primary monitor.
+#[tauri::command]
+fn save_dispatch_popover_position(x: f64, y: f64) {
+    write_saved_popover_position(x, y);
 }
 
 /// Tauri command: push an exact awaiting-review count to the tray badge.
@@ -1853,6 +1904,7 @@ pub fn run() {
             read_workspaces,
             open_dispatch_popover,
             close_dispatch_popover,
+            save_dispatch_popover_position,
             set_tray_badge,
             notify_review_ready,
             #[cfg(target_os = "macos")]
