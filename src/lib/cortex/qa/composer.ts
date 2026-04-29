@@ -21,6 +21,7 @@
 import 'server-only';
 
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
+import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
@@ -234,13 +235,6 @@ export async function composeClassA(
         url: row.citation.url,
       });
     }
-
-    // Contradiction pass — runs after the answer streams (non-blocking to TTFT).
-    const contradictions = await detectContradictions({ rows: topRows, answer: translatedAnswer });
-    for (const c of contradictions) {
-      emit('contradiction', c);
-    }
-
     emit('done', {});
   } catch (err) {
     const message = err instanceof Error ? err.message : 'composer-A error';
@@ -250,7 +244,7 @@ export async function composeClassA(
   }
 }
 
-// ── Class B composer (Sonnet, streaming) ─────────────────────────────────────
+// ── Class B composer (Sonnet via CLI > API > Flash) ──────────────────────────
 
 export async function composeClassB(
   question: string,
@@ -258,20 +252,10 @@ export async function composeClassB(
   topRows: TypedRow[],
   emit: SseEmit,
 ): Promise<void> {
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!anthropicKey) {
-    // Fall back to Flash if no Anthropic key.
-    console.info('[qa][composer-B] No ANTHROPIC_API_KEY — falling back to Flash compose');
-    return composeClassA(question, repoPath, topRows, emit);
-  }
-
   const lookup = buildCitationLookup(topRows);
 
   try {
-    const body = {
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+    const result = await callSonnet({
       system: buildSonnetComposeSystem(),
       messages: [
         {
@@ -280,75 +264,15 @@ export async function composeClassB(
         },
       ],
       stream: true,
-    };
-
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
     });
 
-    if (!res.ok || !res.body) {
-      const errText = await res.text().catch(() => '');
-      console.warn(`[qa][composer-B] Anthropic error ${res.status}: ${errText.slice(0, 200)}`);
-      // Degrade to Flash.
-      return composeClassA(question, repoPath, topRows, emit);
-    }
-
-    // Stream SSE from Anthropic. We collect the full text so we can post-process
-    // citations, while also emitting tokens as they arrive for TTFT.
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    // Consume the token stream, emitting each token and accumulating for
+    // citation post-processing. Works for all three tiers (cli/api/flash).
     let fullText = '';
-
-    // Token buffer — emit tokens as they arrive, accumulate for post-processing.
-    const flushToken = (text: string) => {
-      if (!text) return;
-      fullText += text;
-      emit('token', { text });
-    };
-
-    let lineBuffer = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        lineBuffer += line + '\n';
-        if (line === '') {
-          // End of an SSE block.
-          const block = lineBuffer;
-          lineBuffer = '';
-          if (!block.includes('data: ')) continue;
-          const dataLine = block.split('\n').find((l) => l.startsWith('data: '));
-          if (!dataLine) continue;
-          const raw = dataLine.slice(6).trim();
-          if (raw === '[DONE]') break;
-          try {
-            const evt = JSON.parse(raw) as {
-              type?: string;
-              delta?: { type?: string; text?: string };
-            };
-            if (
-              evt.type === 'content_block_delta' &&
-              evt.delta?.type === 'text_delta' &&
-              evt.delta.text
-            ) {
-              flushToken(evt.delta.text);
-            }
-          } catch {
-            // Ignore parse failures in mid-stream.
-          }
-        }
-      }
+    for await (const token of result.tokens) {
+      if (!token) continue;
+      fullText += token;
+      emit('token', { text: token });
     }
 
     // Post-process: translate bracket citations → verified CITATION markers.
@@ -356,7 +280,6 @@ export async function composeClassB(
     if (fullText.trim()) {
       const { translatedAnswer: translated, verifiedRows } = translateCitations(fullText, lookup);
       finalAnswer = translated;
-      // Emit verified citations after streaming completes.
       for (const row of verifiedRows) {
         emit('citation', {
           kind: row.citation.kind,
@@ -381,7 +304,7 @@ export async function composeClassB(
   } catch (err) {
     const message = err instanceof Error ? err.message : 'composer-B error';
     console.warn('[qa][composer-B] error:', message);
-    // Degrade to Flash.
+    // Degrade to Flash on any failure.
     return composeClassA(question, repoPath, topRows, emit);
   }
 }
