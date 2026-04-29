@@ -57,9 +57,20 @@ function countOutcomes(): number {
     // Drizzle's COUNT helper has historically been finicky against the
     // boolean column on older sqlite builds (#747). Drop down to raw SQL
     // for the headline counter — it's the cheapest possible query.
+    //
+    // #837 — only count LIVE outcomes. Decayed rows (`valid_to` past now)
+    // were inflating the count above the 5,000-row eval threshold
+    // prematurely and tripping the substrate-eval gate on data that no
+    // longer participates in recall. Mirrors `liveOutcomeFilter()` in
+    // `src/lib/cortex/decay.ts` (raw SQL form because this route uses
+    // raw sqlite, not Drizzle, for the headline counter).
     const sqlite = getSqlite();
     if (!sqlite || typeof sqlite.prepare !== 'function') return 0;
-    const row = sqlite.prepare('SELECT COUNT(*) AS n FROM session_outcomes').get() as { n?: number } | undefined;
+    const row = sqlite
+      .prepare(
+        "SELECT COUNT(*) AS n FROM session_outcomes WHERE valid_to IS NULL OR valid_to > datetime('now')",
+      )
+      .get() as { n?: number } | undefined;
     return typeof row?.n === 'number' ? row.n : 0;
   } catch (error) {
     console.warn('[cortex-diagnostics] outcomes count failed:', error instanceof Error ? error.message : error);

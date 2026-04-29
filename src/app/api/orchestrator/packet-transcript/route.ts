@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { getCodexRolloutPath } from '@/lib/codex/sessions';
 import { getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
+import { listLanes } from '@/lib/lane/registry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { normalizeCodexEvents, type TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -38,6 +39,24 @@ function findPacket(packetId: string): OrchestratorPacket | null {
   try {
     const mission = readOrchestratorControlPlaneState();
     return mission.packets.find((packet) => packet.id === packetId) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #846 — Lane-registry fallback for the binding race.
+ *
+ * When a packet completes fast (small dispatches finish before mission
+ * state catches up), `packet.lane` may be null in the control-plane state
+ * by the time MCP reads it back, even though the lane registry already has
+ * the sessionKey recorded. Look it up by packetId across ALL lanes
+ * (including completed/archived) so the transcript stays reachable.
+ */
+function resolveSessionKeyFromLaneRegistry(packetId: string): string | null {
+  try {
+    const lane = listLanes().find((candidate) => candidate.packetId === packetId);
+    return lane?.sessionKey?.trim() || null;
   } catch {
     return null;
   }
@@ -120,9 +139,14 @@ export async function GET(request: NextRequest) {
 
   try {
     const packet = findPacket(packetId);
-    const sessionKey = packet?.lane?.sessionKey?.trim() ?? '';
+    // #846 — Fall back to the lane registry when the mission-state binding
+    // got stripped (fast-completing packets race the control-plane writer).
+    // The lane registry retains `packetId → sessionKey` even after the lane
+    // archives, so the transcript remains reachable.
+    const packetSessionKey = packet?.lane?.sessionKey?.trim() ?? '';
+    const sessionKey = packetSessionKey || resolveSessionKeyFromLaneRegistry(packetId);
 
-    if (!packet) {
+    if (!packet && !sessionKey) {
       return NextResponse.json(
         { events: [], nextCursor: null, note: 'packet_not_found' },
         { headers: { 'Cache-Control': 'no-store, max-age=0' } },

@@ -217,6 +217,10 @@ async function dispatchPacketMerge(
             title: packet.title,
             issueNumber: packet.issue?.number ?? null,
           },
+          // #843 — Pass the merge commit message through so any
+          // `Spec-Update: <directive-name>` lines in the body narrow the
+          // trailer to a specific directive instead of blanket-appending.
+          commitMessage: input.commitMessage ?? null,
         });
         if (updated.length > 0) {
           console.log(
