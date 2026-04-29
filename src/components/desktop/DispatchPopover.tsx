@@ -1,25 +1,43 @@
 'use client';
 
 /**
- * DispatchPopover — the 600x80 frameless popover summoned by Cmd+Shift+O
- * (issue #730). Single text input. Press Enter to dispatch via the existing
- * `/api/orchestrator/create-mission` endpoint (which auto-dispatches because
- * the API defaults `dispatch=true`). Esc to close.
+ * DispatchPopover — the glass card summoned by Cmd+Shift+O (issues #730, #753, #763).
  *
- * Picks the most recently opened repo as the dispatch target. v1 trade-off:
- * we don't show a repo picker — that bloats the 80px height. Power users can
- * still dispatch via the main Orchestrator tab when they need a different
- * repo. Future iteration: tab-completion for repo names.
+ * Layout (600x280):
+ *   ┌─────────────────────────────────────────────┐
+ *   │ Dispatch a task          [drag handle]  [×] │  44px header
+ *   ├─────────────────────────────────────────────┤
+ *   │                                             │
+ *   │  What do you want done?                     │  textarea body
+ *   │                                             │
+ *   ├─────────────────────────────────────────────┤
+ *   │ [Codex] [Gemini] [openc.] · repo▾   Send ⌘↵│  48px footer
+ *   └─────────────────────────────────────────────┘
+ *
+ * Header is the entire drag region (`data-tauri-drag-region`). After a drag
+ * finishes we read the new physical position via Tauri's `onMoved` event and
+ * persist it via `save_dispatch_popover_position` so the next summons honors
+ * the saved spot. Esc closes without dispatching; ⌘+Enter dispatches.
+ *
+ * Dispatch is fire-and-forget: POST /api/orchestrator/create-mission with
+ * { repoPath, runtime, issues: [{title, body}] } then close the window. The
+ * orchestrator's WS lane events drive the awaiting-review notification on the
+ * main window, not this popover. Subcomponents live in `DispatchPopoverParts.tsx`
+ * to keep this file under the 800-line ceiling.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { V1_DISPATCH_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import {
+  ContextEnginePill,
+  DispatchBody,
+  DispatchFooter,
+  DispatchHeader,
+  ErrorRow,
+  type RepoEntry,
+} from './DispatchPopoverParts';
 
-interface RepoEntry {
-  id: string;
-  name: string;
-  localPath: string;
-  defaultBranch: string;
-  lastOpenedAt: string;
-}
+type CodebaseMemoryStatus = 'unknown' | 'downloading' | 'ready' | 'error';
 
 function readWsToken(): string {
   if (typeof document === 'undefined') return '';
@@ -28,61 +46,146 @@ function readWsToken(): string {
 
 function bearerHeaders(): Record<string, string> {
   const token = readWsToken();
-  const base: Record<string, string> = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
   };
-  if (token) base.Authorization = `Bearer ${token}`;
-  return base;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
 }
 
-async function loadDefaultRepo(): Promise<RepoEntry | null> {
+async function loadRepos(): Promise<RepoEntry[]> {
   try {
     const res = await fetch('/api/panel/repos', { headers: bearerHeaders() });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const json = await res.json().catch(() => null);
     const repos: RepoEntry[] = Array.isArray(json?.repos) ? json.repos : [];
-    if (repos.length === 0) return null;
-    // Most recently opened wins. lastOpenedAt is ISO; lex-sort works.
-    const sorted = [...repos].sort((a, b) => (b.lastOpenedAt ?? '').localeCompare(a.lastOpenedAt ?? ''));
-    return sorted[0] ?? null;
+    // Most-recently-opened first so the default selection is the active repo.
+    return [...repos].sort((a, b) => (b.lastOpenedAt ?? '').localeCompare(a.lastOpenedAt ?? ''));
+  } catch {
+    return [];
+  }
+}
+
+async function invokeTauri(
+  command: string,
+  payload?: Record<string, unknown>,
+): Promise<unknown> {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return null;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke(command, payload);
   } catch {
     return null;
   }
 }
 
 async function closePopover(): Promise<void> {
-  // Cross fingers we're inside Tauri; in a non-Tauri preview context, just
-  // navigate the browser tab away.
-  try {
-    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('close_dispatch_popover');
-      return;
-    }
-  } catch {
-    // fall through
-  }
-  if (typeof window !== 'undefined') {
-    window.close();
-  }
+  const handled = await invokeTauri('close_dispatch_popover');
+  if (handled !== null) return;
+  if (typeof window !== 'undefined') window.close();
 }
 
 export default function DispatchPopover() {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const sendButtonRef = useRef<HTMLButtonElement | null>(null);
+  const runtimeButtonsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  const repoButtonRef = useRef<HTMLButtonElement | null>(null);
+
   const [value, setValue] = useState('');
-  const [repo, setRepo] = useState<RepoEntry | null>(null);
+  const [repos, setRepos] = useState<RepoEntry[]>([]);
+  const [repoPath, setRepoPath] = useState<string | null>(null);
+  const [runtime, setRuntime] = useState<OrchestratorRuntime>('codex');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [repoPickerOpen, setRepoPickerOpen] = useState(false);
+  const [memoryStatus, setMemoryStatus] = useState<CodebaseMemoryStatus>('unknown');
 
+  const dispatchableRuntimes = useMemo<OrchestratorRuntime[]>(() => V1_DISPATCH_RUNTIMES, []);
+
+  // Mount: load repos, focus textarea.
   useEffect(() => {
-    void loadDefaultRepo().then((r) => setRepo(r));
-    const id = window.setTimeout(() => inputRef.current?.focus(), 30);
-    return () => window.clearTimeout(id);
+    let cancelled = false;
+    void loadRepos().then((list) => {
+      if (cancelled) return;
+      setRepos(list);
+      // Default to most-recently-opened repo (lastOpenedAt-sorted from loadRepos).
+      if (list.length > 0) setRepoPath(list[0].localPath);
+    });
+    const focusId = window.setTimeout(() => textareaRef.current?.focus(), 30);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(focusId);
+    };
   }, []);
 
-  // Esc closes immediately. We capture at window level because the input
-  // doesn't always have native Esc behavior under Tauri.
+  // Listen for the codebase-memory-mcp download status emitted by the Tauri
+  // sidecar on launch. Don't block dispatch — show an inline pill so the user
+  // knows the context engine isn't available for this packet.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        const handle = await listen<string>('codebase-memory:status', (event) => {
+          const status = event.payload;
+          if (status === 'downloading' || status === 'ready' || status === 'error') {
+            setMemoryStatus(status);
+          }
+        });
+        if (cancelled) {
+          handle();
+        } else {
+          unlisten = handle;
+        }
+      } catch {
+        // Listener not available — leave status as 'unknown'.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  // Drag-end persistence: subscribe to the window's onMoved event and save the
+  // last position to ~/.o8/popover-state.json via the Rust command. Debounced
+  // to once-per-200ms because Tauri emits onMoved for every pixel of drag.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    let debounceId: number | null = null;
+    void (async () => {
+      if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const win = getCurrentWindow();
+        const handle = await win.onMoved(({ payload }) => {
+          if (debounceId !== null) window.clearTimeout(debounceId);
+          debounceId = window.setTimeout(() => {
+            void invokeTauri('save_dispatch_popover_position', { x: payload.x, y: payload.y });
+          }, 200);
+        });
+        if (cancelled) {
+          handle();
+        } else {
+          unlisten = handle;
+        }
+      } catch {
+        // Window API not available in non-Tauri contexts — drag persistence is a no-op.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (debounceId !== null) window.clearTimeout(debounceId);
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  // Esc closes; we capture at window-level because the textarea sometimes
+  // swallows the keydown depending on the Tauri webview's focus state.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -94,30 +197,10 @@ export default function DispatchPopover() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Auto-close on blur — the popover should feel like a Spotlight prompt:
-  // click anywhere else, it goes away. We keep a ref-flag for `busy` so the
-  // handler can read the latest value (closure capture would freeze busy=false).
-  const busyRef = useRef(false);
-  useEffect(() => { busyRef.current = busy; }, [busy]);
-  useEffect(() => {
-    const handler = () => {
-      // Slight delay so submit's window.close beats this and we don't fire
-      // both close paths. Skip when a dispatch is in flight.
-      window.setTimeout(() => {
-        if (busyRef.current) return;
-        if (!document.hasFocus()) {
-          void closePopover();
-        }
-      }, 120);
-    };
-    window.addEventListener('blur', handler);
-    return () => window.removeEventListener('blur', handler);
-  }, []);
-
-  const submit = async () => {
+  const submit = useCallback(async () => {
     const trimmed = value.trim();
     if (!trimmed || busy) return;
-    if (!repo) {
+    if (!repoPath) {
       setError('No repo registered. Open one in the dashboard first.');
       return;
     }
@@ -128,7 +211,8 @@ export default function DispatchPopover() {
         method: 'POST',
         headers: bearerHeaders(),
         body: JSON.stringify({
-          repoPath: repo.localPath,
+          repoPath,
+          runtime,
           issues: [
             {
               number: Date.now(),
@@ -145,18 +229,26 @@ export default function DispatchPopover() {
         setBusy(false);
         return;
       }
-      // Mission created + auto-dispatched (the API defaults dispatch=true).
-      // Close immediately — the user can tab to o8 to monitor progress.
+      // Fire-and-forget: close immediately. The packet's awaiting_review
+      // notification is driven by the main window's WS lane handler.
       await closePopover();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error');
       setBusy(false);
     }
+  }, [busy, repoPath, runtime, value]);
+
+  const onTextareaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // ⌘+Enter / Ctrl+Enter dispatches. Plain Enter inserts a newline (this is
+    // a textarea, not a single-line input, so the user can write multi-line tasks).
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      void submit();
+    }
   };
 
-  const placeholder = repo
-    ? `Dispatch to ${repo.name} on ${repo.defaultBranch}…`
-    : 'Loading repo…';
+  const selectedRepo = repos.find((r) => r.localPath === repoPath) ?? null;
+  const memoryDownloading = memoryStatus === 'downloading';
 
   return (
     <div
@@ -165,91 +257,49 @@ export default function DispatchPopover() {
         inset: 0,
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: 'rgba(22, 25, 30, 0.92)',
-        backdropFilter: 'blur(24px) saturate(160%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+        background: 'var(--t-panel)',
+        backdropFilter: 'blur(28px) saturate(170%)',
+        WebkitBackdropFilter: 'blur(28px) saturate(170%)',
         borderRadius: 14,
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        boxShadow: '0 24px 48px -12px rgba(0, 0, 0, 0.5)',
-        color: '#e8ecf2',
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--t-divider-subtle)',
+        boxShadow: '0 28px 56px -16px rgba(0, 0, 0, 0.42), 0 8px 16px -4px rgba(0, 0, 0, 0.18)',
+        color: 'var(--t-text)',
         fontFamily: '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
         overflow: 'hidden',
       }}
     >
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          paddingLeft: 18,
-          paddingRight: 18,
-          gap: 12,
+      <DispatchHeader busy={busy} onClose={() => void closePopover()} />
+      {memoryDownloading ? <ContextEnginePill /> : null}
+      <DispatchBody
+        textareaRef={textareaRef}
+        value={value}
+        busy={busy}
+        onChange={setValue}
+        onKeyDown={onTextareaKeyDown}
+      />
+      {error ? <ErrorRow message={error} /> : null}
+      <DispatchFooter
+        runtime={runtime}
+        runtimes={dispatchableRuntimes}
+        runtimeButtonsRef={runtimeButtonsRef}
+        onRuntimeChange={setRuntime}
+        repoButtonRef={repoButtonRef}
+        repoPickerOpen={repoPickerOpen}
+        onRepoPickerToggle={() => setRepoPickerOpen((o) => !o)}
+        onRepoPickerClose={() => setRepoPickerOpen(false)}
+        repos={repos}
+        selectedRepo={selectedRepo}
+        onRepoSelect={(localPath) => {
+          setRepoPath(localPath);
+          setRepoPickerOpen(false);
         }}
-      >
-        {/* Tiny brand glyph — square dot — matches the o8 design language. */}
-        <div
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 2,
-            backgroundColor: busy ? '#f59e0b' : '#22c55e',
-            flexShrink: 0,
-            boxShadow: busy ? '0 0 12px rgba(245, 158, 11, 0.6)' : '0 0 12px rgba(34, 197, 94, 0.4)',
-          }}
-        />
-        <input
-          ref={inputRef}
-          value={value}
-          disabled={busy}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              void submit();
-            }
-          }}
-          placeholder={placeholder}
-          autoFocus
-          spellCheck={false}
-          style={{
-            flex: 1,
-            background: 'transparent',
-            border: 'none',
-            outline: 'none',
-            color: '#ffffff',
-            fontSize: 17,
-            fontWeight: 400,
-            letterSpacing: '-0.01em',
-            fontFamily: 'inherit',
-          }}
-        />
-        <span
-          style={{
-            fontSize: 11,
-            color: 'rgba(232, 236, 242, 0.5)',
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            flexShrink: 0,
-          }}
-        >
-          {busy ? 'Dispatching' : 'Enter'}
-        </span>
-      </div>
-      {error ? (
-        <div
-          style={{
-            paddingTop: 4,
-            paddingBottom: 8,
-            paddingLeft: 18,
-            paddingRight: 18,
-            fontSize: 11,
-            color: '#fca5a5',
-            letterSpacing: '-0.005em',
-          }}
-        >
-          {error}
-        </div>
-      ) : null}
+        sendButtonRef={sendButtonRef}
+        canSend={Boolean(value.trim()) && Boolean(repoPath) && !busy}
+        busy={busy}
+        onSend={() => void submit()}
+      />
     </div>
   );
 }
