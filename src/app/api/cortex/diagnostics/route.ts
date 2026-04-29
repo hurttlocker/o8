@@ -64,11 +64,18 @@ function countOutcomes(): number {
     // longer participates in recall. Mirrors `liveOutcomeFilter()` in
     // `src/lib/cortex/decay.ts` (raw SQL form because this route uses
     // raw sqlite, not Drizzle, for the headline counter).
+    //
+    // #745 phase 2 — also require `valid_from IS NOT NULL` so this raw
+    // SQL matches `liveOutcomeFilter()` exactly. A row inserted with
+    // NULL `valid_from` between boots (e.g. another agent's raw INSERT
+    // after the o8 process started) would otherwise count as "live"
+    // here but be excluded from recall, silently inflating the
+    // substrate-eval gate.
     const sqlite = getSqlite();
     if (!sqlite || typeof sqlite.prepare !== 'function') return 0;
     const row = sqlite
       .prepare(
-        "SELECT COUNT(*) AS n FROM session_outcomes WHERE valid_to IS NULL OR valid_to > datetime('now')",
+        "SELECT COUNT(*) AS n FROM session_outcomes WHERE valid_from IS NOT NULL AND (valid_to IS NULL OR valid_to > datetime('now'))",
       )
       .get() as { n?: number } | undefined;
     return typeof row?.n === 'number' ? row.n : 0;

@@ -693,6 +693,37 @@ function backfillSessionOutcomeValidFrom(sqlite: Database.Database): void {
   }
 }
 
+/**
+ * #745 phase 2 — public entry point for the periodic backfill tick.
+ *
+ * The boot-time backfill in `ensureIdempotentColumnAdds()` only fires when
+ * `getDb()` is first called per process. Long-running processes that get a
+ * raw NULL-`valid_from` row inserted by another agent between boots leak the
+ * row as "live but unbackfilled" until the next process restart. The decay
+ * sweep does compensate via COALESCE in its WHERE clause, but recall paths
+ * that gate on `valid_from IS NOT NULL` (see `liveOutcomeFilter()`) still
+ * exclude these rows from results — and now `countOutcomes()` matches that
+ * exclusion too.
+ *
+ * The decay tick (every 6h) calls this as step 0 so any stray NULL gets
+ * stamped before the same tick runs the age-out sweep.
+ */
+export function runSessionOutcomeValidFromBackfill(): void {
+  if (!_sqlite) {
+    // No DB connection yet — nothing to backfill. The first `getDb()` call
+    // will run the boot-time backfill anyway.
+    return;
+  }
+  try {
+    backfillSessionOutcomeValidFrom(_sqlite);
+  } catch (error) {
+    console.warn(
+      '[db] periodic valid_from backfill failed:',
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
 function backfillWatchedAgentColumns(sqlite: Database.Database): void {
   const result = sqlite.prepare(`
     UPDATE watched_agents
