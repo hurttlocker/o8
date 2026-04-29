@@ -3,7 +3,7 @@
 import { useState, memo, type CSSProperties } from 'react';
 import { useTheme } from './ThemeContext';
 
-export type MobileScreen = 'chat' | 'fleet' | 'approvals' | 'costs' | 'settings' | 'issues' | 'orchestrator';
+export type MobileScreen = 'chat' | 'fleet' | 'approvals' | 'costs' | 'settings' | 'issues' | 'orchestrator' | 'browser';
 
 interface SpeedDialProps {
   activeScreen: MobileScreen;
@@ -28,6 +28,12 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
     screen: 'fleet',
     label: 'Agents',
     iconPath: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
+  },
+  {
+    screen: 'browser',
+    label: 'Browser',
+    // Phosphor "Globe" — drawn inline per repo policy (no React icon shim).
+    iconPath: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z M2 12h20 M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z',
   },
   {
     screen: 'issues',
@@ -58,6 +64,7 @@ const SCREEN_TO_VIEW: Record<MobileScreen, string> = {
   settings: 'settings',
   issues: 'issues',
   orchestrator: 'orchestrator',
+  browser: 'browser',
 };
 
 const menuFontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
