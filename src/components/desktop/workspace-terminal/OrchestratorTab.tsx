@@ -549,7 +549,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   const thoughtsChatPanel = (
     <ThoughtsChatPanel
       ref={chatPanelRef}
-      open
+      open={active}
       draftInjection={effectiveDraftInjection}
       agents={agents}
       missionState={data.missionState}
@@ -663,8 +663,8 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
             <button
               type="button"
               onClick={handleNewConversation}
-              aria-label="New orchestrator conversation"
-              title="New orchestrator conversation"
+              aria-label="Start a new orchestrator thread"
+              title="Start a new orchestrator thread"
               style={{
                 background: 'transparent',
                 gap: 6,
@@ -674,7 +674,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
               }}
             >
               <PlusIcon size={13} />
-              <span>New</span>
+              <span>New thread</span>
             </button>
           ) : null}
         </div>
