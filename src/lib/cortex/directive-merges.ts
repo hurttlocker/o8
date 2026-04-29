@@ -192,6 +192,12 @@ export function appendDirectiveTrailer({
       if (!parsed.meta.history) continue;
       if (!matchesRepoScope(parsed.meta, repoPath)) continue;
 
+      // #841 — idempotency. If the exact same trailer line is already
+      // present, skip the write so internal merges + the external-merge
+      // watcher (which replays git log on a 5 min tick) never double up
+      // on directives.
+      if (parsed.trailerLines.includes(newLine)) continue;
+
       const merged = [...parsed.trailerLines, newLine];
       const section = renderRecentMergesSection(merged);
       const next = `${parsed.preserved}\n${section}`;
