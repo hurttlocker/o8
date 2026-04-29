@@ -88,6 +88,11 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureApprovalEventsTable(sqlite);
   ensureExternalMcpServerColumns(sqlite);
   ensurePushSubscriptionsTable(sqlite);
+  // #835 — recover any session_outcomes rows whose `valid_from` was inserted
+  // as NULL (legacy seeds, raw INSERTs that bypassed the Drizzle schema
+  // default). The column-add backfill in `ensureSessionOutcomeColumns` only
+  // fires once when the column is created; this runs every boot.
+  backfillSessionOutcomeValidFrom(sqlite);
 }
 
 /**
@@ -558,6 +563,7 @@ function ensureTables(sqlite: Database.Database): void {
   backfillWatchedAgentColumns(sqlite);
   backfillApprovalContextColumns(sqlite);
   backfillApprovalEventsFromAuditJson(sqlite);
+  backfillSessionOutcomeValidFrom(sqlite);
   ensureApprovalContextIndexes(sqlite);
   ensureUsageLogIndexes(sqlite);
   migrateLegacyLaneStoreIfNeeded(sqlite, { lanesTablePreviouslyMissing });
@@ -632,6 +638,24 @@ function ensureSessionOutcomeColumns(sqlite: Database.Database): void {
   // Index on valid_to to keep "live entries only" recall queries cheap.
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_so_valid_to ON session_outcomes(valid_to)');
   ensureSessionOutcomeRoutingColumns(sqlite); // #747
+}
+
+function backfillSessionOutcomeValidFrom(sqlite: Database.Database): void {
+  // #835 — `valid_from` should always be populated (Drizzle schema default
+  // supplies `datetime('now')`), but legacy seed rows and raw INSERTs that
+  // bypass the ORM can leave it NULL. Without a value here, the decay sweep
+  // can't compare against it and the row leaks live forever. Backfill from
+  // the work timestamp (`completed_at`) when present, else `created_at`,
+  // else `datetime('now')` as the last-resort floor.
+  const result = sqlite.prepare(`
+    UPDATE session_outcomes
+    SET valid_from = COALESCE(completed_at, created_at, datetime('now'))
+    WHERE valid_from IS NULL OR valid_from = ''
+  `).run() as { changes?: number };
+
+  if ((result.changes ?? 0) > 0) {
+    console.log(`[db] Backfilled valid_from for ${result.changes} session_outcomes row${result.changes === 1 ? '' : 's'}`);
+  }
 }
 
 function backfillWatchedAgentColumns(sqlite: Database.Database): void {

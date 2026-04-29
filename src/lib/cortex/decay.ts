@@ -26,7 +26,7 @@
 
 import 'server-only';
 
-import { and, eq, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
 import { getDb, sessionOutcomes } from '@/lib/db';
 
@@ -45,11 +45,21 @@ function logWarn(msg: string, ...rest: unknown[]) {
  * decayed (`valid_to IS NULL`) or whose decay timestamp is in the future
  * (e.g. just confirmed by `confirmOutcome()`). Pull this into Drizzle
  * `.where()` clauses to keep the recall surface consistent.
+ *
+ * #835 — also requires a non-NULL `valid_from`. A NULL window-start is a
+ * writer-side bug (legacy/test seed inserts that bypassed the schema default)
+ * and would otherwise leak through forever because SQL NULL comparisons in
+ * the decay sweep never match. The DB-layer backfill in
+ * `backfillSessionOutcomeValidFrom()` repairs these on every boot, but we
+ * harden the read path here too so a stray NULL can't surface as live.
  */
 export function liveOutcomeFilter() {
-  return or(
-    isNull(sessionOutcomes.validTo),
-    sql`${sessionOutcomes.validTo} > datetime('now')`,
+  return and(
+    isNotNull(sessionOutcomes.validFrom),
+    or(
+      isNull(sessionOutcomes.validTo),
+      sql`${sessionOutcomes.validTo} > datetime('now')`,
+    ),
   );
 }
 
@@ -88,16 +98,22 @@ export async function decayOutcomes(
     // directly. We compare against `valid_from` since the validity window
     // starts there — `completed_at` is the work timestamp, but the outcome
     // becomes "valid" the moment it's recorded.
+    //
+    // #834 — strict less-than (`<`) so a row at exactly the TTL boundary
+    // stays live for its last day. The previous `<=` cut the boundary day
+    // short.
+    //
+    // #835 — `COALESCE(valid_from, completed_at, created_at)` so legacy/test
+    // rows with NULL `valid_from` still decay using their work or insert
+    // timestamps as fallback. Without COALESCE these rows leaked forever
+    // because SQL NULL comparisons are always false.
     const result = await db
       .update(sessionOutcomes)
       .set({ validTo: sql`datetime('now')` })
       .where(
         and(
           isNull(sessionOutcomes.validTo),
-          lte(
-            sessionOutcomes.validFrom,
-            sql`datetime('now', ${`-${ttlDays} days`})`,
-          ),
+          sql`COALESCE(${sessionOutcomes.validFrom}, ${sessionOutcomes.completedAt}, ${sessionOutcomes.createdAt}) < datetime('now', ${`-${ttlDays} days`})`,
         ),
       )
       .run();
