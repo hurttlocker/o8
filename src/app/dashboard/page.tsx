@@ -1435,6 +1435,13 @@ function DashboardInner() {
     });
   }, [setThoughtsDraftInjection]);
 
+  // #746 — Auto-directive proposer Accept callback. Re-uses the same draft
+  // injection pipeline as design-mode capture so the orchestrator chat
+  // composer pre-fills with the proposed directive text.
+  const handleAcceptDirectiveProposal = useCallback((draft: { id: string; text: string }) => {
+    setThoughtsDraftInjection(draft);
+  }, [setThoughtsDraftInjection]);
+
   const injectPayloadIntoRepoChat = useCallback((payload: AgentPanelChatInjectionPayload, repoOverride?: WorkspaceSidePanelRepo | null) => {
     const nextInjection = {
       id: `${payload.reason}-${Date.now()}`,
@@ -2721,6 +2728,7 @@ function DashboardInner() {
             onSelectSession={handleSelectSession}
             latestDispatchedTabId={latestDispatchedTabId}
             latestDispatchedAt={latestDispatchedAt}
+            onAcceptDirectiveProposal={handleAcceptDirectiveProposal}
           >
             <TileContainer
               layout={tileLayout}
