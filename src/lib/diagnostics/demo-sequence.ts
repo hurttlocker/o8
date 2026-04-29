@@ -544,7 +544,17 @@ async function step11NavigateContextGraph(ctx: StepContext): Promise<DemoStepRes
         'context-graph route did not show "Fig. 1.1", "sources", "context", or "graph"',
       );
     }
-    return { screenshotPath, message: 'context-graph surface rendered' };
+    // #848 — never strand the user on /context-graph after the demo. Always
+    // navigate back to /dashboard so the run leaves the webview where it
+    // started. Best-effort — a navigate failure here is non-fatal because
+    // the assertion above has already passed.
+    try {
+      await ctx.client.navigate('/dashboard');
+      await sleep(300);
+    } catch {
+      // ignore — the user can hit Esc / [CLOSE] on /context-graph
+    }
+    return { screenshotPath, message: 'context-graph surface rendered; returned to /dashboard' };
   });
 }
 

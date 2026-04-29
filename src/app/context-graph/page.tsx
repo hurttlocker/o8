@@ -24,6 +24,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import GraphCanvas from './GraphCanvas';
 import LeftColumn from './LeftColumn';
 import RightColumn from './RightColumn';
@@ -125,6 +126,7 @@ function ProgressBar({
 
 export default function ContextGraphPage() {
   const [counts, setCounts] = useState<SourceCounts>(FALLBACK_COUNTS);
+  const router = useRouter();
 
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +137,22 @@ export default function ContextGraphPage() {
       cancelled = true;
     };
   }, []);
+
+  // #869 — back-nav affordance. Esc key returns the user to the dashboard
+  // so they're never stranded on this marketing surface, especially when
+  // navigated here by an automated demo or MCP tool.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        router.push('/dashboard');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [router]);
 
   const totalFmt = counts.total.toLocaleString('en-US');
   const relevantFmt = counts.relevant.toLocaleString('en-US');
@@ -155,6 +173,49 @@ export default function ContextGraphPage() {
         boxSizing: 'border-box',
       }}
     >
+      {/* ─── Close affordance (#869) ─────────────────────────────── */}
+      {/* Fixed top-right; on-brand bracketed editorial link. Always visible
+          so a user (or dogfood agent) navigated here by the demo runner or
+          an MCP tool can exit back to /dashboard. Esc does the same. */}
+      <button
+        type="button"
+        onClick={() => router.push('/dashboard')}
+        aria-label="Close and return to dashboard (Esc)"
+        title="Close (Esc)"
+        style={{
+          position: 'fixed',
+          top: '24px',
+          right: '32px',
+          zIndex: 10,
+          background: 'transparent',
+          border: 'none',
+          paddingTop: '8px',
+          paddingBottom: '8px',
+          paddingLeft: '10px',
+          paddingRight: '10px',
+          margin: 0,
+          cursor: 'pointer',
+          fontFamily: FONT_MONO,
+          fontSize: '11px',
+          fontWeight: 500,
+          letterSpacing: '0.16em',
+          textTransform: 'uppercase',
+          color: 'var(--t-text-muted)',
+          lineHeight: 1,
+          minHeight: '44px',
+          display: 'inline-flex',
+          alignItems: 'center',
+        }}
+        onMouseEnter={(event) => {
+          (event.currentTarget as HTMLButtonElement).style.color = 'var(--t-text-strong)';
+        }}
+        onMouseLeave={(event) => {
+          (event.currentTarget as HTMLButtonElement).style.color = 'var(--t-text-muted)';
+        }}
+      >
+        [CLOSE]
+      </button>
+
       <main
         style={{
           maxWidth: '1240px',
