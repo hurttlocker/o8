@@ -1,14 +1,14 @@
 /**
- * Cortex Q&A eval runner — epic #915 sub-issue 3 (wave A + B complete).
+ * Cortex Q&A eval runner — epic #915 sub-issue 3 wave A (updated by sub-2).
  *
- * Wave A: eval scaffolding, cases.json, aggregation, exitCode logic.
- * Wave B (sub-2): real askCortex() pipeline (Flash classifier + retrievers + Sonnet compose).
- * Wave B (sub-3, this file): real Sonnet judge replaces judgeStub; Flash fallback when
- *   ANTHROPIC_API_KEY missing; persistRun() now fires reliably when DB available.
+ * Wave B changes (this file, sub-issue 2):
+ *   - askCortex() is now the real pipeline imported from
+ *     src/lib/cortex/qa/ask.ts (Flash classifier + retrievers + Sonnet compose).
+ *   - persistRun() is a best-effort SQLite write into qa_eval_runs (schema v14).
  *
  * Wave A contract (preserved):
  *   - Loads tests/qa-eval/cases.json
- *   - Scores with realJudge() (Sonnet → Flash fallback)
+ *   - Scores with judgeStub()
  *   - Aggregates per category and exits 0 when all categories >= 70%
  *   - Persistence skipped gracefully if schema not migrated yet
  */
@@ -18,6 +18,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { askCortex } from '@/lib/cortex/qa/ask';
+import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { renderJudgePrompt } from '../../../../../tests/qa-eval/judge';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -59,22 +60,13 @@ export interface AskCortexResult {
   citations: ExpectedCitation[];
 }
 
-// ── Real Sonnet judge (Wave B) ─────────────────────────────────────────────────
+// ── Real Sonnet judge (via CLI > API > Flash) ─────────────────────────────────
 
 interface JudgeResult {
   factual_accuracy: number;
   citation_correctness: number;
   hallucination_count: number;
   notes: string;
-}
-
-interface JudgeInput {
-  question: string;
-  expectedAnswer: string | null;
-  expectedFacts: string[];
-  expectedCitations: ExpectedCitation[];
-  actualAnswer: string;
-  actualCitations: ExpectedCitation[];
 }
 
 const JUDGE_FAILED: JudgeResult = {
@@ -101,79 +93,30 @@ function parseJudgeJson(raw: string): JudgeResult | null {
   }
 }
 
-/** Call Sonnet as judge. Falls back to Flash if ANTHROPIC_API_KEY missing. */
-async function realJudge(input: JudgeInput): Promise<JudgeResult> {
-  // Cast to the judge template's JudgeInput — the JSON data will always have
-  // valid union kind values; runner's local type is weaker (string).
+/** Call Sonnet as judge. Provider resolved via CLI > API > Flash. */
+async function realJudge(input: {
+  question: string;
+  expectedAnswer: string | null;
+  expectedFacts: string[];
+  expectedCitations: ExpectedCitation[];
+  actualAnswer: string;
+  actualCitations: ExpectedCitation[];
+}): Promise<JudgeResult> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const prompt = renderJudgePrompt(input as any);
 
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (anthropicKey) {
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 256,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (res.ok) {
-        const json = await res.json() as { content?: Array<{ type?: string; text?: string }> };
-        const text = json.content?.find((b) => b.type === 'text')?.text ?? '';
-        const result = parseJudgeJson(text);
-        if (result) return result;
-      } else {
-        console.warn(`[qa-eval] Sonnet judge error ${res.status} — falling back to Flash`);
-      }
-    } catch (err) {
-      console.warn('[qa-eval] Sonnet judge threw — falling back to Flash:', err instanceof Error ? err.message : err);
-    }
-  } else {
-    console.info('[qa-eval] No ANTHROPIC_API_KEY — using Flash judge (acceptable degradation)');
-  }
-
-  // Flash fallback judge.
-  const geminiKey =
-    process.env.GOOGLE_AI_API_KEY ??
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
-    process.env.GEMINI_API_KEY;
-
-  if (!geminiKey) {
-    console.warn('[qa-eval] No Gemini key either — returning judge-failed');
-    return JUDGE_FAILED;
-  }
-
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.0, maxOutputTokens: 256 },
-        }),
-        signal: AbortSignal.timeout(15_000),
-      },
-    );
-    if (!res.ok) {
-      console.warn(`[qa-eval] Flash judge error ${res.status}`);
-      return JUDGE_FAILED;
-    }
-    const json = await res.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-    const text = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    const result = parseJudgeJson(text);
-    return result ?? JUDGE_FAILED;
+    const result = await callSonnet({
+      system: 'You are a strict evaluator. Return only valid JSON matching the requested schema.',
+      messages: [{ role: 'user', content: prompt }],
+      stream: false,
+    });
+    const parsed = parseJudgeJson(result.text);
+    if (parsed) return parsed;
+    console.warn('[qa-eval] Judge returned unparseable JSON — using JUDGE_FAILED');
+    return JUDGE_FAILED;
   } catch (err) {
-    console.warn('[qa-eval] Flash judge threw:', err instanceof Error ? err.message : err);
+    console.warn('[qa-eval] realJudge threw:', err instanceof Error ? err.message : err);
     return JUDGE_FAILED;
   }
 }
