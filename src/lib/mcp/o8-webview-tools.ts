@@ -103,6 +103,123 @@ function capEvalResult(raw: string): McpToolResult {
   });
 }
 
+// Sibling of #868 — three Phase 2 audit agents (Recall Card, status-grouped
+// lanes, packet spec) flagged that the Rust execute_js bridge silently
+// returns the empty string when the user's last expression evaluates to a
+// non-JSON-serializable value (functions, DOM elements, circular refs) or
+// when a multi-statement script doesn't explicitly return.
+//
+// Fix: wrap the user's code in an outer IIFE that:
+//   1. Evaluates the code via indirect eval — `(0, eval)(code)` — which
+//      preserves completion-value semantics so `var x = 42; x` returns 42
+//      (whereas `new Function(body)` would silently return undefined).
+//   2. Catches any throw and returns `{ ok: false, error }`.
+//   3. Probes `JSON.stringify` on the result. If it succeeds AND the value
+//      key survives the round-trip, returns `{ ok: true, value }`. If
+//      stringify throws (circular ref) OR drops the value key (function,
+//      undefined, top-level non-enumerable), falls back to `String(result)`
+//      so toString() still surfaces the value.
+//   4. console.warn on the renderer side when the fallback fires so
+//      operators can see in DevTools that a non-serializable came back.
+//
+// This eliminates the "silently returns undefined" bug for medium-complexity
+// expressions like `JSON.stringify(arrayOfObjects)`,
+// `(() => { var x = ...; x.click(); return x.id; })()`, and
+// `var x = setItem(...); x`.
+function wrapEvalCode(userCode: string): string {
+  const trimmed = userCode.trim();
+  // Run the user code via indirect eval — `(0, eval)(code)` evaluates in the
+  // global scope AND returns the completion value of the last statement,
+  // which is what the user expects when they write `var x = 42; x`. Direct
+  // `new Function(code)` would silently return undefined because function
+  // bodies require an explicit `return`.
+  //
+  // After we have the value, probe JSON.stringify behaviour:
+  //   - If JSON.stringify drops the value key (function, undefined,
+  //     non-enumerable), fall back to String(value) and tag the envelope
+  //     with nonSerializable:true.
+  //   - If JSON.stringify throws (circular ref), fall back identically.
+  //   - Otherwise return the envelope as-is.
+  //
+  // Errors during eval surface as { ok: false, error: { message, name, stack } }.
+  const codeJson = JSON.stringify(trimmed);
+  return `(() => {
+  const __o8_user_code__ = ${codeJson};
+  let __o8_value__;
+  try {
+    // Indirect eval — (0, eval) — evaluates in global scope and preserves
+    // completion-value semantics for statement bodies.
+    __o8_value__ = (0, eval)(__o8_user_code__);
+  } catch (__o8_err__) {
+    return JSON.stringify({
+      ok: false,
+      error: {
+        message: (__o8_err__ && __o8_err__.message) || String(__o8_err__),
+        name: (__o8_err__ && __o8_err__.name) || 'Error',
+        stack: (__o8_err__ && __o8_err__.stack) || null,
+      },
+    });
+  }
+
+  // Probe JSON serializability. JSON.stringify on a top-level non-serializable
+  // (function, undefined) returns undefined; on a property with such a value
+  // it drops the key. We detect both via a marker: stringify { value: x } and
+  // check the parsed envelope still has the key.
+  let __o8_serialized__;
+  let __o8_throwOnSerialize__ = false;
+  try {
+    __o8_serialized__ = JSON.stringify({ ok: true, value: __o8_value__ });
+  } catch (__o8_serialize_err__) {
+    __o8_throwOnSerialize__ = true;
+    try {
+      console.warn('[o8_view_eval] JSON.stringify threw, falling back to String():', __o8_serialize_err__ && __o8_serialize_err__.message);
+    } catch (_) {}
+  }
+
+  // Detect the dropped-key case: stringify succeeded but the value field is
+  // missing in the round-tripped envelope (function or undefined property).
+  let __o8_keyDropped__ = false;
+  if (!__o8_throwOnSerialize__ && typeof __o8_serialized__ === 'string') {
+    try {
+      const __o8_parsed__ = JSON.parse(__o8_serialized__);
+      if (!('value' in __o8_parsed__)) {
+        __o8_keyDropped__ = true;
+        try {
+          console.warn('[o8_view_eval] non-serializable result (key dropped), falling back to String(): typeof =', typeof __o8_value__);
+        } catch (_) {}
+      }
+    } catch (_) {
+      __o8_throwOnSerialize__ = true;
+    }
+  }
+
+  if (!__o8_throwOnSerialize__ && !__o8_keyDropped__ && typeof __o8_serialized__ === 'string') {
+    return __o8_serialized__;
+  }
+
+  // Fallback path — String(value) the result so the caller still sees
+  // something useful (eg. "[object HTMLDivElement]" for DOM nodes,
+  // "function ..." for functions). Includes nonSerializable:true so callers
+  // can distinguish this case from a normal serialized return.
+  let __o8_string__;
+  try {
+    __o8_string__ = String(__o8_value__);
+  } catch (__o8_string_err__) {
+    __o8_string__ = '[unstringifiable value]';
+  }
+  try {
+    return JSON.stringify({
+      ok: true,
+      value: __o8_string__,
+      nonSerializable: true,
+      valueType: typeof __o8_value__,
+    });
+  } catch (_) {
+    return '{"ok":true,"value":"[unrepresentable]","nonSerializable":true}';
+  }
+})()`;
+}
+
 function imageResult(base64: string, mimeType: string, meta: Record<string, unknown>): McpToolResult {
   return {
     content: [
@@ -222,7 +339,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_eval',
-    description: 'Execute JavaScript in the o8 webview. Returns stringified result, capped at 8KB — payloads larger than the cap come back as { truncated: true, sizeBytes, capBytes, preview }. Base64 image blobs are rejected — use o8_view_screenshot for image data. Use when snapshot/click can\'t reach the target.',
+    description: 'Execute JavaScript in the o8 webview. Result wrapped as JSON envelope { ok: true, value } on success or { ok: false, error: { message, name, stack } } on throw. Non-JSON-serializable values (DOM nodes, functions, circular refs) fall back to String(result) and come back as { ok: true, value: "<toString>", nonSerializable: true, valueType: "<typeof>" }. Single expressions and multi-statement scripts both work — the wrapper auto-detects expression vs. body. Capped at 8KB — payloads larger than the cap come back as { truncated: true, sizeBytes, capBytes, preview }. Base64 image blobs are rejected — use o8_view_screenshot for image data.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -310,7 +427,8 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
 
     o8_view_eval: async (args) => withStructuredErrors(async () => {
       const code = requiredString(args, 'code');
-      const result = await getClient().evalJs(code);
+      const wrapped = wrapEvalCode(code);
+      const result = await getClient().evalJs(wrapped);
       return capEvalResult(result.result);
     }),
 
