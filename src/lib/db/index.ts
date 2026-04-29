@@ -33,7 +33,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 10;
+const DB_SCHEMA_VERSION = 11;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -238,7 +238,9 @@ function ensureTables(sqlite: Database.Database): void {
       transcript_path TEXT,
       started_at TEXT NOT NULL,
       completed_at TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      valid_from TEXT NOT NULL DEFAULT (datetime('now')),
+      valid_to TEXT
     );
 
     CREATE TABLE IF NOT EXISTS teams (
@@ -479,6 +481,7 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_so_repo_completed ON session_outcomes(repo_path, completed_at DESC);
     CREATE INDEX IF NOT EXISTS idx_so_lane_id ON session_outcomes(lane_id);
     CREATE INDEX IF NOT EXISTS idx_so_packet_id ON session_outcomes(packet_id);
+    CREATE INDEX IF NOT EXISTS idx_so_valid_to ON session_outcomes(valid_to);
     CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
     CREATE INDEX IF NOT EXISTS idx_github_repositories_installation ON github_repositories(installation_id);
@@ -609,6 +612,23 @@ function ensureSessionOutcomeColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'session_outcomes', 'plan_text')) {
     sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN plan_text TEXT');
   }
+  // #745 — Temporal validity windows. SQLite ALTER TABLE ADD COLUMN rejects
+  // any non-literal DEFAULT (even CURRENT_TIMESTAMP) on the bundled
+  // better-sqlite3 build, so add the column as nullable, backfill historical
+  // rows from `completed_at`, and let Drizzle's schema-level default supply
+  // `datetime('now')` for fresh inserts. Fresh DBs get the NOT NULL DEFAULT
+  // (datetime('now')) shape via the CREATE TABLE in ensureTables() above.
+  if (!tableColumnExists(sqlite, 'session_outcomes', 'valid_from')) {
+    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN valid_from TEXT');
+    sqlite.exec(
+      "UPDATE session_outcomes SET valid_from = COALESCE(completed_at, created_at, datetime('now')) WHERE valid_from IS NULL OR valid_from = ''",
+    );
+  }
+  if (!tableColumnExists(sqlite, 'session_outcomes', 'valid_to')) {
+    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN valid_to TEXT');
+  }
+  // Index on valid_to to keep "live entries only" recall queries cheap.
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_so_valid_to ON session_outcomes(valid_to)');
 }
 
 function backfillWatchedAgentColumns(sqlite: Database.Database): void {

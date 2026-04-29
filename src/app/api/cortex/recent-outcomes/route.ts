@@ -26,8 +26,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getDb, sessionOutcomes } from '@/lib/db';
+import { liveOutcomeFilter } from '@/lib/cortex/decay';
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest) {
         durationMs: sessionOutcomes.durationMs,
       })
       .from(sessionOutcomes)
-      .where(eq(sessionOutcomes.repoPath, repoPath))
+      .where(and(eq(sessionOutcomes.repoPath, repoPath), liveOutcomeFilter()))
       .orderBy(desc(sessionOutcomes.completedAt))
       .limit(limit);
 
