@@ -38,6 +38,41 @@ const recommendationCache = new Map<string, { value: RuntimeRecommendationPayloa
 // via a shared event would be cleaner but adds plumbing for marginal gain.
 const RECOMMENDATION_TTL_MS = 10_000;
 
+// Phase 4 (#747 follow-up) — In-flight fetch dedupe. When a packet transitions
+// draft → running, its PacketCard unmounts in the BACKLOG group and remounts
+// in the IN PROGRESS group; if the original fetch was still in flight the
+// previous mount's `controller.abort()` cancelled it, leaving the new mount
+// to fire a fresh request. Under heavy WS load this can repeat enough that
+// the chip never settles. Sharing a single Promise per repoPath fixes that
+// without touching the per-mount cleanup contract.
+const inFlightByRepo = new Map<string, Promise<RuntimeRecommendationPayload | null>>();
+
+function fetchRecommendationFor(repoPath: string): Promise<RuntimeRecommendationPayload | null> {
+  const existing = inFlightByRepo.get(repoPath);
+  if (existing) return existing;
+  const url = `/api/cortex/runtime-recommendation?repoPath=${encodeURIComponent(repoPath)}`;
+  // Fetch detached from any AbortController — we never want a card unmount
+  // to kill the request, since the cache it populates is shared across all
+  // cards on the same repo.
+  const promise = fetch(url)
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const data = await response.json().catch(() => null);
+      if (!data || data.ok !== true || !data.recommendation) return null;
+      return data.recommendation as RuntimeRecommendationPayload;
+    })
+    .then((value) => {
+      recommendationCache.set(repoPath, { value, expiresAt: Date.now() + RECOMMENDATION_TTL_MS });
+      return value;
+    })
+    .catch(() => null)
+    .finally(() => {
+      inFlightByRepo.delete(repoPath);
+    });
+  inFlightByRepo.set(repoPath, promise);
+  return promise;
+}
+
 function useRuntimeRecommendation(repoPath: string | null | undefined): RuntimeRecommendationPayload | null {
   const [payload, setPayload] = useState<RuntimeRecommendationPayload | null>(() => {
     if (!repoPath) return null;
@@ -52,23 +87,10 @@ function useRuntimeRecommendation(repoPath: string | null | undefined): RuntimeR
       return;
     }
     let cancelled = false;
-    const controller = new AbortController();
-    const url = `/api/cortex/runtime-recommendation?repoPath=${encodeURIComponent(repoPath)}`;
-    fetch(url, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        const data = await response.json().catch(() => null);
-        if (!data || data.ok !== true || !data.recommendation) return null;
-        return data.recommendation as RuntimeRecommendationPayload;
-      })
-      .then((value) => {
-        recommendationCache.set(repoPath, { value, expiresAt: Date.now() + RECOMMENDATION_TTL_MS });
-        if (!cancelled) setPayload(value);
-      })
-      .catch(() => {
-        // Network or middleware errors are non-fatal — chip just stays hidden.
-      });
-    return () => { cancelled = true; controller.abort(); };
+    fetchRecommendationFor(repoPath).then((value) => {
+      if (!cancelled) setPayload(value);
+    });
+    return () => { cancelled = true; };
   }, [repoPath]);
   return payload;
 }
@@ -250,7 +272,10 @@ export function PacketMetaRows({
         >
           <span style={rowLabelStyle}>runtime</span>
           <span style={{ ...rowValueStyle, color: orchestratorRuntimeTone(packet.runtime).color, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' as const }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{runtimeDisplay}</span>
+            {/* min-width:0 lets the runtime label shrink so the recommendation
+                chip never gets clipped by the row's overflow:hidden, even when
+                running packets carry longer lane metadata or denser layout. */}
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{runtimeDisplay}</span>
             {showRecommendationChipOnRow && recommendedRuntime && recommendationScorePct !== null ? (
               <span
                 title={`History on this repo prefers ${orchestratorRuntimeTone(recommendedRuntime).label} (${recommendationScorePct}% clean merge rate). Click to switch.`}
