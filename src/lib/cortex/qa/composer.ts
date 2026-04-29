@@ -20,6 +20,7 @@
 
 import 'server-only';
 
+import { detectContradictions } from '@/lib/cortex/qa/contradictions';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
@@ -233,6 +234,13 @@ export async function composeClassA(
         url: row.citation.url,
       });
     }
+
+    // Contradiction pass — runs after the answer streams (non-blocking to TTFT).
+    const contradictions = await detectContradictions({ rows: topRows, answer: translatedAnswer });
+    for (const c of contradictions) {
+      emit('contradiction', c);
+    }
+
     emit('done', {});
   } catch (err) {
     const message = err instanceof Error ? err.message : 'composer-A error';
@@ -344,8 +352,10 @@ export async function composeClassB(
     }
 
     // Post-process: translate bracket citations → verified CITATION markers.
+    let finalAnswer = '';
     if (fullText.trim()) {
-      const { verifiedRows } = translateCitations(fullText, lookup);
+      const { translatedAnswer: translated, verifiedRows } = translateCitations(fullText, lookup);
+      finalAnswer = translated;
       // Emit verified citations after streaming completes.
       for (const row of verifiedRows) {
         emit('citation', {
@@ -360,6 +370,13 @@ export async function composeClassB(
       // Nothing streamed — emit a default message.
       emit('token', { text: 'I don\'t have that information yet — try indexing more directives or PRs.' });
     }
+
+    // Contradiction pass — runs after the answer streams (non-blocking to TTFT).
+    const contradictions = await detectContradictions({ rows: topRows, answer: finalAnswer });
+    for (const c of contradictions) {
+      emit('contradiction', c);
+    }
+
     emit('done', {});
   } catch (err) {
     const message = err instanceof Error ? err.message : 'composer-B error';
