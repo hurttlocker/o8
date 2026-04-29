@@ -5,18 +5,26 @@
  * o8 install. Lets a real user install the packaged Tauri app, hit this
  * endpoint, and get a copy-paste-ready config without hardcoded dev paths.
  *
- * Two install modes:
+ * Two install modes for the operator MCP server:
  *   1. Dev checkout — use `tsx` against the source file in-tree.
  *   2. Packaged Tauri app — use `node` against the bundled .mjs in the
  *      resource dir. Signalled by process.env.O8_BUNDLED_MCP_PATH, which
  *      the Rust sidecar sets before spawning the Next server.
  *
+ * Plus codebase-memory (Context Engine v2, epic #738): a static binary the
+ * Tauri sidecar downloads on first launch (#739). Resolved via
+ * `O8_CODEBASE_MEMORY_BIN` env var (set when ready) with a deterministic
+ * `~/.o8/bin/codebase-memory-mcp{.exe}` fallback. Omitted when neither
+ * resolves so cold first launch doesn't break Claude Code session boot.
+ *
  * Returns:
  *   {
  *     server: { "o8": { command, args, env } },
+ *     codebaseMemory: { command, args, env } | null,
  *     fullConfig: { "mcpServers": { ... } },
  *     instructions: { claudeDesktop, claudeCode },
- *     diagnostics: { nodeInstalled, codexInstalled, ghInstalled }
+ *     diagnostics: { nodeInstalled, codexInstalled, ghInstalled,
+ *                    codebaseMemoryAvailable, ... }
  *   }
  */
 
@@ -80,6 +88,54 @@ function buildServerConfig(): { command: string; args: string[]; env: Record<str
   };
 }
 
+/**
+ * Resolve the codebase-memory-mcp binary path.
+ *
+ * #739 (the Tauri sidecar) downloads the static binary on first launch into
+ * `~/.o8/bin/codebase-memory-mcp` (`.exe` on Windows) and sets
+ * `O8_CODEBASE_MEMORY_BIN` to the resolved path. Because the env var only
+ * inherits into children spawned AFTER the download completes, we also fall
+ * back to the deterministic path so external installs (Claude Desktop /
+ * Claude Code outside the o8 process) can still locate the binary.
+ *
+ * Returns null when neither source resolves to a real executable. Callers
+ * MUST treat null as "skip the entry" so cold first launch (binary not yet
+ * downloaded) doesn't break Claude Code session boot.
+ */
+function resolveCodebaseMemoryBin(): string | null {
+  const fromEnv = process.env.O8_CODEBASE_MEMORY_BIN;
+  if (fromEnv && fromEnv.trim() && existsSync(fromEnv)) {
+    return fromEnv;
+  }
+
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  if (!home) return null;
+
+  const fileName = process.platform === 'win32'
+    ? 'codebase-memory-mcp.exe'
+    : 'codebase-memory-mcp';
+  const deterministic = join(home, '.o8', 'bin', fileName);
+  if (existsSync(deterministic)) {
+    return deterministic;
+  }
+
+  return null;
+}
+
+/**
+ * Build the codebase-memory MCP server entry, or null if the binary isn't
+ * available. The binary defaults to MCP-stdio mode when invoked with no args.
+ */
+function buildCodebaseMemoryConfig(): { command: string; args: string[]; env: Record<string, string> } | null {
+  const bin = resolveCodebaseMemoryBin();
+  if (!bin) return null;
+  return {
+    command: bin,
+    args: [],
+    env: {},
+  };
+}
+
 function buildInstructions(): { claudeDesktop: string; claudeCode: string } {
   const home = process.env.HOME || '';
   const claudeDesktopConfigPath = process.platform === 'darwin'
@@ -106,7 +162,13 @@ function buildInstructions(): { claudeDesktop: string; claudeCode: string } {
 export async function GET() {
   try {
     const server = buildServerConfig();
-    const fullConfig = { mcpServers: { o8: server } };
+    const codebaseMemory = buildCodebaseMemoryConfig();
+
+    const mcpServers: Record<string, unknown> = { o8: server };
+    if (codebaseMemory) {
+      mcpServers['codebase-memory'] = codebaseMemory;
+    }
+    const fullConfig = { mcpServers };
 
     const nodeBin = findCommand('node');
     const codexBin = findCommand('codex');
@@ -122,6 +184,7 @@ export async function GET() {
 
     return NextResponse.json({
       server,
+      codebaseMemory,
       fullConfig,
       instructions: buildInstructions(),
       diagnostics: {
@@ -142,6 +205,7 @@ export async function GET() {
         dbSize,
         webviewSocketPath,
         webviewToolsAvailable: existsSync(webviewSocketPath),
+        codebaseMemoryAvailable: Boolean(codebaseMemory),
       },
     });
   } catch (error) {
