@@ -12,6 +12,7 @@
  *   history — transcript updates (pushed on change)
  *   lane-lifecycle — lane status transitions (pushed on change)
  *   review  — review file updates (pushed on change)
+ *   cortex-changes — directive / outcome / codebase-memory writes (#840)
  *   pong    — keepalive response
  *
  * The client sends:
@@ -3081,6 +3082,53 @@ const httpServer = createServer((req, res) => {
 
       res.writeHead(400);
       res.end('unsupported kind');
+    });
+    return;
+  }
+
+  // ── #840 — Cortex memory change broadcast ──
+  // Invoked by `publishCortexChange()` after a directive trailer is appended
+  // (or any other Cortex memory write). Fans out a `cortex-changes` channel
+  // event; the desktop WS bridge converts it to an `o8:cortex-changes`
+  // window event so the Recall Card / Packet Review Card re-fetch without
+  // a full page reload.
+  if (req.url === '/internal/cortex-changes' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
+          scope?: string;
+          repoPath?: string;
+          reason?: string;
+        };
+        const scope = typeof body.scope === 'string' ? body.scope : 'unknown';
+        broadcast({
+          channel: 'cortex-changes',
+          event: 'update',
+          data: {
+            scope,
+            repoPath: body.repoPath ?? null,
+            reason: body.reason ?? null,
+            ts: currentIsoTime(),
+          },
+        });
+        console.log(`[cortex-changes] Broadcast scope=${scope}${body.reason ? ` reason=${body.reason}` : ''}`);
+        res.writeHead(202);
+        res.end('accepted');
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : 'invalid json',
+        }));
+      }
     });
     return;
   }
