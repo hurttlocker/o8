@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { applyApprovedFileEdit } from '@/lib/approvals/file-edit';
+import { applyApprovedSpecUpdate } from '@/lib/approvals/spec-update';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
 import {
@@ -196,8 +197,40 @@ export async function POST(request: NextRequest) {
       };
     }
 
+    // Spec-update continuation — apply via writePacketSpec on approve.
+    // resolveApproval already settled atomically; only the winner of the race
+    // (resolvedAt === updatedAt) writes to disk, so concurrent approvers
+    // can't corrupt the spec file.
+    let appliedSpecUpdate: { packetId: string; message: string; updatedAt?: string } | undefined;
+    if (
+      action === 'approve'
+      && approval.continuation?.kind === 'spec-update'
+      && approval.status === 'approved'
+      && approval.resolvedAt === approval.updatedAt
+    ) {
+      const applyResult = await applyApprovedSpecUpdate(approval);
+      if (!applyResult.ok) {
+        return NextResponse.json({
+          ok: false,
+          error: applyResult.message,
+          code: applyResult.error,
+          approval,
+        }, {
+          status: 500,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        });
+      }
+      appliedSpecUpdate = {
+        packetId: applyResult.packetId,
+        message: applyResult.message,
+        updatedAt: applyResult.updatedAt,
+      };
+    }
+
     // Route resolution based on continuation type
-    let decisionNote = appliedEdit?.message ?? (action === 'approve' ? 'Approved.' : 'Denied.');
+    let decisionNote = appliedSpecUpdate?.message
+      ?? appliedEdit?.message
+      ?? (action === 'approve' ? 'Approved.' : 'Denied.');
     let assistantMessage: unknown = undefined;
     let nextApproval: unknown = undefined;
 
@@ -279,6 +312,7 @@ export async function POST(request: NextRequest) {
       assistantMessage,
       nextApproval,
       appliedEdit,
+      appliedSpecUpdate,
     }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });

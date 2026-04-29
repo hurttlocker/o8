@@ -125,7 +125,26 @@ export interface PlanApprovalContinuation {
   constraints?: string;
 }
 
-export type ApprovalContinuation = LlmApprovalContinuation | RuntimeApprovalContinuation | LaneApprovalContinuation | PlanApprovalContinuation;
+/**
+ * Agent-proposed packet spec update — closes #857.
+ *
+ * The orchestrator agent calls `cortex_propose_spec` to suggest a new spec.md
+ * body for a packet. The proposal is held in the approval queue until the
+ * operator approves (apply via `writePacketSpec`) or rejects (no change).
+ * Changes only land for NEW dispatches, never an in-flight agent.
+ */
+export interface SpecUpdateApprovalContinuation {
+  kind: 'spec-update';
+  packetId: string;
+  proposedSpec: string;
+}
+
+export type ApprovalContinuation =
+  | LlmApprovalContinuation
+  | RuntimeApprovalContinuation
+  | LaneApprovalContinuation
+  | PlanApprovalContinuation
+  | SpecUpdateApprovalContinuation;
 
 export interface ApprovalRecord {
   id: string;
