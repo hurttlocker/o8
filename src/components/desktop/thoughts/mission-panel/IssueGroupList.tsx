@@ -1,7 +1,13 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 import type { RepoIssue, RepoIssuesGroup } from './types';
+
+// #867 — Two-step confirm window. First click on "+" arms the row; second
+// click within this window actually dispatches. Auto-cancels after the
+// timeout so an idle armed row doesn't sit hot indefinitely.
+const CONFIRM_TIMEOUT_MS = 5000;
 
 interface IssueGroupListProps {
   issueGroups: RepoIssuesGroup[];
@@ -20,6 +26,35 @@ export function IssueGroupList({
   missionState,
   onCreatePacketFromIssue,
 }: IssueGroupListProps) {
+  // #867 — Track which issue row is currently armed for dispatch. Only one
+  // row can be armed at a time; clicking another row's "+" cancels the
+  // previous arm. Key shape: `${repoId}::${issueNumber}`.
+  const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending arm-timer on unmount so we don't fire setState on a
+  // gone component.
+  useEffect(() => {
+    return () => {
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    };
+  }, []);
+
+  const armConfirm = (key: string) => {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    setConfirmingKey(key);
+    confirmTimerRef.current = setTimeout(() => {
+      setConfirmingKey((current) => (current === key ? null : current));
+      confirmTimerRef.current = null;
+    }, CONFIRM_TIMEOUT_MS);
+  };
+
+  const cancelConfirm = () => {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    confirmTimerRef.current = null;
+    setConfirmingKey(null);
+  };
+
   return (
     <>
       {issueGroups.map((group) => {
@@ -78,6 +113,8 @@ export function IssueGroupList({
                   const alreadyPacketed = missionState.packets.some(
                     (packet) => packet.summary.includes(`#${issue.number}`) || packet.title === issue.title,
                   );
+                  const issueKey = `${group.repoId}::${issue.number}`;
+                  const isConfirming = confirmingKey === issueKey;
                   return (
                     <div
                       key={`${group.repoId}-${issue.number}`}
@@ -102,10 +139,93 @@ export function IssueGroupList({
                         {issue.title}
                       </span>
                       {!alreadyPacketed ? (
-                        <button type="button" onClick={() => onCreatePacketFromIssue(issue)} title="Create work packet"
-                          style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-                          <span style={{ fontSize: 14, color: 'var(--t-text-muted)', opacity: 0.5, lineHeight: 1 }}>+</span>
-                        </button>
+                        isConfirming ? (
+                          // #867 — Inline confirm strip. Two buttons: confirm
+                          // (orange accent, dispatches) and cancel (neutral,
+                          // disarms). Auto-disarms after CONFIRM_TIMEOUT_MS.
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              flexShrink: 0,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                cancelConfirm();
+                                onCreatePacketFromIssue(issue);
+                              }}
+                              title="Confirm dispatch"
+                              style={{
+                                borderWidth: 1,
+                                borderStyle: 'solid',
+                                borderColor: 'rgba(255, 90, 31, 0.45)',
+                                background: 'rgba(255, 90, 31, 0.12)',
+                                color: '#c2410c',
+                                cursor: 'pointer',
+                                paddingTop: 2,
+                                paddingRight: 8,
+                                paddingBottom: 2,
+                                paddingLeft: 8,
+                                borderRadius: 6,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                letterSpacing: '0.04em',
+                                textTransform: 'uppercase' as const,
+                                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                              }}
+                            >
+                              Dispatch
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelConfirm}
+                              title="Cancel"
+                              style={{
+                                borderWidth: 1,
+                                borderStyle: 'solid',
+                                borderColor: 'var(--t-border)',
+                                background: 'transparent',
+                                color: 'var(--t-text-secondary)',
+                                cursor: 'pointer',
+                                paddingTop: 2,
+                                paddingRight: 8,
+                                paddingBottom: 2,
+                                paddingLeft: 8,
+                                borderRadius: 6,
+                                fontSize: 10,
+                                fontWeight: 600,
+                                letterSpacing: '0.04em',
+                                textTransform: 'uppercase' as const,
+                                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => armConfirm(issueKey)}
+                            title="Create work packet"
+                            style={{
+                              borderWidth: 0,
+                              background: 'transparent',
+                              cursor: 'pointer',
+                              paddingTop: 2,
+                              paddingRight: 4,
+                              paddingBottom: 2,
+                              paddingLeft: 4,
+                              flexShrink: 0,
+                              display: 'flex',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <span style={{ fontSize: 14, color: 'var(--t-text-muted)', opacity: 0.5, lineHeight: 1 }}>+</span>
+                          </button>
+                        )
                       ) : null}
                     </div>
                   );
