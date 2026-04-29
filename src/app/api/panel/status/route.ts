@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ensureCodebaseMemoryBootIndex } from '@/lib/codebase-memory/indexer';
+import { ensureDecayBootHook } from '@/lib/cortex/decay';
 
 export async function GET() {
   // Tauri shell hits /api/panel/status as a liveness probe right after the
@@ -7,6 +8,9 @@ export async function GET() {
   // codebase-memory boot index pass (closes #741). Idempotent — fires once
   // per server process. Runs in the background, never blocks the response.
   ensureCodebaseMemoryBootIndex();
+  // #745 — Temporal validity windows. Same idempotent pattern: first call
+  // fires an immediate decay sweep on a microtask and schedules a 6h tick.
+  ensureDecayBootHook();
 
   return NextResponse.json({
     connected: false,
