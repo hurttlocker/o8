@@ -86,6 +86,8 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  // Fix #4: synchronous guard so held-Enter can't double-fire before setState flushes
+  const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const name = useMemo(() => displayName(agent, sessionKey), [agent, sessionKey]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
@@ -96,9 +98,19 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
   const canSend = canSteer && !sending && trimmedDraft.length > 0;
   const lastEntryKey = entries.length > 0 ? `${entries[entries.length - 1]?.id}:${entryContent(entries[entries.length - 1]!)}` : '';
 
+  // Fix #1: keep a ref in sync with latest agent so submitSteer re-derives
+  // canSteer at call time, not at callback-creation time.
+  const agentRef = useRef(agent);
+  useEffect(() => { agentRef.current = agent; }, [agent]);
+
   const submitSteer = useCallback(async () => {
     const message = trimmedDraft;
-    if (!message || !canSteer || sending) return;
+    // Fix #1: re-derive canSteer from the latest agent ref to avoid stale closure
+    const currentStatus = classifyStatus(agentRef.current?.status);
+    const canSteerNow = currentStatus === 'running' || currentStatus === 'waiting';
+    // Fix #4: check sendingRef synchronously before any setState to prevent held-Enter race
+    if (!message || !canSteerNow || sendingRef.current) return;
+    sendingRef.current = true;
     setSending(true);
     setSendError(null);
     try {
@@ -114,20 +126,27 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
       const payload = await response
         .json()
         .catch(() => null) as { ok?: boolean; note?: string; error?: string } | null;
+      // Fix #2: always clear draft after a send-attempt to prevent double-send on retry after error
+      setDraft('');
       if (!response.ok || payload?.ok === false) {
         const note = payload?.error ?? payload?.note ?? response.statusText ?? 'Unable to send steer.';
         setSendError(note);
         return;
       }
-      setDraft('');
+      // Fix #5: set transcript to loading but fall back to idle after 10s if WS push never arrives
       transcriptStore.setStatus(sessionKey, 'loading');
+      setTimeout(() => {
+        transcriptStore.setStatus(sessionKey, 'idle');
+      }, 10_000);
     } catch (err) {
+      // Draft already cleared above; just surface the error
       setSendError(err instanceof Error ? err.message : 'Unable to send steer.');
     } finally {
+      sendingRef.current = false;
       setSending(false);
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
-  }, [canSteer, sending, sessionKey, trimmedDraft]);
+  }, [sessionKey, trimmedDraft]);
 
   const handleTextareaKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
