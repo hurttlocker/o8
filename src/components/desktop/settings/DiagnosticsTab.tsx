@@ -16,6 +16,7 @@ import {
 } from './shared';
 import { RecallHealthSection } from './RecallHealthSection';
 import { LoopStatusSection } from './LoopStatusSection';
+import { DemoRunSection } from './DemoRunSection';
 import {
   ResetConfirmModal,
   ResetDoneModal,
@@ -446,6 +447,9 @@ export function DiagnosticsTab() {
           <HairlineRule />
         </div>
       </section>
+
+      {/* 06 — DEMO SEQUENCE (#800 in-app golden-path runner) */}
+      <DemoRunSection sectionNumber="06" />
 
       {/* Two-step confirmation modal */}
       {resetStage === 'confirm' || resetStage === 'busy' || resetStage === 'error' ? (
