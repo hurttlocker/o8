@@ -266,6 +266,28 @@ export async function callCodebaseMemoryTool(
               });
               return;
             }
+            // #852: MCP tools/call can return a JSON-RPC success whose result
+            // payload has `isError: true`. Without this check we treated tool-
+            // level failures (e.g. "repo_path is required") as success and
+            // marked repos indexed when nothing was written.
+            const toolResult = callResp.result as
+              | { isError?: boolean; content?: Array<{ type?: string; text?: string }> }
+              | undefined;
+            if (toolResult && toolResult.isError === true) {
+              const text = toolResult.content
+                ?.map((c) => c?.text ?? '')
+                .filter(Boolean)
+                .join(' ')
+                .trim();
+              clearTimeout(timeout);
+              finish({
+                ok: false,
+                error: `${input.toolName} reported isError${text ? ` — ${text}` : ''}`,
+                stderr: stderrBuf || undefined,
+                durationMs: Date.now() - started,
+              });
+              return;
+            }
             clearTimeout(timeout);
             finish({
               ok: true,
