@@ -32,7 +32,11 @@ interface RuntimeRecommendationPayload {
   evidence: Partial<Record<OrchestratorRuntime, RuntimeEvidenceRow>>;
 }
 const recommendationCache = new Map<string, { value: RuntimeRecommendationPayload | null; expiresAt: number }>();
-const RECOMMENDATION_TTL_MS = 30_000;
+// #861 — TTL dropped from 30s → 10s so the chip reflects fresh outcomes shortly
+// after a packet completes. The route is cheap aggregation and the cache is
+// per-repoPath, so the extra fetch cost is negligible. Cross-card invalidation
+// via a shared event would be cleaner but adds plumbing for marginal gain.
+const RECOMMENDATION_TTL_MS = 10_000;
 
 function useRuntimeRecommendation(repoPath: string | null | undefined): RuntimeRecommendationPayload | null {
   const [payload, setPayload] = useState<RuntimeRecommendationPayload | null>(() => {
@@ -291,82 +295,121 @@ export function PacketMetaRows({
               overflow: 'hidden',
             }}
           >
-            {listDispatchableRuntimes({ includeExperimental: opencodeEnabled || packet.runtime === 'opencode' }).map((runtime: OrchestratorRuntime) => {
-              const evidence = recommendation?.evidence?.[runtime] ?? null;
-              const isRecommended = recommendedRuntime === runtime;
-              const evidencePct = evidence && evidence.total > 0
-                ? Math.round((evidence.mergedClean / evidence.total) * 100)
-                : null;
-              return (
-                <button
-                  key={runtime}
-                  type="button"
-                  onClick={() => {
-                    onPatch((current) => ({ ...current, runtime }));
-                    onEditingFieldChange(null);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    width: '100%',
-                    paddingTop: 7,
-                    paddingRight: 10,
-                    paddingBottom: 7,
-                    paddingLeft: 10,
-                    borderWidth: 0,
-                    background: packet.runtime === runtime ? 'var(--t-accent-soft)' : 'transparent',
-                    color: 'var(--t-text)',
-                    fontSize: 11.5,
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => { if (packet.runtime !== runtime) e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
-                  onMouseLeave={(e) => { if (packet.runtime !== runtime) e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: orchestratorRuntimeTone(runtime).color, flexShrink: 0 }} />
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                    {orchestratorRuntimeTone(runtime).label}
-                  </span>
-                  {isRecommended && evidencePct !== null ? (
-                    <span
-                      style={{
-                        fontSize: 9,
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.06em',
-                        color: orchestratorRuntimeTone(runtime).color,
-                        background: 'var(--t-accent-soft)',
-                        borderWidth: 1,
-                        borderStyle: 'solid',
-                        borderColor: 'var(--t-accent-border)',
-                        borderRadius: 4,
-                        paddingTop: 1,
-                        paddingRight: 5,
-                        paddingBottom: 1,
-                        paddingLeft: 5,
-                        flexShrink: 0,
-                      }}
-                    >
-                      RECOMMENDED · {evidencePct}%
+            {(() => {
+              // #860 — When opencode is hidden by the experimentalOpencode flag
+              // we still render its evidence row (disabled) so operators can see
+              // historical data and understand WHY the runtime was excluded.
+              const dispatchable = listDispatchableRuntimes({ includeExperimental: opencodeEnabled || packet.runtime === 'opencode' });
+              const opencodeHidden = !dispatchable.includes('opencode');
+              const opencodeHasEvidence = (recommendation?.evidence?.opencode?.total ?? 0) > 0;
+              const showDisabledOpencodeRow = opencodeHidden && opencodeHasEvidence;
+              const visibleRuntimes: Array<{ runtime: OrchestratorRuntime; disabled: boolean }> = [
+                ...dispatchable.map((runtime) => ({ runtime, disabled: false })),
+                ...(showDisabledOpencodeRow ? [{ runtime: 'opencode' as OrchestratorRuntime, disabled: true }] : []),
+              ];
+              return visibleRuntimes.map(({ runtime, disabled }) => {
+                const evidence = recommendation?.evidence?.[runtime] ?? null;
+                const isRecommended = !disabled && recommendedRuntime === runtime;
+                const evidencePct = evidence && evidence.total > 0
+                  ? Math.round((evidence.mergedClean / evidence.total) * 100)
+                  : null;
+                return (
+                  <button
+                    key={runtime}
+                    type="button"
+                    disabled={disabled}
+                    title={disabled ? 'opencode is disabled. Enable the experimentalOpencode flag in Settings → Operator Defaults to dispatch.' : undefined}
+                    onClick={disabled ? undefined : () => {
+                      onPatch((current) => ({ ...current, runtime }));
+                      onEditingFieldChange(null);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      width: '100%',
+                      paddingTop: 7,
+                      paddingRight: 10,
+                      paddingBottom: 7,
+                      paddingLeft: 10,
+                      borderWidth: 0,
+                      background: packet.runtime === runtime ? 'var(--t-accent-soft)' : 'transparent',
+                      color: disabled ? 'var(--t-text-muted)' : 'var(--t-text)',
+                      fontSize: 11.5,
+                      fontWeight: 500,
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      textAlign: 'left',
+                      opacity: disabled ? 0.65 : 1,
+                    }}
+                    onMouseEnter={(e) => { if (!disabled && packet.runtime !== runtime) e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
+                    onMouseLeave={(e) => { if (!disabled && packet.runtime !== runtime) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: orchestratorRuntimeTone(runtime).color, flexShrink: 0, opacity: disabled ? 0.5 : 1 }} />
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                      {orchestratorRuntimeTone(runtime).label}
                     </span>
-                  ) : evidence && evidence.total > 0 ? (
-                    <span
-                      style={{
-                        fontSize: 9.5,
-                        fontWeight: 600,
-                        color: 'var(--t-text-muted)',
-                        flexShrink: 0,
-                        fontVariantNumeric: 'tabular-nums',
-                      }}
-                    >
-                      {evidence.mergedClean}/{evidence.total}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
+                    {disabled ? (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          color: 'var(--t-text-muted)',
+                          background: 'var(--t-divider-subtle)',
+                          borderWidth: 1,
+                          borderStyle: 'solid',
+                          borderColor: 'var(--t-divider-subtle)',
+                          borderRadius: 4,
+                          paddingTop: 1,
+                          paddingRight: 5,
+                          paddingBottom: 1,
+                          paddingLeft: 5,
+                          flexShrink: 0,
+                        }}
+                      >
+                        DISABLED
+                      </span>
+                    ) : null}
+                    {isRecommended && evidencePct !== null ? (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          color: orchestratorRuntimeTone(runtime).color,
+                          background: 'var(--t-accent-soft)',
+                          borderWidth: 1,
+                          borderStyle: 'solid',
+                          borderColor: 'var(--t-accent-border)',
+                          borderRadius: 4,
+                          paddingTop: 1,
+                          paddingRight: 5,
+                          paddingBottom: 1,
+                          paddingLeft: 5,
+                          flexShrink: 0,
+                        }}
+                      >
+                        RECOMMENDED · {evidencePct}%
+                      </span>
+                    ) : evidence && evidence.total > 0 ? (
+                      <span
+                        style={{
+                          fontSize: 9.5,
+                          fontWeight: 600,
+                          color: 'var(--t-text-muted)',
+                          flexShrink: 0,
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {evidence.mergedClean}/{evidence.total}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              });
+            })()}
           </div>
         ) : null}
       </div>
