@@ -37,13 +37,14 @@
 import 'server-only';
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { and, desc, eq } from 'drizzle-orm';
 
 import { getDb, sessionOutcomes } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { liveOutcomeFilter } from '@/lib/cortex/decay';
 import { withTiming } from '@/lib/cortex/diagnostics';
+import { readRepoPathRegistry } from '@/lib/repos/repo-path-registry';
 
 import { extractSymbols, traceSymbols, type SymbolEdge } from './client';
 
@@ -135,6 +136,37 @@ function readDirectives(): DirectiveEntry[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * #849 — guard against global-directive leakage into unrelated repo packets.
+ *
+ * Global directives are by definition broad, but the semantic contract is
+ * "speak about a known repo". When the caller hands us a repoPath we don't
+ * recognize (typo, fixture path, fake `/tmp/...`), we shouldn't speak for it.
+ * Returns true when the path matches a registered repo OR equals the
+ * orchestrator's own `process.cwd()` (the canonical self-host case).
+ *
+ * Falls back to "trust it" if the registry is unreadable, so registry I/O
+ * errors don't silently kill the directives leg for legitimate repos.
+ */
+async function isKnownRepoPath(repoPath: string): Promise<boolean> {
+  const normalized = resolve(repoPath.trim());
+  if (!normalized) return false;
+
+  // Self-host case: o8 dispatching against its own checkout.
+  try {
+    if (resolve(process.cwd()) === normalized) return true;
+  } catch {
+    // resolve() never throws in practice, but keep the helper non-throwing.
+  }
+
+  const registry = await readRepoPathRegistry();
+  if (!registry.ok) {
+    // Registry unreadable — don't penalize legitimate dispatches.
+    return true;
+  }
+  return registry.repos.some((entry) => entry.path === normalized);
 }
 
 /** Filter directives by repo (global + matching repo name). */
@@ -297,7 +329,15 @@ export async function buildContextBlock({
 }: BuildContextBlockInput): Promise<string> {
   if (!repoPath?.trim()) return '';
 
-  const directives = filterDirectivesForRepo(readDirectives(), repoPath);
+  // #849 — when the path doesn't match a registered repo (and isn't our own
+  // checkout), drop the directives leg. Global directives are intentionally
+  // global, but injecting them into a packet for an unknown repo claims
+  // authority we don't have. Outcomes/symbols still resolve naturally to
+  // empty for unknown paths since they key off repoPath in the DB.
+  const repoIsKnown = await isKnownRepoPath(repoPath);
+  const directives = repoIsKnown
+    ? filterDirectivesForRepo(readDirectives(), repoPath)
+    : [];
   const outcomes = await readRecentOutcomes(repoPath);
 
   // Symbol graph is best-effort — `traceSymbols` already returns
