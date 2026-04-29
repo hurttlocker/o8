@@ -77,7 +77,7 @@ export function ResetConfirmModal({
           color: '#d94f3a',
           marginBottom: 14,
         }}>
-          ⏵ DANGER · IRREVERSIBLE
+          DANGER · IRREVERSIBLE
         </div>
         <div style={{
           fontSize: 18,
@@ -234,7 +234,7 @@ export function ResetDoneModal({
           color: RAMS_ACCENT,
           marginBottom: 14,
         }}>
-          ⏵ RESET COMPLETE
+          RESET COMPLETE
         </div>
         <div style={{
           fontSize: 18,

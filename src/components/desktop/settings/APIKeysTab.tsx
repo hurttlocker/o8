@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
@@ -42,16 +42,22 @@ export function APIKeysTab() {
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ provider: string; type: 'success' | 'error'; message: string } | null>(null);
   const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(() => readAdaptiveThinkingEnabled());
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const loadKeys = useCallback(async () => {
     try {
       const res = await fetch('/api/v2/keys');
       if (res.ok) {
         const data = await res.json();
-        setProviders(data.providers);
+        if (mountedRef.current) setProviders(data.providers);
       }
     } catch { /* ignore */ }
-    setLoading(false);
+    if (mountedRef.current) setLoading(false);
   }, []);
 
   useEffect(() => {
