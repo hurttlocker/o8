@@ -18,6 +18,15 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseMcpConfigInput, type ParsedMcpServer } from './parse-config';
 import { getOrCreateWsToken } from '../ws-auth';
+import {
+  addRepoToProject,
+  createProject,
+  deleteProject,
+  listProjects,
+  removeRepoFromProject,
+  setRepoRole,
+} from '../projects/store';
+import type { ProjectRole } from '../projects/types';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -351,6 +360,94 @@ const TOOLS: McpTool[] = [
           description: 'For transport="http": the MCP endpoint URL.',
         },
       },
+    },
+  },
+  // ── Projects (epic #899) ──
+  {
+    name: 'cortex_create_project',
+    description:
+      'Create a new Project — an operator-curated grouping of repos that share product/team boundaries. ' +
+      'Optionally seed with repos and per-repo roles (frontend/backend/shared/etc.).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Display name for the project.' },
+        description: { type: 'string', description: 'Optional description.' },
+        repoIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional list of repo IDs (from the repo registry) to add at creation time.',
+        },
+        roles: {
+          description:
+            'Optional roles per repo. Either a parallel array (same length as repoIds) or a map { repoId: role }. ' +
+            'Curated roles: frontend, backend, fullstack, mobile, library, service, infra, docs, site, shared.',
+        },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'cortex_add_repo_to_project',
+    description: 'Link a repo into an existing project, optionally with a role tag.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'Project ID returned by cortex_create_project.' },
+        repoId: { type: 'string', description: 'Repo ID from the repo registry (~/.o8/repos.json).' },
+        role: {
+          type: 'string',
+          description: 'Optional role tag. Curated values: frontend, backend, fullstack, mobile, library, service, infra, docs, site, shared.',
+        },
+      },
+      required: ['projectId', 'repoId'],
+    },
+  },
+  {
+    name: 'cortex_remove_repo_from_project',
+    description: 'Unlink a repo from a project. The repo itself is left intact in the registry.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string' },
+        repoId: { type: 'string' },
+      },
+      required: ['projectId', 'repoId'],
+    },
+  },
+  {
+    name: 'cortex_set_repo_role',
+    description: 'Update the role tag on an existing project ↔ repo link.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string' },
+        repoId: { type: 'string' },
+        role: {
+          type: 'string',
+          description: 'Curated role. Pass empty string to clear the role.',
+        },
+      },
+      required: ['projectId', 'repoId', 'role'],
+    },
+  },
+  {
+    name: 'cortex_list_projects',
+    description: 'List every project the operator has defined, with their member repos and roles.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'cortex_delete_project',
+    description: 'Delete a project. The repos themselves are not removed from the registry; only the grouping goes away.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string' },
+      },
+      required: ['projectId'],
     },
   },
 ];
@@ -917,6 +1014,116 @@ async function handleRegisterMcp(args: Record<string, unknown>): Promise<McpTool
   }
 }
 
+// ── Projects handlers (epic #899) ──
+//
+// These call the storage layer directly rather than going through HTTP. The
+// MCP server runs in its own node process but shares the SQLite file with the
+// Next backend; better-sqlite3 + WAL mode is multi-process safe. This keeps
+// project mutations atomic and avoids the panel-auth round-trip.
+
+function resolveRoleArg(value: unknown): ProjectRole | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? (trimmed as ProjectRole) : null;
+}
+
+async function handleCreateProject(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const name = typeof args.name === 'string' ? args.name.trim() : '';
+    if (!name) return textResult('name is required.', true);
+    const description = typeof args.description === 'string' ? args.description : null;
+
+    const project = createProject({ name, description });
+
+    const repoIds = Array.isArray(args.repoIds)
+      ? args.repoIds.filter((value): value is string => typeof value === 'string' && Boolean(value))
+      : [];
+    const roles = args.roles;
+
+    for (let index = 0; index < repoIds.length; index += 1) {
+      const repoId = repoIds[index];
+      let role: ProjectRole | null = null;
+      if (Array.isArray(roles)) {
+        role = resolveRoleArg(roles[index]);
+      } else if (roles && typeof roles === 'object') {
+        role = resolveRoleArg((roles as Record<string, unknown>)[repoId]);
+      }
+      addRepoToProject(project.id, repoId, role, 'manual');
+    }
+
+    return jsonResult({ projectId: project.id, slug: project.slug });
+  } catch (err) {
+    return textResult(`Failed to create project: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function handleAddRepoToProject(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const projectId = typeof args.projectId === 'string' ? args.projectId : '';
+    const repoId = typeof args.repoId === 'string' ? args.repoId : '';
+    if (!projectId || !repoId) {
+      return textResult('projectId and repoId are required.', true);
+    }
+    const role = resolveRoleArg(args.role);
+    addRepoToProject(projectId, repoId, role, 'manual');
+    return jsonResult({ ok: true });
+  } catch (err) {
+    return textResult(`Failed to add repo: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function handleRemoveRepoFromProject(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const projectId = typeof args.projectId === 'string' ? args.projectId : '';
+    const repoId = typeof args.repoId === 'string' ? args.repoId : '';
+    if (!projectId || !repoId) {
+      return textResult('projectId and repoId are required.', true);
+    }
+    const removed = removeRepoFromProject(projectId, repoId);
+    return jsonResult({ ok: removed });
+  } catch (err) {
+    return textResult(`Failed to remove repo: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function handleSetRepoRole(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const projectId = typeof args.projectId === 'string' ? args.projectId : '';
+    const repoId = typeof args.repoId === 'string' ? args.repoId : '';
+    if (!projectId || !repoId) {
+      return textResult('projectId and repoId are required.', true);
+    }
+    const role = resolveRoleArg(args.role);
+    const link = setRepoRole(projectId, repoId, role);
+    if (!link) {
+      return textResult('Project repo link not found.', true);
+    }
+    return jsonResult({ ok: true });
+  } catch (err) {
+    return textResult(`Failed to set role: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function handleListProjects(): Promise<McpToolResult> {
+  try {
+    const projects = listProjects();
+    return jsonResult({ projects });
+  } catch (err) {
+    return textResult(`Failed to list projects: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function handleDeleteProject(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const projectId = typeof args.projectId === 'string' ? args.projectId : '';
+    if (!projectId) return textResult('projectId is required.', true);
+    const deleted = deleteProject(projectId);
+    return jsonResult({ ok: deleted });
+  } catch (err) {
+    return textResult(`Failed to delete project: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
   cortex_fleet_status: handleFleetStatus,
   cortex_list_issues: handleListIssues,
@@ -932,6 +1139,12 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_read_transcript: handleReadTranscript,
   cortex_interrupt_agent: handleInterruptAgent,
   register_mcp: handleRegisterMcp,
+  cortex_create_project: handleCreateProject,
+  cortex_add_repo_to_project: handleAddRepoToProject,
+  cortex_remove_repo_from_project: handleRemoveRepoFromProject,
+  cortex_set_repo_role: handleSetRepoRole,
+  cortex_list_projects: handleListProjects,
+  cortex_delete_project: handleDeleteProject,
 };
 
 // ── JSON-RPC Server ──

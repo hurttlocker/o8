@@ -34,7 +34,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 12;
+const DB_SCHEMA_VERSION = 13;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -105,6 +105,8 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureApprovalEventsTable(sqlite);
   ensureExternalMcpServerColumns(sqlite);
   ensurePushSubscriptionsTable(sqlite);
+  ensureProjectsTables(sqlite);
+  ensureProjectScopeColumns(sqlite);
   // #835 — recover any session_outcomes rows whose `valid_from` was inserted
   // as NULL (legacy seeds, raw INSERTs that bypassed the Drizzle schema
   // default). The column-add backfill in `ensureSessionOutcomeColumns` only
@@ -567,6 +569,35 @@ function ensureTables(sqlite: Database.Database): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_push_subscriptions_created_at ON push_subscriptions(created_at);
+
+    -- Schema v13 — Projects (epic #899). Operator-curated repo groupings that
+    -- replace the Jaccard-based cross-repo proposer (#748). project_repos.role
+    -- is free-form text in the DB; the curated set lives in src/lib/projects/types.ts.
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL UNIQUE,
+      description TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS project_repos (
+      project_id TEXT NOT NULL,
+      repo_id TEXT NOT NULL,
+      role TEXT,
+      suggestion_origin TEXT NOT NULL DEFAULT 'manual',
+      added_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, repo_id),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_repos_repo_id ON project_repos(repo_id);
+
+    CREATE TABLE IF NOT EXISTS dismissed_suggestions (
+      fingerprint TEXT PRIMARY KEY,
+      dismissed_at INTEGER NOT NULL,
+      reason TEXT
+    );
   `);
 
   ensureApprovalContextColumns(sqlite);
@@ -870,6 +901,62 @@ function ensurePushSubscriptionsTable(sqlite: Database.Database): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_push_subscriptions_created_at ON push_subscriptions(created_at);
+  `);
+}
+
+/**
+ * Schema v13 — Projects model (epic #899). Creates the three Projects tables
+ * for installs that landed before v13. Idempotent.
+ */
+function ensureProjectsTables(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL UNIQUE,
+      description TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS project_repos (
+      project_id TEXT NOT NULL,
+      repo_id TEXT NOT NULL,
+      role TEXT,
+      suggestion_origin TEXT NOT NULL DEFAULT 'manual',
+      added_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, repo_id),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_repos_repo_id ON project_repos(repo_id);
+
+    CREATE TABLE IF NOT EXISTS dismissed_suggestions (
+      fingerprint TEXT PRIMARY KEY,
+      dismissed_at INTEGER NOT NULL,
+      reason TEXT
+    );
+  `);
+}
+
+/**
+ * Schema v13 — add nullable `project_id` to existing tables that should be
+ * scopable to a Project. Cross-repo signals (outcomes, approvals, lanes) can
+ * then propagate to every member repo via the new Projects model.
+ */
+function ensureProjectScopeColumns(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'session_outcomes', 'project_id')) {
+    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN project_id TEXT');
+  }
+  if (!tableColumnExists(sqlite, 'approvals', 'project_id')) {
+    sqlite.exec('ALTER TABLE approvals ADD COLUMN project_id TEXT');
+  }
+  if (!tableColumnExists(sqlite, 'lanes', 'project_id')) {
+    sqlite.exec('ALTER TABLE lanes ADD COLUMN project_id TEXT');
+  }
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_session_outcomes_project_id ON session_outcomes(project_id);
+    CREATE INDEX IF NOT EXISTS idx_approvals_project_id ON approvals(project_id);
+    CREATE INDEX IF NOT EXISTS idx_lanes_project_id ON lanes(project_id);
   `);
 }
 
