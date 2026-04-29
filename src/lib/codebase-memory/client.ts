@@ -168,9 +168,27 @@ export async function extractGraphResolvedSymbols(
   return { symbols: resolvedSymbols, edges: resolvedEdges, unavailable: false };
 }
 
+/**
+ * Why a SymbolEdge has no `file`/`line` set. Surfaced so the UI and the
+ * orchestrator-context renderer can differentiate "we don't know what this
+ * is" from "this is a known symbol that doesn't carry a definition site"
+ * (e.g. labels like File/Folder/Route which the indexer stores without a
+ * `start_line`). Phase 4 #739–#741 polish.
+ */
+export type SymbolEdgeReason =
+  /** Symbol matched the index but the indexer doesn't record a line for
+   *  this label — File/Folder/Route/Channel/Project nodes. */
+  | 'no-definition-recorded'
+  /** Symbol was not found in the project graph at all. */
+  | 'unknown-symbol'
+  /** trace_path returned an explicit error for this symbol. */
+  | 'trace-error';
+
 export interface SymbolEdge {
   /** The symbol we asked about. */
   symbol: string;
+  /** Indexer label (Function / Interface / Type / etc.) when known. */
+  kind?: string | null;
   /** File path of the definition, repo-relative. */
   file?: string | null;
   /** Line number of the definition. */
@@ -179,6 +197,8 @@ export interface SymbolEdge {
   neighbours: string[];
   /** Raw error string when the lookup failed for this symbol. */
   error?: string | null;
+  /** Why `file`/`line` is unset, when it is. Drives a clearer UI hint. */
+  reason?: SymbolEdgeReason | null;
 }
 
 interface RawTracePathItem {
@@ -264,6 +284,7 @@ function pluckDefinitionLocation(payload: RawTracePath): {
 interface RawSearchGraphResult {
   name?: string;
   qualified_name?: string;
+  label?: string;
   file_path?: string;
   start_line?: number;
 }
@@ -285,10 +306,29 @@ function parseSearchGraphResult(raw: unknown): RawSearchGraphResponse | null {
   }
 }
 
+interface FindSymbolResult {
+  file: string | null;
+  line: number | null;
+  kind: string | null;
+  /** Set when we deliberately didn't return a file/line. */
+  reason: SymbolEdgeReason | null;
+}
+
 /**
  * Resolve a symbol's definition file/line via `search_graph`. Used as the
  * #898 fallback when `trace_path` doesn't carry the location. The binary
  * indexes file_path + start_line per node; this lookup just reads them.
+ *
+ * Phase 4 polish (#739–#741): we now require an EXACT name match before
+ * returning a location. Previously we fell back to `parsed.results[0]`,
+ * which silently returned the wrong file/line for any fuzzy bm25 hit
+ * (e.g. searching "async" returned `ghExecAsync` as the definition).
+ *
+ * Some indexer labels — File / Folder / Route / Channel / Project — are
+ * stored without `start_line` by design. When we hit one of those we
+ * return the file path but flag the absent line with reason
+ * `no-definition-recorded` so the caller can render a clearer hint than
+ * the prior "no definition recorded" string-on-falsy.
  */
 async function findSymbolDefinition(
   binPath: string,
@@ -296,7 +336,7 @@ async function findSymbolDefinition(
   project: string,
   symbol: string,
   timeoutMs: number,
-): Promise<{ file: string | null; line: number | null }> {
+): Promise<FindSymbolResult> {
   const callResult = await callCodebaseMemoryTool({
     binPath,
     cwd: repoPath,
@@ -304,15 +344,25 @@ async function findSymbolDefinition(
     args: { query: symbol, project },
     timeoutMs,
   });
-  if (!callResult.ok) return { file: null, line: null };
+  if (!callResult.ok) return { file: null, line: null, kind: null, reason: null };
   const parsed = parseSearchGraphResult(callResult.result);
-  if (!parsed?.results?.length) return { file: null, line: null };
-  // Prefer an exact-name match over a fuzzy bm25 hit.
-  const exact = parsed.results.find((r) => r.name === symbol) ?? parsed.results[0];
-  return {
-    file: exact?.file_path ?? null,
-    line: exact?.start_line ?? null,
-  };
+  if (!parsed?.results?.length) {
+    return { file: null, line: null, kind: null, reason: 'unknown-symbol' };
+  }
+  const exact = parsed.results.find((r) => r.name === symbol);
+  if (!exact) {
+    // bm25 returned only fuzzy matches — don't lie about the location.
+    return { file: null, line: null, kind: null, reason: 'unknown-symbol' };
+  }
+  const file = exact.file_path ?? null;
+  const line = typeof exact.start_line === 'number' && exact.start_line > 0
+    ? exact.start_line
+    : null;
+  const kind = exact.label ?? null;
+  // File/Folder/Route/Channel/Project labels carry no line by design —
+  // surface that as a structured reason instead of a misleading null.
+  const reason: SymbolEdgeReason | null = !line ? 'no-definition-recorded' : null;
+  return { file, line, kind, reason };
 }
 
 function parseTracePathResult(raw: unknown): RawTracePath | null {
@@ -371,8 +421,27 @@ export async function traceSymbols({
       timeoutMs,
     });
 
+    // Phase 4 (#739–#741): when trace_path errors out — including the
+    // common "function not found" path the binary returns for non-callable
+    // symbols (interfaces, types, components, etc.) — still try
+    // search_graph so the recall card can show a structured "not in
+    // project graph" hint instead of a raw error string.
     if (!callResult.ok) {
-      edges.push({ symbol, neighbours: [], error: callResult.error });
+      const fallback = await findSymbolDefinition(binPath, repoPath, project, symbol, timeoutMs);
+      edges.push({
+        symbol,
+        kind: fallback.kind,
+        file: fallback.file,
+        line: fallback.line,
+        neighbours: [],
+        // Surface the search_graph signal when present (unknown vs no-line),
+        // otherwise fall back to a generic trace-error reason that the UI
+        // can render without the raw process error string.
+        reason: fallback.reason ?? 'trace-error',
+        // Keep the original error around for debugging — UI only renders
+        // it when a structured `reason` isn't set.
+        error: fallback.reason ? null : callResult.error,
+      });
       continue;
     }
 
@@ -382,24 +451,43 @@ export async function traceSymbols({
       continue;
     }
     if (parsed.error) {
-      edges.push({ symbol, neighbours: [], error: parsed.error });
+      // Same idea as the !callResult.ok branch — degrade through
+      // search_graph so the row shows useful context.
+      const fallback = await findSymbolDefinition(binPath, repoPath, project, symbol, timeoutMs);
+      edges.push({
+        symbol,
+        kind: fallback.kind,
+        file: fallback.file,
+        line: fallback.line,
+        neighbours: [],
+        reason: fallback.reason ?? 'trace-error',
+        error: fallback.reason ? null : parsed.error,
+      });
       continue;
     }
 
     let { file, line } = pluckDefinitionLocation(parsed);
-    // #898: if trace_path didn't carry the location (v0.6.0 shape), look
-    // it up via search_graph. The binary indexes file_path + start_line
-    // per node — this is just an extra lookup, not a re-parse.
+    let kind: string | null = null;
+    let reason: SymbolEdgeReason | null = null;
+    // #898 / Phase 4: if trace_path didn't carry the location (v0.6.0
+    // shape), look it up via search_graph. The binary indexes file_path +
+    // start_line per node — this is just an extra lookup, not a re-parse.
+    // The fallback also tells us whether the symbol is genuinely unknown
+    // vs. matched-but-line-less, which we surface via `reason`.
     if (!file || line == null) {
       const fallback = await findSymbolDefinition(binPath, repoPath, project, symbol, timeoutMs);
       file = file ?? fallback.file;
       line = line ?? fallback.line;
+      kind = fallback.kind;
+      reason = fallback.reason;
     }
     edges.push({
       symbol,
+      kind,
       file,
       line,
       neighbours: pluckNeighbours(parsed),
+      reason,
     });
   }
 
