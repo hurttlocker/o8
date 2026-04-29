@@ -46,7 +46,7 @@ import { liveOutcomeFilter } from '@/lib/cortex/decay';
 import { withTiming } from '@/lib/cortex/diagnostics';
 import { readRepoPathRegistry } from '@/lib/repos/repo-path-registry';
 
-import { extractSymbols, traceSymbols, type SymbolEdge } from './client';
+import { extractGraphResolvedSymbols, type SymbolEdge } from './client';
 
 const MAX_BLOCK_CHARS = 4000;
 const MAX_DIRECTIVES = 5;
@@ -340,18 +340,17 @@ export async function buildContextBlock({
     : [];
   const outcomes = await readRecentOutcomes(repoPath);
 
-  // Symbol graph is best-effort — `traceSymbols` already returns
-  // `unavailable: true` when the binary isn't on disk and never throws.
+  // Symbol graph is best-effort — `extractGraphResolvedSymbols` traces a
+  // wider candidate set and keeps only the symbols that actually have a
+  // graph entry, so a TS interface name with no edges doesn't burn a slot.
+  // Returns `unavailable: true` when the binary isn't on disk; never throws.
   let edges: SymbolEdge[] = [];
   try {
-    const symbols = extractSymbols(packetBody, MAX_SYMBOLS);
-    if (symbols.length > 0) {
-      const traced = await withTiming(
-        'recall.symbol-graph',
-        () => traceSymbols({ repoPath, symbols }),
-      );
-      if (!traced.unavailable) edges = traced.edges;
-    }
+    const resolved = await withTiming(
+      'recall.symbol-graph',
+      () => extractGraphResolvedSymbols(packetBody, repoPath, MAX_SYMBOLS),
+    );
+    if (!resolved.unavailable) edges = resolved.edges;
   } catch {
     // swallow — never block dispatch on the symbol graph
   }
