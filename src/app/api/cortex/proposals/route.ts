@@ -17,9 +17,14 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { readCachedProposals, snoozeProposal } from '@/lib/cortex/proposer';
 
-export function GET() {
+export function GET(request: NextRequest) {
   try {
-    const { candidates, computedAt } = readCachedProposals();
+    // #836 — `?force=1` (or `force=true`) bypasses the in-memory cache so
+    // operators can always see fresh proposals after a directive change or
+    // new outcome row, without restarting the server or waiting on the tick.
+    const forceParam = request.nextUrl.searchParams.get('force');
+    const force = forceParam === '1' || forceParam === 'true';
+    const { candidates, computedAt } = readCachedProposals({ force });
     return NextResponse.json(
       { ok: true, proposals: candidates, computedAt },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },

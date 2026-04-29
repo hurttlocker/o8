@@ -399,7 +399,11 @@ export function proposeDirectives(options: ProposeOptions = {}): DirectivePropos
 
 let bootTickFired = false;
 let lastTickAt = 0;
-const TICK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+// #836 — shortened from 30 min to 5 min so the Mission panel's poll cadence
+// (also 5 min) and the cache TTL line up. Combined with the `?force=1`
+// query param on the route, fresh data lands immediately when the operator
+// asks for it.
+const TICK_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
  * Cache for the current tick — read by the API route. Keeps the proposer
@@ -421,7 +425,7 @@ function runTick(): void {
 /**
  * Boot-time entrypoint. Mirrors the `ensureCodebaseMemoryBootIndex` pattern:
  * fires once per server process via `setImmediate`, then schedules itself
- * every 30 min. Idempotent.
+ * every 5 min (#836). Idempotent.
  */
 export function ensureProposerBootTick(): void {
   if (bootTickFired) return;
@@ -439,10 +443,28 @@ export function ensureProposerBootTick(): void {
  * Read the most recent cached candidate set. If the cache is empty (server
  * just booted), runs the proposer inline. Cheap — bounded by the LIMIT 500
  * query above and the threshold filter.
+ *
+ * #836 — `force` bypasses the cache and recomputes inline so the Mission
+ * panel can show fresh data immediately after a directive change or new
+ * outcome row, without waiting on the next tick.
  */
-export function readCachedProposals(): { candidates: DirectiveProposalCandidate[]; computedAt: number } {
-  if (cachedAt === 0) {
+export function readCachedProposals(
+  options: { force?: boolean } = {},
+): { candidates: DirectiveProposalCandidate[]; computedAt: number } {
+  if (options.force || cachedAt === 0) {
     runTick();
   }
   return { candidates: cachedCandidates, computedAt: cachedAt };
+}
+
+/**
+ * #836 — Drop the cached payload so the next read recomputes from scratch.
+ * Call sites: anything that mutates `session_outcomes` or the directives dir
+ * such that the proposer's input set has shifted. Cheap — no I/O, just zeroes
+ * the in-memory state so the next `readCachedProposals()` call falls through
+ * to `runTick()`.
+ */
+export function invalidateProposerCache(): void {
+  cachedCandidates = [];
+  cachedAt = 0;
 }

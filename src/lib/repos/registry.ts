@@ -308,6 +308,20 @@ function fireSignatureRecompute(): void {
       error instanceof Error ? error.message : error,
     );
   }
+  // #851 — Stack signatures change → cross-repo proposer's similarity
+  // matrix changes → cache must drop so the next read sees the new repo
+  // set. Lazy-required for the same reasons as the signature import.
+  try {
+    const mod = require('@/lib/cortex/cross-repo-proposer') as
+      | typeof import('@/lib/cortex/cross-repo-proposer')
+      | undefined;
+    mod?.invalidateCrossRepoProposerCache?.();
+  } catch (error) {
+    console.warn(
+      '[repo-registry] cross-repo cache invalidation failed:',
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 export async function listRepos() {
