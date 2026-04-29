@@ -519,7 +519,10 @@ export function ScopeBadge({ scope }: { scope: string }) {
   return (
     <span style={{
       display: 'inline-block',
-      padding: '2px 8px',
+      paddingTop: 2,
+      paddingRight: 8,
+      paddingBottom: 2,
+      paddingLeft: 8,
       borderRadius: 6,
       fontSize: 10,
       fontWeight: 600,
@@ -549,7 +552,10 @@ export function ScopeDiagnostic({
 
   return (
     <div style={{
-      padding: 12,
+      paddingTop: 12,
+      paddingRight: 12,
+      paddingBottom: 12,
+      paddingLeft: 12,
       borderRadius: 10,
       background: tone.bg,
       border: `1px solid ${tone.border}`,
@@ -557,7 +563,10 @@ export function ScopeDiagnostic({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{title}</span>
         <span style={{
-          padding: '2px 7px',
+          paddingTop: 2,
+          paddingRight: 7,
+          paddingBottom: 2,
+          paddingLeft: 7,
           borderRadius: 999,
           background: `${tone.pill}22`,
           color: tone.text,
