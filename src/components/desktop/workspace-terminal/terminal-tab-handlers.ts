@@ -38,6 +38,14 @@ export interface NewTerminalTabResult {
  * shell terminal tabs. Only labels matching `Terminal <integer>` participate;
  * agent-named terminals (Claude Code, Codex, etc.) keep their own labels.
  */
+/**
+ * Single-quote a shell argument to prevent injection via paths with spaces or
+ * special characters (e.g. `cd /some/path with spaces` → `cd '/some/path with spaces'`).
+ */
+export function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 export function nextTerminalLabel(tabs: TerminalTab[]): string {
   const used = new Set<number>();
   for (const tab of tabs) {
@@ -78,7 +86,7 @@ export function computeNewTerminalTab(
   let cliCommand: string | null = null;
   if (agent.command || repo) {
     const parts: string[] = [];
-    if (repo) parts.push(`cd ${repo.localPath}`);
+    if (repo) parts.push(`cd ${shellQuote(repo.localPath)}`);
     if (agent.command) parts.push(agent.command);
     cliCommand = parts.join(' && ');
   }

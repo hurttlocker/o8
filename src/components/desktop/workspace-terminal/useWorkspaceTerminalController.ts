@@ -49,6 +49,7 @@ import {
   isAutoArchiveEligible,
   resolveRunCommandTarget,
   observeXtermHelperNames,
+  shellQuote,
   startPreviewDrag,
   computeSaveCheckpoint,
   computeUpdatedChatMessages,
@@ -94,6 +95,7 @@ export function useWorkspaceTerminalController(
   const panelRefs = useRef<Map<string, XtermPanelHandle>>(new Map());
   const pendingCliCommands = useRef<Map<string, string>>(new Map());
   const pendingRequestRef = useRef<Map<string, string>>(new Map());
+  const pendingSessionsRef = useRef<Set<string>>(new Set());
   const restoredRef = useRef(false);
   const restoreSettledRef = useRef(false);
   const restoreInFlightRef = useRef(false);
@@ -261,6 +263,7 @@ export function useWorkspaceTerminalController(
   const requestTerminalForTab = useCallback((tabId: string, command?: string) => {
     const requestId = `workspace-${tabId}-${Date.now()}`;
     pendingRequestRef.current.set(requestId, tabId);
+    pendingSessionsRef.current.add(tabId);
     if (command) {
       pendingCliCommands.current.set(tabId, command);
     }
@@ -321,7 +324,7 @@ export function useWorkspaceTerminalController(
       }
       for (const deadTab of result.deadTerminalTabs) {
         if (cancelled?.()) return false;
-        const restoreCommand = deadTab.repo?.localPath ? `cd ${deadTab.repo.localPath}` : undefined;
+        const restoreCommand = deadTab.repo?.localPath ? `cd ${shellQuote(deadTab.repo.localPath)}` : undefined;
         requestTerminalForTab(deadTab.id, restoreCommand);
       }
     } else {
@@ -412,7 +415,7 @@ export function useWorkspaceTerminalController(
         sendTerminalAttach(tab.tmuxSession, 120, 30);
         continue;
       }
-      const restoreCommand = tab.repo?.localPath ? `cd ${tab.repo.localPath}` : undefined;
+      const restoreCommand = tab.repo?.localPath ? `cd ${shellQuote(tab.repo.localPath)}` : undefined;
       requestTerminalForTab(tab.id, restoreCommand);
     }
   }, [requestTerminalForTab, sendTerminalAttach, termWsConnected]);
@@ -506,8 +509,13 @@ export function useWorkspaceTerminalController(
 
   const handleSessionCreated = useCallback((sessionName: string, requestId?: string) => {
     const directTabId = requestId ? pendingRequestRef.current.get(requestId) : undefined;
-    if (requestId && !directTabId) return false;
+    if (requestId && !directTabId) {
+      // The tab was closed before this session arrived — detach the orphan.
+      if (requestId) sendTerminalDetach(sessionName);
+      return false;
+    }
     if (requestId) pendingRequestRef.current.delete(requestId);
+    if (directTabId) pendingSessionsRef.current.delete(directTabId);
 
     let claimed = false;
     setTabs((previous) => {
@@ -727,6 +735,11 @@ export function useWorkspaceTerminalController(
     if (result.detachedSession) {
       sendTerminalDetach(result.detachedSession);
       panelRefs.current.delete(result.detachedSession);
+    }
+    // If the tab is still mid-spawn (no tmuxSession yet), detach the orphan
+    // session that will arrive via session-created after this close.
+    if (pendingSessionsRef.current.has(tabId)) {
+      pendingSessionsRef.current.delete(tabId);
     }
     pendingCliCommands.current.delete(tabId);
     for (const [requestId, pendingTabId] of pendingRequestRef.current) {
