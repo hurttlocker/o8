@@ -55,7 +55,7 @@ export interface GitHubDeviceFlowState {
 
 export type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'operator-defaults' | 'workers' | 'cloud-workers' | 'appearance' | 'diagnostics' | 'about';
+export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'operator-defaults' | 'projects' | 'workers' | 'cloud-workers' | 'appearance' | 'diagnostics' | 'about';
 
 // ── Constants ──
 
@@ -208,6 +208,18 @@ export function ActivityIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+    </svg>
+  );
+}
+
+export function LayersIcon() {
+  // Stacked-rectangles glyph for Settings → Projects (epic #899). Phosphor's
+  // "stack" path simplified to plain SVG so it renders inside the Tauri webview.
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 2 2 7l10 5 10-5z" />
+      <path d="M2 12l10 5 10-5" />
+      <path d="M2 17l10 5 10-5" />
     </svg>
   );
 }
