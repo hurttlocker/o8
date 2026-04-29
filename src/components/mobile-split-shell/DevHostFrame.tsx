@@ -304,6 +304,17 @@ export const DevHostFrame = memo(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [committedUrl]);
 
+    /* ── Listen for desktop send-to-mobile URL push (#782) ──────────────── */
+    useEffect(() => {
+      function handlePush(event: Event) {
+        const detail = (event as CustomEvent<{ url?: string }>).detail;
+        const url = detail?.url?.trim();
+        if (url) commitUrl(url);
+      }
+      window.addEventListener('o8:mobile-url-push', handlePush);
+      return () => window.removeEventListener('o8:mobile-url-push', handlePush);
+    }, [commitUrl]);
+
     /* ── Iframe load handlers ───────────────────────────────────────────── */
     const onIframeLoad = useCallback(() => {
       clearHostileTimer();
