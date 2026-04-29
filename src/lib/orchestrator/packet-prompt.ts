@@ -1,3 +1,4 @@
+import { buildContextBlock } from '@/lib/codebase-memory/build-context';
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
 import { renderReadBudgetSections } from '@/lib/dispatch/read-budget';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
@@ -240,6 +241,23 @@ export async function buildPacketPrompt(
   // `packet.edgeCaseSites`, render them as a grouped "Watch for these"
   // block so weaker models see adjacent risk surfaces up-front.
   const edgeCaseSections = renderEdgeCaseSections(packet.edgeCaseSites);
+  // #743 — Cortex context block. Pull directives + recent outcomes +
+  // symbol-graph for this repo and prepend a `<context>` envelope so the
+  // runtime sees the same recall data the operator sees on the packet
+  // card. Helper degrades gracefully (codebase-memory binary missing,
+  // empty DB, etc.) and returns an empty string when nothing useful
+  // resolved — that's the legacy path.
+  const contextBlock = packet.workspaceTargetPath
+    ? await buildContextBlock({
+        repoPath: packet.workspaceTargetPath,
+        packetBody: [packet.title, packet.summary, packet.issue?.body]
+          .filter((value): value is string => Boolean(value))
+          .join('\n\n'),
+      })
+    : '';
+  if (contextBlock) {
+    console.log(`[context-injection] Prepended <context> block for packet ${packet.id} (${contextBlock.length} chars)`);
+  }
   if (dependencySections.length > 0) {
     console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
   }
@@ -263,6 +281,7 @@ export async function buildPacketPrompt(
   }
 
   return [
+    contextBlock || null,
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
     packet.branchTarget ? `Branch target: ${packet.branchTarget}` : null,
