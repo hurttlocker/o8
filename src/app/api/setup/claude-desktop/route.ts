@@ -1,17 +1,21 @@
 /**
  * Claude Desktop / Claude Code Auto-Register
  *
- * POST — merge the o8 MCP server entry into the user's Claude config file
- *        without touching any other servers they have configured.
- * GET  — preview: show the current config file contents and whether o8
- *        is already registered, without writing anything.
+ * POST — merge the o8 + codebase-memory MCP server entries into the user's
+ *        Claude config file without touching any other servers they have
+ *        configured. codebase-memory is registered only when its binary
+ *        resolves (env var or `~/.o8/bin/codebase-memory-mcp{.exe}`); cold
+ *        first launch (binary not yet downloaded) skips it gracefully so
+ *        Claude Code session boot stays clean.
+ * GET  — preview: show the current config file contents and whether the
+ *        servers are already registered, without writing anything.
  *
  * This is the one-click "Connect to Claude Desktop" button in Settings →
  * MCP. It closes the last manual step in the real-user install flow.
  *
  * The file is parsed with comment-tolerant handling (Claude Desktop sometimes
  * emits a trailing newline, users hand-edit with `//` comments). We preserve
- * all unknown keys, only touching `mcpServers.o8`.
+ * all unknown keys, only touching `mcpServers.o8` and `mcpServers.codebase-memory`.
  */
 
 export const dynamic = 'force-dynamic';
@@ -93,6 +97,42 @@ function buildServerConfig(): McpServerConfig {
   };
 }
 
+/**
+ * Resolve the codebase-memory-mcp binary, falling back from the env var the
+ * Tauri sidecar sets (#739) to the deterministic install path. Returns null
+ * when neither resolves — in which case the caller MUST omit the entry so
+ * cold first launch doesn't break Claude Code session boot.
+ */
+function resolveCodebaseMemoryBin(): string | null {
+  const fromEnv = process.env.O8_CODEBASE_MEMORY_BIN;
+  if (fromEnv && fromEnv.trim() && existsSync(fromEnv)) {
+    return fromEnv;
+  }
+
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  if (!home) return null;
+
+  const fileName = process.platform === 'win32'
+    ? 'codebase-memory-mcp.exe'
+    : 'codebase-memory-mcp';
+  const deterministic = join(home, '.o8', 'bin', fileName);
+  if (existsSync(deterministic)) {
+    return deterministic;
+  }
+
+  return null;
+}
+
+function buildCodebaseMemoryConfig(): McpServerConfig | null {
+  const bin = resolveCodebaseMemoryBin();
+  if (!bin) return null;
+  return {
+    command: bin,
+    args: [],
+    env: {},
+  };
+}
+
 // ── Tolerant JSON read ──
 
 interface ClaudeConfig {
@@ -153,19 +193,30 @@ export async function GET(request: Request) {
 
     const fileExists = existsSync(path);
     const config = readClaudeConfig(path);
-    const existingEntry = config.mcpServers && typeof config.mcpServers === 'object'
-      ? (config.mcpServers as Record<string, unknown>)['o8']
-      : undefined;
+    const existingServers = config.mcpServers && typeof config.mcpServers === 'object'
+      ? (config.mcpServers as Record<string, unknown>)
+      : {};
+    const existingEntry = existingServers['o8'];
+    const existingCodebaseMemoryEntry = existingServers['codebase-memory'];
 
     const proposed = buildServerConfig();
+    const proposedCodebaseMemory = buildCodebaseMemoryConfig();
+
     const alreadyUpToDate = Boolean(
       existingEntry
       && typeof existingEntry === 'object'
       && JSON.stringify(existingEntry) === JSON.stringify(proposed),
     );
+    const codebaseMemoryUpToDate = proposedCodebaseMemory
+      ? Boolean(
+        existingCodebaseMemoryEntry
+        && typeof existingCodebaseMemoryEntry === 'object'
+        && JSON.stringify(existingCodebaseMemoryEntry) === JSON.stringify(proposedCodebaseMemory),
+      )
+      : null;
 
     const otherServers = config.mcpServers
-      ? Object.keys(config.mcpServers).filter((k) => k !== 'o8')
+      ? Object.keys(config.mcpServers).filter((k) => k !== 'o8' && k !== 'codebase-memory')
       : [];
 
     return NextResponse.json({
@@ -176,6 +227,11 @@ export async function GET(request: Request) {
       alreadyUpToDate,
       proposed,
       existingEntry: existingEntry ?? null,
+      proposedCodebaseMemory,
+      existingCodebaseMemoryEntry: existingCodebaseMemoryEntry ?? null,
+      codebaseMemoryAvailable: Boolean(proposedCodebaseMemory),
+      codebaseMemoryRegistered: Boolean(existingCodebaseMemoryEntry),
+      codebaseMemoryUpToDate,
       otherServers,
       size: fileExists ? statSync(path).size : 0,
     });
@@ -202,15 +258,34 @@ export async function POST(request: Request) {
     const servers = config.mcpServers as Record<string, unknown>;
 
     if (remove) {
+      const removed: string[] = [];
       if ('o8' in servers) {
         delete servers['o8'];
+        removed.push('o8');
+      }
+      if ('codebase-memory' in servers) {
+        delete servers['codebase-memory'];
+        removed.push('codebase-memory');
+      }
+      if (removed.length > 0) {
         atomicWriteConfig(path, config);
-        return NextResponse.json({ ok: true, action: 'removed', path });
+        return NextResponse.json({ ok: true, action: 'removed', path, removed });
       }
       return NextResponse.json({ ok: true, action: 'no-op', path, detail: 'o8 was not registered' });
     }
 
     servers['o8'] = buildServerConfig();
+
+    // codebase-memory is opt-in: only register when the binary resolves.
+    // Cold first launch (binary not yet downloaded) skips this gracefully so
+    // session boot doesn't break.
+    const codebaseMemory = buildCodebaseMemoryConfig();
+    const installed: string[] = ['o8'];
+    if (codebaseMemory) {
+      servers['codebase-memory'] = codebaseMemory;
+      installed.push('codebase-memory');
+    }
+
     atomicWriteConfig(path, config);
 
     return NextResponse.json({
@@ -218,6 +293,8 @@ export async function POST(request: Request) {
       action: 'installed',
       target,
       path,
+      installed,
+      codebaseMemoryAvailable: Boolean(codebaseMemory),
       detail:
         target === 'claude-desktop'
           ? 'Restart Claude Desktop to load the o8 tools.'

@@ -6,6 +6,11 @@
       "env": {
         "O8_API_BASE": "http://localhost:3001"
       }
+    },
+    "codebase-memory": {
+      "command": "${O8_CODEBASE_MEMORY_BIN}",
+      "args": [],
+      "env": {}
     }
   }
 }
