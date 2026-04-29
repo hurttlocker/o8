@@ -17,6 +17,57 @@ import type { EditingField } from './types';
 // endpoint revalidates on its own). Avoids prop-drilling the flag through
 // every mission-panel layer for a single opt-in toggle.
 let cachedExperimentalOpencode: boolean | null = null;
+
+// #747 — Routing recommendation cache. One entry per repoPath; refreshed
+// lazily so the chip stays consistent across packet cards on the same repo.
+interface RuntimeEvidenceRow {
+  runtime: OrchestratorRuntime;
+  score: number;
+  total: number;
+  mergedClean: number;
+}
+interface RuntimeRecommendationPayload {
+  runtime: OrchestratorRuntime | null;
+  score: number;
+  evidence: Partial<Record<OrchestratorRuntime, RuntimeEvidenceRow>>;
+}
+const recommendationCache = new Map<string, { value: RuntimeRecommendationPayload | null; expiresAt: number }>();
+const RECOMMENDATION_TTL_MS = 30_000;
+
+function useRuntimeRecommendation(repoPath: string | null | undefined): RuntimeRecommendationPayload | null {
+  const [payload, setPayload] = useState<RuntimeRecommendationPayload | null>(() => {
+    if (!repoPath) return null;
+    const cached = recommendationCache.get(repoPath);
+    return cached && cached.expiresAt > Date.now() ? cached.value : null;
+  });
+  useEffect(() => {
+    if (!repoPath) { setPayload(null); return; }
+    const cached = recommendationCache.get(repoPath);
+    if (cached && cached.expiresAt > Date.now()) {
+      setPayload(cached.value);
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    const url = `/api/cortex/runtime-recommendation?repoPath=${encodeURIComponent(repoPath)}`;
+    fetch(url, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const data = await response.json().catch(() => null);
+        if (!data || data.ok !== true || !data.recommendation) return null;
+        return data.recommendation as RuntimeRecommendationPayload;
+      })
+      .then((value) => {
+        recommendationCache.set(repoPath, { value, expiresAt: Date.now() + RECOMMENDATION_TTL_MS });
+        if (!cancelled) setPayload(value);
+      })
+      .catch(() => {
+        // Network or middleware errors are non-fatal — chip just stays hidden.
+      });
+    return () => { cancelled = true; controller.abort(); };
+  }, [repoPath]);
+  return payload;
+}
 function useExperimentalOpencodeFlag(override?: boolean): boolean {
   const [flag, setFlag] = useState<boolean>(
     override !== undefined ? override : (cachedExperimentalOpencode ?? false),
@@ -60,6 +111,17 @@ export function PacketMetaRows({
   const isEditingRepo = editingField?.packetId === packet.id && editingField.field === 'repo';
   const isEditingBranch = editingField?.packetId === packet.id && editingField.field === 'branch';
   const canEditBranch = packet.queueState === 'draft';
+  // #747 — Routing recommendation chip. Only renders when the recommender has
+  // a confident pick (`runtime` non-null) and the operator hasn't already
+  // selected it. Per-runtime evidence rendered inside the popover.
+  const recommendation = useRuntimeRecommendation(packet.workspaceTargetPath);
+  const recommendedRuntime = recommendation?.runtime ?? null;
+  const recommendationScorePct = recommendation && recommendedRuntime
+    ? Math.round(recommendation.score * 100)
+    : null;
+  const showRecommendationChipOnRow = Boolean(
+    recommendedRuntime && recommendedRuntime !== packet.runtime,
+  );
 
   const workspaceLabel = packet.workspaceTargetPath
     ? (workspaceTargets.find((t) => t.localPath === packet.workspaceTargetPath)?.label ?? packet.workspaceTargetPath.split('/').pop() ?? 'target')
@@ -183,8 +245,32 @@ export function PacketMetaRows({
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           <span style={rowLabelStyle}>runtime</span>
-          <span style={{ ...rowValueStyle, color: orchestratorRuntimeTone(packet.runtime).color, fontWeight: 600 }}>
-            {runtimeDisplay}
+          <span style={{ ...rowValueStyle, color: orchestratorRuntimeTone(packet.runtime).color, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' as const }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{runtimeDisplay}</span>
+            {showRecommendationChipOnRow && recommendedRuntime && recommendationScorePct !== null ? (
+              <span
+                title={`History on this repo prefers ${orchestratorRuntimeTone(recommendedRuntime).label} (${recommendationScorePct}% clean merge rate). Click to switch.`}
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: orchestratorRuntimeTone(recommendedRuntime).color,
+                  background: 'var(--t-accent-soft)',
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: 'var(--t-accent-border)',
+                  borderRadius: 4,
+                  paddingTop: 1,
+                  paddingRight: 5,
+                  paddingBottom: 1,
+                  paddingLeft: 5,
+                  flexShrink: 0,
+                }}
+              >
+                {orchestratorRuntimeTone(recommendedRuntime).label} {recommendationScorePct}%
+              </span>
+            ) : null}
           </span>
           {chevron}
         </button>
@@ -205,38 +291,82 @@ export function PacketMetaRows({
               overflow: 'hidden',
             }}
           >
-            {listDispatchableRuntimes({ includeExperimental: opencodeEnabled || packet.runtime === 'opencode' }).map((runtime: OrchestratorRuntime) => (
-              <button
-                key={runtime}
-                type="button"
-                onClick={() => {
-                  onPatch((current) => ({ ...current, runtime }));
-                  onEditingFieldChange(null);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  width: '100%',
-                  paddingTop: 7,
-                  paddingRight: 10,
-                  paddingBottom: 7,
-                  paddingLeft: 10,
-                  borderWidth: 0,
-                  background: packet.runtime === runtime ? 'var(--t-accent-soft)' : 'transparent',
-                  color: 'var(--t-text)',
-                  fontSize: 11.5,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                }}
-                onMouseEnter={(e) => { if (packet.runtime !== runtime) e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
-                onMouseLeave={(e) => { if (packet.runtime !== runtime) e.currentTarget.style.background = 'transparent'; }}
-              >
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: orchestratorRuntimeTone(runtime).color }} />
-                {orchestratorRuntimeTone(runtime).label}
-              </button>
-            ))}
+            {listDispatchableRuntimes({ includeExperimental: opencodeEnabled || packet.runtime === 'opencode' }).map((runtime: OrchestratorRuntime) => {
+              const evidence = recommendation?.evidence?.[runtime] ?? null;
+              const isRecommended = recommendedRuntime === runtime;
+              const evidencePct = evidence && evidence.total > 0
+                ? Math.round((evidence.mergedClean / evidence.total) * 100)
+                : null;
+              return (
+                <button
+                  key={runtime}
+                  type="button"
+                  onClick={() => {
+                    onPatch((current) => ({ ...current, runtime }));
+                    onEditingFieldChange(null);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    width: '100%',
+                    paddingTop: 7,
+                    paddingRight: 10,
+                    paddingBottom: 7,
+                    paddingLeft: 10,
+                    borderWidth: 0,
+                    background: packet.runtime === runtime ? 'var(--t-accent-soft)' : 'transparent',
+                    color: 'var(--t-text)',
+                    fontSize: 11.5,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                  onMouseEnter={(e) => { if (packet.runtime !== runtime) e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
+                  onMouseLeave={(e) => { if (packet.runtime !== runtime) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: orchestratorRuntimeTone(runtime).color, flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                    {orchestratorRuntimeTone(runtime).label}
+                  </span>
+                  {isRecommended && evidencePct !== null ? (
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                        color: orchestratorRuntimeTone(runtime).color,
+                        background: 'var(--t-accent-soft)',
+                        borderWidth: 1,
+                        borderStyle: 'solid',
+                        borderColor: 'var(--t-accent-border)',
+                        borderRadius: 4,
+                        paddingTop: 1,
+                        paddingRight: 5,
+                        paddingBottom: 1,
+                        paddingLeft: 5,
+                        flexShrink: 0,
+                      }}
+                    >
+                      RECOMMENDED · {evidencePct}%
+                    </span>
+                  ) : evidence && evidence.total > 0 ? (
+                    <span
+                      style={{
+                        fontSize: 9.5,
+                        fontWeight: 600,
+                        color: 'var(--t-text-muted)',
+                        flexShrink: 0,
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {evidence.mergedClean}/{evidence.total}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
         ) : null}
       </div>

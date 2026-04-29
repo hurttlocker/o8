@@ -20,6 +20,7 @@ import * as schema from './schema';
 import { migrateLegacyApprovalStoreIfNeeded } from '@/lib/approvals/storage-migration';
 import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
 import { ensureUsageLogIndexes, ensureUsageLogSchema } from '@/lib/db/usage-log-migration';
+import { ensureSessionOutcomeRoutingColumns } from '@/lib/db/session-outcome-routing-migration';
 
 // ── Data directory ──
 
@@ -33,7 +34,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 11;
+const DB_SCHEMA_VERSION = 12;
 const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
 
 // Ensure data directory exists
@@ -240,7 +241,8 @@ function ensureTables(sqlite: Database.Database): void {
       completed_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       valid_from TEXT NOT NULL DEFAULT (datetime('now')),
-      valid_to TEXT
+      valid_to TEXT,
+      skipped_tests INTEGER, reworked INTEGER, merged_clean INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS teams (
@@ -629,6 +631,7 @@ function ensureSessionOutcomeColumns(sqlite: Database.Database): void {
   }
   // Index on valid_to to keep "live entries only" recall queries cheap.
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_so_valid_to ON session_outcomes(valid_to)');
+  ensureSessionOutcomeRoutingColumns(sqlite); // #747
 }
 
 function backfillWatchedAgentColumns(sqlite: Database.Database): void {
