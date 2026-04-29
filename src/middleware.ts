@@ -122,6 +122,9 @@ const GATED_PREFIXES = [
   // Cortex memory/directive surface — local-only by design. Even read-only
   // endpoints leak operator preferences and repo names; gate them too.
   '/api/cortex/',
+  // Projects model (epic #899) — leaks repo names and operator-curated
+  // groupings. Loopback-only with bearer-token fallback for LAN clients.
+  '/api/projects',
   // Setup routes are gated too — GET is allowlisted above, POST needs loopback
   // or a token (so an evil cross-origin page can't POST to /api/setup/claude-desktop
   // and silently write to the user's Claude config).
