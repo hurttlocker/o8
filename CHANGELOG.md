@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-29
 
+- `7b60b3a4` feat(qa): Schema v14 + FTS5 + retrievers (epic sub-1)
 - `c3107842` feat(qa): Ask Anything UI scaffold + mock stream (epic sub-4)
 - `f529dff4` feat(projects): AI Stage 2 LLM project suggestions + Confident/Plausible UI (epic wave 2)
 - `f5b3b608` feat(projects): Settings → Projects UI with manual linking + GitHub-org auto-suggest (epic wave 2)
