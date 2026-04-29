@@ -129,10 +129,21 @@ export function DemoRunSection({ sectionNumber }: { sectionNumber: string }) {
   const runDemo = useCallback(async () => {
     setBusy(true);
     setError(null);
+    // #848 — record an intentional opt-in just before firing. The flag is
+    // only ever set here (the explicit Settings button); any future surface
+    // that wants to launch the demo must do the same so we never auto-fire
+    // and never strand a user on /context-graph by accident.
+    try {
+      window.localStorage.setItem('o8:demo-sequence:enabled', '1');
+    } catch {
+      // localStorage unavailable (private mode, SSR) — fine, the API still
+      // requires `confirmed: true` in the body so we're covered.
+    }
     try {
       const res = await fetch('/api/panel/diagnostics/run-demo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true }),
       });
       const data = await res.json().catch(() => ({})) as ApiPayload;
       if (data.result) {
