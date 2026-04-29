@@ -32,6 +32,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { publishCortexChange } from '@/lib/realtime/publisher';
 
 const MAX_TRAILER_ENTRIES = 10;
 const SECTION_HEADER = '## Recent Merges';
@@ -208,6 +209,19 @@ export function appendDirectiveTrailer({
         error instanceof Error ? error.message : error,
       );
     }
+  }
+
+  // #840 — Notify open Recall Cards / Packet Review Cards so the
+  // freshly-appended trailer is visible without a manual collapse/reopen.
+  // Fire-and-forget — never block the merge path on a websocket round-trip.
+  // Co-located with the writer so any caller (merge handler, external-merge
+  // handler #841, REPL smoke test) gets the broadcast automatically.
+  if (updated.length > 0) {
+    void publishCortexChange({
+      scope: 'directive',
+      repoPath,
+      reason: `trailer:${entry.status}`,
+    });
   }
 
   return updated;
