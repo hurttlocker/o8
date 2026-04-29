@@ -27,6 +27,10 @@ import {
 import { IssueGroupList } from './mission-panel/IssueGroupList';
 import { PacketCard } from './mission-panel/PacketCard';
 import { StatusGroupedLanes } from './mission-panel/StatusGroupedLanes';
+import type { DirectiveProposalCandidate } from './directive-proposal-types';
+import { useDirectiveProposals } from './mission-panel/useDirectiveProposals';
+import { DirectiveProposalSection } from './mission-panel/DirectiveProposalSection';
+import { useOrchestratorData } from '../orchestrator-data-context';
 
 // #517 — Rough per-run cost estimate used only for the fan-out gate warning.
 // Not meant to be accurate — it just reminds the operator that running 3+
@@ -81,6 +85,7 @@ export function ThoughtsMissionPanel({
   const [reviewStateByPacketId, setReviewStateByPacketId] = useState<Record<string, ReviewPanelState>>({});
   const branchAutofillAttemptRef = useRef<Record<string, string>>({});
   const branchRequestByRepoPathRef = useRef<Record<string, Promise<Awaited<ReturnType<typeof fetchPacketBranches>>>>>({});
+  const orchestratorData = useOrchestratorData();
 
   // Close editing field on Escape or click outside any row in the
   // expanded packet card.
@@ -372,6 +377,37 @@ export function ThoughtsMissionPanel({
       body: JSON.stringify({ verb: 'resume', laneId: packet.lane?.laneId, message: 'Continue the previous task.', actor: 'user' }),
     }).catch(() => {});
   }, []);
+
+  // #746 — Auto-directive proposer rows. State + fetch + dismiss live in
+  // the dedicated hook; the panel just maps Accept onto the orchestrator
+  // data context's `onAcceptDirectiveProposal` callback.
+  const handleAcceptProposalDraft = useCallback((proposal: DirectiveProposalCandidate) => {
+    // Pre-fill the orchestrator chat composer via the shared draft injection
+    // hook. The operator edits + sends; orchestrator-side memory tools then
+    // write the directive markdown. We never write the file ourselves —
+    // human-gated by design.
+    const draftText = [
+      'Please save the following directive after I review it:',
+      '',
+      proposal.draftDirective,
+    ].join('\n');
+    orchestratorData?.onAcceptDirectiveProposal?.({
+      id: `proposal-accept-${proposal.id}-${Date.now()}`,
+      text: draftText,
+    });
+  }, [orchestratorData]);
+
+  const {
+    proposals,
+    pendingProposalId,
+    handleAccept: handleAcceptProposal,
+    handleDismiss: handleDismissProposal,
+  } = useDirectiveProposals({
+    open,
+    visible,
+    retryNonce: issuesRetryNonce,
+    onAccept: handleAcceptProposalDraft,
+  });
 
   // #517 — Best-of-n: bucket packets by comparisonGroupId so each group
   // renders ONCE via ComparisonCard instead of N separate PacketCards.
@@ -671,6 +707,16 @@ export function ThoughtsMissionPanel({
           </button>
         </div>
       ) : null}
+
+      {/* #746 — Auto-directive proposer rows. Anchored above Open Issues
+          because they're "advice the system gives the operator" — should
+          read like a recommendation, not a queued task. */}
+      <DirectiveProposalSection
+        proposals={proposals}
+        pendingProposalId={pendingProposalId}
+        onAccept={handleAcceptProposal}
+        onDismiss={handleDismissProposal}
+      />
 
       <IssueGroupList
         issueGroups={issueGroups}
