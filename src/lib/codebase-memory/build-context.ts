@@ -276,9 +276,21 @@ function renderSymbolGraphSection(edges: SymbolEdge[]): string[] {
 
   const lines = ['## Symbol Graph'];
   for (const edge of useful) {
-    const where = edge.file
-      ? `defined at ${edge.file}${typeof edge.line === 'number' ? `:${edge.line}` : ''}`
-      : 'no definition recorded';
+    // Phase 4 (#739–#741): when trace_path + search_graph couldn't pin a
+    // line we now distinguish "indexer doesn't store a line for this
+    // label" (File/Folder/Route) from the legacy catch-all string.
+    let where: string;
+    if (edge.file && typeof edge.line === 'number') {
+      where = `defined at ${edge.file}:${edge.line}`;
+    } else if (edge.file) {
+      where = `defined at ${edge.file}`;
+    } else if (edge.reason === 'no-definition-recorded') {
+      where = 'indexed (no source line recorded)';
+    } else if (edge.reason === 'unknown-symbol') {
+      where = 'not in project graph';
+    } else {
+      where = 'no definition recorded';
+    }
     const neighbours = edge.neighbours.slice(0, NEIGHBOUR_LIMIT);
     const linked = neighbours.length > 0
       ? `; linked to ${neighbours.join(', ')}`
