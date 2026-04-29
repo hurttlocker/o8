@@ -1,21 +1,28 @@
 'use client';
 
 /**
- * #746 — Hook that owns the auto-directive proposer state for
- * `ThoughtsMissionPanel`. Pulled out of the panel so the panel stays under
- * the 800-line ceiling.
+ * #746 / #748 — Hook that owns directive-proposal state for
+ * `ThoughtsMissionPanel`. Fetches BOTH proposal sources (auto + cross-repo)
+ * in parallel and merges them into a single yellow-row list. Pulled out of
+ * the panel so the panel stays under the 800-line ceiling.
  *
  * Responsibilities:
- *   - Fetch the cached proposal set from `/api/cortex/proposals` on
- *     panel-open + lifecycle events + 5-min fallback poll.
+ *   - Fetch the cached proposal sets from `/api/cortex/proposals` (#746)
+ *     and `/api/cortex/cross-repo-proposals` (#748) on panel-open,
+ *     lifecycle events, and a 5-min fallback poll.
  *   - Hide a row optimistically while the dismiss POST is in flight.
+ *   - Route dismiss to the correct endpoint based on `proposal.source`.
  *   - Dispatch Accept by calling `onAccept` with the candidate; the
  *     consumer (Mission panel) wires it to the orchestrator chat composer
  *     via `OrchestratorDataContext.onAcceptDirectiveProposal`.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { DirectiveProposalCandidate } from '../directive-proposal-types';
+import type {
+  AutoDirectiveProposal,
+  CrossRepoDirectiveProposal,
+  DirectiveProposalCandidate,
+} from '../directive-proposal-types';
 
 interface UseDirectiveProposalsArgs {
   open: boolean;
@@ -36,6 +43,13 @@ interface UseDirectiveProposalsReturn {
   handleDismiss: (proposal: DirectiveProposalCandidate) => Promise<void>;
 }
 
+// Server returns these as plain JSON without a discriminator stamped on
+// every record (the `source` field was added in #748). We tag them at the
+// fetch boundary so the row component can branch on `proposal.source`
+// safely even if the cache predates the field.
+type RawAutoProposal = Omit<AutoDirectiveProposal, 'source'> & { source?: 'auto' };
+type RawCrossRepoProposal = Omit<CrossRepoDirectiveProposal, 'source'> & { source?: 'cross-repo' };
+
 export function useDirectiveProposals({
   open,
   visible,
@@ -50,13 +64,41 @@ export function useDirectiveProposals({
     let cancelled = false;
     const loadProposals = async () => {
       try {
-        const res = await fetch('/api/cortex/proposals', { cache: 'no-store' });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { ok?: boolean; proposals?: DirectiveProposalCandidate[] };
+        const [autoRes, crossRes] = await Promise.allSettled([
+          fetch('/api/cortex/proposals', { cache: 'no-store' }),
+          fetch('/api/cortex/cross-repo-proposals', { cache: 'no-store' }),
+        ]);
         if (cancelled) return;
-        if (data?.ok && Array.isArray(data.proposals)) {
-          setProposals(data.proposals);
+
+        const merged: DirectiveProposalCandidate[] = [];
+
+        if (autoRes.status === 'fulfilled' && autoRes.value.ok) {
+          try {
+            const data = (await autoRes.value.json()) as { ok?: boolean; proposals?: RawAutoProposal[] };
+            if (!cancelled && data?.ok && Array.isArray(data.proposals)) {
+              for (const p of data.proposals) {
+                merged.push({ ...p, source: 'auto' } as AutoDirectiveProposal);
+              }
+            }
+          } catch (err) {
+            console.warn('[proposer] auto parse failed:', err instanceof Error ? err.message : err);
+          }
         }
+
+        if (crossRes.status === 'fulfilled' && crossRes.value.ok) {
+          try {
+            const data = (await crossRes.value.json()) as { ok?: boolean; proposals?: RawCrossRepoProposal[] };
+            if (!cancelled && data?.ok && Array.isArray(data.proposals)) {
+              for (const p of data.proposals) {
+                merged.push({ ...p, source: 'cross-repo' } as CrossRepoDirectiveProposal);
+              }
+            }
+          } catch (err) {
+            console.warn('[proposer] cross-repo parse failed:', err instanceof Error ? err.message : err);
+          }
+        }
+
+        if (!cancelled) setProposals(merged);
       } catch (err) {
         console.warn('[proposer] proposal fetch failed:', err instanceof Error ? err.message : err);
       }
@@ -86,16 +128,29 @@ export function useDirectiveProposals({
   const handleDismiss = useCallback(async (proposal: DirectiveProposalCandidate) => {
     setPendingProposalId(proposal.id);
     try {
-      const res = await fetch('/api/cortex/proposals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'dismiss',
-          id: proposal.id,
-          filePattern: proposal.filePattern,
-          fixPattern: proposal.fixPattern,
-        }),
-      });
+      let res: Response;
+      if (proposal.source === 'cross-repo') {
+        res = await fetch('/api/cortex/cross-repo-proposals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'dismiss',
+            targetRepoId: proposal.targetRepoId,
+            directiveId: proposal.directiveId,
+          }),
+        });
+      } else {
+        res = await fetch('/api/cortex/proposals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'dismiss',
+            id: proposal.id,
+            filePattern: proposal.filePattern,
+            fixPattern: proposal.fixPattern,
+          }),
+        });
+      }
       const data = (await res.json().catch(() => null)) as { ok?: boolean } | null;
       if (!res.ok || !data?.ok) {
         console.warn('[proposer] dismiss failed', data);

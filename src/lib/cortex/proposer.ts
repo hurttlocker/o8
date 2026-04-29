@@ -50,6 +50,12 @@ const STOP_WORDS = new Set([
 ]);
 
 export interface DirectiveProposalCandidate {
+  /**
+   * #748 — Discriminator so the same `DirectiveProposalRow` UI can render
+   * both auto-proposer rows (this module) and cross-repo rows
+   * (`cross-repo-proposer.ts`). Always `'auto'` for outputs of this module.
+   */
+  source: 'auto';
   /** Stable hash id derived from `(filePattern, fixPattern)` — used as the snooze key. */
   id: string;
   filePattern: string;
@@ -367,6 +373,7 @@ export function proposeDirectives(options: ProposeOptions = {}): DirectivePropos
     const id = makeProposalId(acc.filePattern, acc.fixPattern);
     if (snoozed.has(id)) continue;
     candidates.push({
+      source: 'auto',
       id,
       filePattern: acc.filePattern,
       fixPattern: acc.fixPattern,
