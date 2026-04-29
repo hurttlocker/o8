@@ -13,6 +13,7 @@ import type { EditingField, ReviewPanelState } from './types';
 import { PacketMetaRows } from './PacketMetaRows';
 import { PacketReviewCard } from './PacketReviewCard';
 import { PacketReviewPanel } from './PacketReviewPanel';
+import { PacketSpecEditor } from './PacketSpecEditor';
 import { RejectedFeedbackPanel } from './RejectedFeedbackPanel';
 
 interface PacketCardProps {
@@ -213,6 +214,11 @@ export function PacketCard({
 
           {/* #742 — Context Recall Card (Directive / Recent Outcomes / Symbol Graph). */}
           <ContextRecallCard packet={packet} repoName={targetRepoName} />
+
+          {/* #773 — Editable spec.md. The orchestrator re-reads the latest
+              spec at dispatch time so each NEW launch sees the operator's
+              current intent. In-flight agents are not steered. */}
+          <PacketSpecEditor packetId={packet.id} />
 
           {/* #615 — DETAILS row (read-only popover trigger). */}
           <div
