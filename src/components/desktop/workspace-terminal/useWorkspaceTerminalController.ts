@@ -113,6 +113,29 @@ export function useWorkspaceTerminalController(
   const reportedChatSessionsSignatureRef = useRef('');
   const reportedActiveChatSessionKeyRef = useRef<string | null>(null);
 
+  // Phase 4 friction fix #4: tab-navigation race during HMR.
+  // The restore pipeline (loadInitialTabState → applyPersistedState) is
+  // async. While the await resolves, the user may have clicked a different
+  // tab — the late-landing setActiveTabId from restore would then yank
+  // them back, looking like a phantom navigation. Track a monotonic
+  // counter that bumps on every USER-driven setActiveTabId; restore
+  // captures the value at the start of its async work and bails if a
+  // newer user nav landed in the interim.
+  const userNavVersionRef = useRef(0);
+  const setActiveTabIdFromUser = useCallback((next: string) => {
+    userNavVersionRef.current += 1;
+    setActiveTabId(next);
+  }, []);
+  const setActiveTabIdFromRestore = useCallback((next: string, capturedVersion: number) => {
+    if (capturedVersion !== userNavVersionRef.current) {
+      // Newer user nav landed during the restore await — drop this stale
+      // restore action so the user's tab stays put.
+      return false;
+    }
+    setActiveTabId(next);
+    return true;
+  }, []);
+
   preferredRepoRef.current = preferredRepo;
 
   const stableRepoScope = !splitCreated && preferredRepo?.localPath
@@ -305,6 +328,10 @@ export function useWorkspaceTerminalController(
   }, [createDefaultOrchestratorTab, createDefaultChatTab]);
 
   const applyPersistedState = useCallback(async (saved: PersistedTabState, cancelled?: () => boolean) => {
+    // Capture the user-nav version at the start of restore. If the user
+    // clicks a different tab while computeRestoredTabs is awaiting, the
+    // captured version goes stale and we drop the activeTabId update.
+    const capturedNavVersion = userNavVersionRef.current;
     const result = await computeRestoredTabs(saved, {
       preferredRepo: preferredRepoRef.current,
       defaultTab,
@@ -314,7 +341,7 @@ export function useWorkspaceTerminalController(
 
     tabsRef.current = result.tabs;
     setTabs(result.tabs);
-    setActiveTabId(result.activeTabId);
+    setActiveTabIdFromRestore(result.activeTabId, capturedNavVersion);
     if (cancelled?.()) return false;
 
     if (termWsConnectedRef.current) {
@@ -423,6 +450,11 @@ export function useWorkspaceTerminalController(
   useEffect(() => {
     if (tabs.length > 0 || !termWsConnected || splitCreated || !primaryRestoreSettled) return;
     const timer = window.setTimeout(() => {
+      // Capture the user-nav version at the point where this fallback
+      // restore is scheduled. If the user clicks a tab between the timer
+      // firing and the async load resolving, we drop the late activeTabId
+      // assignment so the user's click stays sticky. Phase 4 friction #4.
+      const capturedNavVersion = userNavVersionRef.current;
       void (async () => {
         if (stableRepoScope && preferredRepo?.localPath) {
           const saved = await loadTabState(stableRepoScope, preferredRepo.localPath);
@@ -434,27 +466,27 @@ export function useWorkspaceTerminalController(
         if (!autoCreateDefaultTab) {
           tabsRef.current = [];
           setTabs([]);
-          setActiveTabId('');
+          setActiveTabIdFromRestore('', capturedNavVersion);
           return;
         }
         if (defaultTab === 'llm-chat') {
           const defaultTabs = createDefaultChatTabSet();
           tabsRef.current = defaultTabs;
           setTabs(defaultTabs);
-          setActiveTabId(defaultTabs[0].id);
+          setActiveTabIdFromRestore(defaultTabs[0].id, capturedNavVersion);
           return;
         }
         const fallbackShell = createDefaultShellTab();
         tabsRef.current = [fallbackShell];
         setTabs([fallbackShell]);
-        setActiveTabId(fallbackShell.id);
+        setActiveTabIdFromRestore(fallbackShell.id, capturedNavVersion);
         if (termWsConnected) {
           requestTerminalForTab(fallbackShell.id);
         }
       })();
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultChatTabSet, createDefaultShellTab, defaultTab, preferredRepo?.localPath, primaryRestoreSettled, requestTerminalForTab, splitCreated, stableRepoScope, tabs.length, termWsConnected]);
+  }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultChatTabSet, createDefaultShellTab, defaultTab, preferredRepo?.localPath, primaryRestoreSettled, requestTerminalForTab, setActiveTabIdFromRestore, splitCreated, stableRepoScope, tabs.length, termWsConnected]);
 
   useEffect(() => {
     if (tabs.length > 0 || defaultTab !== 'llm-chat') return;
@@ -539,10 +571,10 @@ export function useWorkspaceTerminalController(
     const result = computeCliChatSession(options, tabsRef.current, activeTabId);
     tabsRef.current = result.tabs;
     setTabs(result.tabs);
-    setActiveTabId(result.activeTabId);
+    setActiveTabIdFromUser(result.activeTabId);
     if (result.needsPersist) persistTabsNow(result.tabs, result.activeTabId);
     return result.activeTabId;
-  }, [activeTabId, persistTabsNow]);
+  }, [activeTabId, persistTabsNow, setActiveTabIdFromUser]);
 
   const openWorkspaceLlmChatSession = useCallback((options: {
     repo?: RegisteredRepo;
@@ -562,9 +594,9 @@ export function useWorkspaceTerminalController(
     } else if (result.newTab) {
       setTabs((previous) => [result.newTab!, ...previous]);
     }
-    setActiveTabId(result.activeTabId);
+    setActiveTabIdFromUser(result.activeTabId);
     return result.activeTabId;
-  }, [activeTabId]);
+  }, [activeTabId, setActiveTabIdFromUser]);
 
   const openWorkspaceInspectorTab = useCallback((canvasTab: NonNullable<TerminalTab['canvasTab']>, options?: { repo?: RegisteredRepo; createNew?: boolean }) => {
     const result = computeInspectorTab(canvasTab, tabsRef.current, options);
@@ -578,10 +610,10 @@ export function useWorkspaceTerminalController(
       setTabs((previous) => [result.newTab!, ...previous]);
     }
     if (result.activeTabId !== null) {
-      setActiveTabId(result.activeTabId);
+      setActiveTabIdFromUser(result.activeTabId);
     }
     return result.updatedTabId ?? result.newTab?.id ?? '';
-  }, []);
+  }, [setActiveTabIdFromUser]);
 
   const handleOpenWorkspaceCommitTab = useCallback((hash: string, meta?: Record<string, string>, repo?: RegisteredRepo) => {
     const { canvasTab, repo: resolvedRepo } = buildCommitCanvasTab(hash, meta, repo);
@@ -602,7 +634,11 @@ export function useWorkspaceTerminalController(
     preferredRepo,
     setTabs,
     setPreviews,
-    setActiveTabId,
+    // External callers via the imperative handle are user-driven (e.g.
+    // the dashboard wiring an "open this tab" gesture) — bump the
+    // user-nav version so a concurrently-running restore doesn't yank
+    // the tab back. Phase 4 friction fix #4.
+    setActiveTabId: setActiveTabIdFromUser,
     onPreviewDetected,
     onOpenRepoDiff,
     handleSessionCreated,
@@ -612,7 +648,7 @@ export function useWorkspaceTerminalController(
     persistTabsNow,
     sendTerminalDetach,
     closeTabById: (tabId: string) => handleCloseTabRef.current(tabId),
-  }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, persistTabsNow, preferredRepo, sendTerminalDetach, stateScope]);
+  }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, persistTabsNow, preferredRepo, sendTerminalDetach, setActiveTabIdFromUser, stateScope]);
 
   const handleRegisterRepo = useCallback((localPath: string) => {
     fetch('/api/panel/repos', {
@@ -630,15 +666,15 @@ export function useWorkspaceTerminalController(
       pendingCliCommands.current.set(result.newTab.id, result.cliCommand);
     }
     setTabs((previous) => [result.newTab!, ...previous]);
-    setActiveTabId(result.activeTabId);
+    setActiveTabIdFromUser(result.activeTabId);
     requestTerminalForTab(result.newTab.id, result.cliCommand ?? undefined);
-  }, [requestTerminalForTab]);
+  }, [requestTerminalForTab, setActiveTabIdFromUser]);
 
   const handleNewChatTab = useCallback((runtime: Exclude<WorkspaceChatRuntime, 'chat'>, repo?: RegisteredRepo) => {
     const newTab = buildNewChatTab(runtime, repo);
     setTabs((previous) => [newTab, ...previous]);
-    setActiveTabId(newTab.id);
-  }, []);
+    setActiveTabIdFromUser(newTab.id);
+  }, [setActiveTabIdFromUser]);
 
   const handleNewLLMChatTab = useCallback((repo?: RegisteredRepo) => {
     const newTab = buildNewLlmChatTab(repo ?? preferredRepo ?? undefined);
@@ -647,8 +683,8 @@ export function useWorkspaceTerminalController(
       persistTabsNow(nextTabs, newTab.id);
       return nextTabs;
     });
-    setActiveTabId(newTab.id);
-  }, [persistTabsNow, preferredRepo]);
+    setActiveTabIdFromUser(newTab.id);
+  }, [persistTabsNow, preferredRepo, setActiveTabIdFromUser]);
 
   const handleUpdateChatMessages = useCallback((tabId: string, messages: MobileTranscriptEntry[]) => {
     setTabs((previous) => previous.map((tab) => (
@@ -696,8 +732,8 @@ export function useWorkspaceTerminalController(
     const result = computeCheckpointRestore(tabsRef.current, tabId);
     if (!result.newTab) return;
     setTabs((previous) => [...previous, result.newTab!]);
-    setActiveTabId(result.activeTabId);
-  }, []);
+    setActiveTabIdFromUser(result.activeTabId);
+  }, [setActiveTabIdFromUser]);
 
   const handleConsumeChatDraftInjection = useCallback((tabId: string, injectionId: string) => {
     setTabs((previous) => previous.map((tab) => (
@@ -721,13 +757,13 @@ export function useWorkspaceTerminalController(
       sendTerminalInput(target.tmuxSession!, command + '\n');
     } else if (target.kind === 'pending-shell') {
       pendingCliCommands.current.set(target.pendingTabId!, command);
-      setActiveTabId(target.pendingTabId!);
+      setActiveTabIdFromUser(target.pendingTabId!);
     } else {
       setTabs((previous) => [...previous, target.newTab!]);
-      setActiveTabId(target.newTab!.id);
+      setActiveTabIdFromUser(target.newTab!.id);
       requestTerminalForTab(target.newTab!.id, command);
     }
-  }, [requestTerminalForTab, sendTerminalInput, tabs]);
+  }, [requestTerminalForTab, sendTerminalInput, setActiveTabIdFromUser, tabs]);
 
   const handleCloseTab = useCallback((tabId: string) => {
     const result = computeCloseTab(tabsRef.current, tabId, activeTabId);
@@ -746,13 +782,13 @@ export function useWorkspaceTerminalController(
       if (pendingTabId === tabId) pendingRequestRef.current.delete(requestId);
     }
     setTabs(result.remaining);
-    if (result.nextActiveId !== null) setActiveTabId(result.nextActiveId);
+    if (result.nextActiveId !== null) setActiveTabIdFromUser(result.nextActiveId);
     setPreviews((prev) => {
       const toRemove = prev.filter((p) => p.tabId === tabId);
       toRemove.forEach((p) => detectedPortsRef.current.delete(p.port));
       return prev.filter((p) => p.tabId !== tabId);
     });
-  }, [activeTabId, sendTerminalDetach]);
+  }, [activeTabId, sendTerminalDetach, setActiveTabIdFromUser]);
 
   handleCloseTabRef.current = handleCloseTab;
 
@@ -818,11 +854,11 @@ export function useWorkspaceTerminalController(
   }, []);
 
   const handleSelectTab = useCallback((id: string) => {
-    setActiveTabId(id);
+    setActiveTabIdFromUser(id);
     setTabs((previous) => previous.map((tab) => (
       tab.id === id && tab.unseen ? { ...tab, unseen: false } : tab
     )));
-  }, []);
+  }, [setActiveTabIdFromUser]);
 
   const handleClosePreview = useCallback((id: string) => {
     setPreviews((previous) => {
@@ -843,13 +879,13 @@ export function useWorkspaceTerminalController(
     const newTab = buildHistoryChatTab(currentTab, historyTabId, title, historyRepo);
     setTabs((previous) => {
       if (previous.some((tab) => tab.id === historyTabId)) {
-        setActiveTabId(historyTabId);
+        setActiveTabIdFromUser(historyTabId);
         return previous;
       }
       return [...previous, newTab];
     });
-    setActiveTabId(historyTabId);
-  }, []);
+    setActiveTabIdFromUser(historyTabId);
+  }, [setActiveTabIdFromUser]);
 
   return {
     activeCheckpoint,

@@ -142,6 +142,63 @@ async function run() {
     },
   );
 
+  // Phase 4 follow-up: bare object literals were silently returning the
+  // last block-statement expression instead of the object. The wrapper now
+  // detects single object-literal expressions and parens-wraps them.
+  await check(
+    'bare object literal {a:1}',
+    '{a:1}',
+    (text) => {
+      try {
+        const env = JSON.parse(text);
+        return env.ok === true && env.value && env.value.a === 1;
+      } catch { return false; }
+    },
+  );
+
+  await check(
+    'multi-key bare object literal',
+    '{a:1, b:2, c:"hello"}',
+    (text) => {
+      try {
+        const env = JSON.parse(text);
+        return env.ok === true && env.value && env.value.a === 1 && env.value.b === 2 && env.value.c === 'hello';
+      } catch { return false; }
+    },
+  );
+
+  // Multi-statement code that does NOT start with `{` should still take
+  // the regular indirect-eval path and roundtrip cleanly.
+  await check(
+    'multi-statement var assignment still works',
+    'var y = {x:1}; JSON.stringify(y)',
+    (text) => {
+      try {
+        const env = JSON.parse(text);
+        return env.ok === true && env.value === '{"x":1}';
+      } catch { return false; }
+    },
+  );
+
+  // Arrow-function expression returns the function via the
+  // non-serializable fallback (functions can't JSON.stringify) — the
+  // wrapper should not crash, and value should be the function's
+  // toString.
+  await check(
+    'arrow function expression () => 42',
+    '() => 42',
+    (text) => {
+      try {
+        const env = JSON.parse(text);
+        return env.ok === true
+          && env.nonSerializable === true
+          && env.valueType === 'function'
+          && typeof env.value === 'string'
+          && env.value.includes('42');
+      } catch { return false; }
+    },
+  );
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 }
