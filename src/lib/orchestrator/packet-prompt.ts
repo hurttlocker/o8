@@ -4,6 +4,7 @@ import { renderReadBudgetSections } from '@/lib/dispatch/read-budget';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
+import { buildPacketSpecPromptSection } from '@/lib/orchestrator/packet-spec';
 import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
@@ -255,8 +256,16 @@ export async function buildPacketPrompt(
           .join('\n\n'),
       })
     : '';
+  // #773 — Live spec injection. The operator can edit a per-packet spec in
+  // the Mission panel; we re-read it here so each NEW dispatch gets the
+  // current content. Running agents are not steered — only the next launch
+  // (or rerun) sees an edited spec. Returns null when no spec exists.
+  const livePacketSpec = await buildPacketSpecPromptSection(packet.id);
   if (contextBlock) {
     console.log(`[context-injection] Prepended <context> block for packet ${packet.id} (${contextBlock.length} chars)`);
+  }
+  if (livePacketSpec) {
+    console.log(`[packet-spec] Injected live spec for packet ${packet.id} (${livePacketSpec.length} chars)`);
   }
   if (dependencySections.length > 0) {
     console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
@@ -284,6 +293,7 @@ export async function buildPacketPrompt(
     contextBlock || null,
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
+    livePacketSpec,
     packet.branchTarget ? `Branch target: ${packet.branchTarget}` : null,
     packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
     dependencySections.length > 0 ? 'Dependency handoff context:' : null,
