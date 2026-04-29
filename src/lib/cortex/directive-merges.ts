@@ -1,0 +1,266 @@
+/**
+ * #769 — Living Specs.
+ *
+ * After a packet's PR merges, append a one-line trailer to each directive
+ * markdown file that matched the dispatch repo. The trailer accumulates
+ * evidence that a merge respected (or violated) the directive — directives
+ * stay human-authored, but each one carries a history of how the fleet
+ * acted on it.
+ *
+ * Storage:
+ *   ~/.o8/directives/<filename>.md
+ *
+ * Format (appended):
+ *   ## Recent Merges
+ *   - 2026-04-29 [merged] feat(orchestrator): packet title (#736)
+ *   - 2026-04-28 [violated] fix(workspaces): tighten filter (#735)
+ *
+ * Behaviour:
+ *   - Skip directives with `history: false` in front matter.
+ *   - Filter by repo using the same scope rules `build-context.ts` uses.
+ *   - Last 10 entries are kept; older ones are pruned in the same write.
+ *   - Append-only — never rewrite existing directive body content. The
+ *     `## Recent Merges` section is replaced with a fresh one each call;
+ *     everything above it is preserved verbatim.
+ *   - Helper never throws. A failure to update one directive is logged
+ *     and swallowed so a merge never rolls back over a markdown bug.
+ */
+
+import 'server-only';
+
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+
+import { getDataDir } from '@/lib/data-dir-migration';
+
+const MAX_TRAILER_ENTRIES = 10;
+const SECTION_HEADER = '## Recent Merges';
+const FRONT_MATTER_BOUNDARY = /^---\s*$/m;
+
+export interface DirectiveTrailerEntry {
+  /** ISO date YYYY-MM-DD. */
+  date: string;
+  /** `merged` for clean ships, `violated` when the review pass flagged a directive violation. */
+  status: 'merged' | 'violated';
+  /** Conventional-commit-style title (e.g. `feat(orchestrator): packet title`). */
+  title: string;
+  /** Optional GitHub issue/PR number to render as a `(#N)` suffix. */
+  issueNumber?: number | null;
+}
+
+interface DirectiveMeta {
+  id: string;
+  scope: string;
+  repoName: string | null;
+  history: boolean;
+}
+
+interface ParsedDirective {
+  meta: DirectiveMeta;
+  /** Raw front-matter block + body, stopping right before the `## Recent Merges` section. */
+  preserved: string;
+  /** Existing trailer lines, oldest first. */
+  trailerLines: string[];
+}
+
+/** Parse minimal front matter — just the keys we care about for filtering. */
+function parseFrontMatter(text: string, fallbackId: string): DirectiveMeta {
+  const result: DirectiveMeta = {
+    id: fallbackId,
+    scope: 'global',
+    repoName: null,
+    history: true,
+  };
+
+  if (!text.startsWith('---')) return result;
+
+  const afterFirst = text.slice(3).trimStart();
+  const closingIndex = afterFirst.search(FRONT_MATTER_BOUNDARY);
+  if (closingIndex < 0) return result;
+
+  const front = afterFirst.slice(0, closingIndex);
+  for (const line of front.split('\n')) {
+    const idx = line.indexOf(':');
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    if (!key) continue;
+    if (key === 'id') result.id = value || fallbackId;
+    else if (key === 'scope') result.scope = value || 'global';
+    else if (key === 'repoName') result.repoName = value || null;
+    else if (key === 'history') {
+      // Treat unquoted `false` / `no` / `0` as opt-out. Default = true.
+      const normalized = value.toLowerCase().replace(/['"`]/g, '');
+      if (normalized === 'false' || normalized === 'no' || normalized === '0') {
+        result.history = false;
+      }
+    }
+  }
+
+  return result;
+}
+
+function splitOnRecentMerges(text: string): { before: string; section: string | null } {
+  const re = new RegExp(`(^|\\n)${SECTION_HEADER}\\b[\\s\\S]*$`);
+  const match = text.match(re);
+  if (!match) return { before: text, section: null };
+  const idx = text.indexOf(match[0]);
+  const before = text.slice(0, idx);
+  const section = text.slice(idx + (match[1] === '\n' ? 1 : 0));
+  return { before, section };
+}
+
+function readTrailerLines(section: string | null): string[] {
+  if (!section) return [];
+  // Strip the header (and possibly leading newline) then collect `- ...` lines.
+  const body = section.replace(new RegExp(`^${SECTION_HEADER}\\s*\\n?`), '');
+  return body
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- '));
+}
+
+function parseDirective(raw: string, fallbackId: string): ParsedDirective {
+  const text = raw.replace(/\r\n/g, '\n');
+  const meta = parseFrontMatter(text, fallbackId);
+  const { before, section } = splitOnRecentMerges(text);
+  const preserved = before.replace(/\s*$/, '\n');
+  const trailerLines = readTrailerLines(section);
+  return { meta, preserved, trailerLines };
+}
+
+function formatTrailerLine(entry: DirectiveTrailerEntry): string {
+  const issueSuffix =
+    typeof entry.issueNumber === 'number' && Number.isFinite(entry.issueNumber)
+      ? ` (#${entry.issueNumber})`
+      : '';
+  return `- ${entry.date} [${entry.status}] ${entry.title}${issueSuffix}`;
+}
+
+function renderRecentMergesSection(lines: string[]): string {
+  const trimmed = lines.slice(-MAX_TRAILER_ENTRIES);
+  return `${SECTION_HEADER}\n${trimmed.join('\n')}\n`;
+}
+
+function matchesRepoScope(meta: DirectiveMeta, repoPath: string): boolean {
+  const repoName = basename(repoPath).toLowerCase();
+  const scope = meta.scope.toLowerCase();
+  if (scope === 'global' || scope === '') return true;
+  const declared = (meta.repoName ?? '').toLowerCase();
+  if (declared && declared === repoName) return true;
+  if (scope === repoName) return true;
+  return false;
+}
+
+function listDirectiveFiles(): { name: string; path: string }[] {
+  try {
+    const dir = join(getDataDir(), 'directives');
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => ({ name, path: join(dir, name) }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Append a trailer entry to every directive matching the repo. Returns the
+ * list of directive ids that were updated so callers can log + surface
+ * the touch in telemetry. Never throws — per-file errors are logged.
+ */
+export function appendDirectiveTrailer({
+  repoPath,
+  entry,
+}: {
+  repoPath: string;
+  entry: DirectiveTrailerEntry;
+}): string[] {
+  if (!repoPath?.trim()) return [];
+  const updated: string[] = [];
+
+  const files = listDirectiveFiles();
+  if (files.length === 0) return [];
+
+  const newLine = formatTrailerLine(entry);
+
+  for (const file of files) {
+    try {
+      const raw = readFileSync(file.path, 'utf-8');
+      const fallbackId = file.name.replace(/\.md$/, '');
+      const parsed = parseDirective(raw, fallbackId);
+      if (!parsed.meta.history) continue;
+      if (!matchesRepoScope(parsed.meta, repoPath)) continue;
+
+      const merged = [...parsed.trailerLines, newLine];
+      const section = renderRecentMergesSection(merged);
+      const next = `${parsed.preserved}\n${section}`;
+
+      // Only write when the rendered output changes — avoids touching mtime
+      // for unrelated directives in the same dir.
+      if (next !== raw) {
+        writeFileSync(file.path, next, 'utf-8');
+      }
+      updated.push(parsed.meta.id);
+    } catch (error) {
+      console.warn(
+        `[directive-merges] Failed to append trailer to ${file.name}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  return updated;
+}
+
+/**
+ * Read the latest N trailer lines for a directive id. Used by the API
+ * surface that powers the Recall Card. Returns the lines newest-first so
+ * the UI can render them top-down without sorting.
+ */
+export function readDirectiveTrailers(directiveId: string, limit = 3): string[] {
+  if (!directiveId?.trim()) return [];
+  try {
+    const files = listDirectiveFiles();
+    for (const file of files) {
+      const fallbackId = file.name.replace(/\.md$/, '');
+      const raw = readFileSync(file.path, 'utf-8');
+      const parsed = parseDirective(raw, fallbackId);
+      if (parsed.meta.id !== directiveId) continue;
+      // Stored chronologically (oldest first); reverse + slice for newest-N.
+      return parsed.trailerLines.slice(-limit).reverse();
+    }
+  } catch (error) {
+    console.warn(
+      `[directive-merges] Failed to read trailers for ${directiveId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+  return [];
+}
+
+/**
+ * Read the latest trailer lines for every directive on disk, keyed by
+ * directive id. Convenience for the API route so the recall-card surface
+ * resolves trailers for all rows in one pass.
+ */
+export function readAllDirectiveTrailers(limit = 3): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  try {
+    const files = listDirectiveFiles();
+    for (const file of files) {
+      try {
+        const fallbackId = file.name.replace(/\.md$/, '');
+        const raw = readFileSync(file.path, 'utf-8');
+        const parsed = parseDirective(raw, fallbackId);
+        const newest = parsed.trailerLines.slice(-limit).reverse();
+        if (newest.length > 0) out[parsed.meta.id] = newest;
+      } catch {
+        // skip unreadable files
+      }
+    }
+  } catch {
+    // dir missing — empty map is the right answer
+  }
+  return out;
+}

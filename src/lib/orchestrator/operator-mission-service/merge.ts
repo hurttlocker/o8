@@ -1,4 +1,5 @@
 import { listApprovalsForContext } from '@/lib/approvals/store';
+import { appendDirectiveTrailer } from '@/lib/cortex/directive-merges';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
 import { archiveLane, findLaneByPacket } from '@/lib/lane/registry';
@@ -195,6 +196,38 @@ async function dispatchPacketMerge(
       console.log(
         '[worktree-cleanup]',
         `Post-merge cleanup skipped for lane ${lane.id} (packet ${packet.id}): reason=${cleanup.reason ?? 'unknown'}. Reconcile sweep will handle it.`,
+      );
+    }
+
+    // #769 — Living Specs. Append a one-line trailer to every directive
+    // matching this repo so each directive accumulates evidence of which
+    // merges respected (or, once #732 ships violation flags, violated)
+    // it. Best-effort — never roll back a successful merge over a markdown
+    // bug. `violated` is wired off `packet.review.approved === false`,
+    // matching the same flag that gates `[REJECTED]` in the outcomes block.
+    try {
+      const repoPath = packet.workspaceTargetPath?.trim() || lane.repoPath;
+      if (repoPath) {
+        const violated = packet.review?.approved === false;
+        const updated = appendDirectiveTrailer({
+          repoPath,
+          entry: {
+            date: new Date().toISOString().slice(0, 10),
+            status: violated ? 'violated' : 'merged',
+            title: packet.title,
+            issueNumber: packet.issue?.number ?? null,
+          },
+        });
+        if (updated.length > 0) {
+          console.log(
+            `[living-specs] Appended ${violated ? '[violated]' : '[merged]'} trailer to ${updated.length} directive${updated.length === 1 ? '' : 's'} for packet ${packet.id} (${updated.join(', ')})`,
+          );
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `[living-specs] Trailer append failed for packet ${packet.id}:`,
+        error instanceof Error ? error.message : error,
       );
     }
   }
