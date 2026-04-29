@@ -1,0 +1,488 @@
+{
+  "$comment": "30-question Q&A eval set for the Cortex Engineering Brain (epic #915 sub-issue 3 wave A). 5 questions per category over 6 categories: ownership / decisions / processes / incidents / specs / cross-repo. Ground truth pulled from ~/.o8/cortex-ide.db (session_outcomes, github_pull_requests, projects, project_repos), ~/.o8/directives/*.md, and the locked architecture comment on epic #915 itself. Questions marked knownGap are designed to surface ingestion holes — the runner classifies them as gaps, not failures. expectedCitations rowIds reference real rows where applicable; the validator warns if a rowId can't be resolved against a live DB but does NOT fail the build (DBs differ across machines).",
+  "version": 1,
+  "generatedAt": "2026-04-29",
+  "cases": [
+    {
+      "id": "qa-001",
+      "category": "ownership",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Which directives in the cortex-ide repo are scoped specifically to the cortex-ide repo (scope: repo) versus globally?",
+      "expectedAnswer": "Six directives are scope: repo for cortex-ide — the 800-line file ceiling, glass-chrome-preserved, inline-styles-only, no-native-form-controls-in-packets, palette-vars, and phosphor-svg-only seeds. Two directives are scope: global (typecheck-before-commit, surgical-changes).",
+      "expectedFacts": [
+        "Mentions 800-line file ceiling",
+        "Mentions inline styles only",
+        "Mentions phosphor SVG only",
+        "Identifies typecheck-before-commit and surgical-changes as global scope"
+      ],
+      "expectedCitations": [
+        { "kind": "directive", "rowId": "seed-cortex-ide-800-line-ceiling" },
+        { "kind": "directive", "rowId": "seed-cortex-ide-inline-styles-only" },
+        { "kind": "directive", "rowId": "seed-cortex-ide-phosphor-svg-only" },
+        { "kind": "directive", "rowId": "seed-global-typecheck-before-commit" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+    },
+    {
+      "id": "qa-002",
+      "category": "ownership",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Which project does the cortex-ide repo belong to, and what other repos are in that project?",
+      "expectedAnswer": "cortex-ide belongs to the o8 project (slug: o8, id: proj-5d0d9e02-015). The other repo in that project is o8-site (the marketing site).",
+      "expectedFacts": [
+        "Mentions o8 project / proj-5d0d9e02-015",
+        "Mentions o8-site as the sibling repo",
+        "References the project_repos linking table or projects table"
+      ],
+      "expectedCitations": [
+        { "kind": "project", "rowId": "proj-5d0d9e02-015" },
+        { "kind": "project_repo", "rowId": "70954348-8e56-41dd-ac10-5b4e91964fc2" },
+        { "kind": "project_repo", "rowId": "a1c35bf5-ed73-44cf-a7d9-30c6ccb1eb84" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-003",
+      "category": "ownership",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Who authored the most recent merged PRs in cortex-ide?",
+      "expectedAnswer": null,
+      "knownGap": "github-author-ingestion-incomplete",
+      "expectedFacts": [
+        "Either returns the author_login from github_pull_requests rows OR explicitly states the data is missing",
+        "Does not invent fictional GitHub usernames"
+      ],
+      "expectedCitations": [],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-004",
+      "category": "ownership",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Which runtime owns the most recently merged session outcomes in cortex-ide?",
+      "expectedAnswer": "Codex owns the majority of recent successful merges — the dispatch-context-injection-743, recall-card-742, mcp-register-codebase-memory-740, codebase-memory-runtime-download-755, and recall-card-symbol-graph-row outcomes are all codex. Gemini owns auto-index-repos-741 and dispatch-popover-placement-752.",
+      "expectedFacts": [
+        "Identifies codex as the dominant runtime in recent outcomes",
+        "Names at least one specific gemini outcome",
+        "References the runtime column in session_outcomes"
+      ],
+      "expectedCitations": [
+        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-1d-codex-feat-dispatch-context-injection-743" },
+        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-2d-gemini-feat-auto-index-repos-741" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+    },
+    {
+      "id": "qa-005",
+      "category": "ownership",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Which directive owner enforces the rule that packet metadata rows can't use native select or input controls?",
+      "expectedAnswer": "The seed-cortex-ide-no-native-form-controls-in-packets directive (scope: repo, repoName: cortex-ide, priority: 7). It points to ThoughtsMissionPanel and the packet-meta-rows pattern as the canonical example to copy.",
+      "expectedFacts": [
+        "Names the directive id seed-cortex-ide-no-native-form-controls-in-packets",
+        "Mentions ThoughtsMissionPanel as the reference implementation",
+        "Mentions packet-meta-rows pattern"
+      ],
+      "expectedCitations": [
+        { "kind": "directive", "rowId": "seed-cortex-ide-no-native-form-controls-in-packets" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-006",
+      "category": "decisions",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Why does cortex-ide forbid CSS classes and require inline styles?",
+      "expectedAnswer": "iOS Safari and the Tauri webview have shipped reliability issues with class-based styling. The seed-cortex-ide-inline-styles-only directive marks this as a permanent rule, not a stylistic preference. All styling lives in style={{ }} props on JSX, with as React.CSSProperties used for vendor-prefixed or non-standard CSS properties.",
+      "expectedFacts": [
+        "Names iOS Safari and Tauri webview as the reliability driver",
+        "Identifies the rule as permanent",
+        "References the seed-cortex-ide-inline-styles-only directive (or seed-cortex-ide-inline-styles-only or d-1775763867817-183404ef)"
+      ],
+      "expectedCitations": [
+        { "kind": "directive", "rowId": "seed-cortex-ide-inline-styles-only" },
+        { "kind": "directive", "rowId": "d-1775763867817-183404ef" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-007",
+      "category": "decisions",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Why are React icon component imports (lucide-react, @phosphor-icons/react) banned in favor of raw SVG?",
+      "expectedAnswer": "Neither lucide-react nor @phosphor-icons/react renders correctly inside the Tauri webview, so the seed-cortex-ide-phosphor-svg-only directive bans the component imports and requires extracting raw SVG path data from @phosphor-icons/react/dist/defs/. A 85-icon shim system in src/lib/icons/ covers the common cases; HTML entities are preferred for trivial actions.",
+      "expectedFacts": [
+        "Names Tauri webview rendering as the cause",
+        "Mentions extracting from @phosphor-icons/react/dist/defs/",
+        "Mentions src/lib/icons/ shim system or 85 icons"
+      ],
+      "expectedCitations": [
+        { "kind": "directive", "rowId": "seed-cortex-ide-phosphor-svg-only" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-008",
+      "category": "decisions",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Why did the team choose FTS5 + structured SQL over a vector store for the Cortex Q&A retrieval layer?",
+      "expectedAnswer": "Per the locked architecture comment on epic #915, the prior open-source Cortex shipped 88/501 real embeddings and 413 silent fallbacks to zero-vectors under load — vector retrieval had a silent failure mode. FTS5 BM25 has no silent-failure mode (it returns ranked tokens or nothing), is in-process and sub-200ms, and is indexed-on-write via SQLite triggers. Three retrievers run in parallel — structured SQL, FTS5 lexical, and codebase-memory-mcp graph — composed by an LLM with typed citations.",
+      "expectedFacts": [
+        "References 413/501 silent zero-vector fallbacks (the OSS-Cortex post-mortem number)",
+        "States BM25 has no silent failure mode",
+        "Names the three retrievers (SQL, FTS5, graph / codebase-memory-mcp)"
+      ],
+      "expectedCitations": [
+        { "kind": "issue", "rowId": "915" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+    },
+    {
+      "id": "qa-009",
+      "category": "decisions",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Why is the o8-site marketing repo deployed to Vercel while the cortex-ide repo is not?",
+      "expectedAnswer": "cortex-ide is a Tauri v2 desktop app — it ships as a native installer (.dmg/.msi/.deb) via cargo tauri build, not a web deploy. Its Next.js backend runs locally on the user's machine. o8-site is a standalone Next.js marketing site (landing + changelog) and is the one and only Vercel surface for the o8 project.",
+      "expectedFacts": [
+        "Identifies cortex-ide as a Tauri desktop app",
+        "Identifies o8-site as the Vercel surface",
+        "References the .dmg/installer flow OR the local-Next-backend nature"
+      ],
+      "expectedCitations": [],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-010",
+      "category": "decisions",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the locked LLM routing strategy for Cortex Q&A — which model handles lookup vs reasoning?",
+      "expectedAnswer": "Two-tier routing keyed by question class. Class A (lookup, deterministic SQL only) uses Gemini 2.5 Flash with a 200-500ms total budget. Class B (reasoning) uses Claude Sonnet streaming compose with a citation-discipline prompt at 1-3s total. A Flash classifier picks the class and emits 3-5 BM25 query variants in one 50ms call. Local fallback is opencode/gpt-5-nano if no API keys are present.",
+      "expectedFacts": [
+        "Names Gemini 2.5 Flash for Class A lookup",
+        "Names Claude Sonnet for Class B reasoning",
+        "Mentions the Flash classifier OR the local opencode/gpt-5-nano fallback"
+      ],
+      "expectedCitations": [
+        { "kind": "issue", "rowId": "915" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+    },
+    {
+      "id": "qa-011",
+      "category": "processes",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the required local check before every commit?",
+      "expectedAnswer": "Run npx tsc --noEmit before every commit. The seed-global-typecheck-before-commit directive marks this as no-exceptions on shared codebases. For Next.js repos prefer npm run typecheck (clears the typegen cache before checking).",
+      "expectedFacts": [
+        "Names npx tsc --noEmit",
+        "References the typecheck directive OR npm run typecheck variant"
+      ],
+      "expectedCitations": [
+        { "kind": "directive", "rowId": "seed-global-typecheck-before-commit" },
+        { "kind": "directive", "rowId": "d-1775763668585-fba2ce0b" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-012",
+      "category": "processes",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the file size ceiling and which files are explicitly waived?",
+      "expectedAnswer": "Files must stay under 800 lines. If a change would push past 800, decompose first by extracting helpers, hooks, sub-components, or modules. Layout orchestrators (src/app/dashboard/page.tsx) and multiplexers (src/ws-server.ts) are explicitly waived.",
+      "expectedFacts": [
+        "States 800 lines",
+        "Names src/app/dashboard/page.tsx as waived",
+        "Names src/ws-server.ts as waived"
+      ],
+      "expectedCitations": [
+        { "kind": "directive", "rowId": "seed-cortex-ide-800-line-ceiling" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-013",
+      "category": "processes",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the surgical-changes rule for this codebase?",
+      "expectedAnswer": "Every changed line must trace back to the request. Don't improve adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style even if you'd write it differently. If you notice unrelated dead code or a tempting refactor, mention it — don't silently delete or rewrite it. Drift in unrelated areas is the #1 source of bad reviews.",
+      "expectedFacts": [
+        "States 'every changed line traces to the request'",
+        "Mentions drift in unrelated areas being a top review issue OR matches existing style",
+        "Forbids silent rewrites of adjacent code"
+      ],
+      "expectedCitations": [
+        { "kind": "directive", "rowId": "seed-global-surgical-changes" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-014",
+      "category": "processes",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "How do we ship a new release of the o8 desktop app — what command sequence does the daily-driver loop use?",
+      "expectedAnswer": "npm version patch (sync-version.mjs hook updates package.json + src-tauri/tauri.conf.json + src-tauri/Cargo.toml in one commit, then npm tags v0.1.X+1), then git push --follow-tags, then npm run ship (cargo tauri build with signing key + dev-mcp-plugin feature, then scripts/release.mjs uploads the signed assets to GitHub Releases). The installed app picks up the update via the UpdateBanner polling hurttlocker/cortex-ide releases.",
+      "expectedFacts": [
+        "Names npm version patch as the version bump",
+        "Names git push --follow-tags",
+        "Names npm run ship",
+        "References the auto-update flow / UpdateBanner / GitHub Releases"
+      ],
+      "expectedCitations": [],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-015",
+      "category": "processes",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Which API route prefixes are gated by the loopback + ws-token middleware in src/middleware.ts?",
+      "expectedAnswer": "The middleware gates /api/panel/, /api/orchestrator/, /api/directives, /api/cortex/, /api/runtime/, /api/lanes, /api/worktrees, /api/review/, /api/board/, /api/command-center/, /api/claude-code/, /api/codex/, /api/operator/, and /api/setup/. Loopback origins (127.0.0.1, localhost, tauri://localhost, same-origin) pass automatically; cross-origin must present Authorization: Bearer <ws-token>. Allowlist is /api/setup/* GET only, /api/v2/auth/*, /api/panel/github-device/*, /api/panel/status.",
+      "expectedFacts": [
+        "Names /api/panel/, /api/orchestrator/, /api/cortex/, /api/lanes (or any 4+ of the gated prefixes)",
+        "Mentions loopback host check + Bearer token",
+        "References the allowlist or /api/setup/* GET-only carve-out"
+      ],
+      "expectedCitations": [],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 1 }
+    },
+    {
+      "id": "qa-016",
+      "category": "incidents",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What happened on the fix/midnight-blob-rgba-sweep branch and why was it reverted?",
+      "expectedAnswer": "The Gemini-run dispatch tried to swap hardcoded rgba whites for palette vars in chrome surfaces. The pass collapsed glass into solid blobs across NavRail, status bar, and command palette — the low-opacity rgba whites are intentionally the glass tint over the macOS vibrancy backdrop, not arbitrary colors. The branch was reverted before merge. This led to the seed-cortex-ide-glass-chrome-preserved directive being added.",
+      "expectedFacts": [
+        "Identifies the runtime as gemini",
+        "Names NavRail / status bar / command palette as collapsed surfaces",
+        "States the fix was reverted (outcome=failed)",
+        "Optionally mentions the resulting glass-chrome-preserved directive"
+      ],
+      "expectedCitations": [
+        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-7d-gemini-fix-midnight-blob-rgba-sweep" },
+        { "kind": "directive", "rowId": "seed-cortex-ide-glass-chrome-preserved" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-017",
+      "category": "incidents",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Which packet finished only partial and what work was left over?",
+      "expectedAnswer": "The feat/packet-meta-rows-restyle outcome (codex, partial). Branch + repo rows landed cleanly, but the runtime + summary rows were still using a native select that needed a popover follow-up.",
+      "expectedFacts": [
+        "Names the feat/packet-meta-rows-restyle branch",
+        "States outcome=partial",
+        "Identifies the runtime/summary rows as the leftover work",
+        "Mentions the native-select-to-popover migration"
+      ],
+      "expectedCitations": [
+        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-6d-codex-feat-packet-meta-rows-restyle" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-018",
+      "category": "incidents",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Why did the orchestrator-empty-state-copy outcome get flagged by the reviewer even though it shipped?",
+      "expectedAnswer": "The opencode-run polish/orchestrator-empty-state-copy outcome rewrote the empty-state copy and quick-action card layout. The reviewer flagged the new copy as off-brand vs the locked design language.",
+      "expectedFacts": [
+        "Names the runtime as opencode",
+        "Names the outcome as polish/orchestrator-empty-state-copy",
+        "States that the reviewer flagged it as off-brand vs the locked design language"
+      ],
+      "expectedCitations": [
+        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-5d-opencode-polish-orchestrator-empty-state-copy" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-019",
+      "category": "incidents",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Has the o8_view_eval webview tool family ever failed to ship cleanly? What was the failure mode?",
+      "expectedAnswer": "Yes — the so-1776188979528-a3yz23te outcome (codex, failed) for the inline 'add o8_view_* webview tool family to operator-mcp-server' attempt. The session went idle between runs; even though the client + tools files were added and wired, the commit didn't go through cleanly. A separate failure (so-1776188344936-92de5fx8) attempted to surface webview tool availability in MCP diagnostics — git refused that commit because only an unrelated .claude/settings.json was seen as modified.",
+      "expectedFacts": [
+        "Identifies at least one failed outcome related to o8_view_*",
+        "Names the runtime as codex",
+        "Mentions either the idle-between-runs symptom OR the git-refused-commit symptom"
+      ],
+      "expectedCitations": [
+        { "kind": "outcome", "rowId": "so-1776188979528-a3yz23te" },
+        { "kind": "outcome", "rowId": "so-1776188344936-92de5fx8" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+    },
+    {
+      "id": "qa-020",
+      "category": "incidents",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What CSS color literal pattern broke midnight theme and which commit contains the post-mortem?",
+      "expectedAnswer": null,
+      "knownGap": "commit-sha-recall-not-yet-ingested",
+      "expectedFacts": [
+        "Mentions hardcoded rgba(255,255,255,0.xx) becoming a light-gray blob in midnight",
+        "Either cites commit 929ffdf OR explicitly states the commit history is not available in the substrate"
+      ],
+      "expectedCitations": [
+        { "kind": "directive", "rowId": "seed-cortex-ide-palette-vars" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-021",
+      "category": "specs",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What are the four FTS5 virtual tables planned for schema v14 to support Cortex Q&A?",
+      "expectedAnswer": "outcomes_fts(summary, plan_text) with content='session_outcomes', directives_fts(title, body) materialized from disk on directive write, prs_fts(title, body) with content='github_pull_requests', and issues_fts(title, body) with content='github_issues'. Triggers on parent tables keep the FTS coherent. A new qa_eval_runs(question_id, expected, actual, score, run_at) table is added for the eval harness.",
+      "expectedFacts": [
+        "Names outcomes_fts, directives_fts, prs_fts, issues_fts (all four)",
+        "Mentions triggers keeping FTS coherent",
+        "Mentions the qa_eval_runs eval harness table"
+      ],
+      "expectedCitations": [
+        { "kind": "issue", "rowId": "915" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-022",
+      "category": "specs",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What latency budgets are locked for the three Q&A question classes?",
+      "expectedAnswer": "Class A (lookup, deterministic SQL only): 250ms p95 target with a 500ms hard ceiling. Class A+ (lookup + Flash compose): 800ms p95 target with a 1.5s hard ceiling. Class B (reasoning + Sonnet streaming compose): 2.0s TTFT and 4s TTLT p95 targets, with a 6s hard ceiling.",
+      "expectedFacts": [
+        "Names Class A 250ms p95 / 500ms ceiling",
+        "Names Class A+ 800ms p95 / 1.5s ceiling",
+        "Names Class B 2.0s TTFT / 4s TTLT / 6s ceiling"
+      ],
+      "expectedCitations": [
+        { "kind": "issue", "rowId": "915" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-023",
+      "category": "specs",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the cache key shape and TTL for the Cortex Q&A retrieval layer?",
+      "expectedAnswer": "Cache key is sha256(question + repoPath + max(directives.updated_at, outcomes.completed_at)). TTL is 30s. Invalidated on directive write or outcome insert.",
+      "expectedFacts": [
+        "Names sha256 hash over question + repoPath + max-timestamp",
+        "States 30s TTL",
+        "Mentions invalidation on directive write or outcome insert"
+      ],
+      "expectedCitations": [
+        { "kind": "issue", "rowId": "915" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-024",
+      "category": "specs",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What are the two output modes for the Cortex Q&A surface and what triggers each?",
+      "expectedAnswer": "Memory mode (terse) emits a one-line answer plus citation chips for Class-A questions. Brain mode (verbose) emits a paragraph with inline citations and a contradiction footer for Class-B reasoning questions. The mode is picked by question class, not by the user.",
+      "expectedFacts": [
+        "Names memory mode for terse / Class-A",
+        "Names brain mode for verbose / Class-B",
+        "States that the mode is picked by class, not by user"
+      ],
+      "expectedCitations": [
+        { "kind": "issue", "rowId": "915" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-025",
+      "category": "specs",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the regression-gate threshold for the Q&A eval harness?",
+      "expectedAnswer": "Any category dropping below 70% factual_accuracy fails CI. The eval set is 30 questions split 5 per category across ownership / decisions / processes / incidents / specs / cross-repo. Sonnet-as-judge scores each on the rubric {factual_accuracy, citation_correctness, hallucination_count}.",
+      "expectedFacts": [
+        "Names 70% threshold",
+        "Names 30 questions / 5 per category",
+        "Names the rubric fields factual_accuracy, citation_correctness, hallucination_count"
+      ],
+      "expectedCitations": [
+        { "kind": "issue", "rowId": "915" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-026",
+      "category": "cross-repo",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What invariants does o8-site explicitly carry over from the cortex-ide desktop app?",
+      "expectedAnswer": "Per the o8-site README, four invariants carry over: inline styles only (style={{ }}, never className); longhand padding (paddingTop / paddingLeft, never padding shorthand); no emoji (raw SVG or HTML entities only); and glass tokens (var(--t-surface), var(--t-border)) for panels rather than hardcoded rgba(255,255,255,0.xx).",
+      "expectedFacts": [
+        "Names inline styles only",
+        "Names longhand padding",
+        "Names no emoji",
+        "Names glass tokens / palette vars"
+      ],
+      "expectedCitations": [
+        { "kind": "directive", "rowId": "seed-cortex-ide-inline-styles-only" },
+        { "kind": "directive", "rowId": "seed-cortex-ide-palette-vars" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.3, "max_hallucinations": 1 }
+    },
+    {
+      "id": "qa-027",
+      "category": "cross-repo",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Which repo in the o8 project is the deployable Vercel surface and which is not?",
+      "expectedAnswer": "o8-site is the Vercel surface — the README explicitly says 'do not deploy the cortex-ide repo to Vercel — that's a Tauri desktop app. This landing site is the one and only Vercel surface for o8.' cortex-ide ships as a native installer via cargo tauri build.",
+      "expectedFacts": [
+        "Identifies o8-site as the Vercel surface",
+        "Identifies cortex-ide as Tauri desktop, not Vercel",
+        "References the o8-site README or the explicit 'one and only Vercel surface' wording"
+      ],
+      "expectedCitations": [
+        { "kind": "project", "rowId": "proj-5d0d9e02-015" }
+      ],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.3, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-028",
+      "category": "cross-repo",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "Both o8-site and cortex-ide use Plus Jakarta Sans. Is that a coincidence or an explicit decision?",
+      "expectedAnswer": "Explicit decision. The o8-site README states 'Plus Jakarta Sans (matches the desktop app)' as a stack choice. The cortex-ide repo locked Plus Jakarta Sans during the Apr 12 fleet UX overhaul (see typography memory and the /text specimen page).",
+      "expectedFacts": [
+        "States it's an explicit decision, not coincidence",
+        "References the o8-site stack note OR the cortex-ide typography decision",
+        "Optionally names the /text specimen page"
+      ],
+      "expectedCitations": [],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-029",
+      "category": "cross-repo",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "How many session_outcomes rows currently exist for the o8-site repo?",
+      "expectedAnswer": null,
+      "knownGap": "o8-site-not-yet-dispatched",
+      "expectedFacts": [
+        "Either returns 0 / no outcomes ingested OR explicitly states the o8-site repo has not been dispatched against yet",
+        "Does not invent fictional o8-site outcome rows"
+      ],
+      "expectedCitations": [],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+    },
+    {
+      "id": "qa-030",
+      "category": "cross-repo",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What's the AGENTS.md file in o8-site say, and does cortex-ide have an equivalent?",
+      "expectedAnswer": "o8-site's AGENTS.md (referenced from CLAUDE.md via @AGENTS.md) wraps the Next.js agent rules — a 'this is NOT the Next.js you know' callout that forces agents to read node_modules/next/dist/docs/ before writing code, because the version has breaking changes from training data. cortex-ide's CLAUDE.md is the equivalent surface — a much longer file covering architecture, commands, and the critical NEVER/ALWAYS rules.",
+      "expectedFacts": [
+        "Names the 'this is NOT the Next.js you know' wording or the breaking-changes callout",
+        "Identifies cortex-ide's CLAUDE.md as the equivalent surface",
+        "Mentions reading node_modules/next/dist/docs/ before writing code"
+      ],
+      "expectedCitations": [],
+      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 1 }
+    }
+  ]
+}
