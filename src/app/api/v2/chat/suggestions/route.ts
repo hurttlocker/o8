@@ -115,6 +115,7 @@ export async function POST(request: NextRequest) {
             temperature: 0.4,
             maxOutputTokens: 200,
             responseMimeType: 'application/json',
+            thinkingConfig: { thinkingBudget: 0 },
           },
         }),
         signal: controller.signal,
