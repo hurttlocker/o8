@@ -1,5 +1,6 @@
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use tauri::{
@@ -1454,6 +1455,211 @@ fn read_git_status(repo: String) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "changedFiles": changed_files, "clean": changed_files == 0 }))
 }
 
+// ── MCP loop observability (issues #793, #794) ──
+//
+// Two MCP tools that close gaps in the autonomous dogfood loop's
+// observability when the webview's JS thread is busy. Both keep their
+// state on the Rust side so the data is captured / queried even when
+// page-side eval calls are slow:
+//
+//   - `o8_view_console_errors`: an in-process ring buffer (cap 100, FIFO
+//     eviction) populated by an injected JS hook that wraps `console.error`
+//     + listens for `error` / `unhandledrejection` events and posts each
+//     one back through `__TAURI_INTERNALS__.invoke('record_console_error', …)`.
+//     The MCP read returns `{ errors, count, sinceLastFetch }` and resets
+//     the per-fetch counter on every call.
+//
+//   - `o8_view_active_route`: returns the main webview's current URL parts
+//     by calling `webview.url()` directly (no JS-thread crossing on the
+//     read side; the MCP transport still goes through the plugin's
+//     execute_js bridge — see operator-mcp-server.ts). The Next.js
+//     router segment is intentionally returned as `null` for now;
+//     extracting it requires JS-side state that is harder to reach
+//     without an eval round-trip.
+
+const CONSOLE_ERROR_BUFFER_CAP: usize = 100;
+
+#[derive(Clone, Serialize)]
+struct ConsoleError {
+    message: String,
+    source: String,
+    lineno: u32,
+    timestamp: u64,
+}
+
+struct ConsoleErrorBuffer {
+    errors: VecDeque<ConsoleError>,
+    /// Errors recorded since the last `o8_view_console_errors` call. Counter
+    /// resets on every read, so consecutive calls show only the delta.
+    since_last_fetch: u32,
+}
+
+fn console_errors() -> &'static Mutex<ConsoleErrorBuffer> {
+    static BUFFER: OnceLock<Mutex<ConsoleErrorBuffer>> = OnceLock::new();
+    BUFFER.get_or_init(|| {
+        Mutex::new(ConsoleErrorBuffer {
+            errors: VecDeque::with_capacity(CONSOLE_ERROR_BUFFER_CAP),
+            since_last_fetch: 0,
+        })
+    })
+}
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// JS injected into every page load on the main window. Wires three error
+/// sources back into the Rust ring buffer via `__TAURI_INTERNALS__.invoke`:
+///   1. `window.onerror` (synchronous runtime errors, parser errors)
+///   2. `unhandledrejection` (async rejections without a `.catch`)
+///   3. `console.error` (monkey-patched — original is preserved + still
+///      forwarded to devtools so log output is unchanged)
+///
+/// Each handler stringifies its inputs into a single `message`, derives a
+/// `source` (script URL where applicable, otherwise the source label), and
+/// fires a fire-and-forget invoke. Failures swallow silently — we never
+/// want the error hook itself to log noise that triggers more invokes.
+const CONSOLE_ERROR_HOOK_JS: &str = r#"
+(function () {
+  if (typeof window === 'undefined' || window.__o8ConsoleErrorHookInstalled) return;
+  window.__o8ConsoleErrorHookInstalled = true;
+
+  function safeInvoke(message, source, lineno) {
+    try {
+      if (
+        typeof window === 'undefined'
+        || !window.__TAURI_INTERNALS__
+        || typeof window.__TAURI_INTERNALS__.invoke !== 'function'
+      ) {
+        return;
+      }
+      var payload = {
+        message: String(message == null ? '' : message).slice(0, 4000),
+        source: String(source == null ? '' : source).slice(0, 1000),
+        lineno: typeof lineno === 'number' && isFinite(lineno) ? Math.floor(lineno) : 0,
+      };
+      var p = window.__TAURI_INTERNALS__.invoke('record_console_error', payload);
+      if (p && typeof p.then === 'function') p.catch(function () {});
+    } catch (e) { /* swallow */ }
+  }
+
+  function stringifyArg(value) {
+    if (value == null) return String(value);
+    if (typeof value === 'string') return value;
+    if (value instanceof Error) {
+      return value.stack ? value.stack : (value.message || String(value));
+    }
+    try { return JSON.stringify(value); }
+    catch (e) { try { return String(value); } catch (_) { return '[unserializable]'; } }
+  }
+
+  var originalConsoleError = console.error;
+  console.error = function () {
+    try {
+      var parts = [];
+      for (var i = 0; i < arguments.length; i++) parts.push(stringifyArg(arguments[i]));
+      safeInvoke(parts.join(' '), 'console.error', 0);
+    } catch (e) { /* swallow */ }
+    try {
+      return originalConsoleError.apply(console, arguments);
+    } catch (e) {
+      // If the original throws (extremely unusual), fall back to noop so we
+      // don't spiral. We've already captured the error above.
+    }
+  };
+
+  window.addEventListener('error', function (event) {
+    try {
+      var msg = event && (event.message || (event.error && (event.error.stack || event.error.message)));
+      var src = event && (event.filename || (event.target && (event.target.src || event.target.href)));
+      var line = event && typeof event.lineno === 'number' ? event.lineno : 0;
+      safeInvoke(msg, src, line);
+    } catch (e) { /* swallow */ }
+  }, true);
+
+  window.addEventListener('unhandledrejection', function (event) {
+    try {
+      var reason = event && event.reason;
+      var msg;
+      if (reason instanceof Error) {
+        msg = reason.stack || reason.message || String(reason);
+      } else {
+        try { msg = JSON.stringify(reason); }
+        catch (_) { msg = String(reason); }
+      }
+      safeInvoke(msg, 'unhandledrejection', 0);
+    } catch (e) { /* swallow */ }
+  });
+})();
+"#;
+
+/// Tauri command invoked by the injected JS hook. Pushes one error onto the
+/// ring buffer, evicting the oldest entry when capacity is reached, and
+/// bumps the per-fetch counter that `o8_view_console_errors` resets on read.
+#[tauri::command]
+fn record_console_error(message: String, source: String, lineno: u32) {
+    let Ok(mut buffer) = console_errors().lock() else {
+        return;
+    };
+    if buffer.errors.len() >= CONSOLE_ERROR_BUFFER_CAP {
+        buffer.errors.pop_front();
+    }
+    buffer.errors.push_back(ConsoleError {
+        message,
+        source,
+        lineno,
+        timestamp: now_unix_ms(),
+    });
+    buffer.since_last_fetch = buffer.since_last_fetch.saturating_add(1);
+}
+
+/// MCP read path. Returns the full ring buffer plus the count since the
+/// previous call (which resets to zero after this returns).
+#[tauri::command]
+fn o8_view_console_errors() -> serde_json::Value {
+    let Ok(mut buffer) = console_errors().lock() else {
+        return serde_json::json!({ "errors": [], "count": 0, "sinceLastFetch": 0 });
+    };
+    let errors: Vec<ConsoleError> = buffer.errors.iter().cloned().collect();
+    let count = errors.len();
+    let since_last_fetch = buffer.since_last_fetch;
+    buffer.since_last_fetch = 0;
+    serde_json::json!({
+        "errors": errors,
+        "count": count,
+        "sinceLastFetch": since_last_fetch,
+    })
+}
+
+/// Read the main webview's current URL via `webview.url()` and split it into
+/// pathname / search / hash. `routerState` is intentionally `null` — the
+/// Next.js segment isn't reachable without a JS-side eval, which we defer.
+#[tauri::command]
+fn o8_view_active_route(app: AppHandle) -> Result<serde_json::Value, String> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Err("main webview not found".to_string());
+    };
+    let url = window.url().map_err(|e| format!("webview.url() failed: {}", e))?;
+    let pathname = url.path().to_string();
+    let search = match url.query() {
+        Some(q) if !q.is_empty() => format!("?{}", q),
+        _ => String::new(),
+    };
+    let hash = match url.fragment() {
+        Some(f) if !f.is_empty() => format!("#{}", f),
+        _ => String::new(),
+    };
+    Ok(serde_json::json!({
+        "pathname": pathname,
+        "search": search,
+        "hash": hash,
+        "routerState": serde_json::Value::Null,
+    }))
+}
+
 // ── SQLite helper (read-only, WAL mode) ──
 
 fn open_cortex_db() -> Result<Connection, String> {
@@ -2127,6 +2333,22 @@ pub fn run() {
     }
 
     builder
+        // Inject the console-error capture hook on every main-window page
+        // load (issue #793). Other windows (dispatch popover, etc.) skip
+        // injection — we only care about errors in the main app shell.
+        // PageLoadEvent fires twice per navigation (Started + Finished); we
+        // inject on Started so the hook is in place before any user JS runs.
+        .on_page_load(|webview, payload| {
+            if webview.label() != "main" {
+                return;
+            }
+            if payload.event() != tauri::webview::PageLoadEvent::Started {
+                return;
+            }
+            if let Err(err) = webview.eval(CONSOLE_ERROR_HOOK_JS) {
+                log::warn!("[console-error-hook] inject failed: {}", err);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_desktop_info,
             check_port,
@@ -2145,6 +2367,9 @@ pub fn run() {
             save_dispatch_popover_position,
             set_tray_badge,
             notify_review_ready,
+            record_console_error,
+            o8_view_console_errors,
+            o8_view_active_route,
             #[cfg(target_os = "macos")]
             master_key_get,
             #[cfg(target_os = "macos")]
