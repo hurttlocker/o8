@@ -330,7 +330,12 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     autoTiledComparisonGroupIdRef.current = nextAutoTileGroup.groupId;
     sessionTiles.autoTileSessions(sessionKeys);
     console.log(`[best-of-n] Auto-tiled comparison group ${nextAutoTileGroup.groupId}`);
-  }, [comparisonGroups, sessionTiles]);
+  // Narrow to the stable callback — listing the whole `sessionTiles` object
+  // would re-fire on every render because useSessionTiles returns a fresh
+  // literal each time. autoTileSessions is wrapped in useCallback inside the
+  // hook, so it's stable as long as its own deps don't change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comparisonGroups, sessionTiles.autoTileSessions]);
 
   const handleTogglePermission = useCallback(() => {
     setPermissionMode((current) => {

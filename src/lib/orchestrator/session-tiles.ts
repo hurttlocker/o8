@@ -316,15 +316,47 @@ export function serializeSessionTileLayout(layout: SessionTileLayout): string {
   });
 }
 
+/**
+ * Migrate a parsed layout from a prior version to the current one.
+ *
+ * Add a `case` for every old version that can be salvaged. Return `null`
+ * when the version is too old or unknown to migrate safely — the caller
+ * will fall back to the default layout instead of silently resetting state.
+ *
+ * Currently a no-op because SESSION_TILE_LAYOUT_VERSION === 1 has no
+ * prior versions. The scaffold ensures future bumps don't silently destroy
+ * user data (issue #818 audit finding #3).
+ */
+function migrateSessionTileLayout(
+  parsed: { version?: unknown; root?: unknown },
+): SessionTileLayout | null {
+  switch (parsed.version) {
+    // v1 is current — caller should never reach here for current version,
+    // but handle it safely as a no-op fallback.
+    case 1: {
+      if (!isPlainSessionNode(parsed.root)) return null;
+      return { version: SESSION_TILE_LAYOUT_VERSION, root: parsed.root };
+    }
+    // Add future cases here:
+    // case 2: { /* migrate v2 → v3 */ }
+    default:
+      return null;
+  }
+}
+
 export function deserializeSessionTileLayout(
   raw: string | null | undefined,
 ): SessionTileLayout | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as { version?: unknown; root?: unknown };
-    if (parsed.version !== SESSION_TILE_LAYOUT_VERSION) return null;
-    if (!isPlainSessionNode(parsed.root)) return null;
-    return { version: SESSION_TILE_LAYOUT_VERSION, root: parsed.root };
+    if (parsed.version === SESSION_TILE_LAYOUT_VERSION) {
+      // Fast path: current version, validate shape directly.
+      if (!isPlainSessionNode(parsed.root)) return null;
+      return { version: SESSION_TILE_LAYOUT_VERSION, root: parsed.root };
+    }
+    // Older version — attempt migration rather than silently returning null.
+    return migrateSessionTileLayout(parsed);
   } catch {
     return null;
   }

@@ -10,7 +10,7 @@
  * absolutely-positioned sibling of the container so React preserves
  * component state across split/resize/close changes.
  */
-import { useCallback, useMemo, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { SessionTranscriptPane } from '@/components/desktop/SessionTranscriptPane';
 import {
   collectAllLeaves,
@@ -41,6 +41,26 @@ export function SessionTileSurface({
   onFocusSession,
 }: SessionTileSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Track listeners so we can remove them on unmount-during-drag (issue #818).
+  const dragListenersRef = useRef<{
+    handleMove: (event: MouseEvent) => void;
+    handleUp: () => void;
+  } | null>(null);
+
+  // Cleanup: if component unmounts while a drag is in progress, reset the
+  // body cursor and remove any dangling document listeners so they don't
+  // persist after the surface is gone.
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (dragListenersRef.current) {
+        document.removeEventListener('mousemove', dragListenersRef.current.handleMove);
+        document.removeEventListener('mouseup', dragListenersRef.current.handleUp);
+        dragListenersRef.current = null;
+      }
+    };
+  }, []);
 
   const { leaves, leafRects, splitFrames } = useMemo(() => {
     const { leafRects, splitFrames } = computeSessionTileLayout(layout.root);
@@ -70,11 +90,13 @@ export function SessionTileSurface({
         const handleUp = () => {
           document.removeEventListener('mousemove', handleMove);
           document.removeEventListener('mouseup', handleUp);
+          dragListenersRef.current = null;
           document.body.style.cursor = '';
           document.body.style.userSelect = '';
         };
         document.body.style.cursor = direction === 'vertical' ? 'col-resize' : 'row-resize';
         document.body.style.userSelect = 'none';
+        dragListenersRef.current = { handleMove, handleUp };
         document.addEventListener('mousemove', handleMove);
         document.addEventListener('mouseup', handleUp);
       },
