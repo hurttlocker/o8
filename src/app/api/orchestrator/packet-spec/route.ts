@@ -48,6 +48,17 @@ export async function PUT(request: NextRequest) {
   }
 
   const content = typeof record.content === 'string' ? record.content : '';
+  // #856 — silently accepting an empty/whitespace-only spec used to set the
+  // mtime stamp ("Updated just now") even though the file ended up blank,
+  // giving the operator no signal their content was lost. Reject explicitly
+  // and tell them how to clear the spec instead.
+  if (content.trim().length === 0) {
+    return operatorError(
+      'invalid_request',
+      'Spec cannot be empty. Delete the spec file directly to remove it, or write at least one non-whitespace character.',
+      400,
+    );
+  }
   try {
     const result = await writePacketSpec(packetId, content);
     return operatorSuccess(result);

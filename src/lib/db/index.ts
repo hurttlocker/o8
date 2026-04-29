@@ -35,7 +35,10 @@ const DATA_DIR = process.env.O8_DATA_DIR
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
 const DB_SCHEMA_VERSION = 12;
-const DB_MIGRATION_MARKER_PATH = path.join(DATA_DIR, `.db-migrated-v${DB_SCHEMA_VERSION}`);
+
+function migrationMarkerPath(version: number): string {
+  return path.join(DATA_DIR, `.db-migrated-v${version}`);
+}
 
 // Ensure data directory exists
 if (!existsSync(DATA_DIR)) {
@@ -68,12 +71,26 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
 
   _db = drizzle!(_sqlite, { schema });
 
-  if (shouldEnsureTables(dbFilePreviouslyExisted)) {
+  // #859 — the old gate skipped `ensureIdempotentColumnAdds` whenever the
+  // top-version marker was missing, leaving installs that landed before v4
+  // pinned at v3 forever and silently skipping the per-boot column-add +
+  // backfill helpers. New behaviour:
+  //   1. Run `ensureTables` (which uses CREATE TABLE IF NOT EXISTS) when the
+  //      DB file is new OR the top-version marker is missing — this is also
+  //      what the old `shouldEnsureTables` gate did, except now it serves as
+  //      a safety net before the always-on idempotent path.
+  //   2. ALWAYS run `ensureIdempotentColumnAdds` so column-add + backfill
+  //      helpers can never be silently skipped for existing installs whose
+  //      marker drifted out of sync with DB_SCHEMA_VERSION.
+  //   3. Backfill any missing v1..v12 markers in order so installs upgraded
+  //      from older schemas show the full migration history on disk and
+  //      brand-new installs don't appear to have skipped versions.
+  const topMarkerExists = existsSync(migrationMarkerPath(DB_SCHEMA_VERSION));
+  if (!dbFilePreviouslyExisted || !topMarkerExists) {
     ensureTables(_sqlite);
-    writeMigrationMarker();
-  } else {
-    ensureIdempotentColumnAdds(_sqlite);
   }
+  ensureIdempotentColumnAdds(_sqlite);
+  writeAllMissingMigrationMarkers();
 
   console.log(`[db] Connected to ${DB_PATH}`);
   return _db;
@@ -569,18 +586,36 @@ function ensureTables(sqlite: Database.Database): void {
   migrateLegacyLaneStoreIfNeeded(sqlite, { lanesTablePreviouslyMissing });
 }
 
-function shouldEnsureTables(dbFilePreviouslyExisted: boolean): boolean {
-  return !dbFilePreviouslyExisted || !existsSync(DB_MIGRATION_MARKER_PATH);
-}
-
-function writeMigrationMarker(): void {
-  try {
-    writeFileSync(
-      DB_MIGRATION_MARKER_PATH,
-      JSON.stringify({ schemaVersion: DB_SCHEMA_VERSION, migratedAt: new Date().toISOString() }),
-    );
-  } catch (error) {
-    console.warn(`[db] Failed to write migration marker at ${DB_MIGRATION_MARKER_PATH}`, error);
+/**
+ * #859 — walk every marker version v1..DB_SCHEMA_VERSION and write any that
+ * are missing. Existing installs that landed before v4 stayed pinned at v3
+ * forever because the old `writeMigrationMarker()` only stamped the highest
+ * version once and bailed; brand-new installs likewise only ever showed
+ * `.db-migrated-v12`, hiding the migration history.
+ *
+ * This runs unconditionally on every boot. The `existsSync` check makes each
+ * write idempotent — we only touch files that aren't already present — so
+ * the cost is one stat per missing marker (~12 syscalls in the worst case).
+ *
+ * We don't run version-specific SQL here. The schema-mutating helpers live
+ * in `ensureIdempotentColumnAdds` and `ensureTables`; markers are purely an
+ * audit trail of what's been applied. That separation matches the issue
+ * fix: "idempotent column-add helpers should run unconditionally" + "walk
+ * all marker versions on every boot".
+ */
+function writeAllMissingMigrationMarkers(): void {
+  const now = new Date().toISOString();
+  for (let version = 1; version <= DB_SCHEMA_VERSION; version += 1) {
+    const markerPath = migrationMarkerPath(version);
+    if (existsSync(markerPath)) continue;
+    try {
+      writeFileSync(
+        markerPath,
+        JSON.stringify({ schemaVersion: version, migratedAt: now }),
+      );
+    } catch (error) {
+      console.warn(`[db] Failed to write migration marker at ${markerPath}`, error);
+    }
   }
 }
 
