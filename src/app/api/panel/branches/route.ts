@@ -108,6 +108,27 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
+      // Claude harness sub-agent worktrees check out real feature branches
+      // (e.g. polish/hit-zone-approvals) into `.claude/worktrees/agent-XXX/`
+      // dirs that the harness creates per sub-agent run and never cleans up.
+      // The branch ref + worktree dir survive long after the sub-agent
+      // completes, leaking 30+ stale rows into the sidebar. Detect them by
+      // worktree-path convention (we already know it's a worktree from the
+      // git porcelain parse above) and skip — the user only ever wants to
+      // see worktrees they created via the o8 workspace flow, not the ones
+      // Claude's sub-agent feature spawned. Closes #750. The path check is
+      // a substring match because git reports paths verbatim from the
+      // porcelain output, including the repo's own basename — `endsWith`
+      // would miss nested cases. The active checkout (`isCurrent`) is
+      // never under .claude/worktrees/agent-* in practice but we preserve
+      // it defensively in case a power-user is daily-driving from one.
+      if (!isCurrent && isWt) {
+        const worktreePath = worktrees.get(trimmedName) ?? '';
+        if (worktreePath.includes('/.claude/worktrees/agent-')) {
+          continue;
+        }
+      }
+
       // Hide branches whose working diff vs default branch is empty — i.e.
       // every change on the branch already exists on default. Catches BOTH
       // fast-forward / regular merges AND squash merges (where the branch
