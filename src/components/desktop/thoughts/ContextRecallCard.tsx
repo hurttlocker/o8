@@ -100,17 +100,27 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
   // Re-runs whenever `directiveRefreshTick` is bumped by the
   // `o8:cortex-changes` listener below, so a merge that appends a `[merged]`
   // trailer is reflected in the open card within ~ws-roundtrip latency.
+  //
+  // #897 — Always settle to a concrete state. Previously a non-OK response
+  // returned silently, leaving `directives === null` and pinning the row at
+  // "Loading…" forever. We now treat any non-OK response as "no data
+  // available right now" and render the empty/last-known state instead of
+  // hanging.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const response = await fetch('/api/cortex/directives', { cache: 'no-store' });
-        if (!response.ok) return;
+        if (cancelled) return;
+        if (!response.ok) {
+          setDirectives((prev) => prev ?? []);
+          return;
+        }
         const payload = (await response.json()) as { directives?: DirectiveSummary[] };
         if (cancelled) return;
         setDirectives(payload.directives ?? []);
       } catch {
-        if (!cancelled) setDirectives([]);
+        if (!cancelled) setDirectives((prev) => prev ?? []);
       }
     })();
     return () => {
@@ -121,8 +131,15 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
   // #840 — Listen for cortex-changes pushed from the server after a merge
   // appends a directive trailer. Bridge already converts the WS message
   // into an `o8:cortex-changes` window event in DesktopWebSocketContext.
+  //
+  // #897 — Coalesce bursts. If the WS bridge fans out spuriously (or the
+  // external-merge-watcher writes multiple trailers in one tick) we don't
+  // want to restart the fetch faster than it can resolve. Debounce the
+  // refresh-tick bump to a single trailing edge per 250 ms window.
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    let pending = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const handler = (event: Event) => {
       const detail = (event as CustomEvent).detail as {
         data?: { scope?: string };
@@ -130,12 +147,22 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
       const scope = detail?.data?.scope;
       // Only directive scope triggers a directive re-fetch — outcomes and
       // codebase-memory will hook in here later if/when they need it.
-      if (scope === 'directive' || !scope) {
-        setDirectiveRefreshTick((tick) => tick + 1);
-      }
+      if (scope !== 'directive' && scope) return;
+      pending = true;
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        if (pending) {
+          pending = false;
+          setDirectiveRefreshTick((tick) => tick + 1);
+        }
+      }, 250);
     };
     window.addEventListener('o8:cortex-changes', handler);
-    return () => window.removeEventListener('o8:cortex-changes', handler);
+    return () => {
+      window.removeEventListener('o8:cortex-changes', handler);
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   // ── Recent outcomes — keyed on repoPath ─────────────────────────────
@@ -168,16 +195,25 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
   }, [repoPath]);
 
   // ── Index state — gates the SYMBOL GRAPH row ────────────────────────
+  // #897 — On a non-OK response (or thrown error) we used to silently
+  // return, leaving `indexState === null`. We now settle to an empty
+  // sentinel so the symbol-graph row renders the fallback "repo not indexed"
+  // hint instead of cascading the directives row's "Loading…" failure.
+  // (Last-known good state is preserved by the `prev ??` guard.)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const response = await fetch('/api/cortex/codebase-memory', { cache: 'no-store' });
-        if (!response.ok) return;
+        if (cancelled) return;
+        if (!response.ok) {
+          setIndexState((prev) => prev ?? { bootRan: false, inFlight: false, entries: [] });
+          return;
+        }
         const payload = (await response.json()) as IndexState;
         if (!cancelled) setIndexState(payload);
       } catch {
-        /* ignore */
+        if (!cancelled) setIndexState((prev) => prev ?? { bootRan: false, inFlight: false, entries: [] });
       }
     })();
     return () => {
