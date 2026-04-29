@@ -361,3 +361,15 @@ export function isDismissed(fingerprint: string): boolean {
   ).get(fingerprint);
   return Boolean(row);
 }
+
+/**
+ * Return every dismissed suggestion fingerprint. Used by the Settings UI to
+ * filter the GitHub-org auto-suggest strip in one round-trip rather than
+ * issuing per-fingerprint `isDismissed` lookups.
+ */
+export function listDismissedFingerprints(): string[] {
+  const rows = db().prepare(
+    'SELECT fingerprint FROM dismissed_suggestions ORDER BY dismissed_at DESC',
+  ).all() as Array<{ fingerprint: string }>;
+  return rows.map((row) => row.fingerprint);
+}
