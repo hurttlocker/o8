@@ -1,21 +1,28 @@
 /**
- * #748 — Cross-repo learning.
+ * #748 / #899 — Cross-repo learning.
  *
- * When a directive lands in repo A and ≥ 2 other registered repos share a
- * stack signature with A (Jaccard overlap ≥ SIMILARITY_THRESHOLD; see
- * `SIMILARITY_THRESHOLD` constant for the empirical floor and #853 for
- * rationale), surface a yellow proposal row in those target repos'
- * orchestrator views. The operator
- * accepts (duplicates the directive scoped to the target) or dismisses
- * (snoozes the (target, directive) pair for 30 days). Always human-gated.
+ * Default path (#899): when a `scope: repo` directive lands in repo A,
+ * resolve A's project memberships, then propose the directive to every other
+ * repo in those projects. Project membership is the explicit, operator-curated
+ * grouping that replaced the production-inert Jaccard candidate-selection
+ * step.
  *
- * The proposer never writes a directive itself. Accept text drives the
- * orchestrator chat composer; the orchestrator's existing memory tools
- * handle the actual markdown write — this matches #746's flow.
+ * Legacy path (#748, gated): set `O8_LEGACY_JACCARD_PROPOSER=1` to fall back
+ * to the original behavior — Jaccard overlap of stack signatures with a
+ * `repos.length < 3` floor and `SIMILARITY_THRESHOLD ≥ 0.4`. This existed for
+ * one version after the project rewrite so any regression in the new path can
+ * be reverted by env flag.
+ *
+ * Either way, the operator accepts (duplicates the directive scoped to the
+ * target) or dismisses (snoozes the (target, directive) pair for 30 days).
+ * Always human-gated. The proposer never writes a directive itself — Accept
+ * text drives the orchestrator chat composer; the orchestrator's existing
+ * memory tools handle the actual markdown write — this matches #746's flow.
  *
  * Storage:
- *   ~/.o8/stack-signatures.json — cached signatures (owned by stack-signature.ts)
  *   ~/.o8/cross-repo-snooze.json — append-only ledger of dismissed (target, directive) pairs
+ *   ~/.o8/directive-origins.json — circular-propagation guard (#855)
+ *   ~/.o8/stack-signatures.json — only read on the legacy Jaccard path
  *
  * Proposal id: sha1(`${targetRepoId}::${directiveId}`).slice(0,16) — stable
  * across ticks so dismiss survives recomputes.
@@ -31,22 +38,38 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { readOrComputeSignatures } from '@/lib/cortex/stack-signature';
+import { listProjectsByRepoId } from '@/lib/projects/store';
 
-// #853 — empirical floor for real-world repos. The original 0.8 spec was
-// chosen without validating against actual registered repos; in practice
-// `cortex-ide` (Next + Tauri + 52 deps) vs `eyes-web` (Next + Vercel + 55
-// deps) scores Jaccard ≈ 0.126, far below 0.8. Two repos sharing a Next.js
-// + TypeScript stack typically clear 0.4 even when their feature surfaces
-// are unrelated, so 0.4 is the practical floor for any pair to clear at
-// all. TODO: replace raw Jaccard with a tech-stack-weighted similarity
-// (Next/TS/Tauri tags overweighted vs. file-list overlap) once we have
-// > 3 repos worth of empirical pairs to calibrate against.
+// #853 / #899 — Jaccard constants live behind the legacy gate. The empirical
+// 0.4 floor and ≥ 3-repos minimum mathematically excluded asymmetric stacks
+// (cortex-ide 52 deps vs o8-site 7 deps caps at Jaccard ≈ 0.135), which is
+// why #748 was production-inert. The default path (project membership) needs
+// neither constant.
 const SIMILARITY_THRESHOLD = 0.4;
 const MIN_SIMILAR_REPOS = 2;
 const SNOOZE_DAYS = 30;
 const MAX_CANDIDATES = 12;
 const SNOOZE_FILE = 'cross-repo-snooze.json';
 const ORIGIN_FILE = 'directive-origins.json';
+
+/**
+ * #899 — fixed similarity score for project-membership matches. Project
+ * grouping is binary ("in this project" or not), so we render the badge as
+ * 100% to signal "explicit operator-curated link" rather than a fuzzy stack
+ * overlap. The UI tooltip distinguishes the two via the `source` discriminator.
+ */
+const PROJECT_MEMBERSHIP_SCORE = 1.0;
+
+/**
+ * #899 — emergency fallback. Set `O8_LEGACY_JACCARD_PROPOSER=1` to revert to
+ * the pre-Project Jaccard candidate selection for one version. Default OFF.
+ */
+function isLegacyJaccardEnabled(): boolean {
+  const raw = process.env.O8_LEGACY_JACCARD_PROPOSER;
+  if (!raw) return false;
+  const v = raw.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
 
 // ── directive read (same parser shape as cortex/directives/route.ts) ──────
 
@@ -354,6 +377,11 @@ function findSourceRepo(
   directive: DirectiveSummary,
   repos: RepoRegistryEntry[],
 ): RepoRegistryEntry | null {
+  // #899 — `scope: project` directives already span every member repo of the
+  // listed Projects. They're the explicit cross-repo solution, so the proposer
+  // never fans them out further. Skip before scope/repoName resolution.
+  if (directive.scope?.toLowerCase() === 'project') return null;
+
   // Repo-scoped directive: front matter `repoName: <name>` or `scope: <name>`.
   const declared = (directive.repoName || directive.scope || '').toLowerCase();
   if (declared && declared !== 'global' && declared !== 'repo') {
@@ -386,7 +414,13 @@ export interface CrossRepoProposalCandidate {
   directiveTitle: string;
   directiveBody: string;
   directivePriority: number | null;
-  /** Jaccard similarity between source and target (0..1). */
+  /**
+   * Match score in [0..1].
+   *   - Default path (#899): always 1.0 — the link is an explicit Project
+   *     membership, not a fuzzy stack overlap.
+   *   - Legacy path (Jaccard, gated by O8_LEGACY_JACCARD_PROPOSER): Jaccard
+   *     similarity over stack signatures, ≥ SIMILARITY_THRESHOLD.
+   */
   similarity: number;
   /** Pre-rendered draft text the chat composer fills with on Accept. */
   draftDirective: string;
@@ -427,19 +461,48 @@ function buildDraft(directive: DirectiveSummary, target: RepoRegistryEntry): str
 }
 
 /**
- * Compute proposals for every registered repo. Synchronous read of cached
- * signatures + the directives dir + snooze ledger.
+ * #899 — collect every peer repo id for a source repo via its project
+ * memberships. "Peer" = "in any of the same Projects as the source", excluding
+ * the source itself. Empty Set when the source has no project links or the
+ * Projects DB is unavailable.
+ */
+function collectProjectPeers(sourceRepoId: string): Set<string> {
+  const peers = new Set<string>();
+  let projects: Array<{ id: string; repos: Array<{ repoId: string }> }> = [];
+  try {
+    projects = listProjectsByRepoId(sourceRepoId);
+  } catch {
+    return peers;
+  }
+  for (const project of projects) {
+    for (const link of project.repos) {
+      if (link.repoId !== sourceRepoId) peers.add(link.repoId);
+    }
+  }
+  return peers;
+}
+
+/**
+ * Compute proposals for every registered repo.
+ *
+ * #899 default path: for each `scope: repo` directive, find its source repo,
+ * then propose to every peer repo that shares at least one Project with the
+ * source. The Jaccard candidate-selection step that gated #748 production-inert
+ * has been replaced by this explicit-membership lookup.
  *
  * Returns an empty result when:
- *   - signatures haven't been computed yet (caller should kick boot tick)
- *   - fewer than 3 repos are registered (the issue specifies ≥ 3 sharing a stack)
+ *   - the registry is unreadable
  *   - no repo-scoped directives exist
+ *   - no Projects link the source repo to any other repo (and legacy gate off)
+ *
+ * Set `O8_LEGACY_JACCARD_PROPOSER=1` to fall back to the pre-#899 behavior.
  */
 export async function proposeAcrossRepos(
   options: ProposeOptions = {},
 ): Promise<ProposeAcrossReposOutput> {
   const limit = options.limit ?? MAX_CANDIDATES;
   const now = options.now ?? new Date();
+  const useLegacy = isLegacyJaccardEnabled();
 
   let repos: RepoRegistryEntry[] = [];
   try {
@@ -447,12 +510,22 @@ export async function proposeAcrossRepos(
   } catch {
     return { byDirective: {}, candidates: [] };
   }
-  if (repos.length < 3) return { byDirective: {}, candidates: [] };
 
-  const signatureStore = await readOrComputeSignatures();
-  const sigByRepoId = new Map<string, string[]>();
-  for (const sig of signatureStore.signatures) {
-    sigByRepoId.set(sig.repoId, sig.deps);
+  // #899 — the legacy floor of `repos.length < 3` was a Jaccard-era guard
+  // ("≥ 3 sharing a stack"). With explicit Projects, two repos in one Project
+  // is a perfectly valid fan-out target, so we drop that gate on the default
+  // path and keep it only when the legacy flag is on.
+  if (useLegacy && repos.length < 3) return { byDirective: {}, candidates: [] };
+
+  // Legacy path also needs stack signatures. The default path doesn't load
+  // them — saves the I/O when the operator has opted into Projects.
+  let sigByRepoId: Map<string, string[]> | null = null;
+  if (useLegacy) {
+    const signatureStore = await readOrComputeSignatures();
+    sigByRepoId = new Map<string, string[]>();
+    for (const sig of signatureStore.signatures) {
+      sigByRepoId.set(sig.repoId, sig.deps);
+    }
   }
 
   const directives = readAllDirectives();
@@ -466,32 +539,54 @@ export async function proposeAcrossRepos(
     const sourceRepo = findSourceRepo(directive, repos);
     if (!sourceRepo) continue;
 
-    const sourceDeps = sigByRepoId.get(sourceRepo.id);
-    // No signature recorded yet — skip (boot tick will fix it on next pass).
-    if (!sourceDeps || sourceDeps.length === 0) continue;
-
     // #855 — circular propagation guard. If this directive was previously
     // accepted from another repo, its origin is recorded in the sidecar
-    // ledger. Never propose it back to that origin.
+    // ledger. Never propose it back to that origin. Applied uniformly on
+    // both paths so the guard survives env-flag toggles.
     const directiveOrigin = originRepoIdFor(directive.id);
 
-    // Find every other repo with similarity ≥ threshold.
     const similarRepos: { repo: RepoRegistryEntry; similarity: number }[] = [];
-    for (const target of repos) {
-      if (target.id === sourceRepo.id) continue;
-      // #855 — skip if target IS the origin repo of this directive.
-      if (directiveOrigin && target.id === directiveOrigin) continue;
-      const targetDeps = sigByRepoId.get(target.id);
-      if (!targetDeps || targetDeps.length === 0) continue;
-      const sim = jaccard(sourceDeps, targetDeps);
-      if (sim >= SIMILARITY_THRESHOLD) {
-        similarRepos.push({ repo: target, similarity: sim });
-      }
-    }
 
-    // Issue spec: only fire when ≥ 2 similar repos exist (3 total counting
-    // source). One similar peer isn't a "stack" worth fanning out to.
-    if (similarRepos.length < MIN_SIMILAR_REPOS) continue;
+    if (useLegacy && sigByRepoId) {
+      // ── Legacy Jaccard path (gated; preserves pre-#899 behavior) ─────────
+      const sourceDeps = sigByRepoId.get(sourceRepo.id);
+      // No signature recorded yet — skip (boot tick will fix it on next pass).
+      if (!sourceDeps || sourceDeps.length === 0) continue;
+
+      for (const target of repos) {
+        if (target.id === sourceRepo.id) continue;
+        if (directiveOrigin && target.id === directiveOrigin) continue;
+        const targetDeps = sigByRepoId.get(target.id);
+        if (!targetDeps || targetDeps.length === 0) continue;
+        const sim = jaccard(sourceDeps, targetDeps);
+        if (sim >= SIMILARITY_THRESHOLD) {
+          similarRepos.push({ repo: target, similarity: sim });
+        }
+      }
+
+      // Legacy spec: only fire when ≥ 2 similar repos exist (3 total counting
+      // source). One similar peer isn't a "stack" worth fanning out to.
+      if (similarRepos.length < MIN_SIMILAR_REPOS) continue;
+    } else {
+      // ── #899 Project-membership path (default) ───────────────────────────
+      // Look up the source repo's project peers. Empty set when the source
+      // isn't in any Project (operator hasn't grouped it yet) or the Projects
+      // DB is unavailable; either way, no proposals fire — which is the
+      // correct behavior. Operators opt into cross-repo by grouping repos.
+      const peerIds = collectProjectPeers(sourceRepo.id);
+      if (peerIds.size === 0) continue;
+
+      for (const target of repos) {
+        if (target.id === sourceRepo.id) continue;
+        // Origin guard — same rule as the Jaccard path.
+        if (directiveOrigin && target.id === directiveOrigin) continue;
+        if (!peerIds.has(target.id)) continue;
+        similarRepos.push({ repo: target, similarity: PROJECT_MEMBERSHIP_SCORE });
+      }
+
+      // No floor on peer count — a 2-repo Project is a valid fan-out target.
+      if (similarRepos.length === 0) continue;
+    }
 
     byDirective[directive.id] = similarRepos.map((s) => s.repo.id);
     for (const { repo: target, similarity } of similarRepos) {
@@ -515,7 +610,9 @@ export async function proposeAcrossRepos(
   }
 
   // Sort by similarity (highest match first), then alphabetically by target
-  // name so output stays stable across recomputes.
+  // name so output stays stable across recomputes. Project-membership matches
+  // all share PROJECT_MEMBERSHIP_SCORE, so the alphabetic tiebreak does the
+  // real ordering work on the default path.
   candidates.sort((a, b) => {
     if (b.similarity !== a.similarity) return b.similarity - a.similarity;
     if (a.targetRepoName !== b.targetRepoName) return a.targetRepoName.localeCompare(b.targetRepoName);
