@@ -202,6 +202,31 @@ const TOOLS: McpTool[] = [
       required: ['id', 'action'],
     },
   },
+  {
+    name: 'cortex_propose_spec',
+    description:
+      'Propose an updated packet spec.md body for the operator to approve. ' +
+      'The proposal is queued in the approval surface — the spec only changes if the operator approves; rejecting leaves the spec untouched. ' +
+      'Approved updates take effect on the next dispatch of the packet, never an in-flight agent.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'The packet ID whose spec.md you are proposing to update.',
+        },
+        proposedSpec: {
+          type: 'string',
+          description: 'The full new spec.md body (markdown). Replaces the existing content if approved.',
+        },
+        rationale: {
+          type: 'string',
+          description: 'Short explanation of why this update is needed. Surfaced in the approval card.',
+        },
+      },
+      required: ['packetId', 'proposedSpec', 'rationale'],
+    },
+  },
   // ── Delegation tools ──
   {
     name: 'cortex_launch_agent',
@@ -517,6 +542,39 @@ async function handleListApprovals(args: Record<string, unknown>): Promise<McpTo
     return jsonResult({ pendingCount: pending.length, approvals: summary });
   } catch (err) {
     return textResult(`Failed to fetch approvals: ${err}`, true);
+  }
+}
+
+async function handleProposeSpec(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const packetId = typeof args.packetId === 'string' ? args.packetId.trim() : '';
+    if (!packetId) return textResult('packetId is required', true);
+
+    const proposedSpec = typeof args.proposedSpec === 'string' ? args.proposedSpec : '';
+    if (!proposedSpec.trim()) return textResult('proposedSpec is required', true);
+
+    const rationale = typeof args.rationale === 'string' ? args.rationale.trim() : '';
+    if (!rationale) return textResult('rationale is required', true);
+
+    const result = await apiFetch('/api/orchestrator/propose-spec', {
+      method: 'POST',
+      body: JSON.stringify({ packetId, proposedSpec, rationale }),
+    }) as Record<string, unknown>;
+
+    if (result.ok) {
+      const inner = (result.result ?? {}) as Record<string, unknown>;
+      const approvalId = typeof inner.approvalId === 'string' ? inner.approvalId : '';
+      return jsonResult({
+        ok: true,
+        approvalId,
+        note: 'Spec proposal enqueued. The operator must approve before the spec changes; rejecting leaves the spec untouched. Approved updates apply on the NEXT dispatch of the packet, not in-flight agents.',
+      });
+    }
+    const error = (result.error as Record<string, unknown> | undefined);
+    const message = (error?.message as string) ?? 'unknown error';
+    return textResult(`Propose spec failed: ${message}`, true);
+  } catch (err) {
+    return textResult(`Failed to propose spec: ${err}`, true);
   }
 }
 
@@ -868,6 +926,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_update_packet: handleUpdatePacket,
   cortex_list_approvals: handleListApprovals,
   cortex_resolve_approval: handleResolveApproval,
+  cortex_propose_spec: handleProposeSpec,
   cortex_launch_agent: handleLaunchAgent,
   cortex_steer_agent: handleSteerAgent,
   cortex_read_transcript: handleReadTranscript,
