@@ -259,8 +259,14 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
 
   // ── GitHub auth ──
   const csrfTokenRef = useRef<string | null>(null);
+  // Hard-cap device-code polling so a wedged endpoint (persistent 5xx/429,
+  // network silently dropping requests) can't leak the interval forever.
+  // 5s interval × 120 attempts = 10 min — matches GitHub's device flow expiry.
+  const pollAttemptsRef = useRef(0);
+  const MAX_POLL_ATTEMPTS = 120;
   const startGithubFlow = useCallback(async () => {
     setGithubFlow({ stage: 'waiting' });
+    pollAttemptsRef.current = 0;
     try {
       const res = await fetch('/api/panel/github-device', {
         method: 'POST',
@@ -279,6 +285,12 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
       if (d.verificationUriComplete || d.verificationUri) window.open(d.verificationUriComplete || d.verificationUri, '_blank');
       pollTimerRef.current = setInterval(async () => {
         if (!flowIdRef.current) return;
+        pollAttemptsRef.current += 1;
+        if (pollAttemptsRef.current > MAX_POLL_ATTEMPTS) {
+          if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+          setGithubFlow({ stage: 'error', error: 'Authorization timed out. Try again.' });
+          return;
+        }
         try {
           const pr = await fetch('/api/panel/github-device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'poll', flowId: flowIdRef.current, csrfToken: csrfTokenRef.current }) });
           if (!pr.ok) return;
@@ -291,7 +303,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
             setGithubFlow({ stage: 'error', error: pd.error || 'Expired. Try again.' });
           }
-        } catch { /* keep polling */ }
+        } catch { /* keep polling — but the attempt counter still ticks, so we'll bail at the cap */ }
       }, 5000);
     } catch {
       setGithubFlow({ stage: 'error', error: 'Network error.' });
