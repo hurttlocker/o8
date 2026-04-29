@@ -17,9 +17,9 @@ const GATE_CATEGORY_LABELS: Record<string, string> = {
 
 function GateReportSection({ approval }: { approval: SidebarApproval }) {
   const gate = approval.gateResult;
-  if (!gate || gate.violations.length === 0) return null;
-
   const [expanded, setExpanded] = useState(false);
+
+  if (!gate || gate.violations.length === 0) return null;
   const categories = ['security', 'budget', 'integrity'] as const;
 
   return (
@@ -65,7 +65,7 @@ function GateReportSection({ approval }: { approval: SidebarApproval }) {
           {categories.map((cat) => {
             const catViolations = gate.violations.filter((v) => v.category === cat);
             if (catViolations.length === 0) return (
-              <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 11 }}>
+              <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, fontSize: 11 }}>
                 <span style={{ color: '#16a34a', fontWeight: 800 }}>{'\u2713'}</span>
                 <span style={{ fontWeight: 700, color: 'var(--t-text-secondary)' }}>{GATE_CATEGORY_LABELS[cat]}</span>
                 <span style={{ color: 'var(--t-text-muted)', fontWeight: 600 }}>passed</span>
@@ -73,7 +73,7 @@ function GateReportSection({ approval }: { approval: SidebarApproval }) {
             );
 
             return (
-              <div key={cat} style={{ padding: '4px 8px' }}>
+              <div key={cat} style={{ paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 2 }}>
                   <span style={{ color: '#dc2626', fontWeight: 800 }}>{'\u2717'}</span>
                   <span style={{ fontWeight: 700, color: 'var(--t-text-secondary)' }}>{GATE_CATEGORY_LABELS[cat]}</span>
@@ -117,14 +117,17 @@ function ConflictSection({
   resolvingId: string | null;
 }) {
   const conflict = approval.conflictReport;
-  if (!conflict || conflict.files.length === 0) return null;
-
   const [selectedStrategy, setSelectedStrategy] = useState<string>('theirs');
+
+  if (!conflict || conflict.files.length === 0) return null;
 
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{
-        padding: '8px 10px',
+        paddingTop: 8,
+        paddingRight: 10,
+        paddingBottom: 8,
+        paddingLeft: 10,
         borderRadius: 10,
         background: 'rgba(245, 158, 11, 0.06)',
         border: '1px solid rgba(245, 158, 11, 0.12)',
@@ -260,7 +263,10 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
       display: 'flex',
       flexDirection: 'column',
       gap: 10,
-      padding: '10px 14px 12px',
+      paddingTop: 10,
+      paddingRight: 14,
+      paddingBottom: 12,
+      paddingLeft: 14,
       marginTop: 8,
       marginRight: 14,
       marginBottom: 10,
@@ -314,7 +320,10 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
           justifyContent: 'center',
           minWidth: 22,
           height: 22,
-          padding: '0 7px',
+          paddingTop: 0,
+          paddingRight: 7,
+          paddingBottom: 0,
+          paddingLeft: 7,
           borderRadius: 999,
           background: 'rgba(239, 68, 68, 0.12)',
           color: '#dc2626',
@@ -343,7 +352,10 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
             <div
               key={approval.id}
               style={{
-                padding: '12px 12px 10px',
+                paddingTop: 12,
+                paddingRight: 12,
+                paddingBottom: 10,
+                paddingLeft: 12,
                 borderRadius: 14,
                 background: THEME_BG_CARD,
                 border: `1px solid ${riskTone.border}`,
@@ -376,7 +388,10 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
                 <span style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  padding: '3px 8px',
+                  paddingTop: 3,
+                  paddingRight: 8,
+                  paddingBottom: 3,
+                  paddingLeft: 8,
                   borderRadius: 999,
                   background: riskTone.bg,
                   color: riskTone.fg,
@@ -408,7 +423,10 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
                 <>
                   {approval.command ? (
                     <div style={{
-                      padding: '8px 10px',
+                      paddingTop: 8,
+                      paddingRight: 10,
+                      paddingBottom: 8,
+                      paddingLeft: 10,
                       borderRadius: 10,
                       background: 'rgba(15, 23, 42, 0.96)',
                       color: '#e2e8f0',

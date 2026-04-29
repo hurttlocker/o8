@@ -68,6 +68,7 @@ export function ApprovalReviewScreenshot({ approval }: { approval: ApprovalRecor
 
         if (attempt < MAX_LOOKUP_ATTEMPTS - 1) {
           await new Promise((resolve) => window.setTimeout(resolve, LOOKUP_RETRY_MS));
+          if (cancelled) return;
         }
       }
     })();
