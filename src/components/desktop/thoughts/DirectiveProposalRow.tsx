@@ -1,17 +1,19 @@
 'use client';
 
 /**
- * #746 — DirectiveProposalRow.
+ * #746 / #748 — DirectiveProposalRow.
  *
  * Yellow Issues-style row that surfaces above Open Issues in the Mission
- * panel when the auto-directive proposer detects a recurring fix-pattern.
- * Human-gated: Accept fills the chat composer with a draft directive;
- * Dismiss snoozes the proposal for 30 days.
+ * panel. Two proposal sources share this chrome:
  *
- * The row mirrors the `IssueGroupList` row chrome (dense, 34px tall, no
- * card outline) but tinted yellow so the operator notices it without it
- * dominating the panel. Multiple proposals stack as sibling rows under a
- * single header.
+ *   - `auto` (#746) — recurring (filePattern, fixPattern) pairs from the
+ *     local outcome ledger. Renders `<hits>× seen   add directive: pattern → bigram?`
+ *   - `cross-repo` (#748) — a stack-similar repo already has this directive.
+ *     Renders `<sourceRepo> → <targetRepo>   <directive title>` with a
+ *     similarity chip in place of the hits badge.
+ *
+ * Human-gated: Accept fills the chat composer with a draft directive;
+ * Dismiss snoozes the proposal.
  */
 
 import { useCallback, useState } from 'react';
@@ -68,45 +70,11 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Hits badge — mirrors the issue-number column width in IssueGroupList. */}
-      <span
-        title={`Observed ${proposal.hits}× in the last 14 days`}
-        style={{
-          width: 42,
-          flexShrink: 0,
-          fontSize: 10,
-          fontWeight: 700,
-          color: YELLOW_TEXT_DARK,
-          fontFamily: MONO_FAMILY,
-          letterSpacing: '-0.01em',
-        }}
-      >
-        {proposal.hits}× seen
-      </span>
-
-      {/* Pattern preview — file-glob + bigram in monospace so it reads as code. */}
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          fontSize: 12,
-          color: 'var(--t-text)',
-          letterSpacing: '-0.01em',
-        }}
-      >
-        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>add directive: </span>
-        <span style={{ fontFamily: MONO_FAMILY, fontSize: 11, color: 'var(--t-text)' }}>
-          {proposal.filePattern}
-        </span>
-        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}> → </span>
-        <span style={{ fontFamily: MONO_FAMILY, fontSize: 11, color: 'var(--t-text)' }}>
-          {proposal.fixPattern}
-        </span>
-        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>?</span>
-      </span>
+      {proposal.source === 'cross-repo' ? (
+        <CrossRepoBody proposal={proposal} />
+      ) : (
+        <AutoBody proposal={proposal} />
+      )}
 
       {/* Actions. Mirror the IssueGroupList "+" pattern (transparent buttons,
           tight padding) but with text labels so Accept/Dismiss are explicit. */}
@@ -114,7 +82,11 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
         type="button"
         onClick={handleAccept}
         disabled={busy}
-        title="Open the directive editor pre-filled with this draft"
+        title={
+          proposal.source === 'cross-repo'
+            ? `Import this directive into ${proposal.targetRepoName}`
+            : 'Open the directive editor pre-filled with this draft'
+        }
         style={{
           flexShrink: 0,
           paddingTop: 3,
@@ -163,5 +135,108 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
         Dismiss
       </button>
     </div>
+  );
+}
+
+// ── auto-proposer body (#746) ──────────────────────────────────────────────
+
+function AutoBody({ proposal }: { proposal: Extract<DirectiveProposalCandidate, { source: 'auto' }> }) {
+  return (
+    <>
+      {/* Hits badge — mirrors the issue-number column width in IssueGroupList. */}
+      <span
+        title={`Observed ${proposal.hits}× in the last 14 days`}
+        style={{
+          width: 42,
+          flexShrink: 0,
+          fontSize: 10,
+          fontWeight: 700,
+          color: YELLOW_TEXT_DARK,
+          fontFamily: MONO_FAMILY,
+          letterSpacing: '-0.01em',
+        }}
+      >
+        {proposal.hits}× seen
+      </span>
+
+      {/* Pattern preview — file-glob + bigram in monospace so it reads as code. */}
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontSize: 12,
+          color: 'var(--t-text)',
+          letterSpacing: '-0.01em',
+        }}
+      >
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>add directive: </span>
+        <span style={{ fontFamily: MONO_FAMILY, fontSize: 11, color: 'var(--t-text)' }}>
+          {proposal.filePattern}
+        </span>
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}> → </span>
+        <span style={{ fontFamily: MONO_FAMILY, fontSize: 11, color: 'var(--t-text)' }}>
+          {proposal.fixPattern}
+        </span>
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>?</span>
+      </span>
+    </>
+  );
+}
+
+// ── cross-repo body (#748) ─────────────────────────────────────────────────
+
+function CrossRepoBody({
+  proposal,
+}: {
+  proposal: Extract<DirectiveProposalCandidate, { source: 'cross-repo' }>;
+}) {
+  // Render similarity as `87%` so the badge stays narrow. Matches the
+  // hits-badge column width on auto rows so the layout doesn't shift when
+  // the two row kinds are stacked.
+  const similarityLabel = `${Math.round(proposal.similarity * 100)}%`;
+  return (
+    <>
+      <span
+        title={`Stack overlap: ${similarityLabel} between ${proposal.sourceRepoName} and ${proposal.targetRepoName}`}
+        style={{
+          width: 42,
+          flexShrink: 0,
+          fontSize: 10,
+          fontWeight: 700,
+          color: YELLOW_TEXT_DARK,
+          fontFamily: MONO_FAMILY,
+          letterSpacing: '-0.01em',
+        }}
+      >
+        {similarityLabel}
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontSize: 12,
+          color: 'var(--t-text)',
+          letterSpacing: '-0.01em',
+        }}
+      >
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>import from </span>
+        <span style={{ fontFamily: MONO_FAMILY, fontSize: 11, color: 'var(--t-text)' }}>
+          {proposal.sourceRepoName}
+        </span>
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}> → </span>
+        <span style={{ fontFamily: MONO_FAMILY, fontSize: 11, color: 'var(--t-text)' }}>
+          {proposal.targetRepoName}
+        </span>
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>: </span>
+        <span style={{ fontSize: 11, color: 'var(--t-text)' }}>{proposal.directiveTitle}</span>
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>?</span>
+      </span>
+    </>
   );
 }

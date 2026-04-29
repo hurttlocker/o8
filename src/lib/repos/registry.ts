@@ -284,6 +284,32 @@ async function writeStore(store: RepoRegistryStore) {
   });
 }
 
+/**
+ * #748 — Recompute stack signatures whenever the registry mutates so the
+ * cross-repo proposer always reads fresh data. Lazy-required so the cold
+ * `addRepo` path doesn't pay for the import unless needed (and so test
+ * harnesses that mock the registry don't drag in fs/cortex code).
+ *
+ * Fire-and-forget — the registry write returns immediately and the
+ * recompute lands shortly after on a microtask. Failures are logged inside
+ * `triggerSignatureRecompute` and never propagate.
+ */
+function fireSignatureRecompute(): void {
+  try {
+    const mod = require('@/lib/cortex/stack-signature') as
+      | typeof import('@/lib/cortex/stack-signature')
+      | undefined;
+    mod?.triggerSignatureRecompute?.();
+  } catch (error) {
+    // Treat any import-time failure as a no-op. The boot tick will refresh
+    // signatures on the next server restart even if this hook misfires.
+    console.warn(
+      '[repo-registry] signature recompute trigger failed:',
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
 export async function listRepos() {
   const store = await readStore();
   return store.repos;
@@ -317,6 +343,7 @@ export async function addRepo(localPath: string) {
 
     const repos = store.repos.map((repo) => (repo.id === existing.id ? updated : repo));
     await writeStore({ version: 1, repos });
+    fireSignatureRecompute();
     return updated;
   }
 
@@ -336,6 +363,7 @@ export async function addRepo(localPath: string) {
     repos: [...store.repos, entry],
   });
 
+  fireSignatureRecompute();
   return entry;
 }
 
@@ -378,6 +406,8 @@ export async function removeRepo(id: string) {
     version: 1,
     repos: store.repos.filter((repo) => repo.id !== id),
   });
+
+  fireSignatureRecompute();
 }
 
 export function getRepoRegistryPath() {
