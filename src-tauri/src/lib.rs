@@ -814,6 +814,235 @@ fn kill_tracked_children() {
     }
 }
 
+// ── Boot-time orphan reaper (issue #776) ──
+//
+// `probe_kill_port(3001/3002)` from #719/#728 only clears specific ports.
+// But orphans from prior crashes can squat on ANY port in our 3001-3050
+// range — and once they're listening on, say, 3003, our new sidecar quietly
+// picks 3004 and the user spends an hour debugging "why didn't my fix take
+// effect" before realizing the webview is hitting the wrong server.
+//
+// This reaper runs ONCE at boot, BEFORE the Tauri builder is constructed,
+// and:
+//   1. Enumerates every `next-server` and `ws-server` process via `pgrep`.
+//   2. Verifies o8 ownership via cwd substring + ppid==launchd (orphan
+//      signature). Active processes parented to a live `npm run dev` or
+//      another running sidecar are LEFT ALONE.
+//   3. SIGTERM with 2s grace, then SIGKILL anything still alive.
+//   4. Removes a stale `/tmp/tauri-mcp-o8-<user>.sock` if no live process
+//      holds it — fixes the "Socket ... is in use" crash on relaunch when
+//      the prior sidecar died without unbinding.
+//
+// We can't read other processes' env vars on macOS without root, so the
+// `O8_SIDECAR_PID` marker we set on our own children (see setup()) is best-
+// effort forward-compat — useful in `ps` output and on Linux/Windows where
+// /proc/<pid>/environ is readable.
+
+/// Fast PID enumeration via `pgrep -f <pattern>`. Returns Vec<u32> on success,
+/// empty Vec if pgrep is missing or finds nothing (both are non-fatal).
+#[cfg(unix)]
+fn pgrep_pids(pattern: &str) -> Vec<u32> {
+    let out = match Command::new("pgrep").args(["-f", pattern]).output() {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+    // pgrep exits 1 when no match (stdout + stderr both empty) — not an error.
+    // A real failure produces something on stderr (e.g. permission denied).
+    if !out.status.success() && !out.stderr.is_empty() {
+        log::warn!(
+            "[orphan-reap] pgrep -f {:?} failed: {}",
+            pattern,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|s| s.trim().parse::<u32>().ok())
+        .filter(|pid| *pid != std::process::id())
+        .collect()
+}
+
+/// Best-effort cwd lookup via `lsof -p PID -a -d cwd -F n`. Returns the path
+/// or empty string. macOS lsof is part of the base system; Linux ships it on
+/// most distros. If lsof is missing we treat cwd as unknown and the candidate
+/// is rejected by the ownership filter (safer than a false-positive kill).
+#[cfg(unix)]
+fn process_cwd(pid: u32) -> String {
+    let out = match Command::new("lsof")
+        .args(["-p", &pid.to_string(), "-a", "-d", "cwd", "-F", "n"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return String::new(),
+    };
+    // lsof -F n format: each record line starts with a single-char field
+    // marker; the cwd path is on a line starting with 'n'.
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix('n').map(|s| s.to_string()))
+        .unwrap_or_default()
+}
+
+/// Parent PID via `ps -o ppid=`. Returns 0 on failure (treat as "unknown
+/// parent" — unsafe to assume orphan, so caller skips).
+#[cfg(unix)]
+fn process_ppid(pid: u32) -> u32 {
+    Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "ppid="])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .parse::<u32>()
+                .ok()
+        })
+        .unwrap_or(0)
+}
+
+/// True if the cwd looks like an o8 install or checkout. We accept:
+///   - Any path containing `cortex-ide` (dev checkouts, worktrees)
+///   - Any path containing `.app/Contents/Resources/server` (installed app)
+///   - Any path ending in `/.o8` or containing `/o8/` (rebrand-friendly)
+///
+/// We deliberately do NOT match the bare token "o8" anywhere — too broad
+/// (matches user dirs like ~/projects/o8-experiment).
+#[cfg(unix)]
+fn cwd_looks_o8_owned(cwd: &str) -> bool {
+    if cwd.is_empty() {
+        return false;
+    }
+    cwd.contains("cortex-ide")
+        || cwd.contains(".app/Contents/Resources/server")
+        || cwd.contains("/.o8")
+        || cwd.contains("/o8.app/")
+}
+
+/// Send SIGTERM, wait up to 2s for the process to exit, then SIGKILL if
+/// still alive. `kill -0` is the standard "is this process alive" probe.
+#[cfg(unix)]
+fn term_then_kill(pid: u32) {
+    let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+    while std::time::Instant::now() < deadline {
+        let alive = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !alive {
+            log::info!("[orphan-reap] pid={} exited after TERM", pid);
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    log::warn!("[orphan-reap] pid={} did not exit after 2s — sending KILL", pid);
+    let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+}
+
+/// Clean a stale `/tmp/tauri-mcp-o8-<user>.sock` file. When the prior sidecar
+/// crashed without unbinding, the socket file lingers and the next launch's
+/// `tauri-plugin-mcp` plugin throws "Socket ... is in use by another instance".
+///
+/// We test "in-use" by attempting a Unix-domain stream connect to the socket.
+/// If a process is actually listening, connect() succeeds → we leave it alone
+/// (another live o8 instance owns it). If connect() fails with refused/no-such
+/// the file is dead → safe to unlink.
+#[cfg(unix)]
+fn clean_stale_tauri_mcp_socket() {
+    let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
+    let sock_path = format!("/tmp/tauri-mcp-o8-{}.sock", user);
+    let path = std::path::Path::new(&sock_path);
+    if !path.exists() {
+        return;
+    }
+    // Best-effort liveness probe via UnixStream connect. A successful connect
+    // means somebody is listening — leave the socket alone.
+    use std::os::unix::net::UnixStream;
+    match UnixStream::connect(&sock_path) {
+        Ok(_) => {
+            log::info!(
+                "[orphan-reap] tauri-mcp socket at {} is live — leaving in place",
+                sock_path
+            );
+        }
+        Err(_) => {
+            // Connect refused / no listener — socket file is dead.
+            match std::fs::remove_file(&sock_path) {
+                Ok(()) => log::info!("[orphan-reap] removed stale tauri-mcp socket {}", sock_path),
+                Err(e) => log::warn!(
+                    "[orphan-reap] could not remove stale tauri-mcp socket {}: {}",
+                    sock_path, e
+                ),
+            }
+        }
+    }
+}
+
+/// Top-level orphan reaper. Called once from `pub fn run()` before the Tauri
+/// builder is constructed. No-ops on non-unix platforms.
+fn reap_o8_orphans() {
+    #[cfg(unix)]
+    {
+        // Patterns chosen to catch every shape o8 spawns its node children as.
+        // `next-server` is what Next.js renames the process title to after
+        // boot. `ws-server.mjs` and `ws-server.ts` cover the bundled and dev
+        // forms of our WebSocket multiplexer.
+        let patterns: &[&str] = &["next-server", "ws-server.mjs", "ws-server.ts"];
+        let mut candidates: Vec<u32> = Vec::new();
+        for p in patterns {
+            for pid in pgrep_pids(p) {
+                if !candidates.contains(&pid) {
+                    candidates.push(pid);
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            log::info!("[orphan-reap] no candidate next/ws-server processes found");
+        } else {
+            log::info!("[orphan-reap] candidates: {:?}", candidates);
+        }
+
+        for pid in candidates {
+            let ppid = process_ppid(pid);
+            let cwd = process_cwd(pid);
+
+            // Ownership filter — must look like an o8 install/checkout. This
+            // is the catastrophic-false-positive guard.
+            if !cwd_looks_o8_owned(&cwd) {
+                log::info!(
+                    "[orphan-reap] pid={} cwd={:?} not o8-owned — skipping",
+                    pid, cwd
+                );
+                continue;
+            }
+
+            // Orphan signal: parent reparented to launchd (pid 1). If the
+            // parent is still alive (a running terminal `npm run dev` or
+            // another live o8 sidecar), we leave it alone — the user is
+            // actively using it.
+            if ppid != 1 {
+                log::info!(
+                    "[orphan-reap] pid={} ppid={} is actively parented (cwd={:?}) — skipping",
+                    pid, ppid, cwd
+                );
+                continue;
+            }
+
+            log::info!(
+                "[orphan-reap] reaping orphan pid={} ppid=1 cwd={:?}",
+                pid, cwd
+            );
+            term_then_kill(pid);
+        }
+
+        clean_stale_tauri_mcp_socket();
+    }
+}
+
 // ── Child process log capture ──
 //
 // The bundled Next.js server and WS server each get their own log file
@@ -1827,6 +2056,15 @@ pub fn run() {
     // for ungraceful exits.
     install_shutdown_handlers();
 
+    // ── Boot-time orphan reaper (issue #776) ──
+    // Reap stale `next-server` / `ws-server` processes from prior crashes
+    // (reparented to launchd) and remove a stale `/tmp/tauri-mcp-o8-<user>.sock`
+    // BEFORE the Tauri builder is constructed — the `tauri-plugin-mcp` plugin
+    // binds the socket during builder setup and throws if the file lingers.
+    // Wider net than `probe_kill_port` from #719: hits orphans on any port,
+    // not just 3001/3002.
+    reap_o8_orphans();
+
     // Cmd+Shift+O on macOS, Ctrl+Shift+O elsewhere. The global-shortcut
     // plugin uses the same `Modifiers::SUPER` token for both Cmd (mac) and
     // the Windows key — close enough for v1; we expose this constant so the
@@ -2136,7 +2374,13 @@ pub fn run() {
                     .env("O8_NODE_BIN", &node_bin)
                     .env("O8_API_PORT", api_port.to_string())
                     .env("O8_WS_PORT", ws_port.to_string())
-                    .env("WS_PORT", ws_port.to_string());
+                    .env("WS_PORT", ws_port.to_string())
+                    // Issue #776: marker so future sidecar boots can identify
+                    // this child as an o8 sibling. macOS doesn't let us read
+                    // env vars of other processes without root, so this is
+                    // best-effort forward-compat for Linux/Windows /proc and
+                    // human-readable in `ps -E` from the same user.
+                    .env("O8_SIDECAR_PID", std::process::id().to_string());
                 if has_bundled_mcp {
                     server_cmd.env("O8_BUNDLED_MCP_DIR", &server_dir);
                     server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
@@ -2184,6 +2428,8 @@ pub fn run() {
                         .env("O8_NODE_BIN", &node_bin)
                         .env("WS_PORT", ws_port.to_string())
                         .env("NEXT_ORIGIN", format!("http://127.0.0.1:{}", api_port))
+                        // Issue #776: same sidecar marker as the next-server child.
+                        .env("O8_SIDECAR_PID", std::process::id().to_string())
                         .stdout(child_stdio(ws_log.as_ref()))
                         .stderr(child_stdio(ws_log.as_ref()))
                         .spawn()
