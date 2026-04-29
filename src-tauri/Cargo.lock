@@ -2718,7 +2718,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.72"
+version = "0.1.73"
 dependencies = [
  "libc",
  "log",

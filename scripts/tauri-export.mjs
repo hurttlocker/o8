@@ -402,6 +402,17 @@ for (const bundle of REQUIRED_BUNDLES) {
   }
 }
 
+// ── Fetch codebase-memory-mcp static binary (issue #739) ──
+// Pulls the matching-arch prebuilt from the upstream DeusData release into
+// out/server/. Non-fatal: if the network is unreachable, the bundle ships
+// without it and the Tauri sidecar treats the binary as optional. The fetch
+// script is idempotent — second runs hit the cache via the version sentinel.
+try {
+  execSync('node scripts/fetch-codebase-memory.mjs', { cwd: root, stdio: 'inherit' });
+} catch (e) {
+  console.warn('⚠️  fetch-codebase-memory.mjs failed (non-fatal):', e.message);
+}
+
 const size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\\t')[0];
 console.log('\\n✅ Export complete');
 console.log(`   frontend/ → loader HTML`);

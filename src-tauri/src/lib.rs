@@ -1789,6 +1789,25 @@ pub fn run() {
                     log::info!("Bundled MCP scripts at {:?}", server_dir);
                 }
 
+                // Issue #739: Vendored codebase-memory-mcp static binary.
+                // Fetched at build time by scripts/fetch-codebase-memory.mjs
+                // and dropped into out/server/. Setting the env var lets the
+                // Next server, ws-server, and #740's MCP registration logic
+                // resolve the binary path without re-probing the filesystem.
+                // Missing binary = feature unavailable, not a startup error.
+                let codebase_memory_bin_name = if cfg!(target_os = "windows") {
+                    "codebase-memory-mcp.exe"
+                } else {
+                    "codebase-memory-mcp"
+                };
+                let codebase_memory_bin = server_dir.join(codebase_memory_bin_name);
+                let has_codebase_memory_bin = codebase_memory_bin.exists();
+                if has_codebase_memory_bin {
+                    log::info!("Bundled codebase-memory-mcp at {:?}", codebase_memory_bin);
+                } else {
+                    log::info!("codebase-memory-mcp binary not bundled — feature unavailable");
+                }
+
                 // Open per-server log files before spawning so stdout/stderr
                 // can be wired directly. Rotated to .prev on each boot.
                 let next_log = open_child_log("next-server.log");
@@ -1809,6 +1828,14 @@ pub fn run() {
                 if has_bundled_mcp {
                     server_cmd.env("O8_BUNDLED_MCP_DIR", &server_dir);
                     server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
+                }
+                if has_codebase_memory_bin {
+                    server_cmd.env("O8_CODEBASE_MEMORY_BIN", &codebase_memory_bin);
+                    // Also persist to the parent process env so any future
+                    // child spawned by the orchestrator or MCP servers picks
+                    // it up without us threading the path through every call
+                    // site. Mirrors the O8_NODE_BIN pattern above.
+                    std::env::set_var("O8_CODEBASE_MEMORY_BIN", &codebase_memory_bin);
                 }
                 match server_cmd
                     .stdout(child_stdio(next_log.as_ref()))
