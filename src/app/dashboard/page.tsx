@@ -119,6 +119,8 @@ const LazyCommandPalette = lazy(() => import('@/components/desktop/CommandPalett
 const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })));
 const LazyWorkspaceSidePanel = lazy(() => import('@/components/desktop/WorkspaceSidePanel').then(m => ({ default: m.WorkspaceSidePanel })));
 const LazyO8Panel = lazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })));
+// #888/#895 — packet-mode right panel (Spec / Agent Overview / Changes).
+const LazyPacketRightPanel = lazy(() => import('@/components/desktop/PacketRightPanel').then(m => ({ default: m.PacketRightPanel })));
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
 import { TileContainer } from '@/components/desktop/TileContainer';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
@@ -259,6 +261,10 @@ function DashboardInner() {
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [latestDispatchedTabId, setLatestDispatchedTabId] = useState<string | null>(null);
   const [latestDispatchedAt, setLatestDispatchedAt] = useState<number | null>(null);
+  // #888/#895 — packet selection lifted from ThoughtsMissionPanel so the
+  // right-side workspace panel can flip into packet mode (Spec / Agent
+  // Overview) when one is expanded. See `src/lib/panel/mode.ts`.
+  const [selectedPacketId, setSelectedPacketId] = useState<string | null>(null);
   const lastMarkedWorkspaceReadRef = useRef<string>('');
 
   // ── Cmd+K command palette (#661) — full-screen overlay search across
@@ -2740,6 +2746,8 @@ function DashboardInner() {
             latestDispatchedTabId={latestDispatchedTabId}
             latestDispatchedAt={latestDispatchedAt}
             onAcceptDirectiveProposal={handleAcceptDirectiveProposal}
+            selectedPacketId={selectedPacketId}
+            onSelectedPacketChange={setSelectedPacketId}
           >
             <TileContainer
               layout={tileLayout}
@@ -2846,6 +2854,30 @@ function DashboardInner() {
                             else openCanvasTab(tab);
                           })();
                         }}
+                      />
+                    </Suspense>
+                  </motion.div>
+                ) : selectedPacketId ? (
+                  <motion.div
+                    key={`packet:${selectedPacketId}`}
+                    initial={{ opacity: 0, x: 12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 12 }}
+                    transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <Suspense fallback={null}>
+                      <LazyPacketRightPanel
+                        selectedPacketId={selectedPacketId}
+                        missionState={thoughtsMissionState}
+                        workspaceSidePanelRepo={workspaceSidePanelRepo}
+                        onClose={() => setSelectedPacketId(null)}
+                        onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
                       />
                     </Suspense>
                   </motion.div>

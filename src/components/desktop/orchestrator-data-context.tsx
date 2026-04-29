@@ -40,6 +40,15 @@ export interface OrchestratorDataValue {
    * the two surfaces independent.
    */
   onAcceptDirectiveProposal?: (draft: { id: string; text: string }) => void;
+  /**
+   * #888/#895 — When the operator expands a packet in the orchestrator's
+   * mission rail, the dashboard's right-side workspace panel pivots from
+   * `idle` (Changes/Files/Git Log) to `packet` (Spec/Agent Overview).
+   * The selection is owned by ThoughtsMissionPanel and surfaced here so
+   * the dashboard can react without prop-drilling through every layer.
+   */
+  selectedPacketId?: string | null;
+  onSelectedPacketChange?: (packetId: string | null) => void;
 }
 
 const OrchestratorDataContext = createContext<OrchestratorDataValue | null>(null);
