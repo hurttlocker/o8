@@ -396,7 +396,11 @@ export async function proposeAcrossRepos(
 
 let bootTickFired = false;
 let lastTickAt = 0;
-const TICK_INTERVAL_MS = 30 * 60 * 1000;
+// #851 — shortened from 30 min to 5 min so a directive add/edit, repo
+// add/remove, or new outcome row surfaces in the proposer within a single
+// poll cycle. The `?force=1` query param on the route covers the
+// "right now" case explicitly.
+const TICK_INTERVAL_MS = 5 * 60 * 1000;
 
 let cachedCandidates: CrossRepoProposalCandidate[] = [];
 let cachedAt = 0;
@@ -426,12 +430,30 @@ export function ensureCrossRepoProposerBootTick(): void {
   if (typeof interval.unref === 'function') interval.unref();
 }
 
-export async function readCachedCrossRepoProposals(): Promise<{
+/**
+ * #851 — `force` bypasses the cache and recomputes inline so a fresh repo
+ * add, directive edit, or outcome row surfaces immediately instead of
+ * waiting for the next tick.
+ */
+export async function readCachedCrossRepoProposals(
+  options: { force?: boolean } = {},
+): Promise<{
   candidates: CrossRepoProposalCandidate[];
   computedAt: number;
 }> {
-  if (cachedAt === 0) {
+  if (options.force || cachedAt === 0) {
     await runTick();
   }
   return { candidates: cachedCandidates, computedAt: cachedAt };
+}
+
+/**
+ * #851 — Drop the cached payload so the next read recomputes from scratch.
+ * Call sites: any registry mutation (repo add/remove), any directive write,
+ * any new outcome row that shifts the candidate set. Cheap — no I/O, just
+ * zeroes the in-memory state so the next read falls through to `runTick()`.
+ */
+export function invalidateCrossRepoProposerCache(): void {
+  cachedCandidates = [];
+  cachedAt = 0;
 }
