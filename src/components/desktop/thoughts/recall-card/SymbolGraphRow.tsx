@@ -109,6 +109,28 @@ export function SymbolGraphRow({ open, onToggle, loading, edges }: SymbolGraphRo
                       {edge.file}
                       {edge.line ? `:${edge.line}` : ''}
                     </span>
+                  ) : edge.reason ? (
+                    // Phase 4 (#739–#741): explain WHY there's no file/line
+                    // instead of leaving the row mute. UI mirrors the
+                    // build-context renderer wording.
+                    <span
+                      style={{
+                        fontSize: 9.5,
+                        color: 'var(--t-text-faint)',
+                        fontFamily: FONT_FAMILY,
+                        fontStyle: 'italic',
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                    >
+                      {edge.reason === 'no-definition-recorded'
+                        ? edge.kind
+                          ? `${edge.kind.toLowerCase()} (no source line)`
+                          : 'no source line'
+                        : edge.reason === 'unknown-symbol'
+                        ? 'not in project graph'
+                        : 'trace error'}
+                    </span>
                   ) : null}
                 </div>
                 {edge.neighbours.length > 0 ? (
