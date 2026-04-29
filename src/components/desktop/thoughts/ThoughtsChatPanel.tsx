@@ -315,6 +315,57 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [draftInjection?.id, draftInjection?.text, open]);
 
+  // Phase 4 friction fix #1: clear stale composer drafts on tab refocus.
+  // The composer state is preserved across tab switches (the parent uses
+  // display:none, not unmount), so a directive review draft sitting in
+  // the textarea before the user navigated away ends up appended to
+  // whatever they type next time they return. Snapshot the input on
+  // tab-blur (open: true→false) and clear + toast on next refocus
+  // (open: false→true) IF that snapshot was non-empty AND no fresh
+  // draft injection arrived in the interim. The newDraftArrived check
+  // prevents the clear from wiping a legitimate inject; the
+  // inject effect declared above runs first in declaration order, so
+  // we observe the post-inject input here.
+  const previousOpenRef = useRef(open);
+  const inputAtBlurRef = useRef<string>('');
+  const lastSeenDraftIdRef = useRef<string | null>(draftInjection?.id ?? null);
+  const [showDraftClearedToast, setShowDraftClearedToast] = useState(false);
+  const draftClearedToastTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (draftClearedToastTimerRef.current !== null) {
+        window.clearTimeout(draftClearedToastTimerRef.current);
+      }
+    };
+  }, []);
+  useEffect(() => {
+    const wasOpen = previousOpenRef.current;
+    previousOpenRef.current = open;
+    if (wasOpen && !open) {
+      inputAtBlurRef.current = input;
+      lastSeenDraftIdRef.current = draftInjection?.id ?? null;
+      return;
+    }
+    if (open && !wasOpen) {
+      const staleDraft = inputAtBlurRef.current.trim();
+      const newDraftArrived = (draftInjection?.id ?? null) !== lastSeenDraftIdRef.current;
+      if (staleDraft && !newDraftArrived) {
+        setInput('');
+        setPreEnhanceInput(null);
+        setShowDraftClearedToast(true);
+        if (draftClearedToastTimerRef.current !== null) {
+          window.clearTimeout(draftClearedToastTimerRef.current);
+        }
+        draftClearedToastTimerRef.current = window.setTimeout(() => {
+          setShowDraftClearedToast(false);
+          draftClearedToastTimerRef.current = null;
+        }, 1800);
+      }
+      inputAtBlurRef.current = '';
+      lastSeenDraftIdRef.current = draftInjection?.id ?? null;
+    }
+  }, [open, input, draftInjection?.id]);
+
   useEffect(() => {
     requestAnimationFrame(() => {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -985,6 +1036,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         reloadNotice={reloadNotice}
         onDismissReloadNotice={dismissReloadNotice}
         showClearToast={showClearToast}
+        showDraftClearedToast={showDraftClearedToast}
         thoughtsBodyBackground={thoughtsBodyBackground}
       />
 

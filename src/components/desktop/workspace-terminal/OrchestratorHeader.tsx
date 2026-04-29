@@ -274,8 +274,8 @@ export function OrchestratorHeader({
           <button
             type="button"
             onClick={onNewConversation}
-            aria-label="New orchestrator conversation"
-            title="New orchestrator conversation"
+            aria-label="Start a new orchestrator thread"
+            title="Start a new orchestrator thread"
             style={{
               height: 44,
               paddingTop: 0,
@@ -311,7 +311,7 @@ export function OrchestratorHeader({
             }}
           >
             <PlusIcon size={13} />
-            <span>New</span>
+            <span>New thread</span>
           </button>
         ) : null}
       </div>

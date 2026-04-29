@@ -126,6 +126,47 @@ function capEvalResult(raw: string): McpToolResult {
 // expressions like `JSON.stringify(arrayOfObjects)`,
 // `(() => { var x = ...; x.click(); return x.id; })()`, and
 // `var x = setItem(...); x`.
+
+// Phase 4 follow-up — bare object-literal expressions are a known JS parser
+// ambiguity. `{a: 1}` parses as a block statement (label `a:` + expression
+// `1`), so the indirect eval returns `1` rather than `{a:1}`. Detect single
+// object-literal expressions via a small balanced-brace + statement-keyword
+// heuristic and parens-wrap them so the parser sees an expression. Multi-
+// statement code (var/let/const/return + body) still goes through the
+// regular path.
+function looksLikeObjectLiteralExpression(trimmed: string): boolean {
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return false;
+  // Cheap statement-keyword reject — reduces false positives without a
+  // full tokenizer. These won't appear inside a normal object literal in
+  // a way that matters for the heuristic.
+  if (/\b(?:var|let|const|return|function|if|for|while|do|switch|try|throw|class)\b/.test(trimmed)) {
+    return false;
+  }
+  let depth = 0;
+  let inString: '"' | "'" | '`' | null = null;
+  let escaped = false;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (escaped) { escaped = false; continue; }
+    if (inString) {
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === inString) { inString = null; }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inString = ch; continue; }
+    if (ch === '{' || ch === '[' || ch === '(') { depth++; continue; }
+    if (ch === '}' || ch === ']' || ch === ')') {
+      depth--;
+      // If the outer `{` closes before the very end, this isn't a single
+      // object-literal expression (eg. `{a:1}{b:2}`).
+      if (depth === 0 && i !== trimmed.length - 1) return false;
+      continue;
+    }
+    if (ch === ';' && depth === 1) return false;
+  }
+  return depth === 0;
+}
+
 function wrapEvalCode(userCode: string): string {
   const trimmed = userCode.trim();
   // Run the user code via indirect eval — `(0, eval)(code)` evaluates in the
@@ -133,6 +174,9 @@ function wrapEvalCode(userCode: string): string {
   // which is what the user expects when they write `var x = 42; x`. Direct
   // `new Function(code)` would silently return undefined because function
   // bodies require an explicit `return`.
+  //
+  // Phase 4 follow-up: bare object literals (`{a:1}`) need a parens wrap
+  // so the parser sees them as expressions instead of block statements.
   //
   // After we have the value, probe JSON.stringify behaviour:
   //   - If JSON.stringify drops the value key (function, undefined,
@@ -142,7 +186,10 @@ function wrapEvalCode(userCode: string): string {
   //   - Otherwise return the envelope as-is.
   //
   // Errors during eval surface as { ok: false, error: { message, name, stack } }.
-  const codeJson = JSON.stringify(trimmed);
+  const evalSource = looksLikeObjectLiteralExpression(trimmed)
+    ? `(${trimmed})`
+    : trimmed;
+  const codeJson = JSON.stringify(evalSource);
   return `(() => {
   const __o8_user_code__ = ${codeJson};
   let __o8_value__;
