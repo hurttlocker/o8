@@ -14,6 +14,14 @@ export interface DirectiveSummary {
   repoName: string | null;
   priority: number | null;
   body: string;
+  /**
+   * #769 — Last 3 merge-trailer lines surfaced under the directive title.
+   * Newest-first, raw markdown line including the leading `- ` bullet, e.g.
+   * `- 2026-04-29 [merged] feat(cortex): living specs (#769)`.
+   * Empty array when the directive has not yet matched a merged packet, or
+   * when `history: false` opts out.
+   */
+  recentMerges?: string[];
 }
 
 export interface RecentOutcome {

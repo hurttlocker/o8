@@ -13,6 +13,7 @@ import {
   Chevron,
   expandedSurfaceStyle,
   FONT_FAMILY,
+  MONO_FAMILY,
   rowChromeStyle,
   rowLabelStyle,
   rowValueStyle,
@@ -26,6 +27,47 @@ interface DirectiveRowProps {
   topDirective: DirectiveSummary | null;
   otherCount: number;
   allDirectives: DirectiveSummary[];
+}
+
+/**
+ * #769 — Living Specs render. Mono lines, muted ink, indented slightly.
+ * Tooltip on hover shows the full trailer line so the operator can read
+ * past the truncated tail without expanding into a viewer.
+ */
+function RecentMergesList({ lines }: { lines: string[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        paddingLeft: 8,
+        borderLeftWidth: 2,
+        borderLeftStyle: 'solid',
+        borderLeftColor: 'var(--t-divider-subtle)',
+      }}
+    >
+      {lines.map((line, idx) => (
+        <div
+          key={`${idx}-${line.slice(0, 24)}`}
+          title={line}
+          style={{
+            fontFamily: MONO_FAMILY,
+            fontSize: 10,
+            lineHeight: 1.5,
+            color: 'var(--t-text-muted)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            letterSpacing: '-0.005em',
+          }}
+        >
+          {line}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function DirectiveRow({
@@ -120,6 +162,7 @@ export function DirectiveRow({
               {topDirective.body}
             </div>
           ) : null}
+          <RecentMergesList lines={topDirective?.recentMerges ?? []} />
           {allDirectives.length > 1 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
               {allDirectives.slice(0, 6).map((d) => (
