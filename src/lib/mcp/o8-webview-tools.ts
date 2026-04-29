@@ -26,6 +26,83 @@ function jsonResult(data: unknown, isError = false): McpToolResult {
   return textResult(JSON.stringify(data), isError);
 }
 
+// Cap eval results at 8KB before they cross the MCP socket. Issue #868:
+// busy pages (eg. /context-graph) sometimes leak large blobs — base64
+// screenshots, full document.body.outerHTML — through eval, hanging the
+// socket and burning agent context. The cap lives at the o8_view_eval
+// handler boundary, NOT in evalJs(), because internal callers (click,
+// readPage, waitFor) depend on full strings round-tripping through eval.
+const EVAL_RESULT_BYTE_CAP = 8 * 1024;
+
+// Reject base64 image blobs explicitly — eval is not the right channel
+// for binary image data. Detect both data URLs (`data:image/...;base64,...`)
+// and raw long base64 strings whose first bytes decode to a known image
+// magic number.
+const IMAGE_DATA_URL_RE = /^data:image\/[a-z0-9+.\-]+;base64,/i;
+
+function looksLikeBase64Image(text: string): boolean {
+  if (text.length < 256) {
+    return false;
+  }
+  if (IMAGE_DATA_URL_RE.test(text)) {
+    return true;
+  }
+  // Heuristic: long, well-formed base64, with image magic in the first
+  // few bytes. We sample only the first 64 chars (48 bytes decoded) so
+  // we don't allocate the full payload to inspect it.
+  const head = text.slice(0, 64);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(head)) {
+    return false;
+  }
+  try {
+    const bytes = Buffer.from(head, 'base64');
+    if (bytes.length < 4) {
+      return false;
+    }
+    // PNG: 89 50 4E 47, JPEG: FF D8 FF, GIF: 47 49 46 38
+    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+      return true;
+    }
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+      return true;
+    }
+    if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function capEvalResult(raw: string): McpToolResult {
+  if (looksLikeBase64Image(raw)) {
+    return jsonResult({
+      ok: false,
+      error: {
+        code: 'EVAL_RETURNED_IMAGE',
+        message: 'eval result looks like a base64 image blob — use o8_view_screenshot for image data',
+        sizeBytes: Buffer.byteLength(raw, 'utf8'),
+      },
+    }, true);
+  }
+
+  const sizeBytes = Buffer.byteLength(raw, 'utf8');
+  if (sizeBytes <= EVAL_RESULT_BYTE_CAP) {
+    return textResult(raw);
+  }
+
+  // Slice at a UTF-8-safe byte boundary, then JSON-encode the envelope.
+  const buf = Buffer.from(raw, 'utf8').subarray(0, EVAL_RESULT_BYTE_CAP);
+  const preview = buf.toString('utf8');
+  return jsonResult({
+    truncated: true,
+    sizeBytes,
+    capBytes: EVAL_RESULT_BYTE_CAP,
+    preview,
+  });
+}
+
 function imageResult(base64: string, mimeType: string, meta: Record<string, unknown>): McpToolResult {
   return {
     content: [
@@ -145,7 +222,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_eval',
-    description: 'Execute JavaScript in the o8 webview. Returns stringified result. Use when snapshot/click can\'t reach the target.',
+    description: 'Execute JavaScript in the o8 webview. Returns stringified result, capped at 8KB — payloads larger than the cap come back as { truncated: true, sizeBytes, capBytes, preview }. Base64 image blobs are rejected — use o8_view_screenshot for image data. Use when snapshot/click can\'t reach the target.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -234,7 +311,7 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
     o8_view_eval: async (args) => withStructuredErrors(async () => {
       const code = requiredString(args, 'code');
       const result = await getClient().evalJs(code);
-      return textResult(result.result);
+      return capEvalResult(result.result);
     }),
 
     o8_view_navigate: async (args) => withStructuredErrors(async () => {
