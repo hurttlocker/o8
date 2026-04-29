@@ -119,6 +119,24 @@ export function useDirectiveProposals({
 
   const handleAccept = useCallback((proposal: DirectiveProposalCandidate) => {
     onAccept(proposal);
+    // #855 — Cross-repo Accept stamps directive origin in the sidecar map
+    // so the next 30-min tick won't propose D back to its source. Fire and
+    // forget — the orchestrator chat-composer handoff is the user-visible
+    // path; this just records provenance. Failure is non-fatal (worst case
+    // we'd see a circular re-proposal once, then the operator dismisses).
+    if (proposal.source === 'cross-repo') {
+      void fetch('/api/cortex/cross-repo-proposals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'accept',
+          directiveId: proposal.directiveId,
+          originRepoId: proposal.sourceRepoId,
+        }),
+      }).catch((err) => {
+        console.warn('[proposer] origin stamp failed:', err instanceof Error ? err.message : err);
+      });
+    }
     // Hide the row locally — once a directive is created, the next tick
     // will (eventually) shift the file/fix patterns enough that the
     // proposer stops re-emitting it. If not, the operator can re-dismiss.
