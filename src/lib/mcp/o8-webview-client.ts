@@ -513,9 +513,24 @@ export class O8WebviewClient {
   }
 
   async navigate(path: string): Promise<{ ok: boolean }> {
+    // Drive the renderer's Next.js App Router via the NavigationBridge
+    // (mounted in the root layout). This is the only path that performs
+    // a true SPA transition — `webview.navigate(url)` triggers a full
+    // HTTP reload and `pushState + popstate` doesn't always cross
+    // page-route segments (eg. /context-graph ↔ /dashboard), which
+    // leaves Next.js mid-route and freezes the JS thread for 10–30s.
+    // See issue #863.
+    //
+    // The pushState + popstate path is kept as a fallback for the few
+    // moments before NavigationBridge mounts after a cold launch.
     await this.evalJs(`(() => {
       const next = new URL(${JSON.stringify(path)}, window.location.origin);
       const route = \`\${next.pathname}\${next.search}\${next.hash}\`;
+      const bridge = (window).__o8Navigate__;
+      if (typeof bridge === 'function') {
+        bridge(route);
+        return route;
+      }
       window.history.pushState(window.history.state, '', route);
       const event = typeof PopStateEvent === 'function'
         ? new PopStateEvent('popstate', { state: window.history.state })
