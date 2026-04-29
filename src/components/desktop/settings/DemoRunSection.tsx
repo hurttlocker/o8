@@ -31,7 +31,7 @@ import {
 
 // ── Types (mirror runDemoSequence's output) ──
 
-type DemoStepStatus = 'pass' | 'fail' | 'skipped';
+type DemoStepStatus = 'pass' | 'fail' | 'skipped' | 'unavailable';
 
 interface DemoStepResult {
   name: string;
@@ -49,6 +49,7 @@ interface DemoRunResult {
   passed: number;
   failed: number;
   skipped: number;
+  unavailable?: number;
   runDir: string;
   steps: DemoStepResult[];
   truncated?: boolean;
@@ -87,12 +88,32 @@ function formatRelative(iso: string): string {
   return `${days}d ago`;
 }
 
+function formatSummaryLine(result: DemoRunResult): string {
+  const parts: string[] = [`${result.passed}/${result.totalSteps} passed`];
+  if (result.failed > 0) {
+    parts.push(`${result.failed} failed`);
+  }
+  const unavailable = result.unavailable ?? 0;
+  if (unavailable > 0) {
+    parts.push(`${unavailable} unavailable`);
+  }
+  if (result.skipped > 0) {
+    parts.push(`${result.skipped} skipped`);
+  }
+  return `last run: ${parts.join(' · ')} · ${formatRelative(result.finishedAt)} · ${formatDuration(result.durationMs)}`;
+}
+
 function statusTone(status: DemoStepStatus): { dot: string; label: string; pill: string } {
   if (status === 'pass') {
     return { dot: '#22c55e', label: 'PASS', pill: '#22c55e' };
   }
   if (status === 'fail') {
     return { dot: '#ef4444', label: 'FAIL', pill: '#ef4444' };
+  }
+  if (status === 'unavailable') {
+    // Amber — distinct from grey 'skipped' so a missing Tauri command
+    // reads as "not run, but not your fault" rather than a cascade.
+    return { dot: '#f59e0b', label: 'UNAVAILABLE', pill: '#f59e0b' };
   }
   return { dot: RAMS_INK_QUIET, label: 'SKIPPED', pill: RAMS_INK_QUIET };
 }
@@ -177,7 +198,7 @@ export function DemoRunSection({ sectionNumber }: { sectionNumber: string }) {
               color: RAMS_INK_QUIET,
               textTransform: 'uppercase',
             }}>
-              last run: {result.passed}/{result.totalSteps} passed · {formatRelative(result.finishedAt)} · {formatDuration(result.durationMs)}
+              {formatSummaryLine(result)}
             </div>
           ) : null}
         </div>
