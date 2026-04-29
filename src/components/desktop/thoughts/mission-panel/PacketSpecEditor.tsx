@@ -112,6 +112,17 @@ export function PacketSpecEditor({ packetId }: PacketSpecEditorProps) {
 
   const save = useCallback(async () => {
     if (saving) return;
+    // #856 — surface "Spec must contain at least one character" inline before
+    // the round-trip when the textarea is empty, so the operator gets the same
+    // signal whether they're online or offline. The API also rejects empty
+    // payloads with 400 in case this guard ever drifts out of sync.
+    if (draft.trim().length === 0) {
+      setState((prev) => ({
+        ...prev,
+        error: 'Spec must contain at least one character.',
+      }));
+      return;
+    }
     setSaving(true);
     try {
       const response = await fetch('/api/orchestrator/packet-spec', {
@@ -120,12 +131,19 @@ export function PacketSpecEditor({ packetId }: PacketSpecEditorProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ packetId, content: draft }),
       });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const payload = await response.json() as { ok?: boolean; result?: { updatedAt?: string }; error?: { message?: string } };
-      if (!payload.ok) {
-        throw new Error(payload.error?.message || 'Save failed.');
+      // Parse the body before checking status so the structured error.message
+      // surfaces (e.g. the 400 from #856 empty-spec rejection) instead of a
+      // raw "HTTP 400".
+      const payload = await response
+        .json()
+        .catch(() => null) as
+        | { ok?: boolean; result?: { updatedAt?: string }; error?: { message?: string } }
+        | null;
+      if (!response.ok || !payload?.ok) {
+        throw new Error(
+          payload?.error?.message
+          || (response.ok ? 'Save failed.' : `HTTP ${response.status}`),
+        );
       }
       setEditing(false);
       setRefreshTick((tick) => tick + 1);
