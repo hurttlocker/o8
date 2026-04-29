@@ -222,6 +222,10 @@ async function dispatchPacketMerge(
           console.log(
             `[living-specs] Appended ${violated ? '[violated]' : '[merged]'} trailer to ${updated.length} directive${updated.length === 1 ? '' : 's'} for packet ${packet.id} (${updated.join(', ')})`,
           );
+          // #840 — `appendDirectiveTrailer` itself fires
+          // `publishCortexChange({ scope: 'directive' })` so any caller
+          // (this path + REPL smoke tests + future external-merge handler)
+          // refreshes the Recall Card without extra wiring here.
         }
       }
     } catch (error) {

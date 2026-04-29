@@ -41,11 +41,15 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
   const [diff, setDiff] = useState<DiffPayload | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
+  // #840 — Bumped on `o8:cortex-changes` so the directive list refetches
+  // after a merge appends a trailer.
+  const [directiveRefreshTick, setDirectiveRefreshTick] = useState(0);
 
   const worktreePath = reviewState?.worktreePath ?? packet.lane?.worktreePath ?? null;
   const baseBranchHint = packet.branchTarget && packet.branchTarget.trim() ? packet.branchTarget : null;
 
-  // Load directives once on mount.
+  // Load directives once on mount, and again whenever the cortex-changes
+  // bus signals a directive write.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -63,6 +67,22 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
       }
     })();
     return () => { cancelled = true; };
+  }, [directiveRefreshTick]);
+
+  // #840 — Re-fetch directives when the server broadcasts a directive write.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        data?: { scope?: string };
+      } | undefined;
+      const scope = detail?.data?.scope;
+      if (scope === 'directive' || !scope) {
+        setDirectiveRefreshTick((tick) => tick + 1);
+      }
+    };
+    window.addEventListener('o8:cortex-changes', handler);
+    return () => window.removeEventListener('o8:cortex-changes', handler);
   }, []);
 
   // Load diff when worktreePath becomes known.

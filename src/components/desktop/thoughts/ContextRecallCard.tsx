@@ -80,6 +80,12 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
     unavailable: false,
   });
 
+  // #840 — Bumped when a Cortex memory write (e.g. directive trailer append
+  // after a merge) fires the `o8:cortex-changes` window event. The directive
+  // fetch effect uses this as a dependency so the card re-fetches in place
+  // without a manual collapse/reopen.
+  const [directiveRefreshTick, setDirectiveRefreshTick] = useState(0);
+
   const repoPath = packet.workspaceTargetPath;
 
   const symbolText = useMemo(() => {
@@ -91,6 +97,9 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
   }, [packet.title, packet.summary, packet.issue]);
 
   // ── Directives — load once, share across packets ────────────────────
+  // Re-runs whenever `directiveRefreshTick` is bumped by the
+  // `o8:cortex-changes` listener below, so a merge that appends a `[merged]`
+  // trailer is reflected in the open card within ~ws-roundtrip latency.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -107,6 +116,26 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
     return () => {
       cancelled = true;
     };
+  }, [directiveRefreshTick]);
+
+  // #840 — Listen for cortex-changes pushed from the server after a merge
+  // appends a directive trailer. Bridge already converts the WS message
+  // into an `o8:cortex-changes` window event in DesktopWebSocketContext.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        data?: { scope?: string };
+      } | undefined;
+      const scope = detail?.data?.scope;
+      // Only directive scope triggers a directive re-fetch — outcomes and
+      // codebase-memory will hook in here later if/when they need it.
+      if (scope === 'directive' || !scope) {
+        setDirectiveRefreshTick((tick) => tick + 1);
+      }
+    };
+    window.addEventListener('o8:cortex-changes', handler);
+    return () => window.removeEventListener('o8:cortex-changes', handler);
   }, []);
 
   // ── Recent outcomes — keyed on repoPath ─────────────────────────────
