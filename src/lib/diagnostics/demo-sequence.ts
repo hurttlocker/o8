@@ -6,12 +6,18 @@
  *
  * Steps (each step records pass/fail/skipped/unavailable + ms + optional
  * screenshot):
- *   1. Navigate to /dashboard → wait → screenshot
- *   2. Verify active route pathname === "/dashboard"
- *   3. Click the Orchestrator tab via screen coordinates
- *   4. Wait, screenshot, verify the chat surface shows a greeting
- *   5. Click the first quick-action card on the empty state
- *   6. Verify no NEW console errors fired between step 1 and step 6
+ *   1.  Navigate to /dashboard → wait → screenshot
+ *   2.  Verify active route pathname === "/dashboard"
+ *   3.  Click the Orchestrator tab via screen coordinates
+ *   4.  Wait, screenshot, verify the chat surface shows a greeting
+ *   5.  Click the first quick-action card on the empty state
+ *   6.  Verify no NEW console errors fired between step 1 and step 6
+ *   7.  Open the Mission/right sidebar (best-effort coord click + optional
+ *       snapshot for audit trail — snapshot timeout is soft/unavailable)
+ *   8.  Verify the Mission sidebar rendered ("Mission", "Open Issues", "packet")
+ *   9.  Click the NavRail Settings icon (best-effort coord)
+ *  10.  Verify the Settings page rendered ("DIAGNOSTICS", "Settings", etc.)
+ *  11.  Navigate to /context-graph and verify it rendered
  *
  * Failure semantics (#802):
  *   - HARD `fail` (screenshot null, click missed, real assertion mismatch):
@@ -20,8 +26,9 @@
  *     socket unreachable): does NOT cascade. We move on so the rest of the
  *     demo path still runs.
  * We still return everything captured so the UI can show partial progress.
- * Total wall-clock budget is 30s — past that, the API route returns 504 with
- * whatever it managed to capture.
+ * Total wall-clock budget is 45s (extended from 30s to cover steps 7–11 —
+ * the sidebar toggle + two readPage calls each add ~1–2s) — past that, the
+ * API route returns 504 with whatever it managed to capture.
  *
  * Screenshots land under `<dataDir>/demo-runs/<ISO timestamp>/<step>.png`
  * (UTF-8 base64 → PNG buffer). We retain the most recent 10 runs and prune
@@ -80,6 +87,14 @@ export interface DemoRunResult {
 
 const ORCHESTRATOR_TAB_COORDS = { x: 199, y: 44 };
 const QUICK_ACTION_COORDS = { x: 410, y: 200 };
+// Right-sidebar toggle: probed from snapshot — sits in the top-right toolbar
+// area of WorkspaceTerminal (approximately x=1180, y=88 on a 1440-wide window).
+// Treated as a best-effort coord — a miss surfaces as 'unavailable' via the
+// soft-fail path in step 7 so the rest of the demo path continues.
+const MISSION_SIDEBAR_TOGGLE_COORDS = { x: 1180, y: 88 };
+// NavRail Settings icon: bottom of the left rail, 56px wide.
+// Approximately x=28, y=720 on a standard 800-tall window.
+const SETTINGS_NAV_COORDS = { x: 28, y: 720 };
 const STEP_NAMES = [
   '01-navigate-dashboard',
   '02-verify-route',
@@ -87,6 +102,11 @@ const STEP_NAMES = [
   '04-verify-greeting',
   '05-click-quick-action',
   '06-verify-no-errors',
+  '07-open-mission-sidebar',
+  '08-verify-mission-render',
+  '09-click-settings',
+  '10-verify-diagnostics',
+  '11-navigate-context-graph',
 ] as const;
 const RETAIN_RUNS = 10;
 
@@ -412,6 +432,107 @@ async function step6VerifyNoNewErrors(ctx: StepContext): Promise<DemoStepResult>
   });
 }
 
+async function step7OpenMissionSidebar(ctx: StepContext): Promise<DemoStepResult> {
+  return timeStep(STEP_NAMES[6], async () => {
+    // Attempt a snapshot first to surface accurate coordinates. The snapshot
+    // tool is JS-thread-bound and can time out on a busy webview, so any
+    // socket-level or eval-level failure is treated as unavailable rather than
+    // a hard fail — we still proceed with the best-effort coords below.
+    let snapshotMsg = `click (${MISSION_SIDEBAR_TOGGLE_COORDS.x},${MISSION_SIDEBAR_TOGGLE_COORDS.y})`;
+    try {
+      const snap = await ctx.client.snapshot();
+      // snapshot() returns { tree: string } — log approximate size as a proxy
+      // for node count to keep the audit trail informative.
+      if (snap && typeof snap.tree === 'string') {
+        snapshotMsg = `snapshot ok (${snap.tree.length} chars); ${snapshotMsg}`;
+      }
+    } catch (snapErr) {
+      // Snapshot failure is soft — we still attempt the click.
+      const msg = snapErr instanceof Error ? snapErr.message : String(snapErr);
+      if (isCommandUnavailableMessage(msg)) {
+        snapshotMsg = `snapshot unavailable (JS-thread busy); ${snapshotMsg}`;
+      } else {
+        snapshotMsg = `snapshot error: ${msg.slice(0, 80)}; ${snapshotMsg}`;
+      }
+    }
+    await ctx.client.click({
+      x: MISSION_SIDEBAR_TOGGLE_COORDS.x,
+      y: MISSION_SIDEBAR_TOGGLE_COORDS.y,
+    });
+    await sleep(800);
+    return { message: snapshotMsg };
+  });
+}
+
+async function step8VerifyMissionRender(ctx: StepContext): Promise<DemoStepResult> {
+  return timeStep(STEP_NAMES[7], async () => {
+    await sleep(500);
+    const screenshotPath = await captureScreenshot(ctx.client, ctx.runDir, STEP_NAMES[7]);
+    const { text } = await ctx.client.readPage();
+    const lower = text.toLowerCase();
+    const matched = lower.includes('mission')
+      || lower.includes('open issues')
+      || lower.includes('packet');
+    if (!matched) {
+      throw new Error('mission sidebar did not show "Mission", "Open Issues", or packet content');
+    }
+    return { screenshotPath, message: 'mission/issues marker present' };
+  });
+}
+
+async function step9ClickSettings(ctx: StepContext): Promise<DemoStepResult> {
+  return timeStep(STEP_NAMES[8], async () => {
+    await ctx.client.click({ x: SETTINGS_NAV_COORDS.x, y: SETTINGS_NAV_COORDS.y });
+    await sleep(1200);
+    const screenshotPath = await captureScreenshot(ctx.client, ctx.runDir, STEP_NAMES[8]);
+    return {
+      screenshotPath,
+      message: `click (${SETTINGS_NAV_COORDS.x},${SETTINGS_NAV_COORDS.y})`,
+    };
+  });
+}
+
+async function step10VerifyDiagnostics(ctx: StepContext): Promise<DemoStepResult> {
+  return timeStep(STEP_NAMES[9], async () => {
+    const { text } = await ctx.client.readPage();
+    const lower = text.toLowerCase();
+    const matched = lower.includes('diagnostics')
+      || lower.includes('settings')
+      || lower.includes('mcp')
+      || lower.includes('appearance');
+    if (!matched) {
+      throw new Error(
+        'settings page did not show "DIAGNOSTICS", "Settings", "MCP", or "Appearance"',
+      );
+    }
+    return { message: 'settings/diagnostics section label present' };
+  });
+}
+
+async function step11NavigateContextGraph(ctx: StepContext): Promise<DemoStepResult> {
+  return timeStep(STEP_NAMES[10], async () => {
+    await ctx.client.navigate('/context-graph');
+    await sleep(1500);
+    const screenshotPath = await captureScreenshot(
+      ctx.client,
+      ctx.runDir,
+      STEP_NAMES[10],
+    );
+    const { text } = await ctx.client.readPage();
+    const lower = text.toLowerCase();
+    const matched = lower.includes('fig. 1.1')
+      || lower.includes('sources')
+      || lower.includes('context')
+      || lower.includes('graph');
+    if (!matched) {
+      throw new Error(
+        'context-graph route did not show "Fig. 1.1", "sources", "context", or "graph"',
+      );
+    }
+    return { screenshotPath, message: 'context-graph surface rendered' };
+  });
+}
+
 // ── Orchestrator ──
 
 /**
@@ -443,7 +564,10 @@ async function withGlobalTimeout<T>(
 export async function runDemoSequence(opts?: { timeoutMs?: number }): Promise<DemoRunResult> {
   const startedAt = nowIso();
   const startedMs = Date.now();
-  const timeoutMs = Math.max(5_000, Math.min(opts?.timeoutMs ?? 30_000, 60_000));
+  // Default 45s — 11 steps including sidebar toggle + Settings nav + context-graph
+  // navigate each add ~1-2s over the original 6-step 30s budget. Still well
+  // within the hard cap of 60s.
+  const timeoutMs = Math.max(5_000, Math.min(opts?.timeoutMs ?? 45_000, 60_000));
 
   const { runDir, rootDir } = await ensureRunDir();
   // Prune older folders before the new run so the directory stays tidy
@@ -474,6 +598,11 @@ export async function runDemoSequence(opts?: { timeoutMs?: number }): Promise<De
       step4VerifyGreeting,
       step5ClickQuickAction,
       step6VerifyNoNewErrors,
+      step7OpenMissionSidebar,
+      step8VerifyMissionRender,
+      step9ClickSettings,
+      step10VerifyDiagnostics,
+      step11NavigateContextGraph,
     ];
     for (let i = 0; i < steps.length; i += 1) {
       const result = await steps[i](ctx);
