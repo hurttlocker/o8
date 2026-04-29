@@ -31,6 +31,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { withTimingSync } from '@/lib/cortex/diagnostics';
 
 const DEFAULT_WINDOW_DAYS = 14;
 const DEFAULT_THRESHOLD = 3;
@@ -300,12 +301,14 @@ function readRecentOutcomes(windowDays: number): OutcomeRow[] {
   `;
 
   try {
-    const rows = sqlite.prepare(sql).all(sinceIso) as Array<{
-      id: string;
-      summary: string;
-      completedAt: string;
-      changedFilesJson: string;
-    }>;
+    const rows = withTimingSync('recall.proposer-outcomes', () =>
+      sqlite.prepare(sql).all(sinceIso) as Array<{
+        id: string;
+        summary: string;
+        completedAt: string;
+        changedFilesJson: string;
+      }>,
+    );
     return rows.filter((r) => r && typeof r.id === 'string');
   } catch (err) {
     console.warn('[proposer] outcome read failed:', err instanceof Error ? err.message : err);
