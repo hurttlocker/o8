@@ -49,12 +49,16 @@ export const PACKET_GROUP_ORDER: readonly PacketGroupDef[] = [
  *   already labels this state "Completed", which we surface as Done.
  * - In Review — `status === 'awaiting_review'`. The packet has a worktree
  *   diff waiting on the human merge gate.
- * - Backlog — `queueState === 'draft'` AND no lane binding yet. These are
- *   packets the operator has scoped but not dispatched.
- * - In Progress — everything live: queued/launching/running/idle (lane
- *   spawned) + recovering/failed/blocked. Failed/blocked stay visible at
- *   the top because the operator needs to act on them, not because the
- *   work is "in progress" in the strict sense.
+ * - Backlog — `status === 'draft' | 'queued'` AND no real lane binding
+ *   (`lane.laneId` empty). Covers the freshly-scoped case AND the
+ *   reset / rerun-with-feedback case (#865), where resetPacket leaves
+ *   status='draft' + queueState='queued' + lane=null and the reconciler
+ *   may then promote status to 'queued'. The operator's mental model:
+ *   "I reset it; it's waiting to run" = backlog.
+ * - In Progress — every live runtime status: launching/idle/running/
+ *   recovering/failed/blocked. Failed/blocked stay visible at the top
+ *   because the operator needs to act on them, not because the work is
+ *   "in progress" in the strict sense.
  *
  * Cancelled is currently never assigned — packets don't carry a
  * `cancelled` status today, and the issue (#772) said "No new data model".
@@ -72,7 +76,10 @@ export function classifyPacketGroup(packet: OrchestratorPacket): PacketGroupId {
   if (packet.status === 'awaiting_review') {
     return 'in_review';
   }
-  if (packet.queueState === 'draft' && !packet.lane?.laneId) {
+  // #865 — reset/rerun-with-feedback packets carry status='draft' (or
+  // 'queued' once the reconciler runs) with lane=null. Treat both as
+  // backlog so the operator sees "waiting to run" not "in progress".
+  if ((packet.status === 'draft' || packet.status === 'queued') && !packet.lane?.laneId) {
     return 'backlog';
   }
   return 'in_progress';
