@@ -14,6 +14,7 @@ import { resolveCodebaseMemoryBin } from './binary';
 import { callCodebaseMemoryTool } from './mcp-client';
 
 const TRACE_TOOL_NAME = 'trace_path';
+const SEARCH_TOOL_NAME = 'search_graph';
 
 /**
  * Derive the codebase-memory project name from a repo's absolute path.
@@ -144,6 +145,102 @@ function pluckNeighbours(payload: RawTracePath): string[] {
   return names.slice(0, 6);
 }
 
+/**
+ * #898 — codebase-memory-mcp v0.6.0's `trace_path` response omits the
+ * subject symbol's `file` and `line` at the top level; only `callers` and
+ * `callees` arrays come back, and even those don't carry file/line in
+ * practice (just `name`/`qualified_name`/`hop`). Without a fallback,
+ * every SymbolEdge in the Recall Card renders "no definition recorded"
+ * even when the DB row has the path/line. We try, in order:
+ *   1. top-level `file` / `filePath` and `line` / `startLine`
+ *   2. first caller's file/line (in case future binary versions emit it)
+ *   3. first callee's file/line
+ *
+ * Convention: when the binary ships a fix in v0.6.1+ the top-level fields
+ * win, so this helper degrades gracefully. The remaining gap (when the
+ * trace_path response carries no location at all) is filled by an out-of-
+ * band `search_graph` lookup in `traceSymbols`.
+ */
+function pluckDefinitionLocation(payload: RawTracePath): {
+  file: string | null;
+  line: number | null;
+} {
+  const topFile = payload.file ?? payload.filePath ?? null;
+  const topLine = payload.line ?? payload.startLine ?? null;
+  if (topFile && topLine != null) return { file: topFile, line: topLine };
+
+  const fromItem = (item?: RawTracePathItem): { file: string | null; line: number | null } => ({
+    file: item?.file ?? item?.filePath ?? null,
+    line: item?.line ?? item?.startLine ?? null,
+  });
+
+  for (const candidate of payload.callers ?? []) {
+    const loc = fromItem(candidate);
+    if (loc.file && loc.line != null) return loc;
+  }
+  for (const candidate of payload.callees ?? []) {
+    const loc = fromItem(candidate);
+    if (loc.file && loc.line != null) return loc;
+  }
+  // Partial: if we only have one of the two, return what we have rather
+  // than nothing — the UI can still show the file label.
+  return { file: topFile, line: topLine };
+}
+
+interface RawSearchGraphResult {
+  name?: string;
+  qualified_name?: string;
+  file_path?: string;
+  start_line?: number;
+}
+
+interface RawSearchGraphResponse {
+  total?: number;
+  results?: RawSearchGraphResult[];
+}
+
+function parseSearchGraphResult(raw: unknown): RawSearchGraphResponse | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const result = raw as { content?: Array<{ type?: string; text?: string }> };
+  const text = result.content?.[0]?.text;
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as RawSearchGraphResponse;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a symbol's definition file/line via `search_graph`. Used as the
+ * #898 fallback when `trace_path` doesn't carry the location. The binary
+ * indexes file_path + start_line per node; this lookup just reads them.
+ */
+async function findSymbolDefinition(
+  binPath: string,
+  repoPath: string,
+  project: string,
+  symbol: string,
+  timeoutMs: number,
+): Promise<{ file: string | null; line: number | null }> {
+  const callResult = await callCodebaseMemoryTool({
+    binPath,
+    cwd: repoPath,
+    toolName: SEARCH_TOOL_NAME,
+    args: { query: symbol, project },
+    timeoutMs,
+  });
+  if (!callResult.ok) return { file: null, line: null };
+  const parsed = parseSearchGraphResult(callResult.result);
+  if (!parsed?.results?.length) return { file: null, line: null };
+  // Prefer an exact-name match over a fuzzy bm25 hit.
+  const exact = parsed.results.find((r) => r.name === symbol) ?? parsed.results[0];
+  return {
+    file: exact?.file_path ?? null,
+    line: exact?.start_line ?? null,
+  };
+}
+
 function parseTracePathResult(raw: unknown): RawTracePath | null {
   if (!raw || typeof raw !== 'object') return null;
   const result = raw as { content?: Array<{ type?: string; text?: string }> };
@@ -215,10 +312,19 @@ export async function traceSymbols({
       continue;
     }
 
+    let { file, line } = pluckDefinitionLocation(parsed);
+    // #898: if trace_path didn't carry the location (v0.6.0 shape), look
+    // it up via search_graph. The binary indexes file_path + start_line
+    // per node — this is just an extra lookup, not a re-parse.
+    if (!file || line == null) {
+      const fallback = await findSymbolDefinition(binPath, repoPath, project, symbol, timeoutMs);
+      file = file ?? fallback.file;
+      line = line ?? fallback.line;
+    }
     edges.push({
       symbol,
-      file: parsed.file ?? parsed.filePath ?? null,
-      line: parsed.line ?? parsed.startLine ?? null,
+      file,
+      line,
       neighbours: pluckNeighbours(parsed),
     });
   }
