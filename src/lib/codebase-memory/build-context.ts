@@ -44,7 +44,9 @@ import { getDb, sessionOutcomes } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { liveOutcomeFilter } from '@/lib/cortex/decay';
 import { withTiming } from '@/lib/cortex/diagnostics';
+import { listRepos } from '@/lib/repos/registry';
 import { readRepoPathRegistry } from '@/lib/repos/repo-path-registry';
+import { listProjectsByRepoId } from '@/lib/projects/store';
 
 import { extractGraphResolvedSymbols, type SymbolEdge } from './client';
 
@@ -63,6 +65,12 @@ interface DirectiveEntry {
   title: string;
   scope: string;
   repoName: string | null;
+  /**
+   * #899 — `scope: project` directives carry a list of project slugs in the
+   * front matter (`projects: [atlas, beacon]`). Empty list when the directive
+   * isn't project-scoped or front matter omitted the field.
+   */
+  projects: string[];
   priority: number | null;
   body: string;
 }
@@ -111,9 +119,34 @@ function parseDirectiveFile(raw: string, fallbackId: string): DirectiveEntry | n
     title: meta.title?.trim() || fallbackId,
     scope: meta.scope?.trim() || 'global',
     repoName: meta.repoName?.trim() || null,
+    projects: parseProjectsList(meta.projects),
     priority: Number.isFinite(priorityNum) ? priorityNum : null,
     body,
   };
+}
+
+/**
+ * #899 — parse the `projects:` front matter field into a normalized slug list.
+ * Accepts the two YAML-ish shapes the directive parser already supports:
+ *   projects: [atlas, beacon]
+ *   projects: atlas, beacon
+ * Returns an empty array when the field is missing/empty/malformed. Slugs are
+ * lowercased and de-duplicated to keep membership checks predictable.
+ */
+function parseProjectsList(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const stripped = raw.trim().replace(/^\[|\]$/g, '').trim();
+  if (!stripped) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of stripped.split(',')) {
+    const slug = part.trim().replace(/^["']|["']$/g, '').toLowerCase();
+    if (!slug) continue;
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    out.push(slug);
+  }
+  return out;
 }
 
 function readDirectives(): DirectiveEntry[] {
@@ -169,14 +202,54 @@ async function isKnownRepoPath(repoPath: string): Promise<boolean> {
   return registry.repos.some((entry) => entry.path === normalized);
 }
 
-/** Filter directives by repo (global + matching repo name). */
-function filterDirectivesForRepo(directives: DirectiveEntry[], repoPath: string): DirectiveEntry[] {
+/**
+ * Filter directives for a target repo across the three scope tiers.
+ *
+ * #899 — Tier order, broad → narrow:
+ *   1. `scope: global` — always applies (#849 already gates these on a known
+ *      repo path before this helper is called).
+ *   2. `scope: project` — applies when the directive's `projects:` slug list
+ *      intersects with the project memberships of the target repo. Resolved
+ *      via the SQLite-backed `listProjectsByRepoId(repoId)` lookup, with the
+ *      repoId resolved by matching the registered repo's `localPath` to the
+ *      target `repoPath`. Repos that aren't in any Project naturally see no
+ *      project-scoped directives.
+ *   3. `scope: repo` (or `scope: <repoName>`) — applies when the explicit
+ *      `repoName` field or the scope literal matches the target repo's basename.
+ *
+ * Lookups never throw — listProjectsByRepoId() / listRepos() are wrapped, and
+ * any I/O or DB failure falls back to "skip the project tier" so a misbehaving
+ * Projects table never starves repo + global directives.
+ */
+async function filterDirectivesForRepo(
+  directives: DirectiveEntry[],
+  repoPath: string,
+): Promise<DirectiveEntry[]> {
   const repoName = basename(repoPath).toLowerCase();
+
+  // Resolve project memberships once per call. Empty Set when:
+  //   - the repo isn't registered (no id to look up)
+  //   - the repo is registered but in zero projects
+  //   - the projects DB layer is unavailable
+  // In all three cases, project-scoped directives skip silently.
+  const projectSlugsForRepo = await resolveRepoProjectSlugs(repoPath);
+
   return directives
     .filter((d) => {
       const scope = d.scope.toLowerCase();
       if (scope === 'global' || scope === '') return true;
-      // Repo-scoped: match either explicit repoName field or scope===repoName
+
+      // #899 — Project tier. Match if any directive project slug is in the
+      // repo's project membership set.
+      if (scope === 'project') {
+        if (d.projects.length === 0) return false;
+        for (const slug of d.projects) {
+          if (projectSlugsForRepo.has(slug)) return true;
+        }
+        return false;
+      }
+
+      // Repo tier — match either explicit repoName field or `scope: <repoName>`.
       const declaredRepo = (d.repoName ?? '').toLowerCase();
       if (declaredRepo && declaredRepo === repoName) return true;
       if (scope === repoName) return true;
@@ -189,6 +262,54 @@ function filterDirectivesForRepo(directives: DirectiveEntry[], repoPath: string)
       return a.title.localeCompare(b.title);
     })
     .slice(0, MAX_DIRECTIVES);
+}
+
+/**
+ * #899 — resolve the set of project slugs that include the given repo path.
+ *
+ * Three-step lookup, each step swallows failures into an empty result:
+ *   1. Read the repo registry (SQLite-free file at `~/.o8/repos.json`).
+ *   2. Find the registry entry whose `localPath` resolves to `repoPath`.
+ *   3. Ask the projects store for membership rows by the registry id.
+ *
+ * Returns an empty Set when the registry, the repo, or the projects DB is
+ * unavailable. Project-scoped directives are an additive tier — losing them
+ * never breaks repo + global directives.
+ */
+async function resolveRepoProjectSlugs(repoPath: string): Promise<Set<string>> {
+  const out = new Set<string>();
+  const normalized = (() => {
+    try { return resolve(repoPath); } catch { return ''; }
+  })();
+  if (!normalized) return out;
+
+  let repoId: string | null = null;
+  try {
+    const repos = await listRepos();
+    const match = repos.find((r) => {
+      try {
+        return resolve(r.localPath) === normalized;
+      } catch {
+        return false;
+      }
+    });
+    repoId = match?.id ?? null;
+  } catch {
+    return out;
+  }
+  if (!repoId) return out;
+
+  try {
+    const projects = listProjectsByRepoId(repoId);
+    for (const project of projects) {
+      const slug = project.slug?.toLowerCase().trim();
+      if (slug) out.add(slug);
+    }
+  } catch {
+    // Project DB unavailable (migration not applied yet, etc.) — drop tier
+    // silently. Other tiers still resolve.
+  }
+  return out;
 }
 
 async function readRecentOutcomes(repoPath: string): Promise<OutcomeRow[]> {
@@ -348,7 +469,7 @@ export async function buildContextBlock({
   // empty for unknown paths since they key off repoPath in the DB.
   const repoIsKnown = await isKnownRepoPath(repoPath);
   const directives = repoIsKnown
-    ? filterDirectivesForRepo(readDirectives(), repoPath)
+    ? await filterDirectivesForRepo(readDirectives(), repoPath)
     : [];
   const outcomes = await readRecentOutcomes(repoPath);
 
