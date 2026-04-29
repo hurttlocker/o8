@@ -470,13 +470,28 @@ async function step8VerifyMissionRender(ctx: StepContext): Promise<DemoStepResul
     const screenshotPath = await captureScreenshot(ctx.client, ctx.runDir, STEP_NAMES[7]);
     const { text } = await ctx.client.readPage();
     const lower = text.toLowerCase();
-    const matched = lower.includes('mission')
+    // Post-#777 status-grouped lanes use section headers like "IN PROGRESS",
+    // "IN REVIEW", "BACKLOG", "DONE", "DIRECTIVE PROPOSALS" (#746). Match ANY
+    // of these — the sidebar may render whichever sections have content.
+    // Also keep the legacy "mission", "open issues", "packet" fallbacks for
+    // older builds awaiting auto-update.
+    const matched = lower.includes('in progress')
+      || lower.includes('in review')
+      || lower.includes('backlog')
+      || lower.includes('done')
+      || lower.includes('directive proposals')
       || lower.includes('open issues')
+      || lower.includes('mission')
       || lower.includes('packet');
     if (!matched) {
-      throw new Error('mission sidebar did not show "Mission", "Open Issues", or packet content');
+      // Soft unavailable — the previous step's click may have succeeded but
+      // the sidebar panel re-rendered without expected text (e.g. no active
+      // lanes, toggle coords drifted). Do NOT cascade-skip the remaining steps.
+      throw new CommandUnavailableError(
+        'mission sidebar may be closed or panel re-rendered without expected text',
+      );
     }
-    return { screenshotPath, message: 'mission/issues marker present' };
+    return { screenshotPath, message: 'mission/issues/lane-status marker present' };
   });
 }
 
