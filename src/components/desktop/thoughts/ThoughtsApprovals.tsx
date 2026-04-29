@@ -13,7 +13,10 @@ export function ThoughtsApprovals({
 
   return (
     <div style={{
-      padding: '8px 12px',
+      paddingTop: 8,
+      paddingRight: 12,
+      paddingBottom: 8,
+      paddingLeft: 12,
       display: 'flex',
       flexDirection: 'column',
       gap: 8,
@@ -24,7 +27,10 @@ export function ThoughtsApprovals({
     }}>
       {approvals.map((approval) => (
         <div key={approval.id} style={{
-          padding: '10px 12px',
+          paddingTop: 10,
+          paddingRight: 12,
+          paddingBottom: 10,
+          paddingLeft: 12,
           borderRadius: 14,
           background: approval.risk === 'high'
             ? 'rgba(239, 68, 68, 0.06)'
@@ -53,7 +59,7 @@ export function ThoughtsApprovals({
             </span>
             <span style={{
               fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
-              padding: '2px 6px', borderRadius: 5,
+              paddingTop: 2, paddingRight: 6, paddingBottom: 2, paddingLeft: 6, borderRadius: 5,
               background: approval.risk === 'high'
                 ? 'rgba(239, 68, 68, 0.1)'
                 : approval.risk === 'medium'
@@ -77,7 +83,7 @@ export function ThoughtsApprovals({
           </div>
           {approval.command && (
             <div style={{
-              padding: '6px 8px', borderRadius: 8,
+              paddingTop: 6, paddingRight: 8, paddingBottom: 6, paddingLeft: 8, borderRadius: 8,
               background: 'var(--t-code-bg)',
               fontFamily: 'SF Mono, Menlo, monospace',
               fontSize: 10, color: 'var(--t-text)',
@@ -93,7 +99,7 @@ export function ThoughtsApprovals({
               onClick={() => onResolve(approval.id, 'approve')}
               disabled={resolvingId === approval.id}
               style={{
-                flex: 1, padding: '7px 0', borderRadius: 10, border: 'none',
+                flex: 1, paddingTop: 7, paddingRight: 0, paddingBottom: 7, paddingLeft: 0, borderRadius: 10, border: 'none',
                 background: '#22c55e', color: '#fff',
                 fontSize: 11, fontWeight: 700, cursor: 'pointer',
                 opacity: resolvingId === approval.id ? 0.5 : 1,
@@ -107,7 +113,7 @@ export function ThoughtsApprovals({
               onClick={() => onResolve(approval.id, 'reject')}
               disabled={resolvingId === approval.id}
               style={{
-                flex: 1, padding: '7px 0', borderRadius: 10,
+                flex: 1, paddingTop: 7, paddingRight: 0, paddingBottom: 7, paddingLeft: 0, borderRadius: 10,
                 border: '1px solid rgba(239, 68, 68, 0.2)',
                 background: 'rgba(239, 68, 68, 0.06)',
                 color: '#ef4444',

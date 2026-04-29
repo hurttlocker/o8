@@ -114,7 +114,10 @@ function DiffPreview({ diff }: { diff: { before?: string; after?: string; path?:
           display: 'flex',
           alignItems: 'center',
           gap: 6,
-          padding: '4px 8px',
+          paddingTop: 4,
+          paddingRight: 8,
+          paddingBottom: 4,
+          paddingLeft: 8,
           borderRadius: 8,
           border: '1px solid var(--t-divider)',
           background: 'var(--t-code-bg, rgba(0,0,0,0.03))',
@@ -226,7 +229,10 @@ function ApprovalCard({
               letterSpacing: '0.04em',
               color: colors.text,
               background: colors.badge,
-              padding: '2px 6px',
+              paddingTop: 2,
+              paddingRight: 6,
+              paddingBottom: 2,
+              paddingLeft: 6,
               borderRadius: 6,
             }}>
               {approval.risk}
@@ -277,7 +283,10 @@ function ApprovalCard({
       {approval.command && (
         <div style={{
           marginTop: 8,
-          padding: '6px 10px',
+          paddingTop: 6,
+          paddingRight: 10,
+          paddingBottom: 6,
+          paddingLeft: 10,
           borderRadius: 8,
           background: 'var(--t-code-bg, rgba(0,0,0,0.03))',
           border: '1px solid var(--t-divider)',
@@ -307,7 +316,10 @@ function ApprovalCard({
               key={key}
               style={{
                 fontSize: 10,
-                padding: '2px 6px',
+                paddingTop: 2,
+                paddingRight: 6,
+                paddingBottom: 2,
+                paddingLeft: 6,
                 borderRadius: 6,
                 background: 'var(--t-code-bg, rgba(0,0,0,0.03))',
                 color: 'var(--t-text-secondary)',
@@ -417,7 +429,10 @@ function EmptyState() {
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '60px 24px',
+      paddingTop: 60,
+      paddingRight: 24,
+      paddingBottom: 60,
+      paddingLeft: 24,
       gap: 12,
     }}>
       <div style={{
@@ -511,7 +526,7 @@ export function ApprovalQueuePanel({ onClose, embedded }: { onClose?: () => void
     // Hide entirely when empty and loaded (no need to show "All clear" inline)
     if (loaded && pending.length === 0) return null;
     return (
-      <div style={{ padding: '8px 12px' }}>
+      <div style={{ paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12 }}>
         {!loaded && pending.length === 0 ? (
           <div style={{
             height: 60,
@@ -547,7 +562,10 @@ export function ApprovalQueuePanel({ onClose, embedded }: { onClose?: () => void
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '16px 20px 12px',
+        paddingTop: 16,
+        paddingRight: 20,
+        paddingBottom: 12,
+        paddingLeft: 20,
         borderBottom: '1px solid var(--t-divider)',
         flexShrink: 0,
       }}>
@@ -567,7 +585,10 @@ export function ApprovalQueuePanel({ onClose, embedded }: { onClose?: () => void
               fontWeight: 700,
               color: '#fff',
               background: '#ef4444',
-              padding: '1px 7px',
+              paddingTop: 1,
+              paddingRight: 7,
+              paddingBottom: 1,
+              paddingLeft: 7,
               borderRadius: 10,
               lineHeight: '18px',
             }}>
@@ -606,7 +627,10 @@ export function ApprovalQueuePanel({ onClose, embedded }: { onClose?: () => void
       <div style={{
         flex: 1,
         overflowY: 'auto',
-        padding: '12px 16px',
+        paddingTop: 12,
+        paddingRight: 16,
+        paddingBottom: 12,
+        paddingLeft: 16,
       }}>
         {/* Loading skeleton */}
         {!loaded && pending.length === 0 && (
@@ -614,7 +638,10 @@ export function ApprovalQueuePanel({ onClose, embedded }: { onClose?: () => void
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
-            padding: '20px 0',
+            paddingTop: 20,
+            paddingRight: 0,
+            paddingBottom: 20,
+            paddingLeft: 0,
           }}>
             {[1, 2].map((i) => (
               <div key={i} style={{
@@ -653,7 +680,10 @@ export function ApprovalQueuePanel({ onClose, embedded }: { onClose?: () => void
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                padding: '8px 0',
+                paddingTop: 8,
+                paddingRight: 0,
+                paddingBottom: 8,
+                paddingLeft: 0,
                 border: 'none',
                 background: 'none',
                 color: 'var(--t-text-secondary)',
