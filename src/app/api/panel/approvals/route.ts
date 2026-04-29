@@ -165,15 +165,25 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // resolveApproval is atomic in SQLite and guards against double-resolve.
+    // Call it first so a concurrent request loses the race and short-circuits
+    // before any file mutation occurs (close TOCTOU window).
+    const approval = resolveApproval(id, action, 'desktop');
+    if (!approval) {
+      return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
+    }
+
+    // If resolveApproval returned a record that is already resolved (status !== pending
+    // before our call), skip the file edit — it was already applied by the winner.
     let appliedEdit: { filePath: string; message: string } | undefined;
-    if (action === 'approve' && current.toolName === 'edit_file') {
+    if (action === 'approve' && current.toolName === 'edit_file' && approval.status === 'approved' && approval.resolvedAt === approval.updatedAt) {
       const applyResult = await applyApprovedFileEdit(current);
       if (!applyResult.ok) {
         return NextResponse.json({
           ok: false,
           error: applyResult.error,
           code: applyResult.code,
-          approval: current,
+          approval,
         }, {
           status: applyResult.status,
           headers: { 'Cache-Control': 'no-store, max-age=0' },
@@ -184,11 +194,6 @@ export async function POST(request: NextRequest) {
         filePath: applyResult.filePath,
         message: applyResult.message,
       };
-    }
-
-    const approval = resolveApproval(id, action, 'desktop');
-    if (!approval) {
-      return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
     }
 
     // Route resolution based on continuation type

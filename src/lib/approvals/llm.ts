@@ -116,7 +116,7 @@ export async function resumeLlmApproval(
     const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
     const note = typeof body?.error === 'string' ? body.error : `HTTP ${response.status}`;
     recordApprovalAudit(approval.id, 'resume_failed', options.actor, note);
-    throw new Error(note);
+    return { approval, note };
   }
 
   const reader = response.body.getReader();
@@ -176,11 +176,12 @@ export async function resumeLlmApproval(
       timestamp: Date.now(),
       model: continuation.model,
     });
-  recordApprovalAudit(approval.id, 'resumed', options.actor, 'Approval approved; follow-up approval is pending.');
+    recordApprovalAudit(approval.id, 'resumed', options.actor, 'Approval approved; follow-up approval is pending.');
+    // nextApproval omitted when SSE stream lacks an id — mobile re-polls /api/panel/approvals
     return {
       approval,
       assistantMessage,
-      nextApproval: nextApproval ?? undefined,
+      ...(nextApproval !== null ? { nextApproval } : {}),
       note: 'Approval recorded. Another approval is required to continue this chat turn.',
     };
   }
