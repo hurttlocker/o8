@@ -4,6 +4,7 @@ import { ensureDecayBootHook } from '@/lib/cortex/decay';
 import { ensureProposerBootTick } from '@/lib/cortex/proposer';
 import { ensureStackSignatureBoot } from '@/lib/cortex/stack-signature';
 import { ensureCrossRepoProposerBootTick } from '@/lib/cortex/cross-repo-proposer';
+import { ensureExternalMergeBootHook } from '@/lib/cortex/external-merge-watcher';
 
 export async function GET() {
   // Tauri shell hits /api/panel/status as a liveness probe right after the
@@ -22,6 +23,12 @@ export async function GET() {
   // repos every 30 min. Both boot hooks are idempotent + microtask-driven.
   ensureStackSignatureBoot();
   ensureCrossRepoProposerBootTick();
+  // #841 — External merge ingestion. Most real merges happen outside o8
+  // (gh CLI, GitHub web UI, teammate CLIs) and bypassed `appendDirectiveTrailer`
+  // entirely. The watcher polls each registered repo's git log every 5 min,
+  // appends trailers for new merges, and dedupes against internal-path
+  // writes via the trailerLines.includes guard in directive-merges.ts.
+  ensureExternalMergeBootHook();
 
   return NextResponse.json({
     connected: false,
