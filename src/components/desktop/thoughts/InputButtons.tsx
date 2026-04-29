@@ -283,7 +283,7 @@ export function InputButtons({
       <button
         type="button"
         onClick={onToggleMission}
-        title={missionOpen ? 'Hide issues' : 'Show issues'}
+        title={missionOpen ? 'Hide panel' : 'Show panel'}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
