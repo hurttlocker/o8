@@ -13,6 +13,76 @@ import {
   paneStyle,
 } from './shared';
 
+const MAX_INITIAL_LINES = 200;
+
+/**
+ * Renders a patch body capped at MAX_INITIAL_LINES lines with an expand button.
+ * Mirrors the HunkBlock "Expand N more lines" pattern from InlineDiffViewer.
+ */
+function ExpandablePatch({ patch }: { patch: string }) {
+  const [showAll, setShowAll] = useState(false);
+  const allLines = patch.split('\n');
+  const visibleLines = showAll ? allLines : allLines.slice(0, MAX_INITIAL_LINES);
+  const hiddenCount = Math.max(0, allLines.length - visibleLines.length);
+  return (
+    <div style={{
+      borderTopWidth: 1,
+      borderTopStyle: 'solid',
+      borderTopColor: 'var(--t-divider-subtle)',
+      background: 'var(--t-bg)',
+    }}>
+      <pre style={{
+        margin: 0,
+        paddingTop: 6,
+        paddingRight: 10,
+        paddingBottom: 6,
+        paddingLeft: 10,
+        fontSize: 10,
+        fontFamily: MONO_FAMILY,
+        color: 'var(--t-text)',
+        overflowX: 'auto',
+        whiteSpace: 'pre',
+        lineHeight: 1.5,
+      }}>
+        {visibleLines.map((line, idx) => {
+          let color = 'var(--t-text-secondary)';
+          if (line.startsWith('+') && !line.startsWith('+++')) color = '#16a34a';
+          else if (line.startsWith('-') && !line.startsWith('---')) color = '#dc2626';
+          else if (line.startsWith('@@')) color = '#7c3aed';
+          return (
+            <div key={idx} style={{ color, whiteSpace: 'pre' }}>
+              {line || ' '}
+            </div>
+          );
+        })}
+      </pre>
+      {hiddenCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          style={{
+            width: '100%',
+            minHeight: 28,
+            borderWidth: 0,
+            borderTopWidth: 1,
+            borderTopStyle: 'solid',
+            borderTopColor: 'var(--t-divider-subtle)',
+            background: 'var(--t-panel-translucent)',
+            color: 'var(--t-text-secondary)',
+            fontSize: 10,
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: FONT_FAMILY,
+            letterSpacing: '-0.01em',
+          }}
+        >
+          Expand full diff ({hiddenCount} more line{hiddenCount === 1 ? '' : 's'})
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * #729 — DIFF pane: file tree with +/- totals + per-file unified diff with
  * hunk-level expansion.
@@ -103,8 +173,8 @@ export function DiffPane({ packet, reviewState, diff, diffLoading, diffError }: 
                   borderRadius: 8,
                   borderWidth: 1,
                   borderStyle: 'solid',
-                  borderColor: 'rgba(148, 163, 184, 0.16)',
-                  background: 'rgba(148, 163, 184, 0.06)',
+                  borderColor: 'var(--t-divider)',
+                  background: 'var(--t-bg-subtle)',
                   overflow: 'hidden',
                 }}
               >
@@ -158,35 +228,7 @@ export function DiffPane({ packet, reviewState, diff, diffLoading, diffError }: 
                   </span>
                 </button>
                 {isExpanded && file.patch ? (
-                  <pre style={{
-                    margin: 0,
-                    paddingTop: 6,
-                    paddingRight: 10,
-                    paddingBottom: 6,
-                    paddingLeft: 10,
-                    fontSize: 10,
-                    fontFamily: MONO_FAMILY,
-                    color: 'var(--t-text)',
-                    background: 'var(--t-bg)',
-                    borderTopWidth: 1,
-                    borderTopStyle: 'solid',
-                    borderTopColor: 'rgba(148, 163, 184, 0.12)',
-                    overflowX: 'auto',
-                    whiteSpace: 'pre',
-                    lineHeight: 1.5,
-                  }}>
-                    {file.patch.split('\n').map((line, idx) => {
-                      let color = 'var(--t-text-secondary)';
-                      if (line.startsWith('+') && !line.startsWith('+++')) color = '#16a34a';
-                      else if (line.startsWith('-') && !line.startsWith('---')) color = '#dc2626';
-                      else if (line.startsWith('@@')) color = '#7c3aed';
-                      return (
-                        <div key={idx} style={{ color, whiteSpace: 'pre' }}>
-                          {line || ' '}
-                        </div>
-                      );
-                    })}
-                  </pre>
+                  <ExpandablePatch patch={file.patch} />
                 ) : null}
               </div>
             );

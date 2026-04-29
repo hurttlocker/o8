@@ -264,7 +264,11 @@ export const InlineDiffViewer = memo(function InlineDiffViewer({
     if (!root) return;
     const target = root.querySelector(`#${fileAnchorId(filePath)}`);
     if (target instanceof HTMLElement) {
-      root.scrollTo({ top: Math.max(0, target.offsetTop - 8), behavior: 'smooth' });
+      // Use getBoundingClientRect so the offset is relative to the scroll
+      // container, not the nearest positioned offsetParent (which may differ).
+      const top =
+        target.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
+      root.scrollTo({ top: Math.max(0, top - 8), behavior: 'smooth' });
     }
   }, []);
 
