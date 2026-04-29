@@ -15,6 +15,7 @@ import {
   TabBreadcrumb,
   TabHeading,
 } from './shared';
+import { RecallHealthSection } from './RecallHealthSection';
 
 // ── Types ──
 
@@ -250,9 +251,12 @@ export function DiagnosticsTab() {
         </div>
       </section>
 
-      {/* 02 — MAINTENANCE */}
-      <section>
-        <SectionLabel number="02">MAINTENANCE</SectionLabel>
+      {/* 02 — RECALL HEALTH (#749 substrate eval gate) */}
+      <RecallHealthSection />
+
+      {/* 03 — MAINTENANCE */}
+      <section style={{ marginTop: 32 }}>
+        <SectionLabel number="03">MAINTENANCE</SectionLabel>
 
         <div style={{
           display: 'flex',
@@ -377,9 +381,9 @@ export function DiagnosticsTab() {
         </div>
       </section>
 
-      {/* 03 — DANGER */}
+      {/* 04 — DANGER */}
       <section style={{ marginTop: 32 }}>
-        <SectionLabel number="03">DANGER</SectionLabel>
+        <SectionLabel number="04">DANGER</SectionLabel>
 
         <div style={{
           display: 'flex',
