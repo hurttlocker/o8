@@ -1338,15 +1338,39 @@ const POPOVER_LABEL: &str = "dispatch-popover";
 const POPOVER_WIDTH: f64 = 600.0;
 const POPOVER_HEIGHT: f64 = 80.0;
 
-/// Open (or focus, if already open) the dispatch popover. Centered on the
-/// active monitor, always-on-top, no decorations, frameless. Built on the
-/// dev URL when running `cargo tauri dev`, otherwise the bundled
-/// `tauri://localhost` scheme. Returns Ok(()) on success.
+/// Open (or focus, if already open) the dispatch popover. Spotlight-style:
+/// horizontally centered, anchored at 25% from the top of the active monitor.
+/// Always-on-top, no decorations, frameless. Built on the dev URL when running
+/// `cargo tauri dev`, otherwise the bundled `tauri://localhost` scheme.
+/// Returns Ok(()) on success.
 fn open_dispatch_popover_impl(app: &AppHandle) -> Result<(), String> {
+    // Compute Spotlight-style position on the primary monitor: horizontally
+    // centered, 25% from the top. Falls back to .center() if monitor info is
+    // unavailable (rare — headless / detached display races).
+    //
+    // Tauri v2: monitor.size() is physical pixels, popover dims are logical.
+    // .position(x, y) takes physical pixels, so we scale logical → physical.
+    let spotlight_position: Option<(f64, f64)> = match app.primary_monitor() {
+        Ok(Some(monitor)) => {
+            let scale = monitor.scale_factor();
+            let monitor_w = monitor.size().width as f64;
+            let monitor_h = monitor.size().height as f64;
+            let popover_w_phys = POPOVER_WIDTH * scale;
+            let x = (monitor_w - popover_w_phys) / 2.0;
+            let y = monitor_h * 0.25;
+            Some((x.max(0.0), y.max(0.0)))
+        }
+        _ => None,
+    };
+
     if let Some(existing) = app.get_webview_window(POPOVER_LABEL) {
         let _ = existing.show();
         let _ = existing.set_focus();
-        let _ = existing.center();
+        if let Some((x, y)) = spotlight_position {
+            let _ = existing.set_position(tauri::PhysicalPosition::new(x, y));
+        } else {
+            let _ = existing.center();
+        }
         return Ok(());
     }
 
@@ -1371,8 +1395,13 @@ fn open_dispatch_popover_impl(app: &AppHandle) -> Result<(), String> {
         .transparent(true)
         .focused(true)
         .visible(true)
-        .skip_taskbar(true)
-        .center();
+        .skip_taskbar(true);
+
+    builder = if let Some((x, y)) = spotlight_position {
+        builder.position(x, y)
+    } else {
+        builder.center()
+    };
 
     // visible_on_all_workspaces is critical for a global shortcut —
     // otherwise the popover only shows on the workspace that owns the main
