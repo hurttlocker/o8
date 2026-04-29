@@ -7,8 +7,85 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-04-29
+
+- `c3107842` feat(qa): Ask Anything UI scaffold + mock stream (epic sub-4)
+- `f529dff4` feat(projects): AI Stage 2 LLM project suggestions + Confident/Plausible UI (epic wave 2)
+- `f5b3b608` feat(projects): Settings → Projects UI with manual linking + GitHub-org auto-suggest (epic wave 2)
+- `628495ba` feat(projects): Recall Card Project pulse section (epic wave 2)
+- `ebbfd6da` feat(projects): scope:project directives + cross-repo proposer rewrite (epic wave 1)
+- `ec4e3ce5` feat(projects): schema v13 + storage + API + MCP tools (epic wave 1)
+- `2fcade70` feat(projects): AI semantics Stage 1 fingerprint extractor (epic wave 1)
+- `2576b08f` feat: agent-proposed spec approval flow
+- `dc0508a4` feat(diagnostics): extend demo runner with mission/settings/context-graph steps (closes)
+- `099b6a46` feat(diagnostics): in-app demo-sequence runner (closes)
+- `9d0fd5e6` feat(panel): loop-state writer endpoint + shell helper (closes)
+- `29b370cc` feat(settings): in-app loop status widget — cron + lanes + recent merges (closes)
+- `24fb98f9` feat(mcp): o8_view_console_errors + o8_view_active_route — close loop observability gaps (closes)
+- `40124d3c` feat(o8): cross-repo learning
+- `e74dfa91` feat(o8): per-runtime outcome telemetry → dispatch routing recommendation (closes)
+- `7409a9be` feat(o8): auto-directive proposer
+- `44ef75b1` feat(o8): temporal validity windows on session_outcomes — auto-decay 30d (closes)
+- `ead15d33` feat(mobile): Browser tab gates the chat+iframe split (closes)
+- `8edf1dc2` feat(mobile): wire url-push listener into split shell + DevHostFrame handler
+- `1d489b16` feat(mobile): long-press port chip pushes URL to connected phone over WS (closes)
+- `b01eb931` feat(mobile): wire DevHostFrame into MobileSplitShell right pane
+- `dcc44eae` feat(mobile): landscape split-view shell
+- `7df82d56` feat(mobile): DevHostFrame iframe with URL bar + LAN host discovery (closes)
+- `a8415187` feat(context-engine): editable packet spec.md feeds live orchestrator context (closes)
+- `e1b47aa8` feat(mission-control): status-grouped lanes (closes)
+- `371c020e` feat(orchestrator): suggested-reply chips under Coordinator messages
+- `9dceb63c` feat(o8): living specs
+- `1ead5f84` feat(context-engine): /context-graph test page — 3-column flow viz (closes)
+- `5674f2d2` feat(native shell): dispatch popover redesign
+
+## 2026-04-28
+
+- `61138692` feat(o8): demo polish
+- `9a0492ac` feat(o8): inject <context> block into packet bodies on dispatch (closes)
+- `f3b26e4e` feat(orchestrator): context recall card 3-row hero (closes)
+- `42bbf86d` feat(o8): auto-index registered repos at boot via codebase-memory-mcp (closes)
+- `d4f25cb3` feat(mcp): register codebase-memory-mcp in .mcp.json + setup generator (closes)
+- `4ae59a8c` feat(mcp): runtime-download codebase-memory-mcp on first launch (closes)
+- `b65834f6` feat(native shell): global-shortcut + notification + menu bar tray (closes)
+- `30b1e411` feat(orchestrator): packet review card 3-pane (closes)
+- `d52ff056` perf(dashboard): defer non-critical work off the bootstrap path (closes)
+- `afa0aff1` feat(workspaces): hover-reveal trash + confirm-strip + git branch -D
+- `e255f348` feat(desktop): auto-hide merged + agent worktrees in Workspaces sidebar + hover-prune
+- `60c892da` perf(desktop): memoize ThoughtsChatPanel message bubbles
+- `cb9e73b9` perf(desktop): widen / remove short polling intervals
+- `ac058e40` perf(desktop): reduce SessionVisualizer render churn
+- `bb3bcc1f` feat(desktop): hit-zone audit — Settings page (44pt minimum)
+- `4662f5c4` feat(desktop): hit-zone audit
+- `f0da0757` feat(desktop): hit-zone audit — Approval surfaces (44pt minimum)
+- `5c22d514` feat(desktop): multi-window / split-pane orchestrator transcripts
+- `592029bb` feat(orchestrator): bump AI provider defaultModel to AI provider-3.1-pro
+- `2c6fb4b7` feat(desktop): Cmd+K command palette across the app
+- `32dbcd77` feat(desktop): one-click rerun-with-feedback on rejected reviews
+- `e8b447ce` feat(desktop): inline diff viewer in workspace center
+- `9af81251` feat(desktop): steer-in-flight composer on active agent transcripts
+- `0bc22ad0` feat(orchestrator): drop AI provider-code from dispatch picker
+- `067183e3` feat(mobile): offline send queue + replay on reconnect
+- `df18c17c` feat(mobile): push notifications + Web Push infra
+- `d825fcad` feat(mobile): haptic feedback
+- `8c0b38f3` feat(mobile): pull-to-refresh across mobile surfaces
+- `e25d03a4` feat(mobile): universal search ('/') across chats/threads/activity
+- `3fa902ec` feat(mobile): markdown + code blocks in agent transcripts
+- `e1caad40` feat(mobile): swipe-to-approve/reject gestures on approvals
+- `b6a04b17` feat(mobile): inline diff viewer for approvals + PR cards + agent transcripts
+- `fa09d3ae` feat(mobile): inline diff viewer for approvals + PR cards + agent transcripts
+- `29882140` feat(mobile): inline diff viewer for approvals + PR cards + agent transcripts
+- `97fc6936` feat(mobile): inline diff viewer for approvals + PR cards + agent transcripts [via-o8]
+- `78412db7` design(mobile): dark mode transcript bubble polish [via-o8]
+- `5ec52cf6` feat(mobile): voice input via long-press to dictate [via-o8]
+- `da4f2232` feat(mobile): voice input via long-press to dictate
+
 ## 2026-04-27
 
+- `cdac1e25` feat(mobile): read-only agent transcript sheet (v1 mobile model)
+- `fc6c9899` feat(mobile): orchestrator brain chip + thread card opacity fix
+- `57f05cee` feat(mobile): rename Chats→Assistant, action-weight order, sidebar subtitles, orchestrator New button
+- `1c0e5a1d` feat(release): post-bundle sign + notarize for nested Node native modules
 - `efc3bbfe` feat(release): wire Apple Developer ID signing + notarization
 - `edf81be4` design(orchestrator): match Assistant chat breathing room and typography
 - `ecb1fa2f` design(mobile): unify standard topbar across all 5 new tabs
