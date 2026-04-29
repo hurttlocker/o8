@@ -1,4 +1,4 @@
-import { withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { archiveLane, listLanes, updateLane } from '@/lib/lane/registry';
 import { getWorktreeManager } from '@/lib/worktree/launch';
@@ -148,9 +148,10 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
     packet.prompt = appendFeedback(originalPrompt, feedback);
 
     // Step 4 — run a dispatch tick so the packet relaunches with the
-    // updated prompt.
-    const afterDispatch = await runDispatchTick(current);
-    writeOrchestratorControlPlaneState(afterDispatch);
+    // updated prompt. Return afterDispatch so withLockedState uses it as
+    // the basis for reconcile + write (prevents the pre-dispatch snapshot
+    // from clobbering the dispatch result — #820 CRITICAL fix).
+    return await runDispatchTick(current);
   });
 
   const dispatchedPacket = finalState.packets.find((candidate) => candidate.id === packetId) ?? null;
