@@ -256,20 +256,27 @@ export function approvalSeverity(risk: ApprovalRisk): EventSeverity {
 
 export function expireStaleApprovals() {
   const cutoff = Date.now() - STALE_APPROVAL_TTL_MS;
-  const result = getSqlite()
+  const staleIds = getSqlite()
     .prepare(`
-      UPDATE approvals
-      SET status = 'rejected'
+      SELECT id FROM approvals
       WHERE status = 'pending'
         AND created_at < ?
     `)
-    .run(cutoff);
+    .all(cutoff) as Array<{ id: string }>;
 
-  if (result.changes > 0) {
-    console.log(`[approvals] Expired ${result.changes} stale pending approvals`);
+  let changes = 0;
+  for (const { id } of staleIds) {
+    const resolved = resolveApproval(id, 'reject', 'system', 'Expired: stale pending approval TTL exceeded');
+    if (resolved) {
+      changes += 1;
+    }
   }
 
-  return result.changes;
+  if (changes > 0) {
+    console.log(`[approvals] Expired ${changes} stale pending approvals`);
+  }
+
+  return changes;
 }
 
 export function listApprovals(options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string } = {}) {
