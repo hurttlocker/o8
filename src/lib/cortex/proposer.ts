@@ -42,13 +42,33 @@ const SNOOZE_FILE = 'proposal-snooze.json';
 // English-ish stop words — minimal list, just enough to drop the most common
 // connector-noise from summary text. Bigger lists get the proposer too
 // aggressive on borderline phrases.
+//
+// #839 — added common dev-prefix tokens (`test`, `wip`, `todo`, `hotfix`,
+// `chore`, `refactor`, `done`) so a stray bracket marker like `[test]` (the
+// recommended dogfood prefix) doesn't cluster across unrelated outcomes and
+// surface a spurious `test always` bigram. Outcomes whose summary starts
+// with a `[bracket-prefix]` are also skipped entirely below.
 const STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have',
   'in', 'into', 'is', 'it', 'its', 'of', 'on', 'or', 'that', 'the', 'this', 'to',
   'was', 'were', 'will', 'with', 'when', 'while', 'over', 'under', 'now', 'then',
   'so', 'do', 'did', 'does', 'add', 'added', 'fix', 'fixed', 'update', 'updated',
   'change', 'changed', 'remove', 'removed', 'use', 'used', 'make', 'made',
+  // Dev-prefix noise (#839)
+  'test', 'wip', 'todo', 'hotfix', 'chore', 'refactor', 'done',
 ]);
+
+/**
+ * #839 — Outcomes whose summary starts with a `[bracket-prefix]` (e.g.
+ * `[test] always validate`, `[WIP] hook up cache`) are dogfood/staging
+ * markers, not real fix patterns. Skip them when counting cluster hits so
+ * the same prefix can't aggregate spurious bigrams across the corpus.
+ */
+const BRACKET_PREFIX = /^\s*\[[^\]]+\]/;
+function hasBracketPrefix(summary: string | null | undefined): boolean {
+  if (!summary) return false;
+  return BRACKET_PREFIX.test(summary);
+}
 
 export interface DirectiveProposalCandidate {
   /**
@@ -144,9 +164,14 @@ function activeSnoozedIds(now: Date): Set<string> {
 }
 
 /**
- * Append a snooze entry for the given candidate. Append-only — never rewrites
- * existing entries. Stale entries (past their snoozedUntil) accumulate but
- * are filtered at read time. Compaction is left to a future maintenance pass.
+ * Snooze a proposal for the SNOOZE_DAYS window.
+ *
+ * #838 — write-side dedup. If an entry with this `id` already exists in the
+ * ledger, update its `snoozedUntil` in place rather than appending a new row.
+ * Without this, a rapid double-click on Dismiss (UI race before optimistic
+ * hide takes effect) used to write two entries with different timestamps.
+ * `activeSnoozedIds()` already deduped at read time so behavior was
+ * unaffected, but the file accumulated garbage.
  */
 export function snoozeProposal(candidate: { id: string; filePattern: string; fixPattern: string }): SnoozeEntry {
   const snoozedUntil = new Date(Date.now() + SNOOZE_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -157,7 +182,12 @@ export function snoozeProposal(candidate: { id: string; filePattern: string; fix
     snoozedUntil,
   };
   const ledger = readSnoozeLedger();
-  ledger.entries.push(entry);
+  const existingIdx = ledger.entries.findIndex((e) => e.id === candidate.id);
+  if (existingIdx >= 0) {
+    ledger.entries[existingIdx] = entry;
+  } else {
+    ledger.entries.push(entry);
+  }
   writeSnoozeLedger(ledger);
   return entry;
 }
@@ -347,6 +377,9 @@ export function proposeDirectives(options: ProposeOptions = {}): DirectivePropos
   // end requires the SAME pair to appear in ≥ 3 distinct outcomes.
   const accumulators = new Map<string, CandidateAccumulator>();
   for (const row of outcomes) {
+    // #839 — bracket-prefixed summaries (`[test] …`, `[WIP] …`) are dogfood
+    // markers; skip them so prefix tokens can't cluster as bigrams.
+    if (hasBracketPrefix(row.summary)) continue;
     const filePattern = extractFilePattern(safeParseChangedFiles(row.changedFilesJson));
     if (!filePattern) continue;
     const bigrams = extractBigrams(row.summary ?? '');
