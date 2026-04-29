@@ -28,7 +28,7 @@ import 'server-only';
 
 import { and, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
-import { getDb, sessionOutcomes } from '@/lib/db';
+import { getDb, runSessionOutcomeValidFromBackfill, sessionOutcomes } from '@/lib/db';
 
 const DEFAULT_TTL_DAYS = 30;
 const DECAY_TICK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
@@ -85,6 +85,14 @@ export async function decayOutcomes(
   if (!db) {
     return { decayed: 0, scanned: 0, skipped: true };
   }
+
+  // #745 phase 2 — step 0: backfill any rows whose `valid_from` got inserted
+  // as NULL by raw SQL between boots (legacy seeds, parallel-agent inserts).
+  // The boot-time backfill in `ensureIdempotentColumnAdds()` only fires on
+  // the first `getDb()` call per process, so a long-running Next server
+  // would otherwise carry stray NULLs until the next restart. Doing this
+  // before the age-out sweep guarantees the sweep sees a complete window.
+  runSessionOutcomeValidFromBackfill();
 
   try {
     // Count live rows for telemetry. Cheap because of `idx_so_valid_to`.
