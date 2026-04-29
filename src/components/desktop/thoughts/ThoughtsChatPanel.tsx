@@ -46,6 +46,7 @@ import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
 import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadNotice';
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
+import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import type {
   ThoughtsChatPanelChromeState,
   ThoughtsChatPanelHandle,
@@ -659,6 +660,18 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
   const activeTargetLabel = isOrchestratorMode ? 'Claude Code' : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
   const activeTargetColor = isOrchestratorMode ? '#e07a3a' : (targetAgent?.color ?? orchestratorRuntimeTone(preferredRuntime).color);
+  // #771 — Augment Intent-style chip row under the last assistant message.
+  // Only fires in orchestrator mode; CLI lanes still steer via the composer.
+  const {
+    lastAssistantId: suggestedReplyMessageId,
+    chipsForLastAssistant,
+    dismissChips: dismissSuggestedReplies,
+  } = useSuggestedReplies({
+    enabled: isOrchestratorMode,
+    messages: displayMessages,
+    isStreaming: displayWaiting,
+  });
+
   // Memoize so a render triggered by composer state (input typing) doesn't
   // hand ChatMessageList a fresh `topContent` ref each keystroke.
   const transcriptTopContent = useMemo(() => displayPlanText ? (
@@ -960,6 +973,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         emptyStateFallback={fallbackEmptyState}
         topContent={transcriptTopContent}
         isOrchestratorMode={isOrchestratorMode}
+        suggestedReplyMessageId={suggestedReplyMessageId}
+        suggestedReplies={chipsForLastAssistant}
+        onSelectSuggestion={(chip) => { sendNow(chip); }}
+        onDismissSuggestions={dismissSuggestedReplies}
       />
 
       <ChatToastStack

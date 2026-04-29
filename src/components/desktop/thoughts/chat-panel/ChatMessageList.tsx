@@ -2,6 +2,7 @@
 
 import { forwardRef } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
+import { SuggestedReplies } from '../SuggestedReplies';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 interface ChatMessageListProps {
@@ -22,6 +23,13 @@ interface ChatMessageListProps {
   // Duplicating the inline "is thinking…" bubble here makes the chat feel
   // noisy during tool-heavy turns. CLI lane panels still need the bubble.
   isOrchestratorMode?: boolean;
+  // Suggested-reply chips (#771). The parent owns the cache + Gemini fetch and
+  // hands us the chip strings for the last assistant message. We render them
+  // under that message; click → onSelectSuggestion(text); X → onDismissSuggestions.
+  suggestedReplyMessageId?: string | null;
+  suggestedReplies?: string[];
+  onSelectSuggestion?: (chip: string) => void;
+  onDismissSuggestions?: () => void;
 }
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
@@ -38,7 +46,18 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   emptyStateFallback,
   topContent,
   isOrchestratorMode = false,
+  suggestedReplyMessageId,
+  suggestedReplies,
+  onSelectSuggestion,
+  onDismissSuggestions,
 }, chatEndRef) {
+  const hasSuggestedReplies = Boolean(
+    suggestedReplyMessageId
+    && suggestedReplies
+    && suggestedReplies.length > 0
+    && onSelectSuggestion
+    && onDismissSuggestions,
+  );
   const showEmptyWithOverride = displayMessages.length === 0 && !displayWaiting && emptyStateOverride;
   const showEmptyWithFallback = displayMessages.length === 0 && !displayWaiting && !emptyStateOverride;
   const isCompacting = displayWaiting && displayMessages.length > 0 &&
@@ -76,6 +95,15 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
           repoPath={repoPath}
         />
       ))}
+
+      {hasSuggestedReplies && suggestedReplies && onSelectSuggestion && onDismissSuggestions ? (
+        <SuggestedReplies
+          chips={suggestedReplies}
+          disabled={displayWaiting}
+          onSelect={onSelectSuggestion}
+          onDismiss={onDismissSuggestions}
+        />
+      ) : null}
 
       {isCompacting ? (
         <div style={{
