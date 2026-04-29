@@ -213,6 +213,7 @@ export const CommandPalette = memo(function CommandPalette({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const selectedIndexRef = useRef(selectedIndex);
 
   // Reset state on open and refresh recents from localStorage.
   useEffect(() => {
@@ -339,6 +340,12 @@ export const CommandPalette = memo(function CommandPalette({
     }
   }, [items.length, selectedIndex]);
 
+  // Sync selectedIndexRef so the Enter handler always reads the latest index
+  // without closing over a stale value.
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
   // Scroll the active item into view.
   useEffect(() => {
     const list = listRef.current;
@@ -397,12 +404,10 @@ export const CommandPalette = memo(function CommandPalette({
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      const target = items[selectedIndex];
+      const target = items[selectedIndexRef.current];
       if (target) handleActivate(target);
     }
-  }, [handleActivate, items, onClose, selectedIndex]);
-
-  if (!open) return null;
+  }, [handleActivate, items, onClose]);
 
   const showEmpty = !loading && !error && items.length === 0;
   const trimmed = query.trim();

@@ -1238,6 +1238,33 @@ function DashboardInner() {
     });
   }, [openCanvasTab]);
 
+  // Stable callbacks passed to CommandPalette — extracted to avoid defeating
+  // memo boundaries with fresh inline arrows on every render (#809).
+  const handlePaletteClose = useCallback(() => {
+    setCommandPaletteOpen(false);
+  }, []);
+
+  const handlePaletteSelectIssue = useCallback((issueNumber: number, repo?: string) => {
+    handleSelectIssue(issueNumber, repo);
+  }, [handleSelectIssue]);
+
+  const handlePaletteSelectFile = useCallback((filePath: string, line?: number) => {
+    openCanvasTab({
+      id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
+      kind: 'file',
+      label: filePath.split('/').pop() ?? filePath,
+      resourceId: filePath,
+      meta: {
+        ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
+        ...(line ? { line: String(line) } : {}),
+      },
+    });
+  }, [activeWorkspace, openCanvasTab]);
+
+  const handlePaletteSelectAgent = useCallback((sessionKey: string) => {
+    handleSelectSession(sessionKey);
+  }, [handleSelectSession]);
+
   const handleSelectPR = useCallback((prNumber: number, repo?: string) => {
     openCanvasTab({
       id: `pr:${prNumber}${repo ? `:${repo}` : ''}`,
@@ -2403,27 +2430,12 @@ function DashboardInner() {
         <Suspense fallback={null}>
           <LazyCommandPalette
             open={commandPaletteOpen}
-            onClose={() => setCommandPaletteOpen(false)}
+            onClose={handlePaletteClose}
             workspace={activeWorkspace ?? null}
             repo={globalRepo ?? null}
-            onSelectIssue={(issueNumber, repo) => {
-              handleSelectIssue(issueNumber, repo);
-            }}
-            onSelectFile={(filePath, line) => {
-              openCanvasTab({
-                id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
-                kind: 'file',
-                label: filePath.split('/').pop() ?? filePath,
-                resourceId: filePath,
-                meta: {
-                  ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
-                  ...(line ? { line: String(line) } : {}),
-                },
-              });
-            }}
-            onSelectAgent={(sessionKey) => {
-              handleSelectSession(sessionKey);
-            }}
+            onSelectIssue={handlePaletteSelectIssue}
+            onSelectFile={handlePaletteSelectFile}
+            onSelectAgent={handlePaletteSelectAgent}
           />
         </Suspense>
       ) : null}
