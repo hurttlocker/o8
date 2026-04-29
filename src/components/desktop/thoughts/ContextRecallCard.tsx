@@ -32,6 +32,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { ProjectPulse } from '@/lib/projects/pulse';
 import {
   indexEntryForRepo,
   pickTopDirective,
@@ -42,9 +43,10 @@ import {
 } from './recall-card/shared';
 import { DirectiveRow } from './recall-card/DirectiveRow';
 import { OutcomesRow } from './recall-card/OutcomesRow';
+import { ProjectPulseRow } from './recall-card/ProjectPulseRow';
 import { SymbolGraphFallbackRow, SymbolGraphRow } from './recall-card/SymbolGraphRow';
 
-type OpenRow = 'directive' | 'outcomes' | 'symbols' | null;
+type OpenRow = 'directive' | 'outcomes' | 'symbols' | 'pulse' | null;
 
 interface OutcomesCacheEntry {
   repoPath: string;
@@ -56,6 +58,11 @@ interface EdgesCacheEntry {
   key: string;
   rows: SymbolEdgeView[] | null;
   unavailable: boolean;
+}
+
+interface PulseCacheEntry {
+  repoPath: string;
+  pulses: ProjectPulse[] | null;
 }
 
 interface ContextRecallCardProps {
@@ -79,12 +86,21 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
     rows: null,
     unavailable: false,
   });
+  // #899 wave 2 — peer-repo activity, keyed on repoPath so a mid-flight
+  // packet switch shows "loading" rather than stale data.
+  const [pulseByRepo, setPulseByRepo] = useState<PulseCacheEntry>({
+    repoPath: '',
+    pulses: null,
+  });
 
   // #840 — Bumped when a Cortex memory write (e.g. directive trailer append
   // after a merge) fires the `o8:cortex-changes` window event. The directive
   // fetch effect uses this as a dependency so the card re-fetches in place
   // without a manual collapse/reopen.
   const [directiveRefreshTick, setDirectiveRefreshTick] = useState(0);
+  // #899 — Same WS bridge also bumps this so the project-pulse row refreshes
+  // on directive changes (a new directive may shift which projects matter).
+  const [pulseRefreshTick, setPulseRefreshTick] = useState(0);
 
   const repoPath = packet.workspaceTargetPath;
 
@@ -155,6 +171,9 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
         if (pending) {
           pending = false;
           setDirectiveRefreshTick((tick) => tick + 1);
+          // #899 wave 2 — directive change may shift project membership /
+          // priorities, so refresh the pulse on the same debounced edge.
+          setPulseRefreshTick((tick) => tick + 1);
         }
       }, 250);
     };
@@ -193,6 +212,33 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
       cancelled = true;
     };
   }, [repoPath]);
+
+  // ── Project pulse — keyed on repoPath, refreshes on cortex-changes ──
+  // #899 wave 2. Failure modes — non-OK, throw, or repo not in any project —
+  // all settle to an empty list so the row can hide gracefully.
+  useEffect(() => {
+    if (!repoPath) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const url = `/api/cortex/project-pulse?repoPath=${encodeURIComponent(repoPath)}`;
+        const response = await fetch(url, { cache: 'no-store' });
+        if (cancelled) return;
+        if (!response.ok) {
+          setPulseByRepo({ repoPath, pulses: [] });
+          return;
+        }
+        const payload = (await response.json()) as { ok?: boolean; pulses?: ProjectPulse[] };
+        if (cancelled) return;
+        setPulseByRepo({ repoPath, pulses: payload.pulses ?? [] });
+      } catch {
+        if (!cancelled) setPulseByRepo({ repoPath, pulses: [] });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [repoPath, pulseRefreshTick]);
 
   // ── Index state — gates the SYMBOL GRAPH row ────────────────────────
   // #897 — On a non-OK response (or thrown error) we used to silently
@@ -293,6 +339,12 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
   const liveEdgesUnavailable =
     edgesByKey.key === symbolKey && symbolKey && edgesByKey.unavailable;
 
+  // #899 wave 2 — same repoPath fence as outcomes; mid-flight repo switches
+  // show loading instead of stale peer activity.
+  const livePulses =
+    repoPath && pulseByRepo.repoPath === repoPath ? pulseByRepo.pulses : null;
+  const showPulseRow = (livePulses?.length ?? 0) > 0;
+
   const repoEntry = indexEntryForRepo(indexState, repoPath);
   const showSymbolRow = repoEntryReady && !liveEdgesUnavailable;
   const symbolStatusHint = (() => {
@@ -347,6 +399,14 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
           onIndexStateChange={setIndexState}
         />
       )}
+      {showPulseRow ? (
+        <ProjectPulseRow
+          open={openRow === 'pulse'}
+          onToggle={() => setOpenRow(openRow === 'pulse' ? null : 'pulse')}
+          loading={livePulses === null}
+          pulses={livePulses ?? []}
+        />
+      ) : null}
     </div>
   );
 }
