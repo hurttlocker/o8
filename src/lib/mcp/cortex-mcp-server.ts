@@ -23,10 +23,16 @@ import {
   createProject,
   deleteProject,
   listProjects,
+  recordDismissedSuggestion,
   removeRepoFromProject,
   setRepoRole,
 } from '../projects/store';
 import type { ProjectRole } from '../projects/types';
+import {
+  getCachedSuggestion,
+  removeSuggestionFromCache,
+  suggestProjects,
+} from '../projects/suggest';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -448,6 +454,50 @@ const TOOLS: McpTool[] = [
         projectId: { type: 'string' },
       },
       required: ['projectId'],
+    },
+  },
+  {
+    name: 'cortex_suggest_projects',
+    description:
+      'Run AI Stage 2: read every registered repo fingerprint and ask Gemini Flash to group them into Projects. ' +
+      'Returns cached suggestions when nothing has changed; otherwise recomputes. Two-tier confidence: confident or plausible.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'cortex_refresh_project_suggestions',
+    description: 'Force a fresh AI Stage 2 run, bypassing the suggestion cache. Use when a fingerprint changed and the cache key did not yet invalidate.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'cortex_create_project_from_suggestion',
+    description:
+      'Accept an AI suggestion and turn it into a real Project. Creates the project with the suggested name + detected roles per repo and tags every link as suggestion_origin="ai-semantic". Removes the suggestion from the live cache after acceptance.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        suggestionId: { type: 'string', description: 'Suggestion id returned by cortex_suggest_projects.' },
+        name: { type: 'string', description: 'Optional override for the project name (defaults to the suggested name).' },
+      },
+      required: ['suggestionId'],
+    },
+  },
+  {
+    name: 'cortex_dismiss_project_suggestion',
+    description:
+      'Reject an AI suggestion. The suggestion is removed from the live cache and recorded so it will not be re-suggested.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        suggestionId: { type: 'string', description: 'Suggestion id returned by cortex_suggest_projects.' },
+        reason: { type: 'string', description: 'Optional dismissal reason (free text, stored alongside the dismissal record).' },
+      },
+      required: ['suggestionId'],
     },
   },
 ];
@@ -1124,6 +1174,72 @@ async function handleDeleteProject(args: Record<string, unknown>): Promise<McpTo
   }
 }
 
+// ── AI suggestions (epic #899 wave 2) ──
+
+async function handleSuggestProjects(): Promise<McpToolResult> {
+  try {
+    const result = await suggestProjects();
+    return jsonResult(result);
+  } catch (err) {
+    return textResult(`Failed to compute suggestions: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function handleRefreshProjectSuggestions(): Promise<McpToolResult> {
+  try {
+    const result = await suggestProjects({ force: true });
+    return jsonResult(result);
+  } catch (err) {
+    return textResult(`Failed to refresh suggestions: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function handleCreateProjectFromSuggestion(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const suggestionId = typeof args.suggestionId === 'string' ? args.suggestionId : '';
+    if (!suggestionId) return textResult('suggestionId is required.', true);
+
+    const suggestion = getCachedSuggestion(suggestionId);
+    if (!suggestion) {
+      return textResult(`Suggestion not found: ${suggestionId}. Run cortex_suggest_projects first or refresh the cache.`, true);
+    }
+
+    const overrideName = typeof args.name === 'string' ? args.name.trim() : '';
+    const project = createProject({
+      name: overrideName || suggestion.suggestedName,
+      description: suggestion.rationale,
+    });
+
+    for (const repoId of suggestion.repoIds) {
+      const role = suggestion.detectedRoles[repoId] ?? null;
+      addRepoToProject(project.id, repoId, role, 'ai-semantic');
+    }
+
+    removeSuggestionFromCache(suggestionId);
+
+    return jsonResult({
+      projectId: project.id,
+      slug: project.slug,
+      memberCount: suggestion.repoIds.length,
+    });
+  } catch (err) {
+    return textResult(`Failed to create project from suggestion: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function handleDismissProjectSuggestion(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const suggestionId = typeof args.suggestionId === 'string' ? args.suggestionId : '';
+    if (!suggestionId) return textResult('suggestionId is required.', true);
+    const reason = typeof args.reason === 'string' ? args.reason : null;
+    recordDismissedSuggestion(suggestionId, reason);
+    const removed = removeSuggestionFromCache(suggestionId);
+    return jsonResult({ ok: true, removedFromCache: removed });
+  } catch (err) {
+    return textResult(`Failed to dismiss suggestion: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
   cortex_fleet_status: handleFleetStatus,
   cortex_list_issues: handleListIssues,
@@ -1145,6 +1261,10 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_set_repo_role: handleSetRepoRole,
   cortex_list_projects: handleListProjects,
   cortex_delete_project: handleDeleteProject,
+  cortex_suggest_projects: handleSuggestProjects,
+  cortex_refresh_project_suggestions: handleRefreshProjectSuggestions,
+  cortex_create_project_from_suggestion: handleCreateProjectFromSuggestion,
+  cortex_dismiss_project_suggestion: handleDismissProjectSuggestion,
 };
 
 // ── JSON-RPC Server ──
