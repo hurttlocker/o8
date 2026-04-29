@@ -10,7 +10,7 @@
  *
  * Behaviour:
  *   - 200 + { ok: true, result } when the run completes (pass or fail).
- *   - 504 + { ok: false, error, result } when the 30s overall budget hits;
+ *   - 504 + { ok: false, error, result } when the 60s overall budget hits;
  *     `result` still contains everything we captured before timing out.
  *   - 500 + { ok: false, error } only for unrecoverable infra failures
  *     (e.g. the data dir cannot be written to).
@@ -25,7 +25,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
-const OVERALL_TIMEOUT_MS = 30_000;
+const OVERALL_TIMEOUT_MS = 60_000;
 
 function jsonResponse(payload: unknown, status = 200) {
   return NextResponse.json(payload, { status, headers: NO_STORE_HEADERS });
