@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useLandscapeSplit } from './landscape-controller';
+import { DevHostFrame } from './DevHostFrame';
 
 // MobileSplitShell — landscape chrome wrapper for the mobile PWA.
 //
@@ -276,7 +277,7 @@ function SplitLayout({ children }: { children: ReactNode }) {
         <span style={handleGripStyle} aria-hidden="true" />
       </div>
       <div style={rightPaneStyle}>
-        <DevHostPlaceholder />
+        <DevHostFrame />
       </div>
     </div>
   );
