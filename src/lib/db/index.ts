@@ -21,6 +21,7 @@ import { migrateLegacyApprovalStoreIfNeeded } from '@/lib/approvals/storage-migr
 import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
 import { ensureUsageLogIndexes, ensureUsageLogSchema } from '@/lib/db/usage-log-migration';
 import { ensureSessionOutcomeRoutingColumns } from '@/lib/db/session-outcome-routing-migration';
+import { ensureV14Fts5Schema } from '@/lib/db/v14-fts5-migration';
 
 // ── Data directory ──
 
@@ -34,7 +35,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 13;
+const DB_SCHEMA_VERSION = 14;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -107,6 +108,11 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensurePushSubscriptionsTable(sqlite);
   ensureProjectsTables(sqlite);
   ensureProjectScopeColumns(sqlite);
+  // #915 sub-1 — Schema v14 — Q&A retrieval foundation. FTS5 virtual tables
+  // for outcomes/prs/issues/directives plus qa_eval_runs table. Skips with a
+  // warning when FTS5 isn't compiled in. Always-on via the same idempotent
+  // pattern as the rest of this function.
+  ensureV14Fts5Schema(sqlite);
   // #835 — recover any session_outcomes rows whose `valid_from` was inserted
   // as NULL (legacy seeds, raw INSERTs that bypassed the Drizzle schema
   // default). The column-add backfill in `ensureSessionOutcomeColumns` only
