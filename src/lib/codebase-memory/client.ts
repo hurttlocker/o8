@@ -16,6 +16,26 @@ import { callCodebaseMemoryTool } from './mcp-client';
 const TRACE_TOOL_NAME = 'trace_path';
 
 /**
+ * Derive the codebase-memory project name from a repo's absolute path.
+ *
+ * #854 — `trace_path` requires a `project` parameter; the binary does NOT
+ * auto-detect from `cwd`. The binary names projects as the absolute path
+ * with the leading slash stripped and remaining slashes replaced with
+ * hyphens, e.g. `/Users/marquisehurtt/UGC` → `Users-marquisehurtt-UGC`.
+ * Confirmed against `cli list_projects` on a freshly indexed repo.
+ *
+ * Windows paths (drive letter + backslashes) are normalized to slashes
+ * first so the same convention applies cross-platform.
+ */
+function repoPathToProjectName(repoPath: string): string {
+  return repoPath
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\//g, '-');
+}
+
+/**
  * Symbol patterns we mine from packet titles / summaries / issue bodies.
  *
  *   1. Multi-cap identifiers (PascalCase with ≥2 caps): `PacketCard`,
@@ -166,13 +186,17 @@ export async function traceSymbols({
   if (!binPath) return { unavailable: true, edges: [] };
 
   const edges: SymbolEdge[] = [];
+  // #854: trace_path requires `project` — the binary doesn't infer it from
+  // cwd, so without this every call returned "project not found or not
+  // indexed" and the SYMBOL GRAPH row was permanently unavailable.
+  const project = repoPathToProjectName(repoPath);
 
   for (const symbol of symbols) {
     const callResult = await callCodebaseMemoryTool({
       binPath,
       cwd: repoPath,
       toolName: TRACE_TOOL_NAME,
-      args: { function_name: symbol },
+      args: { function_name: symbol, project },
       timeoutMs,
     });
 
