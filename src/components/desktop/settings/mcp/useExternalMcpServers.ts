@@ -129,9 +129,6 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
   }, [load]);
 
   const remove = useCallback(async (server: ExternalMcpServer) => {
-    if (typeof window !== 'undefined' && !window.confirm(`Remove external MCP server "${server.name}"?`)) {
-      return;
-    }
     setActionId(server.id);
     setNote(null);
     try {
