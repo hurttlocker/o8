@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { readAllDirectiveTrailers } from '@/lib/cortex/directive-merges';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,6 +28,8 @@ interface DirectiveSummary {
   repoName: string | null;
   priority: number | null;
   body: string;
+  /** #769 — last 3 trailer lines newest-first; empty until a merge appends one. */
+  recentMerges: string[];
 }
 
 const FRONT_MATTER_BOUNDARY = /^---\s*$/m;
@@ -41,7 +44,12 @@ function parseDirectiveFile(raw: string, fallbackId: string): DirectiveSummary |
   if (closingIndex < 0) return null;
 
   const front = afterFirst.slice(0, closingIndex);
-  const body = afterFirst.slice(closingIndex).replace(FRONT_MATTER_BOUNDARY, '').trim();
+  const rawBody = afterFirst.slice(closingIndex).replace(FRONT_MATTER_BOUNDARY, '').trim();
+  // #769 — Strip the `## Recent Merges` trailer so the body shown in the UI
+  // stays the operator-authored content. Trailer lines are surfaced via the
+  // separate `recentMerges` field so the recall card can render them with
+  // dedicated chrome.
+  const body = rawBody.replace(/\n*##\s+Recent Merges\b[\s\S]*$/, '').trim();
 
   const meta: Record<string, string> = {};
   for (const line of front.split('\n')) {
@@ -62,6 +70,7 @@ function parseDirectiveFile(raw: string, fallbackId: string): DirectiveSummary |
     repoName: meta.repoName?.trim() || null,
     priority: Number.isFinite(priorityNum) ? priorityNum : null,
     body,
+    recentMerges: [],
   };
 }
 
@@ -87,6 +96,14 @@ export async function GET() {
       } catch (error) {
         console.warn(`[cortex-directives] Failed to read ${name}:`, error);
       }
+    }
+
+    // #769 — Hydrate recent-merge trailers from the same markdown files.
+    // The helper re-reads the dir, but the cost is trivial (≤dozens of small
+    // files) and keeps the trailer logic colocated with the writer.
+    const trailerMap = readAllDirectiveTrailers(3);
+    for (const directive of directives) {
+      directive.recentMerges = trailerMap[directive.id] ?? [];
     }
 
     // Sort by priority desc (higher = more important), then title.
