@@ -136,10 +136,10 @@ export function DirectiveRow({
               borderRadius: 6,
               background:
                 topDirective.scope === 'global'
-                  ? 'rgba(37, 99, 235, 0.10)'
-                  : 'rgba(148, 163, 184, 0.12)',
+                  ? 'var(--t-accent-soft)'
+                  : 'var(--t-divider-strong)',
               color:
-                topDirective.scope === 'global' ? '#2563eb' : 'var(--t-text-muted)',
+                topDirective.scope === 'global' ? 'var(--t-accent)' : 'var(--t-text-muted)',
             }}
           >
             {topDirective.scope}
@@ -183,7 +183,7 @@ export function DirectiveRow({
                       height: 4,
                       borderRadius: '50%',
                       background:
-                        d.scope === 'global' ? '#2563eb' : 'var(--t-text-faint)',
+                        d.scope === 'global' ? 'var(--t-accent)' : 'var(--t-text-faint)',
                       flexShrink: 0,
                     }}
                   />

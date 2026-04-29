@@ -128,7 +128,7 @@ export function StatusGroupedLanes({ packets, renderPacket }: StatusGroupedLanes
                 paddingBottom: 0,
                 paddingLeft: 8,
                 border: 'none',
-                background: 'transparent',
+                background: 'var(--t-panel)',
                 cursor: 'pointer',
                 position: 'sticky',
                 top: 0,
