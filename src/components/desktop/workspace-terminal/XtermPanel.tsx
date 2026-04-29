@@ -38,6 +38,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   const termRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fitAddonRef = useRef<any>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exited, setExited] = useState(false);
   const [inlineImages, setInlineImages] = useState<InlineImage[]>([]);
@@ -169,7 +170,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           sendTerminalInput(tmuxSession, data);
         });
 
-        const observer = new ResizeObserver(() => {
+        observerRef.current = new ResizeObserver(() => {
           if (disposed || !fitAddonRef.current) return;
           try {
             fitAddonRef.current.fit();
@@ -178,9 +179,10 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
             return;
           }
         });
-        if (containerRef.current) observer.observe(containerRef.current);
+        if (containerRef.current) observerRef.current.observe(containerRef.current);
         return () => {
-          observer.disconnect();
+          observerRef.current?.disconnect();
+          observerRef.current = null;
         };
       } catch (err) {
         if (!disposed) {
@@ -195,6 +197,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     return () => {
       disposed = true;
       sendTerminalDetach(tmuxSession);
+      observerRef.current?.disconnect();
+      observerRef.current = null;
       cleanupPromise?.then((cleanup) => cleanup?.());
       if (termRef.current) {
         termRef.current.dispose();
