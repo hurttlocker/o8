@@ -23,6 +23,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { isLanDevHost } from '@/lib/mobile/lan-dev-host';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,67 +31,6 @@ export const dynamic = 'force-dynamic';
 const REALTIME_INTERNAL_ORIGIN =
   process.env.CORTEX_REALTIME_INTERNAL_ORIGIN ?? 'http://127.0.0.1:3002';
 const REALTIME_INTERNAL_TIMEOUT_MS = 2_500;
-
-/**
- * Returns true when the URL points at a host the user could plausibly be
- * dev-running on the same LAN. Defense-in-depth — even an authorized
- * caller cannot push https://example.com onto the phone.
- *
- * Allowed:
- *   - http(s)://localhost(:port)
- *   - http(s)://127.0.0.1(:port)
- *   - http(s)://10.x.x.x(:port)
- *   - http(s)://172.16.x.x – 172.31.x.x(:port)
- *   - http(s)://192.168.x.x(:port)
- *   - http(s)://*.local or *.localhost (mDNS / dev hostnames)
- *   - http(s)://[::1] (IPv6 loopback)
- */
-export function isLanDevHost(rawUrl: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return false;
-  }
-
-  // URL hostname keeps the brackets for IPv6 (e.g. "[::1]"). Normalize so
-  // the loopback check below works for both shapes.
-  const rawHost = parsed.hostname.toLowerCase();
-  const host = rawHost.startsWith('[') && rawHost.endsWith(']')
-    ? rawHost.slice(1, -1)
-    : rawHost;
-
-  // mDNS / dev hostnames.
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
-    return true;
-  }
-
-  // IPv6 loopback (after stripping brackets).
-  if (host === '::1') return true;
-
-  // Plain loopback v4.
-  if (host === '127.0.0.1' || host.startsWith('127.')) return true;
-
-  // RFC1918 — private LAN ranges.
-  if (host.startsWith('10.')) return true;
-  if (host.startsWith('192.168.')) return true;
-
-  if (host.startsWith('172.')) {
-    const parts = host.split('.');
-    if (parts.length === 4) {
-      const second = Number.parseInt(parts[1], 10);
-      if (Number.isFinite(second) && second >= 16 && second <= 31) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
 
 interface PushUrlBody {
   url?: string;

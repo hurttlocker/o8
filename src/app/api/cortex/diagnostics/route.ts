@@ -33,22 +33,9 @@ import {
   summarizeTimings,
   type RecallTimingSummary,
 } from '@/lib/cortex/diagnostics';
+import { SUBSTRATE_EVAL_THRESHOLDS } from '@/lib/cortex/substrate-eval-thresholds';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Threshold values referenced by `docs/substrate-eval-gate.md`. Surfaced
- * inline so the UI can display the same numbers and the doc can't drift
- * silently from the runtime check.
- */
-export const SUBSTRATE_EVAL_THRESHOLDS = {
-  /** Eval trigger at this many `session_outcomes` rows. */
-  outcomesEval: 5_000,
-  /** Eval trigger at recall p95 above this many milliseconds. */
-  p95Ms: 200,
-  /** Sustained-over window in days for the p95 trigger. */
-  sustainedDays: 7,
-} as const;
 
 interface DiagnosticsResponse {
   ok: true;
