@@ -6,6 +6,7 @@ import { deriveGithubIssueUrl } from '@/lib/orchestrator/issue-url';
 import { packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorPacket, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { hasPacketBranchTarget } from '@/components/desktop/thoughts/mission-panel/branchTarget';
+import { ContextRecallCard } from '@/components/desktop/thoughts/ContextRecallCard';
 import { PacketActionStrip } from '@/components/desktop/thoughts/PacketActionStrip';
 import { PacketDetailsPopover } from '@/components/desktop/thoughts/PacketDetailsPopover';
 import type { EditingField, ReviewPanelState } from './types';
@@ -66,7 +67,9 @@ export function PacketCard({
   const canShowLaunchAction = !packet.archivedAt && packet.releaseState !== 'released' && packet.queueState !== 'held' && !dependencyBlocker;
   const canLaunch = canShowLaunchAction && hasBranchTarget;
   const hasInteractiveLane = Boolean(packet.lane?.tileId && packet.lane?.tabId);
-  const targetLabel = workspaceTargets.find((target) => target.localPath === packet.workspaceTargetPath)?.label ?? null;
+  const matchedTarget = workspaceTargets.find((target) => target.localPath === packet.workspaceTargetPath) ?? null;
+  const targetLabel = matchedTarget?.label ?? null;
+  const targetRepoName = matchedTarget?.repoName ?? null;
   const showReviewSection = Boolean(packet.lane?.laneId) && (
     packet.status === 'awaiting_review'
     || (packet.status === 'blocked' && packet.blockedReason === 'Awaiting operator input')
@@ -207,6 +210,9 @@ export function PacketCard({
             onEditingFieldChange={onEditingFieldChange}
             onPatch={onPatch}
           />
+
+          {/* #742 — Context Recall Card (Directive / Recent Outcomes / Symbol Graph). */}
+          <ContextRecallCard packet={packet} repoName={targetRepoName} />
 
           {/* #615 — DETAILS row (read-only popover trigger). */}
           <div
