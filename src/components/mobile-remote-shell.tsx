@@ -26,6 +26,7 @@ import { ShimmerCard } from './mobile/ShimmerCard';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { type MobileScreen } from './mobile/SpeedDial';
+import { MobileSplitShell } from './mobile-split-shell/MobileSplitShell';
 
 // Lazy-loaded panels — only loaded when opened (#45)
 const shimmerFallback = { loading: () => <ShimmerCard /> };
@@ -64,9 +65,17 @@ import {
 } from './mobile/neomorph';
 
 export function MobileRemoteShell(props: MobileRemoteShellProps) {
+  // MobileSplitShell is a transparent passthrough in portrait — it only
+  // adds chrome (right pane + drag handle) when the device rotates to
+  // landscape and matches the (orientation: landscape) and (min-width:
+  // 720px) media query. Wrapping at this layer keeps MobileRemoteShellInner
+  // mounted at the same React tree depth across rotations, so transcript,
+  // draft, and scroll state survive (closes #779).
   return (
     <AlertProvider>
-      <MobileRemoteShellInner {...props} />
+      <MobileSplitShell>
+        <MobileRemoteShellInner {...props} />
+      </MobileSplitShell>
     </AlertProvider>
   );
 }
