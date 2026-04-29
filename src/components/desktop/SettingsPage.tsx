@@ -25,6 +25,7 @@ import {
   TabButton,
   PlugIcon,
   KeyIcon,
+  LayersIcon,
   UsersIcon,
   PaletteIcon,
   ActivityIcon,
@@ -35,6 +36,7 @@ import { GitHubTab } from './settings/GitHubTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
 import { OperatorDefaultsTab } from './settings/OperatorDefaultsTab';
+import { ProjectsPanel } from './settings/ProjectsPanel';
 import { WorkersTab } from './settings/WorkersTab';
 import { CloudWorkersTab } from './settings/CloudWorkersTab';
 import { AppearanceTab } from './settings/AppearanceTab';
@@ -281,6 +283,7 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
         <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
+        <TabButton label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} onClick={() => setActiveTab('projects')} />
         <TabButton label="Workers" icon={<UsersIcon />} active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} comingSoon />
         <TabButton label="Cloud Workers" icon={<UsersIcon />} active={activeTab === 'cloud-workers'} onClick={() => setActiveTab('cloud-workers')} comingSoon />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
@@ -320,6 +323,9 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         )}
         {activeTab === 'operator-defaults' && (
           <OperatorDefaultsTab />
+        )}
+        {activeTab === 'projects' && (
+          <ProjectsPanel />
         )}
         {activeTab === 'workers' && (
           <WorkersTab />
