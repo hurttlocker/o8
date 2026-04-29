@@ -23,7 +23,8 @@ import 'server-only';
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { statSync, readdirSync } from 'node:fs';
+import { existsSync, statSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -31,6 +32,24 @@ import { resolveCodebaseMemoryBin, waitForCodebaseMemoryBin } from './binary';
 import { callCodebaseMemoryTool } from './mcp-client';
 import { getRecordedHead, recordIndexedHead } from './state-store';
 import type { IndexState, RepoIndexEntry, RepoIndexStatus } from './types';
+
+/**
+ * Directory names skipped by the indexer at index time (these are the trees
+ * the codebase-memory-mcp binary itself ignores). `measureRepoSize` MUST
+ * apply the same set when summing bytes — otherwise it counts trees that
+ * will never be indexed and inflates the size to multi-GB on JS repos with
+ * a chunky `node_modules`. #896.
+ */
+const SKIP_DIRS: ReadonlySet<string> = new Set([
+  'node_modules',
+  '.git',
+  'target',
+  '.next',
+  'dist',
+  'build',
+  'out',
+  'coverage',
+]);
 
 const execFileAsync = promisify(execFile);
 
@@ -106,6 +125,12 @@ async function getCurrentHead(localPath: string): Promise<string | null> {
  * SIZE_WALK_ENTRY_CAP to avoid spending boot time enumerating huge trees;
  * past that cap we treat the repo as "definitely big" and defer it.
  *
+ * Skips the same directories as the indexer (SKIP_DIRS) so the measured
+ * size reflects what's actually indexable. Previously we statSync()'d the
+ * skipped dirs and added their reported size — which on macOS returned
+ * inflated block-aligned values (e.g. cortex-ide's node_modules pushed the
+ * total to 1.6 GB and tripped the 500 MB defer cap on every boot). #896.
+ *
  * Returns:
  *   - bytes when fully measured under the cap
  *   - null when measurement failed (treat as small/unknown — proceed)
@@ -129,25 +154,23 @@ function measureRepoSize(localPath: string): number | null {
       if (entriesSeen > SIZE_WALK_ENTRY_CAP) {
         return Number.POSITIVE_INFINITY;
       }
-      // Skip the usual giants — they exist in basically every repo.
-      if (
-        dirent.name === 'node_modules' ||
-        dirent.name === '.git' ||
-        dirent.name === 'target' ||
-        dirent.name === '.next' ||
-        dirent.name === 'dist'
-      ) {
-        // Approximate node_modules size by stating the directory once.
-        try {
-          const s = statSync(join(dir, dirent.name));
-          total += s.size;
-        } catch {
-          /* ignore */
-        }
+      // Skip the same dirs the indexer skips. Don't stat them — those
+      // trees will never be indexed, so their bytes don't count toward
+      // the size budget.
+      if (SKIP_DIRS.has(dirent.name)) {
         continue;
       }
       const full = join(dir, dirent.name);
       if (dirent.isDirectory()) {
+        // #896: skip nested git worktrees. A linked worktree has a `.git`
+        // FILE (gitdir pointer) at its root rather than a directory; the
+        // codebase-memory-mcp binary descends into nested .git/worktrees
+        // separately, so counting them again here both inflates the size
+        // and explodes the SIZE_WALK_ENTRY_CAP on repos that use o8's
+        // .claude/worktrees/* dispatch flow.
+        if (isLinkedWorktreeRoot(full)) {
+          continue;
+        }
         stack.push(full);
         continue;
       }
@@ -162,14 +185,129 @@ function measureRepoSize(localPath: string): number | null {
   return total;
 }
 
+/**
+ * A linked git worktree root has a `.git` FILE (containing `gitdir: ...`)
+ * rather than a `.git` directory. Detecting this lets us prune entire
+ * agent-spawn worktrees (e.g. `.claude/worktrees/agent-*`) from the size
+ * walk. #896.
+ */
+function isLinkedWorktreeRoot(dirPath: string): boolean {
+  const candidate = join(dirPath, '.git');
+  if (!existsSync(candidate)) return false;
+  try {
+    const stat = statSync(candidate);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Convert a repo's absolute path into the codebase-memory-mcp project
+ * name. The binary uses the same convention: strip leading slash, replace
+ * remaining slashes with hyphens. Mirrors `repoPathToProjectName` in
+ * client.ts but kept local to avoid a server-only ↔ server-only cycle.
+ */
+function repoPathToProjectName(repoPath: string): string {
+  return repoPath
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\//g, '-');
+}
+
+/**
+ * The codebase-memory-mcp binary writes per-project SQLite DBs to
+ * `~/.cache/codebase-memory-mcp/<project-name>.db`. If that file exists
+ * we know the repo has been indexed at least once, even if our local
+ * state-store doesn't have a HEAD recorded. #896.
+ */
+function indexedDbExists(localPath: string): boolean {
+  const home = process.env.HOME || process.env.USERPROFILE || homedir();
+  if (!home) return false;
+  const project = repoPathToProjectName(localPath);
+  const dbPath = join(home, '.cache', 'codebase-memory-mcp', `${project}.db`);
+  return existsSync(dbPath);
+}
+
 interface RunIndexJobOpts {
   binPath: string;
   repo: RepoRegistryEntry;
   maxSizeBytes: number;
 }
 
+interface DeltaIndexOpts {
+  binPath: string;
+  repo: RepoRegistryEntry;
+  currentHead: string;
+}
+
+/** Track in-flight delta indexes so concurrent boot passes don't double-fire. */
+const deltaInFlight = new Set<string>();
+
+/**
+ * Fire a background re-index for a repo whose .db exists but whose HEAD
+ * has moved since the last recorded index. Doesn't block the boot pass —
+ * the UI shows 'cached' immediately and gets refreshed once the delta
+ * finishes. #896.
+ */
+function scheduleDeltaIndex({ binPath, repo, currentHead }: DeltaIndexOpts): void {
+  if (deltaInFlight.has(repo.id)) return;
+  deltaInFlight.add(repo.id);
+  setImmediate(async () => {
+    try {
+      logInfo(`delta-indexing ${repo.name} (HEAD ${currentHead.slice(0, 7)})`);
+      const result = await callCodebaseMemoryTool({
+        binPath,
+        cwd: repo.localPath,
+        toolName: INDEX_TOOL_NAME,
+        args: { repo_path: repo.localPath },
+      });
+      if (!result.ok) {
+        logWarn(`delta-index failed for ${repo.name}: ${result.error}`);
+        return;
+      }
+      recordIndexedHead(repo.id, currentHead);
+      patchEntry(repo.id, {
+        status: 'ready' satisfies RepoIndexStatus,
+        lastIndexedHead: currentHead,
+        lastIndexedAt: new Date().toISOString(),
+        error: null,
+        durationMs: result.durationMs,
+      });
+      logInfo(`delta-indexed ${repo.name} in ${result.durationMs}ms`);
+    } catch (err) {
+      logWarn(`delta-index threw for ${repo.name}:`, err);
+    } finally {
+      deltaInFlight.delete(repo.id);
+    }
+  });
+}
+
 async function runIndexJob({ binPath, repo, maxSizeBytes }: RunIndexJobOpts): Promise<void> {
   const repoId = repo.id;
+
+  // #896: short-circuit on prior-indexed DB. The codebase-memory-mcp binary
+  // persists per-project SQLite at ~/.cache/codebase-memory-mcp/<name>.db,
+  // so if that file exists the repo was already indexed in a prior boot
+  // (or by direct CLI use). Skip the size walk entirely, mark it cached,
+  // and let the delta-index timeline decide whether to refresh.
+  if (indexedDbExists(repo.localPath)) {
+    const currentHead = await getCurrentHead(repo.localPath);
+    const recordedHead = getRecordedHead(repoId);
+    logInfo(`cached ${repo.name}: prior MCP DB present — skipping size walk`);
+    patchEntry(repoId, {
+      status: 'cached' satisfies RepoIndexStatus,
+      lastIndexedHead: currentHead ?? recordedHead ?? null,
+    });
+    if (currentHead && (!recordedHead || recordedHead !== currentHead)) {
+      // HEAD drift: schedule a delta-index out of band. Logs only —
+      // the boot pass returns immediately so the status route paints
+      // 'cached' instead of churning on a re-index.
+      scheduleDeltaIndex({ binPath, repo, currentHead });
+    }
+    return;
+  }
 
   // Size guard. Defer oversize repos.
   let sizeBytes: number | null = null;
