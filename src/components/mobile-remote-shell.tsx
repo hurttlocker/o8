@@ -8,6 +8,7 @@ import {
   useState,
   lazy,
   type CSSProperties,
+  type ReactNode,
 } from 'react';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot, MobileReviewFileResponse, MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -26,7 +27,7 @@ import { ShimmerCard } from './mobile/ShimmerCard';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { type MobileScreen } from './mobile/SpeedDial';
-import { MobileSplitShell } from './mobile-split-shell/MobileSplitShell';
+import { MobileBrowserTabRoot } from './mobile-split-shell/MobileBrowserTabRoot';
 
 // Lazy-loaded panels — only loaded when opened (#45)
 const shimmerFallback = { loading: () => <ShimmerCard /> };
@@ -47,7 +48,7 @@ const SettingsView = lazy(async () => ({ default: (await import('./mobile/Settin
 const IssuesPage = lazy(() => import('./mobile/IssuesPage'));
 const OrchestratorView = dynamic(() => import('./mobile/OrchestratorView').then((m) => ({ default: m.OrchestratorView })), { ssr: false, ...shimmerFallback });
 
-const BETA_ENABLED_VIEWS = new Set(['fleet', 'activity', 'settings', 'orchestrator']);
+const BETA_ENABLED_VIEWS = new Set(['fleet', 'activity', 'settings', 'orchestrator', 'browser']);
 const MOBILE_SESSION_LIST_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MOBILE_SESSION_LIST_LIMIT = 20;
 const MOBILE_INITIAL_INBOX_LIMIT = 15;
@@ -65,17 +66,13 @@ import {
 } from './mobile/neomorph';
 
 export function MobileRemoteShell(props: MobileRemoteShellProps) {
-  // MobileSplitShell is a transparent passthrough in portrait — it only
-  // adds chrome (right pane + drag handle) when the device rotates to
-  // landscape and matches the (orientation: landscape) and (min-width:
-  // 720px) media query. Wrapping at this layer keeps MobileRemoteShellInner
-  // mounted at the same React tree depth across rotations, so transcript,
-  // draft, and scroll state survive (closes #779).
+  // The chat-left + iframe-right split is now opt-in via the Browser tab
+  // (closes #786). MobileBrowserTabRoot is mounted only when activeView
+  // === 'browser' inside MobileRemoteShellInner — every other tab renders
+  // the regular portrait shell unchanged.
   return (
     <AlertProvider>
-      <MobileSplitShell>
-        <MobileRemoteShellInner {...props} />
-      </MobileSplitShell>
+      <MobileRemoteShellInner {...props} />
     </AlertProvider>
   );
 }
@@ -180,6 +177,27 @@ function buildVisibleMobileSessionList(sessions: MobileInboxSnapshot['sessions']
   }
 
   return [...activeSessions, ...recentSessions].slice(0, MOBILE_SESSION_LIST_LIMIT);
+}
+
+// Conditional wrapper for the Browser tab: when active, mounts
+// MobileBrowserTabRoot (which owns the chat-left + iframe-right split via
+// MobileSplitShell + the orientation-lock attempt + the portrait hint
+// banner). On every other tab this is a transparent passthrough so the
+// regular shell renders unchanged. Defined as a component (not an inline
+// ternary) so the chat surface JSX isn't duplicated (closes #786).
+function BrowserTabConditionalWrap({
+  isBrowserTab,
+  onBack,
+  children,
+}: {
+  isBrowserTab: boolean;
+  onBack: () => void;
+  children: ReactNode;
+}) {
+  if (!isBrowserTab) {
+    return <>{children}</>;
+  }
+  return <MobileBrowserTabRoot onBack={onBack}>{children}</MobileBrowserTabRoot>;
 }
 
 function MobileRemoteShellInner({
@@ -403,7 +421,11 @@ function MobileRemoteShellInner({
   const hasTerminalSession = Boolean(selectedSession?.tmuxSession);
   const showBetaPlaceholder = !BETA_ENABLED_VIEWS.has(activeView);
   const isIndexView = activeView === 'squad';
-  const isThreadView = activeView === 'chat';
+  // Treat the Browser tab the same as the Chat tab for showing thread
+  // surfaces — Browser is a chat+iframe split, so the left pane needs the
+  // full chat affordances (transcript, composer, etc.). The right pane is
+  // injected by MobileBrowserTabRoot via MobileSplitShell.
+  const isThreadView = activeView === 'chat' || activeView === 'browser';
   const showRecentPicker = !showBetaPlaceholder && (isIndexView || (isThreadView && !selectedSession));
   const isSessionListSurface = showBetaPlaceholder || showRecentPicker || activeView === 'fleet';
   const showThreadSurface = !showBetaPlaceholder && isThreadView && Boolean(selectedSession);
@@ -626,7 +648,7 @@ function MobileRemoteShellInner({
           activeView={activeView}
           compactLine={compactLine}
           enabledViews={BETA_ENABLED_VIEWS}
-          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'issues' ? 'issues' : activeView === 'orchestrator' ? 'orchestrator' : 'chat'}
+          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'issues' ? 'issues' : activeView === 'orchestrator' ? 'orchestrator' : activeView === 'browser' ? 'browser' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
               case 'chat':
@@ -650,6 +672,9 @@ function MobileRemoteShellInner({
               case 'orchestrator':
                 setActiveView('orchestrator');
                 break;
+              case 'browser':
+                setActiveView('browser');
+                break;
             }
           }}
           onNewChat={showBetaPlaceholder ? undefined : handleCreateNewChat}
@@ -658,7 +683,10 @@ function MobileRemoteShellInner({
         {activeView === 'orchestrator' ? (
           <OrchestratorView onBack={returnToHome} />
         ) : (
-        <>
+        <BrowserTabConditionalWrap
+          isBrowserTab={activeView === 'browser'}
+          onBack={returnToHome}
+        >
         <PullToRefresh onRefresh={async () => { await refreshInbox(true); await new Promise(r => setTimeout(r, 600)); }}>
         <PageTransition activeKey={activeView}>
         <div style={scrollViewStyle}>
@@ -908,7 +936,7 @@ function MobileRemoteShellInner({
             </div>
           ) : null}
         </div>
-        </>
+        </BrowserTabConditionalWrap>
         )}
       </div>
       <ControlsSheet
