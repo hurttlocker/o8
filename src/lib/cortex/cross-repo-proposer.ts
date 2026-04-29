@@ -2,8 +2,10 @@
  * #748 — Cross-repo learning.
  *
  * When a directive lands in repo A and ≥ 2 other registered repos share a
- * stack signature with A (Jaccard overlap ≥ 0.8), surface a yellow
- * proposal row in those target repos' orchestrator views. The operator
+ * stack signature with A (Jaccard overlap ≥ SIMILARITY_THRESHOLD; see
+ * `SIMILARITY_THRESHOLD` constant for the empirical floor and #853 for
+ * rationale), surface a yellow proposal row in those target repos'
+ * orchestrator views. The operator
  * accepts (duplicates the directive scoped to the target) or dismisses
  * (snoozes the (target, directive) pair for 30 days). Always human-gated.
  *
@@ -30,11 +32,21 @@ import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { readOrComputeSignatures } from '@/lib/cortex/stack-signature';
 
-const SIMILARITY_THRESHOLD = 0.8;
+// #853 — empirical floor for real-world repos. The original 0.8 spec was
+// chosen without validating against actual registered repos; in practice
+// `cortex-ide` (Next + Tauri + 52 deps) vs `eyes-web` (Next + Vercel + 55
+// deps) scores Jaccard ≈ 0.126, far below 0.8. Two repos sharing a Next.js
+// + TypeScript stack typically clear 0.4 even when their feature surfaces
+// are unrelated, so 0.4 is the practical floor for any pair to clear at
+// all. TODO: replace raw Jaccard with a tech-stack-weighted similarity
+// (Next/TS/Tauri tags overweighted vs. file-list overlap) once we have
+// > 3 repos worth of empirical pairs to calibrate against.
+const SIMILARITY_THRESHOLD = 0.4;
 const MIN_SIMILAR_REPOS = 2;
 const SNOOZE_DAYS = 30;
 const MAX_CANDIDATES = 12;
 const SNOOZE_FILE = 'cross-repo-snooze.json';
+const ORIGIN_FILE = 'directive-origins.json';
 
 // ── directive read (same parser shape as cortex/directives/route.ts) ──────
 
@@ -176,8 +188,12 @@ function activeSnoozedIds(now: Date): Set<string> {
 }
 
 /**
- * Append-only snooze. Stale entries pile up but are filtered at read time;
- * matches #746's pattern.
+ * Snooze a cross-repo proposal. Stale entries are filtered at read time.
+ *
+ * #838 — write-side dedup. If an entry with this `(targetRepoId,
+ * directiveId)` pair (i.e. same composite id) already exists, update its
+ * `snoozedUntil` rather than appending. Same rationale as `snoozeProposal`
+ * in `proposer.ts`: a rapid double-click on Dismiss used to leave two rows.
  */
 export function snoozeCrossRepoProposal(input: {
   targetRepoId: string;
@@ -192,8 +208,121 @@ export function snoozeCrossRepoProposal(input: {
     snoozedUntil,
   };
   const ledger = readSnoozeLedger();
-  ledger.entries.push(entry);
+  const existingIdx = ledger.entries.findIndex((e) => e.id === id);
+  if (existingIdx >= 0) {
+    ledger.entries[existingIdx] = entry;
+  } else {
+    ledger.entries.push(entry);
+  }
   writeSnoozeLedger(ledger);
+  return entry;
+}
+
+// ── directive origin map (#855 circular guard) ───────────────────────────
+//
+// When the operator accepts a cross-repo proposal, the new directive in the
+// target repo is structurally identical to the source's directive — same
+// title and body, scoped to the target. The next 30-min tick will then see
+// "target has a directive that source doesn't [yet]" and propose source ←
+// target, which is the same rule bouncing back. To break the cycle we keep
+// a sidecar map that records the origin repo of every accepted proposal.
+//
+// File: ~/.o8/directive-origins.json
+//   { version: 1, entries: [ { directiveId, originRepoId, recordedAt } ] }
+//
+// Rules:
+//   - When `proposeAcrossRepos` is evaluating "should we propose D from B
+//     to A", look up D's origin. If origin is A, skip.
+//   - This naturally handles transitive chains too: if D was originally
+//     C → A → B, B's directive has origin C; proposer will skip B → C and
+//     also won't propose B → A because once the operator accepted C → A, we
+//     also recorded A's directive with origin C, which means the proposer
+//     never proposed A → B (origin would be C, target B is fine to propose
+//     to, but… see below). The minimal correctness guarantee here is "never
+//     propose D back to its immediate origin"; a deeper provenance chain is
+//     left for a follow-up if dogfooding shows it's needed.
+//   - Locally-edited directives (origin == null) are not recorded — absence
+//     means "this repo authored the directive itself". The check is "skip
+//     if origin matches target", so missing entries never block a proposal.
+
+interface OriginEntry {
+  directiveId: string;
+  originRepoId: string;
+  recordedAt: string; // ISO-8601
+}
+
+interface OriginLedger {
+  version: 1;
+  entries: OriginEntry[];
+}
+
+function originFilePath(): string {
+  return join(getDataDir(), ORIGIN_FILE);
+}
+
+function readOriginLedger(): OriginLedger {
+  const path = originFilePath();
+  if (!existsSync(path)) return { version: 1, entries: [] };
+  try {
+    const raw = readFileSync(path, 'utf-8');
+    const parsed = JSON.parse(raw) as Partial<OriginLedger>;
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.entries)) {
+      return { version: 1, entries: [] };
+    }
+    const entries = parsed.entries.filter(
+      (e): e is OriginEntry =>
+        !!e &&
+        typeof e === 'object' &&
+        typeof e.directiveId === 'string' &&
+        typeof e.originRepoId === 'string' &&
+        typeof e.recordedAt === 'string',
+    );
+    return { version: 1, entries };
+  } catch (err) {
+    console.warn('[cross-repo-proposer] Failed to parse origin ledger:', err instanceof Error ? err.message : err);
+    return { version: 1, entries: [] };
+  }
+}
+
+function writeOriginLedger(ledger: OriginLedger): void {
+  try {
+    writeFileSync(originFilePath(), JSON.stringify(ledger, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[cross-repo-proposer] Failed to write origin ledger:', err instanceof Error ? err.message : err);
+  }
+}
+
+function originRepoIdFor(directiveId: string): string | null {
+  const ledger = readOriginLedger();
+  for (const entry of ledger.entries) {
+    if (entry.directiveId === directiveId) return entry.originRepoId;
+  }
+  return null;
+}
+
+/**
+ * Record that `directiveId` originated in `originRepoId`. Called by the
+ * cross-repo proposals POST route on `action: 'accept'`. Idempotent — if an
+ * entry with this directiveId already exists, the originRepoId is updated
+ * (last-writer-wins, matches snooze dedup behavior in #838).
+ */
+export function recordDirectiveOrigin(input: {
+  directiveId: string;
+  originRepoId: string;
+}): OriginEntry {
+  const entry: OriginEntry = {
+    directiveId: input.directiveId,
+    originRepoId: input.originRepoId,
+    recordedAt: new Date().toISOString(),
+  };
+  const ledger = readOriginLedger();
+  const existingIdx = ledger.entries.findIndex((e) => e.directiveId === input.directiveId);
+  if (existingIdx >= 0) {
+    ledger.entries[existingIdx] = entry;
+  } else {
+    ledger.entries.push(entry);
+  }
+  writeOriginLedger(ledger);
   return entry;
 }
 
@@ -341,10 +470,17 @@ export async function proposeAcrossRepos(
     // No signature recorded yet — skip (boot tick will fix it on next pass).
     if (!sourceDeps || sourceDeps.length === 0) continue;
 
+    // #855 — circular propagation guard. If this directive was previously
+    // accepted from another repo, its origin is recorded in the sidecar
+    // ledger. Never propose it back to that origin.
+    const directiveOrigin = originRepoIdFor(directive.id);
+
     // Find every other repo with similarity ≥ threshold.
     const similarRepos: { repo: RepoRegistryEntry; similarity: number }[] = [];
     for (const target of repos) {
       if (target.id === sourceRepo.id) continue;
+      // #855 — skip if target IS the origin repo of this directive.
+      if (directiveOrigin && target.id === directiveOrigin) continue;
       const targetDeps = sigByRepoId.get(target.id);
       if (!targetDeps || targetDeps.length === 0) continue;
       const sim = jaccard(sourceDeps, targetDeps);
