@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { useLandscapeSplit } from './landscape-controller';
 import { DevHostFrame } from './DevHostFrame';
+import { useMobileUrlPushListener } from './url-push-listener';
 
 // MobileSplitShell — landscape chrome wrapper for the mobile PWA.
 //
@@ -88,6 +89,11 @@ export function MobileSplitShell({ children }: MobileSplitShellProps) {
 }
 
 function SplitLayout({ children }: { children: ReactNode }) {
+  // Subscribe to send-to-mobile URL pushes from desktop (#782). The listener
+  // re-fans WS messages as `o8:mobile-url-push` window events; DevHostFrame
+  // listens for that event and re-points its iframe.
+  useMobileUrlPushListener();
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   // dragStateRef tracks both the active pointer and the most recent ratio
   // emitted by the pointer-move handler. We persist on pointer-up by reading
