@@ -26,6 +26,7 @@ import {
 } from './mission-panel/branchTarget';
 import { IssueGroupList } from './mission-panel/IssueGroupList';
 import { PacketCard } from './mission-panel/PacketCard';
+import { StatusGroupedLanes } from './mission-panel/StatusGroupedLanes';
 
 // #517 — Rough per-run cost estimate used only for the fan-out gate warning.
 // Not meant to be accurate — it just reminds the operator that running 3+
@@ -421,7 +422,60 @@ export function ThoughtsMissionPanel({
     }
   }, []);
 
+  // #517 — Tracked outside the renderPacket closure so the dedupe set is
+  // shared across all section traversals in StatusGroupedLanes. Recreated
+  // every parent render so it resets cleanly between re-renders. Plain
+  // const (not useCallback) so the Set never gets stale between renders.
   const renderedComparisonGroupIds = new Set<string>();
+
+  const renderPacket = (packet: OrchestratorPacket) => {
+    // Comparison-group siblings: render ONE ComparisonCard at the first
+    // sibling's position, return null for the rest.
+    if (packet.comparisonGroupId) {
+      if (renderedComparisonGroupIds.has(packet.comparisonGroupId)) {
+        return null;
+      }
+      renderedComparisonGroupIds.add(packet.comparisonGroupId);
+      const groupPackets = comparisonGroups.get(packet.comparisonGroupId) ?? [packet];
+      return (
+        <ComparisonCard
+          key={`cmp-${packet.comparisonGroupId}`}
+          groupId={packet.comparisonGroupId}
+          packets={groupPackets}
+          onPickWinner={handlePickComparisonWinner}
+        />
+      );
+    }
+
+    const isExpanded = expandedPacketId === packet.id;
+    const reviewState = reviewStateByPacketId[packet.id] ?? null;
+    return (
+      <PacketCard
+        key={packet.id}
+        packet={packet}
+        allPackets={missionState.packets}
+        isExpanded={isExpanded}
+        onToggleExpanded={() => setExpandedPacketId(isExpanded ? null : packet.id)}
+        editingField={editingField}
+        onEditingFieldChange={setEditingField}
+        workspaceTargets={workspaceTargets}
+        repoRemoteUrlByPath={repoRemoteUrlByPath}
+        reviewState={reviewState}
+        onPatch={(updater) => patchPacket(packet.id, updater)}
+        onLaunch={() => { void handleLaunchPacket(packet); }}
+        onFocus={() => handleFocusPacket(packet)}
+        onDelete={() => {
+          updateMissionState((current) => ({
+            ...current,
+            packets: current.packets.filter((p) => p.id !== packet.id),
+          }));
+        }}
+        onReviewAction={(verb) => { void handleReviewAction(packet, verb); }}
+        onToggleShowAllFiles={() => updateReviewState(packet.id, (current) => ({ ...current, showAllFiles: !current.showAllFiles }))}
+        onResume={() => handleResumePacket(packet)}
+      />
+    );
+  };
 
   useEffect(() => {
     if (!open || !visible || !expandedPacketId) return;
@@ -686,54 +740,10 @@ export function ThoughtsMissionPanel({
         </div>
       ) : null}
 
-      {missionState.packets.map((packet) => {
-        // #517 — Route comparison-group packets through ComparisonCard. Render
-        // ONE card per groupId (at the first sibling's position), skip the rest.
-        if (packet.comparisonGroupId) {
-          if (renderedComparisonGroupIds.has(packet.comparisonGroupId)) {
-            return null;
-          }
-          renderedComparisonGroupIds.add(packet.comparisonGroupId);
-          const groupPackets = comparisonGroups.get(packet.comparisonGroupId) ?? [packet];
-          return (
-            <ComparisonCard
-              key={`cmp-${packet.comparisonGroupId}`}
-              groupId={packet.comparisonGroupId}
-              packets={groupPackets}
-              onPickWinner={handlePickComparisonWinner}
-            />
-          );
-        }
-
-        const isExpanded = expandedPacketId === packet.id;
-        const reviewState = reviewStateByPacketId[packet.id] ?? null;
-        return (
-          <PacketCard
-            key={packet.id}
-            packet={packet}
-            allPackets={missionState.packets}
-            isExpanded={isExpanded}
-            onToggleExpanded={() => setExpandedPacketId(isExpanded ? null : packet.id)}
-            editingField={editingField}
-            onEditingFieldChange={setEditingField}
-            workspaceTargets={workspaceTargets}
-            repoRemoteUrlByPath={repoRemoteUrlByPath}
-            reviewState={reviewState}
-            onPatch={(updater) => patchPacket(packet.id, updater)}
-            onLaunch={() => { void handleLaunchPacket(packet); }}
-            onFocus={() => handleFocusPacket(packet)}
-            onDelete={() => {
-              updateMissionState((current) => ({
-                ...current,
-                packets: current.packets.filter((p) => p.id !== packet.id),
-              }));
-            }}
-            onReviewAction={(verb) => { void handleReviewAction(packet, verb); }}
-            onToggleShowAllFiles={() => updateReviewState(packet.id, (current) => ({ ...current, showAllFiles: !current.showAllFiles }))}
-            onResume={() => handleResumePacket(packet)}
-          />
-        );
-      })}
+      {/* #772 — Status-grouped sectioned list. Empty groups collapse, so
+          the operator never sees `DONE · 0` headers. Each section's
+          open/closed state persists per-status to localStorage. */}
+      <StatusGroupedLanes packets={missionState.packets} renderPacket={renderPacket} />
     </div>
   );
 }
