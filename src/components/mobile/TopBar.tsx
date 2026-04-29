@@ -64,6 +64,8 @@ function screenTitle(activeView: TopBarProps['activeView']) {
       return 'Costs';
     case 'orchestrator':
       return 'Orchestrator';
+    case 'browser':
+      return 'Browser';
     default:
       return 'Code';
   }
@@ -84,10 +86,13 @@ export const TopBar = memo(function TopBar({
   const { colors } = useTheme();
   void compactLine;
 
-  if (activeView !== 'squad' && activeView !== 'chat') {
+  if (activeView !== 'squad' && activeView !== 'chat' && activeView !== 'browser') {
     return null;
   }
 
+  // Browser tab gets the SpeedDial nav (same as squad/index) so the user
+  // can swap tabs from the same affordance — only the actual chat thread
+  // view should reveal the back-arrow + thread-controls layout.
   const isThreadView = activeView === 'chat';
   const primaryText = colors.text;
   const chromeBackground = colors.surface;
