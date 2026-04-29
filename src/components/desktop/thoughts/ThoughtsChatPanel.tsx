@@ -665,6 +665,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const {
     lastAssistantId: suggestedReplyMessageId,
     chipsForLastAssistant,
+    isPlaceholderVisibleForLastAssistant: suggestedRepliesPending,
     dismissChips: dismissSuggestedReplies,
   } = useSuggestedReplies({
     enabled: isOrchestratorMode,
@@ -975,6 +976,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         isOrchestratorMode={isOrchestratorMode}
         suggestedReplyMessageId={suggestedReplyMessageId}
         suggestedReplies={chipsForLastAssistant}
+        suggestedRepliesPending={suggestedRepliesPending}
         onSelectSuggestion={(chip) => { sendNow(chip); }}
         onDismissSuggestions={dismissSuggestedReplies}
       />
