@@ -17,6 +17,7 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { readAllDirectiveTrailers } from '@/lib/cortex/directive-merges';
+import { withTimingSync } from '@/lib/cortex/diagnostics';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -85,18 +86,21 @@ export async function GET() {
       });
     }
 
-    const entries = readdirSync(directivesDir).filter((name) => name.endsWith('.md'));
-    const directives: DirectiveSummary[] = [];
-    for (const name of entries) {
-      try {
-        const raw = readFileSync(join(directivesDir, name), 'utf-8');
-        const fallbackId = name.replace(/\.md$/, '');
-        const parsed = parseDirectiveFile(raw, fallbackId);
-        if (parsed) directives.push(parsed);
-      } catch (error) {
-        console.warn(`[cortex-directives] Failed to read ${name}:`, error);
+    const directives: DirectiveSummary[] = withTimingSync('recall.directives', () => {
+      const entries = readdirSync(directivesDir).filter((name) => name.endsWith('.md'));
+      const out: DirectiveSummary[] = [];
+      for (const name of entries) {
+        try {
+          const raw = readFileSync(join(directivesDir, name), 'utf-8');
+          const fallbackId = name.replace(/\.md$/, '');
+          const parsed = parseDirectiveFile(raw, fallbackId);
+          if (parsed) out.push(parsed);
+        } catch (error) {
+          console.warn(`[cortex-directives] Failed to read ${name}:`, error);
+        }
       }
-    }
+      return out;
+    });
 
     // #769 — Hydrate recent-merge trailers from the same markdown files.
     // The helper re-reads the dir, but the cost is trivial (≤dozens of small
