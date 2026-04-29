@@ -38,10 +38,11 @@ import 'server-only';
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 
 import { getDb, sessionOutcomes } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { liveOutcomeFilter } from '@/lib/cortex/decay';
 
 import { extractSymbols, traceSymbols, type SymbolEdge } from './client';
 
@@ -171,7 +172,7 @@ async function readRecentOutcomes(repoPath: string): Promise<OutcomeRow[]> {
         reviewApproved: sessionOutcomes.reviewApproved,
       })
       .from(sessionOutcomes)
-      .where(eq(sessionOutcomes.repoPath, repoPath))
+      .where(and(eq(sessionOutcomes.repoPath, repoPath), liveOutcomeFilter()))
       .orderBy(desc(sessionOutcomes.completedAt))
       .limit(MAX_OUTCOMES);
     return rows;
