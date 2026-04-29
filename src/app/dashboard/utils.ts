@@ -1,4 +1,4 @@
-import type { DetectionResult } from '@/components/desktop/SetupWizard';
+import type { DetectionResult } from '@/components/desktop/setup-wizard/types';
 import type { WorkspaceSidePanelRepo } from '@/components/desktop/WorkspaceSidePanel';
 import type { CommandPaletteStateTone } from '@/components/shared/UniversalSearch';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';

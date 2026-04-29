@@ -69,7 +69,15 @@ export async function POST(request: NextRequest) {
   const current = readConfig();
   const updated = mergeConfig(current, body as Partial<SetupConfig>);
 
-  writeConfig(updated);
+  try {
+    writeConfig(updated);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error writing setup config';
+    return NextResponse.json(
+      { ok: false, error: `Failed to persist setup config: ${message}` },
+      { status: 500 },
+    );
+  }
 
   if (updated.setupComplete || updated.completedAt) {
     try {

@@ -17,27 +17,44 @@ import {
   THEME_TEXT_MUTED,
 } from './theme';
 
-export function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => void }) {
-  const [provider, setProvider] = useState('anthropic');
+// v1: Only OpenRouter is exposed in the wizard. The o8 Operator uses Gemini
+// under the hood via GOOGLE_AI_API_KEY which is provisioned silently.
+// `/api/v2/keys` is the single source of truth — keys are AES-256-GCM
+// encrypted and written to ~/.o8/.env.local where the LLM subsystem reads them.
+export function ApiKeyInput({ onSave }: { onSave?: (provider: string) => void }) {
+  const [provider, setProvider] = useState('openrouter');
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const providers = [
-    { id: 'anthropic', name: 'Anthropic', env: 'ANTHROPIC_API_KEY', prefix: 'sk-ant-' },
-    { id: 'openai', name: 'OpenAI', env: 'OPENAI_API_KEY', prefix: 'sk-' },
-    { id: 'google', name: 'Google AI', env: 'GOOGLE_AI_API_KEY', prefix: 'AI' },
+    { id: 'openrouter', name: 'OpenRouter', prefix: 'sk-or-' },
   ];
 
   const current = providers.find((p) => p.id === provider)!;
 
   const handleSave = async () => {
-    if (!apiKey.trim()) return;
+    const trimmed = apiKey.trim();
+    if (!trimmed) return;
     setSaving(true);
+    setError(null);
     try {
-      onSave(current.env, apiKey.trim());
+      const res = await fetch('/api/v2/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: current.id, key: trimmed }),
+      });
+      const body = await res.json().catch(() => null) as { error?: string; warning?: string } | null;
+      if (!res.ok) {
+        setError(body?.error ?? `Save failed (${res.status})`);
+        return;
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      onSave?.(current.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error');
     } finally {
       setSaving(false);
     }
@@ -99,13 +116,18 @@ export function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string
           }}
         />
         <GlassButton
-          label={saved ? 'Saved' : 'Save'}
+          label={saved ? 'Saved' : saving ? 'Saving' : 'Save'}
           variant="secondary"
           onClick={handleSave}
           disabled={saving || !apiKey.trim()}
           style={{ padding: '8px 16px', fontSize: 12 }}
         />
       </div>
+      {error ? (
+        <div style={{ fontSize: 11, color: '#ef4444', lineHeight: 1.4 }}>
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DetectionResult } from '@/components/desktop/SetupWizard';
+import type { DetectionResult } from '@/components/desktop/setup-wizard/types';
 import { loadSetupDetection } from '@/lib/setup/detection-cache';
 import { normalizeDetection } from '../utils';
 
