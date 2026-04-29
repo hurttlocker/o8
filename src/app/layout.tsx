@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { resolvePortInfo } from '@/lib/panel/api-port';
+import NavigationBridge from '@/components/NavigationBridge';
 
 export const metadata: Metadata = {
   title: 'o8',
@@ -52,6 +53,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             `,
           }}
         />
+        <NavigationBridge />
         {children}
         <script
           dangerouslySetInnerHTML={{
