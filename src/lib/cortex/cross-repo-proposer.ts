@@ -2,8 +2,10 @@
  * #748 — Cross-repo learning.
  *
  * When a directive lands in repo A and ≥ 2 other registered repos share a
- * stack signature with A (Jaccard overlap ≥ 0.8), surface a yellow
- * proposal row in those target repos' orchestrator views. The operator
+ * stack signature with A (Jaccard overlap ≥ SIMILARITY_THRESHOLD; see
+ * `SIMILARITY_THRESHOLD` constant for the empirical floor and #853 for
+ * rationale), surface a yellow proposal row in those target repos'
+ * orchestrator views. The operator
  * accepts (duplicates the directive scoped to the target) or dismisses
  * (snoozes the (target, directive) pair for 30 days). Always human-gated.
  *
@@ -30,7 +32,16 @@ import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { readOrComputeSignatures } from '@/lib/cortex/stack-signature';
 
-const SIMILARITY_THRESHOLD = 0.8;
+// #853 — empirical floor for real-world repos. The original 0.8 spec was
+// chosen without validating against actual registered repos; in practice
+// `cortex-ide` (Next + Tauri + 52 deps) vs `eyes-web` (Next + Vercel + 55
+// deps) scores Jaccard ≈ 0.126, far below 0.8. Two repos sharing a Next.js
+// + TypeScript stack typically clear 0.4 even when their feature surfaces
+// are unrelated, so 0.4 is the practical floor for any pair to clear at
+// all. TODO: replace raw Jaccard with a tech-stack-weighted similarity
+// (Next/TS/Tauri tags overweighted vs. file-list overlap) once we have
+// > 3 repos worth of empirical pairs to calibrate against.
+const SIMILARITY_THRESHOLD = 0.4;
 const MIN_SIMILAR_REPOS = 2;
 const SNOOZE_DAYS = 30;
 const MAX_CANDIDATES = 12;
