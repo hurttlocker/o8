@@ -22,9 +22,14 @@ import {
   snoozeCrossRepoProposal,
 } from '@/lib/cortex/cross-repo-proposer';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const { candidates, computedAt } = await readCachedCrossRepoProposals();
+    // #851 — `?force=1` (or `force=true`) bypasses the in-memory cache so
+    // operators see fresh cross-repo proposals immediately after a registry
+    // change, directive write, or outcome row, without waiting on the tick.
+    const forceParam = request.nextUrl.searchParams.get('force');
+    const force = forceParam === '1' || forceParam === 'true';
+    const { candidates, computedAt } = await readCachedCrossRepoProposals({ force });
     return NextResponse.json(
       { ok: true, proposals: candidates, computedAt },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },
