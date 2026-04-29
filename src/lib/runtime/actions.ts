@@ -359,8 +359,17 @@ function unavailable(agent: AgentSummary, action: RuntimeActionKind, note: strin
 
 export async function performRuntimeAction(payload: RuntimeActionRequest): Promise<RuntimeActionResult> {
   const surfaceId = payload.surfaceId?.trim();
+  // Fix #3: return structured error instead of throwing across the API boundary (CLAUDE.md rule)
   if (!surfaceId) {
-    throw new Error('surfaceId is required');
+    return {
+      ok: false,
+      action: payload.action,
+      surfaceId: '',
+      runtime: '',
+      clientMutationId: payload.clientMutationId,
+      status: 'unavailable',
+      note: 'surfaceId is required',
+    };
   }
 
   // Try cached snapshot first to avoid expensive full re-discovery on every action.
@@ -372,7 +381,16 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
     agent = findRuntimeAgent(fresh, surfaceId);
   }
   if (!agent) {
-    throw new Error('Runtime surface not found.');
+    // Fix #3: return structured error instead of throwing across the API boundary
+    return {
+      ok: false,
+      action: payload.action,
+      surfaceId,
+      runtime: '',
+      clientMutationId: payload.clientMutationId,
+      status: 'unavailable',
+      note: 'Runtime surface not found.',
+    };
   }
 
   const runtimeSurface = agent.runtimeSurface;
