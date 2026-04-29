@@ -165,11 +165,20 @@ export const sessionOutcomes = sqliteTable('session_outcomes', {
   startedAt: text('started_at').notNull(),
   completedAt: text('completed_at').notNull(),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  /**
+   * #745 — Temporal validity windows. `valid_from` defaults to NOW; `valid_to`
+   * is NULL for live entries and gets stamped to NOW once the row decays
+   * (no confirmations within 30d) or is superseded by a fresher outcome on
+   * the same `(repo_path, file_path, symbol)` tuple.
+   */
+  validFrom: text('valid_from').notNull().default(sql`(datetime('now'))`),
+  validTo: text('valid_to'),
 }, (table) => ({
   repoRuntimeIdx: index('idx_so_repo_runtime').on(table.repoPath, table.runtime, table.completedAt),
   repoCompletedIdx: index('idx_so_repo_completed').on(table.repoPath, table.completedAt),
   laneIdIdx: index('idx_so_lane_id').on(table.laneId),
   packetIdIdx: index('idx_so_packet_id').on(table.packetId),
+  validToIdx: index('idx_so_valid_to').on(table.validTo),
 }));
 
 // ══════════════════════════════════════════════════════════════════
