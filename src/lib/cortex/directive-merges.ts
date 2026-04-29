@@ -51,6 +51,8 @@ export interface DirectiveTrailerEntry {
 
 interface DirectiveMeta {
   id: string;
+  /** Optional `title:` from front matter — used for `Spec-Update:` matching by title (#843). */
+  title: string | null;
   scope: string;
   repoName: string | null;
   history: boolean;
@@ -68,6 +70,7 @@ interface ParsedDirective {
 function parseFrontMatter(text: string, fallbackId: string): DirectiveMeta {
   const result: DirectiveMeta = {
     id: fallbackId,
+    title: null,
     scope: 'global',
     repoName: null,
     history: true,
@@ -87,6 +90,7 @@ function parseFrontMatter(text: string, fallbackId: string): DirectiveMeta {
     const value = line.slice(idx + 1).trim();
     if (!key) continue;
     if (key === 'id') result.id = value || fallbackId;
+    else if (key === 'title') result.title = value || null;
     else if (key === 'scope') result.scope = value || 'global';
     else if (key === 'repoName') result.repoName = value || null;
     else if (key === 'history') {
@@ -99,6 +103,58 @@ function parseFrontMatter(text: string, fallbackId: string): DirectiveMeta {
   }
 
   return result;
+}
+
+/**
+ * #843 — Parse `Spec-Update: <directive-name>` lines out of a commit message
+ * so callers can target a single directive instead of blanket-appending.
+ *
+ * Convention (documented for future contributors):
+ *   - One trailer per line, anywhere in the commit message body.
+ *   - Format: `Spec-Update: <name>` where `<name>` matches a directive's
+ *     `title` from its front matter, OR its filename (with or without `.md`),
+ *     OR its `id`. Matching is case-insensitive and trims whitespace.
+ *   - Multiple `Spec-Update:` lines append to each named directive in turn.
+ *   - When no `Spec-Update:` line is present, the trailer falls back to the
+ *     existing blanket-append behavior — every directive whose scope matches
+ *     the merging repo gets the line.
+ *
+ * Returns the lower-cased target names. An empty array means "blanket
+ * append" — no targeting requested.
+ */
+export function parseSpecUpdateTargets(commitMessage: string | null | undefined): string[] {
+  if (!commitMessage) return [];
+  const targets: string[] = [];
+  for (const rawLine of commitMessage.split(/\r?\n/)) {
+    const match = /^\s*Spec-Update:\s*(.+?)\s*$/i.exec(rawLine);
+    if (!match) continue;
+    const name = match[1].trim();
+    if (!name) continue;
+    targets.push(name.toLowerCase());
+  }
+  return targets;
+}
+
+/**
+ * #843 — Does this directive match any of the requested `Spec-Update:`
+ * targets? Returns true when targets is empty (no targeting → blanket).
+ * Match keys: title, filename (with/without `.md`), and id — all
+ * case-insensitive.
+ */
+function matchesSpecUpdateTargets(
+  meta: DirectiveMeta,
+  fileName: string,
+  targets: string[],
+): boolean {
+  if (targets.length === 0) return true;
+  const candidates = new Set<string>();
+  if (meta.id) candidates.add(meta.id.toLowerCase());
+  if (meta.title) candidates.add(meta.title.toLowerCase());
+  if (fileName) {
+    candidates.add(fileName.toLowerCase());
+    candidates.add(fileName.replace(/\.md$/i, '').toLowerCase());
+  }
+  return targets.some((target) => candidates.has(target));
 }
 
 function splitOnRecentMerges(text: string): { before: string; section: string | null } {
@@ -169,13 +225,19 @@ function listDirectiveFiles(): { name: string; path: string }[] {
  * Append a trailer entry to every directive matching the repo. Returns the
  * list of directive ids that were updated so callers can log + surface
  * the touch in telemetry. Never throws — per-file errors are logged.
+ *
+ * #843 — Optional `commitMessage` lets callers narrow the trailer to a
+ * specific directive via `Spec-Update: <name>` lines in the commit body.
+ * See `parseSpecUpdateTargets()` for the convention.
  */
 export function appendDirectiveTrailer({
   repoPath,
   entry,
+  commitMessage,
 }: {
   repoPath: string;
   entry: DirectiveTrailerEntry;
+  commitMessage?: string | null;
 }): string[] {
   if (!repoPath?.trim()) return [];
   const updated: string[] = [];
@@ -184,6 +246,7 @@ export function appendDirectiveTrailer({
   if (files.length === 0) return [];
 
   const newLine = formatTrailerLine(entry);
+  const specUpdateTargets = parseSpecUpdateTargets(commitMessage);
 
   for (const file of files) {
     try {
@@ -192,6 +255,7 @@ export function appendDirectiveTrailer({
       const parsed = parseDirective(raw, fallbackId);
       if (!parsed.meta.history) continue;
       if (!matchesRepoScope(parsed.meta, repoPath)) continue;
+      if (!matchesSpecUpdateTargets(parsed.meta, file.name, specUpdateTargets)) continue;
 
       // #841 — idempotency. If the exact same trailer line is already
       // present, skip the write so internal merges + the external-merge

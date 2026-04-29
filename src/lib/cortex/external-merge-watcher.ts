@@ -65,6 +65,8 @@ interface ParsedMerge {
   date: string;
   title: string;
   issueNumber: number | null;
+  /** #843 — Full commit message (subject + body) so `Spec-Update:` lines reach `appendDirectiveTrailer`. */
+  commitMessage: string;
 }
 
 function logInfo(msg: string, ...rest: unknown[]) {
@@ -140,7 +142,9 @@ async function readRecentMerges(
         ref,
         `--max-count=${limit}`,
         // Use the byte 0x1e (record separator) between commits and 0x00 between fields.
-        '--format=%H%x00%cI%x00%s%x1e',
+        // `%B` is the full commit message (subject + body) — needed so `Spec-Update:`
+        // lines (#843) can be parsed by `appendDirectiveTrailer`.
+        '--format=%H%x00%cI%x00%s%x00%B%x1e',
       ],
       {
         maxBuffer: 1024 * 1024,
@@ -153,9 +157,9 @@ async function readRecentMerges(
     for (const record of records) {
       const parts = record.split('\x00');
       if (parts.length < 3) continue;
-      const [sha, isoDate, subject] = parts;
+      const [sha, isoDate, subject, body] = parts;
       if (!sha || !isoDate || !subject) continue;
-      merges.push(parseMerge(sha, isoDate, subject));
+      merges.push(parseMerge(sha, isoDate, subject, body ?? ''));
     }
     return merges;
   } catch (error) {
@@ -172,7 +176,7 @@ async function readRecentMerges(
  * `appendDirectiveTrailer` renders the trailer with the format
  * `<title> (#N)` once instead of duplicating the issue number.
  */
-function parseMerge(sha: string, isoDate: string, subject: string): ParsedMerge {
+function parseMerge(sha: string, isoDate: string, subject: string, body: string): ParsedMerge {
   const trailing = SUBJECT_TRAILING_REF_RE.exec(subject);
   if (trailing) {
     const number = Number.parseInt(trailing[1], 10);
@@ -181,6 +185,7 @@ function parseMerge(sha: string, isoDate: string, subject: string): ParsedMerge 
       date: isoDate.slice(0, 10),
       title: subject.replace(SUBJECT_TRAILING_REF_RE, '').trim(),
       issueNumber: Number.isFinite(number) ? number : null,
+      commitMessage: body,
     };
   }
 
@@ -192,6 +197,7 @@ function parseMerge(sha: string, isoDate: string, subject: string): ParsedMerge 
       date: isoDate.slice(0, 10),
       title: subject.replace(LEADING_MERGE_REF_RE, '').trim(),
       issueNumber: Number.isFinite(number) ? number : null,
+      commitMessage: body,
     };
   }
 
@@ -200,6 +206,7 @@ function parseMerge(sha: string, isoDate: string, subject: string): ParsedMerge 
     date: isoDate.slice(0, 10),
     title: subject.trim(),
     issueNumber: null,
+    commitMessage: body,
   };
 }
 
@@ -277,6 +284,9 @@ export async function ingestExternalMerges(): Promise<{
               title: merge.title,
               issueNumber: merge.issueNumber,
             },
+            // #843 — Forward the full commit message so any
+            // `Spec-Update: <name>` lines target a single directive.
+            commitMessage: merge.commitMessage,
           });
           updatedHere += updated.length;
         } catch (error) {
