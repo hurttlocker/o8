@@ -29,9 +29,17 @@ interface CreateProjectBody {
   name?: unknown;
   slug?: unknown;
   description?: unknown;
+  /** Parallel-array shape: list of repo IDs. Aligned with `roles`. */
   repoIds?: unknown;
-  // Optional parallel array of roles aligned to repoIds, or a map { repoId: role }.
+  /** Parallel array of roles aligned to repoIds, OR a map { repoId: role }. */
   roles?: unknown;
+  /**
+   * #899 dogfood follow-up — natural inverse of GET response.
+   * Object-array shape: `[{ repoId, role? }, ...]`. Auto-detected and
+   * normalized to `repoIds` + parallel `roles`. Both shapes can't be supplied
+   * at once — pick one or you'll get a 400.
+   */
+  repos?: unknown;
   suggestionOrigin?: unknown;
 }
 
@@ -65,6 +73,47 @@ function resolveRoleForRepo(
   return null;
 }
 
+/**
+ * #899 dogfood follow-up — accept the natural inverse of the GET response
+ * shape: `repos: [{ repoId, role? }, ...]`. Returns parallel arrays so the
+ * existing repoIds + roles path can consume them, OR a structured error
+ * describing why the shape was rejected (so callers don't silently get an
+ * empty project).
+ *
+ * Returns `null` when the body has no `repos` field — the caller falls back
+ * to the legacy `repoIds` + `roles` shape.
+ */
+function normalizeReposField(
+  reposField: unknown,
+): { ok: true; repoIds: string[]; roles: (ProjectRole | null)[] }
+  | { ok: false; error: string }
+  | null {
+  if (reposField === undefined) return null;
+  if (!Array.isArray(reposField)) {
+    return { ok: false, error: '`repos` must be an array.' };
+  }
+  const repoIds: string[] = [];
+  const roles: (ProjectRole | null)[] = [];
+  for (let i = 0; i < reposField.length; i++) {
+    const entry = reposField[i];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return {
+        ok: false,
+        error: `\`repos[${i}]\` must be an object with a \`repoId\` string. Did you mean to send \`repoIds\`?`,
+      };
+    }
+    const obj = entry as { repoId?: unknown; role?: unknown };
+    const repoId = asString(obj.repoId)?.trim();
+    if (!repoId) {
+      return { ok: false, error: `\`repos[${i}].repoId\` is required and must be a non-empty string.` };
+    }
+    repoIds.push(repoId);
+    const roleStr = asString(obj.role)?.trim();
+    roles.push(roleStr ? (roleStr as ProjectRole) : null);
+  }
+  return { ok: true, repoIds, roles };
+}
+
 export async function POST(req: NextRequest) {
   const denied = requirePanelAuth(req);
   if (denied) return denied;
@@ -81,6 +130,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Project name is required.' }, { status: 400 });
   }
 
+  // #899 dogfood follow-up — auto-detect either shape:
+  //   { repoIds: [...], roles: [...] | { repoId: role } }   ← parallel-array (legacy)
+  //   { repos: [{ repoId, role? }, ...] }                   ← object-array (natural inverse)
+  // Sending both at once is ambiguous and rejected. Sending a malformed
+  // `repos` (e.g. array of strings) returns a structured 400 instead of
+  // silently creating a project with zero repos.
+  let resolvedRepoIds: string[] = [];
+  let rolesSource: unknown = body.roles;
+  if (body.repos !== undefined && body.repoIds !== undefined) {
+    return NextResponse.json(
+      {
+        error:
+          'Pass either `repos: [{repoId, role?}]` (object array) OR `repoIds` + `roles` (parallel arrays), not both.',
+      },
+      { status: 400 },
+    );
+  }
+  const reposNormalized = normalizeReposField(body.repos);
+  if (reposNormalized) {
+    if (!reposNormalized.ok) {
+      return NextResponse.json({ error: reposNormalized.error }, { status: 400 });
+    }
+    resolvedRepoIds = reposNormalized.repoIds;
+    rolesSource = reposNormalized.roles;
+  } else if (body.repoIds !== undefined) {
+    const parsed = asStringArray(body.repoIds);
+    if (!parsed) {
+      return NextResponse.json(
+        { error: '`repoIds` must be an array of strings.' },
+        { status: 400 },
+      );
+    }
+    resolvedRepoIds = parsed;
+  }
+
   try {
     const project = createProject({
       name,
@@ -88,12 +172,11 @@ export async function POST(req: NextRequest) {
       description: asString(body.description) ?? null,
     });
 
-    const repoIds = asStringArray(body.repoIds) ?? [];
     const suggestionOrigin =
       (asString(body.suggestionOrigin) as SuggestionOrigin | undefined) ?? 'manual';
 
-    const repos = repoIds.map((repoId, index) => {
-      const role = resolveRoleForRepo(repoId, index, body.roles);
+    const repos = resolvedRepoIds.map((repoId, index) => {
+      const role = resolveRoleForRepo(repoId, index, rolesSource);
       return addRepoToProject(project.id, repoId, role, suggestionOrigin);
     });
 

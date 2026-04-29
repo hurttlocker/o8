@@ -126,7 +126,14 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
     let cancelled = false;
     (async () => {
       try {
-        const response = await fetch('/api/cortex/directives', { cache: 'no-store' });
+        // #899 dogfood follow-up — pass repoPath so the server applies the
+        // same project / repo / global scope filter that dispatch uses.
+        // Without this, project-scoped directives leaked to repos that aren't
+        // in the project.
+        const url = repoPath
+          ? `/api/cortex/directives?repoPath=${encodeURIComponent(repoPath)}`
+          : '/api/cortex/directives';
+        const response = await fetch(url, { cache: 'no-store' });
         if (cancelled) return;
         if (!response.ok) {
           setDirectives((prev) => prev ?? []);
@@ -142,7 +149,7 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
     return () => {
       cancelled = true;
     };
-  }, [directiveRefreshTick]);
+  }, [directiveRefreshTick, repoPath]);
 
   // #840 — Listen for cortex-changes pushed from the server after a merge
   // appends a directive trailer. Bridge already converts the WS message
