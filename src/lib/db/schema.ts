@@ -173,6 +173,20 @@ export const sessionOutcomes = sqliteTable('session_outcomes', {
    */
   validFrom: text('valid_from').notNull().default(sql`(datetime('now'))`),
   validTo: text('valid_to'),
+  /**
+   * #747 — Per-runtime outcome shape used by the dispatch routing recommender.
+   * Nullable because legacy rows (before v12) don't carry the signal. The
+   * `recommendRuntime()` helper coalesces to "no opinion" when these are NULL.
+   *
+   *  - `skippedTests`  — true when the agent skipped or stubbed required tests
+   *  - `reworked`      — true when the operator had to rerun-with-feedback
+   *                      before accepting (or rejected outright)
+   *  - `mergedClean`   — true when the diff merged without operator edits and
+   *                      `review_approved = true`. The headline routing signal.
+   */
+  skippedTests: integer('skipped_tests', { mode: 'boolean' }),
+  reworked: integer('reworked', { mode: 'boolean' }),
+  mergedClean: integer('merged_clean', { mode: 'boolean' }),
 }, (table) => ({
   repoRuntimeIdx: index('idx_so_repo_runtime').on(table.repoPath, table.runtime, table.completedAt),
   repoCompletedIdx: index('idx_so_repo_completed').on(table.repoPath, table.completedAt),

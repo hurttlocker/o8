@@ -6,6 +6,7 @@ import { findLaneByPacket } from '@/lib/lane/registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
+import { recommendRuntime } from '@/lib/dispatch/routing';
 import {
   buildMissionId,
   buildMissionPrompt,
@@ -145,6 +146,17 @@ export async function createMission(input: CreateMissionInput) {
 
   log(`Created mission ${missionId} with ${persisted.packets.length} packets.`);
 
+  // #747 — Per-packet routing recommendation snapshot. Logs the runtime the
+  // recommender would have picked next to the operator's actual choice. We
+  // never override the user's selection — this is observability so we can see
+  // whether the heuristic agrees with current operator behavior.
+  void logDispatchRoutingRecommendations(persisted.packets, missionId).catch((error) => {
+    console.warn(
+      '[dispatch-routing] recommendation logging failed:',
+      error instanceof Error ? error.message : error,
+    );
+  });
+
   return {
     missionId,
     packets: persisted.packets.map((packet) => ({
@@ -153,6 +165,34 @@ export async function createMission(input: CreateMissionInput) {
       wave: waves.get(packet.id) ?? 1,
     })),
   };
+}
+
+async function logDispatchRoutingRecommendations(
+  packets: OrchestratorPacket[],
+  missionId: string,
+): Promise<void> {
+  // Group by repo so we only score each repo once per mission.
+  const byRepo = new Map<string, OrchestratorPacket[]>();
+  for (const packet of packets) {
+    const repo = packet.workspaceTargetPath?.trim();
+    if (!repo) continue;
+    const prior = byRepo.get(repo) ?? [];
+    prior.push(packet);
+    byRepo.set(repo, prior);
+  }
+
+  for (const [repoPath, repoPackets] of byRepo) {
+    const recommendation = await recommendRuntime(repoPath);
+    for (const packet of repoPackets) {
+      const matched = recommendation.runtime !== null && packet.runtime === recommendation.runtime;
+      const evidenceSummary = Object.values(recommendation.evidence)
+        .map((row) => `${row.runtime}=${row.mergedClean}/${row.total}`)
+        .join(' ') || 'no-history';
+      console.log(
+        `[dispatch-routing] mission=${missionId} packet=${packet.referenceLabel} repo=${repoPath} chose=${packet.runtime} recommended=${recommendation.runtime ?? 'none'} score=${recommendation.score.toFixed(2)} matched=${matched} evidence=${evidenceSummary}`,
+      );
+    }
+  }
 }
 
 export async function dispatchMission(input: DispatchMissionInput) {
