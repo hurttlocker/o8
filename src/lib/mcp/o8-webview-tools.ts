@@ -159,7 +159,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_navigate',
-    description: 'Navigate the o8 app to a new route by dispatching history.pushState. Use for deep-linking into specific tabs.',
+    description: 'Navigate the o8 app to a new route via Next.js App Router (router.push). Performs a true SPA transition — does NOT trigger a full Tauri webview reload, so subsequent o8_view_eval / o8_view_click calls remain responsive immediately. Use for deep-linking into specific tabs.',
     inputSchema: {
       type: 'object',
       properties: {
