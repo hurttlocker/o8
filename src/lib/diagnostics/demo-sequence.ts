@@ -118,6 +118,24 @@ class CommandUnavailableError extends Error {
 }
 
 /**
+ * Commands added in #795 that are purely observational side-channels. They
+ * expose data that the binary must opt-in to via a feature flag / compile
+ * flag. If the running binary pre-dates #795 (or was built without the
+ * flag), ANY failure from these commands — including the wrapper string
+ * "tauri invoke 'X' failed" emitted before the underlying error is read —
+ * should be treated as 'unavailable' rather than a hard 'fail'. This lets
+ * the rest of the demo path run even on older installs awaiting auto-update.
+ *
+ * Commands NOT in this set (`o8_view_navigate`, socket-level calls via
+ * O8WebviewClient.screenshot / .click / .readPage) are required: failures
+ * there cascade as hard 'fail'.
+ */
+const OPTIONAL_COMMANDS = new Set([
+  'o8_view_active_route',
+  'o8_view_console_errors',
+]);
+
+/**
  * Heuristic: does this error string look like "the Tauri command isn't in
  * the running binary" rather than "the command ran and gave a wrong answer"?
  *
@@ -127,6 +145,11 @@ class CommandUnavailableError extends Error {
  * generic "tauri internals unavailable" shim guard in invokeTauriCommand
  * when window.__TAURI_INTERNALS__ isn't there at all (e.g. running outside
  * the Tauri shell).
+ *
+ * Round-2 note (#804): real-world Tauri errors are formatted as
+ * "tauri invoke 'X' failed" BEFORE the underlying error is surfaced. The
+ * patterns below catch that wrapper. For commands in OPTIONAL_COMMANDS the
+ * allow-list in invokeTauriCommand short-circuits before this heuristic.
  */
 function isCommandUnavailableMessage(message: string): boolean {
   if (!message) return false;
@@ -141,6 +164,8 @@ function isCommandUnavailableMessage(message: string): boolean {
     || lower.includes('o8 webview tools unavailable')
     || lower.includes('econnrefused')
     || lower.includes('enoent')
+    || /^tauri invoke '[^']+' failed/i.test(message)
+    || /tauri.*invoke.*failed/i.test(message)
   );
 }
 
@@ -237,8 +262,9 @@ async function invokeTauriCommand<T>(
   } catch (err) {
     // Socket-level failure (webview unreachable, plugin not loaded, etc.)
     // is the same class of "command can't run" — surface as unavailable.
+    // For OPTIONAL_COMMANDS, any socket-level error is automatically soft.
     const message = err instanceof Error ? err.message : String(err);
-    if (isCommandUnavailableMessage(message)) {
+    if (OPTIONAL_COMMANDS.has(command) || isCommandUnavailableMessage(message)) {
       throw new CommandUnavailableError(
         `tauri invoke '${command}' unavailable: ${message}`,
       );
@@ -258,7 +284,13 @@ async function invokeTauriCommand<T>(
   const envelope = parsed as { ok?: boolean; data?: unknown; err?: string };
   if (!envelope || envelope.ok !== true) {
     const errMessage = envelope?.err || `tauri invoke '${command}' failed`;
-    if (isCommandUnavailableMessage(errMessage)) {
+    // Allow-list: if this command is known-optional (#795 observability
+    // side-channels), any invoke failure — including the generic wrapper
+    // string "tauri invoke 'X' failed" produced before Tauri surfaces the
+    // real error — is treated as 'unavailable' so the rest of the demo path
+    // continues. For non-optional commands we fall back to the message
+    // heuristic, which now also matches the "tauri invoke ... failed" pattern.
+    if (OPTIONAL_COMMANDS.has(command) || isCommandUnavailableMessage(errMessage)) {
       throw new CommandUnavailableError(
         `tauri invoke '${command}' unavailable: ${errMessage}`,
       );
