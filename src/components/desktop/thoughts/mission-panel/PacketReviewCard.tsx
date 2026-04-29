@@ -47,14 +47,22 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
 
   const worktreePath = reviewState?.worktreePath ?? packet.lane?.worktreePath ?? null;
   const baseBranchHint = packet.branchTarget && packet.branchTarget.trim() ? packet.branchTarget : null;
+  const repoPath = packet.workspaceTargetPath ?? null;
 
   // Load directives once on mount, and again whenever the cortex-changes
   // bus signals a directive write.
+  //
+  // #899 dogfood follow-up — pass repoPath so the server applies the same
+  // project / repo / global scope filter that dispatch uses. Without this,
+  // project-scoped directives leaked to repos outside the project.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const response = await fetch('/api/cortex/directives', { cache: 'no-store' });
+        const url = repoPath
+          ? `/api/cortex/directives?repoPath=${encodeURIComponent(repoPath)}`
+          : '/api/cortex/directives';
+        const response = await fetch(url, { cache: 'no-store' });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
@@ -67,7 +75,7 @@ export function PacketReviewCard({ packet, reviewState, onActionComplete }: Pack
       }
     })();
     return () => { cancelled = true; };
-  }, [directiveRefreshTick]);
+  }, [directiveRefreshTick, repoPath]);
 
   // #840 — Re-fetch directives when the server broadcasts a directive write.
   useEffect(() => {
