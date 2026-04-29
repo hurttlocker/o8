@@ -199,6 +199,275 @@ fn copy_dir_recursive(src: &str, dst: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+// ── Codebase Memory MCP runtime download (issue #755 / #739) ──
+//
+// The Context Engine v2 (epic #738) ships a static `codebase-memory-mcp`
+// binary so the production app can index repos and answer recall queries
+// without a separate install step. Each architecture's binary is ~161 MB
+// — bundling it would balloon the installer (148 MB → 309 MB on disk),
+// so we download it on first launch into `~/.o8/bin/` instead. Every
+// subsequent launch re-uses the cached binary.
+//
+// Strategy:
+//   1. If `~/.o8/bin/codebase-memory-mcp` exists with the expected SHA →
+//      set `O8_CODEBASE_MEMORY_BIN` and return immediately. No network.
+//   2. Otherwise download the matching-arch tarball from the upstream
+//      DeusData release, verify SHA-256 against the pinned constant,
+//      extract the binary, chmod +x, set the env var.
+//   3. On any failure: log + emit `codebase-memory:status` = "error" +
+//      set `O8_CODEBASE_MEMORY_BIN=""` so #740's MCP registration sees
+//      the variable but skips the entry gracefully.
+//
+// The whole flow runs on a background thread so it never blocks the
+// Tauri builder's `setup` callback. By the time #740's MCP registration
+// runs (orchestrator-session.ts spawns Claude Code), the env var is
+// either populated (binary cached or freshly downloaded) or empty
+// (download failed). Either way startup is unblocked.
+//
+// Pin: bump `CODEBASE_MEMORY_VERSION` and the matching `CODEBASE_MEMORY_CHECKSUMS`
+// entries to upgrade. SHA-256 values come from the upstream release
+// `checksums.txt` for that tag. See `docs/codebase-memory-build.md`.
+
+const CODEBASE_MEMORY_VERSION: &str = "0.6.0";
+const CODEBASE_MEMORY_REPO: &str = "DeusData/codebase-memory-mcp";
+
+/// SHA-256 of the upstream archive (tar.gz / zip) — the binary inside
+/// inherits its integrity from the verified archive. Bump these together
+/// with `CODEBASE_MEMORY_VERSION`.
+fn codebase_memory_archive_sha(asset: &str) -> Option<&'static str> {
+    match asset {
+        "codebase-memory-mcp-darwin-amd64.tar.gz" => Some("a4d09d97fe1f47e1a0a23309bc34d9937f74c61950bed3259f9576800cc78727"),
+        "codebase-memory-mcp-darwin-arm64.tar.gz" => Some("a1d3f8a4c353ab94ea8fe1fb60159758020f2f256c9652699a0bd6725189a439"),
+        "codebase-memory-mcp-linux-amd64.tar.gz"  => Some("0dfd70f73337219925f3ec6a572fe776dbbe1c4c8c6ab546ab214fe16e56a426"),
+        "codebase-memory-mcp-linux-arm64.tar.gz"  => Some("f1fad27262fe7af4a356af128e43942355cb2189491079b6790ecc5ae3af069c"),
+        "codebase-memory-mcp-windows-amd64.zip"   => Some("da3d7d7bd6f687b697145457ff9d113ecf6daffe173d236457a43223e89a5e9c"),
+        _ => None,
+    }
+}
+
+/// (asset_name, binary_name, is_zip) for the running host. Returns None
+/// when the host doesn't match any upstream prebuilt — in that case we
+/// skip silently and let #740 omit the MCP entry.
+fn detect_codebase_memory_asset() -> Option<(&'static str, &'static str, bool)> {
+    if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "x86_64") {
+            return Some(("codebase-memory-mcp-darwin-amd64.tar.gz", "codebase-memory-mcp", false));
+        }
+        if cfg!(target_arch = "aarch64") {
+            return Some(("codebase-memory-mcp-darwin-arm64.tar.gz", "codebase-memory-mcp", false));
+        }
+    } else if cfg!(target_os = "linux") {
+        if cfg!(target_arch = "x86_64") {
+            return Some(("codebase-memory-mcp-linux-amd64.tar.gz", "codebase-memory-mcp", false));
+        }
+        if cfg!(target_arch = "aarch64") {
+            return Some(("codebase-memory-mcp-linux-arm64.tar.gz", "codebase-memory-mcp", false));
+        }
+    } else if cfg!(target_os = "windows") && cfg!(target_arch = "x86_64") {
+        return Some(("codebase-memory-mcp-windows-amd64.zip", "codebase-memory-mcp.exe", true));
+    }
+    None
+}
+
+/// Hash a local file with SHA-256, returned as lowercase hex.
+fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 { break; }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Spawn a background thread that ensures the codebase-memory-mcp binary
+/// is available at `~/.o8/bin/codebase-memory-mcp`. On success sets the
+/// `O8_CODEBASE_MEMORY_BIN` env var on the parent process so any later
+/// child inherits it (mirrors the `O8_NODE_BIN` pattern). On failure
+/// sets the var to an empty string — downstream MCP registration in
+/// #740 treats empty/unset as "feature unavailable".
+fn ensure_codebase_memory_binary(app: AppHandle) {
+    std::thread::spawn(move || {
+        let Some((asset_name, binary_name, is_zip)) = detect_codebase_memory_asset() else {
+            log::info!(
+                "[codebase-memory] no prebuilt for {}/{} — skipping",
+                std::env::consts::OS, std::env::consts::ARCH
+            );
+            std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            return;
+        };
+        let Some(expected_sha) = codebase_memory_archive_sha(asset_name) else {
+            log::warn!("[codebase-memory] no checksum pinned for {}", asset_name);
+            std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            return;
+        };
+
+        let bin_dir = format!("{}/bin", o8_data_dir());
+        if let Err(e) = std::fs::create_dir_all(&bin_dir) {
+            log::warn!("[codebase-memory] mkdir {} failed: {}", bin_dir, e);
+            std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            return;
+        }
+        let bin_path = std::path::PathBuf::from(&bin_dir).join(binary_name);
+        let sentinel_path = std::path::PathBuf::from(&bin_dir).join(".codebase-memory-mcp.version");
+
+        // Cache hit: existing binary + matching version sentinel = ready.
+        // Skipping the hash on cache hit keeps re-launches snappy
+        // (~150 MB hash takes meaningful time on slow disks). The
+        // sentinel encodes both version + asset so a partial re-extract
+        // or arch mismatch fails the check.
+        let expected_tag = format!("{}-{}", CODEBASE_MEMORY_VERSION, asset_name);
+        if bin_path.exists() {
+            if let Ok(tag) = std::fs::read_to_string(&sentinel_path) {
+                if tag.trim() == expected_tag {
+                    log::info!("[codebase-memory] cached: {} v{}", binary_name, CODEBASE_MEMORY_VERSION);
+                    let bin_str = bin_path.to_string_lossy().to_string();
+                    std::env::set_var("O8_CODEBASE_MEMORY_BIN", &bin_str);
+                    let _ = app.emit("codebase-memory:status", "ready");
+                    return;
+                }
+            }
+        }
+
+        let _ = app.emit("codebase-memory:status", "downloading");
+
+        // Materialise the archive into a tmp file, verify SHA, extract,
+        // move the binary into place. Any failure on this path leaves
+        // the env var empty so downstream code skips the MCP entry.
+        let url = format!(
+            "https://github.com/{}/releases/download/v{}/{}",
+            CODEBASE_MEMORY_REPO, CODEBASE_MEMORY_VERSION, asset_name
+        );
+        let tmp_root = std::env::temp_dir().join(format!("o8-cmm-{}", std::process::id()));
+        if let Err(e) = std::fs::create_dir_all(&tmp_root) {
+            log::warn!("[codebase-memory] mkdir tmp failed: {}", e);
+            std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            let _ = app.emit("codebase-memory:status", "error");
+            return;
+        }
+        let archive_path = tmp_root.join(asset_name);
+
+        log::info!("[codebase-memory] fetching {} v{}", asset_name, CODEBASE_MEMORY_VERSION);
+        let download_result: Result<(), String> = (|| {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .map_err(|e| format!("client build: {}", e))?;
+            let mut resp = client.get(&url).send().map_err(|e| format!("send: {}", e))?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            let mut out = std::fs::File::create(&archive_path).map_err(|e| format!("create archive: {}", e))?;
+            std::io::copy(&mut resp, &mut out).map_err(|e| format!("write archive: {}", e))?;
+            Ok(())
+        })();
+
+        if let Err(e) = download_result {
+            log::warn!("[codebase-memory] download failed (non-fatal): {}", e);
+            std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            let _ = app.emit("codebase-memory:status", "error");
+            let _ = std::fs::remove_dir_all(&tmp_root);
+            return;
+        }
+
+        let actual_sha = match sha256_file(&archive_path) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("[codebase-memory] hash failed: {}", e);
+                std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+                let _ = app.emit("codebase-memory:status", "error");
+                let _ = std::fs::remove_dir_all(&tmp_root);
+                return;
+            }
+        };
+        if actual_sha != expected_sha {
+            log::warn!(
+                "[codebase-memory] SHA mismatch: expected {}, got {}",
+                expected_sha, actual_sha
+            );
+            std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            let _ = app.emit("codebase-memory:status", "error");
+            let _ = std::fs::remove_dir_all(&tmp_root);
+            return;
+        }
+
+        // Extract via system `tar` / `unzip`. Both ship on every macOS
+        // and Linux host; Windows ships unzip via PowerShell's
+        // Expand-Archive but we don't ship a Windows installer today.
+        let extract_result: Result<(), String> = (|| {
+            let archive_str = archive_path.to_string_lossy();
+            let tmp_str = tmp_root.to_string_lossy();
+            if is_zip {
+                let status = Command::new("unzip")
+                    .args(["-o", &archive_str, "-d", &tmp_str])
+                    .status()
+                    .map_err(|e| format!("unzip spawn: {}", e))?;
+                if !status.success() {
+                    return Err(format!("unzip exit {}", status));
+                }
+            } else {
+                let status = Command::new("tar")
+                    .args(["-xzf", &archive_str, "-C", &tmp_str])
+                    .status()
+                    .map_err(|e| format!("tar spawn: {}", e))?;
+                if !status.success() {
+                    return Err(format!("tar exit {}", status));
+                }
+            }
+            Ok(())
+        })();
+
+        if let Err(e) = extract_result {
+            log::warn!("[codebase-memory] extract failed: {}", e);
+            std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            let _ = app.emit("codebase-memory:status", "error");
+            let _ = std::fs::remove_dir_all(&tmp_root);
+            return;
+        }
+
+        let extracted = tmp_root.join(binary_name);
+        if !extracted.exists() {
+            log::warn!("[codebase-memory] binary not found in archive: {:?}", extracted);
+            std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            let _ = app.emit("codebase-memory:status", "error");
+            let _ = std::fs::remove_dir_all(&tmp_root);
+            return;
+        }
+
+        // copy + rename into place. fs::rename can fail across tmpfs ↔
+        // home-dir filesystem boundaries, so copy + remove keeps it
+        // robust.
+        if let Err(e) = std::fs::copy(&extracted, &bin_path) {
+            log::warn!("[codebase-memory] install failed: {}", e);
+            std::env::set_var("O8_CODEBASE_MEMORY_BIN", "");
+            let _ = app.emit("codebase-memory:status", "error");
+            let _ = std::fs::remove_dir_all(&tmp_root);
+            return;
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&bin_path, std::fs::Permissions::from_mode(0o755));
+        }
+
+        if let Err(e) = std::fs::write(&sentinel_path, &expected_tag) {
+            log::warn!("[codebase-memory] sentinel write failed: {}", e);
+            // Not fatal — next launch will re-verify and re-extract.
+        }
+        let _ = std::fs::remove_dir_all(&tmp_root);
+
+        let bin_str = bin_path.to_string_lossy().to_string();
+        log::info!("[codebase-memory] installed at {}", bin_str);
+        std::env::set_var("O8_CODEBASE_MEMORY_BIN", &bin_str);
+        let _ = app.emit("codebase-memory:status", "ready");
+    });
+}
+
 // ── Dynamic port allocation ──
 //
 // A packaged Tauri app can't assume port 3001 is free — another dev tool,
@@ -1789,6 +2058,16 @@ pub fn run() {
                     log::info!("Bundled MCP scripts at {:?}", server_dir);
                 }
 
+                // Issue #755: kick off the codebase-memory-mcp download in
+                // the background. On a cache hit (existing install) the
+                // env var lands synchronously before Next.js spawns. On a
+                // cold first launch the download runs concurrently with
+                // Next.js boot and the binary lands at the deterministic
+                // path `~/.o8/bin/codebase-memory-mcp` — #740's MCP
+                // registration resolves the path from the env var or
+                // re-checks the filesystem on session spawn.
+                ensure_codebase_memory_binary(app.handle().clone());
+
                 // Open per-server log files before spawning so stdout/stderr
                 // can be wired directly. Rotated to .prev on each boot.
                 let next_log = open_child_log("next-server.log");
@@ -1809,6 +2088,17 @@ pub fn run() {
                 if has_bundled_mcp {
                     server_cmd.env("O8_BUNDLED_MCP_DIR", &server_dir);
                     server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
+                }
+                // Issue #755: forward the codebase-memory-mcp path. On a
+                // cache hit `ensure_codebase_memory_binary()` set this
+                // env var synchronously above; on a cold first launch
+                // it's empty here and the download populates it later
+                // (Next-spawned children re-resolve from the env or the
+                // deterministic path).
+                if let Ok(cmm_bin) = std::env::var("O8_CODEBASE_MEMORY_BIN") {
+                    if !cmm_bin.is_empty() {
+                        server_cmd.env("O8_CODEBASE_MEMORY_BIN", cmm_bin);
+                    }
                 }
                 match server_cmd
                     .stdout(child_stdio(next_log.as_ref()))

@@ -44,6 +44,18 @@ tauri-plugin-mcp = { path = "../../tauri-plugin-mcp", optional = true }
 window-vibrancy = "0.6"
 rusqlite = { version = "0.31", features = ["bundled"] }
 
+# Issue #755: runtime-download for codebase-memory-mcp static binary.
+# All three crates are already in the transitive lock graph (reqwest pulled
+# in by tauri-plugin-updater, sha2/hex by other crates) — promoting them to
+# direct deps adds zero binary cost.
+#   - reqwest: blocking HTTPS GET against github.com (release redirect → S3)
+#   - sha2:    SHA-256 verification against the pinned upstream checksum
+#   - hex:     hex-encode the digest for comparison against the constant
+# rustls (not native-tls) keeps us off OpenSSL link issues on signed builds.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+sha2 = "0.10"
+hex = "0.4"
+
 # Shutdown safety net (issue #719). Both crates are already in the lock graph
 # transitively; promoting them to direct deps is zero binary cost. Used to
 # tear down spawned Node children on SIGTERM / SIGINT so they don't outlive
