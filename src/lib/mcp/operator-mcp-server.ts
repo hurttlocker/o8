@@ -139,6 +139,98 @@ function getO8WebviewClient(): O8WebviewClient {
   return o8WebviewClient;
 }
 
+// ── Loop observability tools (issues #793, #794) ──
+// Both tools read state owned by the Rust ring buffer (`o8_view_console_errors`)
+// or the Rust webview handle (`o8_view_active_route`). The data lives outside
+// the JS thread, so it survives `o8_view_eval` storms. The transport still
+// hops through the plugin's execute_js socket — but the JS shim here is a
+// single-line `__TAURI_INTERNALS__.invoke(...)` that completes as soon as
+// the listener fires; it doesn't depend on any in-flight UI work.
+const LOOP_OBSERVABILITY_TOOLS: McpTool[] = [
+  {
+    name: 'o8_view_console_errors',
+    description: 'Returns runtime errors captured by o8\'s Rust-side ring buffer (window.onerror, unhandledrejection, console.error). Survives a busy JS thread because the buffer is populated as errors fire, not on read. Returns { errors, count, sinceLastFetch }; sinceLastFetch resets on each call.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'o8_view_active_route',
+    description: 'Returns the main webview\'s current URL parts ({ pathname, search, hash, routerState }) by querying webview.url() on the Rust side. Use after o8_view_navigate to confirm the route landed without taking a screenshot. routerState is null for now; defer until we wire a Next.js segment reader.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+];
+
+async function invokeTauriCommandFromWebview<T>(command: string): Promise<T> {
+  // Small JS shim that hands the read off to a Rust Tauri command and wraps
+  // the response in a sentinel envelope. The shim does not depend on any
+  // long-running UI work — as soon as the execute_js listener fires, the
+  // Rust command resolves and we get the JSON payload back through the
+  // plugin's eval bridge.
+  const code = `(() => { try {
+    if (!window.__TAURI_INTERNALS__ || typeof window.__TAURI_INTERNALS__.invoke !== 'function') {
+      return JSON.stringify({ ok: false, err: 'tauri internals unavailable' });
+    }
+    return window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)})
+      .then((r) => JSON.stringify({ ok: true, data: r }))
+      .catch((e) => JSON.stringify({ ok: false, err: String(e && e.message || e) }));
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && e.message || e) }); } })()`;
+
+  const { result } = await getO8WebviewClient().evalJs(code);
+  // The webview eval bridge wraps Promises by awaiting them, so we get the
+  // resolved JSON string here. Parse twice — once for the sentinel, once
+  // for the inner data if it came back as a stringified JSON value.
+  let envelope: { ok: boolean; data?: unknown; err?: string };
+  let parsed: unknown = result;
+  try {
+    parsed = JSON.parse(result);
+  } catch {
+    throw new Error(`tauri invoke '${command}' returned non-JSON: ${String(result).slice(0, 200)}`);
+  }
+  if (typeof parsed === 'string') {
+    // Some bridge implementations double-encode — peel one more layer.
+    try { parsed = JSON.parse(parsed); } catch { /* leave as is */ }
+  }
+  envelope = parsed as { ok: boolean; data?: unknown; err?: string };
+  if (!envelope || envelope.ok !== true) {
+    throw new Error(envelope?.err || `tauri invoke '${command}' failed`);
+  }
+  return envelope.data as T;
+}
+
+async function handleConsoleErrors(): Promise<McpToolResult> {
+  try {
+    const data = await invokeTauriCommandFromWebview<{
+      errors: Array<{ message: string; source: string; lineno: number; timestamp: number }>;
+      count: number;
+      sinceLastFetch: number;
+    }>('o8_view_console_errors');
+    return textResult(JSON.stringify(data));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return textResult(JSON.stringify({ ok: false, error: message }), true);
+  }
+}
+
+async function handleActiveRoute(): Promise<McpToolResult> {
+  try {
+    const data = await invokeTauriCommandFromWebview<{
+      pathname: string;
+      search: string;
+      hash: string;
+      routerState: string | null;
+    }>('o8_view_active_route');
+    return textResult(JSON.stringify(data));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return textResult(JSON.stringify({ ok: false, error: message }), true);
+  }
+}
+
 // ── Tool Definitions ──
 
 const TOOLS: McpTool[] = [
@@ -150,6 +242,7 @@ const TOOLS: McpTool[] = [
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_lane_events'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_packet_transcript'),
   ...O8_WEBVIEW_TOOLS,
+  ...LOOP_OBSERVABILITY_TOOLS,
   ...MISSION_TOOLS.filter((t) => t.name === 'create_mission'),
   ...MISSION_TOOLS.filter((t) => t.name === 'dispatch_mission'),
   ...MISSION_TOOLS.filter((t) => t.name === 'get_mission_status'),
@@ -170,6 +263,8 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_lane_events: handleLaneEvents,
   o8_packet_transcript: handleTranscript,
   ...createO8WebviewToolHandlers(getO8WebviewClient),
+  o8_view_console_errors: handleConsoleErrors,
+  o8_view_active_route: handleActiveRoute,
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,
   get_mission_status: handleGetMissionStatus,
