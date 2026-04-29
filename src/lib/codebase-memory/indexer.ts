@@ -46,8 +46,12 @@ const BINARY_WAIT_TIMEOUT_MS = 5 * 60_000;
 /** Tool exposed by codebase-memory-mcp (#738/#739). */
 const INDEX_TOOL_NAME = 'index_repository';
 
-/** Cap for the manual size walk so a giant node_modules doesn't stall boot. */
-const SIZE_WALK_ENTRY_CAP = 1500;
+/** Cap for the manual size walk so a giant node_modules doesn't stall boot.
+ *  Raised from 1,500 → 100,000 (#850) — cortex-ide alone has 61,887 entries
+ *  after excluding node_modules/.git/target/.next/dist, so the previous cap
+ *  deferred our primary dogfood repo on every boot. The walk is fast (sub-
+ *  100ms even at 60k entries on SSD) so the cap is only a paranoia bound. */
+const SIZE_WALK_ENTRY_CAP = 100_000;
 
 // Live in-process state. Reset on server restart — that's fine since the
 // next boot pass repopulates it.
@@ -211,7 +215,10 @@ async function runIndexJob({ binPath, repo, maxSizeBytes }: RunIndexJobOpts): Pr
     binPath,
     cwd: repo.localPath,
     toolName: INDEX_TOOL_NAME,
-    args: { path: repo.localPath },
+    // #852: binary v0.6.0+ requires `repo_path`, not `path`. Passing the wrong
+    // key returned `{ isError: true }` which the old mcp-client also dropped,
+    // so the indexer marked every repo as cached without ever indexing.
+    args: { repo_path: repo.localPath },
   });
 
   if (!result.ok) {
