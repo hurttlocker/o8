@@ -71,7 +71,14 @@ export const HunkBlock = memo(function HunkBlock({
   onToggleAccepted,
 }: HunkBlockProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [showAll, setShowAll] = useState(hunk.lines.length <= MAX_INITIAL_HUNK_LINES);
+  // Derive from current hunk content so a same-index refresh resets truncation.
+  const hunkHash = `${hunk.lines.length}:${hunk.startOldLine}:${hunk.startNewLine}`;
+  const [showAll, setShowAll] = useState(() => hunk.lines.length <= MAX_INITIAL_HUNK_LINES);
+  const [trackedHash, setTrackedHash] = useState(hunkHash);
+  if (hunkHash !== trackedHash) {
+    setTrackedHash(hunkHash);
+    setShowAll(hunk.lines.length <= MAX_INITIAL_HUNK_LINES);
+  }
 
   const decoratedLines = useMemo(() => decorateLines(hunk), [hunk]);
   const visibleLines = showAll ? decoratedLines : decoratedLines.slice(0, MAX_INITIAL_HUNK_LINES);

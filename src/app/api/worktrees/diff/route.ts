@@ -73,9 +73,9 @@ async function collectDiff(cwd: string, baseBranch: string | null) {
     // ignore
   }
 
-  let additions = 0;
-  let deletions = 0;
-  const files = new Set<string>();
+  // Track per-file totals across both numstat runs to avoid double-counting
+  // files that appear in both the base-branch diff and the dirty-tree diff.
+  const fileStats = new Map<string, { additions: number; deletions: number }>();
 
   async function consumeNumstat(args: string[]) {
     try {
@@ -85,9 +85,16 @@ async function collectDiff(cwd: string, baseBranch: string | null) {
         const [addStr = '0', delStr = '0', ...rest] = line.split('\t');
         const filePath = rest.join('\t');
         if (!filePath) continue;
-        files.add(filePath);
-        if (addStr !== '-') additions += Number.parseInt(addStr, 10) || 0;
-        if (delStr !== '-') deletions += Number.parseInt(delStr, 10) || 0;
+        const add = addStr !== '-' ? (Number.parseInt(addStr, 10) || 0) : 0;
+        const del = delStr !== '-' ? (Number.parseInt(delStr, 10) || 0) : 0;
+        const existing = fileStats.get(filePath);
+        if (existing) {
+          // Already seen this file — keep the higher stat (prefer broader diff).
+          existing.additions = Math.max(existing.additions, add);
+          existing.deletions = Math.max(existing.deletions, del);
+        } else {
+          fileStats.set(filePath, { additions: add, deletions: del });
+        }
       }
     } catch {
       // ignore
@@ -97,11 +104,18 @@ async function collectDiff(cwd: string, baseBranch: string | null) {
   if (baseBranch) await consumeNumstat(['diff', '--numstat', `${baseBranch}...HEAD`]);
   await consumeNumstat(['diff', '--numstat', 'HEAD']);
 
+  let additions = 0;
+  let deletions = 0;
+  for (const stat of fileStats.values()) {
+    additions += stat.additions;
+    deletions += stat.deletions;
+  }
+
   return {
     diff: sections.join('\n'),
     additions,
     deletions,
-    fileCount: files.size,
+    fileCount: fileStats.size,
   };
 }
 
