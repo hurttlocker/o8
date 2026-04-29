@@ -30,6 +30,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { recommendRuntime } from '@/lib/dispatch/routing';
+import { withTiming } from '@/lib/cortex/diagnostics';
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
@@ -42,7 +43,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const recommendation = await recommendRuntime(repoPath);
+    const recommendation = await withTiming(
+      'recall.runtime-recommendation',
+      () => recommendRuntime(repoPath),
+    );
     return NextResponse.json(
       { ok: true, recommendation },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },

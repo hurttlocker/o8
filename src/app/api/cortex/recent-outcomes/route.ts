@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb, sessionOutcomes } from '@/lib/db';
 import { liveOutcomeFilter } from '@/lib/cortex/decay';
+import { withTiming } from '@/lib/cortex/diagnostics';
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const rows = await db
+    const rows = await withTiming('recall.recent-outcomes', () => db
       .select({
         id: sessionOutcomes.id,
         outcome: sessionOutcomes.outcome,
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
       .from(sessionOutcomes)
       .where(and(eq(sessionOutcomes.repoPath, repoPath), liveOutcomeFilter()))
       .orderBy(desc(sessionOutcomes.completedAt))
-      .limit(limit);
+      .limit(limit));
 
     return NextResponse.json(
       { ok: true, outcomes: rows },

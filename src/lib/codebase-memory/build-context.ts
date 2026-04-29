@@ -43,6 +43,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { getDb, sessionOutcomes } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { liveOutcomeFilter } from '@/lib/cortex/decay';
+import { withTiming } from '@/lib/cortex/diagnostics';
 
 import { extractSymbols, traceSymbols, type SymbolEdge } from './client';
 
@@ -305,7 +306,10 @@ export async function buildContextBlock({
   try {
     const symbols = extractSymbols(packetBody, MAX_SYMBOLS);
     if (symbols.length > 0) {
-      const traced = await traceSymbols({ repoPath, symbols });
+      const traced = await withTiming(
+        'recall.symbol-graph',
+        () => traceSymbols({ repoPath, symbols }),
+      );
       if (!traced.unavailable) edges = traced.edges;
     }
   } catch {
