@@ -67,6 +67,8 @@ export function ExternalMcpServersSection() {
   const [pasteNote, setPasteNote] = useState<string | null>(null);
   const [pasteCandidates, setPasteCandidates] = useState<ParsedMcpServer[] | null>(null);
   const [expandedStderrId, setExpandedStderrId] = useState<string | null>(null);
+  // Inline remove confirmation — replaces window.confirm (disabled in Tauri).
+  const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
 
   const applyParsedServer = (server: ParsedMcpServer, fallbackName?: string) => {
     const values = parsedServerToFormValues(server);
@@ -499,8 +501,11 @@ export function ExternalMcpServersSection() {
               outcome={outcome}
               envCount={envCount}
               expandedStderr={expandedStderrId === server.id}
+              pendingRemoval={pendingRemoval === server.id}
               onTest={() => { void test(server); }}
-              onRemove={() => { void remove(server); }}
+              onRemoveRequest={() => { setPendingRemoval(server.id); }}
+              onRemoveConfirm={() => { setPendingRemoval(null); void remove(server); }}
+              onRemoveCancel={() => { setPendingRemoval(null); }}
               onToggleStderr={() => {
                 setExpandedStderrId((cur) => cur === server.id ? null : server.id);
               }}
@@ -520,8 +525,11 @@ function ServerRow({
   outcome,
   envCount,
   expandedStderr,
+  pendingRemoval,
   onTest,
-  onRemove,
+  onRemoveRequest,
+  onRemoveConfirm,
+  onRemoveCancel,
   onToggleStderr,
 }: {
   server: ExternalMcpServer;
@@ -531,8 +539,11 @@ function ServerRow({
   outcome: McpServerTestOutcome | undefined;
   envCount: number;
   expandedStderr: boolean;
+  pendingRemoval: boolean;
   onTest: () => void;
-  onRemove: () => void;
+  onRemoveRequest: () => void;
+  onRemoveConfirm: () => void;
+  onRemoveCancel: () => void;
   onToggleStderr: () => void;
 }) {
   const status = useMemo<{ label: string; tone: 'quiet' | 'accent'; color: string }>(() => {
@@ -639,19 +650,48 @@ function ServerRow({
           <button
             type="button"
             onClick={onTest}
-            disabled={testing || busy}
-            style={rowLinkStyle(testing || busy)}
+            disabled={testing || busy || pendingRemoval}
+            style={rowLinkStyle(testing || busy || pendingRemoval)}
           >
             {testing ? (testingNpxFamily ? 'fetching…' : 'testing…') : 'test'}
           </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            disabled={busy}
-            style={rowLinkStyle(busy)}
-          >
-            remove
-          </button>
+          {pendingRemoval ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 11,
+                fontWeight: 400,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                color: '#dc2626',
+              }}>
+                remove?
+              </span>
+              <button
+                type="button"
+                onClick={onRemoveConfirm}
+                style={rowLinkStyle(false)}
+              >
+                yes
+              </button>
+              <button
+                type="button"
+                onClick={onRemoveCancel}
+                style={rowLinkStyle(false)}
+              >
+                cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={onRemoveRequest}
+              disabled={busy}
+              style={rowLinkStyle(busy)}
+            >
+              remove
+            </button>
+          )}
         </div>
       </div>
 
