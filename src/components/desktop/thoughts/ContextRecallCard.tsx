@@ -41,12 +41,13 @@ import {
   type RecentOutcome,
   type SymbolEdgeView,
 } from './recall-card/shared';
+import { AskAnythingRow } from './recall-card/AskAnythingRow';
 import { DirectiveRow } from './recall-card/DirectiveRow';
 import { OutcomesRow } from './recall-card/OutcomesRow';
 import { ProjectPulseRow } from './recall-card/ProjectPulseRow';
 import { SymbolGraphFallbackRow, SymbolGraphRow } from './recall-card/SymbolGraphRow';
 
-type OpenRow = 'directive' | 'outcomes' | 'symbols' | 'pulse' | null;
+type OpenRow = 'directive' | 'outcomes' | 'symbols' | 'pulse' | 'ask' | null;
 
 interface OutcomesCacheEntry {
   repoPath: string;
@@ -407,6 +408,13 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
           pulses={livePulses ?? []}
         />
       ) : null}
+      {/* #915 sub-4 — Ask Anything chat input + streaming citations.
+          Sits after PROJECT PULSE and before SPEC (Wave B). Always renders. */}
+      <AskAnythingRow
+        open={openRow === 'ask'}
+        onToggle={() => setOpenRow(openRow === 'ask' ? null : 'ask')}
+        repoPath={repoPath}
+      />
     </div>
   );
 }
