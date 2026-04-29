@@ -727,6 +727,48 @@ export function ThoughtsMissionPanel({
         onCreatePacketFromIssue={handleCreatePacketFromIssue}
       />
 
+      {/* #864 — Separator between Issues and Packets. Only renders when
+          BOTH sections have content; otherwise the divider would appear at
+          the top or bottom of an otherwise-empty panel and read as noise.
+          Uses the bracketed-label motif from DESIGN.md (uppercase mono
+          micro-label + hairline rule) so it scans as a section break, not
+          a header. */}
+      {issueGroups.length > 0 && missionState.packets.length > 0 ? (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            paddingTop: 12,
+            paddingRight: 8,
+            paddingBottom: 4,
+            paddingLeft: 8,
+          }}
+          aria-hidden="true"
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.16em',
+              textTransform: 'uppercase' as const,
+              color: 'var(--t-text-muted)',
+              fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+              flexShrink: 0,
+            }}
+          >
+            (PACKETS)
+          </span>
+          <span
+            style={{
+              flex: 1,
+              height: 1,
+              background: 'var(--t-border)',
+            }}
+          />
+        </div>
+      ) : null}
+
       {pendingFanOutCost ? (
         <div
           style={{
