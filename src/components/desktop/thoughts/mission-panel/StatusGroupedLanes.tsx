@@ -128,7 +128,12 @@ export function StatusGroupedLanes({ packets, renderPacket }: StatusGroupedLanes
                 paddingBottom: 0,
                 paddingLeft: 8,
                 border: 'none',
-                background: 'var(--t-panel)',
+                // #862 — keep glass tint, but blur scrolling content beneath the
+                // sticky header so packet text doesn't bleed through. Pattern
+                // mirrors SessionTimeline.tsx (chrome bar over vibrancy).
+                background: 'var(--t-bg-card)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
                 cursor: 'pointer',
                 position: 'sticky',
                 top: 0,
