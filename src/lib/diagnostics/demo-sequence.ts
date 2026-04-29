@@ -4,7 +4,8 @@
  * Drives the live o8 webview through the golden demo path so users can
  * sanity-check the app from Settings → Diagnostics without leaving o8.
  *
- * Steps (each step records pass/fail/skipped + ms + optional screenshot):
+ * Steps (each step records pass/fail/skipped/unavailable + ms + optional
+ * screenshot):
  *   1. Navigate to /dashboard → wait → screenshot
  *   2. Verify active route pathname === "/dashboard"
  *   3. Click the Orchestrator tab via screen coordinates
@@ -12,10 +13,15 @@
  *   5. Click the first quick-action card on the empty state
  *   6. Verify no NEW console errors fired between step 1 and step 6
  *
- * On any failure, subsequent steps are marked `skipped` (with a reason)
- * and we still return everything captured so the UI can show partial
- * progress. Total wall-clock budget is 30s — past that, the API route
- * returns 504 with whatever it managed to capture.
+ * Failure semantics (#802):
+ *   - HARD `fail` (screenshot null, click missed, real assertion mismatch):
+ *     subsequent steps are cascade-marked `skipped`.
+ *   - SOFT `unavailable` (Tauri command not in the running binary, webview
+ *     socket unreachable): does NOT cascade. We move on so the rest of the
+ *     demo path still runs.
+ * We still return everything captured so the UI can show partial progress.
+ * Total wall-clock budget is 30s — past that, the API route returns 504 with
+ * whatever it managed to capture.
  *
  * Screenshots land under `<dataDir>/demo-runs/<ISO timestamp>/<step>.png`
  * (UTF-8 base64 → PNG buffer). We retain the most recent 10 runs and prune
@@ -32,7 +38,21 @@ import { getDataDir } from '@/lib/data-dir-migration';
 
 // ── Public types ──
 
-export type DemoStepStatus = 'pass' | 'fail' | 'skipped';
+/**
+ * Step result kinds:
+ *   - 'pass'         — assertion held, real success.
+ *   - 'fail'         — hard failure on real data (screenshot null, click missed,
+ *                      assertion mismatch). Cascades — subsequent steps are
+ *                      marked 'skipped' because we can't trust state.
+ *   - 'skipped'      — cascaded after an upstream hard fail or hit the global
+ *                      timeout. NOT a real check.
+ *   - 'unavailable'  — soft skip: the underlying Tauri command isn't in the
+ *                      currently running binary (e.g. new command added but
+ *                      shell not yet recompiled / app not yet auto-updated).
+ *                      Does NOT cascade — we move on to the next step so the
+ *                      rest of the demo path still runs.
+ */
+export type DemoStepStatus = 'pass' | 'fail' | 'skipped' | 'unavailable';
 
 export interface DemoStepResult {
   name: string;
@@ -50,6 +70,7 @@ export interface DemoRunResult {
   passed: number;
   failed: number;
   skipped: number;
+  unavailable: number;
   runDir: string;
   steps: DemoStepResult[];
   truncated?: boolean;
@@ -80,6 +101,47 @@ interface ActiveRoutePayload {
   search: string;
   hash: string;
   routerState: string | null;
+}
+
+/**
+ * Sentinel error a step throws when the underlying Tauri command isn't in
+ * the running binary (or the webview socket isn't reachable). The runner
+ * converts this into a 'unavailable' step result and continues to the next
+ * step instead of cascade-skipping the rest of the run.
+ */
+class CommandUnavailableError extends Error {
+  readonly kind = 'command-unavailable' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'CommandUnavailableError';
+  }
+}
+
+/**
+ * Heuristic: does this error string look like "the Tauri command isn't in
+ * the running binary" rather than "the command ran and gave a wrong answer"?
+ *
+ * Matches against the kinds of strings that Tauri 2 emits when an
+ * unrecognised command is invoked through `__TAURI_INTERNALS__.invoke`, the
+ * O8WebviewClient's UNAVAILABLE_MESSAGE for socket reachability, and the
+ * generic "tauri internals unavailable" shim guard in invokeTauriCommand
+ * when window.__TAURI_INTERNALS__ isn't there at all (e.g. running outside
+ * the Tauri shell).
+ */
+function isCommandUnavailableMessage(message: string): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('not found')
+    || lower.includes('not allowed')
+    || lower.includes('not registered')
+    || lower.includes('unknown command')
+    || lower.includes('command not')
+    || lower.includes('tauri internals unavailable')
+    || lower.includes('o8 webview tools unavailable')
+    || lower.includes('econnrefused')
+    || lower.includes('enoent')
+  );
 }
 
 function nowIso(): string {
@@ -169,7 +231,21 @@ async function invokeTauriCommand<T>(
       .catch((e) => JSON.stringify({ ok: false, err: String(e && e.message || e) }));
   } catch (e) { return JSON.stringify({ ok: false, err: String(e && e.message || e) }); } })()`;
 
-  const { result } = await client.evalJs(code);
+  let result: string;
+  try {
+    ({ result } = await client.evalJs(code));
+  } catch (err) {
+    // Socket-level failure (webview unreachable, plugin not loaded, etc.)
+    // is the same class of "command can't run" — surface as unavailable.
+    const message = err instanceof Error ? err.message : String(err);
+    if (isCommandUnavailableMessage(message)) {
+      throw new CommandUnavailableError(
+        `tauri invoke '${command}' unavailable: ${message}`,
+      );
+    }
+    throw err;
+  }
+
   let parsed: unknown = result;
   try {
     parsed = JSON.parse(result);
@@ -181,7 +257,13 @@ async function invokeTauriCommand<T>(
   }
   const envelope = parsed as { ok?: boolean; data?: unknown; err?: string };
   if (!envelope || envelope.ok !== true) {
-    throw new Error(envelope?.err || `tauri invoke '${command}' failed`);
+    const errMessage = envelope?.err || `tauri invoke '${command}' failed`;
+    if (isCommandUnavailableMessage(errMessage)) {
+      throw new CommandUnavailableError(
+        `tauri invoke '${command}' unavailable: ${errMessage}`,
+      );
+    }
+    throw new Error(errMessage);
   }
   return envelope.data as T;
 }
@@ -208,6 +290,14 @@ async function timeStep(
       message: out.message,
     };
   } catch (err) {
+    if (err instanceof CommandUnavailableError) {
+      return {
+        name,
+        status: 'unavailable',
+        ms: Date.now() - started,
+        message: `${err.message} — awaiting recompile / auto-update`,
+      };
+    }
     return {
       name,
       status: 'fail',
@@ -356,6 +446,11 @@ export async function runDemoSequence(opts?: { timeoutMs?: number }): Promise<De
     for (let i = 0; i < steps.length; i += 1) {
       const result = await steps[i](ctx);
       results.push(result);
+      // Only HARD failures cascade — a soft 'unavailable' (Tauri command not
+      // in the running binary) does not invalidate the rest of the demo
+      // path. We still want to know the click + greeting + quick-action
+      // surfaces work even if a side-channel observability command is
+      // missing from the current shell.
       if (result.status === 'fail') {
         for (let j = i + 1; j < steps.length; j += 1) {
           results.push(skippedStep(STEP_NAMES[j], `skipped after ${result.name} failed`));
@@ -388,6 +483,7 @@ export async function runDemoSequence(opts?: { timeoutMs?: number }): Promise<De
   const passed = results.filter((r) => r.status === 'pass').length;
   const failed = results.filter((r) => r.status === 'fail').length;
   const skipped = results.filter((r) => r.status === 'skipped').length;
+  const unavailable = results.filter((r) => r.status === 'unavailable').length;
 
   return {
     startedAt,
@@ -397,6 +493,7 @@ export async function runDemoSequence(opts?: { timeoutMs?: number }): Promise<De
     passed,
     failed,
     skipped,
+    unavailable,
     runDir,
     steps: results,
     ...(truncated ? { truncated: true } : {}),
