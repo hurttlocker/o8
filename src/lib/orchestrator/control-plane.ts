@@ -105,6 +105,11 @@ export async function syncOrchestratorControlPlaneState(state?: OrchestratorMiss
 /**
  * #460 — Locked read-modify-write: read state, apply a mutation, reconcile, and persist.
  * Use this for any operation that needs exclusive access to orchestrator-state.json.
+ *
+ * If the callback returns an OrchestratorMissionState, that value is used as the
+ * basis for reconcile + write instead of the pre-callback snapshot. This allows
+ * callers that run a sub-operation (e.g. runDispatchTick) producing a new state
+ * to persist that result without a second write that would clobber it.
  */
 export async function withLockedState<T>(
   fn: (state: OrchestratorMissionState) => T | Promise<T>,
@@ -113,7 +118,16 @@ export async function withLockedState<T>(
   try {
     const current = readOrchestratorControlPlaneState();
     const result = await fn(current);
-    const reconciled = reconcileOrchestratorControlPlaneState(current);
+    // If the callback returned a mission state, reconcile from that (post-operation
+    // snapshot). Otherwise fall back to the mutated `current` object as before.
+    const basisForReconcile: OrchestratorMissionState =
+      result !== null
+      && typeof result === 'object'
+      && 'packets' in (result as object)
+      && 'lanes' in (result as object)
+        ? (result as unknown as OrchestratorMissionState)
+        : current;
+    const reconciled = reconcileOrchestratorControlPlaneState(basisForReconcile);
     const state = writeOrchestratorControlPlaneState(reconciled);
     return { result, state };
   } finally {
