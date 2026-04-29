@@ -9,6 +9,7 @@ import {
   MOBILE_TOUCH_TARGET,
   IconActivity,
   IconAgents,
+  IconBrowser,
   IconChat,
   IconCosts,
   IconIssues,
@@ -80,6 +81,12 @@ export function Sidebar({
       label: 'Agents',
       description: 'See and steer running sessions',
       icon: <IconAgents fill={palette.iconFill} />,
+    },
+    {
+      id: 'browser',
+      label: 'Browser',
+      description: 'Preview LAN dev servers',
+      icon: <IconBrowser fill={palette.iconFill} />,
     },
     {
       id: 'issues',
