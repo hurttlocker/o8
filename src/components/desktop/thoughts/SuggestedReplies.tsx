@@ -15,6 +15,10 @@ interface SuggestedRepliesProps {
   disabled?: boolean;
   onSelect: (chip: string) => void;
   onDismiss: () => void;
+  // Phase 4 — when true and `chips` is empty, render a [•••] placeholder so
+  // the user knows a fetch was attempted (instead of silently rendering
+  // nothing). Suppressed once real chips arrive.
+  isPlaceholder?: boolean;
 }
 
 // Rams "one orange" — matches the orchestrator accent already used in ThoughtsChatPanel
@@ -49,15 +53,56 @@ function getReducedMotionServerSnapshot(): boolean {
   return false;
 }
 
-export function SuggestedReplies({ chips, disabled = false, onSelect, onDismiss }: SuggestedRepliesProps) {
+export function SuggestedReplies({ chips, disabled = false, onSelect, onDismiss, isPlaceholder = false }: SuggestedRepliesProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [dismissHover, setDismissHover] = useState(false);
   const reduceMotion = useSyncExternalStore(subscribeReducedMotion, getReducedMotion, getReducedMotionServerSnapshot);
 
-  if (chips.length === 0) return null;
-
   const filteredChips = chips.filter((chip) => chip.trim().length > 0);
-  if (filteredChips.length === 0) return null;
+  const hasChips = filteredChips.length > 0;
+
+  // Phase 4 — placeholder strip when a fetch failed (or is mid-retry) and we
+  // don't have chips yet. Renders a muted three-dot row so the user knows
+  // chips were attempted instead of silently rendering nothing.
+  if (!hasChips && isPlaceholder) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        aria-label="Loading suggested replies"
+        style={{
+          alignSelf: 'flex-start',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          marginTop: 4,
+          marginLeft: 2,
+          paddingTop: 7,
+          paddingRight: 10,
+          paddingBottom: 7,
+          paddingLeft: 10,
+          color: 'var(--t-text-tertiary, var(--t-text-secondary, #9ca3af))',
+          opacity: 0.85,
+          transition: reduceMotion ? 'none' : 'opacity 160ms ease',
+        }}
+      >
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            style={{
+              width: 4,
+              height: 4,
+              borderRadius: '50%',
+              background: 'currentColor',
+              animation: reduceMotion ? 'none' : `llmDot 1.2s ease-in-out ${i * 0.18}s infinite`,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (!hasChips) return null;
 
   return (
     <div

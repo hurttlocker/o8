@@ -30,6 +30,10 @@ interface ChatMessageListProps {
   suggestedReplies?: string[];
   onSelectSuggestion?: (chip: string) => void;
   onDismissSuggestions?: () => void;
+  // Phase 4 — when true, render a [•••] placeholder under the last assistant
+  // message even if `suggestedReplies` is empty. Indicates a fetch is in
+  // flight or just failed, so the user knows chips were attempted.
+  suggestedRepliesPending?: boolean;
 }
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
@@ -50,11 +54,18 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   suggestedReplies,
   onSelectSuggestion,
   onDismissSuggestions,
+  suggestedRepliesPending = false,
 }, chatEndRef) {
+  // Phase 4 — chips strip renders when EITHER chips arrived OR a fetch is in
+  // flight / just failed (placeholder). Both share the same anchor under the
+  // last assistant message. Without the placeholder branch the strip would
+  // silently render nothing during transient failures.
   const hasSuggestedReplies = Boolean(
     suggestedReplyMessageId
-    && suggestedReplies
-    && suggestedReplies.length > 0
+    && (
+      (suggestedReplies && suggestedReplies.length > 0)
+      || suggestedRepliesPending
+    )
     && onSelectSuggestion
     && onDismissSuggestions,
   );
@@ -102,7 +113,6 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
         const showChipsHere = isLatestAssistant
           && hasSuggestedReplies
           && msg.id === suggestedReplyMessageId
-          && suggestedReplies
           && onSelectSuggestion
           && onDismissSuggestions;
         return (
@@ -114,10 +124,11 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
             />
             {showChipsHere ? (
               <SuggestedReplies
-                chips={suggestedReplies}
+                chips={suggestedReplies ?? []}
                 disabled={displayWaiting}
                 onSelect={onSelectSuggestion}
                 onDismiss={onDismissSuggestions}
+                isPlaceholder={suggestedRepliesPending}
               />
             ) : null}
           </Fragment>
