@@ -190,6 +190,7 @@ async function callCli(prompt: string, cli: IndexerCli): Promise<string> {
       system: 'You extract structured facts from text. Output strict JSON only.',
       messages: [{ role: 'user', content: prompt }],
       stream: false,
+      timeoutMs: 180_000,
     });
     return result.text;
   }
