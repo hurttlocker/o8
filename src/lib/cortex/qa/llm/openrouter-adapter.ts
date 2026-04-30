@@ -48,6 +48,8 @@
 
 import 'server-only';
 
+import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export interface CallOpenRouterOptions {
@@ -100,7 +102,10 @@ export async function callOpenRouter(
   prompt: string,
   opts: CallOpenRouterOptions = {},
 ): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  // BYOK (#960): resolve from stored user key first, then process.env.
+  // Smoke path always has process.env.OPENROUTER_API_KEY set, so it
+  // resolves immediately without hitting the file.
+  const apiKey = await resolveOpenRouterKey();
   if (!apiKey) {
     throw new Error('[qa][openrouter] OPENROUTER_API_KEY missing');
   }
