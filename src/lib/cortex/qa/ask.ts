@@ -76,21 +76,29 @@ export interface AskCortexResult {
 /**
  * Run the full Q&A pipeline and collect the result (non-streaming).
  * Used by the eval runner and smoke tests.
+ *
+ * @param bypassCache  When true, skip both the cache lookup and the cache
+ *                     write. Used by the eval runner so sequential runs don't
+ *                     reuse stale answers.
  */
 export async function askCortex(
   question: string,
   repoPath: string | undefined,
+  options: { bypassCache?: boolean } = {},
 ): Promise<AskCortexResult> {
+  const { bypassCache = false } = options;
   const key = cacheKey(question, repoPath);
-  const cached = getCached(key);
-  if (cached) {
-    return {
-      answer: cached.answer,
-      citations: cached.citations,
-      class: 'A', // cached result — class doesn't matter
-      retrievalMs: 0,
-      classifyMs: 0,
-    };
+  if (!bypassCache) {
+    const cached = getCached(key);
+    if (cached) {
+      return {
+        answer: cached.answer,
+        citations: cached.citations,
+        class: 'A', // cached result — class doesn't matter
+        retrievalMs: 0,
+        classifyMs: 0,
+      };
+    }
   }
 
   // 1. Classify
@@ -162,7 +170,9 @@ export async function askCortex(
     classifyMs,
   };
 
-  setCache(key, { answer: result.answer, citations });
+  if (!bypassCache) {
+    setCache(key, { answer: result.answer, citations });
+  }
   return result;
 }
 
