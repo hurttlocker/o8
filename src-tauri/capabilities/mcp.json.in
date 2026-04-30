@@ -4,6 +4,6 @@
   "description": "tauri-plugin-mcp eval_and_await JS bridge — only active when built with --features dev-mcp-plugin (#932)",
   "windows": ["main", "dispatch-popover"],
   "permissions": [
-    "tauri-mcp:default"
+    "mcp:default"
   ]
 }
