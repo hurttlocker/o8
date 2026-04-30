@@ -101,6 +101,11 @@ function buildCitationHandle(row: TypedRow): string {
       // in an LLM bracket. Hash deterministically to a 10-char tag so the
       // handle stays bracket-safe and the lookup map can index both forms.
       return `DOC-${shortDocHandle(rowId)}`;
+    case 'fact':
+      // Engineering Brain Indexer (#915 north star #1). Fact rowIds are short
+      // ULIDs/uuids so we embed verbatim — no hashing needed. FACT- prefix
+      // avoids any collision with the existing handles above.
+      return `FACT-${rowId}`;
     default:
       return rowId;
   }
