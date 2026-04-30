@@ -26,6 +26,7 @@ import { ensureV15CommentsFtsSchema } from '@/lib/db/v15-comments-fts-migration'
 import { ensureV16DocsFtsSchema } from '@/lib/db/v16-docs-fts-migration';
 import { ensureV17FactsFtsSchema } from '@/lib/db/v17-facts-fts-migration';
 import { ensureV18FactsSourceAuthoritySchema } from '@/lib/db/v18-facts-source-authority-migration';
+import { ensureV19DocDistillStateSchema } from '@/lib/db/v19-doc-distill-state-migration';
 
 // ── Data directory ──
 
@@ -39,7 +40,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 18;
+const DB_SCHEMA_VERSION = 19;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -137,6 +138,10 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // pr 0.8 → issue 0.75 → comment 0.7) so retrieval + composer can prefer
   // higher-authority rows when facts conflict.
   ensureV18FactsSourceAuthoritySchema(sqlite);
+  // #915 north star Phase 2b — Schema v19 — `doc_distill_state` checkpoint
+  // table for the docs distillation worker. Tracks per-chunk progress so
+  // long runs can resume after interruption without re-paying LLM cost.
+  ensureV19DocDistillStateSchema(sqlite);
   // #835 — recover any session_outcomes rows whose `valid_from` was inserted
   // as NULL (legacy seeds, raw INSERTs that bypassed the Drizzle schema
   // default). The column-add backfill in `ensureSessionOutcomeColumns` only
