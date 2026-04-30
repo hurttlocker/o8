@@ -129,9 +129,10 @@ async function tryCodex(prompt: string, question: string): Promise<ClassifierRes
 /** Tier 3: OpenRouter. HTTP call to grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback. */
 async function tryOpenRouter(prompt: string, question: string): Promise<ClassifierResult | null> {
   try {
-    // 10s — Grok 4.1 Fast 5-fact p50 was 5.7s in the bake-off; 8s would
-    // truncate ~30% of long answers, 10s gives headroom.
-    const text = await callOpenRouter(prompt, { timeoutMs: 10_000 });
+    // 25s — bumped from 10s alongside composer's bump to handle multi-row
+    // prompts under load. Classifier prompts are small but grok-4.1-fast
+    // occasionally takes 8-12s when OpenRouter routes through a slow upstream.
+    const text = await callOpenRouter(prompt, { timeoutMs: 25_000 });
     return parseClassifierJson(text, question);
   } catch (err) {
     console.warn('[qa][classifier] OpenRouter failed:', err instanceof Error ? err.message : err);
