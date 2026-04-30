@@ -91,9 +91,34 @@ function buildCitationHandle(row: TypedRow): string {
     case 'project_repo':
       // PRJREPO- prefix avoids collision with PR- (pull requests).
       return `PRJREPO-${rowId}`;
+    case 'doc':
+      // Doc rowIds are `<repoPath>:<relPath>` — too long to embed verbatim
+      // in an LLM bracket. Hash deterministically to a 10-char tag so the
+      // handle stays bracket-safe and the lookup map can index both forms.
+      return `DOC-${shortDocHandle(rowId)}`;
     default:
       return rowId;
   }
+}
+
+/**
+ * 10-char alphanumeric hash for doc citation handles. Stable for a given
+ * rowId so the LLM can re-emit the same bracket and we still resolve it.
+ *
+ * djb2 is overkill for ~50 docs, but cheap; collision probability across
+ * the realistic doc set is well below the floor of accidental hallucinations
+ * the composer already filters at translation time.
+ */
+function shortDocHandle(rowId: string): string {
+  let hash = 5381;
+  for (let i = 0; i < rowId.length; i += 1) {
+    hash = ((hash << 5) + hash + rowId.charCodeAt(i)) & 0xffffffff;
+  }
+  // base36, padded to 8+ chars by pre-pending the length-mod-9 char so the
+  // tag is fixed-width and easy to spot in the answer text.
+  const tail = (hash >>> 0).toString(36).padStart(7, '0').slice(-7);
+  const head = (rowId.length % 36).toString(36);
+  return `${head}${tail}`.toUpperCase();
 }
 
 // ── Citation parsing + verification ──────────────────────────────────────────
@@ -284,9 +309,11 @@ async function tryComposeCodex(prompt: string): Promise<string | null> {
 /** Tier 3: OpenRouter — grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback. */
 async function tryComposeOpenRouter(prompt: string): Promise<string | null> {
   try {
-    // 10s — Grok 4.1 Fast 5-fact p50 was 5.7s in the bake-off; 8s would
-    // truncate ~30% of long answers, 10s gives headroom.
-    const text = await callOpenRouter(prompt, { timeoutMs: 10_000 });
+    // 25s — was 10s, but ownership questions in eval mode hit grok-4.1-fast
+    // with the full 30-row payload (post-slice-fix) and timed out at 10s
+    // (caused 35% → 2% ownership crash). p95 for multi-row prompts is past
+    // 10s; 25s gives headroom for worst case.
+    const text = await callOpenRouter(prompt, { timeoutMs: 25_000 });
     return text.trim() ? text : null;
   } catch (err) {
     console.warn('[qa][composer-A] OpenRouter failed:', err instanceof Error ? err.message : err);
