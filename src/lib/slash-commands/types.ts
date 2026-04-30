@@ -2,6 +2,7 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 
 export type OrchestratorSlashCommandName =
+  | 'ask'
   | 'compact'
   | 'clear'
   | 'focus'
