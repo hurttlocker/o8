@@ -29,11 +29,17 @@ LOG_DIR="$HOME/.o8/logs"
 LOG_PATH="$LOG_DIR/compactor.log"
 SCRIPT_PATH="${REPO_ROOT}/scripts/compact-facts.ts"
 
-# Resolve npx via login shell so launchd inherits the same PATH the user has.
-# launchd jobs don't get the user's interactive shell env unless we tell them.
-NPX_BIN="$(zsh -ilc 'which npx' 2>/dev/null || which npx)"
-if [ -z "$NPX_BIN" ] || [ "$NPX_BIN" = "npx not found" ]; then
-  echo "[install-compactor-cron] could not find npx — install Node first" >&2
+# Resolve npx. We need an absolute path because launchd doesn't inherit the
+# user's interactive shell PATH. Try non-interactive shell first (clean
+# stdout, no zsh banner pollution), fall back to plain which.
+NPX_BIN="$(/bin/sh -c 'command -v npx' 2>/dev/null)"
+if [ -z "$NPX_BIN" ]; then
+  NPX_BIN="$(which npx 2>/dev/null)"
+fi
+# Strip any whitespace / banner residue defensively.
+NPX_BIN="$(echo "$NPX_BIN" | tail -1 | tr -d '[:space:]')"
+if [ -z "$NPX_BIN" ] || [ ! -x "$NPX_BIN" ]; then
+  echo "[install-compactor-cron] could not resolve npx (got: '$NPX_BIN') — install Node first" >&2
   exit 1
 fi
 
