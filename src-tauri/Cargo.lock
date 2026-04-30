@@ -2778,7 +2778,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.101"
+version = "0.1.102"
 dependencies = [
  "hex",
  "libc",
