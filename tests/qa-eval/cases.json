@@ -126,6 +126,11 @@
         "Mentions ThoughtsMissionPanel as the reference implementation",
         "Mentions packet-meta-rows pattern"
       ],
+      "smokeExpectedFacts": [
+        "no-native-form-controls-in-packets",
+        "packet metadata",
+        "thoughtsmissionpanel"
+      ],
       "expectedCitations": [
         {
           "kind": "directive",
@@ -171,6 +176,11 @@
         "Names Tauri webview rendering as the cause",
         "Mentions extracting from @phosphor-icons/react/dist/defs/",
         "Mentions src/lib/icons/ shim system or 85 icons"
+      ],
+      "smokeExpectedFacts": [
+        "tauri webview",
+        "@phosphor-icons/react/dist/defs",
+        "src/lib/icons"
       ],
       "expectedCitations": [
         {
@@ -257,6 +267,11 @@
       "expectedFacts": [
         "Names npx tsc --noEmit",
         "References the typecheck directive OR npm run typecheck variant"
+      ],
+      "smokeExpectedFacts": [
+        "npx tsc --noemit",
+        "typecheck-before-commit",
+        "every commit"
       ],
       "expectedCitations": [
         {
@@ -415,6 +430,11 @@
         "Names the runtime as opencode",
         "Names the outcome as polish/orchestrator-empty-state-copy",
         "States that the reviewer flagged it as off-brand vs the locked design language"
+      ],
+      "smokeExpectedFacts": [
+        "orchestrator-empty-state-copy",
+        "off-brand",
+        "design language"
       ],
       "expectedCitations": [
         {
@@ -581,6 +601,11 @@
         "Names 30 questions / 5 per category",
         "Names the rubric fields factual_accuracy, citation_correctness, hallucination_count"
       ],
+      "smokeExpectedFacts": [
+        "70%",
+        "factual_accuracy",
+        "5 per category"
+      ],
       "expectedCitations": [
         {
           "kind": "issue",
@@ -654,6 +679,11 @@
         "States it's an explicit decision, not coincidence",
         "References the o8-site stack note OR the cortex-ide typography decision",
         "Optionally names the /text specimen page"
+      ],
+      "smokeExpectedFacts": [
+        "plus jakarta sans",
+        "explicit",
+        "o8-site"
       ],
       "expectedCitations": [],
       "rubric": {
