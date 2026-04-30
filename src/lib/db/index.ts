@@ -23,6 +23,7 @@ import { ensureUsageLogIndexes, ensureUsageLogSchema } from '@/lib/db/usage-log-
 import { ensureSessionOutcomeRoutingColumns } from '@/lib/db/session-outcome-routing-migration';
 import { ensureV14Fts5Schema } from '@/lib/db/v14-fts5-migration';
 import { ensureV15CommentsFtsSchema } from '@/lib/db/v15-comments-fts-migration';
+import { ensureV16DocsFtsSchema } from '@/lib/db/v16-docs-fts-migration';
 
 // ── Data directory ──
 
@@ -36,7 +37,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 15;
+const DB_SCHEMA_VERSION = 16;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -119,6 +120,10 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // live in epic-thread comments (e.g. epic #915's locked architecture
   // comment naming outcomes_fts/qa_eval_runs) become searchable.
   ensureV15CommentsFtsSchema(sqlite);
+  // #915 path-to-70 phase 1.7 #3 — Schema v16 — `docs` parent table +
+  // `docs_fts` FTS5 mirror for repo markdown (CLAUDE.md, README, AGENTS.md,
+  // DESIGN/THEME, docs/**). Same skip-with-warning pattern when FTS5 is off.
+  ensureV16DocsFtsSchema(sqlite);
   // #835 — recover any session_outcomes rows whose `valid_from` was inserted
   // as NULL (legacy seeds, raw INSERTs that bypassed the Drizzle schema
   // default). The column-add backfill in `ensureSessionOutcomeColumns` only

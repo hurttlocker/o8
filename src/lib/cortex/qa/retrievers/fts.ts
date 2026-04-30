@@ -1,8 +1,8 @@
 /**
  * BM25 / FTS5 retriever (epic #915 sub-1).
  *
- * Runs the question (or pre-computed BM25 variants) against all four FTS5
- * indexes in parallel — outcomes, prs, issues, directives — then merges
+ * Runs the question (or pre-computed BM25 variants) against all five FTS5
+ * indexes in parallel — outcomes, prs, issues, directives, docs — then merges
  * the per-index top-20 hits via reciprocal rank fusion (RRF).
  *
  *   RRF score = sum over indexes of 1 / (60 + rank_in_index)
@@ -31,6 +31,12 @@ const PER_INDEX_LIMIT = 20;
 const PER_COMMENTS_LIMIT = 8;
 const DEFAULT_LIMIT = 30;
 const RRF_K = 60;
+// #915 path-to-70 phase 1.7 #3 — docs are typically large and would dominate
+// the merged top-30 if uncapped. 8 lets cross-repo questions that genuinely
+// hinge on CLAUDE.md / README content surface relevant pages without crowding
+// out directives/outcomes/PRs/issues. Tweak alongside MERGE_LIMIT in
+// retrieve.ts if recall starts slipping.
+const DOCS_PER_INDEX_LIMIT = 8;
 
 /** Sanitize a query string for FTS5 MATCH. FTS5 is picky:
  *   - Bare punctuation = parse error
@@ -136,6 +142,15 @@ interface CommentRow {
   updated_at: string | null;
 }
 
+/** docs has a real parent table (`docs`) — pull metadata from there. */
+interface DocRow {
+  id: string;
+  repo_name: string;
+  rel_path: string;
+  kind: string;
+  title: string;
+}
+
 export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResult> {
   const start = Date.now();
   const rows: TypedRow[] = [];
@@ -171,6 +186,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
     const issuesHits: TableHits = new Map();
     const directivesHits: TableHits = new Map();
     const commentsHits: TableHits = new Map();
+    const docsHits: TableHits = new Map();
 
     const merge = (target: TableHits, hits: FtsRow[]) => {
       for (const hit of hits) {
@@ -193,6 +209,12 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
         commentsHits,
         ftsSearch(sqlite, 'comments_fts', 'comment_id', match, PER_COMMENTS_LIMIT),
       );
+      // #915 path-to-70 phase 1.7 #3 — docs (CLAUDE.md / README / AGENTS.md /
+      // DESIGN/THEME / docs/**). Capped at the same PER_INDEX_LIMIT (20) by
+      // ftsSearch; we narrow to the top-N docs via DOCS_PER_INDEX_LIMIT below
+      // so docs don't crowd out directives/outcomes/PRs/issues in the merged
+      // top-30.
+      merge(docsHits, ftsSearch(sqlite, 'docs_fts', 'doc_id', match));
     }
 
     // Convert per-table maps into ranked lists, then RRF-merge into the
@@ -327,6 +349,46 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
           });
         });
       }
+    }
+
+    // docs — content-backed against the `docs` parent table. Hard-cap the
+    // contribution at DOCS_PER_INDEX_LIMIT so the unionMerge top-30 stays a
+    // fair mix across indexes (directives + outcomes + PRs + issues + docs).
+    if (docsHits.size > 0) {
+      const sortedIds = [...docsHits.entries()]
+        .sort((a, b) => b[1].rank - a[1].rank)
+        .map(([id]) => id)
+        .slice(0, DOCS_PER_INDEX_LIMIT);
+      const records = sqlite
+        .prepare(
+          `SELECT id, repo_name, rel_path, kind, title FROM docs
+           WHERE id IN (${sortedIds.map(() => '?').join(',')})`,
+        )
+        .all(...sortedIds) as DocRow[];
+      const byId = new Map(records.map((r) => [r.id, r]));
+      sortedIds.forEach((id, idx) => {
+        const record = byId.get(id);
+        if (!record) return;
+        const hit = docsHits.get(id)!;
+        const score = 1 / (RRF_K + idx);
+        accumulate(`doc:${id}`, score, {
+          citation: {
+            kind: 'doc',
+            rowId: id,
+            table: 'docs',
+            sourcePath: record.rel_path,
+            excerpt: hit.excerpt,
+          },
+          fields: {
+            id: record.id,
+            repoName: record.repo_name,
+            relPath: record.rel_path,
+            kind: record.kind,
+            title: record.title,
+          },
+          score: 0,
+        });
+      });
     }
 
     // directives — title/body live in the FTS index itself.
