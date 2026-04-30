@@ -84,6 +84,11 @@ function buildCitationHandle(row: TypedRow): string {
       return `PR-${rowId}`;
     case 'issue':
       return `ISS-${rowId}`;
+    case 'comment':
+      // CMT- prefix avoids collision with the rest. The rowId is the
+      // composite `<parent_kind>-<parent_number>-<gh_comment_id>` from the
+      // ingestion job.
+      return `CMT-${rowId}`;
     case 'symbol':
       return `SYM-${rowId}`;
     case 'project':

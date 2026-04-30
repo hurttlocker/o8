@@ -24,6 +24,11 @@ import { getSqlite } from '@/lib/db';
 import { isFts5Available } from '@/lib/db/v14-fts5-migration';
 
 const PER_INDEX_LIMIT = 20;
+// Comments compete with the rest of the indexes inside the FTS retriever's
+// own RRF merge, then again in retrieve.ts. Capping the per-table input at
+// 8 keeps comment hits from flooding the top-30 — they should be substrate
+// for decisions/specs, not the dominant voice.
+const PER_COMMENTS_LIMIT = 8;
 const DEFAULT_LIMIT = 30;
 const RRF_K = 60;
 
@@ -62,6 +67,7 @@ function ftsSearch(
   table: string,
   rowIdCol: string,
   match: string,
+  limit: number = PER_INDEX_LIMIT,
 ): FtsRow[] {
   try {
     // bm25() returns a negative rank — lower is better. We negate so higher
@@ -73,7 +79,7 @@ function ftsSearch(
       FROM ${table}
       WHERE ${table} MATCH ?
       ORDER BY bm25(${table})
-      LIMIT ${PER_INDEX_LIMIT}
+      LIMIT ${limit}
     `;
     return sqlite.prepare(sql).all(match) as FtsRow[];
   } catch (error) {
@@ -119,6 +125,17 @@ interface DirectiveRow {
   body: string;
 }
 
+interface CommentRow {
+  id: string;
+  parent_kind: 'issue' | 'pull_request';
+  parent_number: number;
+  repo_full_name: string;
+  author_login: string | null;
+  body: string;
+  url: string | null;
+  updated_at: string | null;
+}
+
 export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResult> {
   const start = Date.now();
   const rows: TypedRow[] = [];
@@ -153,6 +170,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
     const prsHits: TableHits = new Map();
     const issuesHits: TableHits = new Map();
     const directivesHits: TableHits = new Map();
+    const commentsHits: TableHits = new Map();
 
     const merge = (target: TableHits, hits: FtsRow[]) => {
       for (const hit of hits) {
@@ -168,6 +186,13 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
       merge(prsHits, ftsSearch(sqlite, 'prs_fts', 'pr_id', match));
       merge(issuesHits, ftsSearch(sqlite, 'issues_fts', 'issue_id', match));
       merge(directivesHits, ftsSearch(sqlite, 'directives_fts', 'directive_id', match));
+      // Comments table may not exist on installs that haven't applied schema
+      // v15 yet — ftsSearch swallows the error and returns []. The retriever
+      // stays no-op in that case and the rest of the FTS5 path keeps working.
+      merge(
+        commentsHits,
+        ftsSearch(sqlite, 'comments_fts', 'comment_id', match, PER_COMMENTS_LIMIT),
+      );
     }
 
     // Convert per-table maps into ranked lists, then RRF-merge into the
@@ -337,6 +362,58 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
           score: 0,
         });
       });
+    }
+
+    // comments — join back to github_comments for author + url metadata.
+    // The table may not exist on installs that haven't applied v15 yet;
+    // wrap in try/catch so the rest of the retriever still returns rows.
+    if (commentsHits.size > 0) {
+      try {
+        const sortedIds = [...commentsHits.entries()]
+          .sort((a, b) => b[1].rank - a[1].rank)
+          .map(([id]) => id);
+        const records = sqlite
+          .prepare(
+            `SELECT id, parent_kind, parent_number, repo_full_name, author_login,
+                    body, url, updated_at
+             FROM github_comments
+             WHERE id IN (${sortedIds.map(() => '?').join(',')})`,
+          )
+          .all(...sortedIds) as CommentRow[];
+        const byId = new Map(records.map((r) => [r.id, r]));
+        sortedIds.forEach((id, idx) => {
+          const record = byId.get(id);
+          if (!record) return;
+          const hit = commentsHits.get(id)!;
+          const score = 1 / (RRF_K + idx);
+          accumulate(`comment:${id}`, score, {
+            citation: {
+              kind: 'comment',
+              rowId: id,
+              table: 'github_comments',
+              url: record.url ?? undefined,
+              excerpt: hit.excerpt,
+            },
+            fields: {
+              id: record.id,
+              parentKind: record.parent_kind,
+              parentNumber: record.parent_number,
+              repoFullName: record.repo_full_name,
+              author: record.author_login,
+              body: record.body,
+              url: record.url,
+              updatedAt: record.updated_at,
+            },
+            score: 0,
+          });
+        });
+      } catch (error) {
+        // github_comments missing — pre-v15 install. Quietly skip.
+        console.warn(
+          '[qa][fts] comments join skipped:',
+          error instanceof Error ? error.message : error,
+        );
+      }
     }
 
     // Final pass — sort by RRF score, slice to limit. Caller can re-sort
