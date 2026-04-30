@@ -177,8 +177,8 @@ function DashboardInner() {
   const [inTauri, setInTauri] = useState(false);
   useEffect(() => {
     setInTauri(isTauri());
-    // initMcpPlugin() now lives in NavigationBridge so it runs on every
-    // route, not just /dashboard (#932). Don't re-init here.
+    // tauri-plugin-mcp no longer needs JS-side init — the eval_and_await
+    // protocol shipped in #932 phase 2 invokes JS from Rust per call.
     // Schedule the "interactive" mark on the first idle tick after mount.
     // requestIdleCallback is unavailable in some webview / older browser
     // environments, so we fall back to setTimeout(_, 0). Either way the
