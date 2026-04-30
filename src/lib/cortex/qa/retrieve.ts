@@ -22,6 +22,15 @@ const MERGE_LIMIT = 30;
 const RRF_K = 60;
 
 /**
+ * #915 north star #3 — facts are pre-extracted (high-trust) and would otherwise
+ * compete fairly via RRF against raw prose rows that share token overlap with
+ * the question. We pin up to 6 fact rows to the front of the merged top-30 so
+ * the composer always sees them first. 6 is small enough to leave 24 slots for
+ * non-fact rows; tunable. With 0 facts, behavior is identical to pre-pin RRF.
+ */
+const FACTS_PIN_LIMIT = 6;
+
+/**
  * Run every retriever in parallel. Each retriever swallows its own errors
  * and returns an empty `rows` on failure — `Promise.allSettled` is just a
  * belt-and-braces guard so a hard throw in one retriever can't take the
@@ -60,17 +69,46 @@ export async function retrieveAll(input: RetrieverInput): Promise<RetrieverResul
  * the SQL retriever picked because it's recent AND the FTS retriever picked
  * because it matches the question) get a higher merged score than either
  * alone, which is exactly what we want for the LLM composer.
+ *
+ * #915 north star #3 — facts are pinned to the top of the result. Up to
+ * `FACTS_PIN_LIMIT` highest-scoring fact rows take positions 0..K-1 of the
+ * returned slice; non-fact rows fill K..MERGE_LIMIT-1 by RRF. Pinned facts
+ * are removed from the RRF pool so they don't double-occupy slots. With zero
+ * facts the output is identical to pre-pin RRF.
  */
 export function unionMerge(results: RetrieverResult[]): TypedRow[] {
+  // Separate the facts retriever output before RRF so we can pin its
+  // highest-scoring rows above everything else. Non-facts retrievers feed
+  // the union as before.
+  const factsResult = results.find((r) => r.retriever === 'facts');
+  const otherResults = results.filter((r) => r.retriever !== 'facts');
+
+  // Take up to FACTS_PIN_LIMIT facts in their retriever's existing order
+  // (retrieveFacts sorts by BM25 rank descending — score field). Cap at
+  // MERGE_LIMIT so we never return more than 30 total rows.
+  const pinnedFacts: TypedRow[] = factsResult
+    ? [...factsResult.rows]
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .slice(0, Math.min(FACTS_PIN_LIMIT, MERGE_LIMIT))
+    : [];
+
+  // Build a key set so we can drop any duplicate that surfaces from another
+  // retriever (extremely unlikely — only facts retriever emits 'fact' kind —
+  // but cheap insurance against future cross-retriever overlap).
+  const pinnedKeys = new Set(
+    pinnedFacts.map((row) => `${row.citation.kind}:${row.citation.rowId}`),
+  );
+
   const scores = new Map<string, number>();
   const rows = new Map<string, TypedRow>();
 
-  for (const result of results) {
+  for (const result of otherResults) {
     // Sort each retriever's rows by their pre-existing score (FTS uses RRF
     // internally; SQL/graph give 1) so the top-ranked row gets rank 0.
     const sorted = [...result.rows].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     sorted.forEach((row, idx) => {
       const key = `${row.citation.kind}:${row.citation.rowId}`;
+      if (pinnedKeys.has(key)) return; // already pinned above the merge
       const contribution = 1 / (RRF_K + idx);
       const prev = scores.get(key) ?? 0;
       scores.set(key, prev + contribution);
@@ -93,7 +131,10 @@ export function unionMerge(results: RetrieverResult[]): TypedRow[] {
     });
   }
 
-  return [...rows.values()]
+  const remainingSlots = Math.max(0, MERGE_LIMIT - pinnedFacts.length);
+  const mergedNonFacts = [...rows.values()]
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-    .slice(0, MERGE_LIMIT);
+    .slice(0, remainingSlots);
+
+  return [...pinnedFacts, ...mergedNonFacts];
 }
