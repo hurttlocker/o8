@@ -271,10 +271,12 @@ async function tryComposeCodex(prompt: string): Promise<string | null> {
   }
 }
 
-/** Tier 3: OpenRouter — gpt-5.4-nano with in-call gpt-5-nano fallback. */
+/** Tier 3: OpenRouter — grok-4.1-fast with flash-lite + gpt-5-nano in-call fallback. */
 async function tryComposeOpenRouter(prompt: string): Promise<string | null> {
   try {
-    const text = await callOpenRouter(prompt, { timeoutMs: 8_000 });
+    // 10s — Grok 4.1 Fast 5-fact p50 was 5.7s in the bake-off; 8s would
+    // truncate ~30% of long answers, 10s gives headroom.
+    const text = await callOpenRouter(prompt, { timeoutMs: 10_000 });
     return text.trim() ? text : null;
   } catch (err) {
     console.warn('[qa][composer-A] OpenRouter failed:', err instanceof Error ? err.message : err);
