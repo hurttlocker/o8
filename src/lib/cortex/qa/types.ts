@@ -17,6 +17,8 @@ export type CitationKind =
   | 'outcome'
   | 'pr'
   | 'issue'
+  | 'comment'
+  | 'doc'
   | 'symbol'
   | 'project'
   | 'project_repo';
