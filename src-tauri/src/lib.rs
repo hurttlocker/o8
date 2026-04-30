@@ -1654,6 +1654,14 @@ const CONSOLE_ERROR_HOOK_JS: &str = r#"
 /// bumps the per-fetch counter that `o8_view_console_errors` resets on read.
 #[tauri::command]
 fn record_console_error(message: String, source: String, lineno: u32) {
+    // #932: also log to sidecar so the ring buffer is visible without going
+    // through o8_view_console_errors (which goes through the broken eval path).
+    log::info!(
+        "[webview-console] {} (source={} line={})",
+        message.chars().take(400).collect::<String>(),
+        source,
+        lineno
+    );
     let Ok(mut buffer) = console_errors().lock() else {
         return;
     };
