@@ -68,6 +68,7 @@ export function ThoughtsMissionPanel({
   onFocusPacket?: (packet: OrchestratorPacket) => void;
   focusedRepoId?: string | null;
 }) {
+  const orchestratorData = useOrchestratorData();
   const [issueGroups, setIssueGroups] = useState<RepoIssuesGroup[]>([]);
   const [issueGroupCollapsed, setIssueGroupCollapsed] = useState<Record<string, boolean>>({});
   const [issuesLoading, setIssuesLoading] = useState(false);
@@ -80,12 +81,20 @@ export function ThoughtsMissionPanel({
   // #626 — cache of workspace localPath → GitHub remoteUrl, reused by PacketCard
   // so its "open" action can derive an issue URL when packet.issue?.url is absent.
   const [repoRemoteUrlByPath, setRepoRemoteUrlByPath] = useState<Record<string, string | null>>({});
-  const [expandedPacketId, setExpandedPacketId] = useState<string | null>(null);
+  // #888/#895 — packet selection is lifted to OrchestratorDataContext so the
+  // dashboard's right-side workspace panel can flip into packet-mode (Spec /
+  // Agent Overview) when one is expanded. We keep a local fallback for tests
+  // / isolated mounts that don't include the provider.
+  const [localExpandedPacketId, setLocalExpandedPacketId] = useState<string | null>(null);
+  const expandedPacketId = orchestratorData?.selectedPacketId ?? localExpandedPacketId;
+  const setExpandedPacketId = useCallback((next: string | null) => {
+    setLocalExpandedPacketId(next);
+    orchestratorData?.onSelectedPacketChange?.(next);
+  }, [orchestratorData]);
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [reviewStateByPacketId, setReviewStateByPacketId] = useState<Record<string, ReviewPanelState>>({});
   const branchAutofillAttemptRef = useRef<Record<string, string>>({});
   const branchRequestByRepoPathRef = useRef<Record<string, Promise<Awaited<ReturnType<typeof fetchPacketBranches>>>>>({});
-  const orchestratorData = useOrchestratorData();
 
   // Close editing field on Escape or click outside any row in the
   // expanded packet card.
