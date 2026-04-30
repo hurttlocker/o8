@@ -21,7 +21,9 @@
 import 'server-only';
 
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
+import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
+import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 
@@ -162,14 +164,18 @@ function sseFrame(name: string, payload: unknown): string {
 
 export type SseEmit = (name: string, payload: unknown) => void;
 
-// ── Class A composer (Flash → Haiku CLI → Sonnet CLI → heuristic) ────────────
+// ── Class A composer (Haiku CLI → Codex CLI → OpenRouter → Flash → Sonnet CLI → heuristic) ──
 
 /**
- * Class A compose chain:
- *   1. Flash       — fast (200-500ms) JSON answer when Google AI key + service available
- *   2. Haiku CLI   — falls in when Flash 503s / errors. Claude Max subscription, no token cost.
- *   3. Sonnet CLI  — last LLM tier; slower (5-12s) but reuses the same CLI plumbing.
- *   4. Heuristic   — final fallback when all LLMs are unavailable.
+ * Class A compose chain (rewired in #915 path-to-70 phase 1.7 v2):
+ *   1. Haiku CLI   — Claude Max subscription, no per-token cost. Primary.
+ *   2. Codex CLI   — ChatGPT Plus / Codex subscription, also free. Two CLIs
+ *                     beat one for users with either sub. ~15s vs ~14s Haiku.
+ *   3. OpenRouter  — gpt-5.4-nano (newest cheap reasoning) w/ gpt-5-nano fallback.
+ *                     Paid (~$0.0004 per Class A answer) but ~1s, the safety net.
+ *   4. Flash       — Google AI key. Demoted because of recent 503 churn.
+ *   5. Sonnet CLI  — slow (5-12s) but reliable when everything else 503s.
+ *   6. Heuristic   — final fallback when every LLM is unavailable.
  *
  * Each tier returns a raw answer string (or null on failure). After we get
  * an answer, we translate bracket citations → CITATION markers, emit tokens
@@ -189,25 +195,41 @@ export async function composeClassA(
       excerpt: r.citation.excerpt ?? '',
     })),
   );
-  const flashPrompt = buildFlashComposePrompt(question, rowsJson);
+  const composePrompt = buildFlashComposePrompt(question, rowsJson);
 
-  // Tier 1: Flash.
-  const flashAnswer = await tryComposeFlash(flashPrompt);
-  if (flashAnswer) {
-    console.info('[qa][composer-A] resolved via flash');
-    emitClassAAnswer(flashAnswer, lookup, emit);
-    return;
-  }
-
-  // Tier 2: Haiku CLI.
-  const haikuAnswer = await tryComposeHaiku(flashPrompt);
+  // Tier 1: Haiku CLI.
+  const haikuAnswer = await tryComposeHaiku(composePrompt);
   if (haikuAnswer) {
     console.info('[qa][composer-A] resolved via haiku-cli');
     emitClassAAnswer(haikuAnswer, lookup, emit);
     return;
   }
 
-  // Tier 3: Sonnet CLI (callSonnet's CLI tier — slow but reliable).
+  // Tier 2: Codex CLI.
+  const codexAnswer = await tryComposeCodex(composePrompt);
+  if (codexAnswer) {
+    console.info(`[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
+    emitClassAAnswer(codexAnswer, lookup, emit);
+    return;
+  }
+
+  // Tier 3: OpenRouter (gpt-5.4-nano w/ gpt-5-nano fallback).
+  const openrouterAnswer = await tryComposeOpenRouter(composePrompt);
+  if (openrouterAnswer) {
+    console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL}`);
+    emitClassAAnswer(openrouterAnswer, lookup, emit);
+    return;
+  }
+
+  // Tier 4: Flash.
+  const flashAnswer = await tryComposeFlash(composePrompt);
+  if (flashAnswer) {
+    console.info('[qa][composer-A] resolved via flash');
+    emitClassAAnswer(flashAnswer, lookup, emit);
+    return;
+  }
+
+  // Tier 5: Sonnet CLI (callSonnet's CLI tier — slow but reliable).
   const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
   if (sonnetAnswer) {
     console.info('[qa][composer-A] resolved via sonnet-cli');
@@ -215,13 +237,52 @@ export async function composeClassA(
     return;
   }
 
-  // Tier 4: heuristic.
+  // Tier 6: heuristic.
   console.info('[qa][composer-A] resolved via heuristic');
   emit('token', { text: 'I don\'t have that information yet.' });
   emit('done', {});
 }
 
-/** Tier 1: Flash. Returns answer text or null on any failure. */
+/** Tier 1: Haiku CLI. Free for Claude Max users — primary tier. */
+async function tryComposeHaiku(prompt: string): Promise<string | null> {
+  try {
+    // 12s — Haiku CLI bootstrap (login-shell + node start) takes ~6-8s before
+    // the model even runs. As tier 1 we own the larger ceiling; Codex CLI +
+    // OpenRouter + Flash are the fallbacks below.
+    const text = await callHaiku(prompt, { timeoutMs: 12_000 });
+    return text.trim() ? text : null;
+  } catch (err) {
+    console.warn('[qa][composer-A] Haiku CLI failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/** Tier 2: Codex CLI. Free for ChatGPT Plus / Codex sub users. */
+async function tryComposeCodex(prompt: string): Promise<string | null> {
+  try {
+    // 30s — Codex bootstrap is ~15s for trivial prompts (verified live with gpt-5.4).
+    // The larger ceiling matches the slower bootstrap path; OpenRouter (~1s)
+    // is the fast-path fallback below.
+    const text = await callCodex(prompt, { timeoutMs: 30_000 });
+    return text.trim() ? text : null;
+  } catch (err) {
+    console.warn('[qa][composer-A] Codex CLI failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/** Tier 3: OpenRouter — gpt-5.4-nano with in-call gpt-5-nano fallback. */
+async function tryComposeOpenRouter(prompt: string): Promise<string | null> {
+  try {
+    const text = await callOpenRouter(prompt, { timeoutMs: 8_000 });
+    return text.trim() ? text : null;
+  } catch (err) {
+    console.warn('[qa][composer-A] OpenRouter failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/** Tier 3: Flash. Returns answer text or null on any failure. */
 async function tryComposeFlash(prompt: string): Promise<string | null> {
   const apiKey =
     process.env.GOOGLE_AI_API_KEY ??
@@ -245,7 +306,7 @@ async function tryComposeFlash(prompt: string): Promise<string | null> {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.warn(`[qa][composer-A] Flash error ${res.status}: ${errText.slice(0, 200)} — trying Haiku CLI`);
+      console.warn(`[qa][composer-A] Flash error ${res.status}: ${errText.slice(0, 200)} — trying Sonnet CLI`);
       return null;
     }
 
@@ -260,29 +321,16 @@ async function tryComposeFlash(prompt: string): Promise<string | null> {
   }
 }
 
-/** Tier 2: Haiku CLI. Same prompt shape as Flash. */
-async function tryComposeHaiku(prompt: string): Promise<string | null> {
-  try {
-    // 12s — Haiku CLI bootstrap (login-shell + node start) takes ~6-8s before
-    // the model even runs. Flash already had its 8s shot above; this is the
-    // slower fallback so a slightly-longer ceiling is fine.
-    const text = await callHaiku(prompt, { timeoutMs: 12_000 });
-    return text.trim() ? text : null;
-  } catch (err) {
-    console.warn('[qa][composer-A] Haiku CLI failed:', err instanceof Error ? err.message : err);
-    return null;
-  }
-}
-
 /**
- * Tier 3: Sonnet CLI via callSonnet (non-streaming).
+ * Tier 5: Sonnet CLI via callSonnet (non-streaming).
  *
  * Reuses Class B's prompt shape (system + user) since Sonnet works best
- * with the structured rows JSON. We only fall here when both Flash and
- * Haiku failed, so the slower latency is acceptable.
+ * with the structured rows JSON. We only fall here when Haiku CLI,
+ * Codex CLI, OpenRouter, and Flash all failed, so the slower latency is
+ * acceptable.
  *
  * Returns null when callSonnet itself errors OR when the resolved tier is
- * Flash (we already tried Flash in tier 1 — no point looping back).
+ * Flash (we already tried Flash in tier 4 — no point looping back).
  */
 async function tryComposeSonnet(
   question: string,
@@ -301,7 +349,7 @@ async function tryComposeSonnet(
       stream: false,
     });
     if (result.tier === 'flash') {
-      // callSonnet degraded back to Flash; we already tried Flash in tier 1.
+      // callSonnet degraded back to Flash; we already tried Flash in tier 4.
       return null;
     }
     return result.text.trim() ? result.text : null;
