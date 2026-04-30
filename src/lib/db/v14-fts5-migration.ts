@@ -271,6 +271,16 @@ function backfillDirectivesFts(sqlite: Database.Database): number {
   }
   if (files.length === 0) return 0;
 
+  // #915 path-to-70 phase 1.3 — upsert semantics by directive id (the slug).
+  // Two markdown files with the same `id:` front-matter slug used to produce
+  // two FTS rows; the RRF retriever then picked one non-deterministically and
+  // the Q&A judge dinged citation_correctness. Now we delete-then-insert per
+  // id so the last-loaded file wins and the index always carries a single row
+  // per slug. Seed directives sort first by filename ('s' > 'd'), so when a
+  // legacy `d-*.md` paraphrases a `seed-*.md` rule and they happen to share
+  // the same id (rare — they don't today, but defensive), the seed wins.
+  files.sort();
+  const del = sqlite.prepare('DELETE FROM directives_fts WHERE directive_id = ?');
   const insert = sqlite.prepare(
     'INSERT INTO directives_fts(directive_id, title, body) VALUES (?, ?, ?)',
   );
@@ -280,6 +290,7 @@ function backfillDirectivesFts(sqlite: Database.Database): number {
       try {
         const raw = readFileSync(join(dir, name), 'utf-8');
         const { id, title, body } = extractDirectiveFields(raw, name);
+        del.run(id);
         insert.run(id, title, body);
         inserted += 1;
       } catch {
