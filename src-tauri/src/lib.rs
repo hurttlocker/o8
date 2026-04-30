@@ -2381,7 +2381,13 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_mcp::init_with_config(
             tauri_plugin_mcp::PluginConfig::new("o8".to_string())
                 .start_socket_server(true)
-                .socket_path(socket_path.into()),
+                .socket_path(socket_path.into())
+                // #932: pin the default webview label so emit_to('main') resolves
+                // deterministically against the webview registry, not the
+                // ambiguous window-vs-webview label scope. Without this, JS-side
+                // listeners registered via WebviewWindow.listen() never receive
+                // requests Rust emits with app.emit_to('main', ...).
+                .default_webview_label("main".to_string()),
         ));
     }
 
