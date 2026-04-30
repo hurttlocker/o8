@@ -196,24 +196,32 @@ export async function composeClassA(
     })),
   );
   const composePrompt = buildFlashComposePrompt(question, rowsJson);
+  // O8_EVAL_MODE=1 skips CLI tiers (Haiku, Codex, Sonnet) so eval runs use the
+  // fast HTTP path (OpenRouter → Flash → heuristic). The judge in
+  // eval/runner.ts keeps using Sonnet CLI for scoring consistency.
+  const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
-  // Tier 1: Haiku CLI.
-  const haikuAnswer = await tryComposeHaiku(composePrompt);
-  if (haikuAnswer) {
-    console.info('[qa][composer-A] resolved via haiku-cli');
-    emitClassAAnswer(haikuAnswer, lookup, emit);
-    return;
+  // Tier 1: Haiku CLI. Skipped in eval mode.
+  if (!evalMode) {
+    const haikuAnswer = await tryComposeHaiku(composePrompt);
+    if (haikuAnswer) {
+      console.info('[qa][composer-A] resolved via haiku-cli');
+      emitClassAAnswer(haikuAnswer, lookup, emit);
+      return;
+    }
   }
 
-  // Tier 2: Codex CLI.
-  const codexAnswer = await tryComposeCodex(composePrompt);
-  if (codexAnswer) {
-    console.info(`[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
-    emitClassAAnswer(codexAnswer, lookup, emit);
-    return;
+  // Tier 2: Codex CLI. Skipped in eval mode.
+  if (!evalMode) {
+    const codexAnswer = await tryComposeCodex(composePrompt);
+    if (codexAnswer) {
+      console.info(`[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
+      emitClassAAnswer(codexAnswer, lookup, emit);
+      return;
+    }
   }
 
-  // Tier 3: OpenRouter (gpt-5.4-nano w/ gpt-5-nano fallback).
+  // Tier 3: OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5-nano fallback).
   const openrouterAnswer = await tryComposeOpenRouter(composePrompt);
   if (openrouterAnswer) {
     console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL}`);
@@ -229,12 +237,14 @@ export async function composeClassA(
     return;
   }
 
-  // Tier 5: Sonnet CLI (callSonnet's CLI tier — slow but reliable).
-  const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
-  if (sonnetAnswer) {
-    console.info('[qa][composer-A] resolved via sonnet-cli');
-    emitClassAAnswer(sonnetAnswer, lookup, emit);
-    return;
+  // Tier 5: Sonnet CLI (callSonnet's CLI tier — slow but reliable). Skipped in eval mode.
+  if (!evalMode) {
+    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
+    if (sonnetAnswer) {
+      console.info('[qa][composer-A] resolved via sonnet-cli');
+      emitClassAAnswer(sonnetAnswer, lookup, emit);
+      return;
+    }
   }
 
   // Tier 6: heuristic.
@@ -390,6 +400,15 @@ export async function composeClassB(
   emit: SseEmit,
 ): Promise<void> {
   const lookup = buildCitationLookup(topRows);
+  // O8_EVAL_MODE=1 routes Class B through OpenRouter (non-streaming) instead
+  // of Sonnet CLI. ~14-16s saved per multi-fact case during eval iteration.
+  // Eval doesn't care about TTFT — only final answer correctness. Production
+  // path (Sonnet CLI streaming) is unchanged.
+  const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
+
+  if (evalMode) {
+    return composeClassBViaOpenRouter(question, repoPath, topRows, emit, lookup);
+  }
 
   try {
     const result = await callSonnet({
@@ -442,6 +461,60 @@ export async function composeClassB(
     const message = err instanceof Error ? err.message : 'composer-B error';
     console.warn('[qa][composer-B] error:', message);
     // Degrade to Flash on any failure.
+    return composeClassA(question, repoPath, topRows, emit);
+  }
+}
+
+/**
+ * Eval-mode Class B path. Routes the same Sonnet system+user prompt through
+ * OpenRouter (non-streaming) instead of Sonnet CLI. ~14-16s saved per case.
+ * Used only when O8_EVAL_MODE=1.
+ */
+async function composeClassBViaOpenRouter(
+  question: string,
+  repoPath: string | undefined,
+  topRows: TypedRow[],
+  emit: SseEmit,
+  lookup: Map<string, TypedRow>,
+): Promise<void> {
+  try {
+    const system = buildSonnetComposeSystem();
+    const user = buildSonnetComposeUser(question, repoPath, topRows);
+    const fullText = await callOpenRouter(`${system}\n\n${user}`, { timeoutMs: 30_000 });
+
+    let finalAnswer = '';
+    if (fullText.trim()) {
+      emit('token', { text: fullText });
+      const { translatedAnswer: translated, verifiedRows } = translateCitations(fullText, lookup);
+      finalAnswer = translated;
+      for (const row of verifiedRows) {
+        emit('citation', {
+          kind: row.citation.kind,
+          rowId: `${row.citation.kind}-${row.citation.rowId}`,
+          table: row.citation.table,
+          excerpt: row.citation.excerpt,
+          url: row.citation.url,
+        });
+      }
+    } else {
+      emit('token', { text: 'I don\'t have that information yet — try indexing more directives or PRs.' });
+    }
+
+    if (finalAnswer.trim()) {
+      try {
+        const contradictions = await detectContradictions({ rows: topRows, answer: finalAnswer });
+        for (const c of contradictions) {
+          emit('contradiction', c);
+        }
+      } catch {
+        // Contradiction pass is best-effort.
+      }
+    }
+
+    emit('done', {});
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'composer-B-eval error';
+    console.warn('[qa][composer-B-eval] error:', message);
     return composeClassA(question, repoPath, topRows, emit);
   }
 }
