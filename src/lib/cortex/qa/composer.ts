@@ -21,6 +21,7 @@
 import 'server-only';
 
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
+import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 
@@ -157,19 +158,26 @@ function sseFrame(name: string, payload: unknown): string {
 
 export type SseEmit = (name: string, payload: unknown) => void;
 
-// ── Class A composer (Flash, non-streaming) ───────────────────────────────────
+// ── Class A composer (Flash → Haiku CLI → Sonnet CLI → heuristic) ────────────
 
+/**
+ * Class A compose chain:
+ *   1. Flash       — fast (200-500ms) JSON answer when Google AI key + service available
+ *   2. Haiku CLI   — falls in when Flash 503s / errors. Claude Max subscription, no token cost.
+ *   3. Sonnet CLI  — last LLM tier; slower (5-12s) but reuses the same CLI plumbing.
+ *   4. Heuristic   — final fallback when all LLMs are unavailable.
+ *
+ * Each tier returns a raw answer string (or null on failure). After we get
+ * an answer, we translate bracket citations → CITATION markers, emit tokens
+ * and verified citations, then `done`. The path that resolved is logged so
+ * we can track tier health in production.
+ */
 export async function composeClassA(
   question: string,
   repoPath: string | undefined,
   topRows: TypedRow[],
   emit: SseEmit,
 ): Promise<void> {
-  const apiKey =
-    process.env.GOOGLE_AI_API_KEY ??
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
-    process.env.GEMINI_API_KEY;
-
   const lookup = buildCitationLookup(topRows);
   const rowsJson = JSON.stringify(
     topRows.slice(0, 15).map((r) => ({
@@ -177,13 +185,45 @@ export async function composeClassA(
       excerpt: r.citation.excerpt ?? '',
     })),
   );
+  const flashPrompt = buildFlashComposePrompt(question, rowsJson);
 
-  if (!apiKey) {
-    // Degrade to a "no key" message so the UI still shows something.
-    emit('token', { text: 'No Google AI key configured. Answer unavailable.' });
-    emit('done', {});
+  // Tier 1: Flash.
+  const flashAnswer = await tryComposeFlash(flashPrompt);
+  if (flashAnswer) {
+    console.info('[qa][composer-A] resolved via flash');
+    emitClassAAnswer(flashAnswer, lookup, emit);
     return;
   }
+
+  // Tier 2: Haiku CLI.
+  const haikuAnswer = await tryComposeHaiku(flashPrompt);
+  if (haikuAnswer) {
+    console.info('[qa][composer-A] resolved via haiku-cli');
+    emitClassAAnswer(haikuAnswer, lookup, emit);
+    return;
+  }
+
+  // Tier 3: Sonnet CLI (callSonnet's CLI tier — slow but reliable).
+  const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
+  if (sonnetAnswer) {
+    console.info('[qa][composer-A] resolved via sonnet-cli');
+    emitClassAAnswer(sonnetAnswer, lookup, emit);
+    return;
+  }
+
+  // Tier 4: heuristic.
+  console.info('[qa][composer-A] resolved via heuristic');
+  emit('token', { text: 'I don\'t have that information yet.' });
+  emit('done', {});
+}
+
+/** Tier 1: Flash. Returns answer text or null on any failure. */
+async function tryComposeFlash(prompt: string): Promise<string | null> {
+  const apiKey =
+    process.env.GOOGLE_AI_API_KEY ??
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
+    process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
 
   try {
     const res = await fetch(
@@ -192,16 +232,8 @@ export async function composeClassA(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: buildFlashComposePrompt(question, rowsJson) }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 300,
-          },
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
         }),
         signal: AbortSignal.timeout(8_000),
       },
@@ -209,42 +241,90 @@ export async function composeClassA(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      emit('token', { text: `Answer unavailable (API error ${res.status}).` });
-      console.warn(`[qa][composer-A] Flash error ${res.status}: ${errText.slice(0, 200)}`);
-      emit('done', {});
-      return;
+      console.warn(`[qa][composer-A] Flash error ${res.status}: ${errText.slice(0, 200)} — trying Haiku CLI`);
+      return null;
     }
 
     const json = await res.json() as {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
-    const rawAnswer = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    if (!rawAnswer.trim()) {
-      emit('token', { text: 'I don\'t have that information yet.' });
-      emit('done', {});
-      return;
-    }
-
-    const { translatedAnswer, verifiedRows } = translateCitations(rawAnswer, lookup);
-
-    // Emit token then verified citations.
-    emit('token', { text: translatedAnswer });
-    for (const row of verifiedRows) {
-      emit('citation', {
-        kind: row.citation.kind,
-        rowId: `${row.citation.kind}-${row.citation.rowId}`,
-        table: row.citation.table,
-        excerpt: row.citation.excerpt,
-        url: row.citation.url,
-      });
-    }
-    emit('done', {});
+    const text = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    return text.trim() ? text : null;
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'composer-A error';
-    console.warn('[qa][composer-A] error:', message);
-    emit('token', { text: 'I don\'t have that information yet.' });
-    emit('done', {});
+    console.warn('[qa][composer-A] Flash threw:', err instanceof Error ? err.message : err);
+    return null;
   }
+}
+
+/** Tier 2: Haiku CLI. Same prompt shape as Flash. */
+async function tryComposeHaiku(prompt: string): Promise<string | null> {
+  try {
+    // 12s — Haiku CLI bootstrap (login-shell + node start) takes ~6-8s before
+    // the model even runs. Flash already had its 8s shot above; this is the
+    // slower fallback so a slightly-longer ceiling is fine.
+    const text = await callHaiku(prompt, { timeoutMs: 12_000 });
+    return text.trim() ? text : null;
+  } catch (err) {
+    console.warn('[qa][composer-A] Haiku CLI failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Tier 3: Sonnet CLI via callSonnet (non-streaming).
+ *
+ * Reuses Class B's prompt shape (system + user) since Sonnet works best
+ * with the structured rows JSON. We only fall here when both Flash and
+ * Haiku failed, so the slower latency is acceptable.
+ *
+ * Returns null when callSonnet itself errors OR when the resolved tier is
+ * Flash (we already tried Flash in tier 1 — no point looping back).
+ */
+async function tryComposeSonnet(
+  question: string,
+  repoPath: string | undefined,
+  topRows: TypedRow[],
+): Promise<string | null> {
+  try {
+    const result = await callSonnet({
+      system: buildSonnetComposeSystem(),
+      messages: [
+        {
+          role: 'user',
+          content: buildSonnetComposeUser(question, repoPath, topRows),
+        },
+      ],
+      stream: false,
+    });
+    if (result.tier === 'flash') {
+      // callSonnet degraded back to Flash; we already tried Flash in tier 1.
+      return null;
+    }
+    return result.text.trim() ? result.text : null;
+  } catch (err) {
+    console.warn('[qa][composer-A] Sonnet CLI failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Translate bracket citations, emit token + citations + done. Shared by all
+ * three LLM tiers so the SSE shape stays identical regardless of which
+ * provider answered.
+ */
+function emitClassAAnswer(rawAnswer: string, lookup: Map<string, TypedRow>, emit: SseEmit): void {
+  const { translatedAnswer, verifiedRows } = translateCitations(rawAnswer, lookup);
+  emit('token', { text: translatedAnswer });
+  for (const row of verifiedRows) {
+    emit('citation', {
+      kind: row.citation.kind,
+      rowId: `${row.citation.kind}-${row.citation.rowId}`,
+      table: row.citation.table,
+      excerpt: row.citation.excerpt,
+      url: row.citation.url,
+    });
+  }
+  emit('done', {});
 }
 
 // ── Class B composer (Sonnet via CLI > API > Flash) ──────────────────────────
