@@ -41,6 +41,9 @@ import { useOrchestratorContextResidency } from '@/components/desktop/orchestrat
 import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
+import { IntentChips } from '@/components/desktop/orchestrator/IntentChips';
+import { ModePicker, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
+import { WaitingFooter } from '@/components/desktop/orchestrator/WaitingFooter';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
@@ -132,6 +135,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   missionState,
   preferredRuntime,
   sessionTargets,
+  workspaceTargets,
   repoPath: repoPathProp,
   thoughtsBodyBackground,
   thoughtsElevatedSurface,
@@ -151,6 +155,38 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
+  // #888/#891 — repo + branch chips below the composer once intent has
+  // text. The chips advise scope; the orchestrator still reads its own
+  // truth at dispatch time. Default repo = parent-provided repoPathProp.
+  const [intentRepoPath, setIntentRepoPath] = useState<string | null>(repoPathProp ?? null);
+  const [intentBranch, setIntentBranch] = useState<string>('main');
+  // #888/#892 — orchestration mode picker, persisted per-workspace.
+  const workspaceModeKey = repoPathProp ?? '__global__';
+  const [orchestrationMode, setOrchestrationMode] = useState<OrchestrationMode>('fleet');
+  const [singleRuntime, setSingleRuntime] = useState<OrchestratorRuntime>('codex');
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.resolve().then(async () => {
+      const mod = await import('@/components/desktop/orchestrator/ModePicker');
+      if (cancelled) return;
+      const loaded = mod.loadOrchestrationMode(workspaceModeKey);
+      setOrchestrationMode(loaded.mode);
+      setSingleRuntime(loaded.runtime);
+    });
+    return () => { cancelled = true; };
+  }, [workspaceModeKey]);
+  const handleSelectOrchestrationMode = useCallback((next: OrchestrationMode) => {
+    setOrchestrationMode(next);
+    void import('@/components/desktop/orchestrator/ModePicker').then((mod) => {
+      mod.persistOrchestrationMode(workspaceModeKey, next, singleRuntime);
+    });
+  }, [singleRuntime, workspaceModeKey]);
+  const handleSelectSingleRuntime = useCallback((next: OrchestratorRuntime) => {
+    setSingleRuntime(next);
+    void import('@/components/desktop/orchestrator/ModePicker').then((mod) => {
+      mod.persistOrchestrationMode(workspaceModeKey, orchestrationMode, next);
+    });
+  }, [orchestrationMode, workspaceModeKey]);
   const [operatorDefaults, setOperatorDefaults] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
   const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
@@ -1038,6 +1074,29 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         showClearToast={showClearToast}
         showDraftClearedToast={showDraftClearedToast}
         thoughtsBodyBackground={thoughtsBodyBackground}
+      />
+
+      <WaitingFooter
+        count={isOrchestratorMode && displayWaiting ? Math.max(1, agents.filter((a) => a.status === 'running').length) : 0}
+        onStop={orchStream.interrupt}
+      />
+
+      <IntentChips
+        visible={input.trim().length > 0}
+        workspaceTargets={workspaceTargets ?? []}
+        selectedRepoPath={intentRepoPath}
+        onSelectRepoPath={setIntentRepoPath}
+        selectedBranch={intentBranch}
+        onSelectBranch={setIntentBranch}
+      />
+
+      <ModePicker
+        visible={input.trim().length > 0}
+        workspaceKey={workspaceModeKey}
+        selectedMode={orchestrationMode}
+        onSelectMode={handleSelectOrchestrationMode}
+        selectedSingleRuntime={singleRuntime}
+        onSelectSingleRuntime={handleSelectSingleRuntime}
       />
 
       <ComposerArea
