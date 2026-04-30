@@ -74,12 +74,8 @@ function LivingAgentPanelBase({ packet, toolCalls = [] }: LivingAgentPanelProps)
   const [, setRenderTick] = useState(0);
   const lastRenderRef = useRef<number>(0);
   const [subAgents, setSubAgents] = useState<SubAgentRow[]>([]);
-  const reducedMotionRef = useRef(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    reducedMotionRef.current = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-  }, []);
+  // The motion of this panel is delegated to its children (ToolCallChip).
+  // The chips handle prefers-reduced-motion themselves.
 
   // Throttle: never re-render this surface more than once per 100ms even
   // if events arrive in a burst. We schedule a trailing tick so the last

@@ -13,7 +13,7 @@
  *  - No emoji — raw inline SVG glyphs only.
  */
 
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 export type ToolCallChipStatus = 'running' | 'done' | 'error';
 
@@ -30,19 +30,21 @@ export interface ToolCallChipProps {
 }
 
 function ToolCallChipBase({ verb, argument, kind = 'generic', status = 'done', onClick }: ToolCallChipProps) {
-  const [mounted, setMounted] = useState(false);
-  const reducedMotionRef = useRef(false);
+  // Read prefers-reduced-motion once at mount as initializer. This avoids
+  // the react-hooks/set-state-in-effect lint rule and keeps a stable
+  // value across renders since the media query is read on first paint.
+  const [reducedMotion] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  });
+  const [mounted, setMounted] = useState<boolean>(reducedMotion);
 
   useEffect(() => {
+    if (reducedMotion) return;
     if (typeof window === 'undefined') return;
-    reducedMotionRef.current = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    if (reducedMotionRef.current) {
-      setMounted(true);
-      return;
-    }
     const t = window.setTimeout(() => setMounted(true), 0);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [reducedMotion]);
 
   const accent = status === 'running' ? '#FF5A1F' : status === 'error' ? 'var(--t-brand-red, #ef4444)' : 'var(--t-text-muted)';
   const textColor = status === 'running' ? 'var(--t-text)' : 'var(--t-text-secondary)';
@@ -74,7 +76,7 @@ function ToolCallChipBase({ verb, argument, kind = 'generic', status = 'done', o
         letterSpacing: '-0.005em',
         opacity: mounted ? 1 : 0,
         transform: mounted ? 'translateX(0)' : 'translateX(-4px)',
-        transition: reducedMotionRef.current
+        transition: reducedMotion
           ? 'none'
           : 'opacity 100ms cubic-bezier(0.22, 1, 0.36, 1), transform 100ms cubic-bezier(0.22, 1, 0.36, 1)',
         maxWidth: '100%',

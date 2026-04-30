@@ -19,7 +19,7 @@
  * is honored — no card mount animation when set.
  */
 
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 export type OrchestrationMode = 'fleet' | 'single';
@@ -49,11 +49,12 @@ function ModePickerBase({
   onSelectSingleRuntime,
 }: ModePickerProps) {
   void workspaceKey; // persistence wired by parent
+  // Whether the runtime sub-picker drawer is open. We derive openness
+  // from selectedMode + an explicit user toggle in the same setter so we
+  // never have to "sync" two states inside an effect (per react-hooks/
+  // set-state-in-effect lint rule).
   const [singleOpen, setSingleOpen] = useState(false);
-
-  useEffect(() => {
-    if (selectedMode !== 'single') setSingleOpen(false);
-  }, [selectedMode]);
+  const effectiveSingleOpen = selectedMode === 'single' && singleOpen;
 
   const handleClickFleet = useCallback(() => {
     onSelectMode('fleet');
@@ -96,7 +97,7 @@ function ModePickerBase({
           onClick={handleClickSingle}
           glyph={<SingleGlyph />}
         />
-        {selectedMode === 'single' && singleOpen ? (
+        {effectiveSingleOpen ? (
           <div
             style={{
               display: 'flex',
