@@ -5,7 +5,7 @@
  * Five-tier provider chain — all return the same { class, bm25Variants } shape:
  *   1. Claude Haiku CLI       (free for Claude Max users — primary)
  *   2. Codex CLI (gpt-5.4)    (free for ChatGPT Plus / Codex sub users)
- *   3. OpenRouter (grok-4.1-fast + flash-lite + gpt-5-nano fallback) — paid HTTP
+ *   3. OpenRouter (grok-4.1-fast + flash-lite + gpt-5.4-nano fallback) — paid HTTP
  *   4. Gemini Flash JSON-mode (last LLM tier; demoted because of recent 503s)
  *   5. Heuristic fallback     (lexical "why/how/explain" → Class B)
  *
@@ -44,7 +44,7 @@ bm25_variants: 3-5 alternate phrasings using synonyms and rephrasings of the que
  * Classify the question with a 5-tier provider chain:
  *   1. Claude Haiku CLI (Claude Max subscription — no per-token cost, primary)
  *   2. Codex CLI gpt-5.4 (ChatGPT Plus / Codex subscription — also free)
- *   3. OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5-nano fallback) — paid HTTP
+ *   3. OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5.4-nano fallback) — paid HTTP
  *   4. Gemini Flash (JSON-mode; demoted because of recent 503s)
  *   5. Heuristic fallback (lexical "why/how/explain" → Class B)
  *
@@ -126,7 +126,7 @@ async function tryCodex(prompt: string, question: string): Promise<ClassifierRes
   }
 }
 
-/** Tier 3: OpenRouter. HTTP call to grok-4.1-fast with flash-lite + gpt-5-nano in-call fallback. */
+/** Tier 3: OpenRouter. HTTP call to grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback. */
 async function tryOpenRouter(prompt: string, question: string): Promise<ClassifierResult | null> {
   try {
     // 10s — Grok 4.1 Fast 5-fact p50 was 5.7s in the bake-off; 8s would
