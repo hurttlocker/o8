@@ -54,6 +54,8 @@ const NOISE_AUTHOR_LOGINS = new Set<string>([
   'pre-commit-ci[bot]',
   'renovate[bot]',
   'snyk-bot',
+  // o8's own automated PR bot (caught in cortex-ide corpus validation)
+  'cortex-dev-agent[bot]',
 ]);
 
 const MIN_BODY_LENGTH = 80;
