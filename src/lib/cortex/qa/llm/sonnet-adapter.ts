@@ -203,6 +203,9 @@ function extractCliFullText(output: string): string {
 interface SonnetMessages {
   system: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** CLI subprocess timeout in ms. Default 60_000. Long prompts (e.g. indexer
+   * distillation of 6KB+ comments) need more headroom. */
+  timeoutMs?: number;
 }
 
 /** Non-streaming: returns the full response string. */
@@ -332,10 +335,11 @@ async function callSonnetCli(
       child.stdout!.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
       child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
 
+      const timeoutMs = opts.timeoutMs ?? 60_000;
       const timer = setTimeout(() => {
         child.kill();
-        reject(new Error('[qa] Claude CLI timed out after 60s'));
-      }, 60_000);
+        reject(new Error(`[qa] Claude CLI timed out after ${Math.round(timeoutMs / 1000)}s`));
+      }, timeoutMs);
 
       child.on('close', (code) => {
         clearTimeout(timer);
