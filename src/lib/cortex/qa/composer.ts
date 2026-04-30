@@ -332,13 +332,14 @@ export async function composeClassA(
     })),
   );
   const composePrompt = buildFlashComposePrompt(question, rowsJson);
-  // O8_EVAL_MODE=1 is the ship-gate / smoke path. We pay for highest-quality
-  // synthesis here (anthropic/claude-sonnet-4-6) because the smoke is the
-  // single signal that says "does the substrate work?" — false negatives from
-  // a weaker model cost more in re-investigation than the ~$0.026/run.
-  // Haiku 4.5 + grok-4.1-fast remain the cheap fallbacks for rate-limit /
-  // API failure. Production user chat (non-eval-mode) still uses the local
-  // Haiku CLI tier — free for Claude Max users.
+  // O8_EVAL_MODE=1 is the ship-gate / smoke path. By default we pay for
+  // highest-quality synthesis (anthropic/claude-sonnet-4-6 ~$0.026/run)
+  // because false negatives cost more than the bill. Founders / CI runs
+  // that want zero spend can set O8_SMOKE_CLI_ONLY=1 — this routes through
+  // the local Sonnet CLI (free for Claude Max users) at the cost of slower
+  // smoke runs (~10-12 min vs ~50s). Use OpenRouter for fast iteration,
+  // CLI for the once-a-day pre-ship verification.
+  // Production user chat (non-eval-mode) still uses Haiku CLI tier 1 — free.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
   // Eval-mode tier 0: Sonnet 4.6 via OpenRouter — best reasoning + synthesis,
@@ -524,6 +525,13 @@ async function tryComposeSonnet(
         },
       ],
       stream: false,
+      // 300s — Sonnet CLI bootstrap can take 60-90s and synthesis over the
+      // 30-row composer payload runs another 30-60s. The previous default
+      // (60s) killed the call before the model even started generating,
+      // forcing fall-through to paid OpenRouter even when the user has a
+      // free Claude Max sub. 300s lets the CLI actually finish when it's
+      // someone's free tier.
+      timeoutMs: 300_000,
     });
     if (result.tier === 'flash') {
       // callSonnet degraded back to Flash; we already tried Flash in tier 4.
@@ -585,6 +593,12 @@ export async function composeClassB(
         },
       ],
       stream: true,
+      // 300s — production Class B is the Sonnet CLI path users on Claude Max
+      // get for free. Bootstrap + multi-row synthesis can hit 90-180s; the
+      // prior 60s default killed the call before generation finished and
+      // forced fall-through to paid OpenRouter. With 300s the free CLI tier
+      // actually delivers.
+      timeoutMs: 300_000,
     });
 
     // Consume the token stream, emitting each token and accumulating for
