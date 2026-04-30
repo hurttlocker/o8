@@ -332,14 +332,10 @@ export async function composeClassA(
     })),
   );
   const composePrompt = buildFlashComposePrompt(question, rowsJson);
-  // O8_EVAL_MODE=1 is the ship-gate / smoke path. By default we pay for
-  // highest-quality synthesis (anthropic/claude-sonnet-4-6 ~$0.026/run)
-  // because false negatives cost more than the bill. Founders / CI runs
-  // that want zero spend can set O8_SMOKE_CLI_ONLY=1 — this routes through
-  // the local Sonnet CLI (free for Claude Max users) at the cost of slower
-  // smoke runs (~10-12 min vs ~50s). Use OpenRouter for fast iteration,
-  // CLI for the once-a-day pre-ship verification.
-  // Production user chat (non-eval-mode) still uses Haiku CLI tier 1 — free.
+  // O8_EVAL_MODE=1 is the ship-gate / smoke path. We use Sonnet 4.6 via
+  // OpenRouter (~$0.026/run) because false negatives cost more in re-
+  // investigation than the bill. Production user chat (non-eval-mode)
+  // routes through Haiku CLI tier 1 — free for Claude Max users.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
   // Eval-mode tier 0: Sonnet 4.6 via OpenRouter — best reasoning + synthesis,
