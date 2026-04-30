@@ -33,11 +33,37 @@ import { claimNext, completeQueueItem, failQueueItem, pendingQueueDepth } from '
 
 const CONFIDENCE_FLOOR = 0.6;
 
+const DEFAULT_CONCURRENCY = 2;
+const MAX_CONCURRENCY = 8;
+
+/**
+ * Resolve the worker concurrency. Order of precedence:
+ *   1. opts.concurrency (caller override)
+ *   2. O8_INDEXER_CONCURRENCY env (power-user knob)
+ *   3. DEFAULT_CONCURRENCY = 2
+ *
+ * Clamped to [1, MAX_CONCURRENCY]. Each parallel worker spawns its own
+ * Claude/Codex CLI subprocess (~200-400MB RAM each), so 4 is fine on a
+ * 16GB Mac, 8 is the practical ceiling. Higher counts also risk hitting
+ * upstream Anthropic/OpenAI rate limits.
+ */
+function resolveConcurrency(override?: number): number {
+  const raw = override ?? Number.parseInt(process.env.O8_INDEXER_CONCURRENCY ?? '', 10);
+  const value = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_CONCURRENCY;
+  return Math.max(1, Math.min(MAX_CONCURRENCY, value));
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface IndexerWorkerOptions {
   /** Max queue items to process this run. Default 100. */
   maxItems?: number;
+  /**
+   * Parallel worker count. Default 2 (regular users), 4 recommended for
+   * power users on a fresh repo. Override via `O8_INDEXER_CONCURRENCY` env.
+   * Clamped to [1, 8].
+   */
+  concurrency?: number;
 }
 
 export interface IndexerWorkerSummary {
@@ -130,6 +156,7 @@ export async function runIndexerWorker(
 ): Promise<IndexerWorkerSummary> {
   const start = Date.now();
   const maxItems = opts.maxItems ?? 100;
+  const concurrency = resolveConcurrency(opts.concurrency);
 
   const summary: IndexerWorkerSummary = {
     cli: null,
@@ -156,77 +183,101 @@ export async function runIndexerWorker(
     return summary;
   }
 
-  console.log(`[indexer] starting — cli=${cli} maxItems=${maxItems} pending=${totalDepth}`);
+  console.log(
+    `[indexer] starting — cli=${cli} maxItems=${maxItems} concurrency=${concurrency} pending=${totalDepth}`,
+  );
 
-  for (let i = 0; i < maxItems; i += 1) {
-    const item = claimNext();
-    if (!item) break;
+  // Shared counter so parallel workers cooperatively respect maxItems. The
+  // claimNext() call is already atomic via SQLite transaction so we only
+  // need to gate iteration count here, not row claiming.
+  let claimedCount = 0;
 
-    summary.processed += 1;
-    const itemStart = Date.now();
+  /** One worker loop. Pulls from the shared queue until maxItems is reached. */
+  const workerLoop = async (workerId: number): Promise<void> => {
+    while (true) {
+      // Reserve a slot under the cap before claiming a row. If maxItems is
+      // reached, stop. Race-safe because JS is single-threaded.
+      if (claimedCount >= maxItems) return;
+      const slot = claimedCount;
+      claimedCount += 1;
 
-    try {
-      const facts = await distillComment({
-        commentId: item.sourceId,
-        body: item.body,
-        repoPath: item.repoPath,
-        cli,
-      });
-
-      const aboveFloor = facts.filter((f) => f.confidence >= CONFIDENCE_FLOOR);
-      const belowFloor = facts.length - aboveFloor.length;
-
-      if (aboveFloor.length === 0) {
-        completeQueueItem(item.queueId);
-        if (facts.length === 0) {
-          summary.skipped += 1;
-          console.log(
-            `[indexer] [${i + 1}/${target}] ${item.sourceId} → 0 facts (${cli}-cli, ${Date.now() - itemStart}ms)`,
-          );
-        } else {
-          summary.skipped += 1;
-          console.log(
-            `[indexer] [${i + 1}/${target}] ${item.sourceId} → 0 facts (${belowFloor} below confidence floor, ${cli}-cli, ${Date.now() - itemStart}ms)`,
-          );
-        }
-        continue;
+      const item = claimNext();
+      if (!item) {
+        // Queue empty — give back the reserved slot so other workers can
+        // see the empty signal too.
+        claimedCount -= 1;
+        return;
       }
 
-      const insertRows: FactInsertRow[] = aboveFloor.map((fact) => {
-        const factId = randomUUID();
-        const fingerprint = fingerprintOf(fact.content, item.sourceId);
-        return {
-          factId,
-          fact,
-          sourceId: item.sourceId,
+      summary.processed += 1;
+      const itemStart = Date.now();
+
+      try {
+        const facts = await distillComment({
+          commentId: item.sourceId,
+          body: item.body,
           repoPath: item.repoPath,
-          fingerprint,
-          extractedBy: cli === 'claude' ? 'claude-cli' : 'codex-cli',
-        };
-      });
+          cli,
+        });
 
-      const written = writeFacts(insertRows);
-      summary.factsWritten += written;
-      summary.succeeded += 1;
-      completeQueueItem(item.queueId);
+        const aboveFloor = facts.filter((f) => f.confidence >= CONFIDENCE_FLOOR);
+        const belowFloor = facts.length - aboveFloor.length;
 
-      const belowSuffix = belowFloor > 0 ? ` (+${belowFloor} dropped)` : '';
-      console.log(
-        `[indexer] [${i + 1}/${target}] ${item.sourceId} → ${written} facts written${belowSuffix} (${cli}-cli, ${((Date.now() - itemStart) / 1000).toFixed(1)}s)`,
-      );
-    } catch (err) {
-      summary.failed += 1;
-      const message = err instanceof Error ? err.message : String(err);
-      failQueueItem(item.queueId, message);
-      console.warn(
-        `[indexer] [${i + 1}/${target}] ${item.sourceId} FAILED: ${message.slice(0, 200)} (${Date.now() - itemStart}ms)`,
-      );
+        if (aboveFloor.length === 0) {
+          completeQueueItem(item.queueId);
+          summary.skipped += 1;
+          if (facts.length === 0) {
+            console.log(
+              `[indexer] [w${workerId} ${slot + 1}/${target}] ${item.sourceId} → 0 facts (${cli}-cli, ${Date.now() - itemStart}ms)`,
+            );
+          } else {
+            console.log(
+              `[indexer] [w${workerId} ${slot + 1}/${target}] ${item.sourceId} → 0 facts (${belowFloor} below confidence floor, ${cli}-cli, ${Date.now() - itemStart}ms)`,
+            );
+          }
+          continue;
+        }
+
+        const insertRows: FactInsertRow[] = aboveFloor.map((fact) => {
+          const factId = randomUUID();
+          const fingerprint = fingerprintOf(fact.content, item.sourceId);
+          return {
+            factId,
+            fact,
+            sourceId: item.sourceId,
+            repoPath: item.repoPath,
+            fingerprint,
+            extractedBy: cli === 'claude' ? 'claude-cli' : 'codex-cli',
+          };
+        });
+
+        const written = writeFacts(insertRows);
+        summary.factsWritten += written;
+        summary.succeeded += 1;
+        completeQueueItem(item.queueId);
+
+        const belowSuffix = belowFloor > 0 ? ` (+${belowFloor} dropped)` : '';
+        console.log(
+          `[indexer] [w${workerId} ${slot + 1}/${target}] ${item.sourceId} → ${written} facts written${belowSuffix} (${cli}-cli, ${((Date.now() - itemStart) / 1000).toFixed(1)}s)`,
+        );
+      } catch (err) {
+        summary.failed += 1;
+        const message = err instanceof Error ? err.message : String(err);
+        failQueueItem(item.queueId, message);
+        console.warn(
+          `[indexer] [w${workerId} ${slot + 1}/${target}] ${item.sourceId} FAILED: ${message.slice(0, 200)} (${Date.now() - itemStart}ms)`,
+        );
+      }
     }
-  }
+  };
+
+  await Promise.all(
+    Array.from({ length: concurrency }, (_, i) => workerLoop(i + 1)),
+  );
 
   summary.durationMs = Date.now() - start;
   console.log(
-    `[indexer] done — processed=${summary.processed} succeeded=${summary.succeeded} skipped=${summary.skipped} failed=${summary.failed} factsWritten=${summary.factsWritten} (${(summary.durationMs / 1000).toFixed(1)}s)`,
+    `[indexer] done — processed=${summary.processed} succeeded=${summary.succeeded} skipped=${summary.skipped} failed=${summary.failed} factsWritten=${summary.factsWritten} concurrency=${concurrency} (${(summary.durationMs / 1000).toFixed(1)}s)`,
   );
 
   return summary;
