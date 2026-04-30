@@ -489,15 +489,28 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   // switches dispatch targets, not the orchestrator runtime itself.
   const runtimeLabel = orchestratorRuntimeTone('claude-code').label;
 
+  // #888/#889 — clicking a recent-work card both expands the packet in
+  // the mission rail and ensures the rail is visible.
+  const handleSelectRecentPacket = useCallback((packetId: string) => {
+    if (data?.onSelectedPacketChange) {
+      data.onSelectedPacketChange(packetId);
+    }
+    if (!missionOpen) {
+      setMissionOpen(true);
+      writeBooleanPref(MISSION_OPEN_KEY, true);
+    }
+  }, [data, missionOpen]);
+
   const emptyStateNode = useMemo(
     () => (
       <OrchestratorEmptyState
         greeting={greeting}
         runtimeLabel={runtimeLabel}
         onActionClick={handleQuickAction}
+        onSelectPacket={handleSelectRecentPacket}
       />
     ),
-    [greeting, runtimeLabel, handleQuickAction],
+    [greeting, runtimeLabel, handleQuickAction, handleSelectRecentPacket],
   );
 
   const hasMessages = chatChromeState.hasMessages;

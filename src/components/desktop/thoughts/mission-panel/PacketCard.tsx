@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestrator/display';
 import { deriveGithubIssueUrl } from '@/lib/orchestrator/issue-url';
 import { packetReleaseBlockedBy } from '@/lib/orchestrator/store';
@@ -15,6 +15,8 @@ import { PacketReviewCard } from './PacketReviewCard';
 import { PacketReviewPanel } from './PacketReviewPanel';
 import { PacketSpecEditor } from './PacketSpecEditor';
 import { RejectedFeedbackPanel } from './RejectedFeedbackPanel';
+import { PacketTabStrip, type PacketTabId } from '@/components/desktop/orchestrator/PacketTabStrip';
+import { LivingAgentPanel } from '@/components/desktop/orchestrator/LivingAgentPanel';
 
 interface PacketCardProps {
   packet: OrchestratorPacket;
@@ -109,6 +111,44 @@ export function PacketCard({
   const closeDetails = useCallback(() => {
     setDetailsAnchor(null);
   }, []);
+
+  // #888/#893 — packet view tabs. Default = Agents; remember last-active
+  // per-packet via localStorage so re-expanding lands on the same tab.
+  const tabStorageKey = `cortex-ide:packet-tab:${packet.id}`;
+  const [activeTab, setActiveTab] = useState<PacketTabId>('agents');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(tabStorageKey);
+      if (raw === 'agents' || raw === 'context' || raw === 'changes' || raw === 'files') {
+        setActiveTab(raw);
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [packet.id]);
+  const handleTabChange = useCallback((tab: PacketTabId) => {
+    setActiveTab(tab);
+    if (typeof window === 'undefined') return;
+    try { window.localStorage.setItem(tabStorageKey, tab); } catch { /* ignore */ }
+  }, [tabStorageKey]);
+
+  // Notification dot on Agents — verifier flagged or rejected, OR a sub-agent
+  // finished and the packet is awaiting review.
+  const agentsHasNotification = (packet.review?.findings?.length ?? 0) > 0
+    || packet.review?.approved === false
+    || packet.status === 'awaiting_review';
+
+  // Changes count — files modified from review state (best-effort).
+  const changesCount = reviewState?.snapshot?.changedFiles?.length ?? null;
+
+  // Files tab content — predictedFiles or actual changed files.
+  const filesList: string[] = useMemo(() => {
+    const fromReview = reviewState?.snapshot?.changedFiles?.map((f) => f.path) ?? [];
+    if (fromReview.length > 0) return fromReview;
+    return packet.predictedFiles ?? packet.allowedFiles ?? [];
+  }, [packet.predictedFiles, packet.allowedFiles, reviewState?.snapshot?.changedFiles]);
 
   // #517 — Packets in a best-of-n comparison group render via ComparisonCard at
   // the ThoughtsMissionPanel level. Guard AFTER all hooks so the hook order
@@ -212,13 +252,36 @@ export function PacketCard({
             onPatch={onPatch}
           />
 
-          {/* #742 — Context Recall Card (Directive / Recent Outcomes / Symbol Graph). */}
-          <ContextRecallCard packet={packet} repoName={targetRepoName} />
+          {/* #888/#893 — packet view tabs. Each tab pivots the body content
+              while DETAILS / Actions / Hold-Archive-Delete / review and
+              rejected panels remain visible across all tabs. */}
+          <PacketTabStrip
+            active={activeTab}
+            onChange={handleTabChange}
+            agentsHasNotification={agentsHasNotification}
+            changesCount={changesCount}
+          />
 
-          {/* #773 — Editable spec.md. The orchestrator re-reads the latest
-              spec at dispatch time so each NEW launch sees the operator's
-              current intent. In-flight agents are not steered. */}
-          <PacketSpecEditor packetId={packet.id} />
+          {activeTab === 'agents' ? (
+            <LivingAgentPanel packet={packet} />
+          ) : null}
+
+          {activeTab === 'context' ? (
+            <>
+              {/* #742 — Context Recall Card (Directive / Recent Outcomes / Symbol Graph). */}
+              <ContextRecallCard packet={packet} repoName={targetRepoName} />
+              {/* #773 — Editable spec.md nested under Context per #893. */}
+              <PacketSpecEditor packetId={packet.id} />
+            </>
+          ) : null}
+
+          {activeTab === 'changes' ? (
+            <ChangesTabHint />
+          ) : null}
+
+          {activeTab === 'files' ? (
+            <FilesTabList files={filesList} />
+          ) : null}
 
           {/* #615 — DETAILS row (read-only popover trigger). */}
           <div
@@ -577,6 +640,81 @@ export function PacketCard({
           onClose={closeDetails}
         />
       ) : null}
+    </div>
+  );
+}
+
+function ChangesTabHint() {
+  return (
+    <div
+      style={{
+        paddingTop: 14,
+        paddingRight: 14,
+        paddingBottom: 14,
+        paddingLeft: 14,
+        fontSize: 11,
+        color: 'var(--t-text-muted)',
+        lineHeight: 1.55,
+        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+      }}
+    >
+      Changes for this packet are shown in the workspace panel on the right.
+      Spec / Agent Overview / Changes tabs over there mirror the packet context (#895).
+    </div>
+  );
+}
+
+function FilesTabList({ files }: { files: string[] }) {
+  if (files.length === 0) {
+    return (
+      <div
+        style={{
+          paddingTop: 14,
+          paddingRight: 14,
+          paddingBottom: 14,
+          paddingLeft: 14,
+          fontSize: 11,
+          color: 'var(--t-text-muted)',
+          lineHeight: 1.55,
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        }}
+      >
+        No predicted or changed files yet. Files appear here once the agent runs.
+      </div>
+    );
+  }
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        paddingTop: 6,
+        paddingRight: 6,
+        paddingBottom: 6,
+        paddingLeft: 6,
+        fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+      }}
+    >
+      {files.map((file) => (
+        <div
+          key={file}
+          style={{
+            paddingTop: 4,
+            paddingRight: 8,
+            paddingBottom: 4,
+            paddingLeft: 8,
+            fontSize: 10.5,
+            color: 'var(--t-text-secondary)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            wordBreak: 'break-all',
+          }}
+          title={file}
+        >
+          {file}
+        </div>
+      ))}
     </div>
   );
 }
