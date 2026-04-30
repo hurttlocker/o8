@@ -81,6 +81,9 @@ function buildCitationHandle(row: TypedRow): string {
       return `SYM-${rowId}`;
     case 'project':
       return `PROJ-${rowId}`;
+    case 'project_repo':
+      // PRJREPO- prefix avoids collision with PR- (pull requests).
+      return `PRJREPO-${rowId}`;
     default:
       return rowId;
   }
