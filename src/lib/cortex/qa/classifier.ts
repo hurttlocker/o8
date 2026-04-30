@@ -5,7 +5,7 @@
  * Five-tier provider chain — all return the same { class, bm25Variants } shape:
  *   1. Claude Haiku CLI       (free for Claude Max users — primary)
  *   2. Codex CLI (gpt-5.4)    (free for ChatGPT Plus / Codex sub users)
- *   3. OpenRouter (gpt-5.4-nano + gpt-5-nano fallback) — fast HTTP, paid
+ *   3. OpenRouter (grok-4.1-fast + flash-lite + gpt-5-nano fallback) — paid HTTP
  *   4. Gemini Flash JSON-mode (last LLM tier; demoted because of recent 503s)
  *   5. Heuristic fallback     (lexical "why/how/explain" → Class B)
  *
@@ -44,7 +44,7 @@ bm25_variants: 3-5 alternate phrasings using synonyms and rephrasings of the que
  * Classify the question with a 5-tier provider chain:
  *   1. Claude Haiku CLI (Claude Max subscription — no per-token cost, primary)
  *   2. Codex CLI gpt-5.4 (ChatGPT Plus / Codex subscription — also free)
- *   3. OpenRouter (gpt-5.4-nano w/ gpt-5-nano fallback) — fast paid HTTP
+ *   3. OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5-nano fallback) — paid HTTP
  *   4. Gemini Flash (JSON-mode; demoted because of recent 503s)
  *   5. Heuristic fallback (lexical "why/how/explain" → Class B)
  *
