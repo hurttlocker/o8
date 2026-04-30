@@ -44,9 +44,9 @@ interface ProviderKeyConfig {
   validateUrl?: string;
 }
 
-// o8 v1: only OpenRouter is exposed as a user-managed key. CLI runtimes (codex,
-// claude-code, gemini, opencode) handle their own provider auth. The o8 Operator
-// uses Gemini under the hood via GOOGLE_AI_API_KEY which is provisioned silently.
+// BYOK (#960): OpenRouter + Anthropic are the two user-managed keys for beta.
+// CLI runtimes (codex, claude-code, gemini, opencode) handle their own auth.
+// Kill these before official release in favour of the hosted subscription tier.
 const PROVIDERS: ProviderKeyConfig[] = [
   {
     id: 'openrouter',
@@ -55,6 +55,14 @@ const PROVIDERS: ProviderKeyConfig[] = [
     placeholder: 'sk-or-...',
     docsUrl: 'https://openrouter.ai/keys',
     validateUrl: 'https://openrouter.ai/api/v1/models',
+  },
+  {
+    id: 'anthropic',
+    label: 'Anthropic',
+    envVar: 'ANTHROPIC_API_KEY',
+    placeholder: 'sk-ant-...',
+    docsUrl: 'https://console.anthropic.com/keys',
+    validateUrl: 'https://api.anthropic.com/v1/messages',
   },
 ];
 
