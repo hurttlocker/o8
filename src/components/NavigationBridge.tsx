@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { initMcpPlugin } from '@/lib/tauri/bridge';
 
 /**
  * Renderer-side navigation bridge for the o8 webview MCP tools.
@@ -14,13 +15,19 @@ import { useRouter } from 'next/navigation';
  * /dashboard — and leaves Next.js mid-route, freezing the JS thread
  * for 10–30s of hydration).
  *
- * Mounted once in the root layout. See issue #863.
+ * Mounted once in the root layout. See issue #863. Also (#932) the
+ * single boot site for tauri-plugin-mcp listener registration —
+ * previously wired only to /dashboard, which left the click/eval/
+ * snapshot tools dead whenever the app booted into Settings or any
+ * non-dashboard route.
  */
 export default function NavigationBridge() {
   const router = useRouter();
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
+    initMcpPlugin();
 
     const navigate = (path: string) => {
       // router.push handles same-origin paths; absolute URLs fall back

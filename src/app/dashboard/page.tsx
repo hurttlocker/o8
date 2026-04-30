@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { isTauri, initMcpPlugin } from '@/lib/tauri/bridge';
+import { isTauri } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DesktopWebSocketProvider, useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
@@ -175,7 +175,8 @@ function DashboardInner() {
   const [inTauri, setInTauri] = useState(false);
   useEffect(() => {
     setInTauri(isTauri());
-    initMcpPlugin();
+    // initMcpPlugin() now lives in NavigationBridge so it runs on every
+    // route, not just /dashboard (#932). Don't re-init here.
     // Schedule the "interactive" mark on the first idle tick after mount.
     // requestIdleCallback is unavailable in some webview / older browser
     // environments, so we fall back to setTimeout(_, 0). Either way the
