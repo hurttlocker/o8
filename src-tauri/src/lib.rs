@@ -1677,6 +1677,39 @@ fn record_console_error(message: String, source: String, lineno: u32) {
     buffer.since_last_fetch = buffer.since_last_fetch.saturating_add(1);
 }
 
+/// #932 — host-app `mcp_result` command. Lives in the main app (NOT the
+/// plugin) because plugin invokes were silently denied by the ACL across
+/// every capability scoping we tried. The main-app `record_console_error`
+/// uses the same un-prefixed pattern and is empirically working, so this
+/// rides that proven channel.
+///
+/// JS calls: `__TAURI_INTERNALS__.invoke('mcp_result', { correlationId, ok, data, error })`
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct McpResultArgs {
+    correlation_id: String,
+    ok: bool,
+    data: Option<serde_json::Value>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn mcp_result(args: McpResultArgs) {
+    log::info!(
+        "[mcp_result] cid={} ok={} has_data={} has_error={}",
+        args.correlation_id,
+        args.ok,
+        args.data.is_some(),
+        args.error.is_some()
+    );
+    let payload = serde_json::json!({
+        "ok": args.ok,
+        "data": args.data,
+        "error": args.error,
+    });
+    tauri_plugin_mcp::tools::webview::PendingResults::complete(&args.correlation_id, payload);
+}
+
 /// MCP read path. Returns the full ring buffer plus the count since the
 /// previous call (which resets to zero after this returns).
 #[tauri::command]
@@ -2435,6 +2468,7 @@ pub fn run() {
             set_tray_badge,
             notify_review_ready,
             record_console_error,
+            mcp_result,
             o8_view_console_errors,
             o8_view_active_route,
             #[cfg(target_os = "macos")]
