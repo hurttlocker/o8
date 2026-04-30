@@ -56,6 +56,10 @@ interface FactRow {
   fingerprint: string;
   created_at: string;
   extracted_by: string;
+  /** Source-of-truth authority (#915 follow-up). 0.5 default for legacy
+   *  rows; populated to 0.7-1.0 by the v18 backfill + new writes from the
+   *  worker / structured seeder. */
+  source_authority: number;
 }
 
 /**
@@ -152,7 +156,8 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
     const records = sqlite
       .prepare(
         `SELECT id, kind, content, source_kind, source_id, source_excerpt,
-                repo_path, confidence, fingerprint, created_at, extracted_by
+                repo_path, confidence, fingerprint, created_at, extracted_by,
+                source_authority
          FROM facts
          WHERE id IN (${candidateIds.map(() => '?').join(',')})`,
       )
@@ -186,6 +191,12 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
           repoPath: record.repo_path,
           createdAt: record.created_at,
           extractedBy: record.extracted_by,
+          // Source-of-truth hierarchy (#915 follow-up). The composer prefers
+          // higher-authority rows when facts conflict — directives (1.0)
+          // outrank merged-PRs (0.95), which outrank closed-outcomes (0.9),
+          // and so on down to comment-distilled facts (0.7). Default 0.5 for
+          // legacy rows pre-v18 backfill.
+          source_authority: record.source_authority ?? 0.5,
         },
         // Use BM25 rank as the retriever-local score. retrieve.ts re-ranks
         // via RRF over the per-retriever ordering, so absolute magnitudes
