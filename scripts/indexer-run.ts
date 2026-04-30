@@ -68,12 +68,15 @@ async function main() {
   console.log(`[indexer-run] found ${repos.length} repo${repos.length === 1 ? '' : 's'} in registry`);
 
   let totalEnqueued = 0;
+  let totalSkipped = 0;
   for (const repo of repos) {
     try {
-      const enqueued = enqueueComments(repo.localPath);
+      const { enqueued, skipped } = enqueueComments(repo.localPath);
       totalEnqueued += enqueued;
+      totalSkipped += skipped;
+      const skipSuffix = skipped > 0 ? ` (skipped ${skipped} as noise)` : '';
       console.log(
-        `[indexer-run] enqueued ${enqueued} comments for ${repo.name} (${repo.localPath})`,
+        `[indexer-run] enqueued ${enqueued} comments for ${repo.name} (${repo.localPath})${skipSuffix}`,
       );
     } catch (err) {
       console.warn(
@@ -83,7 +86,7 @@ async function main() {
     }
   }
 
-  console.log(`[indexer-run] total enqueued this run: ${totalEnqueued}`);
+  console.log(`[indexer-run] total enqueued this run: ${totalEnqueued} (skipped ${totalSkipped} as noise)`);
   console.log(`[indexer-run] queue depth: ${pendingQueueDepth()} pending`);
 
   // Step 2 — drain.
