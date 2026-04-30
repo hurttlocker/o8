@@ -117,10 +117,12 @@ async function tryCodex(prompt: string, question: string): Promise<ClassifierRes
   }
 }
 
-/** Tier 3: OpenRouter. Fast HTTP call to gpt-5.4-nano with gpt-5-nano fallback. */
+/** Tier 3: OpenRouter. HTTP call to grok-4.1-fast with flash-lite + gpt-5-nano in-call fallback. */
 async function tryOpenRouter(prompt: string, question: string): Promise<ClassifierResult | null> {
   try {
-    const text = await callOpenRouter(prompt, { timeoutMs: 8_000 });
+    // 10s — Grok 4.1 Fast 5-fact p50 was 5.7s in the bake-off; 8s would
+    // truncate ~30% of long answers, 10s gives headroom.
+    const text = await callOpenRouter(prompt, { timeoutMs: 10_000 });
     return parseClassifierJson(text, question);
   } catch (err) {
     console.warn('[qa][classifier] OpenRouter failed:', err instanceof Error ? err.message : err);

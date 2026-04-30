@@ -42,7 +42,8 @@ export interface CallOpenRouterOptions {
   model?: string;
   /** Override the in-call fallback list. Defaults to OPENROUTER_FALLBACK_MODELS. */
   fallbackModels?: string[];
-  /** HTTP timeout. Default 8s — Class A fast lookup budget. */
+  /** HTTP timeout. Default 10s — Grok 4.1 Fast 5-fact p50 was 5.7s in the
+   *  bake-off, so 8s would cut ~30% of long answers; 10s gives runway. */
   timeoutMs?: number;
 }
 
@@ -85,7 +86,7 @@ export async function callOpenRouter(
     throw new Error('[qa][openrouter] OPENROUTER_API_KEY missing');
   }
 
-  const timeoutMs = opts.timeoutMs ?? 8_000;
+  const timeoutMs = opts.timeoutMs ?? 10_000;
   const primary = opts.model ?? OPENROUTER_PRIMARY_MODEL;
   const fallbacks = opts.fallbackModels ?? OPENROUTER_FALLBACK_MODELS;
 
