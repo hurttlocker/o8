@@ -51,8 +51,12 @@ function buildSonnetComposeUser(
   repoPath: string | undefined,
   rows: TypedRow[],
 ): string {
+  // #915 path-to-70 round-2 fix: was slice(0, 20), but retrieve.ts merges to
+  // MERGE_LIMIT = 30. Project rows from emitProjectRows landed at ranks 21-24
+  // and got truncated here — ownership stayed at 35% despite PR #949 paying
+  // the bill. Match the merge ceiling.
   const rowsJson = JSON.stringify(
-    rows.slice(0, 20).map((r) => ({
+    rows.slice(0, 30).map((r) => ({
       citationHandle: buildCitationHandle(r),
       kind: r.citation.kind,
       excerpt: r.citation.excerpt ?? '',
