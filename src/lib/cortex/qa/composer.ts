@@ -30,11 +30,15 @@ import type { TypedRow } from '@/lib/cortex/qa/types';
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
 function buildFlashComposePrompt(question: string, rowsJson: string): string {
-  return `Answer concisely (one sentence) using ONLY the provided typed rows.
+  return `Answer concisely (1-2 sentences) using ONLY the provided typed rows.
 Question: ${question}
-Rows: ${rowsJson}
-Cite the relevant row in [BRACKET-ID] form where BRACKET-ID is the citation handle from the row (e.g. [D-014], [O-481], [PR-650]).
-If no rows answer the question, say: "I don't have that information yet."`;
+Rows (each row has a \`handle\` for citation and \`content\` with the actual text): ${rowsJson}
+
+Rules:
+1. If ANY row's content addresses the question — fully or partially — lead with that information. Quote concrete values, numbers, names, and identifiers verbatim from the content. Prefer FACT- handles as primary citations.
+2. Cite the relevant row(s) inline in [BRACKET-ID] form where BRACKET-ID is the handle field from the row (e.g. [D-014], [O-481], [PR-650], [FACT-abc123]).
+3. NEVER hedge with "I don't have that information yet" when you ARE answering. Either answer with citations OR respond with the exact string "I don't have that information yet." and nothing else. There is no middle ground — no preambles, no apologies.
+4. Only respond "I don't have that information yet." when none of the rows even mention the topic.`;
 }
 
 function buildSonnetComposeSystem(): string {
@@ -71,6 +75,53 @@ function buildSonnetComposeUser(
 
   const repoLine = repoPath ? `\nRepo: ${repoPath}` : '';
   return `Question: ${question}${repoLine}\n\nAvailable rows:\n${rowsJson}`;
+}
+
+/**
+ * Extract the longest readable text from a row's `fields` payload. Used to
+ * feed the composer LLM full content instead of the BM25-truncated FTS snippet
+ * (which strips the very numbers/values most questions are asking about).
+ *
+ * Field shapes are heterogeneous across retrievers — facts have `content`,
+ * comments + directives have `body`, PRs/issues have `title` + `body`, etc.
+ * We pick the most informative field per row kind, capped at ~1500 chars so
+ * a single row can't crowd out the rest of the slice.
+ */
+function rowFullText(row: TypedRow): string {
+  const fields = row.fields as Record<string, unknown>;
+  const pick = (...keys: string[]): string => {
+    for (const k of keys) {
+      const v = fields?.[k];
+      if (typeof v === 'string' && v.trim().length > 0) return v;
+    }
+    return '';
+  };
+  let text = '';
+  switch (row.citation.kind) {
+    case 'fact':
+      text = pick('content');
+      break;
+    case 'directive':
+      text = [pick('title'), pick('body')].filter(Boolean).join(' — ');
+      break;
+    case 'comment':
+      text = pick('body');
+      break;
+    case 'outcome':
+      text = pick('summary', 'body', 'title');
+      break;
+    case 'pr':
+    case 'issue':
+      text = [pick('title'), pick('body')].filter(Boolean).join(' — ');
+      break;
+    case 'doc':
+      text = pick('content', 'body', 'excerpt');
+      break;
+    default:
+      text = pick('body', 'content', 'title', 'excerpt');
+  }
+  if (text.length > 1500) text = text.slice(0, 1500) + '…';
+  return text;
 }
 
 /** Build the citation handle an LLM would use in bracket notation. */
@@ -228,16 +279,43 @@ export async function composeClassA(
   const rowsJson = JSON.stringify(
     topRows.slice(0, 15).map((r) => ({
       handle: buildCitationHandle(r),
-      excerpt: r.citation.excerpt ?? '',
+      // Prefer the full row content over the FTS snippet — snippets are
+      // truncated to ~8 tokens around the BM25 match (e.g. "A CI «regression»
+      // «gate» requires that no «eval»…") and strip the very numbers/values
+      // the question is asking about. Falling back to the snippet only when
+      // no fuller text is available.
+      content: rowFullText(r) || r.citation.excerpt || '',
     })),
   );
   const composePrompt = buildFlashComposePrompt(question, rowsJson);
-  // O8_EVAL_MODE=1 skips CLI tiers (Haiku, Codex, Sonnet) so eval runs use the
-  // fast HTTP path (OpenRouter → Flash → heuristic). The judge in
-  // eval/runner.ts keeps using Sonnet CLI for scoring consistency.
+  // O8_EVAL_MODE=1 is the ship-gate / smoke path. We pay for highest-quality
+  // synthesis here (anthropic/claude-sonnet-4-6) because the smoke is the
+  // single signal that says "does the substrate work?" — false negatives from
+  // a weaker model cost more in re-investigation than the ~$0.026/run.
+  // Haiku 4.5 + grok-4.1-fast remain the cheap fallbacks for rate-limit /
+  // API failure. Production user chat (non-eval-mode) still uses the local
+  // Haiku CLI tier — free for Claude Max users.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
-  // Tier 1: Haiku CLI. Skipped in eval mode.
+  // Eval-mode tier 0: Sonnet 4.6 via OpenRouter — best reasoning + synthesis,
+  // never hedges when rows answer the question.
+  if (evalMode) {
+    const sonnetAnswer = await tryComposeOpenRouter(composePrompt, 'anthropic/claude-sonnet-4-6');
+    if (sonnetAnswer) {
+      console.info('[qa][composer-A] resolved via openrouter:anthropic/claude-sonnet-4-6');
+      emitClassAAnswer(sonnetAnswer, lookup, emit);
+      return;
+    }
+    // Eval-mode tier 0b: Haiku 4.5 via OpenRouter as cheap fallback before grok.
+    const haikuAnswer = await tryComposeOpenRouter(composePrompt, 'anthropic/claude-haiku-4-5');
+    if (haikuAnswer) {
+      console.info('[qa][composer-A] resolved via openrouter:anthropic/claude-haiku-4-5 (sonnet-fallback)');
+      emitClassAAnswer(haikuAnswer, lookup, emit);
+      return;
+    }
+  }
+
+  // Tier 1: Haiku CLI. Skipped in eval mode (CLI bootstrap exceeds smoke budget).
   if (!evalMode) {
     const haikuAnswer = await tryComposeHaiku(composePrompt);
     if (haikuAnswer) {
@@ -292,10 +370,13 @@ export async function composeClassA(
 /** Tier 1: Haiku CLI. Free for Claude Max users — primary tier. */
 async function tryComposeHaiku(prompt: string): Promise<string | null> {
   try {
-    // 12s — Haiku CLI bootstrap (login-shell + node start) takes ~6-8s before
-    // the model even runs. As tier 1 we own the larger ceiling; Codex CLI +
-    // OpenRouter + Flash are the fallbacks below.
-    const text = await callHaiku(prompt, { timeoutMs: 12_000 });
+    // 30s — Haiku CLI bootstrap is ~6-8s, then synthesis over 30 retrieval
+    // rows runs another 10-15s on big multi-row prompts. The previous 12s
+    // ceiling killed every smoke composer call before generation completed,
+    // forcing a fall-through to grok-4.1-fast which over-rejects the Flash
+    // "no info" escape. 30s gives Haiku the room to actually answer; the
+    // OpenRouter / Flash tiers below still catch true failures.
+    const text = await callHaiku(prompt, { timeoutMs: 30_000 });
     return text.trim() ? text : null;
   } catch (err) {
     console.warn('[qa][composer-A] Haiku CLI failed:', err instanceof Error ? err.message : err);
@@ -317,14 +398,16 @@ async function tryComposeCodex(prompt: string): Promise<string | null> {
   }
 }
 
-/** Tier 3: OpenRouter — grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback. */
-async function tryComposeOpenRouter(prompt: string): Promise<string | null> {
+/** Tier 3: OpenRouter — grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback.
+ * Optional `model` override routes to a specific model instead of the primary
+ * (used by the eval-mode Haiku-4.5 tier). */
+async function tryComposeOpenRouter(prompt: string, model?: string): Promise<string | null> {
   try {
     // 25s — was 10s, but ownership questions in eval mode hit grok-4.1-fast
     // with the full 30-row payload (post-slice-fix) and timed out at 10s
     // (caused 35% → 2% ownership crash). p95 for multi-row prompts is past
     // 10s; 25s gives headroom for worst case.
-    const text = await callOpenRouter(prompt, { timeoutMs: 25_000 });
+    const text = await callOpenRouter(prompt, { timeoutMs: 25_000, model });
     return text.trim() ? text : null;
   } catch (err) {
     console.warn('[qa][composer-A] OpenRouter failed:', err instanceof Error ? err.message : err);
@@ -518,7 +601,13 @@ async function composeClassBViaOpenRouter(
   try {
     const system = buildSonnetComposeSystem();
     const user = buildSonnetComposeUser(question, repoPath, topRows);
-    const fullText = await callOpenRouter(`${system}\n\n${user}`, { timeoutMs: 30_000 });
+    // Eval-mode primary = Sonnet 4.6 (matches Class A) — best synthesis for
+    // the ship-gate signal. ~$0.026/smoke-run. grok stays as the fallback
+    // path inside callOpenRouter's models[] chain.
+    const fullText = await callOpenRouter(`${system}\n\n${user}`, {
+      timeoutMs: 30_000,
+      model: 'anthropic/claude-sonnet-4-6',
+    });
 
     let finalAnswer = '';
     if (fullText.trim()) {

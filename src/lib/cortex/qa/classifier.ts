@@ -53,11 +53,27 @@ bm25_variants: 3-5 alternate phrasings using synonyms and rephrasings of the que
  */
 export async function classifyQuestion(question: string): Promise<ClassifierResult> {
   const prompt = `${CLASSIFIER_PROMPT}\n\nQuestion: ${question}`;
-  // O8_EVAL_MODE=1 skips both CLI tiers — they bootstrap ~14-16s each which
-  // dominates eval wall time. The judge (in eval/runner.ts) keeps using
-  // Sonnet CLI for scoring consistency across runs; only the system-under-test
-  // is fast-pathed.
+  // O8_EVAL_MODE=1 skips CLI tiers (their bootstrap dominates eval wall time)
+  // and routes to anthropic/claude-haiku-4-5 via OpenRouter — same intelligence
+  // tier as the local Haiku CLI users get in production.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
+
+  // Eval-mode tier 0: Sonnet 4.6 via OpenRouter — matches the composer's
+  // primary model so classifier + composer use the same reasoning quality.
+  // BM25 variants from Sonnet are reliably better than grok-4.1-fast.
+  if (evalMode) {
+    const sonnetResult = await tryOpenRouter(prompt, question, 'anthropic/claude-sonnet-4-6');
+    if (sonnetResult) {
+      console.info('[qa][classifier] resolved via openrouter:anthropic/claude-sonnet-4-6');
+      return sonnetResult;
+    }
+    // Eval-mode tier 0b: Haiku 4.5 via OpenRouter as cheap fallback before grok.
+    const haikuOpenrouterResult = await tryOpenRouter(prompt, question, 'anthropic/claude-haiku-4-5');
+    if (haikuOpenrouterResult) {
+      console.info('[qa][classifier] resolved via openrouter:anthropic/claude-haiku-4-5 (sonnet-fallback)');
+      return haikuOpenrouterResult;
+    }
+  }
 
   // Tier 1: Haiku CLI (free for Claude Max users). Skipped in eval mode.
   if (!evalMode) {
@@ -126,13 +142,15 @@ async function tryCodex(prompt: string, question: string): Promise<ClassifierRes
   }
 }
 
-/** Tier 3: OpenRouter. HTTP call to grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback. */
-async function tryOpenRouter(prompt: string, question: string): Promise<ClassifierResult | null> {
+/** Tier 3: OpenRouter. HTTP call to grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback.
+ * Optional `model` override routes to a specific model instead of the primary
+ * (used by the eval-mode Haiku-4.5 tier). */
+async function tryOpenRouter(prompt: string, question: string, model?: string): Promise<ClassifierResult | null> {
   try {
     // 25s — bumped from 10s alongside composer's bump to handle multi-row
     // prompts under load. Classifier prompts are small but grok-4.1-fast
     // occasionally takes 8-12s when OpenRouter routes through a slow upstream.
-    const text = await callOpenRouter(prompt, { timeoutMs: 25_000 });
+    const text = await callOpenRouter(prompt, { timeoutMs: 25_000, model });
     return parseClassifierJson(text, question);
   } catch (err) {
     console.warn('[qa][classifier] OpenRouter failed:', err instanceof Error ? err.message : err);
