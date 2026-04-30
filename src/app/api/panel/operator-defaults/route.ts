@@ -97,6 +97,14 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.experimentalOpencode = body.experimentalOpencode;
   }
 
+  if (body.classAComposer !== undefined) {
+    const raw = body.classAComposer;
+    if (raw !== 'auto' && raw !== 'haiku-cli' && raw !== 'sonnet-cli') {
+      throw new Error('classAComposer must be one of "auto", "haiku-cli", "sonnet-cli".');
+    }
+    update.classAComposer = raw;
+  }
+
   return update;
 }
 
