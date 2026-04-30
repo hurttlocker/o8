@@ -7,21 +7,34 @@
  *   classifyQuestion: Haiku CLI → Codex CLI → OpenRouter → Flash → heuristic
  *
  * Why this exact model order (empirically picked, not guessed):
- *   We bake-off'd 6 candidates against a 1-fact lookup + 5-fact spec prompt
- *   on 2026-04-30 (5 calls each, max_tokens=512). The data:
+ *   We re-baked-off all 6 candidates with a credited account on 2026-04-30
+ *   (phase 1.7.1 rerun — the 3 deepseek/gpt-5.4-nano rows that 402'd in the
+ *   original bake-off are now measured). 5 calls each on a 1-fact lookup +
+ *   5-fact spec prompt, max_tokens=512, temperature=0. The data:
  *
- *     model                          p50 1fact   p50 5fact   quality   errors
- *     x-ai/grok-4.1-fast             2091 ms     5677 ms     2/3 + 3/3 0
- *     google/gemini-2.5-flash-lite   7019 ms     3950 ms     2/3 + 3/3 1 (503)
- *     openai/gpt-5-nano              10463 ms    12967 ms    0/3       1 (timeout)
- *     openai/gpt-5.4-nano            —           —           —         402 credit
- *     deepseek/deepseek-v4-pro       —           —           —         402 credit
- *     deepseek/deepseek-chat         —           —           —         402 credit
+ *     model                          p50 1f   p95 1f   p50 5f   p95 5f   quality   errors
+ *     x-ai/grok-4.1-fast             148 ms   189 ms   124 ms   307 ms   3/3 + 3/3 0
+ *     google/gemini-2.5-flash-lite   505 ms   535 ms   471 ms   537 ms   3/3 + 3/3 0
+ *     openai/gpt-5.4-nano            479 ms   597 ms   386 ms   491 ms   3/3 + 3/3 0
+ *     deepseek/deepseek-chat         148 ms  1455 ms   204 ms   988 ms   3/3 + 3/3 0
+ *     deepseek/deepseek-v4-pro      1575 ms  7067 ms  1805 ms  3007 ms   3/3 + 3/3 0
+ *     openai/gpt-5-nano              397 ms   458 ms   —        —        3/3 + 0/3 8 (empty content)
  *
- *   Grok 4.1 Fast is the unambiguous winner: fastest p50, tied highest
- *   quality, zero errors. Flash-Lite is the natural runner-up (tied quality,
- *   slower but proven). gpt-5-nano lands as third — cheap, but slow + empty
- *   on timeout.
+ *   Five models tied on quality (6/6 — every one enumerated all 5 facts and
+ *   cited every handle on the 5-fact prompt). The tiebreaker is latency p95
+ *   sum, where Grok 4.1 Fast wins decisively (496 ms vs runners-up 1072+ ms),
+ *   followed by Flash-Lite, then gpt-5.4-nano. gpt-5-nano is dropped — it
+ *   returned empty content on 8 of 10 calls (provider-side issue, not noise),
+ *   so it's net negative as a fallback. DeepSeek-chat has spiky p95 1.5s
+ *   (good but inconsistent); deepseek-v4-pro has 7s p95 1-fact and 5x the
+ *   price of Grok — both cost more on the latency budget than they save.
+ *
+ *   Pricing (per M tokens, OpenRouter list 2026-04-30):
+ *     grok-4.1-fast            $0.20 / $0.50
+ *     gemini-2.5-flash-lite    $0.10 / $0.40 (cheapest)
+ *     gpt-5.4-nano             $0.20 / $1.25
+ *     deepseek-chat            $0.32 / $0.89
+ *     deepseek-v4-pro          $0.435 / $0.87
  *
  *   We use OpenRouter's `models[]` parameter so a single HTTP request fails
  *   over to the next entry on provider error without an extra round-trip
@@ -48,9 +61,10 @@ export interface CallOpenRouterOptions {
 }
 
 /**
- * Primary OpenRouter model — empirically picked from the 2026-04-30 bake-off:
- * 2.1s p50 on 1-fact, 5.7s on 5-fact, 2/3 + 3/3 quality, 0 errors across 10
- * calls. Cheaper than gpt-5.4-nano ($0.20/$0.50 per M vs $0.20/$1.25).
+ * Primary OpenRouter model — empirically held from the 2026-04-30 phase 1.7.1
+ * rerun (credited account, all 6 candidates measured): 148 ms p50 1-fact,
+ * 124 ms p50 5-fact, 6/6 quality, 0 errors across 10 calls. Lowest p95-sum
+ * (496 ms) of all 5 quality-tied models. $0.20/$0.50 per M tokens.
  */
 export const OPENROUTER_PRIMARY_MODEL = 'x-ai/grok-4.1-fast';
 
@@ -59,11 +73,16 @@ export const OPENROUTER_PRIMARY_MODEL = 'x-ai/grok-4.1-fast';
  * to the next entry on provider error, so our adapter doesn't pay for the
  * extra round-trip.
  *
- * Order picked from the same bake-off:
- *   1. google/gemini-2.5-flash-lite — runner-up (tied quality, 1 503 in 10)
- *   2. openai/gpt-5-nano            — third (cheap, slow but proven)
+ * Order picked from the phase 1.7.1 rerun (all 6/6 quality, ranked by p95-sum):
+ *   1. google/gemini-2.5-flash-lite — p95 sum 1072 ms, $0.10/$0.40 (cheapest)
+ *   2. openai/gpt-5.4-nano          — p95 sum 1088 ms, $0.20/$1.25
+ *
+ * Dropped from the prior chain: openai/gpt-5-nano returned empty content on
+ * 8 of 10 calls in the rerun (provider-side issue), so promoting it as a
+ * fallback hurts more than it helps. gpt-5.4-nano was previously unreachable
+ * (402'd) and now earns its slot.
  */
-export const OPENROUTER_FALLBACK_MODELS = ['google/gemini-2.5-flash-lite', 'openai/gpt-5-nano'];
+export const OPENROUTER_FALLBACK_MODELS = ['google/gemini-2.5-flash-lite', 'openai/gpt-5.4-nano'];
 
 /**
  * Call OpenRouter chat completions with `prompt` as a single user message.

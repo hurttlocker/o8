@@ -171,8 +171,8 @@ export type SseEmit = (name: string, payload: unknown) => void;
  *   1. Haiku CLI   — Claude Max subscription, no per-token cost. Primary.
  *   2. Codex CLI   — ChatGPT Plus / Codex subscription, also free. Two CLIs
  *                     beat one for users with either sub. ~15s vs ~14s Haiku.
- *   3. OpenRouter  — grok-4.1-fast (empirically picked from 2026-04-30 bake-off)
- *                     w/ flash-lite + gpt-5-nano in-call fallback. Paid HTTP, ~1-6s.
+ *   3. OpenRouter  — grok-4.1-fast (held in 2026-04-30 phase 1.7.1 rerun)
+ *                     w/ flash-lite + gpt-5.4-nano in-call fallback. Paid HTTP, ~1-6s.
  *   4. Flash       — Google AI key. Demoted because of recent 503 churn.
  *   5. Sonnet CLI  — slow (5-12s) but reliable when everything else 503s.
  *   6. Heuristic   — final fallback when every LLM is unavailable.
@@ -221,7 +221,7 @@ export async function composeClassA(
     }
   }
 
-  // Tier 3: OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5-nano fallback).
+  // Tier 3: OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5.4-nano fallback).
   const openrouterAnswer = await tryComposeOpenRouter(composePrompt);
   if (openrouterAnswer) {
     console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL}`);
@@ -281,7 +281,7 @@ async function tryComposeCodex(prompt: string): Promise<string | null> {
   }
 }
 
-/** Tier 3: OpenRouter — grok-4.1-fast with flash-lite + gpt-5-nano in-call fallback. */
+/** Tier 3: OpenRouter — grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback. */
 async function tryComposeOpenRouter(prompt: string): Promise<string | null> {
   try {
     // 10s — Grok 4.1 Fast 5-fact p50 was 5.7s in the bake-off; 8s would
