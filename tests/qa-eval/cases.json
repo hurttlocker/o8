@@ -1,5 +1,5 @@
 {
-  "$comment": "30-question Q&A eval set for the Cortex Engineering Brain (epic #915 sub-issue 3 wave A). 5 questions per category over 6 categories: ownership / decisions / processes / incidents / specs / cross-repo. Ground truth pulled from ~/.o8/cortex-ide.db (session_outcomes, github_pull_requests, projects, project_repos), ~/.o8/directives/*.md, and the locked architecture comment on epic #915 itself. Questions marked knownGap are designed to surface ingestion holes — the runner classifies them as gaps, not failures. expectedCitations rowIds reference real rows where applicable; the validator warns if a rowId can't be resolved against a live DB but does NOT fail the build (DBs differ across machines).",
+  "$comment": "30-question Q&A eval set for the Cortex Engineering Brain (epic #915 sub-issue 3 wave A). 5 questions per category over 6 categories: ownership / decisions / processes / incidents / specs / cross-repo. Ground truth pulled from ~/.o8/cortex-ide.db (session_outcomes, github_pull_requests, projects, project_repos), ~/.o8/directives/*.md, and the locked architecture comment on epic #915 itself. Questions marked knownGap are designed to surface ingestion holes — the runner classifies them as gaps, not failures. expectedCitations rowIds reference real rows where applicable; the validator warns if a rowId can't be resolved against a live DB but does NOT fail the build (DBs differ across machines). Phase 1.5 (#915 path-to-70): expectedCitations rewritten so rowIds match the kind-prefixed format the composer emits (e.g. \"directive-seed-cortex-ide-...\"). Dead runtime IDs (d-17757638..., d-17757636...) deduped via #948 were dropped — the seed citation already covers the same content. Issue numbers translated to issue_ids per github_issues.issue_id.",
   "version": 1,
   "generatedAt": "2026-04-29",
   "cases": [
@@ -16,12 +16,28 @@
         "Identifies typecheck-before-commit and surgical-changes as global scope"
       ],
       "expectedCitations": [
-        { "kind": "directive", "rowId": "seed-cortex-ide-800-line-ceiling" },
-        { "kind": "directive", "rowId": "seed-cortex-ide-inline-styles-only" },
-        { "kind": "directive", "rowId": "seed-cortex-ide-phosphor-svg-only" },
-        { "kind": "directive", "rowId": "seed-global-typecheck-before-commit" }
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-800-line-ceiling"
+        },
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-inline-styles-only"
+        },
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-phosphor-svg-only"
+        },
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-global-typecheck-before-commit"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 1
+      }
     },
     {
       "id": "qa-002",
@@ -35,11 +51,24 @@
         "References the project_repos linking table or projects table"
       ],
       "expectedCitations": [
-        { "kind": "project", "rowId": "proj-5d0d9e02-015" },
-        { "kind": "project_repo", "rowId": "70954348-8e56-41dd-ac10-5b4e91964fc2" },
-        { "kind": "project_repo", "rowId": "a1c35bf5-ed73-44cf-a7d9-30c6ccb1eb84" }
+        {
+          "kind": "project",
+          "rowId": "project-proj-5d0d9e02-015"
+        },
+        {
+          "kind": "project_repo",
+          "rowId": "project_repo-70954348-8e56-41dd-ac10-5b4e91964fc2"
+        },
+        {
+          "kind": "project_repo",
+          "rowId": "project_repo-a1c35bf5-ed73-44cf-a7d9-30c6ccb1eb84"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-003",
@@ -53,7 +82,11 @@
         "Does not invent fictional GitHub usernames"
       ],
       "expectedCitations": [],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-004",
@@ -67,10 +100,20 @@
         "References the runtime column in session_outcomes"
       ],
       "expectedCitations": [
-        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-1d-codex-feat-dispatch-context-injection-743" },
-        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-2d-gemini-feat-auto-index-repos-741" }
+        {
+          "kind": "outcome",
+          "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-1d-codex-feat-dispatch-context-injection-743"
+        },
+        {
+          "kind": "outcome",
+          "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-2d-gemini-feat-auto-index-repos-741"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 1
+      }
     },
     {
       "id": "qa-005",
@@ -84,9 +127,16 @@
         "Mentions packet-meta-rows pattern"
       ],
       "expectedCitations": [
-        { "kind": "directive", "rowId": "seed-cortex-ide-no-native-form-controls-in-packets" }
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-no-native-form-controls-in-packets"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.7,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-006",
@@ -100,10 +150,16 @@
         "References the seed-cortex-ide-inline-styles-only directive (or seed-cortex-ide-inline-styles-only or d-1775763867817-183404ef)"
       ],
       "expectedCitations": [
-        { "kind": "directive", "rowId": "seed-cortex-ide-inline-styles-only" },
-        { "kind": "directive", "rowId": "d-1775763867817-183404ef" }
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-inline-styles-only"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-007",
@@ -117,9 +173,16 @@
         "Mentions src/lib/icons/ shim system or 85 icons"
       ],
       "expectedCitations": [
-        { "kind": "directive", "rowId": "seed-cortex-ide-phosphor-svg-only" }
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-phosphor-svg-only"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.7,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-008",
@@ -133,9 +196,16 @@
         "Names the three retrievers (SQL, FTS5, graph / codebase-memory-mcp)"
       ],
       "expectedCitations": [
-        { "kind": "issue", "rowId": "915" }
+        {
+          "kind": "issue",
+          "rowId": "issue-4353815519"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 1
+      }
     },
     {
       "id": "qa-009",
@@ -149,7 +219,11 @@
         "References the .dmg/installer flow OR the local-Next-backend nature"
       ],
       "expectedCitations": [],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-010",
@@ -163,9 +237,16 @@
         "Mentions the Flash classifier OR the local opencode/gpt-5-nano fallback"
       ],
       "expectedCitations": [
-        { "kind": "issue", "rowId": "915" }
+        {
+          "kind": "issue",
+          "rowId": "issue-4353815519"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 1
+      }
     },
     {
       "id": "qa-011",
@@ -178,10 +259,16 @@
         "References the typecheck directive OR npm run typecheck variant"
       ],
       "expectedCitations": [
-        { "kind": "directive", "rowId": "seed-global-typecheck-before-commit" },
-        { "kind": "directive", "rowId": "d-1775763668585-fba2ce0b" }
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-global-typecheck-before-commit"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-012",
@@ -195,9 +282,16 @@
         "Names src/ws-server.ts as waived"
       ],
       "expectedCitations": [
-        { "kind": "directive", "rowId": "seed-cortex-ide-800-line-ceiling" }
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-800-line-ceiling"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.7,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-013",
@@ -211,9 +305,16 @@
         "Forbids silent rewrites of adjacent code"
       ],
       "expectedCitations": [
-        { "kind": "directive", "rowId": "seed-global-surgical-changes" }
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-global-surgical-changes"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.7,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-014",
@@ -228,7 +329,11 @@
         "References the auto-update flow / UpdateBanner / GitHub Releases"
       ],
       "expectedCitations": [],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-015",
@@ -242,7 +347,11 @@
         "References the allowlist or /api/setup/* GET-only carve-out"
       ],
       "expectedCitations": [],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 1 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
     },
     {
       "id": "qa-016",
@@ -257,10 +366,20 @@
         "Optionally mentions the resulting glass-chrome-preserved directive"
       ],
       "expectedCitations": [
-        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-7d-gemini-fix-midnight-blob-rgba-sweep" },
-        { "kind": "directive", "rowId": "seed-cortex-ide-glass-chrome-preserved" }
+        {
+          "kind": "outcome",
+          "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-7d-gemini-fix-midnight-blob-rgba-sweep"
+        },
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-glass-chrome-preserved"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-017",
@@ -275,9 +394,16 @@
         "Mentions the native-select-to-popover migration"
       ],
       "expectedCitations": [
-        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-6d-codex-feat-packet-meta-rows-restyle" }
+        {
+          "kind": "outcome",
+          "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-6d-codex-feat-packet-meta-rows-restyle"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.7,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-018",
@@ -291,9 +417,16 @@
         "States that the reviewer flagged it as off-brand vs the locked design language"
       ],
       "expectedCitations": [
-        { "kind": "outcome", "rowId": "seed-Users-marquisehurtt-cortex-ide-5d-opencode-polish-orchestrator-empty-state-copy" }
+        {
+          "kind": "outcome",
+          "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-5d-opencode-polish-orchestrator-empty-state-copy"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.7, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.7,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-019",
@@ -307,10 +440,20 @@
         "Mentions either the idle-between-runs symptom OR the git-refused-commit symptom"
       ],
       "expectedCitations": [
-        { "kind": "outcome", "rowId": "so-1776188979528-a3yz23te" },
-        { "kind": "outcome", "rowId": "so-1776188344936-92de5fx8" }
+        {
+          "kind": "outcome",
+          "rowId": "outcome-so-1776188979528-a3yz23te"
+        },
+        {
+          "kind": "outcome",
+          "rowId": "outcome-so-1776188344936-92de5fx8"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 1 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 1
+      }
     },
     {
       "id": "qa-020",
@@ -324,9 +467,16 @@
         "Either cites commit 929ffdf OR explicitly states the commit history is not available in the substrate"
       ],
       "expectedCitations": [
-        { "kind": "directive", "rowId": "seed-cortex-ide-palette-vars" }
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-palette-vars"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-021",
@@ -340,9 +490,16 @@
         "Mentions the qa_eval_runs eval harness table"
       ],
       "expectedCitations": [
-        { "kind": "issue", "rowId": "915" }
+        {
+          "kind": "issue",
+          "rowId": "issue-4353815519"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-022",
@@ -356,9 +513,16 @@
         "Names Class B 2.0s TTFT / 4s TTLT / 6s ceiling"
       ],
       "expectedCitations": [
-        { "kind": "issue", "rowId": "915" }
+        {
+          "kind": "issue",
+          "rowId": "issue-4353815519"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-023",
@@ -372,9 +536,16 @@
         "Mentions invalidation on directive write or outcome insert"
       ],
       "expectedCitations": [
-        { "kind": "issue", "rowId": "915" }
+        {
+          "kind": "issue",
+          "rowId": "issue-4353815519"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-024",
@@ -388,9 +559,16 @@
         "States that the mode is picked by class, not by user"
       ],
       "expectedCitations": [
-        { "kind": "issue", "rowId": "915" }
+        {
+          "kind": "issue",
+          "rowId": "issue-4353815519"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-025",
@@ -404,9 +582,16 @@
         "Names the rubric fields factual_accuracy, citation_correctness, hallucination_count"
       ],
       "expectedCitations": [
-        { "kind": "issue", "rowId": "915" }
+        {
+          "kind": "issue",
+          "rowId": "issue-4353815519"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.5, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.5,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-026",
@@ -421,10 +606,20 @@
         "Names glass tokens / palette vars"
       ],
       "expectedCitations": [
-        { "kind": "directive", "rowId": "seed-cortex-ide-inline-styles-only" },
-        { "kind": "directive", "rowId": "seed-cortex-ide-palette-vars" }
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-inline-styles-only"
+        },
+        {
+          "kind": "directive",
+          "rowId": "directive-seed-cortex-ide-palette-vars"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.3, "max_hallucinations": 1 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.3,
+        "max_hallucinations": 1
+      }
     },
     {
       "id": "qa-027",
@@ -438,9 +633,16 @@
         "References the o8-site README or the explicit 'one and only Vercel surface' wording"
       ],
       "expectedCitations": [
-        { "kind": "project", "rowId": "proj-5d0d9e02-015" }
+        {
+          "kind": "project",
+          "rowId": "project-proj-5d0d9e02-015"
+        }
       ],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.3, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0.3,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-028",
@@ -454,7 +656,11 @@
         "Optionally names the /text specimen page"
       ],
       "expectedCitations": [],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-029",
@@ -468,7 +674,11 @@
         "Does not invent fictional o8-site outcome rows"
       ],
       "expectedCitations": [],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 0 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 0
+      }
     },
     {
       "id": "qa-030",
@@ -482,7 +692,11 @@
         "Mentions reading node_modules/next/dist/docs/ before writing code"
       ],
       "expectedCitations": [],
-      "rubric": { "factual_accuracy_threshold": 0.7, "citation_correctness_threshold": 0.0, "max_hallucinations": 1 }
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
     }
   ]
 }
