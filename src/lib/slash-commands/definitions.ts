@@ -2,6 +2,14 @@ import type { OrchestratorSlashCommandDefinition } from './types';
 
 export const ORCHESTRATOR_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] = [
   {
+    command: '/ask',
+    name: 'ask',
+    title: 'Ask the Brain',
+    description: 'Query the Brain — directives, decisions, past outcomes.',
+    argHint: '<question>',
+    requiresArgument: true,
+  },
+  {
     command: '/compact',
     name: 'compact',
     title: 'Compact context',
