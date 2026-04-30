@@ -32,6 +32,10 @@ import { claimNext, completeQueueItem, failQueueItem, pendingQueueDepth } from '
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const CONFIDENCE_FLOOR = 0.6;
+// Source-of-truth hierarchy (#915 follow-up). Comments are the lowest tier
+// because they're conversational opinions, not project rules. Directives
+// (1.0), merged PRs (0.95), and closed outcomes (0.9) outrank them.
+const COMMENT_SOURCE_AUTHORITY = 0.7;
 
 const DEFAULT_CONCURRENCY = 2;
 const MAX_CONCURRENCY = 8;
@@ -109,16 +113,17 @@ function writeFacts(rows: FactInsertRow[]): number {
   const insert = sqlite.prepare(
     `INSERT INTO facts (
        id, kind, content, source_kind, source_id, source_excerpt,
-       repo_path, confidence, fingerprint, extracted_by
+       repo_path, confidence, fingerprint, extracted_by, source_authority
      )
-     VALUES (?, ?, ?, 'github_comment', ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, 'github_comment', ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(fingerprint) DO UPDATE SET
        kind = excluded.kind,
        content = excluded.content,
        source_excerpt = excluded.source_excerpt,
        repo_path = excluded.repo_path,
        confidence = excluded.confidence,
-       extracted_by = excluded.extracted_by`,
+       extracted_by = excluded.extracted_by,
+       source_authority = excluded.source_authority`,
   );
 
   let written = 0;
@@ -134,6 +139,7 @@ function writeFacts(rows: FactInsertRow[]): number {
         row.fact.confidence,
         row.fingerprint,
         row.extractedBy,
+        COMMENT_SOURCE_AUTHORITY,
       );
       written += 1;
     }

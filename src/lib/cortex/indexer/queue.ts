@@ -112,22 +112,55 @@ export interface QueueItem {
 /**
  * Enqueue every `github_comments` row for `repoPath` that isn't already in
  * `facts_queue` AND passes the heuristic noise filter. Idempotent —
- * re-running adds zero rows when the queue is already saturated. Returns
- * `{ enqueued, skipped }` so callers can see how many were filtered.
+ * re-running adds zero rows when the queue is already saturated.
+ *
+ * Re-enqueue when source has been edited upstream: any comment whose
+ * `updated_at` is strictly newer than the most recent fact distilled from it
+ * (`facts.created_at` for `source_id = comment.id`) gets a fresh queue row
+ * (attempts=0, last_error=NULL). The existing fact stays in place until the
+ * worker overwrites it via the fingerprint upsert; if the new content
+ * fingerprints to the same row, the worker no-ops.
+ *
+ * Returns `{ enqueued, skipped }` so callers can see how many were filtered.
  */
 export function enqueueComments(repoPath: string): { enqueued: number; skipped: number } {
   const sqlite = getSqlite();
 
+  // Two pools of candidates:
+  //   1. Brand-new comments: no facts_queue row at all.
+  //   2. Edited comments: a queue row exists AND was completed AND the
+  //      comment's updated_at is newer than the latest fact.created_at for
+  //      that source. We compare against MAX(facts.created_at) so a comment
+  //      that fanned out into multiple facts only re-enqueues once, after
+  //      the last write is older than the upstream edit.
   const candidates = sqlite
     .prepare(
-      `SELECT c.id AS source_id, c.body, c.author_login
-       FROM github_comments c
-       LEFT JOIN facts_queue q
-         ON q.source_kind = 'github_comment'
-        AND q.source_id = c.id
-       WHERE c.repo_path = ?
-         AND q.id IS NULL
-         AND length(c.body) > 0`,
+      `WITH last_fact_per_source AS (
+         SELECT source_id, MAX(created_at) AS last_created_at
+           FROM facts
+          WHERE source_kind = 'github_comment'
+          GROUP BY source_id
+       )
+       SELECT c.id AS source_id, c.body, c.author_login
+         FROM github_comments c
+         LEFT JOIN facts_queue q
+           ON q.source_kind = 'github_comment'
+          AND q.source_id = c.id
+         LEFT JOIN last_fact_per_source f
+           ON f.source_id = c.id
+        WHERE c.repo_path = ?
+          AND length(c.body) > 0
+          AND (
+            -- Brand-new: never queued.
+            q.id IS NULL
+            OR (
+              -- Stale: queued + completed + upstream edited since last fact.
+              q.completed_at IS NOT NULL
+              AND f.last_created_at IS NOT NULL
+              AND c.updated_at IS NOT NULL
+              AND c.updated_at > f.last_created_at
+            )
+          )`,
     )
     .all(repoPath) as Array<{ source_id: string; body: string; author_login: string | null }>;
 
@@ -140,6 +173,18 @@ export function enqueueComments(repoPath: string): { enqueued: number; skipped: 
 
   if (enqueueRows.length === 0) return { enqueued: 0, skipped };
 
+  // For brand-new sources we INSERT. For stale/edited sources we want a
+  // fresh queue row regardless of whether the prior row exists, so the
+  // claim/complete cycle re-runs. Use INSERT OR REPLACE on (source_kind,
+  // source_id) — but `id` is the PK and we need to invalidate the old queue
+  // row by matching on the source pair. Simplest path: DELETE prior queue
+  // row(s) for the source, then INSERT fresh. Wrapped in a transaction so
+  // the worker never sees a hole.
+  const deleteStale = sqlite.prepare(
+    `DELETE FROM facts_queue
+       WHERE source_kind = 'github_comment'
+         AND source_id = ?`,
+  );
   const insert = sqlite.prepare(
     `INSERT INTO facts_queue (id, source_kind, source_id, repo_path, enqueued_at)
      VALUES (?, 'github_comment', ?, ?, datetime('now'))`,
@@ -147,6 +192,7 @@ export function enqueueComments(repoPath: string): { enqueued: number; skipped: 
 
   const tx = sqlite.transaction((items: typeof enqueueRows) => {
     for (const row of items) {
+      deleteStale.run(row.source_id);
       insert.run(randomUUID(), row.source_id, repoPath);
     }
   });
