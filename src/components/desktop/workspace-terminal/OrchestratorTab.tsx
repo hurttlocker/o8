@@ -60,6 +60,7 @@ import { SessionTileSurface } from './SessionTileSurface';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
 // Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
 // row. The old layout component is no longer imported here.
+import { WorkspaceRecallStrip } from './WorkspaceRecallStrip';
 
 interface OrchestratorTabProps {
   tabId: string;
@@ -692,6 +693,9 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
           ) : null}
         </div>
       </div>
+
+      {/* #966 — Ambient recall strip: top-3 directives for active workspace */}
+      <WorkspaceRecallStrip repoPath={repoPath ?? null} />
 
       {/* Sessions strip — pills for active agents. Right-click to split a
           transcript into a tile beside the chat (issue #663). */}
