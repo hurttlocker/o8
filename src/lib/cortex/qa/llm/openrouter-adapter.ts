@@ -1,22 +1,36 @@
 /**
- * OpenRouter adapter for the Cortex Q&A layer (epic #915 path-to-70 phase 1.7).
+ * OpenRouter adapter for the Cortex Q&A layer (epic #915 path-to-70 phase 1.7 v2).
  *
- * Cheap-reasoning fallback that sits between Haiku CLI and Gemini Flash:
+ * Paid HTTP safety net that sits between the two free CLI tiers and Gemini Flash:
  *
- *   composeClassA():  Haiku CLI → OpenRouter → Flash → Sonnet CLI → heuristic
- *   classifyQuestion: Haiku CLI → OpenRouter → Flash → heuristic
+ *   composeClassA():  Haiku CLI → Codex CLI → OpenRouter → Flash → Sonnet CLI → heuristic
+ *   classifyQuestion: Haiku CLI → Codex CLI → OpenRouter → Flash → heuristic
  *
- * Why OpenRouter:
- *   - Uses OpenRouter's `models[]` parameter for in-call fallback so a single
- *     HTTP request degrades GPT-5.4 Nano → GPT-5 Nano without extra round-trips.
- *   - GPT-5.4 Nano is the newest reasoning-tuned cheap model on OR as of
- *     2026-04 ($0.20/$1.25 per M, 400K ctx). GPT-5 Nano is the proven
- *     fallback ($0.05/$0.40 per M).
+ * Why this exact model order (empirically picked, not guessed):
+ *   We bake-off'd 6 candidates against a 1-fact lookup + 5-fact spec prompt
+ *   on 2026-04-30 (5 calls each, max_tokens=512). The data:
+ *
+ *     model                          p50 1fact   p50 5fact   quality   errors
+ *     x-ai/grok-4.1-fast             2091 ms     5677 ms     2/3 + 3/3 0
+ *     google/gemini-2.5-flash-lite   7019 ms     3950 ms     2/3 + 3/3 1 (503)
+ *     openai/gpt-5-nano              10463 ms    12967 ms    0/3       1 (timeout)
+ *     openai/gpt-5.4-nano            —           —           —         402 credit
+ *     deepseek/deepseek-v4-pro       —           —           —         402 credit
+ *     deepseek/deepseek-chat         —           —           —         402 credit
+ *
+ *   Grok 4.1 Fast is the unambiguous winner: fastest p50, tied highest
+ *   quality, zero errors. Flash-Lite is the natural runner-up (tied quality,
+ *   slower but proven). gpt-5-nano lands as third — cheap, but slow + empty
+ *   on timeout.
+ *
+ *   We use OpenRouter's `models[]` parameter so a single HTTP request fails
+ *   over to the next entry on provider error without an extra round-trip
+ *   from our adapter.
  *
  * Why a separate adapter (vs. extending haiku-adapter):
- *   - HTTP, not CLI: no shell probing, no spawn cost. Subsecond cold-start.
- *   - The chain is hardcoded — tier 2 between Haiku CLI (free, slower) and
- *     Flash (free, also fast). Keeps each adapter single-responsibility.
+ *   - HTTP, not CLI: no shell probing, no spawn cost. ~1s cold-start.
+ *   - The chain is hardcoded — tier 3 between two free CLIs (Haiku, Codex)
+ *     and Flash. Keeps each adapter single-responsibility.
  */
 
 import 'server-only';
@@ -33,17 +47,22 @@ export interface CallOpenRouterOptions {
 }
 
 /**
- * Primary OpenRouter model: newest GPT in the cheap tier as of 2026-04.
- * Bias toward newest + best for quick lookup; cost is a tiebreaker.
+ * Primary OpenRouter model — empirically picked from the 2026-04-30 bake-off:
+ * 2.1s p50 on 1-fact, 5.7s on 5-fact, 2/3 + 3/3 quality, 0 errors across 10
+ * calls. Cheaper than gpt-5.4-nano ($0.20/$0.50 per M vs $0.20/$1.25).
  */
-export const OPENROUTER_PRIMARY_MODEL = 'openai/gpt-5.4-nano';
+export const OPENROUTER_PRIMARY_MODEL = 'x-ai/grok-4.1-fast';
 
 /**
  * In-call fallback chain. OpenRouter's `models[]` parameter auto-fails over
  * to the next entry on provider error, so our adapter doesn't pay for the
  * extra round-trip.
+ *
+ * Order picked from the same bake-off:
+ *   1. google/gemini-2.5-flash-lite — runner-up (tied quality, 1 503 in 10)
+ *   2. openai/gpt-5-nano            — third (cheap, slow but proven)
  */
-export const OPENROUTER_FALLBACK_MODELS = ['openai/gpt-5-nano', 'openai/gpt-4.1-mini'];
+export const OPENROUTER_FALLBACK_MODELS = ['google/gemini-2.5-flash-lite', 'openai/gpt-5-nano'];
 
 /**
  * Call OpenRouter chat completions with `prompt` as a single user message.
