@@ -156,8 +156,10 @@ interface RowProbe {
 const CITATION_PROBE: Record<ExpectedCitation['kind'], RowProbe | null> = {
   outcome: { table: 'session_outcomes', column: 'id' },
   directive: null, // directives live as files in ~/.o8/directives/, not the DB
-  pr: { table: 'github_pull_requests', column: 'number' },
-  issue: { table: 'github_issues', column: 'number' },
+  // Cases use pull_request_id / issue_id (the canonical row id the composer cites),
+  // not GH numbers. The retriever joins on the *_id columns.
+  pr: { table: 'github_pull_requests', column: 'pull_request_id' },
+  issue: { table: 'github_issues', column: 'issue_id' },
   project: { table: 'projects', column: 'id' },
   project_repo: { table: 'project_repos', column: 'repo_id' },
 };
@@ -214,11 +216,18 @@ async function probeCitations(
     }
   }
 
+  // expectedCitations rowIds are stored kind-prefixed (e.g. "directive-seed-foo")
+  // so they match the format the composer emits. Strip the "<kind>-" prefix
+  // before probing the DB / disk for the bare ID.
+  const stripPrefix = (kind: string, rowId: string): string =>
+    rowId.startsWith(`${kind}-`) ? rowId.slice(kind.length + 1) : rowId;
+
   for (const qaCase of cases) {
     for (const cit of qaCase.expectedCitations) {
+      const bare = stripPrefix(cit.kind, cit.rowId);
       if (cit.kind === 'directive') {
         if (directiveFiles.size === 0) continue;
-        if (!directiveFiles.has(cit.rowId)) {
+        if (!directiveFiles.has(bare)) {
           warnings.push(
             `case ${qaCase.id}: expectedCitations rowId '${cit.rowId}' (kind=directive) not found in ${directivesDir}`,
           );
@@ -230,7 +239,7 @@ async function probeCitations(
       try {
         const row = db
           .prepare(`SELECT 1 AS hit FROM ${probe.table} WHERE ${probe.column} = ? LIMIT 1`)
-          .get(cit.rowId);
+          .get(bare);
         if (!row) {
           warnings.push(
             `case ${qaCase.id}: expectedCitations rowId '${cit.rowId}' (kind=${cit.kind}) not found in ${probe.table}.${probe.column}`,
