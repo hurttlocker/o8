@@ -93,6 +93,7 @@ import {
   resolveSupervisorAutoEscalateSync,
 } from './lib/operator/defaults';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
+import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import type {
   LaneLifecycleEventPayload,
   RealtimeBatchMessage,
@@ -4005,6 +4006,8 @@ async function bootstrapWsServer() {
     void ensureReviewDrainStarted().catch((error) => {
       console.error('[ws-server] Failed to start review queue drain:', error instanceof Error ? error.message : String(error));
     });
+
+    bootCompactorScheduler();
   });
 }
 
