@@ -10,9 +10,21 @@
  * requested repo (or any repo when none specified) and emit them as typed
  * rows with citations. The orchestrator will RRF-merge these with FTS hits
  * and graph hits — so we don't need a relevance model here, just freshness.
+ *
+ * Ownership intent (Phase 1.4 of #915 path-to-70):
+ *   When the question matches ownership keywords ("which project", "what
+ *   project", "who owns", "members of project", "what's in project"), we
+ *   ALSO emit `project` and `project_repo` rows joined to ~/.o8/repos.json
+ *   so the composer can answer "which project does cortex-ide belong to?"
+ *   without ever falling back to vector search. Outcomes still emit on
+ *   every run — ownership rows just stack on top.
  */
 
 import 'server-only';
+
+import { existsSync, readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import type { RetrieverInput, RetrieverResult, TypedRow } from '@/lib/cortex/qa/types';
 import { getSqlite } from '@/lib/db';
@@ -34,6 +46,246 @@ interface OutcomeRow {
   pr_title: string | null;
   pr_url: string | null;
   pr_id: number | null;
+}
+
+interface ProjectRow {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+}
+
+interface ProjectRepoRow {
+  project_id: string;
+  repo_id: string;
+  role: string | null;
+  suggestion_origin: string;
+}
+
+interface RegistryRepo {
+  id: string;
+  name: string;
+  localPath: string;
+}
+
+// ── Ownership intent detection ───────────────────────────────────────────────
+
+/**
+ * Lightweight keyword match for ownership / project / membership questions.
+ * Cheap (single regex pass) and deterministic — sits in front of the more
+ * expensive project queries so the default outcome path stays sub-100ms when
+ * no project signal is needed.
+ *
+ * The classifier (Flash) sits one layer up and emits BM25 variants — those
+ * help the FTS retriever, but project rows aren't BM25-indexed, so we need
+ * an explicit keyword check here.
+ */
+function isOwnershipQuestion(question: string): boolean {
+  const lower = question.toLowerCase();
+  return (
+    /\bwhich project\b/.test(lower) ||
+    /\bwhat project\b/.test(lower) ||
+    /\bwhat\s+(?:other\s+)?(?:repos?|repositories)\b/.test(lower) ||
+    /\bwho owns\b/.test(lower) ||
+    /\bowner of\b/.test(lower) ||
+    /\bmembers? of (?:the )?project\b/.test(lower) ||
+    /\bin (?:the )?project\b/.test(lower) ||
+    /\bwhat'?s? in project\b/.test(lower) ||
+    /\bbelongs? to\b/.test(lower) ||
+    /\bpart of (?:the )?(?:project|o8|product)\b/.test(lower) ||
+    // "repo X" / "project X" naming probes
+    /\bproject\s+\w+/.test(lower)
+  );
+}
+
+// ── Repo registry (sync read) ────────────────────────────────────────────────
+
+const REPO_REGISTRY_PATH = path.join(os.homedir(), '.o8', 'repos.json');
+
+/** Sync read of the repo registry. Returns [] on any error so the retriever
+ *  never throws. */
+function readRepoRegistrySync(): RegistryRepo[] {
+  try {
+    if (!existsSync(REPO_REGISTRY_PATH)) return [];
+    const raw = readFileSync(REPO_REGISTRY_PATH, 'utf8');
+    const parsed = JSON.parse(raw) as { repos?: unknown };
+    if (!parsed || !Array.isArray(parsed.repos)) return [];
+    const repos: RegistryRepo[] = [];
+    for (const entry of parsed.repos as unknown[]) {
+      if (!entry || typeof entry !== 'object') continue;
+      const rec = entry as Record<string, unknown>;
+      const id = typeof rec.id === 'string' ? rec.id : null;
+      const name = typeof rec.name === 'string' ? rec.name : null;
+      const localPath = typeof rec.localPath === 'string'
+        ? rec.localPath
+        : typeof rec.path === 'string'
+          ? rec.path
+          : null;
+      if (!id || !name || !localPath) continue;
+      repos.push({ id, name, localPath });
+    }
+    return repos;
+  } catch (error) {
+    console.warn(
+      '[qa][sql] repo registry read failed:',
+      error instanceof Error ? error.message : error,
+    );
+    return [];
+  }
+}
+
+// ── Project rows ─────────────────────────────────────────────────────────────
+
+/**
+ * Emit project + project_repo rows for ownership intent.
+ *
+ * Strategy:
+ *   1. If `repoPath` is set, find that repo in the registry and emit every
+ *      project it belongs to (plus all sibling project_repos rows so the
+ *      composer can list teammates).
+ *   2. If `projectId` is set OR no repoPath, list all projects + repos —
+ *      bounded by `limit` so we never flood the merge.
+ *
+ * The composer renders project rows as `[PROJ-<id>]` and project_repo rows
+ * as `[PRJREPO-<repoId>]` — see `buildCitationHandle` in composer.ts.
+ */
+function emitProjectRows(
+  sqlite: ReturnType<typeof getSqlite>,
+  input: RetrieverInput,
+  rows: TypedRow[],
+  limit: number,
+): void {
+  const registry = readRepoRegistrySync();
+  const repoById = new Map(registry.map((r) => [r.id, r]));
+
+  // Resolve target project_ids: from explicit projectId, from repoPath, or
+  // ALL projects when neither is set.
+  const targetProjectIds = new Set<string>();
+
+  if (input.projectId) {
+    targetProjectIds.add(input.projectId);
+  }
+
+  if (input.repoPath) {
+    const target = path.resolve(input.repoPath);
+    const repo = registry.find((r) => path.resolve(r.localPath) === target);
+    if (repo) {
+      // Find every project this repo participates in.
+      const projectLinks = sqlite
+        .prepare('SELECT project_id FROM project_repos WHERE repo_id = ?')
+        .all(repo.id) as Array<{ project_id: string }>;
+      for (const link of projectLinks) targetProjectIds.add(link.project_id);
+    }
+  }
+
+  // No specific scope — pull every project (capped). Useful for "list the
+  // projects" / cross-repo questions that don't pin a single repo.
+  let projects: ProjectRow[];
+  if (targetProjectIds.size > 0) {
+    const ids = [...targetProjectIds];
+    projects = sqlite
+      .prepare(
+        `SELECT id, name, slug, description FROM projects
+         WHERE id IN (${ids.map(() => '?').join(',')})`,
+      )
+      .all(...ids) as ProjectRow[];
+  } else {
+    projects = sqlite
+      .prepare('SELECT id, name, slug, description FROM projects ORDER BY updated_at DESC LIMIT ?')
+      .all(limit) as ProjectRow[];
+  }
+
+  if (projects.length === 0) return;
+
+  // Pre-fetch every project_repos row for the projects in scope (one round-
+  // trip, not N) so the composer can describe membership without re-querying.
+  const projectIds = projects.map((p) => p.id);
+  const links = sqlite
+    .prepare(
+      `SELECT project_id, repo_id, role, suggestion_origin FROM project_repos
+       WHERE project_id IN (${projectIds.map(() => '?').join(',')})`,
+    )
+    .all(...projectIds) as ProjectRepoRow[];
+
+  const linksByProject = new Map<string, ProjectRepoRow[]>();
+  for (const link of links) {
+    const list = linksByProject.get(link.project_id) ?? [];
+    list.push(link);
+    linksByProject.set(link.project_id, list);
+  }
+
+  for (const project of projects) {
+    const projectLinks = linksByProject.get(project.id) ?? [];
+    const repoSummaries = projectLinks
+      .map((link) => {
+        const repo = repoById.get(link.repo_id);
+        const repoLabel = repo ? repo.name : link.repo_id;
+        return link.role ? `${repoLabel} (${link.role})` : repoLabel;
+      })
+      .join(', ');
+    const excerpt = repoSummaries
+      ? `${project.name} — repos: ${repoSummaries}`
+      : project.description ?? project.name;
+
+    rows.push({
+      citation: {
+        kind: 'project',
+        rowId: project.id,
+        table: 'projects',
+        excerpt: excerpt.length > 160 ? `${excerpt.slice(0, 157)}…` : excerpt,
+      },
+      fields: {
+        id: project.id,
+        name: project.name,
+        slug: project.slug,
+        description: project.description,
+        repos: projectLinks.map((link) => {
+          const repo = repoById.get(link.repo_id);
+          return {
+            repoId: link.repo_id,
+            repoName: repo?.name ?? null,
+            repoPath: repo?.localPath ?? null,
+            role: link.role,
+            suggestionOrigin: link.suggestion_origin,
+          };
+        }),
+      },
+      score: 1,
+    });
+
+    // Emit one project_repo row per link so the composer can cite "cortex-ide
+    // is the fullstack repo in o8 [PRJREPO-...]" with row-level provenance.
+    for (const link of projectLinks) {
+      const repo = repoById.get(link.repo_id);
+      const repoLabel = repo ? repo.name : link.repo_id;
+      const linkExcerpt = link.role
+        ? `${repoLabel} → ${project.name} (role: ${link.role})`
+        : `${repoLabel} → ${project.name}`;
+      rows.push({
+        citation: {
+          kind: 'project_repo',
+          // repoId is the canonical handle — there's a unique
+          // (project_id, repo_id) pair so within a project's context
+          // it's unambiguous, and the eval cases reference rowIds
+          // shaped like the registry uuid.
+          rowId: link.repo_id,
+          table: 'project_repos',
+          excerpt: linkExcerpt,
+        },
+        fields: {
+          projectId: link.project_id,
+          projectName: project.name,
+          projectSlug: project.slug,
+          repoId: link.repo_id,
+          repoName: repo?.name ?? null,
+          repoPath: repo?.localPath ?? null,
+          role: link.role,
+          suggestionOrigin: link.suggestion_origin,
+        },
+        score: 1,
+      });
+    }
+  }
 }
 
 export async function sqlRetriever(input: RetrieverInput): Promise<RetrieverResult> {
@@ -140,6 +392,21 @@ export async function sqlRetriever(input: RetrieverInput): Promise<RetrieverResu
           },
           score: 1,
         });
+      }
+    }
+
+    // Ownership/project intent — emit project + project_repo rows when the
+    // question is asking about membership/ownership, or when the caller
+    // already pinned a projectId. Stacks on top of the outcomes path so RRF
+    // gets both signals.
+    if (input.projectId || isOwnershipQuestion(input.question)) {
+      try {
+        emitProjectRows(sqlite, input, rows, limit);
+      } catch (error) {
+        console.warn(
+          '[qa][sql] project rows failed:',
+          error instanceof Error ? error.message : error,
+        );
       }
     }
   } catch (error) {

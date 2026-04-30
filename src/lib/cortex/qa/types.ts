@@ -12,7 +12,14 @@
  *   - Every fact gets a row id (`rowId` + `table`) so contradictions can be
  *     resolved against the originating row, not a free-text blob.
  */
-export type CitationKind = 'directive' | 'outcome' | 'pr' | 'issue' | 'symbol' | 'project';
+export type CitationKind =
+  | 'directive'
+  | 'outcome'
+  | 'pr'
+  | 'issue'
+  | 'symbol'
+  | 'project'
+  | 'project_repo';
 
 export interface Citation {
   kind: CitationKind;
