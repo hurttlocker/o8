@@ -12,6 +12,7 @@
 
 import 'server-only';
 
+import { retrieveFacts } from '@/lib/cortex/qa/retrievers/facts';
 import { ftsRetriever } from '@/lib/cortex/qa/retrievers/fts';
 import { graphRetriever } from '@/lib/cortex/qa/retrievers/graph';
 import { sqlRetriever } from '@/lib/cortex/qa/retrievers/sql';
@@ -27,15 +28,20 @@ const RRF_K = 60;
  * whole orchestrator down.
  */
 export async function retrieveAll(input: RetrieverInput): Promise<RetrieverResult[]> {
+  // #915 north star #1 — `retrieveFacts` joins the parallel fan-out as a peer
+  // retriever. It contributes rows to the same RRF union below; MERGE_LIMIT
+  // is unchanged so facts compete fairly. Composer-side high-rank injection
+  // (#3) is a separate agent.
   const settled = await Promise.allSettled([
     sqlRetriever(input),
     ftsRetriever(input),
     graphRetriever(input),
+    retrieveFacts(input),
   ]);
 
   return settled.map((entry, idx) => {
     if (entry.status === 'fulfilled') return entry.value;
-    const retriever: RetrieverResult['retriever'] = (['sql', 'fts', 'graph'] as const)[idx];
+    const retriever: RetrieverResult['retriever'] = (['sql', 'fts', 'graph', 'facts'] as const)[idx];
     console.warn(
       `[qa][retrieve] ${retriever} retriever rejected:`,
       entry.reason instanceof Error ? entry.reason.message : entry.reason,

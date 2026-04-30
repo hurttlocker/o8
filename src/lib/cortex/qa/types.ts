@@ -19,9 +19,33 @@ export type CitationKind =
   | 'issue'
   | 'comment'
   | 'doc'
+  | 'fact'
   | 'symbol'
   | 'project'
   | 'project_repo';
+
+/**
+ * Engineering Brain Indexer typed-row shape (epic #915 north star #1).
+ *
+ * `factsRetriever` returns `TypedRow` with `citation.kind === 'fact'`. The
+ * fields below describe the distilled-fact payload the composer reads. Kept
+ * as a documentation-only interface so retrievers can spread it into the
+ * `fields` slot without forcing a discriminated union on TypedRow.
+ */
+export interface FactRowFields {
+  /** Distilled fact category (e.g. 'decision', 'spec', 'directive'). */
+  factKind: string;
+  /** The extracted fact content (≤500 chars). */
+  content: string;
+  /** Source substrate kind (e.g. 'comment', 'doc', 'outcome'). */
+  sourceKind: string;
+  /** Source row id within the substrate table. */
+  sourceId: string;
+  /** Verbatim substring of the source body the fact derives from. */
+  sourceExcerpt: string;
+  /** Distillation confidence (0.0-1.0). */
+  confidence: number;
+}
 
 export interface Citation {
   kind: CitationKind;
@@ -56,7 +80,7 @@ export interface TypedRow {
 }
 
 export interface RetrieverResult {
-  retriever: 'sql' | 'fts' | 'graph';
+  retriever: 'sql' | 'fts' | 'graph' | 'facts';
   rows: TypedRow[];
   durationMs: number;
 }
