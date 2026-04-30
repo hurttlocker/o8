@@ -1136,6 +1136,59 @@ fn resolve_node_via_login_shell() -> Option<String> {
     None
 }
 
+/// Pulls AI provider API keys from the user's login shell (~/.zshenv etc.)
+/// so Finder-launched packaged builds inherit keys the user already has.
+/// Returns a Vec of (KEY, VALUE) pairs for whichever known AI vars exist.
+/// Issue #935: Gemini-backed features (Suggest Projects, classifier) were
+/// dead in the installed app because GUI launches don't read .zshenv.
+fn load_ai_keys_from_login_shell() -> Vec<(String, String)> {
+    const KEYS: &[&str] = &[
+        "GOOGLE_AI_API_KEY",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "GEMINI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "XAI_API_KEY",
+    ];
+    // Shell-print the keys we care about; absent vars print as empty so we
+    // can skip them. Wrapped in `:;` so a missing var doesn't make the
+    // shell exit with non-zero.
+    let script = KEYS
+        .iter()
+        .map(|k| format!("printf '%s=%s\\n' {} \"${{{}:-}}\"", k, k))
+        .collect::<Vec<_>>()
+        .join("; ");
+    let shells: [(&str, &[&str]); 3] = [
+        ("zsh", &["-l", "-c", &script]),
+        ("bash", &["-l", "-c", &script]),
+        ("sh", &["-l", "-c", &script]),
+    ];
+    for (shell, _args) in shells {
+        if let Ok(out) = Command::new(shell)
+            .args(["-l", "-c", &script])
+            .output()
+        {
+            if out.status.success() {
+                let mut pairs = Vec::new();
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    if let Some(eq) = line.find('=') {
+                        let (k, v) = line.split_at(eq);
+                        let v = &v[1..]; // strip leading '='
+                        if !v.is_empty() && KEYS.contains(&k) {
+                            pairs.push((k.to_string(), v.to_string()));
+                        }
+                    }
+                }
+                if !pairs.is_empty() {
+                    return pairs;
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
 /// Returns Some((major, raw_version)) on success, None on failure.
 fn check_node_version(node_bin: &str) -> Option<(u32, String)> {
     let out = Command::new(node_bin).arg("--version").output().ok()?;
@@ -2621,6 +2674,19 @@ pub fn run() {
                         server_cmd.env("O8_CODEBASE_MEMORY_BIN", cmm_bin);
                     }
                 }
+                // Issue #935: forward AI provider keys from the user's login
+                // shell so Finder-launched builds aren't dead for Gemini /
+                // Anthropic / etc. features the user has keys for.
+                let ai_keys = load_ai_keys_from_login_shell();
+                for (k, v) in &ai_keys {
+                    server_cmd.env(k, v);
+                }
+                if !ai_keys.is_empty() {
+                    log::info!(
+                        "Forwarded {} AI provider key(s) from login shell to next-server",
+                        ai_keys.len()
+                    );
+                }
                 match server_cmd
                     .stdout(child_stdio(next_log.as_ref()))
                     .stderr(child_stdio(next_log.as_ref()))
@@ -2647,14 +2713,20 @@ pub fn run() {
                 let ws_server_js = server_dir.join("ws-server.mjs");
                 if ws_server_js.exists() {
                     log::info!("Starting WS server: {} {:?} on :{}", node_bin, ws_server_js, ws_port);
-                    match Command::new(&node_bin)
+                    let mut ws_cmd = Command::new(&node_bin);
+                    ws_cmd
                         .arg(&ws_server_js)
                         .current_dir(&server_dir)
                         .env("O8_NODE_BIN", &node_bin)
                         .env("WS_PORT", ws_port.to_string())
                         .env("NEXT_ORIGIN", format!("http://127.0.0.1:{}", api_port))
                         // Issue #776: same sidecar marker as the next-server child.
-                        .env("O8_SIDECAR_PID", std::process::id().to_string())
+                        .env("O8_SIDECAR_PID", std::process::id().to_string());
+                    // Issue #935: same AI key forward for ws-server children.
+                    for (k, v) in &ai_keys {
+                        ws_cmd.env(k, v);
+                    }
+                    match ws_cmd
                         .stdout(child_stdio(ws_log.as_ref()))
                         .stderr(child_stdio(ws_log.as_ref()))
                         .spawn()
