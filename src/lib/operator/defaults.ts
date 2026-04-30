@@ -25,6 +25,18 @@ function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
 export type OverlapGateMode = 'advisory' | 'strict';
 export type SettingSource = 'env' | 'file' | 'default';
 
+/**
+ * Q&A Class A composer routing (#971).
+ *   - `auto` / `haiku-cli` — current chain: Haiku CLI tier 1, then Codex/OpenRouter/Flash/Sonnet CLI fallbacks.
+ *   - `sonnet-cli` — lead with Sonnet CLI for higher quality. Skips Haiku + Codex tiers.
+ * Eval-mode (smoke gate) is unaffected — always routes through OpenRouter Sonnet 4.6.
+ */
+export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli';
+
+function isClassAComposer(value: unknown): value is ClassAComposer {
+  return value === 'auto' || value === 'haiku-cli' || value === 'sonnet-cli';
+}
+
 export interface OperatorDefaults {
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -42,6 +54,11 @@ export interface OperatorDefaults {
    * even after the flag flips off.
    */
   experimentalOpencode: boolean;
+  /**
+   * Q&A Class A composer model (#971). Production-only knob — eval mode keeps
+   * its OpenRouter Sonnet 4.6 path either way.
+   */
+  classAComposer: ClassAComposer;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -61,7 +78,13 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   orchestratorModel: 'claude-opus-4-7',
   defaultDispatchRuntime: 'codex',
   experimentalOpencode: false,
+  classAComposer: 'auto',
 };
+
+export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
+  { value: 'haiku-cli', label: 'Haiku', detail: 'Fastest, free for Claude Max users.' },
+  { value: 'sonnet-cli', label: 'Sonnet', detail: 'Best quality, free, slower bootstrap.' },
+];
 
 export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label: string; detail: string }> = [
   { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse.' },
@@ -155,6 +178,12 @@ function envExperimentalOpencode(): boolean | null {
   return null;
 }
 
+function envClassAComposer(): ClassAComposer | null {
+  const raw = process.env.O8_CLASS_A_COMPOSER?.trim();
+  if (raw && isClassAComposer(raw)) return raw;
+  return null;
+}
+
 // ── File helpers ──
 
 interface StoredOperatorDefaults {
@@ -167,6 +196,7 @@ interface StoredOperatorDefaults {
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
   experimentalOpencode?: boolean;
+  classAComposer?: ClassAComposer;
 }
 
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
@@ -214,6 +244,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (typeof stored.experimentalOpencode === 'boolean') {
     result.experimentalOpencode = stored.experimentalOpencode;
   }
+  if (isClassAComposer(stored.classAComposer)) {
+    result.classAComposer = stored.classAComposer;
+  }
   return result;
 }
 
@@ -229,6 +262,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envModel = envOrchestratorModel();
   const envRuntime = envDefaultDispatchRuntime();
   const envOpencode = envExperimentalOpencode();
+  const envComposer = envClassAComposer();
 
   const resolved: OperatorDefaults = {
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
@@ -242,6 +276,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
     defaultDispatchRuntime: envRuntime ?? fileValues.defaultDispatchRuntime ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchRuntime,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
+    classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -256,6 +291,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntime !== undefined ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
+    classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -342,6 +378,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.experimentalOpencode !== undefined) {
     stored.experimentalOpencode = Boolean(update.experimentalOpencode);
+  }
+  if (update.classAComposer !== undefined) {
+    if (!isClassAComposer(update.classAComposer)) {
+      throw new Error('classAComposer must be one of "auto", "haiku-cli", "sonnet-cli".');
+    }
+    stored.classAComposer = update.classAComposer;
   }
 
   await mkdir(path.dirname(filePath), { recursive: true });
