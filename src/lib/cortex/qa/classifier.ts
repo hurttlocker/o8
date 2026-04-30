@@ -53,19 +53,28 @@ bm25_variants: 3-5 alternate phrasings using synonyms and rephrasings of the que
  */
 export async function classifyQuestion(question: string): Promise<ClassifierResult> {
   const prompt = `${CLASSIFIER_PROMPT}\n\nQuestion: ${question}`;
+  // O8_EVAL_MODE=1 skips both CLI tiers — they bootstrap ~14-16s each which
+  // dominates eval wall time. The judge (in eval/runner.ts) keeps using
+  // Sonnet CLI for scoring consistency across runs; only the system-under-test
+  // is fast-pathed.
+  const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
-  // Tier 1: Haiku CLI (free for Claude Max users).
-  const haikuResult = await tryHaiku(prompt, question);
-  if (haikuResult) {
-    console.info('[qa][classifier] resolved via haiku-cli');
-    return haikuResult;
+  // Tier 1: Haiku CLI (free for Claude Max users). Skipped in eval mode.
+  if (!evalMode) {
+    const haikuResult = await tryHaiku(prompt, question);
+    if (haikuResult) {
+      console.info('[qa][classifier] resolved via haiku-cli');
+      return haikuResult;
+    }
   }
 
-  // Tier 2: Codex CLI (free for ChatGPT Plus / Codex sub users).
-  const codexResult = await tryCodex(prompt, question);
-  if (codexResult) {
-    console.info(`[qa][classifier] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
-    return codexResult;
+  // Tier 2: Codex CLI (free for ChatGPT Plus / Codex sub users). Skipped in eval mode.
+  if (!evalMode) {
+    const codexResult = await tryCodex(prompt, question);
+    if (codexResult) {
+      console.info(`[qa][classifier] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
+      return codexResult;
+    }
   }
 
   // Tier 3: OpenRouter (fast, paid — safety net when both CLIs unavailable).

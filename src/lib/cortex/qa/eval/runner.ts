@@ -374,6 +374,12 @@ function printSummary(summary: RunSummary): void {
 }
 
 async function main(): Promise<void> {
+  // Skip the 14-16s CLI bootstrap on every case during eval. The system-under-test
+  // routes through OpenRouter (~1-6s) instead. The judge below keeps using
+  // Sonnet CLI for scoring consistency across runs. Set explicitly here so
+  // `npm run eval:qa` always benefits without requiring extra env in package.json.
+  process.env.O8_EVAL_MODE = process.env.O8_EVAL_MODE ?? '1';
+
   const summary = await runEval();
   printSummary(summary);
   process.exitCode = summary.passed ? 0 : 1;
