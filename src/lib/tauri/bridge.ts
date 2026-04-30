@@ -22,16 +22,32 @@ export function isTauri(): boolean {
 // ── MCP Plugin Init ──
 // Register the Tauri MCP event handlers so query_page, execute_js, etc. work.
 // Must run once on page load inside the Tauri webview.
+//
+// #932: Previously used a dynamic `import('tauri-plugin-mcp')` which was
+// failing silently in the production webpack bundle — listener registration
+// never happened, so every JS-bound MCP tool (execute_js, get_page_map,
+// click, type) timed out. Switching to eager require + explicit retry so
+// the failure mode surfaces in console_errors instead of hiding behind a
+// swallowed catch.
 let _mcpInitialized = false;
+let _mcpInitAttempts = 0;
 export async function initMcpPlugin(): Promise<void> {
   if (_mcpInitialized || !isTauri()) return;
-  _mcpInitialized = true;
+  _mcpInitAttempts += 1;
   try {
-    const { setupPluginListeners } = await import('tauri-plugin-mcp');
-    await setupPluginListeners();
-    console.log('[tauri-bridge] MCP plugin listeners registered');
+    const mod = await import('tauri-plugin-mcp');
+    if (typeof mod.setupPluginListeners !== 'function') {
+      throw new Error(`tauri-plugin-mcp loaded but setupPluginListeners is ${typeof mod.setupPluginListeners}`);
+    }
+    await mod.setupPluginListeners();
+    _mcpInitialized = true;
+    console.log(`[tauri-bridge] MCP plugin listeners registered (attempt ${_mcpInitAttempts})`);
   } catch (err) {
-    console.error('[tauri-bridge] MCP plugin init failed:', err);
+    const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
+    console.error(`[tauri-bridge] MCP plugin init failed (attempt ${_mcpInitAttempts}):`, msg);
+    if (_mcpInitAttempts < 5) {
+      setTimeout(() => { void initMcpPlugin(); }, 500 * _mcpInitAttempts);
+    }
   }
 }
 
