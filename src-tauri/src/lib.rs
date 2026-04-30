@@ -1680,34 +1680,36 @@ fn record_console_error(message: String, source: String, lineno: u32) {
 /// #932 — host-app `mcp_result` command. Lives in the main app (NOT the
 /// plugin) because plugin invokes were silently denied by the ACL across
 /// every capability scoping we tried. The main-app `record_console_error`
-/// uses the same un-prefixed pattern and is empirically working, so this
-/// rides that proven channel.
+/// uses the same un-prefixed pattern and is empirically working.
 ///
 /// JS calls: `__TAURI_INTERNALS__.invoke('mcp_result', { correlationId, ok, data, error })`
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct McpResultArgs {
+///
+/// Note: separate params (not a struct) — Tauri command framework wraps
+/// struct params in an `args` key, but separate params get individually
+/// JSON-mapped from JS. `rename_all = "camelCase"` lets JS send camelCase
+/// keys while Rust uses snake_case. This works for host-app commands
+/// because there's no permission file to fight with — only plugin commands
+/// have the rename-renames-the-command-name problem.
+#[tauri::command(rename_all = "camelCase")]
+fn mcp_result(
     correlation_id: String,
     ok: bool,
     data: Option<serde_json::Value>,
     error: Option<String>,
-}
-
-#[tauri::command]
-fn mcp_result(args: McpResultArgs) {
+) {
     log::info!(
         "[mcp_result] cid={} ok={} has_data={} has_error={}",
-        args.correlation_id,
-        args.ok,
-        args.data.is_some(),
-        args.error.is_some()
+        correlation_id,
+        ok,
+        data.is_some(),
+        error.is_some()
     );
     let payload = serde_json::json!({
-        "ok": args.ok,
-        "data": args.data,
-        "error": args.error,
+        "ok": ok,
+        "data": data,
+        "error": error,
     });
-    tauri_plugin_mcp::tools::webview::PendingResults::complete(&args.correlation_id, payload);
+    tauri_plugin_mcp::tools::webview::PendingResults::complete(&correlation_id, payload);
 }
 
 /// MCP read path. Returns the full ring buffer plus the count since the
