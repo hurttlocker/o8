@@ -245,7 +245,7 @@ export async function runEval(): Promise<RunSummary> {
 
     let actual: AskCortexResult;
     try {
-      const result = await askCortex(qaCase.question, qaCase.repoPath);
+      const result = await askCortex(qaCase.question, qaCase.repoPath, { bypassCache: true });
       actual = {
         answer: result.answer,
         citations: result.citations.map((c) => ({
