@@ -32,13 +32,14 @@ import type { TypedRow } from '@/lib/cortex/qa/types';
 function buildFlashComposePrompt(question: string, rowsJson: string): string {
   return `Answer concisely (1-2 sentences) using ONLY the provided typed rows.
 Question: ${question}
-Rows (each row has a \`handle\` for citation and \`content\` with the actual text): ${rowsJson}
+Rows (each row has a \`handle\` for citation, \`content\` with the actual text, and \`source_authority\` 0-1): ${rowsJson}
 
 Rules:
 1. If ANY row's content addresses the question — fully or partially — lead with that information. Quote concrete values, numbers, names, and identifiers verbatim from the content. Prefer FACT- handles as primary citations.
 2. Cite the relevant row(s) inline in [BRACKET-ID] form where BRACKET-ID is the handle field from the row (e.g. [D-014], [O-481], [PR-650], [FACT-abc123]).
-3. NEVER hedge with "I don't have that information yet" when you ARE answering. Either answer with citations OR respond with the exact string "I don't have that information yet." and nothing else. There is no middle ground — no preambles, no apologies.
-4. Only respond "I don't have that information yet." when none of the rows even mention the topic.`;
+3. Source-of-truth hierarchy: each row carries \`source_authority\` (0-1). When two rows contradict, cite the higher-authority one. Directives (1.0) are the project's rules — prefer them over comment opinions (0.7). Merged PRs (0.95) outrank open ones (0.8). Closed issues (0.85) outrank open ones (0.75).
+4. NEVER hedge with "I don't have that information yet" when you ARE answering. Either answer with citations OR respond with the exact string "I don't have that information yet." and nothing else. There is no middle ground — no preambles, no apologies.
+5. Only respond "I don't have that information yet." when none of the rows even mention the topic.`;
 }
 
 function buildSonnetComposeSystem(): string {
@@ -48,9 +49,10 @@ Rules:
 1. Answer in 1-6 sentences. Be direct and specific. For multi-fact specs (latency budgets, schema/table lists, cache TTLs, configuration values, enumerated rules), enumerate EVERY relevant fact present in the rows — don't cherry-pick one and skip the rest. Single-fact questions still get a single tight sentence.
 2. Cite EVERY fact using the row's citation handle in [BRACKET-ID] form (e.g. [D-014] for directives, [O-481] for outcomes, [PR-650] for PRs). One citation per fact, inline.
 3. Rows with citation handle prefix \`FACT-\` are pre-extracted facts (high confidence). Prefer these as your primary citations when they answer the question. Cite raw rows (D-/O-/PR-/CMT-/DOC-) only when no FACT- row covers the fact.
-4. Ground every claim in the retrieved rows. Do not invent facts, numbers, or names not present in the rows.
-5. If rows don't answer the question, say exactly: "I don't have that information yet — try indexing more directives or PRs."
-6. Stream your answer token by token.`;
+4. Source-of-truth hierarchy: each row carries \`source_authority\` (0-1). When two rows contradict, cite the higher-authority one. Directives (1.0) are the project's rules — prefer them over comment opinions (0.7). Merged PRs (0.95) outrank open ones (0.8). Closed issues (0.85) outrank open ones (0.75).
+5. Ground every claim in the retrieved rows. Do not invent facts, numbers, or names not present in the rows.
+6. If rows don't answer the question, say exactly: "I don't have that information yet — try indexing more directives or PRs."
+7. Stream your answer token by token.`;
 }
 
 function buildSonnetComposeUser(
@@ -67,6 +69,9 @@ function buildSonnetComposeUser(
       citationHandle: buildCitationHandle(r),
       kind: r.citation.kind,
       excerpt: r.citation.excerpt ?? '',
+      // Source-of-truth hierarchy (#915 follow-up). Top-level so the model
+      // doesn't have to reach into `fields` for it.
+      source_authority: rowAuthority(r),
       fields: r.fields,
     })),
     null,
@@ -122,6 +127,41 @@ function rowFullText(row: TypedRow): string {
   }
   if (text.length > 1500) text = text.slice(0, 1500) + '…';
   return text;
+}
+
+/**
+ * Resolve the source-of-truth authority for a row (#915 follow-up).
+ *
+ * Fact rows carry the explicit `source_authority` field populated by the
+ * worker / structured seeder / v18 backfill. Non-fact rows (raw directive,
+ * outcome, PR, issue, comment hits) don't carry it, so we derive a default
+ * from `citation.kind` matching the same hierarchy. State-aware tiers
+ * (merged-vs-open PR, closed-vs-open issue) collapse to the lower bound
+ * since the raw retrievers don't surface that state in `fields`. The
+ * facts retriever path stays the canonical signal — non-fact retrievers
+ * are coarser-grained on purpose.
+ */
+function rowAuthority(row: TypedRow): number {
+  const explicit = (row.fields as Record<string, unknown>)?.source_authority;
+  if (typeof explicit === 'number' && Number.isFinite(explicit)) return explicit;
+  switch (row.citation.kind) {
+    case 'directive':
+      return 1.0;
+    case 'outcome':
+      return 0.9;
+    case 'pr':
+      return 0.8;
+    case 'issue':
+      return 0.75;
+    case 'comment':
+      return 0.7;
+    case 'fact':
+      // No explicit field on a fact row — legacy data pre-v18 backfill.
+      // 0.5 is the column default and signals "unknown" to the LLM.
+      return 0.5;
+    default:
+      return 0.5;
+  }
 }
 
 /** Build the citation handle an LLM would use in bracket notation. */
@@ -285,6 +325,10 @@ export async function composeClassA(
       // the question is asking about. Falling back to the snippet only when
       // no fuller text is available.
       content: rowFullText(r) || r.citation.excerpt || '',
+      // Source-of-truth hierarchy (#915 follow-up). Composer prompt rules
+      // tell the model to prefer higher-authority rows when facts conflict.
+      // Default 0.5 for non-fact rows or legacy facts pre-v18 backfill.
+      source_authority: rowAuthority(r),
     })),
   );
   const composePrompt = buildFlashComposePrompt(question, rowsJson);
