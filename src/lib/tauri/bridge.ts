@@ -19,35 +19,11 @@ export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-// ── MCP Plugin Init ──
-// Register the Tauri MCP event handlers so query_page, execute_js, etc. work.
-// Must run once on page load inside the Tauri webview.
-//
-// #932: Use a STATIC import so the plugin bundles into the same chunk as
-// this module, avoiding webpack code-splitting + chunk-load races that
-// silently broke listener registration in the prod build.
-import { setupPluginListeners as setupTauriMcpListeners } from 'tauri-plugin-mcp';
-
-let _mcpInitialized = false;
-let _mcpInitAttempts = 0;
-export async function initMcpPlugin(): Promise<void> {
-  if (_mcpInitialized || !isTauri()) return;
-  _mcpInitAttempts += 1;
-  try {
-    if (typeof setupTauriMcpListeners !== 'function') {
-      throw new Error(`tauri-plugin-mcp.setupPluginListeners is ${typeof setupTauriMcpListeners}`);
-    }
-    await setupTauriMcpListeners();
-    _mcpInitialized = true;
-    console.log(`[tauri-bridge] MCP plugin listeners registered (attempt ${_mcpInitAttempts})`);
-  } catch (err) {
-    const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
-    console.error(`[tauri-bridge] MCP plugin init failed (attempt ${_mcpInitAttempts}):`, msg);
-    if (_mcpInitAttempts < 5) {
-      setTimeout(() => { void initMcpPlugin(); }, 500 * _mcpInitAttempts);
-    }
-  }
-}
+// #932 phase 2: tauri-plugin-mcp's old setupPluginListeners() init dance
+// was deleted. The eval_and_await protocol invokes JS from Rust per call
+// (via webview.eval()) instead of holding persistent JS-side listeners,
+// so no client-side init is required. The plugin loads automatically
+// when the dev-mcp-plugin Cargo feature is on.
 
 // ── Types ──
 

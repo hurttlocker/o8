@@ -2,3 +2,7 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+
+# #932 — capabilities/mcp.json is materialized by build.rs from
+# capabilities/mcp.json.in only when --features dev-mcp-plugin is on.
+capabilities/mcp.json
