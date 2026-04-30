@@ -28,6 +28,77 @@ import { getSqlite } from '@/lib/db';
 const POISON_PREFIX = 'permanent_failure: ';
 const MAX_ATTEMPTS = 3;
 
+// ── Heuristic noise filter — pre-enqueue ─────────────────────────────────────
+//
+// Drops conversational/empty comments BEFORE they hit the queue. Saves user
+// CLI budget (Max plan minutes, Codex sub minutes) on garbage bodies that
+// Sonnet would correctly return [] for after a 14-20s round-trip.
+//
+// Filters in order of cheapest first:
+//   1. Length floor (80 chars). "lgtm", "thanks!", "👍" don't carry facts.
+//   2. Bot author logins. dependabot/github-actions/claude bot comments
+//      don't contain organizational decisions.
+//   3. Pure emoji / quote-only bodies. A reply that's only `> someone's text`
+//      or only emoji has nothing new to distill.
+//
+// Phase 2 may add: LLM triage pass for borderline (50-300 char) comments,
+// updated_at delta detection for re-distilling edits.
+
+const NOISE_AUTHOR_LOGINS = new Set<string>([
+  'dependabot[bot]',
+  'github-actions[bot]',
+  'codecov[bot]',
+  'codecov-commenter',
+  'sweep-ai[bot]',
+  'claude[bot]',
+  'pre-commit-ci[bot]',
+  'renovate[bot]',
+  'snyk-bot',
+]);
+
+const MIN_BODY_LENGTH = 80;
+
+/** Strip GitHub-flavored quote lines (`> ...`) and surrounding whitespace. */
+function stripQuotedLines(body: string): string {
+  return body
+    .split('\n')
+    .filter((line) => !/^\s*>/.test(line))
+    .join('\n')
+    .trim();
+}
+
+/** True if the body, after quote-stripping, is pure emoji/punctuation/noise. */
+function isEmojiOrPunctuationOnly(body: string): boolean {
+  const stripped = stripQuotedLines(body);
+  if (stripped.length === 0) return true;
+  // Remove all unicode emoji + punctuation + whitespace; if nothing left it's noise.
+  const meaningful = stripped.replace(/[\p{Emoji}\p{Punctuation}\s]/gu, '');
+  return meaningful.length < 8;
+}
+
+/**
+ * Returns true if a comment body+author combo should be skipped at enqueue
+ * time. Cheap, deterministic — no LLM call. The skip rate observed in
+ * practice on cortex-ide + o8-site comments is ~30-50%.
+ */
+export function shouldSkipCommentForIndex(args: {
+  body: string | null | undefined;
+  authorLogin: string | null | undefined;
+}): boolean {
+  const body = (args.body ?? '').trim();
+  if (body.length < MIN_BODY_LENGTH) return true;
+
+  if (args.authorLogin && NOISE_AUTHOR_LOGINS.has(args.authorLogin)) return true;
+
+  // After stripping quotes, if there's <80 chars left it's a thin reply.
+  const withoutQuotes = stripQuotedLines(body);
+  if (withoutQuotes.length < MIN_BODY_LENGTH) return true;
+
+  if (isEmojiOrPunctuationOnly(body)) return true;
+
+  return false;
+}
+
 export interface QueueItem {
   queueId: string;
   sourceKind: string;
@@ -38,15 +109,16 @@ export interface QueueItem {
 
 /**
  * Enqueue every `github_comments` row for `repoPath` that isn't already in
- * `facts_queue`. Idempotent — re-running adds zero rows when the queue is
- * already saturated. Returns the count of rows inserted.
+ * `facts_queue` AND passes the heuristic noise filter. Idempotent —
+ * re-running adds zero rows when the queue is already saturated. Returns
+ * `{ enqueued, skipped }` so callers can see how many were filtered.
  */
-export function enqueueComments(repoPath: string): number {
+export function enqueueComments(repoPath: string): { enqueued: number; skipped: number } {
   const sqlite = getSqlite();
 
-  const rows = sqlite
+  const candidates = sqlite
     .prepare(
-      `SELECT c.id AS source_id
+      `SELECT c.id AS source_id, c.body, c.author_login
        FROM github_comments c
        LEFT JOIN facts_queue q
          ON q.source_kind = 'github_comment'
@@ -55,23 +127,30 @@ export function enqueueComments(repoPath: string): number {
          AND q.id IS NULL
          AND length(c.body) > 0`,
     )
-    .all(repoPath) as Array<{ source_id: string }>;
+    .all(repoPath) as Array<{ source_id: string; body: string; author_login: string | null }>;
 
-  if (rows.length === 0) return 0;
+  if (candidates.length === 0) return { enqueued: 0, skipped: 0 };
+
+  const enqueueRows = candidates.filter(
+    (c) => !shouldSkipCommentForIndex({ body: c.body, authorLogin: c.author_login }),
+  );
+  const skipped = candidates.length - enqueueRows.length;
+
+  if (enqueueRows.length === 0) return { enqueued: 0, skipped };
 
   const insert = sqlite.prepare(
     `INSERT INTO facts_queue (id, source_kind, source_id, repo_path, enqueued_at)
      VALUES (?, 'github_comment', ?, ?, datetime('now'))`,
   );
 
-  const tx = sqlite.transaction((items: typeof rows) => {
+  const tx = sqlite.transaction((items: typeof enqueueRows) => {
     for (const row of items) {
       insert.run(randomUUID(), row.source_id, repoPath);
     }
   });
 
-  tx(rows);
-  return rows.length;
+  tx(enqueueRows);
+  return { enqueued: enqueueRows.length, skipped };
 }
 
 /**
