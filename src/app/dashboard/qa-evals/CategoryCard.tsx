@@ -122,7 +122,7 @@ export function CategoryCard({ stat }: { stat: CategoryStats }) {
       flexDirection: 'column',
       gap: 12,
       position: 'relative',
-      outline: hasRegression ? '1.5px solid #ef4444' : '1px solid rgba(0,0,0,0.06)',
+      outline: hasRegression ? '1.5px solid #ef4444' : '1px solid var(--t-divider-subtle, rgba(15,23,42,0.05))',
     }}>
       {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
