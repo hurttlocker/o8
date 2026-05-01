@@ -2654,6 +2654,8 @@ function DashboardInner() {
             onAgentKill={sendAgentKill}
             lifecycleEvents={lifecycleEvents}
             orchestratorPackets={activePackets}
+            orchestratorMissionState={thoughtsMissionState}
+            registeredRepos={globalRepoEntries}
             ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
           />
         </motion.div>
