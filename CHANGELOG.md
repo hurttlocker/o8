@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-01
 
+- `b2b90f3c` feat: tighten supervisor inbox signal
 - `4dace31a` feat(browser-button): hover preview iframe of the active browser tab
 - `f50020d3` feat(titlebar): promote Browser to top header slot
 - `58c842fb` feat(left-panel): collapse branch + agent rows into one work-unit line
