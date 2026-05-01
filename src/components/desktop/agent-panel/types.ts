@@ -4,6 +4,7 @@ import type { OrchestratorMissionState, OrchestratorPacket, OrchestratorRuntime 
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
+import type { LeftPanelFocusState } from '../repo-focus/types';
 
 export interface AgentDetail {
   id: string;
@@ -197,4 +198,8 @@ export interface AgentPanelProps {
   orchestratorMissionState?: OrchestratorMissionState;
   registeredRepos?: RepoRegistryEntry[];
   ideWorkspaceSessions?: MobileInboxSnapshot['sessions'];
+  // Lifted from inside AgentPanel so the dashboard can drive column width
+  // on focus toggle. When omitted (legacy callers / tests), AgentPanel
+  // falls back to its internal hook for back-compat.
+  leftPanelFocus?: LeftPanelFocusState;
 }

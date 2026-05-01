@@ -200,7 +200,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         <O8TabButton icon={(c) => <IconInbox size={16} color={c} />} active={activeTab === 'inbox'} onClick={() => handleTabChange('inbox')} label="Inbox" />
         <O8TabButton icon={(c) => <IconActivity size={16} color={c} />} active={activeTab === 'activity'} onClick={() => handleTabChange('activity')} label="Activity" />
         <div style={{ width: 1, height: 18, background: 'var(--t-divider-subtle)', marginLeft: 8, marginRight: 8 }} />
-        <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'spec'} onClick={() => handleTabChange('spec')} label="Spec" />
+        <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'spec'} onClick={() => handleTabChange('spec')} label="o8.md" />
         <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'changes'} onClick={() => handleTabChange('changes')} label="Changes" />
         <div style={{ flex: 1 }} />
         <button
