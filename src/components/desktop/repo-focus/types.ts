@@ -7,7 +7,7 @@ import type {
 } from '@/lib/orchestrator/types';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 
-export type RepoFocusTabId = 'agents' | 'context' | 'mission';
+export type RepoFocusTabId = 'agents' | 'context' | 'mission' | 'spec' | 'files';
 export type RepoFocusPacketState = 'queued' | 'running' | 'awaiting_review' | 'merged' | 'failed';
 export type IdeWorkspaceSession = MobileInboxSnapshot['sessions'][number];
 

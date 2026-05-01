@@ -6,6 +6,9 @@ import { RepoTabs } from './RepoTabs';
 import { AgentsTab } from './tabs/AgentsTab';
 import { ContextTab } from './tabs/ContextTab';
 import { MissionTab } from './tabs/MissionTab';
+import { SpecTab } from './tabs/SpecTab';
+import { FilesTab } from './tabs/FilesTab';
+import { RepoFocusUsageStrip } from './RepoFocusUsageStrip';
 import type { RepoFocusDataProps, RepoFocusRepo, RepoFocusTabId } from './types';
 import { packetBelongsToRepo, REPO_FOCUS_FONT } from './utils';
 
@@ -76,7 +79,14 @@ export function LeftPanelRepoFocus({
         {activeTab === 'mission' ? (
           <MissionTab packets={allMissionPackets} missionState={missionState} onSelectSession={onSelectSession} />
         ) : null}
+        {activeTab === 'spec' ? (
+          <SpecTab repo={repo} />
+        ) : null}
+        {activeTab === 'files' ? (
+          <FilesTab repo={repo} />
+        ) : null}
       </div>
+      <RepoFocusUsageStrip />
     </div>
   );
 }
