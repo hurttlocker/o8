@@ -7,8 +7,8 @@ const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const filePath = searchParams.get('path');
-  const workspaceParam = searchParams.get('workspace');
+  const filePath = searchParams.get('path') ?? searchParams.get('file');
+  const workspaceParam = searchParams.get('workspace') ?? searchParams.get('repoPath');
 
   if (!filePath) {
     return NextResponse.json({ error: 'path param required' }, { status: 400 });
@@ -24,19 +24,19 @@ export async function GET(request: Request) {
     // Get the diff for this specific file (staged + unstaged)
     let diff = '';
     try {
-      // Unstaged changes
-      diff = execSync(`git diff -- "${filePath}"`, {
+      // Staged + unstaged changes against HEAD.
+      diff = execSync(`git diff --no-color HEAD -- "${filePath}"`, {
         cwd: root,
         encoding: 'utf-8',
         timeout: 5000,
         maxBuffer: 512 * 1024,
       });
-    } catch { /* no unstaged diff */ }
+    } catch { /* no HEAD diff */ }
 
     // Also check staged changes
     let stagedDiff = '';
     try {
-      stagedDiff = execSync(`git diff --cached -- "${filePath}"`, {
+      stagedDiff = diff ? '' : execSync(`git diff --no-color --cached -- "${filePath}"`, {
         cwd: root,
         encoding: 'utf-8',
         timeout: 5000,
