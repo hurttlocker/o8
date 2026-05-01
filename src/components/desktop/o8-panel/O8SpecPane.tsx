@@ -142,10 +142,28 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
   const showEditor = view === 'split' || view === 'edit';
   const showPreview = view === 'split' || view === 'preview';
 
+  // The wide O8 Panel root carries data-chrome-surface="true", which flips
+  // --t-text + --t-input-bg to white-on-glass values for chrome chips. The
+  // spec editor renders CONTENT (paper bg, dark text), so we re-bind the
+  // common token names back to their content values via inline custom
+  // properties — children that reference --t-text / --t-input-bg etc. then
+  // resolve correctly without needing edits in every nested component.
   return (
-    <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, background: 'var(--t-canvas-bg)' }}>
+    <div style={{
+      display: 'flex',
+      flex: 1,
+      flexDirection: 'column',
+      minHeight: 0,
+      background: 'var(--t-canvas-bg)',
+      color: 'var(--t-chat-surface-text)',
+      ['--t-text' as unknown as string]: 'var(--t-chat-surface-text)',
+      ['--t-text-secondary' as unknown as string]: 'var(--t-chat-surface-text-secondary)',
+      ['--t-text-muted' as unknown as string]: 'var(--t-chat-surface-text-muted)',
+      ['--t-text-faint' as unknown as string]: 'var(--t-chat-surface-text-muted)',
+      ['--t-input-bg' as unknown as string]: 'var(--t-chat-surface-input-bg)',
+    } as React.CSSProperties}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 42, paddingLeft: 12, paddingRight: 12, borderBottom: '1px solid var(--t-divider-subtle)', fontFamily: UI_FONT }}>
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 11, fontWeight: 600 }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: error ? 'var(--t-brand-red)' : 'var(--t-chat-surface-text-muted)', fontSize: 11, fontWeight: 600 }}>
           [o8.md] · agents read & write this · {status}
         </span>
         <ViewButton active={view === 'split'} label="Side-by-side" onClick={() => setView('split')} />
@@ -156,7 +174,7 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
         {showEditor ? (
           <div style={{ flex: view === 'split' ? '0 0 50%' : 1, minWidth: 0, display: 'flex', borderRight: view === 'split' ? '1px solid var(--t-divider-subtle)' : 'none' }}>
             {loading ? (
-              <div style={{ paddingTop: 16, paddingLeft: 16, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading o8.md...</div>
+              <div style={{ paddingTop: 16, paddingLeft: 16, color: 'var(--t-chat-surface-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading o8.md...</div>
             ) : (
               <textarea
                 value={content}
@@ -169,11 +187,9 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
                   resize: 'none',
                   border: 'none',
                   outline: 'none',
-                  // Paper-tinted bg, not transparent — transparent reads as
-                  // white-on-white in light mode against the canvas-bg.
-                  background: 'var(--t-input-bg)',
-                  color: 'var(--t-text)',
-                  caretColor: 'var(--t-text)',
+                  background: 'var(--t-chat-surface-input-bg)',
+                  color: 'var(--t-chat-surface-text)',
+                  caretColor: 'var(--t-chat-surface-text)',
                   fontFamily: MONO_FONT,
                   fontSize: 12,
                   lineHeight: 1.58,
@@ -188,8 +204,8 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
           </div>
         ) : null}
         {showPreview ? (
-          <div style={{ flex: view === 'split' ? '0 0 50%' : 1, minWidth: 0, overflowY: 'auto', paddingTop: 14, paddingRight: 18, paddingBottom: 18, paddingLeft: 18 }}>
-            {content.trim() ? <MarkdownRender content={content} /> : <div style={{ color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>No o8.md content yet.</div>}
+          <div style={{ flex: view === 'split' ? '0 0 50%' : 1, minWidth: 0, overflowY: 'auto', paddingTop: 14, paddingRight: 18, paddingBottom: 18, paddingLeft: 18, color: 'var(--t-chat-surface-text)' }}>
+            {content.trim() ? <MarkdownRender content={content} /> : <div style={{ color: 'var(--t-chat-surface-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>No o8.md content yet.</div>}
           </div>
         ) : null}
       </div>
