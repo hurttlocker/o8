@@ -73,7 +73,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   overlapGate: 'advisory',
   healBotEnabled: true,
   supervisorAutoEscalate: false,
-  thinkingEffort: 'adaptive',
+  thinkingEffort: 'high',
   promptCachingEnabled: true,
   orchestratorModel: 'claude-opus-4-7',
   defaultDispatchRuntime: 'codex',
