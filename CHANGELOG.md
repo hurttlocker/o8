@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-01
 
+- `f50020d3` feat(titlebar): promote Browser to top header slot
 - `58c842fb` feat(left-panel): collapse branch + agent rows into one work-unit line
 - `c794c1e5` feat(left-panel): repo focus expands the column inline, no overlay
 - `30ff04aa` feat(chrome): move update notice to footer pill, drop top-right toast
