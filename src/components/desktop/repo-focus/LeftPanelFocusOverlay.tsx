@@ -25,6 +25,8 @@ export function LeftPanelFocusOverlay({
   ideWorkspaceSessions,
   activeSessionKey,
   onSelectSession,
+  onSelectFile,
+  onOpenSpecInWorkspace,
 }: LeftPanelFocusOverlayProps) {
   const reducedMotion = useReducedMotion();
   const repo = focus.focusedRepo;
@@ -32,6 +34,9 @@ export function LeftPanelFocusOverlay({
   // overflow:hidden so the 440px detail surface can extend past the
   // narrow rail without getting clipped. SSR-safe via the mounted gate.
   const [mounted, setMounted] = useState(false);
+  // The portal target only exists after hydration; this gate prevents SSR
+  // access to document while preserving the existing drawer animation.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
   const content = (
@@ -70,6 +75,8 @@ export function LeftPanelFocusOverlay({
             ideWorkspaceSessions={ideWorkspaceSessions}
             activeSessionKey={activeSessionKey}
             onSelectSession={onSelectSession}
+            onSelectFile={onSelectFile}
+            onOpenSpecInWorkspace={onOpenSpecInWorkspace}
           />
         </motion.div>
       ) : null}
