@@ -162,11 +162,23 @@ export interface MobileTranscriptCommandChip {
   tone?: 'blue' | 'amber' | 'emerald' | 'slate' | 'red';
 }
 
+export interface BrainAnswerCitation {
+  kind: string;
+  rowId: string;
+  excerpt: string;
+  url?: string | null;
+}
+
 export interface MobileTranscriptCommand {
   name: string;
   summary: string;
   details?: string[];
   chips?: MobileTranscriptCommandChip[];
+  /** Present on /ask command entries — the streamed Brain answer + citations. */
+  brainAnswer?: {
+    tokens: string;
+    citations: BrainAnswerCitation[];
+  };
 }
 
 // Shared transcript shape used across mobile history and runtime tails.

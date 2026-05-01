@@ -1,7 +1,8 @@
 'use client';
 
+import { Fragment } from 'react';
 import { useState } from 'react';
-import type { MobileTranscriptCommand, MobileTranscriptCommandChip } from '@/lib/mobile/types';
+import type { BrainAnswerCitation, MobileTranscriptCommand, MobileTranscriptCommandChip } from '@/lib/mobile/types';
 
 const BODY_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 const MONO_FONT = '"SF Mono", ui-monospace, monospace';
@@ -45,6 +46,115 @@ function renderInlineText(text: string, keyPrefix: string) {
   });
 }
 
+const CITATION_MARKER = /\[CITATION:([a-zA-Z0-9_\-#.]+)\]/g;
+
+const KIND_SHORT: Record<string, string> = {
+  directive: 'D',
+  outcome: 'O',
+  pr: 'PR',
+  issue: 'I',
+  symbol: 'S',
+};
+
+function citationLabel(kind: string, rowId: string): string {
+  const short = KIND_SHORT[kind] ?? kind.slice(0, 2).toUpperCase();
+  const prefix = `${short}-`;
+  if (rowId.toUpperCase().startsWith(prefix)) return `[${rowId.toUpperCase()}]`;
+  return `[${short}-${rowId}]`;
+}
+
+function BrainAnswerBlock({
+  tokens,
+  citations,
+}: {
+  tokens: string;
+  citations: BrainAnswerCitation[];
+}) {
+  const citationMap = new Map<string, BrainAnswerCitation>();
+  for (const c of citations) {
+    citationMap.set(c.rowId, c);
+    citationMap.set(c.rowId.toUpperCase(), c);
+  }
+
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  CITATION_MARKER.lastIndex = 0;
+  let match: RegExpExecArray | null = null;
+  while ((match = CITATION_MARKER.exec(tokens)) !== null) {
+    const start = match.index;
+    if (start > cursor) {
+      nodes.push(<Fragment key={`t-${key++}`}>{tokens.slice(cursor, start)}</Fragment>);
+    }
+    const id = match[1];
+    const citation = citationMap.get(id) ?? citationMap.get(id.toUpperCase()) ?? null;
+    if (citation) {
+      const label = citationLabel(citation.kind, citation.rowId);
+      nodes.push(
+        <button
+          key={`c-${key++}-${id}`}
+          type="button"
+          title={citation.excerpt}
+          onClick={() => {
+            if (citation.url && typeof window !== 'undefined') {
+              window.open(citation.url, '_blank', 'noopener,noreferrer');
+            }
+          }}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            verticalAlign: 'baseline',
+            marginLeft: 3,
+            marginRight: 3,
+            paddingTop: 1,
+            paddingRight: 5,
+            paddingBottom: 1,
+            paddingLeft: 5,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider-subtle)',
+            background: 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))',
+            color: 'var(--t-accent, #2563eb)',
+            cursor: citation.url ? 'pointer' : 'default',
+            fontFamily: MONO_FONT,
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: '0.02em',
+            lineHeight: 1.2,
+          }}
+        >
+          {label}
+        </button>,
+      );
+    } else {
+      nodes.push(<Fragment key={`u-${key++}`}>{match[0]}</Fragment>);
+    }
+    cursor = start + match[0].length;
+  }
+  if (cursor < tokens.length) {
+    nodes.push(<Fragment key={`t-${key++}`}>{tokens.slice(cursor)}</Fragment>);
+  }
+
+  return (
+    <div
+      style={{
+        fontSize: 12,
+        lineHeight: 1.55,
+        color: 'var(--t-text)',
+        fontFamily: BODY_FONT,
+        letterSpacing: '-0.005em',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        paddingTop: 4,
+        paddingBottom: 4,
+      }}
+    >
+      {nodes}
+    </div>
+  );
+}
+
 export function CommandStripNode({
   command,
   timestampLabel,
@@ -52,10 +162,11 @@ export function CommandStripNode({
   command: MobileTranscriptCommand;
   timestampLabel?: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const hasBrainAnswer = Boolean(command.brainAnswer?.tokens);
+  const [expanded, setExpanded] = useState(() => hasBrainAnswer);
   const details = command.details ?? [];
   const chips = command.chips ?? [];
-  const hasDetails = details.length > 0 || chips.length > 0 || Boolean(timestampLabel);
+  const hasDetails = details.length > 0 || chips.length > 0 || Boolean(timestampLabel) || hasBrainAnswer;
 
   return (
     <div
@@ -215,6 +326,13 @@ export function CommandStripNode({
                 </div>
               ))}
             </div>
+          ) : null}
+
+          {hasBrainAnswer && command.brainAnswer ? (
+            <BrainAnswerBlock
+              tokens={command.brainAnswer.tokens}
+              citations={command.brainAnswer.citations}
+            />
           ) : null}
 
           {timestampLabel ? (

@@ -10,6 +10,13 @@ interface SlashCommandPickerProps {
 
 function commandIcon(name: OrchestratorSlashCommandDefinition['name']) {
   switch (name) {
+    case 'ask':
+      return (
+        <>
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          <path d="M9 9h6M9 13h4" />
+        </>
+      );
     case 'compact':
       return (
         <path d="M6 7h12M8 12h8M10 17h4" />
