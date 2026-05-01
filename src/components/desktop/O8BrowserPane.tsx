@@ -61,6 +61,9 @@ interface O8BrowserPaneProps {
   onEditWithAI?: (context: string) => void;
   onOpenFile?: (filePath: string) => void;
   navigateToUrl?: string | null;
+  // Bubbles the currently-loaded URL up to the dashboard so the TitleBar
+  // Browser button can render a hover-preview iframe pointed at it.
+  onActiveUrlChange?: (url: string | null) => void;
 }
 
 // ── Helpers ──
@@ -93,7 +96,7 @@ function newTabId(): string {
 
 // ── Component ──
 
-export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigateToUrl }: O8BrowserPaneProps) {
+export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigateToUrl, onActiveUrlChange }: O8BrowserPaneProps) {
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState('');
@@ -146,6 +149,13 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
   useEffect(() => {
     setUrlInput(activeTab?.url ?? '');
   }, [activeTabId, activeTab?.url]);
+
+  // Bubble active URL up so the TitleBar can hover-preview it. Empty string
+  // → null so the popover knows to render the empty state.
+  useEffect(() => {
+    if (!onActiveUrlChange) return;
+    onActiveUrlChange(activeTab?.url ? activeTab.url : null);
+  }, [activeTab?.url, onActiveUrlChange]);
 
   const navigateTo = useCallback((url: string) => {
     if (!activeTabId) return;

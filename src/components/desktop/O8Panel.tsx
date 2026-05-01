@@ -93,6 +93,9 @@ interface O8PanelProps {
   activeTab?: O8Tab | null;
   selectedFile?: string | null;
   browserUrl?: string | null;
+  // Bubbles the browser pane's active URL up so the TitleBar Browser
+  // button can render a hover preview iframe pointed at it.
+  onBrowserActiveUrlChange?: (url: string | null) => void;
   onActiveTabChange?: (tab: O8Tab) => void;
   onSelectedFileChange?: (filePath: string) => void;
   commitSha?: string | null;
@@ -153,7 +156,7 @@ function O8TabButton({ icon, active, onClick, label }: {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile: externalSelectedFile, browserUrl, onActiveTabChange, onSelectedFileChange, commitSha, onClearCommit, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile: externalSelectedFile, browserUrl, onBrowserActiveUrlChange, onActiveTabChange, onSelectedFileChange, commitSha, onClearCommit, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
   const [internalActiveTab, setInternalActiveTab] = useState<O8Tab>('changes');
   const activeTab = externalTab ?? internalActiveTab;
   const selectedFile = externalSelectedFile ?? null;
@@ -240,7 +243,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         <O8ChangesPane repoPath={repoPath} initialCommitSha={commitSha} repoSlug={repoSlug} onClearCommit={onClearCommit} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} />
+        <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'files' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8FilesPane repoPath={repoPath ?? undefined} onOpenFile={onOpenFile} onSelectFile={handleSelectedFileChange} />
