@@ -22,6 +22,7 @@ interface FileNode {
 interface O8FilesPaneProps {
   repoPath?: string;
   onOpenFile?: (filePath: string) => void;
+  onSelectFile?: (filePath: string) => void;
 }
 
 // ── Icons (raw SVG) ──
@@ -116,7 +117,7 @@ function TreeNode({
           paddingRight: 6,
           border: 'none',
           borderRadius: 0,
-          background: isSelected ? 'rgba(37, 99, 235, 0.12)' : 'transparent',
+          background: isSelected ? 'var(--t-input-bg)' : 'transparent',
           color: isDir ? 'var(--t-text)' : extensionColor(node.name),
           cursor: 'pointer',
           fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -126,7 +127,7 @@ function TreeNode({
           letterSpacing: '-0.01em',
           transition: 'background 80ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
-        onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+        onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--t-hover)'; }}
         onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
       >
         {isDir ? (
@@ -179,7 +180,7 @@ function TreeNode({
 
 // ── Main Component ──
 
-export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
+export function O8FilesPane({ repoPath, onSelectFile }: O8FilesPaneProps) {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
@@ -219,6 +220,7 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
 
   const handleSelectFile = useCallback((filePath: string) => {
     setSelectedPath(filePath);
+    onSelectFile?.(filePath);
     setFileLoading(true);
     setFileContent(null);
     setEditContent('');
@@ -234,7 +236,7 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
       })
       .catch(() => setFileContent(null))
       .finally(() => setFileLoading(false));
-  }, [repoPath]);
+  }, [onSelectFile, repoPath]);
 
   const handleSave = useCallback(async () => {
     if (!selectedPath || !isDirty) return;
@@ -351,7 +353,7 @@ export function O8FilesPane({ repoPath, onOpenFile }: O8FilesPaneProps) {
                     textTransform: 'uppercase' as const,
                     textAlign: 'left',
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                 >
                   <ChevronIcon open={rootFilesExpanded} size={9} />

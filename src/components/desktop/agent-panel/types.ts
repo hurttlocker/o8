@@ -183,6 +183,7 @@ export interface AgentPanelProps {
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onReviewPR?: (prNumber: number, repo?: string) => void;
   onRepoRemoved?: (repo: RepoRegistryEntry) => void;
+  onOpenSpecInWorkspace?: (repoPath: string) => void;
   onExpandWorkspace?: (workspace: string, repo: string | null) => void;
   onSelectFile?: (filePath: string, workspace?: string) => void;
   onOpenCI?: (repo: string) => void;
