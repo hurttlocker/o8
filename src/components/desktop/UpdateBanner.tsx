@@ -11,6 +11,7 @@ interface UpdateInfo {
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000; // 30 minutes
 const POP_CURVE = 'cubic-bezier(0.34, 1.36, 0.64, 1)';
 const SESSION_ANIM_KEY = 'o8:update-banner:animated';
+const SESSION_DISMISS_KEY = 'o8:update-banner:dismissed';
 
 /**
  * UpdateBanner — center-top sticky notification when a new version is
@@ -31,6 +32,18 @@ export function UpdateBanner() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Per-session dismissal — operator can hide the banner if they're not
+  // ready to restart. Reappears on the next launch (intentional: we want
+  // them to know there's an update at some point).
+  const [dismissed, setDismissed] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try { return window.sessionStorage.getItem(SESSION_DISMISS_KEY); } catch { return null; }
+  });
+  const handleDismiss = useCallback(() => {
+    const version = update?.version ?? '';
+    setDismissed(version);
+    try { window.sessionStorage.setItem(SESSION_DISMISS_KEY, version); } catch { /* ignore */ }
+  }, [update?.version]);
   const animatedRef = useRef(false);
 
   const checkForUpdate = useCallback(async () => {
@@ -121,6 +134,7 @@ export function UpdateBanner() {
   }, []);
 
   if (!update) return null;
+  if (dismissed && dismissed === update.version) return null;
 
   // If we already animated this session (e.g. component re-mounted after
   // a tab change), skip the slide-in by starting in the mounted state.
@@ -132,12 +146,14 @@ export function UpdateBanner() {
       role="status"
       aria-live="polite"
       style={{
+        // Top-right corner toast — out of the way of the workspace tab
+        // strip + command palette. Sits below the 44px TitleBar.
         position: 'fixed',
         top: 52,
-        left: '50%',
+        right: 16,
         transform: isOnScreen
-          ? 'translate(-50%, 0)'
-          : 'translate(-50%, -16px)',
+          ? 'translate(0, 0)'
+          : 'translate(0, -16px)',
         opacity: isOnScreen ? 1 : 0,
         transition: skipAnimation
           ? 'none'
@@ -204,6 +220,36 @@ export function UpdateBanner() {
         }}
       >
         {installing ? 'Installing…' : 'Restart to update'}
+      </button>
+      <button
+        type="button"
+        onClick={handleDismiss}
+        aria-label="Dismiss update banner"
+        title="Dismiss for this session"
+        style={{
+          width: 28,
+          height: 28,
+          marginLeft: 4,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: 'none',
+          borderRadius: 8,
+          background: 'transparent',
+          color: 'var(--t-text-muted)',
+          cursor: 'pointer',
+          flexShrink: 0,
+          fontFamily: 'inherit',
+          fontSize: 14,
+          lineHeight: 1,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-muted)'; }}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+          <line x1="6" y1="6" x2="18" y2="18" />
+          <line x1="18" y1="6" x2="6" y2="18" />
+        </svg>
       </button>
     </div>
   );
