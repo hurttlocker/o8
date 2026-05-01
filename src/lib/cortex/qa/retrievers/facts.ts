@@ -6,6 +6,13 @@
  * with `confidence >= 0.6` so low-quality distillations don't poison the
  * composer's prompt.
  *
+ * #962 — Hybrid scorer (flag-gated):
+ * When `O8_HYBRID_SCORER=1` is set AND `OPENAI_API_KEY` is available, the
+ * retriever embeds the question and re-ranks candidates with:
+ *   score = bm25_norm × 0.6 + cosine × 0.4
+ * Without the flag the retriever behaves identically to before (#962 was
+ * introduced). This keeps smoke tests regression-free while the flag is off.
+ *
  * Mirrors the per-table BM25 pattern from `retrievers/fts.ts` (`ftsSearch`
  * helper), but lives in its own file because facts are surfaced into
  * retrieve.ts as a sibling to `ftsRetriever`/`sqlRetriever`/`graphRetriever`,
@@ -20,6 +27,12 @@ import 'server-only';
 import type { RetrieverInput, RetrieverResult, TypedRow } from '@/lib/cortex/qa/types';
 import { getSqlite } from '@/lib/db';
 import { isFts5Available } from '@/lib/db/v14-fts5-migration';
+import {
+  cosineSimilarity,
+  decodeEmbedding,
+  embedText,
+  isAvailable as embeddingsAvailable,
+} from '@/lib/cortex/embeddings';
 
 const DEFAULT_LIMIT = 8;
 const CONFIDENCE_FLOOR = 0.6;
@@ -60,6 +73,17 @@ interface FactRow {
    *  rows; populated to 0.7-1.0 by the v18 backfill + new writes from the
    *  worker / structured seeder. */
   source_authority: number;
+  /** 1536-dim float32 embedding BLOB (#962). NULL for un-embedded rows. */
+  embedding: Buffer | null;
+}
+
+/**
+ * Whether the hybrid BM25+cosine scorer is enabled. Gated behind
+ * `O8_HYBRID_SCORER=1` so smoke tests run without the flag and pass
+ * identically to pre-#962 behaviour. When enabled, requires OPENAI_API_KEY.
+ */
+function isHybridScorerEnabled(): boolean {
+  return process.env.O8_HYBRID_SCORER === '1';
 }
 
 /**
@@ -153,11 +177,16 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
       .sort((a, b) => b[1].rank - a[1].rank)
       .map(([id]) => id);
 
+    // When the hybrid scorer is enabled, fetch embedding BLOBs so we can
+    // compute cosine similarity against the question embedding. When the
+    // flag is off, we skip the embedding column entirely (no schema read
+    // overhead for the common path).
+    const embeddingColSql = isHybridScorerEnabled() ? ', embedding' : '';
     const records = sqlite
       .prepare(
         `SELECT id, kind, content, source_kind, source_id, source_excerpt,
                 repo_path, confidence, fingerprint, created_at, extracted_by,
-                source_authority
+                source_authority${embeddingColSql}
          FROM facts
          WHERE id IN (${candidateIds.map(() => '?').join(',')})`,
       )
@@ -165,7 +194,54 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
 
     const byId = new Map(records.map((r) => [r.id, r]));
 
+    // Hybrid scorer: optionally re-rank candidates by BM25 × 0.6 + cosine × 0.4.
+    // The question embedding is computed once and reused for all candidates.
+    // Rows missing an embedding fall back to their BM25 rank (cosine = 0).
+    let questionVec: Float32Array | null = null;
+    if (isHybridScorerEnabled() && embeddingsAvailable()) {
+      try {
+        questionVec = await embedText(input.question);
+      } catch (err) {
+        console.warn(
+          '[qa][facts] hybrid scorer: failed to embed question — falling back to BM25 only:',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
+    // Normalise BM25 scores to [0, 1] so they can be combined with cosine.
+    // BM25 ranks are positive (we stored -bm25 = rank, so higher = better).
+    // Max across candidateIds so the blend is relative within this query.
+    let maxBm25 = 0;
+    for (const [id] of hits) {
+      const h = hits.get(id)!;
+      if (h.rank > maxBm25) maxBm25 = h.rank;
+    }
+
+    // Build a scored candidate list.
+    const scored: Array<{ id: string; score: number }> = [];
     for (const id of candidateIds) {
+      const hit = hits.get(id)!;
+      const bm25Norm = maxBm25 > 0 ? hit.rank / maxBm25 : 0;
+
+      let hybridScore = hit.rank; // default: pure BM25 rank (unnormalised)
+      if (questionVec !== null) {
+        const record = byId.get(id);
+        const factVec = record ? decodeEmbedding(record.embedding ?? null) : null;
+        const cosine = factVec ? cosineSimilarity(questionVec, factVec) : 0;
+        // Blend: BM25 normalised × 0.6 + cosine × 0.4
+        hybridScore = bm25Norm * 0.6 + cosine * 0.4;
+      }
+      scored.push({ id, score: hybridScore });
+    }
+
+    // Re-sort by hybrid score (descending). When hybrid scorer is off, the
+    // BM25 rank is preserved as the sort key (same order as before).
+    if (questionVec !== null) {
+      scored.sort((a, b) => b.score - a.score);
+    }
+
+    for (const { id, score } of scored) {
       if (rows.length >= limit) break;
       const record = byId.get(id);
       if (!record) continue;
@@ -198,10 +274,11 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
           // legacy rows pre-v18 backfill.
           source_authority: record.source_authority ?? 0.5,
         },
-        // Use BM25 rank as the retriever-local score. retrieve.ts re-ranks
-        // via RRF over the per-retriever ordering, so absolute magnitudes
-        // don't matter as long as higher = better within this list.
-        score: hit.rank,
+        // Use hybrid score (BM25 × 0.6 + cosine × 0.4 when O8_HYBRID_SCORER=1)
+        // or BM25 rank alone. retrieve.ts re-ranks via RRF over the per-retriever
+        // ordering, so absolute magnitudes don't matter as long as higher = better
+        // within this list.
+        score: score,
       });
     }
   } catch (error) {
