@@ -25,6 +25,7 @@ export function LeftPanelFocusOverlay({
   ideWorkspaceSessions,
   activeSessionKey,
   onSelectSession,
+  onSelectFile,
 }: LeftPanelFocusOverlayProps) {
   const reducedMotion = useReducedMotion();
   const repo = focus.focusedRepo;
@@ -32,7 +33,10 @@ export function LeftPanelFocusOverlay({
   // overflow:hidden so the 440px detail surface can extend past the
   // narrow rail without getting clipped. SSR-safe via the mounted gate.
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    const id = window.setTimeout(() => setMounted(true), 0);
+    return () => window.clearTimeout(id);
+  }, []);
 
   const content = (
     <AnimatePresence initial={false}>
@@ -70,6 +74,7 @@ export function LeftPanelFocusOverlay({
             ideWorkspaceSessions={ideWorkspaceSessions}
             activeSessionKey={activeSessionKey}
             onSelectSession={onSelectSession}
+            onSelectFile={onSelectFile}
           />
         </motion.div>
       ) : null}
