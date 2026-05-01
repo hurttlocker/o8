@@ -9,6 +9,8 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-01
 
+- `58c842fb` feat(left-panel): collapse branch + agent rows into one work-unit line
+- `c794c1e5` feat(left-panel): repo focus expands the column inline, no overlay
 - `30ff04aa` feat(chrome): move update notice to footer pill, drop top-right toast
 - `ff3f0c12` feat(repo-focus): back-arrow polish + ESC-to-close
 - `9d5ebc1d` feat: add o8 diff and spec tabs
