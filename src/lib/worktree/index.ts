@@ -5,6 +5,7 @@
  */
 
 export { WorktreeManager, WorktreeFetchUnreachableError, WorktreeRebaseConflictError } from './manager';
+export { WorktreeOriginMissingError } from './errors';
 
 export {
   prepareLaunchWorktree,

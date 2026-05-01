@@ -3,6 +3,7 @@ import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { RepoReadiness, RepoSetupConfig } from './types';
+import { checkRepoOriginConfigured, getRepoOriginConfiguredOverride } from './origin-readiness';
 
 interface RepoReadinessInput {
   localPath: string;
@@ -71,15 +72,20 @@ function readinessLabel(state: RepoReadiness['state']) {
 export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoReadiness> {
   const cacheKey = repo.localPath;
   const cached = readinessCache.get(cacheKey);
+  const originOverride = getRepoOriginConfiguredOverride(repo.localPath);
   if (cached && Date.now() - cached.ts < READINESS_CACHE_TTL_MS) {
+    if (originOverride !== null && cached.value.originConfigured !== originOverride) {
+      return { ...cached.value, originConfigured: originOverride };
+    }
     return cached.value;
   }
 
   const currentBranch = await getCurrentBranch(repo.localPath, repo.defaultBranch || 'main');
-  const [dirty, packageJsonExists, nodeModulesExists, missingEnvFiles] = await Promise.all([
+  const [dirty, packageJsonExists, nodeModulesExists, originConfigured, missingEnvFiles] = await Promise.all([
     hasDirtyWorktree(repo.localPath),
     pathExists(path.join(repo.localPath, 'package.json')),
     pathExists(path.join(repo.localPath, 'node_modules')),
+    checkRepoOriginConfigured(repo.localPath),
     Promise.all(
       (repo.setup.envMode === 'skip' ? [] : repo.setup.envFiles).map(async (file) => {
         const exists = await pathExists(path.join(repo.localPath, file));
@@ -145,6 +151,7 @@ export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoRe
     nextAction,
     currentBranch,
     onDefaultBranch,
+    originConfigured,
     dirty,
     missingEnvFiles,
   };
