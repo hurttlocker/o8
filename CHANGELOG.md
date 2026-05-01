@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-01
 
+- `e1402ef0` feat(repo-focus): Spec + Files tabs + first-class CLI usage strip
 - `717f5567` feat(ui): repo-focused left-panel mode with Agents/Context/Mission tabs
 - `f28c2029` feat(native shell): O8_DEV_FRONTEND_URL override for hot-reload prod loop [via-o8]
 - `22bddea0` feat(native shell): O8_DEV_FRONTEND_URL override for hot-reload prod loop [via-o8]
