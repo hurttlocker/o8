@@ -466,12 +466,21 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     const cliCmd = [binary, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
     const shellCmd = `${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
 
+    // Adapter-supplied env augmentation. Returned keys override anything
+    // already in the parent process env on the spawned child.
+    const adapterEnv = adapter.extraSpawnEnv ? adapter.extraSpawnEnv() : {};
+    const spawnEnv = {
+      ...adapterEnv,
+      FORCE_COLOR: '0',
+      NO_COLOR: '1',
+    };
+
     try {
       const result = await spawnBridgeTerminalSession({
         sessionName: bridgeSessionName,
         shellCommand: shellCmd,
         cwd: session.repoPath,
-        env: { FORCE_COLOR: '0', NO_COLOR: '1' },
+        env: spawnEnv,
       });
       terminalSessionName = result.sessionName;
       pid = typeof result.pid === 'number' ? result.pid : 0;
@@ -487,6 +496,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
           cwd: session.repoPath,
           detached: true,
           stdio: ['ignore', stdoutFd, stderrFd],
+          // Detached fallback inherits process.env then layers adapter env +
+          // FORCE_COLOR/NO_COLOR, matching the bridge path's semantics.
+          env: { ...process.env, ...spawnEnv },
         });
         child.unref();
         pid = child.pid ?? 0;
