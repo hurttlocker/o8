@@ -24,5 +24,11 @@ Each child issue (#938-#943) gets a folder with a REPORT.md, raw outputs (JSON /
 ## Baseline
 
 - Smoke pre-test: **PASS 6/6** (33986ms total, p50 5.3s) — captured 2026-04-30 evening.
+- Smoke post-T1: **PASS 6/6** (20450ms total, p50 3146ms) — env unchanged.
 - Brain DB: `~/.o8/cortex-ide.db` schema v20, 1995 facts.
 - All 4 CLIs on PATH: claude 2.1.123, codex 0.121.0, gemini 0.38.2, opencode 1.4.3.
+
+## Status (2026-04-30)
+
+- **t1-recall (#938) — FAIL.** Brain wins 1/10 vs Grep, 2/10 vs Long-ctx (need 7/10). Substrate is heavily skewed: 1416 comment facts vs 28 doc / 12 PR / 12 outcome / 9 directive. Per founder stop rule on #938, **t2-t6 are DEFERRED** pending founder direction.
+- See [t1-recall/REPORT.md](t1-recall/REPORT.md) for the full diagnosis, per-question scores, and recommended interpretation.

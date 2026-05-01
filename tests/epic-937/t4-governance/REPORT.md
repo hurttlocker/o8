@@ -1,6 +1,6 @@
 # Test 4 — Governance lift on weaker model (#941)
 
-> **STATUS:** pending — blocked on t3-parallel
+> **STATUS:** **DEFERRED** — Test 1 (#938) FAILED. Founder stop rule. This test indirectly depends on Brain quality (via "ledger context injection") but the directive scaffolding alone is independently testable.
 
 ## Goal
 

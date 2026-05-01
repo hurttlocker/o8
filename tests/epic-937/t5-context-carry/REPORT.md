@@ -1,6 +1,6 @@
 # Test 5 — Cross-runtime context carry (#942)
 
-> **STATUS:** pending — runs only if t1 (#938) passes AND t2 (#939) Phase 2 passes
+> **STATUS:** **DEFERRED — would FAIL by transitivity.** Test 1 (#938) FAILED, and this test directly depends on the Brain's ability to surface a sentinel decision as cited context to a downstream packet. With the substrate as-is (28 doc / 12 PR / 12 outcome facts out of 1995 total) the sentinel decision would not reliably propagate. Run only after the substrate is addressed.
 
 ## Goal
 

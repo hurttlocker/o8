@@ -1,6 +1,6 @@
 # Test 3 — Multi-runtime parallel dispatch (#940)
 
-> **STATUS:** pending — blocked on t2-substitution
+> **STATUS:** **DEFERRED** — Test 1 (#938) FAILED. Founder stop rule. This test is orthogonal to Brain retrieval and could still be run independently.
 
 ## Goal
 

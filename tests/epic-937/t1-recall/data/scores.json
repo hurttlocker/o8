@@ -1,0 +1,338 @@
+{
+  "generatedAt": "2026-05-01T00:53:59.231Z",
+  "scores": [
+    {
+      "caseId": "t1-q01",
+      "category": "specs",
+      "favoredPath": "docs",
+      "question": "What's the data directory override environment variable for cortex-ide, and what's the default path?",
+      "referenceAnswer": "The override variable is CORTEX_IDE_DATA_DIR. Default path is ~/.cortex-ide.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate states it does not have the information, which is incorrect as the reference answer provides it."
+        },
+        "grep": {
+          "factual_accuracy": 1,
+          "citation_correctness": 0,
+          "specificity": 1,
+          "notes": "The candidate correctly identifies the environment variable and default path but cites a file that is not provided."
+        },
+        "longCtx": {
+          "factual_accuracy": 1,
+          "citation_correctness": 0,
+          "specificity": 1,
+          "notes": "The candidate correctly identifies the environment variable and default path but lacks any citation."
+        }
+      }
+    },
+    {
+      "caseId": "t1-q02",
+      "category": "specs",
+      "favoredPath": "docs",
+      "question": "What is the minimum touch target size enforced in the o8 design system, and what's the rationale?",
+      "referenceAnswer": "44px minimum for all interactive elements, per Apple Human Interface Guidelines.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0.5,
+          "citation_correctness": 0,
+          "specificity": 1,
+          "notes": "Candidate B correctly states the minimum touch target size but provides an incorrect and irrelevant rationale, and cites an incorrect source."
+        },
+        "grep": {
+          "factual_accuracy": 1,
+          "citation_correctness": 0,
+          "specificity": 1,
+          "notes": "Candidate A correctly states the minimum touch target size and its rationale, but cites incorrect sources."
+        },
+        "longCtx": {
+          "factual_accuracy": 1,
+          "citation_correctness": 0,
+          "specificity": 1,
+          "notes": "Candidate C correctly states the minimum touch target size and its rationale, but cites an incorrect source."
+        }
+      }
+    },
+    {
+      "caseId": "t1-q03",
+      "category": "processes",
+      "favoredPath": "docs",
+      "question": "How is a new o8 release shipped from a developer's machine? What is the exact local command sequence?",
+      "referenceAnswer": "npm version patch (bumps + tags via sync-version.mjs hook), then git push --follow-tags, then npm run ship (cargo tauri build with signing key + uploads via scripts/release.mjs to GitHub releases). Auto-update banner in installed app picks it up.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0.5,
+          "citation_correctness": 0.5,
+          "specificity": 0.5,
+          "notes": "Candidate B omits the `git push --follow-tags` command and provides a less specific description of the release process, with a partial citation."
+        },
+        "grep": {
+          "factual_accuracy": 1,
+          "citation_correctness": 1,
+          "specificity": 1,
+          "notes": "Candidate A accurately reproduces the command sequence and associated actions described in the reference answer, with correct citations."
+        },
+        "longCtx": {
+          "factual_accuracy": 1,
+          "citation_correctness": 0.5,
+          "specificity": 1,
+          "notes": "Candidate C accurately reproduces the command sequence and associated actions, but cites a general file section rather than specific lines."
+        }
+      }
+    },
+    {
+      "caseId": "t1-q04",
+      "category": "incidents",
+      "favoredPath": "pr-commit",
+      "question": "Why was the OpenRouter Class A composer timeout in eval mode bumped from 10s to 25s? Be specific about the regression that prompted the change.",
+      "referenceAnswer": "Ownership category accuracy crashed from 35% to 2% in eval mode because composer Class A's OpenRouter call timed out at 10s on the full 30-row payload (after the rows.slice(0,20)→(0,30) fix). p95 for multi-row prompts was past 10s. 25s gives headroom for worst case without hanging real failures too long. Same bump applied in the classifier.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate claims the information is not present, but the reference answer provides the requested details."
+        },
+        "grep": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate claims to not have the information, but the reference answer clearly contains it."
+        },
+        "longCtx": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate claims to not have the information, but the reference answer clearly contains it."
+        }
+      }
+    },
+    {
+      "caseId": "t1-q05",
+      "category": "decisions",
+      "favoredPath": "pr-commit",
+      "question": "Which composer model is the eval-mode tier 0 primary, and what's the approximate per-run cost?",
+      "referenceAnswer": "Anthropic Claude Sonnet 4.6 via OpenRouter (model id 'anthropic/claude-sonnet-4-6'). Approximately $0.026 per smoke run. Picked because false-negative cost on the ship gate exceeds the bill.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "specificity": 0.1,
+          "notes": "Candidate C provides a cost for a different operation and fails to identify the primary model, with no relevant citations."
+        },
+        "grep": {
+          "factual_accuracy": 0.2,
+          "citation_correctness": 0.5,
+          "specificity": 0,
+          "notes": "Candidate B mentions 'Composer 2' but fails to identify the primary model or its cost, and cites different sources."
+        },
+        "longCtx": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "Candidate A hedges and provides no information, while the reference answer contains specific details."
+        }
+      }
+    },
+    {
+      "caseId": "t1-q06",
+      "category": "decisions",
+      "favoredPath": "pr-commit",
+      "question": "Why is the Sonnet CLI timeout set to 300s in the composer Class B path?",
+      "referenceAnswer": "Sonnet CLI bootstrap can take 60-90s, then multi-row synthesis adds another 30-60s on the 30-row composer payload. The prior 60s default killed the call before the model even started generating, forcing fall-through to paid OpenRouter even when the user has a free Claude Max subscription. 300s lets the free CLI tier actually deliver.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0.2,
+          "citation_correctness": 0.5,
+          "specificity": 0.3,
+          "notes": "The candidate discusses latency budgets and previous timeouts but does not directly answer why the Sonnet CLI timeout is 300s, nor does it mention the specific 300s value. It cites relevant-sounding but different facts."
+        },
+        "grep": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate states it does not have the information, while the reference answer provides it."
+        },
+        "longCtx": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate states it does not have the information, while the reference answer provides it."
+        }
+      }
+    },
+    {
+      "caseId": "t1-q07",
+      "category": "processes",
+      "favoredPath": "pr-commit",
+      "question": "What does the daily compactor cron job do? What categories of work does it perform on the facts table?",
+      "referenceAnswer": "The compactor performs four jobs: (1) GC orphans (facts whose source rows are gone), (2) dedupe near-duplicate facts, (3) time-decay scoring of older facts, (4) near-dup merge into canonical facts. Runs daily via cron, scheduled per #915.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "Candidate A describes a different process related to dispatch rule entries and does not mention any of the compactor's actual functions on the facts table."
+        },
+        "grep": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0.5,
+          "specificity": 0,
+          "notes": "Candidate B correctly identifies that the provided hits do not specify the work done by the compactor, but it incorrectly states the job is optional and does not mention any of the compactor's functions."
+        },
+        "longCtx": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "Candidate C explicitly states it does not have the information, which is incorrect as the reference answer provides the requested details."
+        }
+      }
+    },
+    {
+      "caseId": "t1-q08",
+      "category": "processes",
+      "favoredPath": "pr-commit",
+      "question": "What does the fs.watch on docs feature do, and which issue introduced it?",
+      "referenceAnswer": "fs.watch on docs (CLAUDE.md, README.md, AGENTS.md, etc.) triggers incremental re-distillation when the founder edits these files, so the Brain stays in sync without a full re-index. Introduced in issue #964, shipped as PR #976.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "This candidate discusses fs.watch on Codex JSONL files, which is unrelated to the reference answer's description of fs.watch on documentation files."
+        },
+        "grep": {
+          "factual_accuracy": 0.2,
+          "citation_correctness": 0.5,
+          "specificity": 0,
+          "notes": "This candidate vaguely relates fs.watch to a 'live watch mode' but does not identify the specific files or the issue number as requested by the reference answer."
+        },
+        "longCtx": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "This candidate states it does not have the information, while the reference answer provides the requested details."
+        }
+      }
+    },
+    {
+      "caseId": "t1-q09",
+      "category": "incidents",
+      "favoredPath": "pr-commit",
+      "question": "What was the ownership-category regression that prompted the rows.slice(0,20) → rows.slice(0,30) fix in src/lib/cortex/qa/composer.ts?",
+      "referenceAnswer": "Project rows from emitProjectRows landed at retrieval ranks 21-24 and got truncated by the slice(0,20). The retriever's unionMerge has MERGE_LIMIT=30, so the slice in the composer was tighter than the merge ceiling. Result: ownership accuracy stayed at 35% even after PR #949 paid the bill of adding project + project_repo retrieval. Matching the slice to MERGE_LIMIT=30 unlocked the project rows for the composer.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate incorrectly states that the provided rows do not contain the information, when the reference answer clearly does."
+        },
+        "grep": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate claims to not have the information, but the reference answer clearly provides it."
+        },
+        "longCtx": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate claims to not have the information, but the reference answer clearly provides it."
+        }
+      }
+    },
+    {
+      "caseId": "t1-q10",
+      "category": "specs",
+      "favoredPath": "pr-commit",
+      "question": "What is the source_authority value the composer assigns to a merged PR versus an open PR, and which row type has the highest authority?",
+      "referenceAnswer": "Merged PRs are 0.95, open PRs are 0.8. Directives are the highest at 1.0. Outcomes are 0.9. Closed issues are 0.85, open issues are 0.75. Comment opinions are 0.7. Fact rows pre-v18 backfill default to 0.5.",
+      "paths": {
+        "brain": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate incorrectly claims the provided rows do not contain the information, which contradicts the reference answer."
+        },
+        "grep": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate incorrectly states it does not have the information when the reference answer provides it."
+        },
+        "longCtx": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "specificity": 0,
+          "notes": "The candidate incorrectly states it does not have the information when the reference answer provides it."
+        }
+      }
+    }
+  ],
+  "summary": {
+    "n": 10,
+    "perPath": {
+      "brain": {
+        "factual_avg": 0.13,
+        "citation_avg": 0.1,
+        "specificity_avg": 0.19
+      },
+      "grep": {
+        "factual_avg": 0.34,
+        "citation_avg": 0.25,
+        "specificity_avg": 0.3
+      },
+      "longCtx": {
+        "factual_avg": 0.3,
+        "citation_avg": 0.05,
+        "specificity_avg": 0.3
+      }
+    },
+    "pairwise": {
+      "brain_vs_grep": {
+        "brainWinsCount2of3": 1,
+        "brainWinsCountAllAxes": 1,
+        "perAxisWinCount": {
+          "factual": 1,
+          "citation": 1,
+          "specificity": 2
+        },
+        "perAxisLossCount": {
+          "factual": 5,
+          "citation": 4,
+          "specificity": 2
+        },
+        "perAxisTieCount": {
+          "factual": 4,
+          "citation": 5,
+          "specificity": 6
+        }
+      },
+      "brain_vs_longCtx": {
+        "brainWinsCount2of3": 2,
+        "brainWinsCountAllAxes": 1,
+        "perAxisWinCount": {
+          "factual": 2,
+          "citation": 1,
+          "specificity": 2
+        },
+        "perAxisLossCount": {
+          "factual": 3,
+          "citation": 0,
+          "specificity": 2
+        },
+        "perAxisTieCount": {
+          "factual": 5,
+          "citation": 9,
+          "specificity": 6
+        }
+      }
+    },
+    "pass_bar_brain_vs_grep": "FAIL",
+    "pass_bar_brain_vs_longCtx": "FAIL",
+    "overall": "FAIL"
+  }
+}

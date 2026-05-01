@@ -1,6 +1,6 @@
 # Test 2 — Harness substitution mid-packet (#939)
 
-> **STATUS:** pending — blocked on t1-recall
+> **STATUS:** **DEFERRED** — Test 1 (#938) FAILED at 1/10 vs Grep (pass bar 7/10). The founder's stop rule on #938 says "the rest of the epic waits." This test is technically orthogonal (it measures runtime coordination, not Brain retrieval) and could still be run, but is held pending founder direction on whether to proceed.
 
 ## Goal
 

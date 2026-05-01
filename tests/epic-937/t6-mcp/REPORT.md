@@ -1,6 +1,6 @@
 # Test 6 — MCP-as-API external composition (#943)
 
-> **STATUS:** pending — runs last
+> **STATUS:** **DEFERRED** — Test 1 (#938) FAILED. Founder stop rule. This test is fully orthogonal to Brain retrieval and could be run independently as a "platform-claim demo" regardless of substrate state.
 
 ## Goal
 
