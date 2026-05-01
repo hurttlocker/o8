@@ -11,9 +11,11 @@ import { useState } from 'react';
 import { O8ActivityPane } from './O8ActivityPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8ChangesPane } from './O8ChangesPane';
+import { O8DiffPane } from './o8-panel/O8DiffPane';
 import { O8FilesPane } from './O8FilesPane';
 import { O8PRPane } from './O8PRPane';
 import { O8InboxPane } from './O8InboxPane';
+import { O8SpecPane } from './o8-panel/O8SpecPane';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
@@ -68,7 +70,7 @@ function IconActivity({ size = 16, color = '#e2e8f0' }: { size?: number; color?:
   );
 }
 
-export type O8Tab = 'changes' | 'browser' | 'files' | 'prs' | 'activity' | 'inbox';
+export type O8Tab = 'changes' | 'browser' | 'files' | 'prs' | 'activity' | 'inbox' | 'diff' | 'spec';
 
 function IconInbox({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
   return (
@@ -89,8 +91,10 @@ interface O8PanelProps {
   prRepo?: string | null;
   repoSlug?: string | null;
   activeTab?: O8Tab | null;
+  selectedFile?: string | null;
   browserUrl?: string | null;
   onActiveTabChange?: (tab: O8Tab) => void;
+  onSelectedFileChange?: (filePath: string) => void;
   commitSha?: string | null;
   onClearCommit?: () => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
@@ -101,7 +105,7 @@ interface O8PanelProps {
 // ── Tab Button ──
 
 const O8_ICON_ACTIVE = '#e2e8f0';
-const O8_ICON_INACTIVE = 'rgba(255,255,255,0.35)';
+const O8_ICON_INACTIVE = 'var(--t-text-muted)';
 
 function O8TabButton({ icon, active, onClick, label }: {
   icon: (color: string) => React.ReactNode;
@@ -121,13 +125,13 @@ function O8TabButton({ icon, active, onClick, label }: {
         width: 32,
         height: 32,
         border: 'none',
-        borderRadius: 8,
-        background: active ? 'rgba(255,255,255,0.14)' : 'transparent',
+        borderRadius: 12,
+        background: active ? 'var(--t-input-bg)' : 'transparent',
         cursor: 'pointer',
         transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         position: 'relative',
       }}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--t-hover)'; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
     >
       {icon(active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE)}
@@ -140,7 +144,7 @@ function O8TabButton({ icon, active, onClick, label }: {
           width: 12,
           height: 2,
           borderRadius: 1,
-          background: '#8fb4ff',
+          background: 'var(--t-brand-orange)',
         }} />
       ) : null}
     </button>
@@ -149,9 +153,10 @@ function O8TabButton({ icon, active, onClick, label }: {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl, onActiveTabChange, commitSha, onClearCommit, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
+export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile: externalSelectedFile, browserUrl, onActiveTabChange, onSelectedFileChange, commitSha, onClearCommit, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
   const [internalActiveTab, setInternalActiveTab] = useState<O8Tab>('changes');
   const activeTab = externalTab ?? internalActiveTab;
+  const selectedFile = externalSelectedFile ?? null;
 
   const handleTabChange = (tab: O8Tab) => {
     if (onActiveTabChange) {
@@ -159,6 +164,10 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       return;
     }
     setInternalActiveTab(tab);
+  };
+
+  const handleSelectedFileChange = (filePath: string) => {
+    onSelectedFileChange?.(filePath);
   };
 
   return (
@@ -183,12 +192,16 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         flexShrink: 0,
         gap: 2,
       }}>
-        <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'changes'} onClick={() => handleTabChange('changes')} label="Changes" />
+        <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'diff'} onClick={() => handleTabChange('diff')} label="Diff" />
         <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'files'} onClick={() => handleTabChange('files')} label="Files" />
-        <O8TabButton icon={(c) => <IconGitPullRequest size={16} color={c} />} active={activeTab === 'prs'} onClick={() => handleTabChange('prs')} label="PRs" />
         <O8TabButton icon={(c) => <IconGlobeSimple size={16} color={c} />} active={activeTab === 'browser'} onClick={() => handleTabChange('browser')} label="Browser" />
-        <O8TabButton icon={(c) => <IconActivity size={16} color={c} />} active={activeTab === 'activity'} onClick={() => handleTabChange('activity')} label="Activity" />
+        <div style={{ width: 1, height: 18, background: 'var(--t-divider-subtle)', marginLeft: 8, marginRight: 8 }} />
+        <O8TabButton icon={(c) => <IconGitPullRequest size={16} color={c} />} active={activeTab === 'prs'} onClick={() => handleTabChange('prs')} label="PRs" />
         <O8TabButton icon={(c) => <IconInbox size={16} color={c} />} active={activeTab === 'inbox'} onClick={() => handleTabChange('inbox')} label="Inbox" />
+        <O8TabButton icon={(c) => <IconActivity size={16} color={c} />} active={activeTab === 'activity'} onClick={() => handleTabChange('activity')} label="Activity" />
+        <div style={{ width: 1, height: 18, background: 'var(--t-divider-subtle)', marginLeft: 8, marginRight: 8 }} />
+        <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'spec'} onClick={() => handleTabChange('spec')} label="Spec" />
+        <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'changes'} onClick={() => handleTabChange('changes')} label="Changes" />
         <div style={{ flex: 1 }} />
         <button
           type="button"
@@ -218,6 +231,9 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       </div>
 
       {/* Tab content — all tabs stay mounted to preserve state */}
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'diff' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8DiffPane repoPath={repoPath} selectedFile={selectedFile} />
+      </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'changes' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8ChangesPane repoPath={repoPath} initialCommitSha={commitSha} repoSlug={repoSlug} onClearCommit={onClearCommit} />
       </div>
@@ -225,7 +241,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'files' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8FilesPane repoPath={repoPath ?? undefined} onOpenFile={onOpenFile} />
+        <O8FilesPane repoPath={repoPath ?? undefined} onOpenFile={onOpenFile} onSelectFile={handleSelectedFileChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8PRPane prNumber={prNumber} repo={prRepo ?? repoSlug} />
@@ -235,6 +251,9 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'inbox' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8InboxPane />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'spec' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8SpecPane repoPath={repoPath} />
       </div>
     </div>
   );
