@@ -20,6 +20,12 @@ export type OrchestratorPacketStatus =
 export type OrchestratorQueueState = 'draft' | 'queued' | 'held';
 export type OrchestratorReleaseState = 'pending' | 'released';
 
+export interface OrchestratorReleaseStatePayload {
+  mergeCommit?: string | null;
+  releasedAt?: string | null;
+  source?: string | null;
+}
+
 export interface OrchestratorWorkspaceTarget {
   id: string;
   label: string;
@@ -92,6 +98,7 @@ export interface OrchestratorPacket {
   dependencyPacketIds: string[];
   queueState: OrchestratorQueueState;
   releaseState: OrchestratorReleaseState;
+  releaseStatePayload?: OrchestratorReleaseStatePayload | null;
   status: OrchestratorPacketStatus;
   attemptCount?: number;
   maxAttempts?: number;
