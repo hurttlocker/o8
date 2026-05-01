@@ -370,14 +370,14 @@ export function APIKeysTab() {
                       color: 'var(--t-text-muted)',
                       lineHeight: 1.55,
                     }}>
-                      Written to{' '}
+                      Encrypted and written to{' '}
                       <span style={{
                         fontFamily: MONO_FONT_STACK,
                         fontSize: 11,
                         letterSpacing: '0.04em',
                         color: 'var(--t-text-secondary)',
                       }}>
-                        .env.local
+                        ~/.o8/.env.local
                       </span>
                       {' '}and available right away.
                     </div>
@@ -449,16 +449,16 @@ export function APIKeysTab() {
           lineHeight: 1.55,
           maxWidth: 620,
         }}>
-          Keys are written to{' '}
+          Keys are AES-256-GCM encrypted and written to{' '}
           <span style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 12,
             letterSpacing: '0.04em',
             color: 'var(--t-text-secondary)',
           }}>
-            .env.local
+            ~/.o8/.env.local
           </span>
-          {' '}and take effect immediately. In the cloud version, keys are encrypted and stored in your account.
+          {' '}and take effect immediately. They never leave this machine. Beta feature — removed before official release in favour of the hosted plan.
         </div>
         <div style={{ marginTop: 16 }}>
           <HairlineRule />
