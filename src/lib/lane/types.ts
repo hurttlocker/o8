@@ -69,7 +69,7 @@ export type LaneEventActor = 'user' | 'orchestrator' | 'system';
 export interface LaneEvent {
   id: string;
   laneId: string;
-  verb: string;
+  verb: LaneEventVerb;
   actor: LaneEventActor;
   payload: Record<string, unknown>;
   timestamp: string;
@@ -162,6 +162,14 @@ export type LaneCommand =
     };
 
 export type LaneVerb = LaneCommand['verb'];
+export type LaneEventVerb =
+  | LaneVerb
+  | 'status_change'
+  | 'update'
+  | 'session_lost'
+  | 'auto_archive'
+  | 'merge_cleanup'
+  | (string & {});
 
 // ── Lane Policy ──
 
