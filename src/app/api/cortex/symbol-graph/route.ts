@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'repoPath is required.' }, { status: 400 });
   }
 
-  const limit = typeof body.limit === 'number' ? Math.max(1, Math.min(5, body.limit)) : 3;
+  const limit = typeof body.limit === 'number' ? Math.max(1, Math.min(10, body.limit)) : 3;
 
   let symbols: string[];
   if (Array.isArray(body.symbols) && body.symbols.length > 0) {

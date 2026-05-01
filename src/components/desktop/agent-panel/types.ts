@@ -1,6 +1,6 @@
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { OrchestratorMissionState, OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
@@ -193,5 +193,7 @@ export interface AgentPanelProps {
   onAgentKill?: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   lifecycleEvents?: Map<string, { state: string; exitCode?: number; ts: number }>;
   orchestratorPackets?: OrchestratorPacket[];
+  orchestratorMissionState?: OrchestratorMissionState;
+  registeredRepos?: RepoRegistryEntry[];
   ideWorkspaceSessions?: MobileInboxSnapshot['sessions'];
 }

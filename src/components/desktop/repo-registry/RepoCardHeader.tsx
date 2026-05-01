@@ -169,6 +169,7 @@ function RepoCardHeaderBase({
             padding: compactLayout ? '9px 14px 8px' : '10px 14px 9px',
             cursor: 'pointer',
           }}
+          onClick={onSelectRepo}
           onMouseEnter={(event) => schedulePreviewHover(event.currentTarget as HTMLDivElement, event.clientX, event.clientY)}
           onMouseLeave={closePreviewHover}
         >

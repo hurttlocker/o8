@@ -2,10 +2,11 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- AgentPanel keeps a stable prop surface during the refactor */
 
 import { memo, type CSSProperties } from 'react';
-import { AnimatePresence } from 'framer-motion';
 import { Clock } from './lucide-shims';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
+import { LeftPanelFocusOverlay } from './repo-focus/LeftPanelFocusOverlay';
+import { useLeftPanelFocus } from './repo-focus/useLeftPanelFocus';
 import {
   AgentPanelEmptyState,
   SidebarSection,
@@ -29,6 +30,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onReviewPR,
     onRepoRemoved,
     orchestratorPackets = [],
+    orchestratorMissionState,
+    registeredRepos = [],
     ideWorkspaceSessions,
   } = props;
 
@@ -57,6 +60,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onSelectSession,
     onAgentsUpdate: props.onAgentsUpdate,
   });
+  const leftPanelFocus = useLeftPanelFocus(registeredRepos);
 
   return (
     <div
@@ -82,6 +86,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         style={{
           flex: 1,
           overflowY: 'auto',
+          position: 'relative',
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
           WebkitOverflowScrolling: 'touch',
@@ -159,7 +164,10 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           <RepoRegistrySection
             onLaunchComplete={refreshNow}
             onSelectSession={onSelectSession}
-            onSelectRepo={props.onSelectRepo}
+            onSelectRepo={(repoId) => {
+              leftPanelFocus.focusByRepoId(repoId);
+              props.onSelectRepo?.(repoId);
+            }}
             onSelectPR={onSelectPR}
             onReviewPR={onReviewPR}
             onRepoRemoved={(repo) => {
@@ -194,6 +202,15 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             Cloud) grouped by their bound repo, with a final "Other" group
             for cross-repo agents. Renders nothing when absent. */}
         <AgentPanelExtraAgents onSelectSession={onSelectSession} />
+
+        <LeftPanelFocusOverlay
+          focus={leftPanelFocus}
+          packets={orchestratorPackets}
+          missionState={orchestratorMissionState}
+          ideWorkspaceSessions={ideWorkspaceSessions}
+          activeSessionKey={activeSessionKey}
+          onSelectSession={onSelectSession}
+        />
 
       </div>
     </div>
