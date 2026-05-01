@@ -16,6 +16,7 @@ import type React from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
+import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
 
 // ── CLI Agents (terminal only, no chat modes) ──
 
@@ -369,6 +370,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
     const [tabs, setTabs] = useState<ContextualPanelTab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string>('');
     const [addMenuOpen, setAddMenuOpen] = useState(false);
+    const opencodeEnabled = useExperimentalOpencodeFlag();
+    const visibleAgents = opencodeEnabled ? CLI_AGENTS : CLI_AGENTS.filter((a) => a.id !== 'opencode');
     const pendingTabIdsRef = useRef<string[]>([]);
     const pendingAgentsRef = useRef<Map<string, CliAgent['id']>>(new Map());
     const pendingRequestRef = useRef<Map<string, string>>(new Map());
@@ -695,7 +698,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 paddingLeft: 4,
                 zIndex: 400,
               } as React.CSSProperties}>
-                {CLI_AGENTS.map((agent) => (
+                {visibleAgents.map((agent) => (
                   <button
                     key={agent.id}
                     type="button"
