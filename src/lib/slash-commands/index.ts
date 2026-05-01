@@ -1,3 +1,4 @@
+import { handleAskSlashCommand } from './ask';
 import { handleClearSlashCommand } from './clear';
 import { handleCompactSlashCommand } from './compact';
 import { handleFocusSlashCommand } from './focus';
@@ -28,6 +29,7 @@ const HANDLERS: Record<ParsedOrchestratorSlashCommand['command']['name'], (
   command: ParsedOrchestratorSlashCommand,
   context: SlashCommandContext,
 ) => Promise<SlashCommandExecutionResult>> = {
+  ask: handleAskSlashCommand,
   clear: handleClearSlashCommand,
   compact: handleCompactSlashCommand,
   focus: handleFocusSlashCommand,
