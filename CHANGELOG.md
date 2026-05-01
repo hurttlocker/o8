@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-30
 
+- `81e51e7b` feat(ui): hide agent runtime pickers behind experimentalagent runtime + thicker tabs
 - `1166d5d4` feat(operator): default thinkingEffort to high (was adaptive)
 - `de689665` feat(runtime): drop agent runtime from default dispatch picker
 - `d76702b3` feat(brain): fs.watch on docs — incremental re-distill
