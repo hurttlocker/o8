@@ -9,6 +9,7 @@ export interface RepoReadiness {
   nextAction?: string;
   currentBranch: string | null;
   onDefaultBranch: boolean | null;
+  originConfigured: boolean;
   dirty: boolean;
   missingEnvFiles: string[];
 }

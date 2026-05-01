@@ -3,11 +3,15 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
+import { markRepoOriginConfigured } from '@/lib/repos/origin-readiness';
+import { enqueueInboxItem, runRetentionSweep, selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
 
 const execFileAsync = promisify(execFile);
 
-const HEAL_BOT_TICK_MS = 30_000;
+const HEAL_BOT_TICK_MS = 60_000;
 const HEAL_BOT_TIMEOUT_MS = 5 * 60_000;
+const FETCH_UNREACHABLE_MIN_AGE_MS = 60_000;
+const FETCH_UNREACHABLE_RETRY_MS = 5 * 60_000;
 const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 const OUTPUT_SNIPPET_LIMIT = 4_000;
 const HEAL_BOT_SYSTEM_PROMPT = 'You are a heal-bot. The packet failed verification with the attached error. You have 5 minutes. Either: (a) make the minimal fix, commit it, run `npx tsc --noEmit`, and exit successfully, OR (b) write `GIVE_UP: <one-line reason>` to stdout and exit. Do not invent scope — only fix the specific failure.';
@@ -19,6 +23,8 @@ export type SupervisorInboxKind =
   | 'packet_missing'
   | 'bounded_retry_exhausted'
   | 'merge_blocked'
+  | 'fetch_unreachable'
+  | 'repo_misconfigured'
   // #613 — silent-exit detector kinds. Lane's underlying session died
   // between work-completion and the completion-reported event, so we had to
   // salvage by hand.
@@ -83,6 +89,7 @@ export interface EnqueueSupervisorInboxItemInput {
 
 let healBotTimer: ReturnType<typeof setInterval> | null = null;
 let drainInFlight = false;
+const fetchTestLastByRepo = new Map<string, number>();
 
 function getDb() {
   const sqlite = getSqlite();
@@ -115,6 +122,11 @@ function truncate(value: string | undefined, limit = OUTPUT_SNIPPET_LIMIT): stri
   if (!normalized) return '';
   if (normalized.length <= limit) return normalized;
   return `${normalized.slice(0, limit)}\n\n... (truncated)`;
+}
+
+function timestampMs(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function quoteBlock(value: string | null | undefined, fallback: string): string {
@@ -512,6 +524,7 @@ function claimPendingItems(): SupervisorInboxItem[] {
     SELECT id, repo_path, packet_id, kind, payload, status, heal_attempt_count, created_at, resolved_at
       FROM supervisor_inbox
      WHERE status = 'pending'
+       AND kind IN ('verification_failed', 'bounded_retry_exhausted')
        AND COALESCE(heal_attempt_count, 0) < 1
      ORDER BY created_at ASC
   `).all() as SupervisorInboxItem[];
@@ -522,6 +535,7 @@ function claimPendingItems(): SupervisorInboxItem[] {
            heal_attempt_count = COALESCE(heal_attempt_count, 0) + 1
      WHERE id = ?
        AND status = 'pending'
+       AND kind IN ('verification_failed', 'bounded_retry_exhausted')
        AND COALESCE(heal_attempt_count, 0) < 1
   `);
 
@@ -566,11 +580,61 @@ function recoverInterruptedHealingItems(): void {
   `).run();
 }
 
+function listFetchUnreachableItems(): SupervisorInboxItem[] {
+  return getDb().prepare(`
+    SELECT id, repo_path, packet_id, kind, payload, status, heal_attempt_count, created_at, resolved_at
+      FROM supervisor_inbox
+     WHERE kind = 'fetch_unreachable'
+       AND status IN ('pending', 'human_required')
+     ORDER BY created_at ASC
+  `).all() as SupervisorInboxItem[];
+}
+
+async function runFetchUnreachableSweep(): Promise<void> {
+  const now = Date.now();
+  const attemptedRepos = new Set<string>();
+  for (const item of listFetchUnreachableItems()) {
+    if (attemptedRepos.has(item.repo_path)) continue;
+    if (now - timestampMs(item.created_at) < FETCH_UNREACHABLE_MIN_AGE_MS) continue;
+    const lastAttemptMs = fetchTestLastByRepo.get(item.repo_path) ?? 0;
+    if (now - lastAttemptMs < FETCH_UNREACHABLE_RETRY_MS) continue;
+
+    const payload = parsePayload(item.payload);
+    const baseBranch = payload.baseBranch?.trim() || 'main';
+    attemptedRepos.add(item.repo_path);
+    fetchTestLastByRepo.set(item.repo_path, now);
+
+    try {
+      await execFileAsync('git', ['fetch', 'origin', baseBranch, '--quiet'], {
+        cwd: item.repo_path,
+        timeout: 60_000,
+        maxBuffer: COMMAND_MAX_BUFFER,
+      });
+      markRepoOriginConfigured(item.repo_path);
+      const healed = selfHealActiveByKindAndRepo('fetch_unreachable', item.repo_path);
+      if (healed > 0) {
+        console.log(`[heal-bot] Self-healed ${healed} fetch_unreachable item(s) for ${item.repo_path} after fetch origin ${baseBranch}`);
+      }
+    } catch (error) {
+      console.warn(`[heal-bot] Fetch test still failing for ${item.repo_path}: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+}
+
+async function runHealBotMaintenance(): Promise<void> {
+  const dismissed = runRetentionSweep();
+  if (dismissed > 0) {
+    console.log(`[heal-bot] Retention sweep dismissed ${dismissed} stale inbox item(s)`);
+  }
+  await runFetchUnreachableSweep();
+}
+
 async function drainHealBotQueue(): Promise<void> {
   if (drainInFlight) return;
   drainInFlight = true;
 
   try {
+    await runHealBotMaintenance();
     const claimed = claimPendingItems();
     for (const item of claimed) {
       try {
@@ -591,28 +655,15 @@ async function drainHealBotQueue(): Promise<void> {
 }
 
 export function enqueueSupervisorInboxItem(input: EnqueueSupervisorInboxItemInput): string {
-  const db = getDb();
-  const id = randomUUID();
-  db.prepare(`
-    INSERT INTO supervisor_inbox (
-      id,
-      repo_path,
-      packet_id,
-      kind,
-      payload,
-      status,
-      heal_attempt_count,
-      created_at,
-      resolved_at
-    ) VALUES (?, ?, ?, ?, ?, 'pending', 0, datetime('now'), NULL)
-  `).run(
-    id,
-    input.repoPath,
-    input.packetId ?? null,
-    input.kind,
-    serializePayload(input.payload),
-  );
-  return id;
+  getDb();
+  const item = enqueueInboxItem({
+    repoPath: input.repoPath,
+    packetId: input.packetId ?? null,
+    kind: input.kind,
+    payload: input.payload as Record<string, unknown>,
+    status: FIXABLE_KINDS.has(input.kind) ? 'pending' : undefined,
+  });
+  return item.id;
 }
 
 export function startHealBot(): () => void {
