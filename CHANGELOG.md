@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-30
 
+- `b8212560` feat(brain): embeddings column + hybrid retrieval
 - `e3f12505` feat(brain): in-process compactor scheduler
 - `19f4451d` feat(qa): Phase 2b
 - `f92d7ed2` feat(qa): source-update detection + source-of-truth hierarchy
