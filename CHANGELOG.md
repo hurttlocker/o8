@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-01
 
+- `30ff04aa` feat(chrome): move update notice to footer pill, drop top-right toast
 - `ff3f0c12` feat(repo-focus): back-arrow polish + ESC-to-close
 - `9d5ebc1d` feat: add o8 diff and spec tabs
 - `3ff8e1f6` feat: add ambient right panel
