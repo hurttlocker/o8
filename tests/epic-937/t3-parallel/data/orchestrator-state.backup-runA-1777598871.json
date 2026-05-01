@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "mission": {
+    "version": 2,
+    "missionId": "mission-e26ab20a-8b3",
+    "prompt": "Sprint mission for o8-test-sandbox.\nTasks:\n- inline-1: t3 serial task 1\n- inline-2: t3 serial task 2\n- inline-3: t3 serial task 3",
+    "summary": "Sprint mission for o8-test-sandbox with 3 tasks.",
+    "repoPath": "/Users/marquisehurtt/o8-test-sandbox",
+    "runtime": "gemini",
+    "constraints": "",
+    "packets": [
+      {
+        "id": "pkt-ad531e55-97b3-440d-a34d-5c8c179b158a",
+        "referenceLabel": "inline-1",
+        "title": "t3 serial task 1",
+        "summary": "Task inline-1: t3 serial task 1\n\nCreate a new file at the repo root named file_1.txt with the single line content: task 1 done. Then commit it.",
+        "workspaceTargetPath": "/Users/marquisehurtt/o8-test-sandbox",
+        "branchTarget": "inline/t3-serial-task-1",
+        "runtime": "gemini",
+        "dependencyLabels": [],
+        "dependencyPacketIds": [],
+        "queueState": "queued",
+        "releaseState": "pending",
+        "status": "archived",
+        "attemptCount": 0,
+        "maxAttempts": 3,
+        "recoveryCount": 0,
+        "lastRecoveryAt": null,
+        "blockedReason": null,
+        "lastEventAt": null,
+        "lastEventLabel": null,
+        "archivedAt": null,
+        "review": null,
+        "lane": null,
+        "comparisonGroupId": null,
+        "assignedModel": null,
+        "prompt": "t3 serial task 1\n\nTask inline-1: t3 serial task 1\n\nCreate a new file at the repo root named file_1.txt with the single line content: task 1 done. Then commit it.",
+        "issue": {
+          "number": 90001,
+          "body": "Create a new file at the repo root named file_1.txt with the single line content: task 1 done. Then commit it."
+        }
+      },
+      {
+        "id": "pkt-4638be88-7075-4e10-8a19-93676f7b3db0",
+        "referenceLabel": "inline-2",
+        "title": "t3 serial task 2",
+        "summary": "Task inline-2: t3 serial task 2\n\nCreate a new file at the repo root named file_2.txt with the single line content: task 2 done. Then commit it.",
+        "workspaceTargetPath": "/Users/marquisehurtt/o8-test-sandbox",
+        "branchTarget": "inline/t3-serial-task-2",
+        "runtime": "gemini",
+        "dependencyLabels": [
+          "inline-1"
+        ],
+        "dependencyPacketIds": [
+          "pkt-ad531e55-97b3-440d-a34d-5c8c179b158a"
+        ],
+        "queueState": "queued",
+        "releaseState": "pending",
+        "status": "blocked",
+        "attemptCount": 0,
+        "maxAttempts": 3,
+        "recoveryCount": 0,
+        "lastRecoveryAt": null,
+        "blockedReason": "Waiting on inline-1 to be explicitly released",
+        "lastEventAt": null,
+        "lastEventLabel": null,
+        "archivedAt": null,
+        "review": null,
+        "lane": null,
+        "comparisonGroupId": null,
+        "assignedModel": null,
+        "prompt": "t3 serial task 2\n\nTask inline-2: t3 serial task 2\n\nCreate a new file at the repo root named file_2.txt with the single line content: task 2 done. Then commit it.",
+        "issue": {
+          "number": 90002,
+          "body": "Create a new file at the repo root named file_2.txt with the single line content: task 2 done. Then commit it."
+        }
+      },
+      {
+        "id": "pkt-3f7aaf71-55e3-4dcb-8daa-6f4fa91d06be",
+        "referenceLabel": "inline-3",
+        "title": "t3 serial task 3",
+        "summary": "Task inline-3: t3 serial task 3\n\nCreate a new file at the repo root named file_3.txt with the single line content: task 3 done. Then commit it.",
+        "workspaceTargetPath": "/Users/marquisehurtt/o8-test-sandbox",
+        "branchTarget": "inline/t3-serial-task-3",
+        "runtime": "gemini",
+        "dependencyLabels": [
+          "inline-2"
+        ],
+        "dependencyPacketIds": [
+          "pkt-4638be88-7075-4e10-8a19-93676f7b3db0"
+        ],
+        "queueState": "queued",
+        "releaseState": "pending",
+        "status": "blocked",
+        "attemptCount": 0,
+        "maxAttempts": 3,
+        "recoveryCount": 0,
+        "lastRecoveryAt": null,
+        "blockedReason": "Waiting on inline-2 to be explicitly released",
+        "lastEventAt": null,
+        "lastEventLabel": null,
+        "archivedAt": null,
+        "review": null,
+        "lane": null,
+        "comparisonGroupId": null,
+        "assignedModel": null,
+        "prompt": "t3 serial task 3\n\nTask inline-3: t3 serial task 3\n\nCreate a new file at the repo root named file_3.txt with the single line content: task 3 done. Then commit it.",
+        "issue": {
+          "number": 90003,
+          "body": "Create a new file at the repo root named file_3.txt with the single line content: task 3 done. Then commit it."
+        }
+      }
+    ],
+    "activeComparisonGroups": [],
+    "updatedAt": "2026-05-01T01:27:25.566Z"
+  }
+}

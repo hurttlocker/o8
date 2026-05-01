@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "mission": {
+    "version": 2,
+    "missionId": "mission-ba6c1dae-185",
+    "prompt": "Sprint mission for cortex-ide.\nTasks:\n- inline-1: Phase-3 audit probe — verify symbols leg + transcript multi-runtime",
+    "summary": "Sprint mission for cortex-ide with 1 task.",
+    "repoPath": "/Users/marquisehurtt/cortex-ide",
+    "runtime": "opencode",
+    "constraints": "",
+    "packets": [
+      {
+        "id": "pkt-95990101-f503-4658-91d4-cc4c082fe5fb",
+        "referenceLabel": "inline-1",
+        "title": "Phase-3 audit probe — verify symbols leg + transcript multi-runtime",
+        "summary": "Task inline-1: Phase-3 audit probe — verify symbols leg + transcript multi-runtime\n\nPhase-3 audit probe of #743 dispatch context injection.\n\nDo NOT modify any files. Only read your scope and report.\n\nReport these exact items in plain text (no JSON):\n\n1. Count Symbol Graph rows in the <context> block and report N.\n2. List each symbol entry by `name → resolved? (yes/no, file:line if yes)`.\n3. Confirm the body has exactly 3 backtick-quoted refs to `extractSymbols`, `buildContextBlock`, `traceSymbols` (these are real functions in src/lib/codebase-memory).\n4. Report whether `SymbolEdge` shows `file:line` populated or 'no definition recorded'.\n5. Report Recall directives count and Outcomes count from <context>.\n\nEnd with a one-line self-review JSON wrapped in <self-review> tags.",
+        "workspaceTargetPath": "/Users/marquisehurtt/cortex-ide",
+        "branchTarget": "inline/phase-3-audit-probe-verify-symbols-leg-transcrip",
+        "runtime": "opencode",
+        "dependencyLabels": [],
+        "dependencyPacketIds": [],
+        "queueState": "queued",
+        "releaseState": "pending",
+        "status": "awaiting_review",
+        "attemptCount": 0,
+        "maxAttempts": 3,
+        "recoveryCount": 0,
+        "lastRecoveryAt": null,
+        "blockedReason": null,
+        "lastEventAt": "2026-04-29T21:36:49.543Z",
+        "lastEventLabel": null,
+        "archivedAt": null,
+        "review": null,
+        "lane": {
+          "tileId": "tile-root",
+          "tabId": "chat-3a132521-fd5c-482d-8ae6-dbe4d215ef42",
+          "repoPath": "/Users/marquisehurtt/cortex-ide",
+          "worktreePath": null,
+          "runtime": "opencode",
+          "sessionKey": "opencode-owned:opencode-owned-1777486256422-5dc83884",
+          "laneId": "lane-d2ae1050-95b",
+          "lastHeartbeatAt": "2026-05-01T01:06:28.215Z",
+          "lastEventAt": "2026-04-29T21:36:49.543Z",
+          "lastEventLabel": null
+        },
+        "comparisonGroupId": null,
+        "assignedModel": null,
+        "prompt": "Phase-3 audit probe — verify symbols leg + transcript multi-runtime\n\nTask inline-1: Phase-3 audit probe — verify symbols leg + transcript multi-runtime\n\nPhase-3 audit probe of #743 dispatch context injection.\n\nDo NOT modify any files. Only read your scope and report.\n\nReport these exact items in plain text (no JSON):\n\n1. Count Symbol Graph rows in the <context> block and report N.\n2. List each symbol entry by `name → resolved? (yes/no, file:line if yes)`.\n3. Confirm the body has exactly 3 backtick-quoted refs to `extractSymbols`, `buildContextBlock`, `traceSymbols` (these are real functions in src/lib/codebase-memory).\n4. Report whether `SymbolEdge` shows `file:line` populated or 'no definition recorded'.\n5. Report Recall directives count and Outcomes count from <context>.\n\nEnd with a one-line self-review JSON wrapped in <self-review> tags.",
+        "issue": {
+          "number": 90001,
+          "body": "Phase-3 audit probe of #743 dispatch context injection.\n\nDo NOT modify any files. Only read your scope and report.\n\nReport these exact items in plain text (no JSON):\n\n1. Count Symbol Graph rows in the <context> block and report N.\n2. List each symbol entry by `name → resolved? (yes/no, file:line if yes)`.\n3. Confirm the body has exactly 3 backtick-quoted refs to `extractSymbols`, `buildContextBlock`, `traceSymbols` (these are real functions in src/lib/codebase-memory).\n4. Report whether `SymbolEdge` shows `file:line` populated or 'no definition recorded'.\n5. Report Recall directives count and Outcomes count from <context>.\n\nEnd with a one-line self-review JSON wrapped in <self-review> tags."
+        }
+      }
+    ],
+    "activeComparisonGroups": [],
+    "updatedAt": "2026-05-01T01:06:28.433Z"
+  }
+}
