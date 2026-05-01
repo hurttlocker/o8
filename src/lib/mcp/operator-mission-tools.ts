@@ -28,6 +28,37 @@ function resolveApiBase(): string {
   } catch { /* fall through */ }
   return 'http://localhost:3001';
 }
+
+// ── Panel Bearer token ──
+//
+// Same pattern as operator-handlers/shared.ts: the middleware's loopback
+// bypass doesn't trigger reliably for plain Node fetch from this MCP path
+// (no Origin / sec-fetch-site headers). Adding `Authorization: Bearer
+// <ws-token>` is belt-and-suspenders. Without this, MCP create_mission /
+// dispatch / status calls return 401 from the gated /api/orchestrator/*
+// routes even though the loopback origin should pass.
+let _cachedPanelToken: { value: string; readAt: number } | null = null;
+const PANEL_TOKEN_TTL_MS = 30_000;
+
+function readPanelToken(): string | null {
+  const now = Date.now();
+  if (_cachedPanelToken && now - _cachedPanelToken.readAt < PANEL_TOKEN_TTL_MS) {
+    return _cachedPanelToken.value || null;
+  }
+  try {
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const tokenPath = join(dataDir, 'ws-token');
+    if (!existsSync(tokenPath)) {
+      _cachedPanelToken = { value: '', readAt: now };
+      return null;
+    }
+    const value = readFileSync(tokenPath, 'utf-8').trim();
+    _cachedPanelToken = { value, readAt: now };
+    return value || null;
+  } catch {
+    return null;
+  }
+}
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type {
   ApproveAndMergeInput as ApproveAndMergeRequest,
@@ -244,11 +275,14 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      const panelToken = readPanelToken();
+      const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (panelToken) baseHeaders.Authorization = `Bearer ${panelToken}`;
       response = await fetch(`${API_BASE}${path}`, {
         ...init,
         signal: controller.signal,
         headers: {
-          'Content-Type': 'application/json',
+          ...baseHeaders,
           ...init?.headers,
         },
       });
