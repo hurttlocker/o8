@@ -16,6 +16,7 @@ import { detectFileOverlaps, recommendMergeOrder } from '@/lib/worktree/conflict
 import type { MergeOrderRecommendation } from '@/lib/worktree/conflicts';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import type { WorktreeInfo } from '@/lib/worktree/types';
+import { capturePostMergeCleanupTarget, postMergeCleanup } from './post-merge-cleanup';
 import { mapReviewSummary } from './review';
 import { currentMissionState, log } from './shared';
 import type {
@@ -173,6 +174,7 @@ async function dispatchPacketMerge(
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
   }
+  const cleanupTarget = await capturePostMergeCleanupTarget(lane);
 
   const result = await dispatchLaneCommand({
     verb: 'merge',
@@ -198,6 +200,9 @@ async function dispatchPacketMerge(
         `Post-merge cleanup skipped for lane ${lane.id} (packet ${packet.id}): reason=${cleanup.reason ?? 'unknown'}. Reconcile sweep will handle it.`,
       );
     }
+    void postMergeCleanup(cleanupTarget).catch((error) => {
+      console.warn(`[merge-cleanup] Unexpected cleanup failure for lane ${lane.id}:`, error);
+    });
 
     // #769 — Living Specs. Append a one-line trailer to every directive
     // matching this repo so each directive accumulates evidence of which
