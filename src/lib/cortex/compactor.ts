@@ -23,6 +23,10 @@ export interface CompactionArgs {
   skipJaccard: boolean;
   reportContradictions: boolean;
   contradictionMinOverlap: number;
+  /** #962 — enable Job 7 (cosine near-dup over facts.embedding). Off by default. */
+  cosineDedup?: boolean;
+  /** #962 — cosine similarity threshold for Job 7. Default 0.92. */
+  cosineThreshold?: number;
 }
 
 export interface CompactionResult {
@@ -34,6 +38,8 @@ export interface CompactionResult {
   jaccardRemoved: number;
   jaccardMerged: number;
   contradictionsReported: number;
+  cosineRemoved: number;
+  cosineMerged: number;
   elapsedMs: number;
 }
 
@@ -511,6 +517,141 @@ function surfaceContradictions(
   return { reported: pairs.length };
 }
 
+// ── Job 7 — cosine near-dup merge (#962) ─────────────────────────────────────
+
+function cosineSim(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+function cosineNearDupMerge(
+  db: Database.Database,
+  threshold: number,
+  dryRun: boolean,
+): { removed: number; merged: number } {
+  const hasCol = (db.pragma('table_info(facts)') as Array<{ name: string }>)
+    .some((c) => c.name === 'embedding');
+  if (!hasCol) {
+    console.log('[cosine-dedup] skipped (facts.embedding column missing — apply schema v20 first)');
+    return { removed: 0, merged: 0 };
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT id, kind, content, confidence, embedding
+         FROM facts
+        WHERE embedding IS NOT NULL
+          AND length(content) > 30`,
+    )
+    .all() as Array<{
+      id: string;
+      kind: string;
+      content: string;
+      confidence: number;
+      embedding: Buffer;
+    }>;
+
+  if (rows.length < 2) {
+    console.log(`[cosine-dedup] skipped (${rows.length} rows have embeddings — need >=2)`);
+    return { removed: 0, merged: 0 };
+  }
+
+  console.log(`[cosine-dedup] comparing ${rows.length} embedded facts at threshold ${threshold}`);
+
+  const vecs: Float32Array[] = rows.map(
+    (r) => new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4),
+  );
+
+  const byKind = new Map<string, number[]>();
+  for (let i = 0; i < rows.length; i++) {
+    let arr = byKind.get(rows[i].kind);
+    if (!arr) { arr = []; byKind.set(rows[i].kind, arr); }
+    arr.push(i);
+  }
+
+  const clusters = new Map<string, Set<string>>();
+  const claimed = new Map<string, string>();
+
+  for (const [, indices] of byKind) {
+    for (let ii = 0; ii < indices.length; ii++) {
+      for (let jj = ii + 1; jj < indices.length; jj++) {
+        const i = indices[ii];
+        const j = indices[jj];
+        if (rows[i].content === rows[j].content) continue;
+        const sim = cosineSim(vecs[i], vecs[j]);
+        if (sim < threshold) continue;
+
+        const winner = rows[i].confidence >= rows[j].confidence ? rows[i] : rows[j];
+        const loser = winner === rows[i] ? rows[j] : rows[i];
+        const winnerKeeper = claimed.get(winner.id) ?? winner.id;
+
+        let cluster = clusters.get(winnerKeeper);
+        if (!cluster) {
+          cluster = new Set([winnerKeeper]);
+          clusters.set(winnerKeeper, cluster);
+        }
+
+        const loserKeeper = claimed.get(loser.id);
+        if (loserKeeper && loserKeeper !== winnerKeeper) {
+          const loserCluster = clusters.get(loserKeeper);
+          if (loserCluster) {
+            for (const id of loserCluster) {
+              cluster.add(id);
+              claimed.set(id, winnerKeeper);
+            }
+            clusters.delete(loserKeeper);
+          }
+        } else {
+          cluster.add(loser.id);
+          claimed.set(loser.id, winnerKeeper);
+        }
+        claimed.set(winner.id, winnerKeeper);
+      }
+    }
+  }
+
+  if (clusters.size === 0) {
+    console.log(`[cosine-dedup] 0 near-dup clusters at threshold ${threshold}`);
+    return { removed: 0, merged: 0 };
+  }
+
+  let toRemove = 0;
+  for (const cluster of clusters.values()) toRemove += cluster.size - 1;
+
+  if (dryRun) {
+    console.log(
+      `[cosine-dedup] ${clusters.size} clusters, ${toRemove} dupe rows (dry-run, not collapsing)`,
+    );
+    return { removed: toRemove, merged: clusters.size };
+  }
+
+  const deleteFact = db.prepare(`DELETE FROM facts WHERE id = ?`);
+  const bumpConfidence = db.prepare(
+    `UPDATE facts SET confidence = MIN(1.0, confidence + ?) WHERE id = ?`,
+  );
+  const tx = db.transaction(() => {
+    for (const [keeper, cluster] of clusters) {
+      const losers = [...cluster].filter((id) => id !== keeper);
+      for (const id of losers) deleteFact.run(id);
+      const bump = Math.min(0.03 * losers.length, 0.08);
+      bumpConfidence.run(bump, keeper);
+    }
+  });
+  tx();
+  console.log(
+    `[cosine-dedup] collapsed ${clusters.size} clusters -> removed ${toRemove} rows`,
+  );
+  return { removed: toRemove, merged: clusters.size };
+}
+
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
 export function reportStats(db: Database.Database, label: string): void {
@@ -557,6 +698,15 @@ export function runCompaction(args: CompactionArgs, db: Database.Database): Comp
   const jacc = args.skipJaccard
     ? { removed: 0, merged: 0 }
     : jaccardMerge(db, args.jaccardThreshold, args.dryRun);
+  // Job 7 — cosine near-dup dedup (#962). Opt-in via cosineDedup. Runs AFTER
+  // Jaccard so the two passes do not collide on the same clusters.
+  const cosineThreshold = args.cosineThreshold ?? 0.92;
+  const cosine = args.cosineDedup
+    ? cosineNearDupMerge(db, cosineThreshold, args.dryRun)
+    : { removed: 0, merged: 0 };
+  if (!args.cosineDedup) {
+    console.log('[cosine-dedup] skipped (pass --cosine-dedup to enable Job 7)');
+  }
   const contradictions = args.reportContradictions
     ? surfaceContradictions(db, args.contradictionMinOverlap, 20)
     : { reported: 0 };
@@ -576,6 +726,7 @@ export function runCompaction(args: CompactionArgs, db: Database.Database): Comp
   console.log(`  exact-dupe collapse   : ${dupes.removed} rows in ${dupes.merged} groups`);
   console.log(`  time-decayed          : ${decay.decayed}`);
   console.log(`  jaccard near-dup      : ${jacc.removed} rows in ${jacc.merged} clusters`);
+  console.log(`  cosine near-dup       : ${cosine.removed} rows in ${cosine.merged} clusters`);
   console.log(`  contradiction report  : ${contradictions.reported} candidate pairs`);
   console.log(`  elapsed               : ${(elapsedMs / 1000).toFixed(2)}s`);
   console.log(`  mode                  : ${args.dryRun ? 'dry-run (no writes)' : 'applied'}`);
@@ -590,6 +741,8 @@ export function runCompaction(args: CompactionArgs, db: Database.Database): Comp
     jaccardRemoved: jacc.removed,
     jaccardMerged: jacc.merged,
     contradictionsReported: contradictions.reported,
+    cosineRemoved: cosine.removed,
+    cosineMerged: cosine.merged,
     elapsedMs,
   };
 }
