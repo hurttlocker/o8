@@ -174,23 +174,40 @@ export function O8DiffPane({ repoPath, selectedFile }: O8DiffPaneProps) {
   }, [repoPath, selectedFile]);
 
   return (
-    <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, background: 'var(--t-canvas-bg)' }}>
+    // Wide O8 Panel chrome scope flips --t-text/--t-text-muted to white. We
+    // render content here, so we rebind the chrome-flipped tokens back to
+    // their chat-surface-* content equivalents. Children that reference
+    // --t-text / --t-text-muted then resolve correctly without per-component
+    // edits.
+    <div style={{
+      display: 'flex',
+      flex: 1,
+      flexDirection: 'column',
+      minHeight: 0,
+      background: 'var(--t-canvas-bg)',
+      color: 'var(--t-chat-surface-text)',
+      ['--t-text' as unknown as string]: 'var(--t-chat-surface-text)',
+      ['--t-text-secondary' as unknown as string]: 'var(--t-chat-surface-text-secondary)',
+      ['--t-text-muted' as unknown as string]: 'var(--t-chat-surface-text-muted)',
+      ['--t-text-faint' as unknown as string]: 'var(--t-chat-surface-text-muted)',
+      ['--t-input-bg' as unknown as string]: 'var(--t-chat-surface-input-bg)',
+    } as React.CSSProperties}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 42, paddingLeft: 12, paddingRight: 12, borderBottom: '1px solid var(--t-divider-subtle)', fontFamily: UI_FONT }}>
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 600 }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-chat-surface-text-muted)', fontSize: 11, fontWeight: 600 }}>
           {selectedFile ? `[DIFF] · ${selectedFile}` : '[DIFF] · select a file from Files tab or focus drawer'}
         </span>
         <ModeButton active={mode === 'unified'} label="Unified" onClick={() => setMode('unified')} />
         <ModeButton active={mode === 'side'} label="Side-by-side" onClick={() => setMode('side')} />
       </div>
       {!selectedFile ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontFamily: MONO_FONT, fontSize: 12 }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-chat-surface-text-muted)', fontFamily: MONO_FONT, fontSize: 12 }}>
           [DIFF] · select a file from Files tab or focus drawer
         </div>
       ) : (
         <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', paddingTop: 10, paddingBottom: 10 }}>
-          {loading ? <div style={{ paddingLeft: 14, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading diff...</div> : null}
+          {loading ? <div style={{ paddingLeft: 14, color: 'var(--t-chat-surface-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading diff...</div> : null}
           {!loading && error ? <div style={{ paddingLeft: 14, color: 'var(--t-brand-red)', fontFamily: UI_FONT, fontSize: 12 }}>{error}</div> : null}
-          {!loading && !error && !diff ? <div style={{ paddingLeft: 14, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>No diff available for this file.</div> : null}
+          {!loading && !error && !diff ? <div style={{ paddingLeft: 14, color: 'var(--t-chat-surface-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>No diff available for this file.</div> : null}
           {!loading && !error && diff ? (mode === 'unified' ? <UnifiedRows lines={lines} /> : <SideRows lines={lines} />) : null}
         </div>
       )}
