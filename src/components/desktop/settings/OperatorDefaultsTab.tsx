@@ -21,6 +21,7 @@ type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 type SettingSource = 'env' | 'file' | 'default';
 
 type DispatchRuntime = 'codex' | 'gemini' | 'opencode';
+type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli';
 
 interface OperatorDefaults {
   parallelCap: number;
@@ -32,6 +33,7 @@ interface OperatorDefaults {
   orchestratorModel: string;
   defaultDispatchRuntime: DispatchRuntime;
   experimentalOpencode: boolean;
+  classAComposer: ClassAComposer;
 }
 
 interface OperatorDefaultsResponse {
@@ -406,6 +408,7 @@ export function OperatorDefaultsTab() {
   const cachingEnv = sources?.promptCachingEnabled === 'env';
   const modelEnv = sources?.orchestratorModel === 'env';
   const runtimeEnv = sources?.defaultDispatchRuntime === 'env';
+  const classAComposerEnv = sources?.classAComposer === 'env';
 
   const envDisabledReason = 'Controlled by environment variable. Unset to manage from Settings.';
 
@@ -746,9 +749,34 @@ export function OperatorDefaultsTab() {
         />
       </section>
 
-      {/* 06 — SAFETY */}
+      {/* 06 — Q&A COMPOSER */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="06">Q&A COMPOSER</SectionLabel>
+        <p style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.55, maxWidth: 580, margin: 0, marginBottom: 4 }}>
+          Class A composer model used to answer Cortex /ask questions. Eval-mode (smoke) keeps OpenRouter Sonnet 4.6. Env var{' '}
+          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12, color: 'var(--t-text-secondary)' }}>O8_CLASS_A_COMPOSER</span>
+          {' '}overrides.
+        </p>
+        <Row
+          label="Class A composer"
+          description={values.classAComposer === 'sonnet-cli' ? 'Sonnet CLI: best quality, slower bootstrap. Skips Haiku and Codex tiers.' : 'Haiku CLI: fastest free path. Falls back through Codex / OpenRouter / Flash / Sonnet CLI.'}
+          source={sources.classAComposer}
+          disabledReason={classAComposerEnv ? envDisabledReason : undefined}
+          right={
+            <PickerMenu<ClassAComposer>
+              value={values.classAComposer === 'sonnet-cli' ? 'sonnet-cli' : 'haiku-cli'}
+              options={[{ value: 'haiku-cli', label: 'Haiku', detail: 'Fastest, free for Claude Max users.' }, { value: 'sonnet-cli', label: 'Sonnet', detail: 'Best quality, free, slower bootstrap.' }]}
+              onChange={(next) => { void updateField('classAComposer', next); }}
+              disabled={classAComposerEnv || busyField === 'classAComposer'}
+              minWidth={180}
+            />
+          }
+        />
+      </section>
+
+      {/* 07 — SAFETY */}
       <section>
-        <SectionLabel number="06">SAFETY</SectionLabel>
+        <SectionLabel number="07">SAFETY</SectionLabel>
         <p style={{
           fontSize: 13,
           color: 'var(--t-text-secondary)',
