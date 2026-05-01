@@ -5,7 +5,7 @@ import { memo, type CSSProperties } from 'react';
 import { Clock } from './lucide-shims';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
-import { LeftPanelFocusOverlay } from './repo-focus/LeftPanelFocusOverlay';
+import { LeftPanelRepoFocus } from './repo-focus/LeftPanelRepoFocus';
 import { useLeftPanelFocus } from './repo-focus/useLeftPanelFocus';
 import {
   AgentPanelEmptyState,
@@ -34,6 +34,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     orchestratorMissionState,
     registeredRepos = [],
     ideWorkspaceSessions,
+    leftPanelFocus: liftedLeftPanelFocus,
   } = props;
 
   const {
@@ -61,12 +62,51 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onSelectSession,
     onAgentsUpdate: props.onAgentsUpdate,
   });
-  const leftPanelFocus = useLeftPanelFocus(registeredRepos);
-  // While focus is active, the LeftPanelFocusOverlay renders the entire
-  // panel surface as a fullscreen drawer. Suppress the multi-repo column
-  // content underneath so we don't get the ghost double-panel where both
-  // surfaces are visible side-by-side.
+  // Prefer the lifted focus state when the dashboard supplies it, so column
+  // width and panel content share a single source of truth. Falls back to a
+  // local hook for legacy callers that mount AgentPanel without the prop.
+  const localLeftPanelFocus = useLeftPanelFocus(registeredRepos);
+  const leftPanelFocus = liftedLeftPanelFocus ?? localLeftPanelFocus;
   const focusActive = leftPanelFocus.focusActive;
+
+  // When focus is active, the column itself widened — render the focus
+  // surface inline so it occupies the whole AgentPanel column and keeps
+  // the TitleBar + DesktopStatusBar visible above and below.
+  if (focusActive && leftPanelFocus.focusedRepo) {
+    return (
+      <div
+        suppressHydrationWarning
+        style={{
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          background: 'var(--t-canvas-bg, var(--t-chat-surface-bg))',
+          borderRight: '1px solid var(--t-divider)',
+        } as CSSProperties}
+      >
+        <div
+          suppressHydrationWarning
+          style={{
+            height: titlebarSpacerHeight,
+            flexShrink: 0,
+            WebkitAppRegion: 'drag' as unknown as string,
+          } as CSSProperties}
+        />
+        <LeftPanelRepoFocus
+          repo={leftPanelFocus.focusedRepo}
+          onBack={leftPanelFocus.clearFocus}
+          packets={orchestratorPackets}
+          missionState={orchestratorMissionState}
+          ideWorkspaceSessions={ideWorkspaceSessions}
+          activeSessionKey={activeSessionKey}
+          onSelectSession={onSelectSession}
+          onSelectFile={props.onSelectFile}
+          onOpenSpecInWorkspace={onOpenSpecInWorkspace}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -77,7 +117,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         flexDirection: 'column',
         overflow: 'hidden',
         background: 'transparent',
-        visibility: focusActive ? 'hidden' : 'visible',
       } as CSSProperties}
     >
       <div
@@ -211,16 +250,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             for cross-repo agents. Renders nothing when absent. */}
         <AgentPanelExtraAgents onSelectSession={onSelectSession} />
 
-        <LeftPanelFocusOverlay
-          focus={leftPanelFocus}
-          packets={orchestratorPackets}
-          missionState={orchestratorMissionState}
-          ideWorkspaceSessions={ideWorkspaceSessions}
-          activeSessionKey={activeSessionKey}
-          onSelectSession={onSelectSession}
-          onSelectFile={props.onSelectFile}
-          onOpenSpecInWorkspace={onOpenSpecInWorkspace}
-        />
+        {/* Repo focus is no longer an overlay — when focusActive, the
+            AgentPanel returns LeftPanelRepoFocus inline above (the column
+            widens). Nothing else to render here. */}
 
       </div>
     </div>

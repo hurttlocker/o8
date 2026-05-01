@@ -156,7 +156,7 @@ export function SpecTab({ repo, onOpenInWorkspace }: SpecTabProps) {
             resize: 'none',
             tabSize: 2,
           }}
-          placeholder="# o8 Spec — write the mission, scope, constraints, and open questions for this repo."
+          placeholder="# o8.md — mission, scope, constraints, and open questions for this repo. Agents read and write here."
         />
       )}
     </div>

@@ -12,6 +12,7 @@ import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
+import { useLeftPanelFocus } from '@/components/desktop/repo-focus/useLeftPanelFocus';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
@@ -149,6 +150,7 @@ import {
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
 const DEFAULT_LEFT_PANEL_WIDTH = 240;
+const FOCUS_LEFT_PANEL_WIDTH = 440;
 const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
 const MIN_O8_PANEL_WIDTH = 400;
@@ -393,6 +395,12 @@ function DashboardInner() {
     setSidebarVisible,
     sidebarVisible,
   });
+
+  // Repo focus state owns whether the left column is in expanded "repo focus"
+  // mode. Lifted here (instead of inside AgentPanel) so the column animation
+  // can react to the same focusActive boolean and widen from the default
+  // sidebar width to FOCUS_LEFT_PANEL_WIDTH without an overlay.
+  const leftPanelFocus = useLeftPanelFocus(globalRepoEntries);
 
   const {
     activeWorkspaceChatSessionKey,
@@ -2629,14 +2637,26 @@ function DashboardInner() {
           left column below. */}
 
       {/* ── Left: Agent Panel ── */}
-      {sidebarVisible && (
+      {sidebarVisible && (() => {
+        // When a repo is focused, we want the column to behave like the
+        // operator dragged the resizer wider — not an overlay sliding over
+        // the workspace. The width is animated; the focus content renders
+        // inline inside AgentPanel.
+        const effectiveLeftWidth = leftPanelFocus.focusActive ? FOCUS_LEFT_PANEL_WIDTH : leftWidth;
+        return (
         <motion.div
-          animate={{ width: leftWidth }}
-          transition={showAgentPanelFtux ? FTUX_SPRING_TRANSITION : { duration: 0.001 }}
+          animate={{ width: effectiveLeftWidth }}
+          transition={
+            leftPanelFocus.focusActive
+              ? { type: 'spring', stiffness: 360, damping: 32 }
+              : showAgentPanelFtux
+                ? FTUX_SPRING_TRANSITION
+                : { duration: 0.001 }
+          }
           data-mcp-scope="agent-panel"
           data-chrome-surface="true"
           style={{
-            width: leftWidth,
+            width: effectiveLeftWidth,
             flexShrink: 0,
             height: '100%',
             display: 'flex',
@@ -2705,9 +2725,11 @@ function DashboardInner() {
             orchestratorMissionState={thoughtsMissionState}
             registeredRepos={globalRepoEntries}
             ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
+            leftPanelFocus={leftPanelFocus}
           />
         </motion.div>
-      )}
+      );
+      })()}
 
       {/* ── Left drag handle ── */}
       {sidebarVisible && <div

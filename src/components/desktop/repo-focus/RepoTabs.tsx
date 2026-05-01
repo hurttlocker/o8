@@ -7,7 +7,7 @@ const TABS: Array<{ id: RepoFocusTabId; label: string }> = [
   { id: 'agents', label: 'Agents' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
-  { id: 'spec', label: 'Spec' },
+  { id: 'spec', label: 'o8.md' },
   { id: 'files', label: 'Files' },
 ];
 
