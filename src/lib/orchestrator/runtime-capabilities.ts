@@ -26,10 +26,14 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     shortLabel: 'Codex',
     dispatchable: true,
     requiresModel: false,
-    defaultModel: 'gpt-5-codex',
+    // 2026-04-30: switched from 'gpt-5-codex' to 'gpt-5.5'. Upstream Codex API
+    // started returning HTTP 400 invalid_request_error "model is not supported
+    // when using Codex with a ChatGPT account" for gpt-5-codex. gpt-5.5 is the
+    // current supported model on ChatGPT-account Codex CLI.
+    defaultModel: 'gpt-5.5',
     accentColor: '#2563eb', // blue — matches existing codex tone in display.ts
     binaryName: 'codex',
-    description: 'GPT-5.4 xhigh coding agent via `codex exec --json`. Full-access sandbox, thread resume.',
+    description: 'GPT-5.5 coding agent via `codex exec --json`. Full-access sandbox, thread resume.',
   },
   'claude-code': {
     label: 'Claude Code',
@@ -70,7 +74,13 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     // owned sessions remain readable.
     dispatchable: false,
     requiresModel: true,
-    defaultModel: 'opencode/gpt-5-nano',
+    // 2026-04-30: switched from 'opencode/gpt-5-nano' (OpenAI-routed; users
+    // without OPENAI_API_KEY silently fail launch) to 'google/gemini-2.5-flash'
+    // which routes through opencode's Google provider — the env var
+    // GOOGLE_GENERATIVE_AI_API_KEY is the same one the user already has set
+    // for direct gemini CLI usage. Operators with explicit OpenAI auth can
+    // override per-packet via the assignedModel field.
+    defaultModel: 'google/gemini-2.5-flash',
     accentColor: '#a855f7', // purple — distinct from the other three
     binaryName: 'opencode',
     description: 'Multi-provider coding CLI — disabled by default. Use Codex / Gemini for dispatch.',

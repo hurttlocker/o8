@@ -158,6 +158,16 @@ export interface OwnedRuntimeAdapter {
   binaryExtraEnvOverrides?: string[];
 
   /**
+   * Optional env-var augmentation for the spawned CLI child. Returned values
+   * are merged on top of the parent process env (overriding existing keys).
+   * Used by adapters that need to translate one auth-var alias into another
+   * (e.g. gemini CLI in stream-json mode reads GEMINI_API_KEY but the user
+   * may only have GOOGLE_GENERATIVE_AI_API_KEY set in their shell). Called
+   * lazily at spawn time so env reads stay current.
+   */
+  extraSpawnEnv?: () => Record<string, string>;
+
+  /**
    * Human-readable label used in fleet metadata. Codex: 'Owned Codex'.
    * Interpolated into source labels, current-task copy, etc.
    */
