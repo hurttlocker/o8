@@ -81,8 +81,10 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          background: 'var(--t-canvas-bg, var(--t-chat-surface-bg))',
-          borderRight: '1px solid var(--t-divider)',
+          // Match the unfocused AgentPanel — transparent over the macOS
+          // vibrancy backdrop, no solid paper here. The focused drawer is
+          // the same glass surface, just wider.
+          background: 'transparent',
         } as CSSProperties}
       >
         <div
