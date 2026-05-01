@@ -34,6 +34,8 @@ export interface RepoFocusDataProps {
   ideWorkspaceSessions?: IdeWorkspaceSession[];
   activeSessionKey?: string | null;
   onSelectSession?: (sessionKey: string) => void;
+  onSelectFile?: (filePath: string, workspace?: string) => void;
+  onOpenSpecInWorkspace?: (repoPath: string) => void;
 }
 
 export function toRepoFocusRepo(repo: RepoRegistryEntry): RepoFocusRepo {
