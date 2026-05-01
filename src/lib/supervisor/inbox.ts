@@ -10,6 +10,7 @@ export type SupervisorInboxKind =
   | 'bounded_retry_exhausted'
   | 'merge_blocked'
   | 'fetch_unreachable'
+  | 'repo_misconfigured'
   // #613 — silent-exit detector kinds. See
   // `src/lib/supervisor/silent-exit-detector.ts` for the triage flow.
   | 'silent_exit_verification_failed'
@@ -18,6 +19,7 @@ export type SupervisorInboxKind =
 
 export type SupervisorInboxStatus =
   | 'pending'
+  | 'healing'
   | 'self_healed'
   | 'human_required'
   | 'dismissed';
@@ -64,6 +66,19 @@ export interface SupervisorInboxItem {
 }
 
 let supervisorInboxReady = false;
+
+const HOUR_MS = 60 * 60_000;
+export const RETENTION_POLICY: Partial<Record<SupervisorInboxKind, {
+  defaultStatus: SupervisorInboxStatus;
+  autoDismissAfterMs?: number;
+}>> = {
+  silent_exit_no_work: { defaultStatus: 'pending', autoDismissAfterMs: 24 * HOUR_MS },
+  silent_exit_but_work_present: { defaultStatus: 'pending', autoDismissAfterMs: 24 * HOUR_MS },
+  bounded_retry_exhausted: { defaultStatus: 'human_required' },
+  verification_failed: { defaultStatus: 'human_required' },
+  merge_blocked: { defaultStatus: 'human_required' },
+  fetch_unreachable: { defaultStatus: 'human_required', autoDismissAfterMs: 7 * 24 * HOUR_MS },
+};
 
 function ensureSupervisorInboxTable() {
   if (supervisorInboxReady) {
@@ -129,6 +144,8 @@ function statusRank(status: SupervisorInboxStatus): number {
       return 0;
     case 'pending':
       return 1;
+    case 'healing':
+      return 1;
     case 'self_healed':
       return 2;
     case 'dismissed':
@@ -144,7 +161,32 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
   const sqlite = getSqlite();
   const id = randomUUID();
   const createdAt = new Date().toISOString();
-  const status = input.status ?? 'human_required';
+  const status = input.status ?? RETENTION_POLICY[input.kind]?.defaultStatus ?? 'human_required';
+  const packetId = input.packetId ?? null;
+  const existing = sqlite.prepare(`
+    SELECT id, repo_path, packet_id, kind, payload, created_at, status, resolved_at
+    FROM supervisor_inbox
+    WHERE kind = ?
+      AND repo_path = ?
+      AND ((packet_id IS NULL AND ? IS NULL) OR packet_id = ?)
+      AND status IN ('pending', 'healing', 'human_required')
+      AND datetime(created_at) >= datetime(?)
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(input.kind, input.repoPath, packetId, packetId, new Date(Date.now() - 30 * 60_000).toISOString()) as SupervisorInboxRow | undefined;
+
+  if (existing) {
+    return {
+      id: existing.id,
+      repoPath: existing.repo_path,
+      packetId: existing.packet_id,
+      kind: existing.kind,
+      payload: parsePayload(existing.payload),
+      createdAt: existing.created_at,
+      status: existing.status,
+      resolvedAt: existing.resolved_at,
+    };
+  }
 
   sqlite.prepare(`
     INSERT INTO supervisor_inbox (
@@ -160,7 +202,7 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
   `).run(
     id,
     input.repoPath,
-    input.packetId ?? null,
+    packetId,
     input.kind,
     JSON.stringify(input.payload),
     createdAt,
@@ -170,7 +212,7 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
   return {
     id,
     repoPath: input.repoPath,
-    packetId: input.packetId ?? null,
+    packetId,
     kind: input.kind,
     payload: input.payload,
     createdAt,
@@ -197,6 +239,47 @@ export function dismissInboxItem(id: string) {
     SET status = ?, resolved_at = ?
     WHERE id = ?
   `).run('dismissed', new Date().toISOString(), id);
+}
+
+export function bulkDismissInboxItems(): number {
+  ensureSupervisorInboxTable();
+  const result = getSqlite().prepare(`
+    UPDATE supervisor_inbox
+    SET status = ?, resolved_at = ?
+    WHERE status IN ('pending', 'healing', 'human_required')
+  `).run('dismissed', new Date().toISOString());
+  return result.changes;
+}
+
+export function selfHealActiveByKindAndRepo(kind: SupervisorInboxKind, repoPath: string): number {
+  ensureSupervisorInboxTable();
+  const result = getSqlite().prepare(`
+    UPDATE supervisor_inbox
+    SET status = ?, resolved_at = ?
+    WHERE kind = ?
+      AND repo_path = ?
+      AND status IN ('pending', 'healing', 'human_required')
+  `).run('self_healed', new Date().toISOString(), kind, repoPath);
+  return result.changes;
+}
+
+export function runRetentionSweep(nowMs = Date.now()): number {
+  ensureSupervisorInboxTable();
+  const rows = getSqlite().prepare(`
+    SELECT id, repo_path, packet_id, kind, payload, created_at, status, resolved_at
+    FROM supervisor_inbox
+    WHERE status IN ('pending', 'human_required')
+  `).all() as SupervisorInboxRow[];
+  let dismissed = 0;
+  for (const row of rows) {
+    const ttl = RETENTION_POLICY[row.kind]?.autoDismissAfterMs;
+    if (!ttl) continue;
+    const createdMs = Date.parse(row.created_at);
+    if (!Number.isFinite(createdMs) || nowMs - createdMs < ttl) continue;
+    dismissInboxItem(row.id);
+    dismissed += 1;
+  }
+  return dismissed;
 }
 
 export function listInboxItems(options: { includeDismissed?: boolean } = {}): SupervisorInboxItem[] {

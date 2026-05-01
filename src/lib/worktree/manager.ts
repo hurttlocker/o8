@@ -32,6 +32,11 @@ import type {
   WorktreeMetaStore,
   WorktreeStatus,
 } from './types';
+import {
+  gitCommandErrorMessage,
+  shouldClassifyFetchAsOriginMissing,
+  WorktreeOriginMissingError,
+} from './errors';
 
 const execFileAsync = promisify(execFile);
 const WORKTREE_DIR_NAME = '.cortex-worktrees';
@@ -355,7 +360,18 @@ export class WorktreeManager {
         timeout: 60_000,
       });
     } catch (fetchErr) {
-      const fetchErrorMessage = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      const fetchErrorMessage = gitCommandErrorMessage(fetchErr);
+      if (await shouldClassifyFetchAsOriginMissing(worktreePath, fetchErrorMessage)) {
+        console.warn(
+          `[worktree-rebase] fetch origin ${baseBranch} failed because origin is not configured — classifying as repo_misconfigured.`,
+        );
+        throw new WorktreeOriginMissingError({
+          baseBranch,
+          worktreePath,
+          branch: branchName,
+          fetchErrorMessage,
+        });
+      }
       const localRefAgeMs = await this.localBaseRefAgeMs(worktreePath, baseBranch);
       if (localRefAgeMs == null || localRefAgeMs > LOCAL_BASE_REF_FRESHNESS_MS) {
         console.warn(

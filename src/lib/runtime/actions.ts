@@ -1,11 +1,14 @@
 import type { AgentSummary } from '@/lib/fleet/types';
 import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
+import { markRepoOriginConfigured, markRepoOriginMissing } from '@/lib/repos/origin-readiness';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
+import { selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
 import {
   linkSessionToWorktree,
   prepareLaunchWorktree,
   WorktreeFetchUnreachableError,
+  WorktreeOriginMissingError,
   WorktreeRebaseConflictError,
 } from '@/lib/worktree';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -74,6 +77,29 @@ export interface RuntimeLaunchResult {
   laneId: string | null;
 }
 
+const FETCH_UNREACHABLE_COOLDOWN_MS = 5 * 60_000;
+const fetchUnreachableFailures = new Map<string, number>();
+const loggedOriginMissingRepos = new Set<string>();
+
+function fetchCooldownRetrySeconds(repoPath: string): number | null {
+  const lastFailureMs = fetchUnreachableFailures.get(repoPath);
+  if (!lastFailureMs) return null;
+  const remainingMs = FETCH_UNREACHABLE_COOLDOWN_MS - (Date.now() - lastFailureMs);
+  if (remainingMs <= 0) {
+    fetchUnreachableFailures.delete(repoPath);
+    return null;
+  }
+  return Math.ceil(remainingMs / 1000);
+}
+
+function recordFetchUnreachable(repoPath: string): void {
+  fetchUnreachableFailures.set(repoPath, Date.now());
+}
+
+function clearFetchUnreachable(repoPath: string): void {
+  fetchUnreachableFailures.delete(repoPath);
+}
+
 function summarizeTaskName(prompt: string) {
   // #533 — orchestrator prompts start with `## Task\n\n<actual content>`, so
   // picking "the first non-empty line" every time collapsed every dispatch
@@ -126,6 +152,12 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   // Create a worktree when: explicitly requested via isolate flag, OR when not skipping setup.
   // This allows dispatch to request isolation (isolate: true) while skipping env setup (skipSetup: true).
   const shouldCreateWorktree = supportsWorktrees && (payload.isolate || !payload.skipSetup);
+  if (shouldCreateWorktree) {
+    const retryInSeconds = fetchCooldownRetrySeconds(repoPath);
+    if (retryInSeconds != null) {
+      throw new Error(`Launch blocked: fetch_unreachable cooldown for ${repoPath}; retry in ${retryInSeconds}s`);
+    }
+  }
   const repoEntry = shouldCreateWorktree
     ? await import('@/lib/repos/registry').then((m) => m.findRepoByLocalPath(repoPath)).catch(() => null)
     : null;
@@ -142,6 +174,14 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         envMode: repoEntry?.setup.envMode,
         envFiles: repoEntry?.setup.envFiles,
       });
+      if (launchWorktree?.worktree) {
+        clearFetchUnreachable(repoPath);
+        markRepoOriginConfigured(repoPath);
+        const healed = selfHealActiveByKindAndRepo('fetch_unreachable', repoPath);
+        if (healed > 0) {
+          console.log(`[supervisor-inbox] Self-healed ${healed} fetch_unreachable item(s) for ${repoPath} after clean rebase.`);
+        }
+      }
     } catch (err) {
       // Rebase-before-launch failed. Don't spawn codex into a broken tree —
       // instead, mark any existing lane as awaiting_input so the operator
@@ -205,11 +245,22 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         );
       }
 
+      if (err instanceof WorktreeOriginMissingError) {
+        markRepoOriginMissing(repoPath);
+        if (!loggedOriginMissingRepos.has(repoPath)) {
+          loggedOriginMissingRepos.add(repoPath);
+          console.warn(`[supervisor-inbox] Repo ${repoPath} has no origin remote; skipping inbox escalation.`);
+        }
+        throw new Error(`Cannot launch ${runtimeId}: origin remote is not configured for ${repoPath}. Configure origin and retry.`);
+      }
+
       // Fetch unreachable + stale local ref. Don't branch from a stale base —
       // same policy as a rebase conflict: mark the lane, surface an inbox row
       // (kind: fetch_unreachable), and throw loudly. The operator can run
       // `git fetch` manually, reconnect, and retry the launch.
       if (err instanceof WorktreeFetchUnreachableError) {
+        recordFetchUnreachable(repoPath);
+        markRepoOriginConfigured(repoPath);
         const baseBranchForInbox = err.baseBranch;
         const conflictBranch = err.branch;
         const localRefAgeMinutes = Number.isFinite(err.localRefAgeMs)

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { dismissInboxItem, listInboxItems } from '@/lib/supervisor/inbox';
+import { bulkDismissInboxItems, dismissInboxItem, listInboxItems } from '@/lib/supervisor/inbox';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,6 +19,9 @@ export async function POST(request: Request) {
   if (action === 'dismiss' && id) {
     dismissInboxItem(id);
     return NextResponse.json({ ok: true });
+  }
+  if (action === 'clear') {
+    return NextResponse.json({ ok: true, dismissed: bulkDismissInboxItems() });
   }
 
   return NextResponse.json({ ok: false, error: 'Unknown action' }, { status: 400 });
