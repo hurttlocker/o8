@@ -1,7 +1,13 @@
 /**
  * OpenRouter adapter for the Cortex Q&A layer (epic #915 path-to-70 phase 1.7 v2).
  *
- * Paid HTTP safety net that sits between the two free CLI tiers and Gemini Flash:
+ * NOT WIRED INTO THE DEFAULT CHAIN as of 2026-04-30. The default Brain Q&A
+ * chain is Haiku CLI → Codex CLI → Flash → Sonnet CLI → heuristic. OpenRouter
+ * was removed because credit exhaustion silently broke the smoke gate
+ * (yesterday's 0/6 regression). Kept in-tree for explicit BYOK / experimentation.
+ *
+ * Historic role (kept for context):
+ * Paid HTTP safety net that sat between the two free CLI tiers and Gemini Flash:
  *
  *   composeClassA():  Haiku CLI → Codex CLI → OpenRouter → Flash → Sonnet CLI → heuristic
  *   classifyQuestion: Haiku CLI → Codex CLI → OpenRouter → Flash → heuristic

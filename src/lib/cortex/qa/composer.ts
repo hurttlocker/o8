@@ -23,7 +23,6 @@ import 'server-only';
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
 import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
-import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 
@@ -291,18 +290,20 @@ function sseFrame(name: string, payload: unknown): string {
 
 export type SseEmit = (name: string, payload: unknown) => void;
 
-// ── Class A composer (Haiku CLI → Codex CLI → OpenRouter → Flash → Sonnet CLI → heuristic) ──
+// ── Class A composer (Haiku CLI → Codex CLI → Flash → Sonnet CLI → heuristic) ──
 
 /**
- * Class A compose chain (rewired in #915 path-to-70 phase 1.7 v2):
+ * Class A compose chain (OpenRouter dropped 2026-04-30 — credit-cliff
+ * dependency replaced by the free CLI tiers + Anthropic prompt caching):
  *   1. Haiku CLI   — Claude Max subscription, no per-token cost. Primary.
- *   2. Codex CLI   — ChatGPT Plus / Codex subscription, also free. Two CLIs
- *                     beat one for users with either sub. ~15s vs ~14s Haiku.
- *   3. OpenRouter  — grok-4.1-fast (held in 2026-04-30 phase 1.7.1 rerun)
- *                     w/ flash-lite + gpt-5.4-nano in-call fallback. Paid HTTP, ~1-6s.
- *   4. Flash       — Google AI key. Demoted because of recent 503 churn.
- *   5. Sonnet CLI  — slow (5-12s) but reliable when everything else 503s.
- *   6. Heuristic   — final fallback when every LLM is unavailable.
+ *   2. Codex CLI   — ChatGPT Plus / Codex subscription, also free.
+ *   3. Flash       — Google AI key (paid Gemini API).
+ *   4. Sonnet CLI  — slow (5-12s) but reliable when everything else fails.
+ *   5. Heuristic   — final fallback when every LLM is unavailable.
+ *
+ * O8_EVAL_MODE=1 uses the same chain — eval mode no longer short-circuits
+ * to OpenRouter. Smoke runs spend a few extra minutes on CLI tiers but
+ * cost zero (vs ~$0.026/run on the old eval-mode OR path).
  *
  * Each tier returns a raw answer string (or null on failure). After we get
  * an answer, we translate bracket citations → CITATION markers, emit tokens
@@ -332,59 +333,24 @@ export async function composeClassA(
     })),
   );
   const composePrompt = buildFlashComposePrompt(question, rowsJson);
-  // O8_EVAL_MODE=1 is the ship-gate / smoke path. We use Sonnet 4.6 via
-  // OpenRouter (~$0.026/run) because false negatives cost more in re-
-  // investigation than the bill. Production user chat (non-eval-mode)
-  // routes through Haiku CLI tier 1 — free for Claude Max users.
-  const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
-  // Eval-mode tier 0: Sonnet 4.6 via OpenRouter — best reasoning + synthesis,
-  // never hedges when rows answer the question.
-  if (evalMode) {
-    const sonnetAnswer = await tryComposeOpenRouter(composePrompt, 'anthropic/claude-sonnet-4-6');
-    if (sonnetAnswer) {
-      console.info('[qa][composer-A] resolved via openrouter:anthropic/claude-sonnet-4-6');
-      emitClassAAnswer(sonnetAnswer, lookup, emit);
-      return;
-    }
-    // Eval-mode tier 0b: Haiku 4.5 via OpenRouter as cheap fallback before grok.
-    const haikuAnswer = await tryComposeOpenRouter(composePrompt, 'anthropic/claude-haiku-4-5');
-    if (haikuAnswer) {
-      console.info('[qa][composer-A] resolved via openrouter:anthropic/claude-haiku-4-5 (sonnet-fallback)');
-      emitClassAAnswer(haikuAnswer, lookup, emit);
-      return;
-    }
-  }
-
-  // Tier 1: Haiku CLI. Skipped in eval mode (CLI bootstrap exceeds smoke budget).
-  if (!evalMode) {
-    const haikuAnswer = await tryComposeHaiku(composePrompt);
-    if (haikuAnswer) {
-      console.info('[qa][composer-A] resolved via haiku-cli');
-      emitClassAAnswer(haikuAnswer, lookup, emit);
-      return;
-    }
-  }
-
-  // Tier 2: Codex CLI. Skipped in eval mode.
-  if (!evalMode) {
-    const codexAnswer = await tryComposeCodex(composePrompt);
-    if (codexAnswer) {
-      console.info(`[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
-      emitClassAAnswer(codexAnswer, lookup, emit);
-      return;
-    }
-  }
-
-  // Tier 3: OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5.4-nano fallback).
-  const openrouterAnswer = await tryComposeOpenRouter(composePrompt);
-  if (openrouterAnswer) {
-    console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL}`);
-    emitClassAAnswer(openrouterAnswer, lookup, emit);
+  // Tier 1: Haiku CLI.
+  const haikuAnswer = await tryComposeHaiku(composePrompt);
+  if (haikuAnswer) {
+    console.info('[qa][composer-A] resolved via haiku-cli');
+    emitClassAAnswer(haikuAnswer, lookup, emit);
     return;
   }
 
-  // Tier 4: Flash.
+  // Tier 2: Codex CLI.
+  const codexAnswer = await tryComposeCodex(composePrompt);
+  if (codexAnswer) {
+    console.info(`[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
+    emitClassAAnswer(codexAnswer, lookup, emit);
+    return;
+  }
+
+  // Tier 3: Flash.
   const flashAnswer = await tryComposeFlash(composePrompt);
   if (flashAnswer) {
     console.info('[qa][composer-A] resolved via flash');
@@ -392,17 +358,15 @@ export async function composeClassA(
     return;
   }
 
-  // Tier 5: Sonnet CLI (callSonnet's CLI tier — slow but reliable). Skipped in eval mode.
-  if (!evalMode) {
-    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
-    if (sonnetAnswer) {
-      console.info('[qa][composer-A] resolved via sonnet-cli');
-      emitClassAAnswer(sonnetAnswer, lookup, emit);
-      return;
-    }
+  // Tier 4: Sonnet CLI (callSonnet's CLI tier — slow but reliable).
+  const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
+  if (sonnetAnswer) {
+    console.info('[qa][composer-A] resolved via sonnet-cli');
+    emitClassAAnswer(sonnetAnswer, lookup, emit);
+    return;
   }
 
-  // Tier 6: heuristic.
+  // Tier 5: heuristic.
   console.info('[qa][composer-A] resolved via heuristic');
   emit('token', { text: 'I don\'t have that information yet.' });
   emit('done', {});
@@ -412,11 +376,9 @@ export async function composeClassA(
 async function tryComposeHaiku(prompt: string): Promise<string | null> {
   try {
     // 30s — Haiku CLI bootstrap is ~6-8s, then synthesis over 30 retrieval
-    // rows runs another 10-15s on big multi-row prompts. The previous 12s
-    // ceiling killed every smoke composer call before generation completed,
-    // forcing a fall-through to grok-4.1-fast which over-rejects the Flash
-    // "no info" escape. 30s gives Haiku the room to actually answer; the
-    // OpenRouter / Flash tiers below still catch true failures.
+    // rows runs another 10-15s on big multi-row prompts. 30s gives Haiku
+    // the room to actually answer; the Flash / Sonnet CLI tiers below still
+    // catch true failures.
     const text = await callHaiku(prompt, { timeoutMs: 30_000 });
     return text.trim() ? text : null;
   } catch (err) {
@@ -428,30 +390,12 @@ async function tryComposeHaiku(prompt: string): Promise<string | null> {
 /** Tier 2: Codex CLI. Free for ChatGPT Plus / Codex sub users. */
 async function tryComposeCodex(prompt: string): Promise<string | null> {
   try {
-    // 30s — Codex bootstrap is ~15s for trivial prompts (verified live with gpt-5.4).
-    // The larger ceiling matches the slower bootstrap path; OpenRouter (~1s)
-    // is the fast-path fallback below.
+    // 30s — Codex bootstrap is ~15s for trivial prompts (verified live with
+    // gpt-5.4). Flash is the fast-path fallback below.
     const text = await callCodex(prompt, { timeoutMs: 30_000 });
     return text.trim() ? text : null;
   } catch (err) {
     console.warn('[qa][composer-A] Codex CLI failed:', err instanceof Error ? err.message : err);
-    return null;
-  }
-}
-
-/** Tier 3: OpenRouter — grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback.
- * Optional `model` override routes to a specific model instead of the primary
- * (used by the eval-mode Haiku-4.5 tier). */
-async function tryComposeOpenRouter(prompt: string, model?: string): Promise<string | null> {
-  try {
-    // 25s — was 10s, but ownership questions in eval mode hit grok-4.1-fast
-    // with the full 30-row payload (post-slice-fix) and timed out at 10s
-    // (caused 35% → 2% ownership crash). p95 for multi-row prompts is past
-    // 10s; 25s gives headroom for worst case.
-    const text = await callOpenRouter(prompt, { timeoutMs: 25_000, model });
-    return text.trim() ? text : null;
-  } catch (err) {
-    console.warn('[qa][composer-A] OpenRouter failed:', err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -496,15 +440,14 @@ async function tryComposeFlash(prompt: string): Promise<string | null> {
 }
 
 /**
- * Tier 5: Sonnet CLI via callSonnet (non-streaming).
+ * Tier 4: Sonnet CLI via callSonnet (non-streaming).
  *
  * Reuses Class B's prompt shape (system + user) since Sonnet works best
  * with the structured rows JSON. We only fall here when Haiku CLI,
- * Codex CLI, OpenRouter, and Flash all failed, so the slower latency is
- * acceptable.
+ * Codex CLI, and Flash all failed, so the slower latency is acceptable.
  *
  * Returns null when callSonnet itself errors OR when the resolved tier is
- * Flash (we already tried Flash in tier 4 — no point looping back).
+ * Flash (we already tried Flash in tier 3 — no point looping back).
  */
 async function tryComposeSonnet(
   question: string,
@@ -522,15 +465,14 @@ async function tryComposeSonnet(
       ],
       stream: false,
       // 300s — Sonnet CLI bootstrap can take 60-90s and synthesis over the
-      // 30-row composer payload runs another 30-60s. The previous default
-      // (60s) killed the call before the model even started generating,
-      // forcing fall-through to paid OpenRouter even when the user has a
-      // free Claude Max sub. 300s lets the CLI actually finish when it's
-      // someone's free tier.
+      // 30-row composer payload runs another 30-60s. A shorter timeout would
+      // kill the call before the model even started generating, forcing the
+      // user's free Claude Max sub to be wasted. 300s lets the CLI actually
+      // finish when it's someone's free tier.
       timeoutMs: 300_000,
     });
     if (result.tier === 'flash') {
-      // callSonnet degraded back to Flash; we already tried Flash in tier 4.
+      // callSonnet degraded back to Flash; we already tried Flash in tier 3.
       return null;
     }
     return result.text.trim() ? result.text : null;
@@ -569,15 +511,6 @@ export async function composeClassB(
   emit: SseEmit,
 ): Promise<void> {
   const lookup = buildCitationLookup(topRows);
-  // O8_EVAL_MODE=1 routes Class B through OpenRouter (non-streaming) instead
-  // of Sonnet CLI. ~14-16s saved per multi-fact case during eval iteration.
-  // Eval doesn't care about TTFT — only final answer correctness. Production
-  // path (Sonnet CLI streaming) is unchanged.
-  const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
-
-  if (evalMode) {
-    return composeClassBViaOpenRouter(question, repoPath, topRows, emit, lookup);
-  }
 
   try {
     const result = await callSonnet({
@@ -590,10 +523,9 @@ export async function composeClassB(
       ],
       stream: true,
       // 300s — production Class B is the Sonnet CLI path users on Claude Max
-      // get for free. Bootstrap + multi-row synthesis can hit 90-180s; the
-      // prior 60s default killed the call before generation finished and
-      // forced fall-through to paid OpenRouter. With 300s the free CLI tier
-      // actually delivers.
+      // get for free. Bootstrap + multi-row synthesis can hit 90-180s; a
+      // shorter timeout would kill the call before generation finished. With
+      // 300s the free CLI tier actually delivers.
       timeoutMs: 300_000,
     });
 
@@ -636,66 +568,6 @@ export async function composeClassB(
     const message = err instanceof Error ? err.message : 'composer-B error';
     console.warn('[qa][composer-B] error:', message);
     // Degrade to Flash on any failure.
-    return composeClassA(question, repoPath, topRows, emit);
-  }
-}
-
-/**
- * Eval-mode Class B path. Routes the same Sonnet system+user prompt through
- * OpenRouter (non-streaming) instead of Sonnet CLI. ~14-16s saved per case.
- * Used only when O8_EVAL_MODE=1.
- */
-async function composeClassBViaOpenRouter(
-  question: string,
-  repoPath: string | undefined,
-  topRows: TypedRow[],
-  emit: SseEmit,
-  lookup: Map<string, TypedRow>,
-): Promise<void> {
-  try {
-    const system = buildSonnetComposeSystem();
-    const user = buildSonnetComposeUser(question, repoPath, topRows);
-    // Eval-mode primary = Sonnet 4.6 (matches Class A) — best synthesis for
-    // the ship-gate signal. ~$0.026/smoke-run. grok stays as the fallback
-    // path inside callOpenRouter's models[] chain.
-    const fullText = await callOpenRouter(`${system}\n\n${user}`, {
-      timeoutMs: 30_000,
-      model: 'anthropic/claude-sonnet-4-6',
-    });
-
-    let finalAnswer = '';
-    if (fullText.trim()) {
-      emit('token', { text: fullText });
-      const { translatedAnswer: translated, verifiedRows } = translateCitations(fullText, lookup);
-      finalAnswer = translated;
-      for (const row of verifiedRows) {
-        emit('citation', {
-          kind: row.citation.kind,
-          rowId: `${row.citation.kind}-${row.citation.rowId}`,
-          table: row.citation.table,
-          excerpt: row.citation.excerpt,
-          url: row.citation.url,
-        });
-      }
-    } else {
-      emit('token', { text: 'I don\'t have that information yet — try indexing more directives or PRs.' });
-    }
-
-    if (finalAnswer.trim()) {
-      try {
-        const contradictions = await detectContradictions({ rows: topRows, answer: finalAnswer });
-        for (const c of contradictions) {
-          emit('contradiction', c);
-        }
-      } catch {
-        // Contradiction pass is best-effort.
-      }
-    }
-
-    emit('done', {});
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'composer-B-eval error';
-    console.warn('[qa][composer-B-eval] error:', message);
     return composeClassA(question, repoPath, topRows, emit);
   }
 }
