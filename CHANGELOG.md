@@ -7,6 +7,25 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-04-30
+
+- `e3f12505` feat(brain): in-process compactor scheduler
+- `19f4451d` feat(qa): Phase 2b
+- `f92d7ed2` feat(qa): source-update detection + source-of-truth hierarchy
+- `c38e4d93` feat(qa): fact compactor
+- `a31eb634` feat(qa): Phase 2a
+- `cd883202` feat(indexer): heuristic noise pre-filter at enqueue ( north star follow-up)
+- `e1005e18` feat(indexer): parallel worker with O8_INDEXER_CONCURRENCY ( north star follow-up)
+- `5fb0e0df` feat(qa): Engineering Brain Indexer worker
+- `33fde327` feat(qa): pin top-6 facts above other retrieval rows ( north star)
+- `c742f23a` feat(qa): smoke:qa fast eval (6 cases, <2min) replaces 30-case heavy eval ( north star)
+- `7baed364` feat(qa): facts schema v17 + retriever foundation ( north star)
+- `69631b3a` feat(qa): docs_fts ingestion for project rules / README / AGENTS.md ( path-to-70 phase 1.7-)
+- `bcd0cf22` feat(qa): github_comments_fts ingestion ( path-to-70 phase 1.7-)
+- `63aa9d81` feat(qa): rebench OpenRouter primary with credited key ( path-to-70 phase 1.7.1)
+- `e18f0aa6` feat(qa): lock OpenRouter primary to grok-4.1-fast from empirical bake-off
+- `ae9bd305` feat(qa): project + project_repo retrieval in sqlRetriever ( path-to-70 phase 1.4)
+
 ## 2026-04-29
 
 - `0f3483df` feat(qa): 30-question eval set + runner skeleton (epic sub-3 wave A)
