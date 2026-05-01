@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { LeftPanelRepoFocus } from './LeftPanelRepoFocus';
 import type { LeftPanelFocusState, RepoFocusDataProps } from './types';
 
@@ -28,62 +27,49 @@ export function LeftPanelFocusOverlay({
   onSelectFile,
   onOpenSpecInWorkspace,
 }: LeftPanelFocusOverlayProps) {
-  const reducedMotion = useReducedMotion();
   const repo = focus.focusedRepo;
   // Portal target — keeps the overlay outside the AgentPanel column's
   // overflow:hidden so the 440px detail surface can extend past the
   // narrow rail without getting clipped. SSR-safe via the mounted gate.
   const [mounted, setMounted] = useState(false);
-  // The portal target only exists after hydration; this gate prevents SSR
-  // access to document while preserving the existing drawer animation.
-  useEffect(() => {
-    const id = window.setTimeout(() => setMounted(true), 0);
-    return () => window.clearTimeout(id);
-  }, []);
+  // SSR-safe portal gate. setMounted in useEffect runs only on the client;
+  // the framer-motion entry animation needs the element in the tree from
+  // first client paint or AnimatePresence's `initial={false}` swallows the
+  // slide-in and the drawer appears stuck offscreen.
+  useEffect(() => { setMounted(true); }, []);
 
-  const content = (
-    <AnimatePresence initial={false}>
-      {repo ? (
-        <motion.div
-          key={repo.localPath}
-          initial={reducedMotion ? { opacity: 1 } : { x: -PANEL_WIDTH }}
-          animate={reducedMotion ? { opacity: 1 } : { x: 0 }}
-          exit={reducedMotion ? { opacity: 0 } : { x: -PANEL_WIDTH }}
-          transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 30 }}
-          style={{
-            // Solid background so the drawer doesn't bleed the vibrancy
-            // backdrop or the multi-repo column behind it. var(--t-bg) is
-            // intentionally 62% opaque to mix with vibrancy — wrong for a
-            // detail surface that needs to read as a discrete plane. We
-            // pin to the dark / paper neutrals directly via the theme's
-            // canvas token (added below if missing).
-            position: 'fixed',
-            top: TITLE_BAR_HEIGHT,
-            bottom: 0,
-            left: 0,
-            width: PANEL_WIDTH,
-            zIndex: 60,
-            display: 'flex',
-            background: 'var(--t-canvas-bg, var(--t-chat-surface-bg, #1a1e24))',
-            borderRight: '1px solid var(--t-divider)',
-            boxShadow: '4px 0 24px rgba(0, 0, 0, 0.28)',
-          } as React.CSSProperties}
-        >
-          <LeftPanelRepoFocus
-            repo={repo}
-            onBack={focus.clearFocus}
-            packets={packets}
-            missionState={missionState}
-            ideWorkspaceSessions={ideWorkspaceSessions}
-            activeSessionKey={activeSessionKey}
-            onSelectSession={onSelectSession}
-            onSelectFile={onSelectFile}
-            onOpenSpecInWorkspace={onOpenSpecInWorkspace}
-          />
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
-  );
+  const content = repo ? (
+    <div
+      key={repo.localPath}
+      style={{
+        position: 'fixed',
+        top: TITLE_BAR_HEIGHT,
+        bottom: 0,
+        left: 0,
+        width: PANEL_WIDTH,
+        zIndex: 60,
+        display: 'flex',
+        background: 'var(--t-canvas-bg, var(--t-chat-surface-bg, #1a1e24))',
+        borderRight: '1px solid var(--t-divider)',
+        boxShadow: '4px 0 24px rgba(0, 0, 0, 0.28)',
+        // No entry animation for now — framer-motion + portal interaction
+        // under React 19 was leaving the drawer stuck at the initial frame.
+        // Discrete appearance is reliable.
+      } as React.CSSProperties}
+    >
+      <LeftPanelRepoFocus
+        repo={repo}
+        onBack={focus.clearFocus}
+        packets={packets}
+        missionState={missionState}
+        ideWorkspaceSessions={ideWorkspaceSessions}
+        activeSessionKey={activeSessionKey}
+        onSelectSession={onSelectSession}
+        onSelectFile={onSelectFile}
+        onOpenSpecInWorkspace={onOpenSpecInWorkspace}
+      />
+    </div>
+  ) : null;
 
   if (!mounted || typeof document === 'undefined') return null;
   return createPortal(content, document.body);
