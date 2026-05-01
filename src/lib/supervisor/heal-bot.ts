@@ -85,6 +85,7 @@ export interface EnqueueSupervisorInboxItemInput {
   packetId?: string | null;
   kind: SupervisorInboxKind;
   payload: SupervisorInboxPayload;
+  status?: SupervisorInboxStatus;
 }
 
 let healBotTimer: ReturnType<typeof setInterval> | null = null;
@@ -661,7 +662,7 @@ export function enqueueSupervisorInboxItem(input: EnqueueSupervisorInboxItemInpu
     packetId: input.packetId ?? null,
     kind: input.kind,
     payload: input.payload as Record<string, unknown>,
-    status: FIXABLE_KINDS.has(input.kind) ? 'pending' : undefined,
+    status: input.status,
   });
   return item.id;
 }
