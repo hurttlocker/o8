@@ -112,11 +112,10 @@ export const TabBar = memo(function TabBar({
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        // 52px bar — heavier than 44 so tabs read as a primary chrome region
-        // rather than a thin strip. Apple HIG 44px hit-zone is still satisfied
-        // by inner tab pills.
-        height: 52,
-        minHeight: 52,
+        // 38px bar — compact strip. Tabs use top-corner radius to flow into
+        // the workspace card below them.
+        height: 38,
+        minHeight: 38,
         // Match the chat-surface bg so the TabBar blends with the workspace
         // content below instead of reading as a separate gray strip.
         background: 'var(--t-chat-surface-bg, #ffffff)',
@@ -272,27 +271,31 @@ export const TabBar = memo(function TabBar({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  // Tab button fills the full 52px tab-bar height. Heavier
-                  // paddings give the pill more visual presence.
-                  minHeight: 52,
-                  paddingTop: 14,
-                  paddingBottom: 14,
-                  paddingLeft: 12,
-                  paddingRight: 10,
+                  // Tab button fills the full 38px bar; compact pill.
+                  minHeight: 38,
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 10,
+                  paddingRight: 8,
                   marginTop: 0,
                   marginBottom: 0,
                   marginLeft: 2,
                   marginRight: 2,
                   borderWidth: 0,
                   borderStyle: 'none',
-                  borderRadius: 8,
+                  // Top corners match workspace card squircle (14px); bottom
+                  // corners square so the pill sits flush onto the card top.
+                  borderTopLeftRadius: 12,
+                  borderTopRightRadius: 12,
+                  borderBottomLeftRadius: 0,
+                  borderBottomRightRadius: 0,
                   borderLeftWidth: dragOverTabId === tab.id ? 2 : 0,
                   borderLeftStyle: dragOverTabId === tab.id ? 'solid' : 'none',
                   borderLeftColor: '#2563eb',
                   background: tabBackground,
                   boxShadow: tabBoxShadow,
                   color: tabTextColor,
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: isActive ? 560 : 500,
                   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   letterSpacing: '-0.01em',
