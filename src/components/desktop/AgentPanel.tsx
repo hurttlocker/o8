@@ -61,15 +61,22 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onAgentsUpdate: props.onAgentsUpdate,
   });
   const leftPanelFocus = useLeftPanelFocus(registeredRepos);
+  // While focus is active, the LeftPanelFocusOverlay renders the entire
+  // panel surface as a fullscreen drawer. Suppress the multi-repo column
+  // content underneath so we don't get the ghost double-panel where both
+  // surfaces are visible side-by-side.
+  const focusActive = leftPanelFocus.focusActive;
 
   return (
     <div
+      suppressHydrationWarning
       style={{
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
         background: 'transparent',
+        visibility: focusActive ? 'hidden' : 'visible',
       } as CSSProperties}
     >
       <div
