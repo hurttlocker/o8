@@ -622,6 +622,10 @@ export function invalidateOwnedCodexFleetCache(): void {
   codexStore.invalidateFleetCache();
 }
 
+export async function archiveOwnedCodexSession(surfaceId: string) {
+  return codexStore.archiveSession(surfaceId);
+}
+
 export async function launchOwnedCodexSession(
   request: OwnedCodexLaunchRequest,
 ): Promise<OwnedCodexLaunchResponse> {

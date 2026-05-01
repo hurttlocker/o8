@@ -626,6 +626,10 @@ export function invalidateOwnedGeminiFleetCache(): void {
   geminiStore.invalidateFleetCache();
 }
 
+export async function archiveOwnedGeminiSession(surfaceId: string) {
+  return geminiStore.archiveSession(surfaceId);
+}
+
 export async function launchOwnedGeminiSession(
   request: OwnedGeminiLaunchRequest,
 ): Promise<OwnedGeminiLaunchResponse> {

@@ -27,6 +27,10 @@ import {
   signalBridgeTerminalSession,
   spawnBridgeTerminalSession,
 } from '@/lib/runtime/pty-bridge';
+import {
+  archiveOwnedSessionDir,
+  archivedSessionPathForSurfaceId,
+} from './archive';
 import type {
   AgentSummary,
   EventItem,
@@ -65,6 +69,7 @@ import {
 } from './helpers';
 import type {
   OwnedFleetAdditions,
+  OwnedArchiveResponse,
   OwnedLaunchRequest,
   OwnedLaunchResponse,
   OwnedReviewDisposition,
@@ -133,6 +138,24 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       }
     }
     return null;
+  }
+
+  async function archiveSession(surfaceId: string): Promise<OwnedArchiveResponse> {
+    const session = await findSession(surfaceId);
+    if (!session) {
+      const archivePath = await archivedSessionPathForSurfaceId(root, surfaceId, surfacePrefix);
+      if (archivePath) {
+        invalidateFleetCache();
+        return { archived: true, archivePath, note: 'Session already archived.' };
+      }
+      return { archived: false, note: 'Session was not found.' };
+    }
+
+    const result = await archiveOwnedSessionDir(root, session);
+    if (result.archived) {
+      invalidateFleetCache();
+    }
+    return result;
   }
 
   // ── Run artifacts ──────────────────────────────────────────────────────────
@@ -1028,6 +1051,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     getRuntimeTail,
     getReviewPacket,
     getFleetAdditions,
+    archiveSession,
     getTelemetrySources,
     setReviewDisposition,
     invalidateFleetCache,
