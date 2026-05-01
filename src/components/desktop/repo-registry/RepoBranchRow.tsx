@@ -269,6 +269,197 @@ function RepoBranchRowBase({
     && (!branch.isWorktree || branch.worktreePath === repo.localPath);
   const isRedundantDefaultBranch = isRootDefaultBranch;
 
+  // Consolidation rule (#operator ask, May 1):
+  //   The branch header row + nested agent/packet row was always two visually
+  //   redundant lines. When there is exactly ONE work unit attached
+  //   (1 agent + 0 packets, or 0 agents + 1 packet) we render a single line
+  //   with [provider icon] [3-word description] [diff], dropping the branch
+  //   header entirely. The branch name still lives in the hover card.
+  const soloAgent = !isRedundantDefaultBranch
+    && branchPackets.length === 0
+    && orderedBranchAgents.length === 1
+    ? orderedBranchAgents[0]!
+    : null;
+  const soloPacket = !isRedundantDefaultBranch
+    && branchPackets.length === 1
+    && orderedBranchAgents.length === 0
+    ? branchPackets[0]!
+    : null;
+  const consolidated = Boolean(soloAgent || soloPacket);
+
+  // Diff figures, hoisted so the consolidated row can render them next to the
+  // agent label. Prefer agent in-progress diff, fallback to branch divergence.
+  const consolidatedAdds = branchDiffAgent?.additions ?? branch.additions ?? 0;
+  const consolidatedDels = branchDiffAgent?.deletions ?? branch.deletions ?? 0;
+
+  if (consolidated) {
+    const targetSessionKey = soloAgent?.sessionKey
+      ?? soloPacket?.lane?.sessionKey
+      ?? null;
+    const runtime = soloAgent?.runtime
+      ?? (soloPacket ? resolveDisplayRuntime(soloPacket) : 'codex');
+    const label = soloAgent
+      ? (soloAgent.status === 'running' || soloAgent.status === 'reviewing'
+          ? threeWordTaskSummary(soloAgent.currentTask) ?? soloAgent.name
+          : soloAgent.name)
+      : threeWordTaskSummary(soloPacket!.title) ?? soloPacket!.title;
+    const secondary = soloAgent
+      ? sessionStatusTone(soloAgent.status).label
+      : orchestratorStatusTone(soloPacket!.status).label;
+    const isSelected = Boolean(
+      activeSessionKey
+      && targetSessionKey
+      && activeSessionKey === targetSessionKey,
+    );
+    const indicatorStatus = soloAgent?.status ?? 'queued';
+    return (
+      <div>
+        <button
+          type="button"
+          disabled={!targetSessionKey || !onSelectSession}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (targetSessionKey) onSelectSession?.(targetSessionKey);
+          }}
+          onMouseEnter={(event) => {
+            const el = event.currentTarget;
+            el.style.background = isSelected ? 'var(--t-accent-soft)' : 'var(--t-panel-hover)';
+            setRowHovered(true);
+            scheduleBranchHover(branch.name, el as unknown as HTMLDivElement, event.clientX, event.clientY);
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.background = isSelected ? 'var(--t-accent-soft)' : 'transparent';
+            setRowHovered(false);
+            closeBranchHover();
+          }}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 9,
+            padding: '5px 8px',
+            borderRadius: 7,
+            border: 'none',
+            background: isSelected ? 'var(--t-accent-soft)' : 'transparent',
+            color: 'var(--t-text)',
+            cursor: targetSessionKey && onSelectSession ? 'pointer' : 'default',
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            textAlign: 'left',
+            transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        >
+          <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
+            <AgentSpinner status={indicatorStatus} size={6} />
+          </span>
+          {runtime === 'claude-code' ? <ClaudeIcon size={13} />
+            : runtime === 'gemini' ? <GeminiIcon size={13} />
+            : runtime === 'opencode' ? <OpenCodeIcon size={13} />
+            : <CodexIcon size={13} />}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 460,
+                color: isSelected ? 'var(--t-accent)' : 'var(--t-text)',
+                letterSpacing: '-0.005em',
+                lineHeight: 1.35,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {label}
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 400,
+                color: 'var(--t-text-faint)',
+                letterSpacing: '-0.005em',
+                lineHeight: 1.3,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {secondary}
+              {' · '}
+              {formatBranchDisplayName(branch.name)}
+            </span>
+          </div>
+          {(consolidatedAdds > 0 || consolidatedDels > 0) ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 10.5,
+                fontWeight: 440,
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                letterSpacing: '-0.005em',
+                flexShrink: 0,
+                marginTop: 1,
+              }}
+            >
+              <span style={{ color: '#4ea672' }}>+{consolidatedAdds.toLocaleString()}</span>
+              <span style={{ color: '#c97070' }}>-{consolidatedDels.toLocaleString()}</span>
+            </span>
+          ) : null}
+        </button>
+        {hoveredBranchName === branch.name && branchHoverRect && typeof document !== 'undefined' ? createPortal(
+          <div
+            onMouseEnter={holdBranchHover}
+            onMouseLeave={closeBranchHover}
+            style={{
+              position: 'fixed',
+              zIndex: 10000,
+              width: 320,
+              padding: '14px 16px 12px',
+              borderRadius: 12,
+              border: '1px solid var(--t-panel-border)',
+              background: 'var(--t-panel-solid)',
+              boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
+              color: 'var(--t-text)',
+              pointerEvents: 'auto',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              ...resolveFloatingPanelPosition(branchHoverRect, 320),
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 10 }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  letterSpacing: '-0.012em',
+                  color: 'var(--t-text)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+                }}
+              >
+                {branch.name}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>
+                {branch.isWorktree ? (worktreeTone?.label ?? 'Worktree') : branch.current ? 'Current branch' : 'Branch'}
+                {worktree?.path ? ` · ${shortenPath(worktree.path)}` : ''}
+              </div>
+            </div>
+            <BranchStatusRow label="Last commit" value={branch.lastCommitAge} />
+            {(consolidatedAdds > 0 || consolidatedDels > 0) ? (
+              <BranchStatusRow
+                label="Diff"
+                value={`+${consolidatedAdds.toLocaleString()} -${consolidatedDels.toLocaleString()}`}
+                mono
+              />
+            ) : null}
+          </div>,
+          document.body,
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div>
       {isRedundantDefaultBranch ? null : (
