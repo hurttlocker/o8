@@ -143,8 +143,12 @@ export function SpecTab({ repo, onOpenInWorkspace }: SpecTabProps) {
             minHeight: 0,
             border: 'none',
             outline: 'none',
-            background: 'transparent',
+            // Solid paper-tinted background so light-mode text doesn't read
+            // as white-on-white. The transparent fallback bled into the
+            // canvas-bg in some themes; explicit input-bg is reliable.
+            background: 'var(--t-input-bg)',
             color: 'var(--t-text)',
+            caretColor: 'var(--t-text)',
             padding: '12px 14px',
             fontSize: 12,
             lineHeight: 1.55,

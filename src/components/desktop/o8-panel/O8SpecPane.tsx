@@ -169,8 +169,11 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
                   resize: 'none',
                   border: 'none',
                   outline: 'none',
-                  background: 'transparent',
+                  // Paper-tinted bg, not transparent — transparent reads as
+                  // white-on-white in light mode against the canvas-bg.
+                  background: 'var(--t-input-bg)',
                   color: 'var(--t-text)',
+                  caretColor: 'var(--t-text)',
                   fontFamily: MONO_FONT,
                   fontSize: 12,
                   lineHeight: 1.58,
