@@ -1,3 +1,5 @@
+mod dev_frontend;
+
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -1094,6 +1096,52 @@ fn child_stdio(file: Option<&std::fs::File>) -> std::process::Stdio {
     }
 }
 
+fn spawn_bundled_ws_server(
+    node_bin: &str,
+    server_dir: &std::path::Path,
+    ws_port: u16,
+    next_origin: &str,
+    ws_log: Option<&std::fs::File>,
+    ai_keys: &[(String, String)],
+) {
+    let ws_server_js = server_dir.join("ws-server.mjs");
+    if ws_server_js.exists() {
+        log::info!("Starting WS server: {} {:?} on :{}", node_bin, ws_server_js, ws_port);
+        let mut ws_cmd = Command::new(node_bin);
+        ws_cmd
+            .arg(&ws_server_js)
+            .current_dir(server_dir)
+            .env("O8_NODE_BIN", node_bin)
+            .env("WS_PORT", ws_port.to_string())
+            .env("NEXT_ORIGIN", next_origin)
+            // Issue #776: same sidecar marker as the next-server child.
+            .env("O8_SIDECAR_PID", std::process::id().to_string());
+        // Issue #935: same AI key forward for ws-server children.
+        for (k, v) in ai_keys {
+            ws_cmd.env(k, v);
+        }
+        match ws_cmd
+            .stdout(child_stdio(ws_log))
+            .stderr(child_stdio(ws_log))
+            .spawn()
+        {
+            Ok(child) => {
+                let pid = child.id();
+                log::info!("WS server started (pid: {})", pid);
+                register_child(pid);
+            }
+            Err(e) => {
+                log::error!("Failed to start WS server: {}", e);
+            }
+        }
+    } else {
+        log::error!(
+            "ws-server.mjs missing from bundle at {:?} — this will break the WebSocket bridge and may hang the Next.js server",
+            ws_server_js
+        );
+    }
+}
+
 // ── Node.js pre-flight ──
 //
 // Finder-launched Tauri apps inherit a minimal PATH (`/usr/bin:/bin`) that
@@ -1709,7 +1757,13 @@ fn mcp_result(
         "data": data,
         "error": error,
     });
+    #[cfg(feature = "dev-mcp-plugin")]
     tauri_plugin_mcp::tools::webview::PendingResults::complete(&correlation_id, payload);
+    #[cfg(not(feature = "dev-mcp-plugin"))]
+    {
+        let _ = payload;
+        log::warn!("[mcp_result] dev-mcp-plugin disabled; dropping result");
+    }
 }
 
 /// MCP read path. Returns the full ring buffer plus the count since the
@@ -2373,6 +2427,21 @@ pub fn run() {
     // handler and the registration match.
     let dispatch_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyO);
 
+    let dev_frontend = match dev_frontend::from_env() {
+        Ok(dev_frontend) => dev_frontend,
+        Err(err) => {
+            eprintln!("[dev-frontend] ignoring {}: {}", dev_frontend::ENV_VAR, err);
+            None
+        }
+    };
+
+    let mut context = tauri::generate_context!();
+    if let Some(dev_frontend) = dev_frontend.as_ref() {
+        if !dev_frontend::apply_to_main_window_config(context.config_mut(), dev_frontend) {
+            eprintln!("[dev-frontend] main window config not found for {}", dev_frontend::ENV_VAR);
+        }
+    }
+
     #[allow(unused_mut)] // `mut` is needed only when `dev-mcp-plugin` feature is enabled
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default()
@@ -2596,24 +2665,30 @@ pub fn run() {
             // — we now classify the listener before deferring. An orphan gets
             // killed and we fall through to the bundled-spawn path so the new
             // shell owns both Next and ws-server.
-            let dev_server_running = match classify_port_listener(3001) {
-                PortListener::Free => false,
-                PortListener::Legit { pid, command } => {
-                    log::info!(
-                        "[orphan-check] :3001 looks legitimate (pid={}, cmd={:?}) — deferring",
-                        pid, command
-                    );
-                    true
-                }
-                PortListener::Orphan { pid, command } => {
-                    log::info!(
-                        "[orphan-check] :3001 owned by ORPHAN pid={} cmd={:?} — killing",
-                        pid, command
-                    );
-                    kill_orphan_and_wait(pid, 3001);
-                    // Re-probe in case another legit process grabbed the port
-                    // between kill and this check. Unlikely but cheap.
-                    std::net::TcpStream::connect("127.0.0.1:3001").is_ok()
+            let dev_server_running = if dev_frontend.is_some() {
+                // The explicit frontend override owns API selection; probing
+                // :3001 here could kill an unrelated listener during hot reload.
+                false
+            } else {
+                match classify_port_listener(3001) {
+                    PortListener::Free => false,
+                    PortListener::Legit { pid, command } => {
+                        log::info!(
+                            "[orphan-check] :3001 looks legitimate (pid={}, cmd={:?}) — deferring",
+                            pid, command
+                        );
+                        true
+                    }
+                    PortListener::Orphan { pid, command } => {
+                        log::info!(
+                            "[orphan-check] :3001 owned by ORPHAN pid={} cmd={:?} — killing",
+                            pid, command
+                        );
+                        kill_orphan_and_wait(pid, 3001);
+                        // Re-probe in case another legit process grabbed the port
+                        // between kill and this check. Unlikely but cheap.
+                        std::net::TcpStream::connect("127.0.0.1:3001").is_ok()
+                    }
                 }
             };
 
@@ -2624,7 +2699,49 @@ pub fn run() {
             let mut api_port: u16 = 3001;
             let mut ws_port: u16 = 3002;
 
-            if dev_server_running {
+            if let Some(dev_frontend) = dev_frontend.as_ref() {
+                api_port = dev_frontend.port();
+                if api_port != 3002 {
+                    // Keep the WS orphan cleanup, but never kill the explicit
+                    // dev frontend if an operator intentionally points at 3002.
+                    probe_kill_port(3002);
+                }
+                ws_port = find_free_port(WS_PORT_RANGE, Some(api_port)).unwrap_or(3002);
+                log::info!(
+                    "[dev-frontend] {}={} — skipping bundled Next; ports api={} ws={}",
+                    dev_frontend::ENV_VAR,
+                    dev_frontend.url().as_str(),
+                    api_port,
+                    ws_port
+                );
+                let _ = write_port_file("api-port", api_port);
+                let _ = write_port_file("ws-port", ws_port);
+                std::env::set_var("O8_API_PORT", api_port.to_string());
+                std::env::set_var("O8_WS_PORT", ws_port.to_string());
+
+                let node_bin = match run_node_preflight() {
+                    Ok(path) => path,
+                    Err(err) => show_node_error_and_exit(err),
+                };
+                std::env::set_var("O8_NODE_BIN", &node_bin);
+
+                let ws_log = open_child_log("ws-server.log");
+                let ai_keys = load_ai_keys_from_login_shell();
+                if !ai_keys.is_empty() {
+                    log::info!(
+                        "Forwarded {} AI provider key(s) from login shell to ws-server",
+                        ai_keys.len()
+                    );
+                }
+                spawn_bundled_ws_server(
+                    &node_bin,
+                    &server_dir,
+                    ws_port,
+                    dev_frontend.origin(),
+                    ws_log.as_ref(),
+                    &ai_keys,
+                );
+            } else if dev_server_running {
                 log::info!("Dev server already running on :3001 — skipping bundled servers");
                 // Write the dev ports so MCP servers launched from this
                 // session agree with the dev backend.
@@ -2760,42 +2877,15 @@ pub fn run() {
                 // can spiral into a CPU-pegged error loop. We no longer
                 // silently swallow that: it's a fatal startup error so the
                 // user sees the failure instead of a hung dashboard.
-                let ws_server_js = server_dir.join("ws-server.mjs");
-                if ws_server_js.exists() {
-                    log::info!("Starting WS server: {} {:?} on :{}", node_bin, ws_server_js, ws_port);
-                    let mut ws_cmd = Command::new(&node_bin);
-                    ws_cmd
-                        .arg(&ws_server_js)
-                        .current_dir(&server_dir)
-                        .env("O8_NODE_BIN", &node_bin)
-                        .env("WS_PORT", ws_port.to_string())
-                        .env("NEXT_ORIGIN", format!("http://127.0.0.1:{}", api_port))
-                        // Issue #776: same sidecar marker as the next-server child.
-                        .env("O8_SIDECAR_PID", std::process::id().to_string());
-                    // Issue #935: same AI key forward for ws-server children.
-                    for (k, v) in &ai_keys {
-                        ws_cmd.env(k, v);
-                    }
-                    match ws_cmd
-                        .stdout(child_stdio(ws_log.as_ref()))
-                        .stderr(child_stdio(ws_log.as_ref()))
-                        .spawn()
-                    {
-                        Ok(child) => {
-                            let pid = child.id();
-                            log::info!("WS server started (pid: {})", pid);
-                            register_child(pid);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to start WS server: {}", e);
-                        }
-                    }
-                } else {
-                    log::error!(
-                        "ws-server.mjs missing from bundle at {:?} — this will break the WebSocket bridge and may hang the Next.js server",
-                        ws_server_js
-                    );
-                }
+                let next_origin = format!("http://127.0.0.1:{}", api_port);
+                spawn_bundled_ws_server(
+                    &node_bin,
+                    &server_dir,
+                    ws_port,
+                    &next_origin,
+                    ws_log.as_ref(),
+                    &ai_keys,
+                );
             } else {
                 log::warn!("No bundled server found at {:?} — running in dev mode", server_js);
                 let _ = write_port_file("api-port", api_port);
@@ -2813,7 +2903,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Cortex IDE")
         .run(|_app_handle, event| match event {
             // ExitRequested fires on Cmd-Q, app.exit(), tray Quit menu, etc.

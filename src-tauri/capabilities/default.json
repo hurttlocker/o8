@@ -3,6 +3,9 @@
   "identifier": "default",
   "description": "o8 default capabilities",
   "windows": ["main", "dispatch-popover"],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
+  },
   "permissions": [
     "core:default",
     "core:event:default",
