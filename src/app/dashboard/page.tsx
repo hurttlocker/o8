@@ -28,6 +28,7 @@ import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import type { WorkspaceSidePanelRepo, WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
+import type { AmbientLinkedRef, AmbientSelectedFile } from '@/components/desktop/right-panel/useAmbientMode';
 import type { O8Tab } from '@/components/desktop/O8Panel';
 import {
   markDashboardScriptStart,
@@ -266,6 +267,9 @@ function DashboardInner() {
   // right-side workspace panel can flip into packet mode (Spec / Agent
   // Overview) when one is expanded. See `src/lib/panel/mode.ts`.
   const [selectedPacketId, setSelectedPacketId] = useState<string | null>(null);
+  const [rightPanelSelectedFile, setRightPanelSelectedFile] = useState<AmbientSelectedFile | null>(null);
+  const [rightPanelSelectedIssue, setRightPanelSelectedIssue] = useState<AmbientLinkedRef | null>(null);
+  const [rightPanelSelectedPR, setRightPanelSelectedPR] = useState<AmbientLinkedRef | null>(null);
   const lastMarkedWorkspaceReadRef = useRef<string>('');
 
   // ── Cmd+K command palette (#661) — full-screen overlay search across
@@ -1235,6 +1239,11 @@ function DashboardInner() {
   }, [parsedAgents, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
+    setRightPanelSelectedFile(null);
+    setRightPanelSelectedIssue({ id: issueNumber, repo: repo ?? null });
+    setRightPanelSelectedPR(null);
+    setRightPanelKind('review');
+    setChatVisible(true);
     openCanvasTab({
       id: `issue:${issueNumber}${repo ? `:${repo}` : ''}`,
       kind: 'issue',
@@ -1272,6 +1281,11 @@ function DashboardInner() {
   }, [handleSelectSession]);
 
   const handleSelectPR = useCallback((prNumber: number, repo?: string) => {
+    setRightPanelSelectedFile(null);
+    setRightPanelSelectedIssue(null);
+    setRightPanelSelectedPR({ id: prNumber, repo: repo ?? null });
+    setRightPanelKind('review');
+    setChatVisible(true);
     openCanvasTab({
       id: `pr:${prNumber}${repo ? `:${repo}` : ''}`,
       kind: 'pr',
@@ -1809,6 +1823,13 @@ function DashboardInner() {
   }, [enqueueFtuxMilestone, setGlobalRepoBranch, setGlobalRepoId, waitForWorkspaceTerminalTarget]);
 
   const handleSelectFile = useCallback((filePath: string, workspace?: string) => {
+    if (workspace) {
+      setRightPanelSelectedFile({ repoPath: workspace, filePath });
+      setRightPanelSelectedIssue(null);
+      setRightPanelSelectedPR(null);
+      setRightPanelKind('review');
+      setChatVisible(true);
+    }
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
     const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext);
 
@@ -2860,33 +2881,9 @@ function DashboardInner() {
                       />
                     </Suspense>
                   </motion.div>
-                ) : selectedPacketId ? (
-                  <motion.div
-                    key={`packet:${selectedPacketId}`}
-                    initial={{ opacity: 0, x: 12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 12 }}
-                    transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                    style={{
-                      flex: 1,
-                      minHeight: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
-                    }}
-                  >
-                    <Suspense fallback={null}>
-                      <LazyPacketRightPanel
-                        selectedPacketId={selectedPacketId}
-                        missionState={thoughtsMissionState}
-                        workspaceSidePanelRepo={workspaceSidePanelRepo}
-                        onClose={() => setSelectedPacketId(null)}
-                        onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
-                      />
-                    </Suspense>
-                  </motion.div>
                 ) : (
                   <motion.div
-                    key={`review:${workspaceSidePanelView}:${workspaceSidePanelActivationKey}`}
+                    key="ambient-right-panel"
                     initial={{ opacity: 0, x: 12 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 12 }}
@@ -2899,14 +2896,33 @@ function DashboardInner() {
                     }}
                   >
                     <Suspense fallback={null}>
-                      <LazyWorkspaceSidePanel
-                        view={workspaceSidePanelView}
-                        repo={workspaceSidePanelRepo}
-                        agentContext={workspaceSidePanelAgentContext}
-                        onClearView={() => setChatVisible(false)}
-                        onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
-                        onSelectCommit={handleSelectCommit}
-                      />
+                      <OrchestratorDataProvider
+                        agents={parsedAgents}
+                        missionState={thoughtsMissionState}
+                        workspaceTargets={orchestratorWorkspaceTargets}
+                        onMissionStateChange={handleThoughtsMissionStateChange}
+                        onLaunchPacket={launchOrchestrationPacket}
+                        draftInjection={thoughtsDraftInjection}
+                        onSelectSession={handleSelectSession}
+                        latestDispatchedTabId={latestDispatchedTabId}
+                        latestDispatchedAt={latestDispatchedAt}
+                        onAcceptDirectiveProposal={handleAcceptDirectiveProposal}
+                        selectedPacketId={selectedPacketId}
+                        onSelectedPacketChange={setSelectedPacketId}
+                      >
+                        <LazyPacketRightPanel
+                          selectedPacketId={selectedPacketId}
+                          missionState={thoughtsMissionState}
+                          agents={parsedAgents}
+                          workspaceSidePanelRepo={workspaceSidePanelRepo}
+                          focusedRepoPath={rightPanelSelectedFile?.repoPath ?? workspaceSidePanelRepo?.localPath ?? globalRepoEntry?.localPath ?? activeWorkspace ?? null}
+                          selectedFile={rightPanelSelectedFile}
+                          selectedIssue={rightPanelSelectedIssue}
+                          selectedPR={rightPanelSelectedPR}
+                          onClose={() => setChatVisible(false)}
+                          onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
+                        />
+                      </OrchestratorDataProvider>
                     </Suspense>
                   </motion.div>
                 )}
