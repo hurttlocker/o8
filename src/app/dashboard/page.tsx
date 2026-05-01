@@ -249,6 +249,11 @@ function DashboardInner() {
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
   const [o8BrowserUrl, setO8BrowserUrl] = useState<string | null>(null);
+  // Mirrors the wide O8 panel BrowserPane's active URL so the TitleBar can
+  // hover-preview it. Distinct from o8BrowserUrl (which is a one-shot
+  // navigation request from the port popover etc.) — this is the live
+  // current URL of whichever tab is selected inside the pane.
+  const [o8BrowserHoverUrl, setO8BrowserHoverUrl] = useState<string | null>(null);
   const [o8SelectedFile, setO8SelectedFile] = useState<string | null>(null);
   const [o8RepoPathOverride, setO8RepoPathOverride] = useState<string | null>(null);
   const [o8CommitSha, setO8CommitSha] = useState<string | null>(null);
@@ -2443,6 +2448,7 @@ function DashboardInner() {
         o8PanelVisible={chatVisible && rightPanelKind === 'o8'}
         onToggleO8Panel={handleToggleO8Panel}
         browserActive={chatVisible && rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
+        browserPreviewUrl={o8BrowserHoverUrl}
         onOpenBrowser={handleOpenBrowser}
         isAgentsSectionActive={activeNavSection === 'agents'}
         onOpenAgents={() => {
@@ -2930,6 +2936,7 @@ function DashboardInner() {
                         prRepo={o8PrRepo}
                         repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
                         browserUrl={o8BrowserUrl}
+                        onBrowserActiveUrlChange={setO8BrowserHoverUrl}
                         commitSha={o8CommitSha}
                         onClearCommit={handleClearCommit}
                         onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
