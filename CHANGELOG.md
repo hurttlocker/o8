@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-01
 
+- `f28c2029` feat(native shell): O8_DEV_FRONTEND_URL override for hot-reload prod loop [via-o8]
 - `22bddea0` feat(native shell): O8_DEV_FRONTEND_URL override for hot-reload prod loop [via-o8]
 - `2885036a` feat(native shell): O8_DEV_FRONTEND_URL override for hot-reload prod loop [via-o8]
 - `a41bc632` feat: support dev frontend override in native shell
