@@ -29,6 +29,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onSelectPR,
     onReviewPR,
     onRepoRemoved,
+    onOpenSpecInWorkspace,
     orchestratorPackets = [],
     orchestratorMissionState,
     registeredRepos = [],
@@ -218,6 +219,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           activeSessionKey={activeSessionKey}
           onSelectSession={onSelectSession}
           onSelectFile={props.onSelectFile}
+          onOpenSpecInWorkspace={onOpenSpecInWorkspace}
         />
 
       </div>
