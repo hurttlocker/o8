@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { RepoHeader } from './RepoHeader';
 import { RepoTabs } from './RepoTabs';
 import { AgentsTab } from './tabs/AgentsTab';
@@ -31,6 +31,22 @@ export function LeftPanelRepoFocus({
     tab: 'agents',
   }));
   const activeTab = tabState.repoPath === repo.localPath ? tabState.tab : 'agents';
+
+  // ESC to close. Bound to keydown so the operator can dismiss without
+  // hunting for the back arrow — matches macOS sheet/popover convention.
+  // Only acts when no focused input is eating the key; if the user is
+  // typing in the Spec textarea we let them keep typing.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const tag = (event.target as HTMLElement | null)?.tagName ?? '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      event.preventDefault();
+      onBack();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onBack]);
 
   const allMissionPackets = useMemo(
     () => (missionState?.packets ?? packets).filter((packet) => packetBelongsToRepo(packet, repo.localPath)),

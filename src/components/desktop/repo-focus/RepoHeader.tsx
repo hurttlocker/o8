@@ -48,7 +48,10 @@ export function RepoHeader({ repo, packets, missionState, onBack }: RepoHeaderPr
         paddingRight: 14,
         paddingBottom: 12,
         paddingLeft: 10,
-        background: 'var(--t-panel)',
+        // Transparent so the drawer's canvas-bg shows through uniformly —
+        // the t-panel token is 58% opaque and would read as a different
+        // band on top of the solid drawer surface.
+        background: 'transparent',
         fontFamily: REPO_FOCUS_FONT,
       }}
     >
@@ -57,6 +60,7 @@ export function RepoHeader({ repo, packets, missionState, onBack }: RepoHeaderPr
           type="button"
           onClick={onBack}
           aria-label="Back to repositories"
+          title="Back to repositories — esc"
           style={{
             width: 44,
             height: 44,
@@ -69,7 +73,12 @@ export function RepoHeader({ repo, packets, missionState, onBack }: RepoHeaderPr
             color: 'var(--t-text-muted)',
             cursor: 'pointer',
             flexShrink: 0,
+            transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1), transform 80ms ease-out',
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-muted)'; }}
+          onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.94)'; }}
+          onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
         >
           <BackChevron />
         </button>
