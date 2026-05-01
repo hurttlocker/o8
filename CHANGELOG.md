@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-30
 
+- `d76702b3` feat(brain): fs.watch on docs — incremental re-distill
 - `b8212560` feat(brain): embeddings column + hybrid retrieval
 - `e3f12505` feat(brain): in-process compactor scheduler
 - `19f4451d` feat(qa): Phase 2b
