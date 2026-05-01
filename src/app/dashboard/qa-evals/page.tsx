@@ -159,7 +159,7 @@ export default function QaEvalsPage() {
       paddingRight: 32,
       paddingBottom: 32,
       paddingLeft: 32,
-      fontFamily: 'system-ui, -apple-system, sans-serif',
+      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
     }}>
       {/* Page header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 32 }}>
@@ -210,7 +210,7 @@ export default function QaEvalsPage() {
               paddingLeft: 14,
               borderRadius: 8,
               backgroundColor: 'var(--t-bg-card, rgba(255,255,255,0.82))',
-              border: '1px solid rgba(0,0,0,0.08)',
+              border: '1px solid var(--t-border, rgba(15,23,42,0.1))',
               fontSize: 13,
               fontWeight: 500,
               color: 'var(--t-text, #111827)',
@@ -241,7 +241,7 @@ export default function QaEvalsPage() {
                 paddingBottom: 14,
                 paddingLeft: 20,
                 minWidth: 140,
-                outline: item.warn ? '1.5px solid #ef4444' : '1px solid rgba(0,0,0,0.06)',
+                outline: item.warn ? '1.5px solid #ef4444' : '1px solid var(--t-divider-subtle, rgba(15,23,42,0.05))',
               }}
             >
               <div style={{
