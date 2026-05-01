@@ -19,6 +19,7 @@ export type {
   OwnedCodexFleetAdditions,
   OwnedLaunchRequest,
   OwnedLaunchResponse,
+  OwnedArchiveResponse,
   OwnedRuntimeAdapter,
   OwnedSessionStore,
 } from './types';

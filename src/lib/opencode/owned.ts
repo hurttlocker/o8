@@ -335,3 +335,4 @@ export const getOwnedOpencodeReviewPacket = store.getReviewPacket.bind(store);
 export const getOwnedOpencodeTelemetrySources = store.getTelemetrySources.bind(store);
 export const setOwnedOpencodeReviewDisposition = store.setReviewDisposition.bind(store);
 export const invalidateOwnedOpencodeFleetCache = store.invalidateFleetCache.bind(store);
+export const archiveOwnedOpencodeSession = store.archiveSession.bind(store);
