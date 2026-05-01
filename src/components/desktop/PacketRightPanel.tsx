@@ -26,18 +26,49 @@ import type { WorkspaceSidePanelRepo } from '@/components/desktop/WorkspaceSideP
 import { PacketSpecEditor } from '@/components/desktop/thoughts/mission-panel/PacketSpecEditor';
 import { ChangesTab } from '@/components/desktop/workspace-side-panel/ChangesTab';
 import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestrator/display';
+import { AmbientPanel } from '@/components/desktop/right-panel/AmbientPanel';
+import type { FleetAgent } from '@/components/desktop/thoughts/types';
+import type { AmbientLinkedRef, AmbientSelectedFile } from '@/components/desktop/right-panel/useAmbientMode';
 
 type TabId = 'spec' | 'agent-overview' | 'changes';
 
 interface PacketRightPanelProps {
-  selectedPacketId: string;
+  selectedPacketId?: string | null;
   missionState: OrchestratorMissionState;
+  agents?: FleetAgent[];
   workspaceSidePanelRepo: WorkspaceSidePanelRepo | null;
+  focusedRepoPath?: string | null;
+  selectedFile?: AmbientSelectedFile | null;
+  selectedIssue?: AmbientLinkedRef | null;
+  selectedPR?: AmbientLinkedRef | null;
   onClose: () => void;
   onOpenFile: (path: string, repo: WorkspaceSidePanelRepo | null) => void;
 }
 
 export function PacketRightPanel({
+  selectedPacketId,
+  missionState,
+  agents,
+  workspaceSidePanelRepo,
+  focusedRepoPath,
+  selectedFile,
+  selectedIssue,
+  selectedPR,
+}: PacketRightPanelProps) {
+  return (
+    <AmbientPanel
+      selectedPacketId={selectedPacketId}
+      missionState={missionState}
+      agents={agents}
+      focusedRepoPath={focusedRepoPath ?? workspaceSidePanelRepo?.localPath ?? null}
+      selectedFile={selectedFile}
+      selectedIssue={selectedIssue}
+      selectedPR={selectedPR}
+    />
+  );
+}
+
+export function PacketRightPanelLegacy({
   selectedPacketId,
   missionState,
   workspaceSidePanelRepo,

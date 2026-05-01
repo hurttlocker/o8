@@ -25,6 +25,7 @@ export function LeftPanelRepoFocus({
   ideWorkspaceSessions,
   activeSessionKey,
   onSelectSession,
+  onSelectFile,
 }: LeftPanelRepoFocusProps) {
   const [tabState, setTabState] = useState<{ repoPath: string; tab: RepoFocusTabId }>(() => ({
     repoPath: repo.localPath,
@@ -83,7 +84,7 @@ export function LeftPanelRepoFocus({
           <SpecTab repo={repo} />
         ) : null}
         {activeTab === 'files' ? (
-          <FilesTab repo={repo} />
+          <FilesTab repo={repo} onSelectFile={(repoPath, filePath) => onSelectFile?.(filePath, repoPath)} />
         ) : null}
       </div>
       <RepoFocusUsageStrip />
