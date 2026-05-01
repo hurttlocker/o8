@@ -195,6 +195,21 @@ function normalizeComparisonModels(value: unknown): string[] | undefined {
   return models.length > 0 ? models : undefined;
 }
 
+function normalizeReleaseStatePayload(value: unknown): OrchestratorPacket['releaseStatePayload'] {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<NonNullable<OrchestratorPacket['releaseStatePayload']>>;
+  const mergeCommit = typeof raw.mergeCommit === 'string' && raw.mergeCommit.trim()
+    ? raw.mergeCommit.trim()
+    : null;
+  const releasedAt = typeof raw.releasedAt === 'string' && raw.releasedAt.trim()
+    ? raw.releasedAt.trim()
+    : null;
+  const source = typeof raw.source === 'string' && raw.source.trim()
+    ? raw.source.trim()
+    : null;
+  return mergeCommit || releasedAt || source ? { mergeCommit, releasedAt, source } : null;
+}
+
 function normalizePacket(raw: unknown, index: number, existing: Array<Pick<OrchestratorPacket, 'referenceLabel'>>) {
   const packet = (raw && typeof raw === 'object' ? raw : {}) as Partial<OrchestratorPacket>;
   const referenceLabel = typeof packet.referenceLabel === 'string' && packet.referenceLabel.trim()
@@ -218,6 +233,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       : [],
     queueState,
     releaseState: packet.releaseState === 'released' ? 'released' : 'pending',
+    releaseStatePayload: normalizeReleaseStatePayload(packet.releaseStatePayload),
     status: packet.status === 'running'
       || packet.status === 'launching'
       || packet.status === 'awaiting_review'
