@@ -7,6 +7,8 @@ const TABS: Array<{ id: RepoFocusTabId; label: string }> = [
   { id: 'agents', label: 'Agents' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
+  { id: 'spec', label: 'Spec' },
+  { id: 'files', label: 'Files' },
 ];
 
 interface RepoTabsProps {
@@ -21,7 +23,7 @@ export function RepoTabs({ activeTab, onTabChange }: RepoTabsProps) {
       aria-label="Repo focus tabs"
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+        gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
         borderTopWidth: 1,
         borderTopStyle: 'solid',
         borderTopColor: 'var(--t-divider-subtle)',
@@ -43,7 +45,7 @@ export function RepoTabs({ activeTab, onTabChange }: RepoTabsProps) {
             style={{
               minHeight: 44,
               borderWidth: 0,
-              borderRightWidth: tab.id === 'mission' ? 0 : 1,
+              borderRightWidth: tab.id === 'files' ? 0 : 1,
               borderRightStyle: 'solid',
               borderRightColor: 'var(--t-divider-subtle)',
               background: selected ? 'var(--t-input-bg)' : 'transparent',

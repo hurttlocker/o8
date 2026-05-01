@@ -125,6 +125,9 @@ const GATED_PREFIXES = [
   // Projects model (epic #899) — leaks repo names and operator-curated
   // groupings. Loopback-only with bearer-token fallback for LAN clients.
   '/api/projects',
+  // o8.md spec surface — reads/writes a repo-local file. Repo path is
+  // operator-trusted; we don't expose this cross-origin without a token.
+  '/api/repo-spec',
   // Setup routes are gated too — GET is allowlisted above, POST needs loopback
   // or a token (so an evil cross-origin page can't POST to /api/setup/claude-desktop
   // and silently write to the user's Claude config).
