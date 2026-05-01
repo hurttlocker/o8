@@ -21,6 +21,7 @@ import { ChevronRight, Copy, GitBranch, Send } from './lucide-shims';
 import { ChartBar, FolderPlus, GearSix, WarningCircle } from '@phosphor-icons/react';
 import { ChromeButton } from './chrome/ChromeButton';
 import { formatBranchDisplayName } from './repo-registry/shared';
+import { UpdateBanner } from './UpdateBanner';
 
 interface DesktopStatusBarProps {
   branchName: string | null;
@@ -681,6 +682,8 @@ function DesktopStatusBarBase({
       <SupervisorInboxBadge />
 
       <div style={{ flex: 1 }} />
+
+      <UpdateBanner />
 
       {displayBranch ? (
         <span
