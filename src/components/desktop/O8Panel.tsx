@@ -194,7 +194,9 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       }}>
         <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'diff'} onClick={() => handleTabChange('diff')} label="Diff" />
         <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'files'} onClick={() => handleTabChange('files')} label="Files" />
-        <O8TabButton icon={(c) => <IconGlobeSimple size={16} color={c} />} active={activeTab === 'browser'} onClick={() => handleTabChange('browser')} label="Browser" />
+        {/* Browser tab moved to the TitleBar — see RightPanelMorphButton's
+            sibling. The active===browser branch below still renders the
+            BrowserPane content when set externally (TitleBar handler). */}
         <div style={{ width: 1, height: 18, background: 'var(--t-divider-subtle)', marginLeft: 8, marginRight: 8 }} />
         <O8TabButton icon={(c) => <IconGitPullRequest size={16} color={c} />} active={activeTab === 'prs'} onClick={() => handleTabChange('prs')} label="PRs" />
         <O8TabButton icon={(c) => <IconInbox size={16} color={c} />} active={activeTab === 'inbox'} onClick={() => handleTabChange('inbox')} label="Inbox" />
