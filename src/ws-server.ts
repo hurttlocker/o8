@@ -1054,6 +1054,7 @@ let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
 let stopHealBotLoop: (() => void) | null = null;
 let stopSilentExitDetectorLoop: (() => void) | null = null;
+let stopDocWatcherLoop: (() => void) | null = null;
 
 const lastRealtimeFingerprint = {
   runtime: '',
@@ -4008,6 +4009,17 @@ async function bootstrapWsServer() {
     });
 
     bootCompactorScheduler();
+
+    void (async () => {
+      try {
+        const { startDocWatcher } = await import('@/lib/cortex/indexer/doc-watcher');
+        stopDocWatcherLoop = startDocWatcher();
+      } catch (error) {
+        console.warn(
+          `[doc-watcher] Failed to start: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    })();
   });
 }
 
@@ -4026,6 +4038,8 @@ function shutdown(signal: string) {
   stopHealBotLoop = null;
   stopSilentExitDetectorLoop?.();
   stopSilentExitDetectorLoop = null;
+  stopDocWatcherLoop?.();
+  stopDocWatcherLoop = null;
   stopWorktreeReaper();
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
