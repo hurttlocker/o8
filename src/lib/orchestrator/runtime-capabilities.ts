@@ -63,12 +63,17 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
   opencode: {
     label: 'opencode',
     shortLabel: 'opencode',
-    dispatchable: true,
+    // dispatchable=false: opencode disabled in the v1 picker (decision
+    // 2026-04-30). The big-3 (Codex / Gemini / Claude) cover every operator
+    // request we've seen; opencode adds support burden without a user pulling
+    // for it. Re-enable when someone asks. Adapter still ships so existing
+    // owned sessions remain readable.
+    dispatchable: false,
     requiresModel: true,
     defaultModel: 'opencode/gpt-5-nano',
     accentColor: '#a855f7', // purple — distinct from the other three
     binaryName: 'opencode',
-    description: 'Multi-provider coding CLI via `opencode run` — routes to any provider model.',
+    description: 'Multi-provider coding CLI — disabled by default. Use Codex / Gemini for dispatch.',
   },
 };
 
@@ -76,10 +81,13 @@ export function listDispatchableRuntimes(options?: { includeExperimental?: boole
   const includeExperimental = options?.includeExperimental ?? false;
   return (Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[])
     .filter((id) => {
-      if (!ORCHESTRATOR_RUNTIMES[id].dispatchable) return false;
-      // opencode is experimental for v1 — only appears in dispatch pickers
-      // when the operator has flipped `experimentalOpencode` on.
-      if (id === 'opencode' && !includeExperimental) return false;
+      const cap = ORCHESTRATOR_RUNTIMES[id];
+      if (!cap.dispatchable) {
+        // opencode lives behind `experimentalOpencode` for the rare operator
+        // who explicitly flips it on. Big-3 picker stays clean by default.
+        if (id === 'opencode' && includeExperimental) return true;
+        return false;
+      }
       return true;
     });
 }
@@ -89,4 +97,4 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): Orchestrator
 }
 
 /** Runtimes that ship in the v1 dispatch picker. Keep this narrow. */
-export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'gemini', 'opencode'];
+export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'gemini'];
