@@ -125,6 +125,12 @@ export interface OwnedLaunchResponse {
   note: string;
 }
 
+export interface OwnedArchiveResponse {
+  archived: boolean;
+  note: string;
+  archivePath?: string;
+}
+
 // ── Adapter contract ─────────────────────────────────────────────────────────
 
 /**
@@ -254,6 +260,7 @@ export interface OwnedSessionStore {
   }>;
   getReviewPacket(surfaceId: string): Promise<RuntimeReviewPacket>;
   getFleetAdditions(options?: { fresh?: boolean }): Promise<OwnedFleetAdditions>;
+  archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
   getTelemetrySources(surfaceId: string): Promise<{ threadId?: string; stdoutPaths: string[] } | null>;
   setReviewDisposition(
     surfaceId: string,
