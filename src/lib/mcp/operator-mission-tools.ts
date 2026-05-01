@@ -12,10 +12,12 @@ import { sanitizeErrorMessage } from '@/lib/api/error-format';
  * but the MCP-spawn path needs a plain function without Next-specific deps.
  */
 function resolveApiBase(): string {
-  const envBase = process.env.O8_API_BASE?.trim();
-  if (envBase) return envBase;
-  const envPort = process.env.O8_API_PORT?.trim();
-  if (envPort) return `http://127.0.0.1:${envPort}`;
+  // Precedence: api-port FILE first (always reflects the running app),
+  // then env vars (Tauri sidecar children), then legacy default.
+  // The file is the only signal that survives env staleness across dev /
+  // prod port swaps, app restarts, and Claude Code parent shells whose
+  // O8_API_BASE was set before a port change. Env-var-first was the old
+  // order and stuck MCP on dead ports across the dev-frontend swap.
   try {
     const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
     const portFile = join(dataDir, 'api-port');
@@ -26,6 +28,10 @@ function resolveApiBase(): string {
       }
     }
   } catch { /* fall through */ }
+  const envBase = process.env.O8_API_BASE?.trim();
+  if (envBase) return envBase;
+  const envPort = process.env.O8_API_PORT?.trim();
+  if (envPort) return `http://127.0.0.1:${envPort}`;
   return 'http://localhost:3001';
 }
 
