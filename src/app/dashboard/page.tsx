@@ -243,10 +243,12 @@ function DashboardInner() {
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('review');
   const [rightWidth, setRightWidth] = useState(280);
   const [o8Width, setO8Width] = useState(700);
-  const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>('changes');
+  const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>('diff');
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
   const [o8BrowserUrl, setO8BrowserUrl] = useState<string | null>(null);
+  const [o8SelectedFile, setO8SelectedFile] = useState<string | null>(null);
+  const [o8RepoPathOverride, setO8RepoPathOverride] = useState<string | null>(null);
   const [o8CommitSha, setO8CommitSha] = useState<string | null>(null);
   const [o8CommitRepoPath, setO8CommitRepoPath] = useState<string | null>(null);
   const [o8CommitRepoSlug, setO8CommitRepoSlug] = useState<string | null>(null);
@@ -879,6 +881,11 @@ function DashboardInner() {
       setWorkspaceSidePanelActivationKey((value) => value + 1);
     }
 
+    if (pathBelongsToRepoScope(o8RepoPathOverride, removedRepoPath)) {
+      setO8RepoPathOverride(null);
+      setO8SelectedFile(null);
+    }
+
     setWorkspaceChatSessionsByTileId(nextWorkspaceChatSessionsByTileId);
     setWorkspaceChatSessionByTileId((current) => Object.entries(current).reduce<Record<string, string | undefined>>((next, [tileId, sessionKey]) => {
       if (affectedTerminalTileIds.has(tileId)) {
@@ -979,6 +986,7 @@ function DashboardInner() {
     tileLayout.root,
     workspaceChatSessionsByTileId,
     workspaceLifecycleRecords,
+    o8RepoPathOverride,
     workspaceSidePanelRepoPath,
   ]);
 
@@ -1190,6 +1198,8 @@ function DashboardInner() {
     void handleSelectRegisteredRepo(repoId);
     const targetRepo = globalRepoEntries.find((r) => r.id === repoId);
     if (targetRepo) {
+      setO8RepoPathOverride(targetRepo.localPath);
+      setO8SelectedFile(null);
       setWorkspaceSidePanelRepoPath(targetRepo.localPath);
       setWorkspaceSidePanelRepoContext({
         name: targetRepo.name,
@@ -1832,6 +1842,12 @@ function DashboardInner() {
     }
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
     const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext);
+    const diffWorkspace = workspace ?? activeWorkspace ?? globalRepoEntry?.localPath ?? null;
+
+    setO8SelectedFile(filePath);
+    if (diffWorkspace) {
+      setO8RepoPathOverride(diffWorkspace);
+    }
 
     openCanvasTab({
       id: `${isImage ? 'image' : 'file'}:${filePath}${workspace ? `:${workspace}` : ''}`,
@@ -1840,7 +1856,17 @@ function DashboardInner() {
       resourceId: filePath,
       meta: workspace ? { workspace } : undefined,
     });
-  }, [openCanvasTab]);
+  }, [activeWorkspace, globalRepoEntry?.localPath, openCanvasTab]);
+
+  const handleOpenSpecInWorkspace = useCallback((repoPath: string) => {
+    setO8CommitSha(null);
+    setO8CommitRepoPath(null);
+    setO8CommitRepoSlug(null);
+    setO8RepoPathOverride(repoPath);
+    setO8ActiveTab('spec');
+    setRightPanelKind('o8');
+    setChatVisible(true);
+  }, []);
 
   const handleSelectCommit = useCallback((hash: string, meta?: Record<string, string>) => {
     const nextMeta: Record<string, string> = { ...(meta ?? {}) };
@@ -2665,6 +2691,7 @@ function DashboardInner() {
             onSelectPR={handleSelectPR}
             onReviewPR={handleReviewPR}
             onRepoRemoved={handleRepoRemoved}
+            onOpenSpecInWorkspace={handleOpenSpecInWorkspace}
             onExpandWorkspace={handleExpandWorkspace}
             onSelectFile={handleSelectFile}
             onOpenCI={handleOpenCI}
@@ -2859,10 +2886,12 @@ function DashboardInner() {
                     <Suspense fallback={null}>
                       <LazyO8Panel
                         onClose={handleToggleO8Panel}
-                        repoPath={o8CommitRepoPath ?? globalRepoEntry?.localPath}
+                        repoPath={o8CommitRepoPath ?? o8RepoPathOverride ?? globalRepoEntry?.localPath}
                         previews={workspacePreviews}
                         activeTab={o8ActiveTab}
                         onActiveTabChange={setO8ActiveTab}
+                        selectedFile={o8SelectedFile}
+                        onSelectedFileChange={setO8SelectedFile}
                         prNumber={o8PrNumber}
                         prRepo={o8PrRepo}
                         repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
