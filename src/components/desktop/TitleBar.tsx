@@ -13,7 +13,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { UsersThree } from '@phosphor-icons/react';
+import { UsersThree, GlobeSimple } from '@phosphor-icons/react';
 import { ChromeButton } from './chrome/ChromeButton';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render Lucide React components) ──
@@ -87,6 +87,10 @@ interface TitleBarProps {
   onToggleWorkspacePanel?: () => void;
   o8PanelVisible?: boolean;
   onToggleO8Panel?: () => void;
+  // Browser slot — pulls the Browser tab out of the O8 panel tab strip and
+  // gives it a top-of-window perch so we can hover-extend it later.
+  browserActive?: boolean;
+  onOpenBrowser?: () => void;
   // Agents slot — migrated out of the NavRail.
   isAgentsSectionActive?: boolean;
   onOpenAgents?: () => void;
@@ -244,6 +248,8 @@ export function TitleBar({
   onToggleWorkspacePanel,
   o8PanelVisible = false,
   onToggleO8Panel,
+  browserActive = false,
+  onOpenBrowser,
   isAgentsSectionActive = false,
   onOpenAgents,
 }: TitleBarProps) {
@@ -440,6 +446,15 @@ export function TitleBar({
           paddingRight: 4,
         }}
       >
+        {onOpenBrowser ? (
+          <ChromeButton
+            icon={<GlobeSimple size={16} weight="bold" color={browserActive ? 'var(--t-brand-orange, #FF5A1F)' : 'currentColor'} />}
+            label="Browser"
+            onClick={onOpenBrowser}
+            active={browserActive}
+            noDrag
+          />
+        ) : null}
         <RightPanelMorphButton
           workspacePanelVisible={workspacePanelVisible}
           o8PanelVisible={o8PanelVisible}

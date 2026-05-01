@@ -1408,6 +1408,16 @@ function DashboardInner() {
     setChatVisible(true);
   }, [chatVisible, rightPanelKind]);
 
+  // Browser button on the TitleBar — opens (or focuses) the wide O8 panel
+  // and selects its Browser tab. The Browser tab itself is no longer in the
+  // O8 panel's tab strip; it lives in the title bar so we can hover-extend
+  // it with a quick port menu.
+  const handleOpenBrowser = useCallback(() => {
+    setRightPanelKind('o8');
+    setChatVisible(true);
+    setO8ActiveTab('browser');
+  }, []);
+
   useEffect(() => {
     if (rightPanelMode !== 'workspace') return;
     // [workspace-side-panel] Skip auto-sync when panel is in blank/idle state —
@@ -2432,6 +2442,8 @@ function DashboardInner() {
         onToggleWorkspacePanel={handleToggleWorkspacePanel}
         o8PanelVisible={chatVisible && rightPanelKind === 'o8'}
         onToggleO8Panel={handleToggleO8Panel}
+        browserActive={chatVisible && rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
+        onOpenBrowser={handleOpenBrowser}
         isAgentsSectionActive={activeNavSection === 'agents'}
         onOpenAgents={() => {
           setActiveNavSection('agents');
