@@ -15,7 +15,7 @@ import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
-import { UpdateBanner } from '@/components/desktop/UpdateBanner';
+// UpdateBanner is now rendered inside DesktopStatusBar.
 import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
 import { ThemeProvider } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
@@ -2405,8 +2405,8 @@ function DashboardInner() {
       overflow: 'hidden',
       position: 'relative',
     }}>
-      {/* ── Update Banner ── */}
-      <UpdateBanner />
+      {/* UpdateBanner now lives inside DesktopStatusBar as a footer pill —
+          see src/components/desktop/UpdateBanner.tsx. */}
 
       {/* ── Connection Banner (#634) — surfaces dropped WebSocket so users
           know why agent statuses, transcripts, and approvals appear frozen.
