@@ -98,20 +98,20 @@ interface JsonRpcResponse {
 
 /**
  * Resolve the backend base URL. Priority:
- *   1. O8_API_BASE env var (explicit override)
- *   2. O8_API_PORT env var (set by Tauri sidecar at spawn time)
- *   3. ~/.o8/api-port file (written by Tauri sidecar after probing)
+ *   1. ~/.o8/api-port file (always reflects the running app — survives port
+ *      swaps, dev-frontend mode flips, and stale parent-shell env vars)
+ *   2. O8_API_BASE env var (explicit override)
+ *   3. O8_API_PORT env var (set by Tauri sidecar at spawn time)
  *   4. Legacy default http://localhost:3001 (dev workflow)
  *
- * This MCP server can be launched long after the Tauri shell picks a port,
- * and that port may not be 3001 if something else owned it. Reading the
- * persisted file keeps the MCP tools pointed at the real backend.
+ * File-first is critical: Claude Code spawns this MCP from a parent shell
+ * whose env may have been set before a port change (e.g. operator started
+ * Claude Code while prod was on 3001, then the Tauri shell swapped to a
+ * dev-frontend URL on 3010 — the parent O8_API_BASE is now stale). The
+ * file is updated by the Tauri sidecar on every boot, so it's the only
+ * signal that always agrees with the live backend.
  */
 function resolveApiBase(): string {
-  if (process.env.O8_API_BASE) return process.env.O8_API_BASE;
-  if (process.env.O8_API_PORT) {
-    return `http://127.0.0.1:${process.env.O8_API_PORT}`;
-  }
   try {
     const dataDir = process.env.CORTEX_IDE_DATA_DIR
       || join(process.env.HOME || '', '.o8');
@@ -124,6 +124,10 @@ function resolveApiBase(): string {
       }
     }
   } catch { /* fall through */ }
+  if (process.env.O8_API_BASE) return process.env.O8_API_BASE;
+  if (process.env.O8_API_PORT) {
+    return `http://127.0.0.1:${process.env.O8_API_PORT}`;
+  }
   return 'http://localhost:3001';
 }
 
