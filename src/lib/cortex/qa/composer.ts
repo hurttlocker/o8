@@ -26,6 +26,7 @@ import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
+import { getOperatorDefaultsSync, type ClassAComposer } from '@/lib/operator/defaults';
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
@@ -338,6 +339,14 @@ export async function composeClassA(
   // routes through Haiku CLI tier 1 — free for Claude Max users.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
+  // #971: in production, the user-selected `classAComposer` setting picks
+  // which CLI tier leads. Eval mode is never affected (smoke gate is fixed).
+  const classAMode: ClassAComposer = evalMode
+    ? 'auto'
+    : resolveClassAComposerSetting();
+  const sonnetCliFirst = classAMode === 'sonnet-cli';
+  let triedSonnetCli = false;
+
   // Eval-mode tier 0: Sonnet 4.6 via OpenRouter — best reasoning + synthesis,
   // never hedges when rows answer the question.
   if (evalMode) {
@@ -356,8 +365,22 @@ export async function composeClassA(
     }
   }
 
-  // Tier 1: Haiku CLI. Skipped in eval mode (CLI bootstrap exceeds smoke budget).
-  if (!evalMode) {
+  // #971 sonnet-cli mode: lead with Sonnet CLI before Haiku/Codex tiers.
+  // Falls through to OpenRouter/Flash/heuristic on failure (Haiku + Codex
+  // stay skipped because the user explicitly opted in to Sonnet quality).
+  if (sonnetCliFirst) {
+    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
+    triedSonnetCli = true;
+    if (sonnetAnswer) {
+      console.info('[qa][composer-A] resolved via sonnet-cli (mode=sonnet-cli)');
+      emitClassAAnswer(sonnetAnswer, lookup, emit);
+      return;
+    }
+  }
+
+  // Tier 1: Haiku CLI. Skipped in eval mode (CLI bootstrap exceeds smoke budget)
+  // or when the user picked sonnet-cli mode (#971).
+  if (!evalMode && !sonnetCliFirst) {
     const haikuAnswer = await tryComposeHaiku(composePrompt);
     if (haikuAnswer) {
       console.info('[qa][composer-A] resolved via haiku-cli');
@@ -366,8 +389,8 @@ export async function composeClassA(
     }
   }
 
-  // Tier 2: Codex CLI. Skipped in eval mode.
-  if (!evalMode) {
+  // Tier 2: Codex CLI. Skipped in eval mode or sonnet-cli mode.
+  if (!evalMode && !sonnetCliFirst) {
     const codexAnswer = await tryComposeCodex(composePrompt);
     if (codexAnswer) {
       console.info(`[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
@@ -392,8 +415,9 @@ export async function composeClassA(
     return;
   }
 
-  // Tier 5: Sonnet CLI (callSonnet's CLI tier — slow but reliable). Skipped in eval mode.
-  if (!evalMode) {
+  // Tier 5: Sonnet CLI (callSonnet's CLI tier — slow but reliable). Skipped
+  // in eval mode or when sonnet-cli mode already tried it above (#971).
+  if (!evalMode && !triedSonnetCli) {
     const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-cli');
@@ -406,6 +430,19 @@ export async function composeClassA(
   console.info('[qa][composer-A] resolved via heuristic');
   emit('token', { text: 'I don\'t have that information yet.' });
   emit('done', {});
+}
+
+/**
+ * Read the `classAComposer` operator default safely. Sync read off
+ * `~/.cortex-ide/operator-defaults.json`; failures fall back to 'auto'
+ * so a missing/corrupt prefs file never breaks Q&A.
+ */
+function resolveClassAComposerSetting(): ClassAComposer {
+  try {
+    return getOperatorDefaultsSync().values.classAComposer;
+  } catch {
+    return 'auto';
+  }
 }
 
 /** Tier 1: Haiku CLI. Free for Claude Max users — primary tier. */
