@@ -11,6 +11,9 @@ and internal chores live in the private engineering log.
 
 - `d76702b3` feat(brain): fs.watch on docs — incremental re-distill
 - `b8212560` feat(brain): embeddings column + hybrid retrieval
+- `3f18657c` feat(brain): qa-eval regression dashboard
+- `28aade08` feat(brain): post-commit hook feeds facts substrate
+- `0d3d7d00` feat(ui): /ask quick action in chat composer
 - `e3f12505` feat(brain): in-process compactor scheduler
 - `5d15d1b4` feat(brain): bring-your-own OpenRouter / AI provider key surface
 - `1a8432b9` feat(ui): Recall Card — top-N facts ambient surface
