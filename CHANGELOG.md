@@ -12,6 +12,7 @@ and internal chores live in the private engineering log.
 - `d76702b3` feat(brain): fs.watch on docs — incremental re-distill
 - `b8212560` feat(brain): embeddings column + hybrid retrieval
 - `e3f12505` feat(brain): in-process compactor scheduler
+- `3cf3d4fb` feat(qa): configurable Class A composer model
 - `19f4451d` feat(qa): Phase 2b
 - `f92d7ed2` feat(qa): source-update detection + source-of-truth hierarchy
 - `c38e4d93` feat(qa): fact compactor
