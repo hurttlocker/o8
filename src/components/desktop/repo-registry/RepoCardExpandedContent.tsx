@@ -104,7 +104,10 @@ function RepoCardExpandedContentBase({
   // so completed-but-unmerged branches still have +N -M and would qualify
   // wrongly. Branch rail shows: current branch + branches with a live agent
   // task. Mission Control owns packet visibility separately.
-  const visibleBranches = useMemo(
+  // The "active" filter: current branch + branches with a live agent task.
+  // The hidden ones are idle branches the user can opt-in to via the
+  // "+ N idle" button at the bottom of the rail.
+  const activeBranches = useMemo(
     () => branches.filter((branch) => {
       if (branch.current) return true;
       const branchAgents = agentsByBranch?.get(branch.name) ?? [];
@@ -112,9 +115,17 @@ function RepoCardExpandedContentBase({
     }),
     [agentsByBranch, branches],
   );
+  // What renders in the rail. When the user clicks "+ N idle" we honor the
+  // toggle and surface every branch — previously this filter ignored
+  // `showAllBranches`, so the button just made itself disappear without
+  // actually expanding the list.
+  const visibleBranches = useMemo(
+    () => (showAllBranches ? branches : activeBranches),
+    [showAllBranches, branches, activeBranches],
+  );
   const hiddenBranchCount = useMemo(
-    () => branches.length - visibleBranches.length,
-    [branches, visibleBranches],
+    () => branches.length - activeBranches.length,
+    [branches, activeBranches],
   );
   const unmatchedRepoPackets = useMemo(
     () => repoScopedPackets.filter((packet) => !visibleBranches.some((branch) => (
@@ -542,12 +553,12 @@ function RepoCardExpandedContentBase({
         </div>
       ) : (
         <>
-          {hiddenBranchCount > 0 && !showAllBranches && visibleBranches.length > 0 ? (
+          {hiddenBranchCount > 0 && activeBranches.length > 0 ? (
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
-                setShowAllBranches(true);
+                setShowAllBranches((prev) => !prev);
               }}
               style={{
                 display: 'flex',
@@ -577,7 +588,7 @@ function RepoCardExpandedContentBase({
                 target.style.background = 'transparent';
               }}
             >
-              + {hiddenBranchCount} idle
+              {showAllBranches ? `Hide ${hiddenBranchCount} idle` : `+ ${hiddenBranchCount} idle`}
             </button>
           ) : null}
           <button
