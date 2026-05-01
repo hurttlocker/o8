@@ -9,8 +9,11 @@ and internal chores live in the private engineering log.
 
 ## 2026-04-30
 
+- `1166d5d4` feat(operator): default thinkingEffort to high (was adaptive)
+- `de689665` feat(runtime): drop agent runtime from default dispatch picker
 - `d76702b3` feat(brain): fs.watch on docs — incremental re-distill
 - `b8212560` feat(brain): embeddings column + hybrid retrieval
+- `3f18657c` feat(brain): qa-eval regression dashboard
 - `28aade08` feat(brain): post-commit hook feeds facts substrate
 - `0d3d7d00` feat(ui): /ask quick action in chat composer
 - `e3f12505` feat(brain): in-process compactor scheduler
