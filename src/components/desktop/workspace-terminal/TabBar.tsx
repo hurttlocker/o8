@@ -112,12 +112,11 @@ export const TabBar = memo(function TabBar({
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        // Apple HIG 44px hit-zone minimum for tabs + scroll affordances + chrome
-        // buttons living inside this strip. Visible tab pills stay compact via
-        // their own padding; the bar height ensures every interactive child has
-        // room to grow to 44.
-        height: 44,
-        minHeight: 44,
+        // 52px bar — heavier than 44 so tabs read as a primary chrome region
+        // rather than a thin strip. Apple HIG 44px hit-zone is still satisfied
+        // by inner tab pills.
+        height: 52,
+        minHeight: 52,
         // Match the chat-surface bg so the TabBar blends with the workspace
         // content below instead of reading as a separate gray strip.
         background: 'var(--t-chat-surface-bg, #ffffff)',
@@ -273,14 +272,13 @@ export const TabBar = memo(function TabBar({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  // Tab button fills the full 44px tab-bar height to satisfy
-                  // Apple HIG. The visible pill background sits inside via the
-                  // internal padding so the label still reads compact.
-                  minHeight: 44,
-                  paddingTop: 10,
-                  paddingBottom: 10,
-                  paddingLeft: 10,
-                  paddingRight: 8,
+                  // Tab button fills the full 52px tab-bar height. Heavier
+                  // paddings give the pill more visual presence.
+                  minHeight: 52,
+                  paddingTop: 14,
+                  paddingBottom: 14,
+                  paddingLeft: 12,
+                  paddingRight: 10,
                   marginTop: 0,
                   marginBottom: 0,
                   marginLeft: 2,
@@ -294,7 +292,7 @@ export const TabBar = memo(function TabBar({
                   background: tabBackground,
                   boxShadow: tabBoxShadow,
                   color: tabTextColor,
-                  fontSize: 11,
+                  fontSize: 12,
                   fontWeight: isActive ? 560 : 500,
                   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   letterSpacing: '-0.01em',

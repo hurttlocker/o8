@@ -19,8 +19,9 @@
  * is honored — no card mount animation when set.
  */
 
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
 
 export type OrchestrationMode = 'fleet' | 'single';
 
@@ -49,6 +50,11 @@ function ModePickerBase({
   onSelectSingleRuntime,
 }: ModePickerProps) {
   void workspaceKey; // persistence wired by parent
+  const opencodeEnabled = useExperimentalOpencodeFlag();
+  const visibleRuntimes = useMemo(
+    () => (opencodeEnabled ? SINGLE_RUNTIMES : SINGLE_RUNTIMES.filter((r) => r.id !== 'opencode')),
+    [opencodeEnabled],
+  );
   // Whether the runtime sub-picker drawer is open. We derive openness
   // from selectedMode + an explicit user toggle in the same setter so we
   // never have to "sync" two states inside an effect (per react-hooks/
@@ -109,7 +115,7 @@ function ModePickerBase({
               paddingLeft: 4,
             }}
           >
-            {SINGLE_RUNTIMES.map((runtime) => {
+            {visibleRuntimes.map((runtime) => {
               const selected = runtime.id === selectedSingleRuntime;
               return (
                 <button

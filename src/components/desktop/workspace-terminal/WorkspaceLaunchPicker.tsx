@@ -11,6 +11,7 @@ import {
 import { CLI_AGENTS, THEME_ACCENT, THEME_ACCENT_SOFT } from '@/components/desktop/workspace-terminal/constants';
 import { AgentDot, PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
 import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
+import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
 import type { RegisteredRepo, WorkspaceChatRuntime } from '@/components/desktop/workspace-terminal/types';
 
 interface WorkspaceLaunchPickerProps {
@@ -35,6 +36,7 @@ function WorkspaceLaunchPickerBase({
   const [pickerStep, setPickerStep] = useState<'main' | 'terminal' | 'session' | 'repo'>('main');
   const [selectedAgent, setSelectedAgent] = useState<(typeof CLI_AGENTS)[number] | null>(null);
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
+  const opencodeEnabled = useExperimentalOpencodeFlag();
   const pickerRef = useRef<HTMLDivElement>(null);
 
   const openLaunchPicker = () => {
@@ -257,7 +259,9 @@ function WorkspaceLaunchPickerBase({
                 { id: 'codex' as CliSessionRuntime, label: 'Codex', color: '#10b981' },
                 { id: 'claude-code' as CliSessionRuntime, label: 'Claude Code', color: '#8b5cf6' },
                 { id: 'gemini' as CliSessionRuntime, label: 'Gemini', color: '#4285f4' },
-                { id: 'opencode' as CliSessionRuntime, label: 'opencode', color: '#a855f7' },
+                ...(opencodeEnabled
+                  ? [{ id: 'opencode' as CliSessionRuntime, label: 'opencode', color: '#a855f7' }]
+                  : []),
               ]).map((runtime) => (
                 <button
                   type="button"
