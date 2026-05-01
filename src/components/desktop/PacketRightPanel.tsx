@@ -223,7 +223,7 @@ export function PacketRightPanelLegacy({
       >
         <PanelModeTab
           active={activeTab === 'spec'}
-          label="Spec"
+          label="o8.md"
           onClick={() => setActiveTab('spec')}
         />
         <PanelModeTab

@@ -146,7 +146,7 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
     <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, background: 'var(--t-canvas-bg)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 42, paddingLeft: 12, paddingRight: 12, borderBottom: '1px solid var(--t-divider-subtle)', fontFamily: UI_FONT }}>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 11, fontWeight: 600 }}>
-          [SPEC] · agents read & write this · {status}
+          [o8.md] · agents read & write this · {status}
         </span>
         <ViewButton active={view === 'split'} label="Side-by-side" onClick={() => setView('split')} />
         <ViewButton active={view === 'edit'} label="Edit" onClick={() => setView('edit')} />
