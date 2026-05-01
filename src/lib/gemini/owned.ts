@@ -576,10 +576,20 @@ const geminiAdapter: OwnedRuntimeAdapter = {
   rootDefault: path.join(os.homedir(), '.o8', 'owned-gemini'),
   binaryName: 'gemini',
   binaryEnvOverride: 'O8_GEMINI_BIN',
-  // Gemini CLI picks up GEMINI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY from the
-  // inherited environment — no need to wire them here; the shared store spawns
-  // with `{ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }` semantics via
-  // the bridge terminal.
+  // Gemini CLI in --output-format stream-json mode (which o8 uses for headless
+  // dispatch) requires GEMINI_API_KEY specifically — it does NOT honor
+  // GOOGLE_GENERATIVE_AI_API_KEY in that mode (verified empirically 2026-04-30,
+  // see epic-937 t3-parallel REPORT). If the user only has the GOOGLE_-prefixed
+  // alias set, translate it onto GEMINI_API_KEY for the spawned child so dispatch
+  // doesn't silently fail with "you must specify the GEMINI_API_KEY environment
+  // variable" cycling launching → idle.
+  extraSpawnEnv: (): Record<string, string> => {
+    const existing = process.env.GEMINI_API_KEY?.trim();
+    if (existing) return {};
+    const alias = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim()
+      || process.env.GOOGLE_AI_API_KEY?.trim();
+    return alias ? { GEMINI_API_KEY: alias } : {};
+  },
   humanLabel: 'Owned Gemini',
   squadShortName: 'Gemini',
   sessionIdPrefix: 'gemini-owned-',

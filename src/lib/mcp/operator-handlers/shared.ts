@@ -28,6 +28,46 @@ let _apiHealthy = true;
 let _lastHealthCheck = 0;
 const HEALTH_CHECK_INTERVAL_MS = 10_000;
 
+// ── Panel auth token ──
+//
+// The Next-side middleware gates /api/orchestrator/*, /api/panel/* (and a
+// dozen other prefixes) on EITHER a loopback origin OR `Authorization: Bearer
+// <ws-token>` matching ${dataDir}/ws-token. The middleware's loopback bypass
+// has been observed to NOT trigger from this MCP server's plain Node fetch
+// (no Origin or sec-fetch-site headers; nextUrl.hostname/Host inspection has
+// edge cases — see epic-937 t6-mcp REPORT, 2026-04-30). Including the Bearer
+// token explicitly is belt-and-suspenders: works whether or not the loopback
+// path triggers.
+let _cachedPanelToken: { value: string; readAt: number } | null = null;
+const PANEL_TOKEN_TTL_MS = 30_000;
+
+function readPanelToken(): string | null {
+  const now = Date.now();
+  if (_cachedPanelToken && now - _cachedPanelToken.readAt < PANEL_TOKEN_TTL_MS) {
+    return _cachedPanelToken.value || null;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { join } = require('node:path') as typeof import('node:path');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { homedir } = require('node:os') as typeof import('node:os');
+    // Match middleware's lookup order: CORTEX_IDE_DATA_DIR override, else ~/.o8.
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const tokenPath = join(dataDir, 'ws-token');
+    if (!existsSync(tokenPath)) {
+      _cachedPanelToken = { value: '', readAt: now };
+      return null;
+    }
+    const value = readFileSync(tokenPath, 'utf-8').trim();
+    _cachedPanelToken = { value, readAt: now };
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
 export function setApiBase(base: string): void {
   _apiBase = base;
 }
@@ -71,10 +111,15 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<unknow
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      const panelToken = readPanelToken();
+      const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (panelToken) {
+        baseHeaders.Authorization = `Bearer ${panelToken}`;
+      }
       const res = await fetch(`${_apiBase}${path}`, {
         ...init,
         signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', ...init?.headers },
+        headers: { ...baseHeaders, ...init?.headers },
       });
       clearTimeout(timer);
       _apiHealthy = true;
