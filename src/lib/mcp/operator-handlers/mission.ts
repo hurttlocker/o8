@@ -103,6 +103,32 @@ export const MISSION_TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'wait_for_mission_ready',
+    description:
+      'Long-poll until any packet in the mission transitions to a terminal/review state (awaiting_review, released, failed, archived) or the mission completes. Returns the same payload as get_mission_status plus a `wakeReason` field ("state-change" | "timeout" | "already-terminal"). Use after dispatching to get notified when Codex is done without manually polling. Specify `packetId` to wait for a specific packet only. Default timeout 600000ms (10 min); cap 1800000ms (30 min).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        missionId: {
+          type: 'string',
+          description: 'Optional mission ID. If omitted, watches the current stored mission.',
+        },
+        packetId: {
+          type: 'string',
+          description: 'Optional packet ID. When set, returns when this specific packet hits a terminal state.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Max time to wait in ms. Default 600000 (10 min); capped at 1800000 (30 min).',
+        },
+        pollIntervalMs: {
+          type: 'number',
+          description: 'Poll interval in ms. Default 3000ms; minimum 1000ms.',
+        },
+      },
+    },
+  },
+  {
     name: 'submit_review',
     description:
       'Record review findings for a completed packet. Findings are relayed to downstream dependent packets. Example: submit_review({packetId: "pkt-abc", approved: true, findings: [{file: "src/foo.ts", severity: "warning", description: "CSS shorthand used", resolution: "Use paddingTop/paddingLeft"}]})',
@@ -297,6 +323,99 @@ export async function handleGetMissionStatus(args: Record<string, unknown>): Pro
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_mission_status failed: ${errorText(error)}`);
     return textResult(`Failed to read mission status: ${errorText(error)}`, true);
+  }
+}
+
+// Packet states that indicate Codex (or any runtime) is done with this
+// packet — either ready for human/orchestrator review, merged, or failed.
+// `running`, `queued`, and `blocked` are NOT terminal.
+const PACKET_TERMINAL_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived']);
+
+interface MinimalMissionPacket {
+  id?: string;
+  status?: string;
+  releaseState?: string;
+  blockedBy?: unknown;
+}
+
+interface MinimalMissionStatusShape {
+  packets?: MinimalMissionPacket[];
+  currentWave?: number;
+  totalWaves?: number;
+}
+
+function packetSignature(packets: MinimalMissionPacket[] | undefined): string {
+  if (!Array.isArray(packets)) return '';
+  return packets
+    .map((p) => `${p.id ?? ''}:${p.status ?? ''}:${p.releaseState ?? ''}`)
+    .sort()
+    .join(',');
+}
+
+function findTerminalPacket(
+  status: MinimalMissionStatusShape,
+  packetIdFilter: string | null,
+): MinimalMissionPacket | null {
+  const packets = status.packets ?? [];
+  for (const p of packets) {
+    if (packetIdFilter && p.id !== packetIdFilter) continue;
+    if (typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status)) {
+      return p;
+    }
+  }
+  return null;
+}
+
+export async function handleWaitForMissionReady(args: Record<string, unknown>): Promise<McpToolResult> {
+  const TIMEOUT_DEFAULT_MS = 10 * 60 * 1000;
+  const TIMEOUT_MAX_MS = 30 * 60 * 1000;
+  const POLL_DEFAULT_MS = 3000;
+  const POLL_MIN_MS = 1000;
+
+  const missionId = optionalString(args, 'missionId') || undefined;
+  const packetIdFilter = optionalString(args, 'packetId') || null;
+  const timeoutInput = typeof args.timeoutMs === 'number' ? args.timeoutMs : TIMEOUT_DEFAULT_MS;
+  const timeoutMs = Math.max(1000, Math.min(TIMEOUT_MAX_MS, timeoutInput));
+  const pollInput = typeof args.pollIntervalMs === 'number' ? args.pollIntervalMs : POLL_DEFAULT_MS;
+  const pollIntervalMs = Math.max(POLL_MIN_MS, pollInput);
+
+  try {
+    const baseline = (await getMissionStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
+
+    // If a terminal state already exists at baseline, return immediately so
+    // the caller never blocks unnecessarily.
+    const baselineTerminal = findTerminalPacket(baseline, packetIdFilter);
+    if (baselineTerminal) {
+      return jsonResult({ ...baseline, wakeReason: 'already-terminal', terminalPacketId: baselineTerminal.id ?? null });
+    }
+
+    const baselineSig = packetSignature(baseline.packets);
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      // Sleep first — we just fetched baseline, no point hitting again on tick 0.
+      const remaining = deadline - Date.now();
+      const wait = Math.min(pollIntervalMs, Math.max(0, remaining));
+      if (wait > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, wait));
+      }
+      if (Date.now() >= deadline) break;
+
+      const next = (await getMissionStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
+      const terminal = findTerminalPacket(next, packetIdFilter);
+      if (terminal) {
+        return jsonResult({ ...next, wakeReason: 'state-change', terminalPacketId: terminal.id ?? null });
+      }
+      if (packetSignature(next.packets) !== baselineSig) {
+        return jsonResult({ ...next, wakeReason: 'state-change', terminalPacketId: null });
+      }
+    }
+
+    const finalSnapshot = (await getMissionStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
+    return jsonResult({ ...finalSnapshot, wakeReason: 'timeout', terminalPacketId: null });
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} wait_for_mission_ready failed: ${errorText(error)}`);
+    return textResult(`Failed to wait for mission: ${errorText(error)}`, true);
   }
 }
 

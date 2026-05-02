@@ -31,6 +31,7 @@ import {
   handleResetPacket,
   handleReviewState,
   handleSubmitReview,
+  handleWaitForMissionReady,
 } from '@/lib/mcp/operator-handlers/mission';
 import {
   type McpTool,
@@ -250,6 +251,7 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((t) => t.name === 'create_mission'),
   ...MISSION_TOOLS.filter((t) => t.name === 'dispatch_mission'),
   ...MISSION_TOOLS.filter((t) => t.name === 'get_mission_status'),
+  ...MISSION_TOOLS.filter((t) => t.name === 'wait_for_mission_ready'),
   ...MISSION_TOOLS.filter((t) => t.name === 'submit_review'),
   ...APPROVE_TOOLS.filter((t) => t.name === 'approve_and_merge'),
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_merge_preview'),
@@ -272,6 +274,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,
   get_mission_status: handleGetMissionStatus,
+  wait_for_mission_ready: handleWaitForMissionReady,
   submit_review: handleSubmitReview,
   approve_and_merge: handleApproveAndMerge,
   o8_merge_preview: handleMergePreview,
