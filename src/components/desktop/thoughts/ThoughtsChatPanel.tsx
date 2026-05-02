@@ -45,7 +45,11 @@ import { IntentChips } from '@/components/desktop/orchestrator/IntentChips';
 import { ModePicker, loadOrchestrationMode, persistOrchestrationMode, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
 import { WaitingFooter } from '@/components/desktop/orchestrator/WaitingFooter';
 import { getChatModelOption, loadChatModelChoice, type ChatModelId } from '@/components/desktop/orchestrator/chat-models';
-import { sendChatMessage } from '@/components/desktop/orchestrator/send-chat-message';
+import {
+  createChatAssistantEntry,
+  createChatUserEntry,
+  sendChatMessage,
+} from '@/components/desktop/orchestrator/send-chat-message';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
@@ -878,15 +882,40 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     const msg = (explicitText ?? input).trim();
     if (!msg) return;
 
-    const effectiveWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
+    const effectiveWaiting = isChatMode ? waitingForReply : isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
     if (effectiveWaiting) return;
 
     if (isChatMode) {
       setInput('');
       latestInputRef.current = '';
-      const entries = await sendChatMessage(msg, selectedChatModel);
-      setChatMessages((prev) => [...prev, ...entries]);
+      const userEntry = createChatUserEntry(msg);
+      const assistantEntry = createChatAssistantEntry(selectedChatModel, (userEntry.timestamp ?? Date.now()) + 1);
+      let assistantText = '';
+      setChatMessages((prev) => [...prev, userEntry, assistantEntry]);
       clearAttachments();
+      setWaitingForReply(true);
+      try {
+        await sendChatMessage({
+          history: chatMessages,
+          message: msg,
+          modelChoice: selectedChatModel,
+          onDelta: (text) => {
+            assistantText += text;
+            setChatMessages((prev) => prev.map((entry) => (
+              entry.id === assistantEntry.id ? { ...entry, text: assistantText } : entry
+            )));
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Chat request failed.';
+        setChatMessages((prev) => prev.map((entry) => (
+          entry.id === assistantEntry.id
+            ? { ...entry, text: assistantText ? `${assistantText}\n\n${message}` : message }
+            : entry
+        )));
+      } finally {
+        setWaitingForReply(false);
+      }
       return;
     }
 
@@ -948,13 +977,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [captureServerSnapshot, clearAttachments, input, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, selectedChatModel, startPolling, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
+  }, [captureServerSnapshot, chatMessages, clearAttachments, input, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, selectedChatModel, startPolling, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
     if (!msg) return;
 
     if (isChatMode) {
+      if (waitingForReply) return;
       setInput(msg);
       latestInputRef.current = msg;
       setTimeout(() => { void handleTaskSend(msg); }, 0);
@@ -980,7 +1010,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
-  }, [clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort]);
+  }, [clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, waitingForReply]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 

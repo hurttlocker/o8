@@ -25,7 +25,8 @@ import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-ope
 import { ChatModelPicker } from './ChatModelPicker';
 import { getChatModelOption, type ChatModelId } from './chat-models';
 
-export type { OrchestrationMode };
+export type { ChatModelId, OrchestrationMode };
+export { CHAT_MODEL_OPTIONS } from './chat-models';
 
 interface ModePickerProps {
   visible: boolean;
