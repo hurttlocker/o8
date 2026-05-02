@@ -50,6 +50,7 @@ import { useClearCommand } from './chat-panel/useClearCommand';
 import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadNotice';
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
+import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
 import type {
   ThoughtsChatPanelChromeState,
   ThoughtsChatPanelHandle,
@@ -217,6 +218,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
   const { persistThread, persistThreadNow, cancelPendingPersist } = usePersistChatThread(resolvedRepoPath);
   const thinkingEffort: ThinkingEffort = thinkingOverride ?? (adaptiveThinkingEnabled ? 'adaptive' : 'max');
+  const {
+    attachedImages,
+    attachedFiles,
+    dragOver: attachmentDragOver,
+    dragHandlers: attachmentDragHandlers,
+    processFiles: processAttachmentFiles,
+    removeAttachedImage,
+    removeAttachedFile,
+    clearAttachments,
+  } = useThoughtsComposerAttachments();
 
   const isOrchestratorMode = targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey);
 
@@ -876,6 +887,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
     if (isOrchestratorMode) {
       orchStream.send(msg, { permissionMode, thinkingEffort, model: orchestratorModel });
+      clearAttachments();
       return;
     }
 
@@ -887,6 +899,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
     setChatMessages((prev) => [...prev, userMsg]);
+    clearAttachments();
 
     const sessionKey = targetSessionKey;
     if (!sessionKey) return;
@@ -923,7 +936,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [captureServerSnapshot, input, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, startPolling, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
+  }, [captureServerSnapshot, clearAttachments, input, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, startPolling, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -940,6 +953,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setInput('');
         latestInputRef.current = '';
         orchStream.send(msg, { permissionMode, thinkingEffort, model: orchestratorModel });
+        clearAttachments();
       })();
       return;
     }
@@ -947,7 +961,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
-  }, [handleTaskSend, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort]);
+  }, [clearAttachments, handleTaskSend, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
@@ -1046,27 +1060,41 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         </div>
       ) : null}
 
-      <ChatMessageList
-        ref={chatEndRef}
-        displayMessages={displayMessages}
-        displayWaiting={displayWaiting}
-        repoPath={resolvedRepoPath}
-        activeTargetLabel={activeTargetLabel}
-        activeTargetColor={activeTargetColor}
-        thoughtsBodyBackground={thoughtsBodyBackground}
-        thoughtsMutedGlass={thoughtsMutedGlass}
-        thoughtsElevatedBorder={thoughtsElevatedBorder}
-        thoughtsElevatedShadow={thoughtsElevatedShadow}
-        emptyStateOverride={emptyStateOverride}
-        emptyStateFallback={fallbackEmptyState}
-        topContent={transcriptTopContent}
-        isOrchestratorMode={isOrchestratorMode}
-        suggestedReplyMessageId={suggestedReplyMessageId}
-        suggestedReplies={chipsForLastAssistant}
-        suggestedRepliesPending={suggestedRepliesPending}
-        onSelectSuggestion={(chip) => { sendNow(chip); }}
-        onDismissSuggestions={dismissSuggestedReplies}
-      />
+      <div
+        onDragOver={attachmentDragHandlers.onDragOver}
+        onDragLeave={attachmentDragHandlers.onDragLeave}
+        onDrop={attachmentDragHandlers.onDrop}
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flex: 1,
+          minHeight: 0,
+          outline: attachmentDragOver ? '2px solid var(--t-accent)' : 'none',
+          outlineOffset: -2,
+        }}
+      >
+        <ChatMessageList
+          ref={chatEndRef}
+          displayMessages={displayMessages}
+          displayWaiting={displayWaiting}
+          repoPath={resolvedRepoPath}
+          activeTargetLabel={activeTargetLabel}
+          activeTargetColor={activeTargetColor}
+          thoughtsBodyBackground={thoughtsBodyBackground}
+          thoughtsMutedGlass={thoughtsMutedGlass}
+          thoughtsElevatedBorder={thoughtsElevatedBorder}
+          thoughtsElevatedShadow={thoughtsElevatedShadow}
+          emptyStateOverride={emptyStateOverride}
+          emptyStateFallback={fallbackEmptyState}
+          topContent={transcriptTopContent}
+          isOrchestratorMode={isOrchestratorMode}
+          suggestedReplyMessageId={suggestedReplyMessageId}
+          suggestedReplies={chipsForLastAssistant}
+          suggestedRepliesPending={suggestedRepliesPending}
+          onSelectSuggestion={(chip) => { sendNow(chip); }}
+          onDismissSuggestions={dismissSuggestedReplies}
+        />
+      </div>
 
       <ChatToastStack
         reloadNotice={reloadNotice}
@@ -1128,6 +1156,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
         footerMeterSlot={footerMeterSlot}
+        attachedImages={attachedImages}
+        attachedFiles={attachedFiles}
+        dragOver={attachmentDragOver}
+        dragHandlers={attachmentDragHandlers}
+        onAttachedImageRemove={removeAttachedImage}
+        onAttachedFileRemove={removeAttachedFile}
+        onUploadDiskFiles={processAttachmentFiles}
+        repoPath={resolvedRepoPath}
       />
     </>
   );
