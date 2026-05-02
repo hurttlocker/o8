@@ -47,8 +47,10 @@
     "sign-and-notarize": "node scripts/sign-and-notarize.mjs"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^3.0.109",
     "@assistant-ui/react": "^0.12.22",
     "@chenglou/pretext": "^0.0.3",
+    "@clerk/nextjs": "^7.3.0",
     "@json-render/core": "^0.14.0",
     "@json-render/react": "^0.14.0",
     "@json-render/shadcn": "^0.14.0",
@@ -72,6 +74,7 @@
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^5.5.0",
     "adm-zip": "^0.5.16",
+    "ai": "^6.0.174",
     "better-sqlite3": "^12.8.0",
     "drizzle-orm": "^0.45.1",
     "framer-motion": "^12.36.0",
