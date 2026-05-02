@@ -55,12 +55,10 @@ import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/c
 import { ThoughtsMissionPanel } from '@/components/desktop/thoughts/ThoughtsMissionPanel';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
 import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
-import { SessionVisualizer } from '@/components/desktop/SessionVisualizer';
 import { SessionTileSurface } from './SessionTileSurface';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
 // Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
 // row. The old layout component is no longer imported here.
-import { WorkspaceRecallStrip } from './WorkspaceRecallStrip';
 
 interface OrchestratorTabProps {
   tabId: string;
@@ -251,6 +249,31 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
   const [agentsOpen, setAgentsOpen] = useState(() => readBooleanPref(AGENTS_OPEN_KEY));
   const [missionOpen, setMissionOpen] = useState(() => readBooleanPref(MISSION_OPEN_KEY));
+  // Auto-collapse mission sidebar when the tab is in a narrow split pane —
+  // 340px sidebar + chat body needs ~380px to stay readable. Below 720px we
+  // hide the sidebar without touching the user's stored preference, so it
+  // reappears when the pane is widened.
+  const [containerWidth, setContainerWidth] = useState<number>(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 1280,
+  );
+  const outerContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = outerContainerRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  // Below this width the 340px mission sidebar pushes the chat body under
+  // ~660px and the recent-work list visibly clips. Anything at or below
+  // typical split sizes (~900px) should hide the sidebar — un-split full
+  // workspaces sit ~1300px so they stay above the threshold.
+  const MISSION_AUTO_COLLAPSE_PX = 1000;
+  const effectiveMissionOpen = missionOpen && containerWidth >= MISSION_AUTO_COLLAPSE_PX;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
@@ -533,12 +556,58 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   const thoughtsElevatedBorder = '1px solid var(--t-glass-border-strong)';
   const thoughtsElevatedShadow = 'var(--t-glass-shadow)';
   const thoughtsMutedGlass = 'var(--t-glass-muted-strong)';
-  const headerChipStyle = {
-    height: 26, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 9, borderRadius: 8, borderWidth: 1, borderStyle: 'solid',
-    borderColor: 'var(--t-border)', color: 'var(--t-text-muted)', display: 'inline-flex', alignItems: 'center',
-    fontSize: 12, fontWeight: 500, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-  } as const;
 
+  const composerLeadingExtras = (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <ThreadsDropdown
+        historyOpen={historyOpen}
+        agentsOpen={agentsOpen}
+        missionOpen={effectiveMissionOpen}
+        onToggleHistory={handleToggleHistory}
+        onToggleAgents={handleToggleAgents}
+        onToggleMission={handleToggleMission}
+      />
+      {hasMessages ? (
+        <button
+          type="button"
+          onClick={handleHeaderCopyMarkdown}
+          title={
+            exportState === 'error' ? 'Copy failed — clipboard permission denied'
+              : exportState === 'copied' ? 'Copied transcript'
+              : 'Copy transcript as Markdown'
+          }
+          style={{
+            height: 26, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 9, borderRadius: 8, borderWidth: 1, borderStyle: 'solid',
+            borderColor: exportState === 'error' ? 'rgba(239, 68, 68, 0.32)' : 'var(--t-border)',
+            background: 'transparent',
+            color: exportState === 'error' ? '#ef4444' : exportState === 'copied' ? 'var(--t-accent)' : 'var(--t-text-muted)',
+            cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+            fontSize: 12, fontWeight: 500,
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            flexShrink: 0,
+          }}
+        >
+          {exportState === 'copied' ? 'Copied' : exportState === 'error' ? 'Copy failed' : 'Copy'}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => { void handleNewConversation(); }}
+        title="New thread"
+        style={{
+          height: 26, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 9, borderRadius: 8, borderWidth: 1, borderStyle: 'solid',
+          borderColor: 'var(--t-border)', background: 'transparent', color: 'var(--t-text-muted)',
+          cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontSize: 12, fontWeight: 500,
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          flexShrink: 0,
+        }}
+      >
+        <PlusIcon size={11} />
+        <span>New</span>
+      </button>
+    </div>
+  );
 
   const isFullAccess = permissionMode === 'full';
 
@@ -578,7 +647,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
       thoughtsMutedGlass={thoughtsMutedGlass}
       permissionMode={permissionMode}
       onTogglePermission={handleTogglePermission}
-      missionOpen={missionOpen}
+      missionOpen={effectiveMissionOpen}
       onToggleMission={handleToggleMission}
       repoLabel={repoLabel}
       emptyStateOverride={emptyStateNode}
@@ -590,6 +659,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
           onClick={handleToggleContextInspector}
         />
       )}
+      composerLeadingExtras={composerLeadingExtras}
       onMissionStateChange={data.onMissionStateChange}
       onLaunchPacket={data.onLaunchPacket}
       onChromeChange={setChatChromeState}
@@ -598,6 +668,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
 
   return (
     <div
+      ref={outerContainerRef}
       style={{
         flex: 1,
         display: active ? 'flex' : 'none',
@@ -635,79 +706,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
           </svg>
           Read-only mode — Claude will inspect but cannot modify files or run side-effecting commands.
         </div>
-      ) : null}
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 32, paddingTop: 3, paddingRight: 12, paddingBottom: 3, paddingLeft: 12, borderBottomWidth: '0.5px', borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)', background: 'transparent', flexShrink: 0, justifyContent: 'flex-end' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          {hasMessages ? (
-            <button
-              type="button"
-              onClick={() => { void handleHeaderCopyMarkdown(); }}
-              aria-label="Copy thread as Markdown"
-              title={exportState === 'copied' ? 'Copied' : 'Copy thread as Markdown'}
-              style={{
-                ...headerChipStyle,
-                background: 'transparent',
-                gap: 6,
-                cursor: 'pointer',
-                flexShrink: 0,
-                borderColor: exportState === 'copied' ? 'var(--t-accent-border)' : 'var(--t-border)',
-                color: exportState === 'copied' ? 'var(--t-accent)' : 'var(--t-text-muted)',
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <rect x="9" y="9" width="11" height="11" rx="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-              <span>{exportState === 'copied' ? 'Copied' : 'Copy'}</span>
-            </button>
-          ) : null}
-          <ThreadsDropdown
-            historyOpen={historyOpen}
-            agentsOpen={agentsOpen}
-            missionOpen={missionOpen}
-            contextOpen={Boolean(residency?.isOpen)}
-            onToggleHistory={handleToggleHistory}
-            onToggleAgents={handleToggleAgents}
-            onToggleMission={handleToggleMission}
-            onToggleContext={residency ? handleToggleContextInspector : undefined}
-          />
-
-          {hasMessages ? (
-            <button
-              type="button"
-              onClick={handleNewConversation}
-              aria-label="Start a new orchestrator thread"
-              title="Start a new orchestrator thread"
-              style={{
-                background: 'transparent',
-                gap: 6,
-                cursor: 'pointer',
-                flexShrink: 0,
-                ...headerChipStyle,
-              }}
-            >
-              <PlusIcon size={13} />
-              <span>New thread</span>
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      {/* #966 — Ambient recall strip: top-3 directives for active workspace */}
-      <WorkspaceRecallStrip repoPath={repoPath ?? null} />
-
-      {/* Sessions strip — pills for active agents. Right-click to split a
-          transcript into a tile beside the chat (issue #663). */}
-      {agents.length > 0 ? (
-        <SessionVisualizer
-          agents={agents}
-          tiledSessions={sessionTiles.tiledSessions}
-          onSelectSession={data.onSelectSession}
-          onToggleTileSession={sessionTiles.toggleTileSession}
-          onClearTiles={sessionTiles.clearAllTiles}
-          onRequestContextMenu={sessionTiles.requestPillContextMenu}
-        />
       ) : null}
 
       {readyComparisonGroups.length > 0 ? (
@@ -790,9 +788,9 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
         {/* Right: mission control sidebar */}
         <div
           style={{
-            width: missionOpen ? 340 : 0,
-            minWidth: missionOpen ? 340 : 0,
-            borderLeftWidth: missionOpen ? 1 : 0,
+            width: effectiveMissionOpen ? 340 : 0,
+            minWidth: effectiveMissionOpen ? 340 : 0,
+            borderLeftWidth: effectiveMissionOpen ? 1 : 0,
             borderLeftStyle: 'solid',
             borderLeftColor: 'var(--t-divider-subtle)',
             display: 'flex',
@@ -803,7 +801,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
             background: 'var(--t-chat-surface-bg, #ffffff)',
           }}
         >
-          {missionOpen ? (
+          {effectiveMissionOpen ? (
             <ThoughtsMissionPanel
               open
               visible
