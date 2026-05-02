@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-02
+
+- `c83eebfa` feat(orchestrator): wire useFileDrop into ComposerArea
+
 ## 2026-05-01
 
 - `6cae523e` feat: auto-release merged review packets
