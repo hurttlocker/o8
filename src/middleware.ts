@@ -18,6 +18,7 @@
  * public read endpoint, add it to ALLOWLIST_PATHS below.
  */
 
+import { clerkMiddleware } from '@clerk/nextjs/server';
 import { NextResponse, type NextRequest } from 'next/server';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -119,6 +120,9 @@ const GATED_PREFIXES = [
   '/api/claude-code/',
   '/api/codex/',
   '/api/operator/',
+  // Orchestrator chat backend is local-gated here and Clerk-authenticated in
+  // the route handler.
+  '/api/v2/chat',
   // Cortex memory/directive surface — local-only by design. Even read-only
   // endpoints leak operator preferences and repo names; gate them too.
   '/api/cortex/',
@@ -199,7 +203,12 @@ function isWorkerRoute(pathname: string): boolean {
   return WORKER_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
-export function middleware(req: NextRequest): NextResponse {
+function optionalEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value || undefined;
+}
+
+function panelGateMiddleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
   const method = req.method.toUpperCase();
 
@@ -244,3 +253,8 @@ export function middleware(req: NextRequest): NextResponse {
     { status: 401 },
   );
 }
+
+export default clerkMiddleware((_auth, req) => panelGateMiddleware(req), {
+  publishableKey: optionalEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY') ?? optionalEnv('CLERK_PUBLISHABLE_KEY'),
+  secretKey: optionalEnv('CLERK_SECRET_KEY'),
+});
