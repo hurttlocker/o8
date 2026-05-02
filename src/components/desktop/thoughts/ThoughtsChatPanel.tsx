@@ -130,6 +130,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   emptyStateOverride?: React.ReactNode;
   showInlineExport?: boolean;
   footerMeterSlot?: React.ReactNode;
+  composerLeadingExtras?: React.ReactNode;
   onMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
@@ -157,6 +158,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   emptyStateOverride,
   showInlineExport = true,
   footerMeterSlot,
+  composerLeadingExtras,
   onChromeChange,
 }, ref) {
   const [input, setInput] = useState('');
@@ -927,7 +929,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput('');
 
     if (isOrchestratorMode) {
-      orchStream.send(msg, { permissionMode, thinkingEffort, model: orchestratorModel });
+      const attachments = attachedImages.length > 0
+        ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
+        : undefined;
+      orchStream.send(msg, {
+        permissionMode,
+        thinkingEffort,
+        model: orchestratorModel,
+        ...(attachments ? { attachments } : {}),
+      });
       clearAttachments();
       return;
     }
@@ -1001,7 +1011,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         }
         setInput('');
         latestInputRef.current = '';
-        orchStream.send(msg, { permissionMode, thinkingEffort, model: orchestratorModel });
+        const attachments = attachedImages.length > 0
+          ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
+          : undefined;
+        orchStream.send(msg, {
+          permissionMode,
+          thinkingEffort,
+          model: orchestratorModel,
+          ...(attachments ? { attachments } : {}),
+        });
         clearAttachments();
       })();
       return;
@@ -1207,6 +1225,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
         footerMeterSlot={footerMeterSlot}
+        composerLeadingExtras={composerLeadingExtras}
         attachedImages={attachedImages}
         attachedFiles={attachedFiles}
         dragOver={attachmentDragOver}
