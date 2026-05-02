@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-02
 
+- `b7e0affe` feat(o8-panel): restore Pulse tab — live fleet temperature surface
 - `8319ee71` feat(orchestrator): composer footer threads/copy/new + thinking <details> popover
 - `3a44bba7` feat: stream orchestrator chat from gateway
 - `5e28f087` feat: add clerk gated chat route
