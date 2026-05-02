@@ -17,7 +17,7 @@
     "typecheck": "rm -rf .next/types .next/dev/types && next typegen && tsc --noEmit",
     "rule-check": "tsx scripts/rule-check.ts",
     "eval:qa": "tsx src/lib/cortex/qa/eval/runner.ts",
-    "smoke:qa": "node --import ./scripts/register-server-only-stub.mjs ./node_modules/tsx/dist/cli.mjs tests/qa-eval/smoke.ts",
+    "smoke:qa": "NODE_OPTIONS=\"--import=./scripts/register-server-only-stub.mjs\" tsx tests/qa-eval/smoke.ts",
     "validate:qa-cases": "tsx scripts/validate-qa-cases.ts",
     "smoke": "node scripts/smoke.mjs",
     "seed:demo": "node scripts/seed-demo-state.mjs",
