@@ -9,6 +9,13 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-02
 
+- `8319ee71` feat(orchestrator): composer footer threads/copy/new + thinking <details> popover
+- `3a44bba7` feat: stream orchestrator chat from gateway
+- `5e28f087` feat: add clerk gated chat route
+- `54771cb9` feat: add chat gateway server helpers
+- `daa4cef7` feat: route orchestrator chat mode locally
+- `22273536` feat: add chat mode card
+- `d937e6c1` feat: add orchestrator chat model picker
 - `7a4b4fb8` feat(mcp): wait_for_mission_ready
 - `c83eebfa` feat(orchestrator): wire useFileDrop into ComposerArea
 
