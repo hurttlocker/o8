@@ -214,6 +214,7 @@ interface ComposerAreaProps {
   onAttachedFileRemove?: (fileName: string) => void;
   onUploadDiskFiles?: (files: FileList | File[]) => void;
   repoPath?: string | null;
+  composerLeadingExtras?: React.ReactNode;
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
@@ -252,6 +253,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onAttachedFileRemove,
   onUploadDiskFiles,
   repoPath,
+  composerLeadingExtras,
 }, inputRef) {
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
@@ -647,9 +649,12 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         </div>
       </div>
 
-      {footerLeadingSlot || footerMeterSlot ? (
+      {footerLeadingSlot || composerLeadingExtras || footerMeterSlot ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, paddingLeft: 2, paddingRight: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>{footerLeadingSlot}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            {footerLeadingSlot}
+            {composerLeadingExtras}
+          </div>
           {tokenEstimate || footerMeterSlot ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, minWidth: 0, flexWrap: 'wrap' }}>
               {tokenEstimate ? (

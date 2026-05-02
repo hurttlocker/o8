@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { AttachFilesButton } from './AttachFilesButton';
 import { SparklesIcon } from './ThoughtsIcons';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -16,15 +17,14 @@ const EFFORT_DOT: Record<ThinkingEffort, string> = {
   low: 'var(--t-text-faint)',
   medium: 'var(--t-text-muted)',
   high: 'var(--t-text-muted)',
-  max: 'var(--t-text)',
-  xhigh: '#FF5A1F',
+  max: '#FF5A1F',
+  xhigh: 'var(--t-text)',
 };
 
 /**
- * Thinking effort control — matches the ContextMeter pill aesthetic.
- * Transparent background, hairline border, monospace, subtle status dot
- * on the left. Click to open the native dropdown (keeps it a single
- * focusable surface without a popover menu).
+ * Thinking effort control — Rams pill matching ThreadsDropdown aesthetic.
+ * <details>-based popover that opens UPWARD (bottom: 30) so it never
+ * collides with the bottom edge of the composer.
  */
 export function ThinkingChip({
   effort = 'adaptive',
@@ -35,62 +35,88 @@ export function ThinkingChip({
   adaptiveEnabled?: boolean;
   onChange?: (next: ThinkingEffort) => void;
 }) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
   const label = EFFORT_LABELS[effort];
   const dotColor = EFFORT_DOT[effort];
   const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
 
-  return (
-    <label
-      title={`Thinking ${label}`}
-      style={{
-        position: 'relative',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        height: 26,
-        paddingLeft: 8,
-        paddingRight: 8,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-border)',
-        background: 'transparent',
-        color: 'var(--t-text-muted)',
-        cursor: 'pointer',
-        minWidth: 0,
-        fontSize: 11.5,
-        fontWeight: 400,
-        letterSpacing: '0.01em',
-        whiteSpace: 'nowrap',
-        fontVariantNumeric: 'tabular-nums',
-        fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
-      }}
-    >
-      <span
-        aria-hidden="true"
+  const menuItem = (option: ThinkingEffort) => {
+    const active = option === effort;
+    return (
+      <button
+        key={option}
+        type="button"
+        onClick={() => { detailsRef.current?.removeAttribute('open'); onChange?.(option); }}
         style={{
-          width: 6,
-          height: 6,
-          borderRadius: 999,
-          flexShrink: 0,
-          background: dotColor,
+          height: 28, paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10, borderWidth: 0,
+          background: active ? 'var(--t-accent-soft)' : 'transparent',
+          color: active ? 'var(--t-accent)' : 'var(--t-text)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          cursor: 'pointer', fontSize: 12, fontWeight: 400,
+          fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
         }}
-      />
-      <span style={{ color: 'var(--t-text-muted)' }}>thinking</span>
-      <span style={{ color: 'var(--t-text)' }}>{label}</span>
-      <select
-        value={effort}
-        onChange={(event) => onChange?.(event.target.value as ThinkingEffort)}
-        aria-label="Thinking effort"
-        style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
       >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {EFFORT_LABELS[option]}
-          </option>
-        ))}
-      </select>
-    </label>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span
+            aria-hidden="true"
+            style={{ width: 6, height: 6, borderRadius: 999, background: EFFORT_DOT[option] }}
+          />
+          <span>{EFFORT_LABELS[option]}</span>
+        </span>
+        {active ? <span style={{ fontSize: 11, color: 'var(--t-accent)' }}>•</span> : null}
+      </button>
+    );
+  };
+
+  return (
+    <details ref={detailsRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <summary
+        title={`Thinking ${label}`}
+        style={{
+          listStyle: 'none',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          height: 26,
+          paddingLeft: 8,
+          paddingRight: 8,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'var(--t-border)',
+          background: 'transparent',
+          color: 'var(--t-text-muted)',
+          cursor: 'pointer',
+          minWidth: 0,
+          fontSize: 11.5,
+          fontWeight: 400,
+          letterSpacing: '0.01em',
+          whiteSpace: 'nowrap',
+          fontVariantNumeric: 'tabular-nums',
+          fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{ width: 6, height: 6, borderRadius: 999, flexShrink: 0, background: dotColor }}
+        />
+        <span style={{ color: 'var(--t-text-muted)' }}>thinking</span>
+        <span style={{ color: 'var(--t-text)' }}>{label}</span>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </summary>
+      <div
+        style={{
+          position: 'absolute', bottom: 30, left: 0, width: 156,
+          paddingTop: 4, paddingRight: 4, paddingBottom: 4, paddingLeft: 4,
+          borderRadius: 10, borderWidth: 1, borderStyle: 'solid',
+          borderColor: 'var(--t-border)', background: 'var(--t-panel)',
+          backdropFilter: 'blur(18px) saturate(1.3)', boxShadow: 'var(--t-panel-shadow)',
+          display: 'flex', flexDirection: 'column', gap: 2, zIndex: 20,
+        }}
+      >
+        {options.map((option) => menuItem(option))}
+      </div>
+    </details>
   );
 }
 
