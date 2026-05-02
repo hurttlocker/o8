@@ -160,8 +160,8 @@ export function readClaudeUsage(): CliUsage {
     return { runtime: 'claude', primary: null, secondary: null, source: null, available: false, error: 'no recent jsonl' };
   }
 
-  let fiveH = { input: 0, output: 0 };
-  let weekly = { input: 0, output: 0 };
+  const fiveH = { input: 0, output: 0 };
+  const weekly = { input: 0, output: 0 };
   let oldestTs = now;
 
   for (const file of files) {
