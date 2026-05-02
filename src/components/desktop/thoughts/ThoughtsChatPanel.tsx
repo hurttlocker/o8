@@ -703,7 +703,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // silent
       }
     })();
-  }, [isChatMode, isOrchestratorMode, orchStream.messages.length, orchStream.replaceTranscript, chatMessages.length]);
+  }, [chatMessages.length, isChatMode, isOrchestratorMode, orchStream]);
 
   const { showClearToast, handleClearCommand } = useClearCommand({
     isOrchestratorMode,
