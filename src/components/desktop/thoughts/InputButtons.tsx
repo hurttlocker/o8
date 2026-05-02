@@ -1,3 +1,4 @@
+import { AttachFilesButton } from './AttachFilesButton';
 import { SparklesIcon } from './ThoughtsIcons';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
@@ -118,6 +119,9 @@ export function InputButtons({
   repoLabel,
   working = false,
   onStop,
+  onUploadDiskFiles,
+  onFileReferenceSelect,
+  repoPath,
 }: {
   input: string;
   enhancing: boolean;
@@ -138,6 +142,9 @@ export function InputButtons({
   repoLabel?: string | null;
   working?: boolean;
   onStop?: () => void;
+  onUploadDiskFiles?: (files: FileList | File[]) => void;
+  onFileReferenceSelect?: (path: string) => void;
+  repoPath?: string | null;
 }) {
   const canSubmit = Boolean(input.trim());
   const effortCycle: ThinkingEffort[] = adaptiveEnabled
@@ -308,31 +315,11 @@ export function InputButtons({
 
       <div style={{ flex: 1 }} />
 
-      {/* Attach files placeholder */}
-      <button
-        type="button"
-        title="Attach files"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          borderRadius: 7,
-          borderWidth: 0,
-          background: 'transparent',
-          color: 'var(--t-text-muted)',
-          cursor: 'pointer',
-          fontSize: 16,
-          fontWeight: 300,
-          lineHeight: 1,
-          transition: 'color 120ms',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; }}
-      >
-        +
-      </button>
+      <AttachFilesButton
+        onUploadDiskFiles={onUploadDiskFiles}
+        onFileReferenceSelect={onFileReferenceSelect}
+        repoPath={repoPath}
+      />
 
       {/* Send — Rams pill matching ContextMeter/ThinkingChip aesthetic.
           Three states with 180ms morph: idle (hairline faint) → armed
