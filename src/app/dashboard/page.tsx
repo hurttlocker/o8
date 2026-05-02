@@ -29,7 +29,6 @@ import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import type { WorkspaceSidePanelRepo, WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
-import type { AmbientLinkedRef, AmbientSelectedFile } from '@/components/desktop/right-panel/useAmbientMode';
 import type { O8Tab } from '@/components/desktop/O8Panel';
 import {
   markDashboardScriptStart,
@@ -122,7 +121,6 @@ const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignMode
 const LazyWorkspaceSidePanel = lazy(() => import('@/components/desktop/WorkspaceSidePanel').then(m => ({ default: m.WorkspaceSidePanel })));
 const LazyO8Panel = lazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })));
 // #888/#895 — packet-mode right panel (Spec / Agent Overview / Changes).
-const LazyPacketRightPanel = lazy(() => import('@/components/desktop/PacketRightPanel').then(m => ({ default: m.PacketRightPanel })));
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
 import { TileContainer } from '@/components/desktop/TileContainer';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
@@ -241,8 +239,25 @@ function DashboardInner() {
     thoughtsMissionState,
   } = useOrchestratorMission();
   // ── Right panel + workspace side panel state (tightly coupled to callbacks, kept inline) ──
-  const [chatVisible, setChatVisible] = useState(true);
-  const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('review');
+  // SSR-safe defaults; hydrate from localStorage in an effect so the
+  // visibility/kind survives a reload but server and first client render
+  // match (no hydration mismatch).
+  const [chatVisible, setChatVisible] = useState(false);
+  const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('o8');
+  useEffect(() => {
+    try {
+      const visRaw = window.localStorage.getItem('o8:right-panel:visible');
+      const kindRaw = window.localStorage.getItem('o8:right-panel:kind');
+      if (visRaw === '1') setChatVisible(true);
+      if (kindRaw === 'o8' || kindRaw === 'review') setRightPanelKind(kindRaw);
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try { window.localStorage.setItem('o8:right-panel:visible', chatVisible ? '1' : '0'); } catch { /* ignore */ }
+  }, [chatVisible]);
+  useEffect(() => {
+    try { window.localStorage.setItem('o8:right-panel:kind', rightPanelKind); } catch { /* ignore */ }
+  }, [rightPanelKind]);
   const [rightWidth, setRightWidth] = useState(280);
   const [o8Width, setO8Width] = useState(700);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>('diff');
@@ -276,9 +291,6 @@ function DashboardInner() {
   // right-side workspace panel can flip into packet mode (Spec / Agent
   // Overview) when one is expanded. See `src/lib/panel/mode.ts`.
   const [selectedPacketId, setSelectedPacketId] = useState<string | null>(null);
-  const [rightPanelSelectedFile, setRightPanelSelectedFile] = useState<AmbientSelectedFile | null>(null);
-  const [rightPanelSelectedIssue, setRightPanelSelectedIssue] = useState<AmbientLinkedRef | null>(null);
-  const [rightPanelSelectedPR, setRightPanelSelectedPR] = useState<AmbientLinkedRef | null>(null);
   const lastMarkedWorkspaceReadRef = useRef<string>('');
 
   // ── Cmd+K command palette (#661) — full-screen overlay search across
@@ -1262,9 +1274,6 @@ function DashboardInner() {
   }, [parsedAgents, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
-    setRightPanelSelectedFile(null);
-    setRightPanelSelectedIssue({ id: issueNumber, repo: repo ?? null });
-    setRightPanelSelectedPR(null);
     setRightPanelKind('review');
     setChatVisible(true);
     openCanvasTab({
@@ -1304,9 +1313,6 @@ function DashboardInner() {
   }, [handleSelectSession]);
 
   const handleSelectPR = useCallback((prNumber: number, repo?: string) => {
-    setRightPanelSelectedFile(null);
-    setRightPanelSelectedIssue(null);
-    setRightPanelSelectedPR({ id: prNumber, repo: repo ?? null });
     setRightPanelKind('review');
     setChatVisible(true);
     openCanvasTab({
@@ -1857,9 +1863,6 @@ function DashboardInner() {
 
   const handleSelectFile = useCallback((filePath: string, workspace?: string) => {
     if (workspace) {
-      setRightPanelSelectedFile({ repoPath: workspace, filePath });
-      setRightPanelSelectedIssue(null);
-      setRightPanelSelectedPR(null);
       setRightPanelKind('review');
       setChatVisible(true);
     }
