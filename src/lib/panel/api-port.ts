@@ -4,10 +4,15 @@
  *
  * Resolution order (first match wins):
  *   1. Explicit env var: PORT, O8_API_PORT, CORTEX_IDE_PORT.
- *   2. `~/.o8/api-port` written by the Tauri Rust sidecar during
+ *   2. O8_DEV_FRONTEND_URL — when the prod app is launched in dev-bridge
+ *      mode, the URL it loads from is the same origin the dev server is
+ *      bound to. Parsing the port from it keeps ws-server/MCP/etc.
+ *      consistent with the running webview without requiring a duplicate
+ *      PORT/NEXT_ORIGIN env on every helper process.
+ *   3. `~/.o8/api-port` written by the Tauri Rust sidecar during
  *      startup (probe-from-3001-upward). Stale files are tolerated because
  *      the env var path wins when present.
- *   3. Legacy default 3001 so dev workflows (`npm run dev`) still work.
+ *   4. Legacy default 3001 so dev workflows (`npm run dev`) still work.
  *
  * This is the single source of truth for /api/setup/mcp-config,
  * /api/setup/claude-desktop, orchestrator-session.ts, and the MCP server.
@@ -54,6 +59,19 @@ function portFileMtime(name: string): number | null {
   }
 }
 
+function portFromDevFrontendUrl(): number | null {
+  const raw = process.env.O8_DEV_FRONTEND_URL?.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const port = parseInt(url.port, 10);
+    return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
 export function resolvePortInfo(): PortInfo {
   // 1) Env var wins. `PORT` comes from the Next.js process itself (bundled
   // server.js sets it). `O8_API_PORT` is set explicitly by the Rust sidecar
@@ -76,7 +94,19 @@ export function resolvePortInfo(): PortInfo {
     };
   }
 
-  // 2) Port file — cached by mtime.
+  // 2) Dev-bridge mode: when the prod app loads its webview from a dev
+  // server, O8_DEV_FRONTEND_URL is the source of truth for where the API
+  // is listening. ws-server / MCP / orchestrator-session all share this.
+  const devFrontendPort = portFromDevFrontendUrl();
+  if (devFrontendPort) {
+    return {
+      apiPort: devFrontendPort,
+      wsPort: wsFromEnv && Number.isFinite(wsFromEnv) ? wsFromEnv : 3002,
+      source: 'env',
+    };
+  }
+
+  // 3) Port file — cached by mtime.
   const apiMtime = portFileMtime('api-port');
   if (apiMtime != null && _cached && _cached.mtimeMs === apiMtime) {
     return _cached.info;
