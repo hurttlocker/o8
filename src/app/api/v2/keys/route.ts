@@ -57,6 +57,14 @@ const PROVIDERS: ProviderKeyConfig[] = [
     validateUrl: 'https://openrouter.ai/api/v1/models',
   },
   {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    envVar: 'DEEPSEEK_API_KEY',
+    placeholder: 'sk-...',
+    docsUrl: 'https://platform.deepseek.com/api_keys',
+    validateUrl: 'https://api.deepseek.com/models',
+  },
+  {
     id: 'anthropic',
     label: 'Anthropic',
     envVar: 'ANTHROPIC_API_KEY',
