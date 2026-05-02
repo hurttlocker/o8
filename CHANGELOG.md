@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-02
 
+- `7a4b4fb8` feat(mcp): wait_for_mission_ready
 - `c83eebfa` feat(orchestrator): wire useFileDrop into ComposerArea
 
 ## 2026-05-01
