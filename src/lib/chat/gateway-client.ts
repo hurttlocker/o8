@@ -34,12 +34,15 @@ function requiredEnv(name: string): string | null {
 }
 
 export function missingChatGatewayEnv(): string[] {
-  return [
+  const missing = [
     'VERCEL_AI_GATEWAY_API_KEY',
     'HELICONE_API_KEY',
     'CLERK_SECRET_KEY',
-    'CLERK_PUBLISHABLE_KEY',
   ].filter((name) => !requiredEnv(name));
+  if (!requiredEnv('CLERK_PUBLISHABLE_KEY') && !requiredEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY')) {
+    missing.push('CLERK_PUBLISHABLE_KEY');
+  }
+  return missing;
 }
 
 function parseRawEnvFile(filePath: string): Map<string, string> {

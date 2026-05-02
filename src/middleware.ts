@@ -203,6 +203,11 @@ function isWorkerRoute(pathname: string): boolean {
   return WORKER_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+function optionalEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value || undefined;
+}
+
 function panelGateMiddleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
   const method = req.method.toUpperCase();
@@ -249,4 +254,7 @@ function panelGateMiddleware(req: NextRequest): NextResponse {
   );
 }
 
-export default clerkMiddleware((_auth, req) => panelGateMiddleware(req));
+export default clerkMiddleware((_auth, req) => panelGateMiddleware(req), {
+  publishableKey: optionalEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY') ?? optionalEnv('CLERK_PUBLISHABLE_KEY'),
+  secretKey: optionalEnv('CLERK_SECRET_KEY'),
+});
