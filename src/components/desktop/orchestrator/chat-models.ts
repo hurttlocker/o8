@@ -1,6 +1,14 @@
-'use client';
+export type ChatModelBadge = 'FREE' | 'PREMIUM' | 'BYOK';
+export type ChatModelId = 'o8-default' | 'claude-max' | 'byo-key';
 
-export const CHAT_MODEL_OPTIONS = [
+export interface ChatModelOption {
+  id: ChatModelId;
+  label: string;
+  subtitle: string;
+  badge: ChatModelBadge;
+}
+
+export const CHAT_MODEL_OPTIONS: ChatModelOption[] = [
   {
     id: 'o8-default',
     label: 'o8 Default',
@@ -19,41 +27,37 @@ export const CHAT_MODEL_OPTIONS = [
     subtitle: 'Route through your own API key from Settings.',
     badge: 'BYOK',
   },
-] as const;
-
-export type ChatModelOption = (typeof CHAT_MODEL_OPTIONS)[number];
-export type ChatModelId = ChatModelOption['id'];
-export type ChatModelBadge = ChatModelOption['badge'];
+];
 
 export const DEFAULT_CHAT_MODEL_ID: ChatModelId = 'o8-default';
-
-function storageKey(workspaceKey: string): string {
-  return `cortex-ide:orchestrator:chat-model:${workspaceKey}`;
-}
-
-export function isChatModelId(value: string | null | undefined): value is ChatModelId {
-  return CHAT_MODEL_OPTIONS.some((option) => option.id === value);
-}
 
 export function getChatModelOption(id: ChatModelId): ChatModelOption {
   return CHAT_MODEL_OPTIONS.find((option) => option.id === id) ?? CHAT_MODEL_OPTIONS[0];
 }
 
+export function isChatModelId(value: string | null | undefined): value is ChatModelId {
+  return value === 'o8-default' || value === 'claude-max' || value === 'byo-key';
+}
+
+export function chatModelStorageKey(workspaceKey: string): string {
+  return `cortex-ide:orchestrator:chat-model:${workspaceKey}`;
+}
+
 export function loadChatModelChoice(workspaceKey: string): ChatModelId {
   if (typeof window === 'undefined') return DEFAULT_CHAT_MODEL_ID;
   try {
-    const stored = window.localStorage.getItem(storageKey(workspaceKey));
-    return isChatModelId(stored) ? stored : DEFAULT_CHAT_MODEL_ID;
+    const raw = window.localStorage.getItem(chatModelStorageKey(workspaceKey));
+    return isChatModelId(raw) ? raw : DEFAULT_CHAT_MODEL_ID;
   } catch {
     return DEFAULT_CHAT_MODEL_ID;
   }
 }
 
-export function persistChatModelChoice(workspaceKey: string, modelId: ChatModelId): void {
+export function persistChatModelChoice(workspaceKey: string, id: ChatModelId): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(storageKey(workspaceKey), modelId);
+    window.localStorage.setItem(chatModelStorageKey(workspaceKey), id);
   } catch {
-    // ignore quota / privacy mode
+    // ignore
   }
 }
