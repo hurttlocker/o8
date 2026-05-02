@@ -8,6 +8,7 @@ import type { ThoughtsChatPermissionMode } from './types';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 import { formatTokens } from '@/lib/util/format-tokens';
+import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useThoughtsComposerAttachments';
 
 const compactUsdFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -205,6 +206,14 @@ interface ComposerAreaProps {
   displayMessagesCount: number;
   hasAssistantActivity: boolean;
   footerMeterSlot?: React.ReactNode;
+  attachedImages?: ThoughtsAttachedImage[];
+  attachedFiles?: string[];
+  dragOver?: boolean;
+  dragHandlers?: ThoughtsComposerDragHandlers;
+  onAttachedImageRemove?: (index: number) => void;
+  onAttachedFileRemove?: (fileName: string) => void;
+  onUploadDiskFiles?: (files: FileList | File[]) => void;
+  repoPath?: string | null;
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
@@ -235,6 +244,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   displayMessagesCount,
   hasAssistantActivity,
   footerMeterSlot,
+  attachedImages = [],
+  attachedFiles = [],
+  dragOver = false,
+  dragHandlers,
+  onAttachedImageRemove,
+  onAttachedFileRemove,
+  onUploadDiskFiles,
+  repoPath,
 }, inputRef) {
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
@@ -288,6 +305,57 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     onInputChange(nextValue);
   };
 
+  const getInputNode = () => (
+    inputRef && typeof inputRef !== 'function' && 'current' in inputRef ? inputRef.current : null
+  );
+
+  const handleTextareaPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = event.clipboardData?.items;
+    if (!items || !onUploadDiskFiles) return;
+
+    const files: File[] = [];
+    for (let index = 0; index < items.length; index += 1) {
+      if (items[index].kind !== 'file') continue;
+      const file = items[index].getAsFile();
+      if (file) files.push(file);
+    }
+
+    if (files.length === 0) return;
+    event.preventDefault();
+    onUploadDiskFiles(files);
+  };
+
+  const handleFileReferenceSelect = (filePath: string) => {
+    const node = getInputNode();
+    const cursorPos = node?.selectionStart ?? input.length;
+    const textBeforeCursor = input.slice(0, cursorPos);
+    const textAfterCursor = input.slice(cursorPos);
+    const atMatch = textBeforeCursor.match(/@[\w./-]*$/);
+
+    let nextValue: string;
+    let nextCursorPos: number;
+    if (atMatch && typeof atMatch.index === 'number') {
+      const beforeMatch = textBeforeCursor.slice(0, atMatch.index);
+      nextValue = `${beforeMatch}@${filePath} ${textAfterCursor}`;
+      nextCursorPos = beforeMatch.length + filePath.length + 2;
+    } else {
+      const spacer = textBeforeCursor.length === 0 || /\s$/.test(textBeforeCursor) ? '' : ' ';
+      nextValue = `${textBeforeCursor}${spacer}@${filePath} ${textAfterCursor}`;
+      nextCursorPos = textBeforeCursor.length + spacer.length + filePath.length + 2;
+    }
+
+    updateInput(nextValue);
+    requestAnimationFrame(() => {
+      const nextNode = getInputNode();
+      nextNode?.focus();
+      if (!nextNode) return;
+      nextNode.selectionStart = nextCursorPos;
+      nextNode.selectionEnd = nextCursorPos;
+      nextNode.style.height = 'auto';
+      nextNode.style.height = `${Math.min(nextNode.scrollHeight, 200)}px`;
+    });
+  };
+
   const handleSelectSlashCommand = (definition: OrchestratorSlashCommandDefinition) => {
     setDismissedSlashInput(null);
     if (definition.requiresArgument) {
@@ -305,7 +373,10 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
 
   return (
     <div style={{
-      padding: '10px 12px 12px',
+      paddingTop: 10,
+      paddingRight: 12,
+      paddingBottom: 12,
+      paddingLeft: 12,
       borderTop: '1px solid var(--t-divider-subtle)',
       flexShrink: 0,
       background: thoughtsBodyBackground,
@@ -325,18 +396,146 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           onSelect={handleSelectSlashCommand}
         />
         <div
+          onDragOver={dragHandlers?.onDragOver}
+          onDragLeave={dragHandlers?.onDragLeave}
+          onDrop={dragHandlers?.onDrop}
           style={{
+            position: 'relative',
             borderRadius: 14,
             border: '1px solid var(--t-input-border)',
             background: 'var(--t-input-bg)',
             boxShadow: '0 14px 30px rgba(15, 23, 42, 0.08)',
             overflow: 'hidden',
             opacity: isDisabled ? 0.6 : 1,
+            outline: dragOver ? '2px solid var(--t-accent)' : 'none',
+            outlineOffset: -2,
           }}
         >
+          {attachedImages.length > 0 ? (
+            <div style={{
+              display: 'flex',
+              gap: 10,
+              paddingTop: 12,
+              paddingRight: 14,
+              paddingBottom: 6,
+              paddingLeft: 14,
+              overflowX: 'auto',
+            }}>
+              {attachedImages.map((image, index) => (
+                <div key={`${image.name}-${index}`} style={{ position: 'relative', width: 66, flexShrink: 0 }}>
+                  <img
+                    src={image.dataUri}
+                    alt={image.name}
+                    style={{
+                      display: 'block',
+                      width: 56,
+                      height: 56,
+                      objectFit: 'cover',
+                      borderRadius: 10,
+                      border: '1px solid var(--t-input-border)',
+                      background: 'var(--t-bg-card)',
+                    }}
+                  />
+                  <div style={{
+                    width: 60,
+                    marginTop: 4,
+                    color: 'var(--t-text-faint)',
+                    fontSize: 10,
+                    lineHeight: 1.15,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  }}>
+                    {image.name}
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${image.name}`}
+                    onClick={() => onAttachedImageRemove?.(index)}
+                    style={{
+                      position: 'absolute',
+                      top: -5,
+                      right: 4,
+                      width: 18,
+                      height: 18,
+                      borderRadius: 999,
+                      border: '1px solid var(--t-input-border)',
+                      background: 'var(--t-input-bg)',
+                      color: 'var(--t-text-muted)',
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      lineHeight: '16px',
+                      textAlign: 'center',
+                      paddingTop: 0,
+                      paddingRight: 0,
+                      paddingBottom: 0,
+                      paddingLeft: 0,
+                      boxShadow: 'var(--t-panel-shadow)',
+                    }}
+                  >
+                    x
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {attachedFiles.length > 0 ? (
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 6,
+              paddingTop: attachedImages.length > 0 ? 2 : 12,
+              paddingRight: 14,
+              paddingBottom: 6,
+              paddingLeft: 14,
+            }}>
+              {attachedFiles.map((fileName) => (
+                <span key={fileName} style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  maxWidth: '100%',
+                  paddingTop: 4,
+                  paddingRight: 7,
+                  paddingBottom: 4,
+                  paddingLeft: 8,
+                  borderRadius: 7,
+                  border: '1px solid var(--t-accent-border)',
+                  background: 'var(--t-accent-soft)',
+                  color: 'var(--t-accent)',
+                  fontSize: 11,
+                  fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
+                }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {fileName.split('/').pop()}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${fileName}`}
+                    onClick={() => onAttachedFileRemove?.(fileName)}
+                    style={{
+                      borderWidth: 0,
+                      background: 'transparent',
+                      color: 'var(--t-accent)',
+                      cursor: 'pointer',
+                      paddingTop: 0,
+                      paddingRight: 0,
+                      paddingBottom: 0,
+                      paddingLeft: 0,
+                      lineHeight: 1,
+                    }}
+                  >
+                    x
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+
           <textarea
             ref={inputRef}
-            className={isOrchestratorMode ? 'thoughts-orchestrate-input' : undefined}
             value={input}
             onChange={(event) => {
               updateInput(event.target.value);
@@ -393,6 +592,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 }
               }
             }}
+            onPaste={handleTextareaPaste}
             placeholder={
               isOrchestratorMode
                 ? 'Type a message...'
@@ -440,6 +640,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             repoLabel={isOrchestratorMode ? repoLabel : null}
             working={isOrchestratorMode && displayWaiting}
             onStop={isOrchestratorMode ? onStop : undefined}
+            onUploadDiskFiles={onUploadDiskFiles}
+            onFileReferenceSelect={handleFileReferenceSelect}
+            repoPath={repoPath}
           />
         </div>
       </div>
@@ -455,7 +658,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                   onClick={() => { footerMeterProps?.onClick?.(); }}
                   title={`Projected next turn: ${formatTokens(tokenEstimate.projectedTokens).replace(/K$/u, 'k')} tokens · ${tokenEstimate.projectedPercent}% of context`}
                   style={{
-                    padding: 0,
                     borderWidth: 0,
                     background: 'transparent',
                     color: tokenEstimate.warnAtContextThreshold ? '#FF5A1F' : 'var(--t-text-faint)',
@@ -469,6 +671,10 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                     whiteSpace: 'nowrap',
                     fontVariantNumeric: 'tabular-nums',
                     fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
+                    paddingTop: 0,
+                    paddingRight: 0,
+                    paddingBottom: 0,
+                    paddingLeft: 0,
                   }}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
