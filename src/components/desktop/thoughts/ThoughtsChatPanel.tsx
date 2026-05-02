@@ -231,7 +231,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   } = useThoughtsComposerAttachments();
 
   const isOrchestratorMode = targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey);
-  const isChatMode = orchestrationMode === 'chat';
+  const isChatMode = isOrchestratorMode && orchestrationMode === 'chat';
 
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
     seededPlanText: planText,
