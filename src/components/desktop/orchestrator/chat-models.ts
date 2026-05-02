@@ -1,5 +1,5 @@
-export type ChatModelBadge = 'FREE' | 'PREMIUM' | 'BYOK';
-export type ChatModelId = 'o8-default' | 'claude-max' | 'byo-key';
+export type ChatModelBadge = 'FREE' | 'BYOK';
+export type ChatModelId = 'o8-default' | 'byo-key';
 
 export interface ChatModelOption {
   id: ChatModelId;
@@ -12,19 +12,13 @@ export const CHAT_MODEL_OPTIONS: ChatModelOption[] = [
   {
     id: 'o8-default',
     label: 'o8 Default',
-    subtitle: 'Free, fast — great for chatting about o8 and quick questions.',
+    subtitle: 'DeepSeek V3.2 through o8 free tier.',
     badge: 'FREE',
-  },
-  {
-    id: 'claude-max',
-    label: 'Your Claude Max',
-    subtitle: 'Premium quality. Uses your Claude subscription.',
-    badge: 'PREMIUM',
   },
   {
     id: 'byo-key',
     label: 'Bring your own key',
-    subtitle: 'Route through your own API key from Settings.',
+    subtitle: 'Use your DeepSeek key from Settings.',
     badge: 'BYOK',
   },
 ];
@@ -36,7 +30,7 @@ export function getChatModelOption(id: ChatModelId): ChatModelOption {
 }
 
 export function isChatModelId(value: string | null | undefined): value is ChatModelId {
-  return value === 'o8-default' || value === 'claude-max' || value === 'byo-key';
+  return value === 'o8-default' || value === 'byo-key';
 }
 
 export function chatModelStorageKey(workspaceKey: string): string {

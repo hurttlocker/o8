@@ -21,13 +21,6 @@ function badgeTone(badge: ChatModelBadge): { background: string; borderColor: st
       color: 'var(--t-terminal-ansi-green)',
     };
   }
-  if (badge === 'PREMIUM') {
-    return {
-      background: 'var(--t-accent-soft)',
-      borderColor: 'var(--t-accent-border)',
-      color: 'var(--t-accent)',
-    };
-  }
   return {
     background: 'var(--t-bg-card)',
     borderColor: 'var(--t-border)',
