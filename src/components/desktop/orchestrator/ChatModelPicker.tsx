@@ -13,25 +13,25 @@ interface ChatModelPickerProps {
   onSelectModel: (modelId: ChatModelId) => void;
 }
 
-function badgeTone(badge: ChatModelBadge): { color: string; background: string; borderColor: string } {
+function badgeTone(badge: ChatModelBadge): { background: string; borderColor: string; color: string } {
   if (badge === 'FREE') {
     return {
-      color: 'var(--t-terminal-ansi-green)',
       background: 'color-mix(in srgb, var(--t-terminal-ansi-green) 12%, transparent)',
       borderColor: 'color-mix(in srgb, var(--t-terminal-ansi-green) 28%, transparent)',
+      color: 'var(--t-terminal-ansi-green)',
     };
   }
   if (badge === 'PREMIUM') {
     return {
-      color: 'var(--t-accent)',
       background: 'var(--t-accent-soft)',
       borderColor: 'var(--t-accent-border)',
+      color: 'var(--t-accent)',
     };
   }
   return {
-    color: 'var(--t-text-muted)',
-    background: 'var(--t-divider-subtle)',
+    background: 'var(--t-bg-card)',
     borderColor: 'var(--t-border)',
+    color: 'var(--t-text-muted)',
   };
 }
 
@@ -43,9 +43,16 @@ export function ChatModelPicker({ workspaceKey, selectedModelId, onSelectModel }
         flexDirection: 'column',
         gap: 4,
         paddingTop: 4,
-        paddingRight: 0,
-        paddingBottom: 0,
-        paddingLeft: 0,
+        paddingRight: 4,
+        paddingBottom: 4,
+        paddingLeft: 4,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--t-border)',
+        background: 'var(--t-panel)',
+        backdropFilter: 'blur(18px) saturate(1.3)',
+        boxShadow: 'var(--t-panel-shadow)',
       }}
     >
       {CHAT_MODEL_OPTIONS.map((option) => {
@@ -67,10 +74,10 @@ export function ChatModelPicker({ workspaceKey, selectedModelId, onSelectModel }
               gap: 10,
               width: '100%',
               height: 38,
-              paddingTop: 4,
+              paddingTop: 0,
               paddingRight: 8,
-              paddingBottom: 4,
-              paddingLeft: 10,
+              paddingBottom: 0,
+              paddingLeft: 8,
               borderRadius: 8,
               borderWidth: 1,
               borderStyle: 'solid',
@@ -81,16 +88,6 @@ export function ChatModelPicker({ workspaceKey, selectedModelId, onSelectModel }
               textAlign: 'left',
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               transition: 'border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), background 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-            }}
-            onMouseEnter={(event) => {
-              if (selected) return;
-              event.currentTarget.style.background = 'var(--t-panel-hover)';
-              event.currentTarget.style.borderColor = 'var(--t-border)';
-            }}
-            onMouseLeave={(event) => {
-              if (selected) return;
-              event.currentTarget.style.background = 'transparent';
-              event.currentTarget.style.borderColor = 'var(--t-border)';
             }}
           >
             <span
@@ -105,6 +102,7 @@ export function ChatModelPicker({ workspaceKey, selectedModelId, onSelectModel }
                 style={{
                   fontSize: 12,
                   fontWeight: 600,
+                  letterSpacing: 0,
                   color: 'var(--t-text)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -116,6 +114,8 @@ export function ChatModelPicker({ workspaceKey, selectedModelId, onSelectModel }
               <span
                 style={{
                   fontSize: 10.5,
+                  fontWeight: 500,
+                  letterSpacing: 0,
                   color: 'var(--t-text-muted)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -127,11 +127,14 @@ export function ChatModelPicker({ workspaceKey, selectedModelId, onSelectModel }
             </span>
             <span
               style={{
-                flexShrink: 0,
-                minWidth: 54,
-                paddingTop: 2,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: 18,
+                minWidth: 48,
+                paddingTop: 0,
                 paddingRight: 6,
-                paddingBottom: 2,
+                paddingBottom: 0,
                 paddingLeft: 6,
                 borderRadius: 999,
                 borderWidth: 1,
@@ -139,11 +142,11 @@ export function ChatModelPicker({ workspaceKey, selectedModelId, onSelectModel }
                 borderColor: tone.borderColor,
                 background: tone.background,
                 color: tone.color,
+                fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
                 fontSize: 9,
                 fontWeight: 700,
-                letterSpacing: '0.06em',
-                textAlign: 'center',
-                fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+                letterSpacing: '0.04em',
+                flexShrink: 0,
               }}
             >
               {option.badge}

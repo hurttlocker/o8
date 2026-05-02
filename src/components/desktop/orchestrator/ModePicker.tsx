@@ -20,10 +20,12 @@
  */
 
 import { memo, useCallback, useMemo, useState } from 'react';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
+import { ChatModelPicker } from './ChatModelPicker';
+import { getChatModelOption, type ChatModelId } from './chat-models';
 
-export type OrchestrationMode = 'fleet' | 'single';
+export type { OrchestrationMode };
 
 interface ModePickerProps {
   visible: boolean;
@@ -32,6 +34,8 @@ interface ModePickerProps {
   onSelectMode: (mode: OrchestrationMode) => void;
   selectedSingleRuntime: OrchestratorRuntime;
   onSelectSingleRuntime: (runtime: OrchestratorRuntime) => void;
+  selectedChatModelId: ChatModelId;
+  onSelectChatModel: (modelId: ChatModelId) => void;
 }
 
 const SINGLE_RUNTIMES: Array<{ id: OrchestratorRuntime; label: string }> = [
@@ -48,19 +52,23 @@ function ModePickerBase({
   onSelectMode,
   selectedSingleRuntime,
   onSelectSingleRuntime,
+  selectedChatModelId,
+  onSelectChatModel,
 }: ModePickerProps) {
-  void workspaceKey; // persistence wired by parent
   const opencodeEnabled = useExperimentalOpencodeFlag();
   const visibleRuntimes = useMemo(
     () => (opencodeEnabled ? SINGLE_RUNTIMES : SINGLE_RUNTIMES.filter((r) => r.id !== 'opencode')),
     [opencodeEnabled],
   );
+  const selectedChatModel = getChatModelOption(selectedChatModelId);
   // Whether the runtime sub-picker drawer is open. We derive openness
   // from selectedMode + an explicit user toggle in the same setter so we
   // never have to "sync" two states inside an effect (per react-hooks/
   // set-state-in-effect lint rule).
   const [singleOpen, setSingleOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const effectiveSingleOpen = selectedMode === 'single' && singleOpen;
+  const effectiveChatOpen = selectedMode === 'chat' && chatOpen;
 
   const handleClickFleet = useCallback(() => {
     onSelectMode('fleet');
@@ -71,13 +79,18 @@ function ModePickerBase({
     setSingleOpen(true);
   }, [onSelectMode]);
 
+  const handleClickChat = useCallback(() => {
+    onSelectMode('chat');
+    setChatOpen(true);
+  }, [onSelectMode]);
+
   if (!visible) return null;
 
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
+        gridTemplateColumns: '1fr 1fr 1fr',
         gap: 8,
         paddingTop: 4,
         paddingRight: 14,
@@ -150,6 +163,23 @@ function ModePickerBase({
           </div>
         ) : null}
       </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <ModeCard
+          active={selectedMode === 'chat'}
+          title="Chat"
+          copy="Talk to o8 about anything. Pick a model, no dispatch."
+          tag={`using ${selectedChatModel.label}`}
+          onClick={handleClickChat}
+          glyph={<ChatGlyph />}
+        />
+        {effectiveChatOpen ? (
+          <ChatModelPicker
+            workspaceKey={workspaceKey}
+            selectedModelId={selectedChatModelId}
+            onSelectModel={onSelectChatModel}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -181,7 +211,7 @@ function ModeCard({ active, title, copy, tag, onClick, glyph }: ModeCardProps) {
         borderRadius: 10,
         borderWidth: 1,
         borderStyle: 'solid',
-        borderColor: active ? '#FF5A1F' : 'var(--t-divider-subtle)',
+        borderColor: active ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-divider-subtle)',
         background: active ? 'var(--t-accent-soft)' : 'var(--t-bg-card)',
         color: 'var(--t-text)',
         cursor: 'pointer',
@@ -199,7 +229,7 @@ function ModeCard({ active, title, copy, tag, onClick, glyph }: ModeCardProps) {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', color: active ? '#FF5A1F' : 'var(--t-text-muted)' }}>
+        <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', color: active ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text-muted)' }}>
           {glyph}
         </span>
         <span
@@ -260,6 +290,14 @@ function SingleGlyph() {
   );
 }
 
+function ChatGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ display: 'block' }}>
+      <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+    </svg>
+  );
+}
+
 export const ModePicker = memo(ModePickerBase);
 
 export function loadOrchestrationMode(workspaceKey: string): { mode: OrchestrationMode; runtime: OrchestratorRuntime } {
@@ -268,7 +306,7 @@ export function loadOrchestrationMode(workspaceKey: string): { mode: Orchestrati
     const raw = window.localStorage.getItem(`cortex-ide:orchestrator:mode:${workspaceKey}`);
     if (!raw) return { mode: 'fleet', runtime: 'codex' };
     const parsed = JSON.parse(raw) as { mode?: string; runtime?: string };
-    const mode: OrchestrationMode = parsed.mode === 'single' ? 'single' : 'fleet';
+    const mode: OrchestrationMode = parsed.mode === 'single' || parsed.mode === 'chat' ? parsed.mode : 'fleet';
     const runtime: OrchestratorRuntime = parsed.runtime === 'gemini' || parsed.runtime === 'opencode' || parsed.runtime === 'claude-code' || parsed.runtime === 'codex'
       ? parsed.runtime
       : 'codex';
