@@ -42,8 +42,10 @@ import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
 import { IntentChips } from '@/components/desktop/orchestrator/IntentChips';
-import { ModePicker, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
+import { ModePicker, loadOrchestrationMode, persistOrchestrationMode, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
 import { WaitingFooter } from '@/components/desktop/orchestrator/WaitingFooter';
+import { getChatModelOption, loadChatModelChoice, type ChatModelId } from '@/components/desktop/orchestrator/chat-models';
+import { sendChatMessage } from '@/components/desktop/orchestrator/send-chat-message';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
@@ -165,29 +167,28 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const workspaceModeKey = repoPathProp ?? '__global__';
   const [orchestrationMode, setOrchestrationMode] = useState<OrchestrationMode>('fleet');
   const [singleRuntime, setSingleRuntime] = useState<OrchestratorRuntime>('codex');
+  const [chatModelId, setChatModelId] = useState<ChatModelId>('o8-default');
+  const [orchestrationSettingsKey, setOrchestrationSettingsKey] = useState<string | null>(null);
+  const orchestrationSettingsLoaded = orchestrationSettingsKey === workspaceModeKey;
+  const selectedChatModel = useMemo(() => getChatModelOption(chatModelId), [chatModelId]);
   useEffect(() => {
-    let cancelled = false;
-    void Promise.resolve().then(async () => {
-      const mod = await import('@/components/desktop/orchestrator/ModePicker');
-      if (cancelled) return;
-      const loaded = mod.loadOrchestrationMode(workspaceModeKey);
-      setOrchestrationMode(loaded.mode);
-      setSingleRuntime(loaded.runtime);
-    });
-    return () => { cancelled = true; };
+    const loaded = loadOrchestrationMode(workspaceModeKey);
+    setOrchestrationMode(loaded.mode);
+    setSingleRuntime(loaded.runtime);
+    setChatModelId(loadChatModelChoice(workspaceModeKey));
+    setOrchestrationSettingsKey(workspaceModeKey);
   }, [workspaceModeKey]);
   const handleSelectOrchestrationMode = useCallback((next: OrchestrationMode) => {
     setOrchestrationMode(next);
-    void import('@/components/desktop/orchestrator/ModePicker').then((mod) => {
-      mod.persistOrchestrationMode(workspaceModeKey, next, singleRuntime);
-    });
+    persistOrchestrationMode(workspaceModeKey, next, singleRuntime);
   }, [singleRuntime, workspaceModeKey]);
   const handleSelectSingleRuntime = useCallback((next: OrchestratorRuntime) => {
     setSingleRuntime(next);
-    void import('@/components/desktop/orchestrator/ModePicker').then((mod) => {
-      mod.persistOrchestrationMode(workspaceModeKey, orchestrationMode, next);
-    });
+    persistOrchestrationMode(workspaceModeKey, orchestrationMode, next);
   }, [orchestrationMode, workspaceModeKey]);
+  const handleSelectChatModel = useCallback((next: ChatModelId) => {
+    setChatModelId(next);
+  }, []);
   const [operatorDefaults, setOperatorDefaults] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
   const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
@@ -230,8 +231,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   } = useThoughtsComposerAttachments();
 
   const isOrchestratorMode = targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey);
+  const isChatMode = orchestrationMode === 'chat';
 
-  const orchStream = useOrchestratorStream(isOrchestratorMode ? resolvedRepoPath : null, {
+  const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
     seededPlanText: planText,
     hasHistory: chatMessages.length > 0,
   });
@@ -299,7 +301,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   // ── Pre-warm orchestrator session on mount ──
   useEffect(() => {
-    if (!isOrchestratorMode || orchestratorSessionRef.current || orchestratorSpawning) return;
+    if (!isOrchestratorMode || !orchestrationSettingsLoaded || isChatMode || orchestratorSessionRef.current || orchestratorSpawning) return;
 
     let cancelled = false;
     (async () => {
@@ -352,7 +354,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       }
     })();
     return () => { cancelled = true; };
-  }, [isOrchestratorMode, orchestratorSpawning, repoPathProp]);
+  }, [isChatMode, isOrchestratorMode, orchestrationSettingsLoaded, orchestratorSpawning, repoPathProp]);
 
   useEffect(() => {
     if (!open || !draftInjection?.id) return;
@@ -647,7 +649,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const autoRestoreAttemptedRef = useRef(false);
   const AUTO_RESTORE_SUPPRESSED_KEY = 'o8:orchestrator:auto-restore-suppressed';
   useEffect(() => {
-    if (!isOrchestratorMode) return;
+    if (!isOrchestratorMode || isChatMode) return;
     if (autoRestoreAttemptedRef.current) return;
     if (orchStream.messages.length > 0 || chatMessages.length > 0) return;
     autoRestoreAttemptedRef.current = true;
@@ -701,7 +703,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // silent
       }
     })();
-  }, [isOrchestratorMode, orchStream.messages.length, orchStream.replaceTranscript, chatMessages.length]);
+  }, [isChatMode, isOrchestratorMode, orchStream.messages.length, orchStream.replaceTranscript, chatMessages.length]);
 
   const { showClearToast, handleClearCommand } = useClearCommand({
     isOrchestratorMode,
@@ -750,13 +752,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     [agents, sessionTargets],
   );
   const displayMessages = useMemo(() => {
-    if (!isOrchestratorMode) return chatMessages;
+    if (!isOrchestratorMode || isChatMode) return chatMessages;
     return orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
-  }, [chatMessages, isOrchestratorMode, orchStream.messages]);
-  const displayWaiting = isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
-  const displayPlanText = isOrchestratorMode && planText?.trim() ? planText.trim() : null;
+  }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages]);
+  const displayWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
+  const displayPlanText = isOrchestratorMode && !isChatMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
-  const activeTargetLabel = isOrchestratorMode ? 'Claude Code' : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
+  const activeTargetLabel = isChatMode ? selectedChatModel.label : isOrchestratorMode ? 'Claude Code' : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
   const activeTargetColor = isOrchestratorMode ? '#e07a3a' : (targetAgent?.color ?? orchestratorRuntimeTone(preferredRuntime).color);
   // #771 — Augment Intent-style chip row under the last assistant message.
   // Only fires in orchestrator mode; CLI lanes still steer via the composer.
@@ -766,7 +768,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     isPlaceholderVisibleForLastAssistant: suggestedRepliesPending,
     dismissChips: dismissSuggestedReplies,
   } = useSuggestedReplies({
-    enabled: isOrchestratorMode,
+    enabled: isOrchestratorMode && !isChatMode,
     messages: displayMessages,
     isStreaming: displayWaiting,
   });
@@ -802,7 +804,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const residency = useOrchestratorContextResidency();
   useEffect(() => {
     if (!residency) return;
-    if (!isOrchestratorMode) {
+    if (!isOrchestratorMode || isChatMode) {
       residency.publish({ messages: [], runningTotal: 0, activeAssistantId: null });
       return;
     }
@@ -820,14 +822,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       runningTotal: orchStream.runningTotal,
       activeAssistantId,
     });
-  }, [displayMessages, isOrchestratorMode, orchStream.runningTotal, orchStream.status, residency]);
+  }, [displayMessages, isChatMode, isOrchestratorMode, orchStream.runningTotal, orchStream.status, residency]);
 
   // Ref used so sendNow() can flush the latest input value without a re-render.
   const latestInputRef = useRef('');
   useEffect(() => { latestInputRef.current = input; }, [input]);
 
   const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
-    if (!isOrchestratorMode) return false;
+    if (!isOrchestratorMode || isChatMode) return false;
 
     const parsedCommand = parseOrchestratorSlashCommand(rawInput);
     const suppressCommandEntries = parsedCommand?.command.name === 'clear';
@@ -863,6 +865,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [
     displayMessages,
     handleClearCommand,
+    isChatMode,
     isOrchestratorMode,
     missionState,
     orchStream,
@@ -875,8 +878,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     const msg = (explicitText ?? input).trim();
     if (!msg) return;
 
-    const effectiveWaiting = isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
+    const effectiveWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
     if (effectiveWaiting) return;
+
+    if (isChatMode) {
+      setInput('');
+      latestInputRef.current = '';
+      const entries = await sendChatMessage(msg, selectedChatModel);
+      setChatMessages((prev) => [...prev, ...entries]);
+      clearAttachments();
+      return;
+    }
 
     if (isOrchestratorMode && await runLocalOrchestratorSlash(msg)) {
       setInput('');
@@ -936,11 +948,18 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [captureServerSnapshot, clearAttachments, input, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, startPolling, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
+  }, [captureServerSnapshot, clearAttachments, input, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, selectedChatModel, startPolling, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
     if (!msg) return;
+
+    if (isChatMode) {
+      setInput(msg);
+      latestInputRef.current = msg;
+      setTimeout(() => { void handleTaskSend(msg); }, 0);
+      return;
+    }
 
     if (isOrchestratorMode) {
       if (orchStream.status === 'busy') return;
@@ -961,7 +980,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
-  }, [clearAttachments, handleTaskSend, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort]);
+  }, [clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
@@ -1125,6 +1144,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSelectMode={handleSelectOrchestrationMode}
         selectedSingleRuntime={singleRuntime}
         onSelectSingleRuntime={handleSelectSingleRuntime}
+        selectedChatModelId={chatModelId}
+        onSelectChatModel={handleSelectChatModel}
       />
 
       <ComposerArea
@@ -1144,7 +1165,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSubmit={() => { void handleTaskSend(); }}
         onStop={orchStream.interrupt}
         onSlashCommand={handleSlashCommand}
-        modelLabel={isOrchestratorMode ? formatModelLabel(orchestratorModel) : activeTargetLabel}
+        modelLabel={isChatMode ? selectedChatModel.label : isOrchestratorMode ? formatModelLabel(orchestratorModel) : activeTargetLabel}
         effort={thinkingEffort}
         onEffortChange={handleEffortChange}
         adaptiveEnabled={adaptiveThinkingEnabled}
