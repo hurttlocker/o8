@@ -176,11 +176,10 @@ export async function POST(request: NextRequest): Promise<Response> {
       userId,
       history: body.history,
       message: body.message,
-      byokApiKey,
+      byokApiKey: byokApiKey ?? undefined,
       abortSignal: request.signal,
     });
 
-    let recorded = false;
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
@@ -192,7 +191,6 @@ export async function POST(request: NextRequest): Promise<Response> {
 
           if (!isByok) {
             const count = recordChatTurn(userId);
-            recorded = true;
             controller.enqueue(encodeSse({
               type: 'usage',
               count,
@@ -211,9 +209,6 @@ export async function POST(request: NextRequest): Promise<Response> {
           }));
           controller.close();
         }
-      },
-      cancel() {
-        void recorded;
       },
     });
 
