@@ -2980,18 +2980,7 @@ function DashboardInner() {
                         selectedPacketId={selectedPacketId}
                         onSelectedPacketChange={setSelectedPacketId}
                       >
-                        <LazyPacketRightPanel
-                          selectedPacketId={selectedPacketId}
-                          missionState={thoughtsMissionState}
-                          agents={parsedAgents}
-                          workspaceSidePanelRepo={workspaceSidePanelRepo}
-                          focusedRepoPath={rightPanelSelectedFile?.repoPath ?? workspaceSidePanelRepo?.localPath ?? globalRepoEntry?.localPath ?? activeWorkspace ?? null}
-                          selectedFile={rightPanelSelectedFile}
-                          selectedIssue={rightPanelSelectedIssue}
-                          selectedPR={rightPanelSelectedPR}
-                          onClose={() => setChatVisible(false)}
-                          onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
-                        />
+                        <></>
                       </OrchestratorDataProvider>
                     </Suspense>
                   </motion.div>
