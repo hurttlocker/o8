@@ -16,6 +16,7 @@ import { O8FilesPane } from './O8FilesPane';
 import { O8PRPane } from './O8PRPane';
 import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
+import { O8PulsePane } from './o8-panel/O8PulsePane';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
@@ -70,7 +71,15 @@ function IconActivity({ size = 16, color = '#e2e8f0' }: { size?: number; color?:
   );
 }
 
-export type O8Tab = 'changes' | 'browser' | 'files' | 'prs' | 'activity' | 'inbox' | 'diff' | 'spec';
+function IconPulse({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
+      <path d="M3 12h4l3-9 4 18 3-9h4" />
+    </svg>
+  );
+}
+
+export type O8Tab = 'changes' | 'browser' | 'files' | 'prs' | 'activity' | 'inbox' | 'diff' | 'spec' | 'pulse';
 
 function IconInbox({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
   return (
@@ -195,6 +204,7 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         flexShrink: 0,
         gap: 2,
       }}>
+        <O8TabButton icon={(c) => <IconPulse size={16} color={c} />} active={activeTab === 'pulse'} onClick={() => handleTabChange('pulse')} label="Pulse" />
         <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'diff'} onClick={() => handleTabChange('diff')} label="Diff" />
         <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'files'} onClick={() => handleTabChange('files')} label="Files" />
         {/* Browser tab moved to the TitleBar — see RightPanelMorphButton's
@@ -259,6 +269,9 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'spec' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8SpecPane repoPath={repoPath} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'pulse' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8PulsePane />
       </div>
     </div>
   );
