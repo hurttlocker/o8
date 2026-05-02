@@ -42,9 +42,9 @@ import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
 import { IntentChips } from '@/components/desktop/orchestrator/IntentChips';
-import { ModePicker, loadOrchestrationMode, persistOrchestrationMode, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
+import { ModePicker, loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
 import { WaitingFooter } from '@/components/desktop/orchestrator/WaitingFooter';
-import { getChatModelOption, loadChatModelChoice, type ChatModelId } from '@/components/desktop/orchestrator/chat-models';
+import { getChatModelOption, loadChatModelChoice } from '@/components/desktop/orchestrator/chat-models';
 import {
   createChatAssistantEntry,
   createChatUserEntry,
