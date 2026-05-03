@@ -4,9 +4,7 @@ import { useRef } from 'react';
 
 export function ThreadsDropdown(props: {
   historyOpen: boolean;
-  missionOpen: boolean;
   onToggleHistory: () => void;
-  onToggleMission: () => void;
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const menuItem = (label: string, active: boolean, onClick: () => void) => (
@@ -46,7 +44,6 @@ export function ThreadsDropdown(props: {
         }}
       >
         {menuItem('History', props.historyOpen, props.onToggleHistory)}
-        {menuItem('Mission', props.missionOpen, props.onToggleMission)}
       </div>
     </details>
   );
