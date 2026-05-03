@@ -1405,16 +1405,16 @@ function DashboardInner() {
   }, [openWorkspaceSidePanel, workspaceSidePanelRepo, workspaceSidePanelView]);
 
   const handleToggleO8Panel = useCallback(() => {
-    if (rightPanelKind === 'o8' && chatVisible) {
-      // o8 → collapsed — clear commit context so reopening doesn't re-expand stale commit
+    if (chatVisible && rightPanelKind === 'o8') {
+      // o8 → collapsed. Keep kind=o8 so next click re-opens straight to O8
+      // (not the workspace side panel). Clear commit context so reopening
+      // doesn't re-expand a stale commit detail.
       setChatVisible(false);
-      setRightPanelKind('review');
       setO8CommitSha(null);
       setO8CommitRepoPath(null);
       setO8CommitRepoSlug(null);
       return;
     }
-    // review → o8
     setRightPanelKind('o8');
     setChatVisible(true);
   }, [chatVisible, rightPanelKind]);
