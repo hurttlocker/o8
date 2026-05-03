@@ -46,6 +46,13 @@ interface TileContainerProps {
 }
 
 const HANDLE_SIZE = 8;
+// Per-leaf gap + squircle. Each leaf gets HALF the gap as inner padding on
+// every edge that faces a sibling, so the sum of two adjacent paddings
+// equals LEAF_GAP. Corners that face a gap get rounded; corners flush
+// against the workspace edge stay square so the leaves align with the
+// surrounding chrome.
+const LEAF_GAP = 10;
+const LEAF_RADIUS = 14;
 
 /**
  * TileContainer — flat, absolutely-positioned tile renderer.
@@ -136,6 +143,22 @@ export function TileContainer({
         if (!rect) return null;
         const definition = registry[leaf.content.kind];
         const isActive = leaf.id === activeTileId;
+        // Per-edge: half the gap on edges facing siblings; zero on edges
+        // flush with the workspace boundary. Adjacent leaves contribute
+        // half + half = LEAF_GAP visible in the middle, fully transparent
+        // so the chrome shows through.
+        const epsilon = 0.001;
+        const halfGap = LEAF_GAP / 2;
+        const padLeft = rect.left > epsilon ? halfGap : 0;
+        const padRight = rect.left + rect.width < 1 - epsilon ? halfGap : 0;
+        const padTop = rect.top > epsilon ? halfGap : 0;
+        const padBottom = rect.top + rect.height < 1 - epsilon ? halfGap : 0;
+        // Round only corners adjacent to a gap so the leaves keep the
+        // workspace boundary crisp.
+        const radiusTL = (padTop || padLeft) ? LEAF_RADIUS : 0;
+        const radiusTR = (padTop || padRight) ? LEAF_RADIUS : 0;
+        const radiusBL = (padBottom || padLeft) ? LEAF_RADIUS : 0;
+        const radiusBR = (padBottom || padRight) ? LEAF_RADIUS : 0;
         return (
           <div
             key={leaf.id}
@@ -150,39 +173,56 @@ export function TileContainer({
               top: `${rect.top * 100}%`,
               width: `${rect.width * 100}%`,
               height: `${rect.height * 100}%`,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
+              paddingLeft: padLeft,
+              paddingRight: padRight,
+              paddingTop: padTop,
+              paddingBottom: padBottom,
+              boxSizing: 'border-box',
               backgroundColor: 'transparent',
             }}
           >
-            {!definition?.hideHeader && (
-              <TileHeader
-                label={definition?.label ?? 'Tile'}
-                active={isActive}
-                canClose={totalLeaves > 1}
-                onSplitVertical={() => onSplitTile(leaf.id, 'vertical')}
-                onSplitHorizontal={() => onSplitTile(leaf.id, 'horizontal')}
-                onClose={() => onCloseTile(leaf.id)}
-              />
-            )}
             <div
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                flexGrow: 1,
-                flexShrink: 1,
-                flexBasis: '0%',
-                minWidth: 0,
-                minHeight: 0,
+                width: '100%',
+                height: '100%',
                 overflow: 'hidden',
+                borderTopLeftRadius: radiusTL,
+                borderTopRightRadius: radiusTR,
+                borderBottomLeftRadius: radiusBL,
+                borderBottomRightRadius: radiusBR,
+                backgroundColor: 'var(--t-bg, transparent)',
               }}
             >
-              {definition ? definition.render({
-                active: isActive,
-                content: leaf.content,
-                tileId: leaf.id,
-              }) : null}
+              {!definition?.hideHeader && (
+                <TileHeader
+                  label={definition?.label ?? 'Tile'}
+                  active={isActive}
+                  canClose={totalLeaves > 1}
+                  onSplitVertical={() => onSplitTile(leaf.id, 'vertical')}
+                  onSplitHorizontal={() => onSplitTile(leaf.id, 'horizontal')}
+                  onClose={() => onCloseTile(leaf.id)}
+                />
+              )}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  flexGrow: 1,
+                  flexShrink: 1,
+                  flexBasis: '0%',
+                  minWidth: 0,
+                  minHeight: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                {definition ? definition.render({
+                  active: isActive,
+                  content: leaf.content,
+                  tileId: leaf.id,
+                }) : null}
+              </div>
             </div>
           </div>
         );
