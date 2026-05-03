@@ -610,36 +610,58 @@ function WorkspaceChatPaneBase({
       </div>
 
       {chat.showScrollToBottom && (chat.llmMessages.length > 0 || chat.agentRunning) ? (
-        <div style={{ position: 'absolute', right: 30, bottom: 104, zIndex: 40, animation: 'llmFadeIn 150ms ease-out' }}>
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            bottom: 96,
+            zIndex: 40,
+            animation: 'llmFadeIn 150ms ease-out',
+            pointerEvents: 'none',
+          }}
+        >
           <button
             type="button"
-            onClick={() => {
-              chat.scrollToBottom(true);
-            }}
+            onClick={() => { chat.scrollToBottom(true); }}
+            title="Jump to latest message"
             style={{
+              pointerEvents: 'auto',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 7,
-              minHeight: 34,
-              paddingTop: 7,
-              paddingBottom: 7,
-              paddingLeft: 12,
-              paddingRight: 12,
+              gap: 6,
+              height: 26,
+              paddingTop: 0,
+              paddingBottom: 0,
+              paddingLeft: 10,
+              paddingRight: 10,
               borderRadius: 999,
-              border: `1px solid ${THEME_ACCENT_BORDER}`,
-              background: THEME_PANEL_GLASS,
-              color: THEME_ACCENT,
-              boxShadow: `0 12px 28px ${THEME_ACCENT_RING}`,
-              backdropFilter: 'blur(18px)',
-              WebkitBackdropFilter: 'blur(18px)',
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-border)',
+              background: 'var(--t-panel)',
+              color: 'var(--t-text-muted)',
+              boxShadow: 'var(--t-panel-shadow)',
+              backdropFilter: 'blur(18px) saturate(1.3)',
+              WebkitBackdropFilter: 'blur(18px) saturate(1.3)',
               cursor: 'pointer',
               fontSize: 11,
-              fontWeight: 700,
+              fontWeight: 500,
+              letterSpacing: '0.01em',
               fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
             } as CSSProperties}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--t-bg-card)';
+              e.currentTarget.style.color = 'var(--t-text)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--t-panel)';
+              e.currentTarget.style.color = 'var(--t-text-muted)';
+            }}
           >
-            <ArrowDown size={13} />
-            Bottom messages
+            <ArrowDown size={11} />
+            <span>Latest</span>
           </button>
         </div>
       ) : null}
