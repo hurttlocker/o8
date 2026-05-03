@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-03
 
+- `0b48b875` feat(o8-panel): packets render in Activity timeline behind opt-in flag
 - `56c30780` feat(orchestrator): NEEDS YOU click pops O8 Workspace pinned to the lane's worktree
 - `58554aa3` feat(orchestrator): per-section click routing for Recent Work rows
 - `5fbd890e` feat(orchestrator): status-anchored Recent Work — Needs you / In flight / Done today
