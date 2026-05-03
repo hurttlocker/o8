@@ -2,8 +2,8 @@
  * O8 panel focus event bus.
  *
  * The orchestrator chat tile renders write-class tool calls with a
- * "View in Changes" button. Clicking it should pivot the right O8
- * panel to its Changes/Files/PRs tab — but only when that panel is
+ * "View in Workspace" button. Clicking it should pivot the right O8
+ * panel to its Workspace/PRs tab — but only when that panel is
  * already open. We never auto-open it: forcing the right panel open
  * mid-conversation would feel intrusive.
  *
@@ -15,7 +15,7 @@
  * "Open right panel to view diff."
  */
 
-export type O8FocusTab = 'changes' | 'files' | 'prs' | 'browser' | 'activity';
+export type O8FocusTab = 'workspace' | 'prs' | 'browser' | 'activity' | 'inbox';
 
 export interface O8FocusRequest {
   tab: O8FocusTab;
