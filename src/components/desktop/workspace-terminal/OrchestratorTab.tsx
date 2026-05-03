@@ -51,7 +51,6 @@ import {
   type ThoughtsChatPermissionMode,
 } from '@/components/desktop/thoughts/ThoughtsChatPanel';
 import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/components/desktop/thoughts/useOrchestratorStream';
-import { ThoughtsMissionPanel } from '@/components/desktop/thoughts/ThoughtsMissionPanel';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
 import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
 import { SessionTileSurface } from './SessionTileSurface';
@@ -90,7 +89,6 @@ function persistPermissionMode(tabId: string, mode: ThoughtsChatPermissionMode):
 }
 
 const HISTORY_OPEN_KEY = 'o8:orchestrator:history-open';
-const MISSION_OPEN_KEY = 'o8:orchestrator:mission-open';
 const USERS_THREE_ICON_PATH = 'M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z';
 
 function readBooleanPref(key: string): boolean {
@@ -245,32 +243,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   const [contextUsage, setContextUsage] = useState({ tokenCount: 0, runningTotal: 0 });
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
   const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
-  const [missionOpen, setMissionOpen] = useState(() => readBooleanPref(MISSION_OPEN_KEY));
-  // Auto-collapse mission sidebar when the tab is in a narrow split pane —
-  // 340px sidebar + chat body needs ~380px to stay readable. Below 720px we
-  // hide the sidebar without touching the user's stored preference, so it
-  // reappears when the pane is widened.
-  const [containerWidth, setContainerWidth] = useState<number>(() =>
-    typeof window !== 'undefined' ? window.innerWidth : 1280,
-  );
-  const outerContainerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const node = outerContainerRef.current;
-    if (!node || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      setContainerWidth(entry.contentRect.width);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-  // Below this width the 340px mission sidebar pushes the chat body under
-  // ~660px and the recent-work list visibly clips. Anything at or below
-  // typical split sizes (~900px) should hide the sidebar — un-split full
-  // workspaces sit ~1300px so they stay above the threshold.
-  const MISSION_AUTO_COLLAPSE_PX = 1000;
-  const effectiveMissionOpen = missionOpen && containerWidth >= MISSION_AUTO_COLLAPSE_PX;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
@@ -374,30 +346,17 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     });
   }, []);
 
+  // After the Mission rail consolidation (commit 2), the Mission button in
+  // the Threads dropdown opens the wide O8 Panel pinned to the Activity
+  // tab — that panel is now the single mission-control surface.
   const handleToggleMission = useCallback(() => {
-    setMissionOpen((prev) => {
-      const next = !prev;
-      writeBooleanPref(MISSION_OPEN_KEY, next);
-      // Context inspector and Mission share the right rail — opening one
-      // closes the other so the chat center never compresses below its
-      // comfortable width.
-      if (next) residency?.setOpen(false);
-      return next;
-    });
-  }, [residency]);
+    data?.onOpenO8Panel?.({ tab: 'activity' });
+  }, [data]);
 
   const handleToggleContextInspector = useCallback(() => {
     if (!residency) return;
-    if (residency.isOpen) {
-      residency.setOpen(false);
-      return;
-    }
-    residency.setOpen(true);
-    if (missionOpen) {
-      setMissionOpen(false);
-      writeBooleanPref(MISSION_OPEN_KEY, false);
-    }
-  }, [missionOpen, residency]);
+    residency.setOpen(!residency.isOpen);
+  }, [residency]);
 
 
   const handleSelectThread = useCallback((threadTabId: string) => {
@@ -537,7 +496,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <ThreadsDropdown
         historyOpen={historyOpen}
-        missionOpen={effectiveMissionOpen}
+        missionOpen={false}
         onToggleHistory={handleToggleHistory}
         onToggleMission={handleToggleMission}
       />
@@ -621,7 +580,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
       thoughtsMutedGlass={thoughtsMutedGlass}
       permissionMode={permissionMode}
       onTogglePermission={handleTogglePermission}
-      missionOpen={effectiveMissionOpen}
+      missionOpen={false}
       onToggleMission={handleToggleMission}
       repoLabel={repoLabel}
       emptyStateOverride={emptyStateNode}
@@ -642,7 +601,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
 
   return (
     <div
-      ref={outerContainerRef}
       style={{
         flex: 1,
         display: active ? 'flex' : 'none',
@@ -750,41 +708,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
               onFocusSession={sessionTiles.setFocusedSessionKey}
             />
           ) : thoughtsChatPanel}
-        </div>
-
-        {/* Right: mission control sidebar */}
-        <div
-          style={{
-            width: effectiveMissionOpen ? 340 : 0,
-            minWidth: effectiveMissionOpen ? 340 : 0,
-            borderLeftWidth: effectiveMissionOpen ? 1 : 0,
-            borderLeftStyle: 'solid',
-            borderLeftColor: 'var(--t-divider-subtle)',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            transition: 'width 200ms cubic-bezier(0.22, 1, 0.36, 1), min-width 200ms cubic-bezier(0.22, 1, 0.36, 1)',
-            flexShrink: 0,
-            background: 'var(--t-chat-surface-bg, #ffffff)',
-          }}
-        >
-          {effectiveMissionOpen ? (
-            <ThoughtsMissionPanel
-              open
-              visible
-              missionState={data.missionState}
-              workspaceTargets={data.workspaceTargets ?? []}
-              preferredRuntime={preferredRuntime}
-              sessionTargets={sessionTargets}
-              thoughtsBodyBackground={thoughtsBodyBackground}
-              thoughtsElevatedSurface={thoughtsElevatedSurface}
-              thoughtsElevatedBorder={thoughtsElevatedBorder}
-              thoughtsElevatedShadow={thoughtsElevatedShadow}
-              thoughtsMutedGlass={thoughtsMutedGlass}
-              onMissionStateChange={data.onMissionStateChange}
-              onLaunchPacket={data.onLaunchPacket}
-            />
-          ) : null}
         </div>
 
         {/* Right: context inspector (toggles with ContextMeter click, #587) */}
