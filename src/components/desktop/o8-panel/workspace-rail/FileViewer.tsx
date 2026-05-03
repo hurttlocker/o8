@@ -1,5 +1,4 @@
 'use client';
-/* eslint-disable react-hooks/set-state-in-effect -- selected file changes intentionally reset and refetch editor state */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
