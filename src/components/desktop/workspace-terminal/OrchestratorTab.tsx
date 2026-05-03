@@ -504,26 +504,42 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
 
   // Per-section click routing for Recent Work. Different sections imply
   // different operator intent:
-  //   - needs-you → activate workspace tab AND auto-pop O8 Workspace tab
-  //     for that worktree so review-mode is one click away.
+  //   - needs-you → ALWAYS pop O8 Workspace pinned to the lane's worktree
+  //     so the diff is up. If the session is still alive, also activate
+  //     its workspace tab. If the packet exists, also expand it in
+  //     Mission so the packet meta is visible. Review-mode = diff +
+  //     transcript + meta in one click.
   //   - in-flight → activate workspace tab; operator just wants to watch.
   //   - done-today → no live session anymore; expand the packet card in
   //     the Mission rail so the operator can see the merge + diff context.
   //     (Future: route to commit viewer when lane carries mergeSha.)
   const handleActivateRecentLane = useCallback((
-    lane: { id: string; sessionKey?: string | null; packetId?: string | null; repoPath?: string | null; status: string },
+    lane: { id: string; sessionKey?: string | null; packetId?: string | null; repoPath?: string | null; worktreePath?: string | null; status: string },
     sectionId: 'needs-you' | 'in-flight' | 'done-today',
   ) => {
-    const isActiveSection = sectionId === 'needs-you' || sectionId === 'in-flight';
-    if (isActiveSection && lane.sessionKey && data?.onSelectSession) {
-      data.onSelectSession(lane.sessionKey);
-      // NEEDS YOU is review-mode — pop the O8 panel into Workspace tab
-      // pinned to that lane's worktree so diff is right there.
-      if (sectionId === 'needs-you' && data.onOpenO8Panel) {
-        data.onOpenO8Panel({ repoPath: lane.repoPath ?? null, tab: 'workspace' });
+    if (sectionId === 'needs-you') {
+      // Always show the diff. Worktree path beats repo path because the
+      // dirty changes live in the worktree.
+      const focusPath = lane.worktreePath ?? lane.repoPath ?? null;
+      if (focusPath && data?.onOpenO8Panel) {
+        data.onOpenO8Panel({ repoPath: focusPath, tab: 'workspace' });
+      }
+      // If the session is still attached, drop the operator on the
+      // transcript too.
+      if (lane.sessionKey && data?.onSelectSession) {
+        data.onSelectSession(lane.sessionKey);
+      }
+      // Expand the packet in Mission so the meta is one glance away.
+      if (lane.packetId && data?.onSelectedPacketChange) {
+        data.onSelectedPacketChange(lane.packetId);
       }
       return;
     }
+    if (sectionId === 'in-flight' && lane.sessionKey && data?.onSelectSession) {
+      data.onSelectSession(lane.sessionKey);
+      return;
+    }
+    // done-today fallback (or anything without a live session): mission expand
     if (lane.packetId && data?.onSelectedPacketChange) {
       data.onSelectedPacketChange(lane.packetId);
       if (!missionOpen) {

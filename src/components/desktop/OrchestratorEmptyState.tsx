@@ -56,7 +56,7 @@ const QUICK_ACTIONS: QuickAction[] = [
 const GROUPED_KEY = 'cortex-ide:orchestrator:empty:grouped';
 const ARCHIVED_KEY = 'cortex-ide:orchestrator:empty:show-archived';
 
-type LaneSummary = Pick<Lane, 'id' | 'label' | 'repoPath' | 'branch' | 'runtime' | 'status' | 'updatedAt' | 'lastEventAt' | 'packetId'>;
+type LaneSummary = Pick<Lane, 'id' | 'label' | 'repoPath' | 'worktreePath' | 'branch' | 'runtime' | 'status' | 'updatedAt' | 'lastEventAt' | 'sessionKey' | 'packetId'>;
 
 type RecentSectionId = 'needs-you' | 'in-flight' | 'done-today';
 
@@ -68,7 +68,7 @@ interface OrchestratorEmptyStateProps {
    *  caller the operator's intent: review (needs-you), watch (in-flight),
    *  or recap (done-today). */
   onActivateLane?: (
-    lane: { id: string; sessionKey?: string | null; packetId?: string | null; repoPath?: string | null; status: string },
+    lane: { id: string; sessionKey?: string | null; packetId?: string | null; repoPath?: string | null; worktreePath?: string | null; status: string },
     sectionId: RecentSectionId,
   ) => void;
   /** Hide the Recent Work column. Default true; OrchestratorTab passes
