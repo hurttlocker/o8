@@ -347,23 +347,19 @@ function RightPanelMorphButton({
   onToggleWorkspacePanel?: () => void;
   onToggleO8Panel?: () => void;
 }) {
-  // 3-state cycle: collapsed → review → o8 → collapsed
+  // 3-state model kept for visual transitions, but the click action is now
+  // a 2-state toggle: O8 ⇄ collapsed. The review/workspace side panel
+  // surfaces (Changes / Git Log) open via repo-focus or commit clicks; the
+  // header button is dedicated to O8 so first-click never lands on the
+  // narrow rail by accident.
   const state: 'collapsed' | 'review' | 'o8' = o8PanelVisible
     ? 'o8'
     : workspacePanelVisible
       ? 'review'
       : 'collapsed';
   const panelOpen = state !== 'collapsed';
-  const label = state === 'collapsed'
-    ? 'Open review panel (click to cycle: Review → O8 → Close)'
-    : state === 'review'
-      ? 'Switch to O8 panel'
-      : 'Close panel';
-  const handleClick = state === 'collapsed'
-    ? onToggleWorkspacePanel    // collapsed → review
-    : state === 'review'
-      ? onToggleO8Panel         // review → o8
-      : onToggleO8Panel;        // o8 → collapsed (toggle off)
+  const label = panelOpen ? 'Close panel' : 'Open O8 panel';
+  const handleClick = onToggleO8Panel;
 
   return (
     <motion.button
