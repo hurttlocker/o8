@@ -7,6 +7,11 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-03
+
+- `7b1eac39` feat: replace o8 file tabs with workspace
+- `0ff128a5` feat: add o8 workspace pane components
+
 ## 2026-05-02
 
 - `b7e0affe` feat(o8-panel): restore Pulse tab — live fleet temperature surface
