@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * O8Panel — Wide contextual panel with tabs: Changes, Browser, Files, PRs.
+ * O8Panel — Wide contextual panel with Workspace, Browser, PRs, Inbox, Activity, and spec tabs.
  *
  * Third state of the right panel morph button (collapsed → review → o8).
  * Modeled after Cursor 3's right panel, adapted for governance.
@@ -10,35 +10,22 @@
 import { useState } from 'react';
 import { O8ActivityPane } from './O8ActivityPane';
 import { O8BrowserPane } from './O8BrowserPane';
-import { O8ChangesPane } from './O8ChangesPane';
-import { O8DiffPane } from './o8-panel/O8DiffPane';
-import { O8FilesPane } from './O8FilesPane';
 import { O8PRPane } from './O8PRPane';
 import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
 import { O8PulsePane } from './o8-panel/O8PulsePane';
+import { O8WorkspacePane } from './o8-panel/O8WorkspacePane';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
 // ── Phosphor Icons (raw SVG, per CLAUDE.md) ──
 
-function IconGitDiff({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
+function IconWorkspace({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <circle cx="6" cy="6" r="3" />
-      <circle cx="18" cy="18" r="3" />
-      <path d="M6 9v4c0 2 2 4 4 4h1" />
-      <path d="M18 15v-4c0-2-2-4-4-4h-1" />
-    </svg>
-  );
-}
-
-function IconGlobeSimple({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="10" />
-      <line x1="2" y1="12" x2="22" y2="12" />
-      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" />
+      <path d="M8 13h8" />
+      <path d="M12 9v8" />
     </svg>
   );
 }
@@ -79,7 +66,7 @@ function IconPulse({ size = 16, color = '#e2e8f0' }: { size?: number; color?: st
   );
 }
 
-export type O8Tab = 'changes' | 'browser' | 'files' | 'prs' | 'activity' | 'inbox' | 'diff' | 'spec' | 'pulse';
+export type O8Tab = 'workspace' | 'browser' | 'prs' | 'activity' | 'inbox' | 'spec' | 'pulse';
 
 function IconInbox({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
   return (
@@ -165,8 +152,8 @@ function O8TabButton({ icon, active, onClick, label }: {
 
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile: externalSelectedFile, browserUrl, onBrowserActiveUrlChange, onActiveTabChange, onSelectedFileChange, commitSha, onClearCommit, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
-  const [internalActiveTab, setInternalActiveTab] = useState<O8Tab>('changes');
+export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile: externalSelectedFile, browserUrl, onBrowserActiveUrlChange, onActiveTabChange, onSelectedFileChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
+  const [internalActiveTab, setInternalActiveTab] = useState<O8Tab>('workspace');
   const activeTab = externalTab ?? internalActiveTab;
   const selectedFile = externalSelectedFile ?? null;
 
@@ -204,9 +191,8 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         flexShrink: 0,
         gap: 2,
       }}>
+        <O8TabButton icon={(c) => <IconWorkspace size={16} color={c} />} active={activeTab === 'workspace'} onClick={() => handleTabChange('workspace')} label="Workspace" />
         <O8TabButton icon={(c) => <IconPulse size={16} color={c} />} active={activeTab === 'pulse'} onClick={() => handleTabChange('pulse')} label="Pulse" />
-        <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'diff'} onClick={() => handleTabChange('diff')} label="Diff" />
-        <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'files'} onClick={() => handleTabChange('files')} label="Files" />
         {/* Browser tab moved to the TitleBar — see RightPanelMorphButton's
             sibling. The active===browser branch below still renders the
             BrowserPane content when set externally (TitleBar handler). */}
@@ -216,7 +202,6 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         <O8TabButton icon={(c) => <IconActivity size={16} color={c} />} active={activeTab === 'activity'} onClick={() => handleTabChange('activity')} label="Activity" />
         <div style={{ width: 1, height: 18, background: 'var(--t-divider-subtle)', marginLeft: 8, marginRight: 8 }} />
         <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'spec'} onClick={() => handleTabChange('spec')} label="o8.md" />
-        <O8TabButton icon={(c) => <IconGitDiff size={16} color={c} />} active={activeTab === 'changes'} onClick={() => handleTabChange('changes')} label="Changes" />
         <div style={{ flex: 1 }} />
         <button
           type="button"
@@ -246,17 +231,11 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
       </div>
 
       {/* Tab content — all tabs stay mounted to preserve state */}
-      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'diff' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8DiffPane repoPath={repoPath} selectedFile={selectedFile} />
-      </div>
-      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'changes' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8ChangesPane repoPath={repoPath} initialCommitSha={commitSha} repoSlug={repoSlug} onClearCommit={onClearCommit} />
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'workspace' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8WorkspacePane repoPath={repoPath} selectedFile={selectedFile} onSelectedFileChange={handleSelectedFileChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
-      </div>
-      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'files' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8FilesPane repoPath={repoPath ?? undefined} onOpenFile={onOpenFile} onSelectFile={handleSelectedFileChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8PRPane prNumber={prNumber} repo={prRepo ?? repoSlug} />

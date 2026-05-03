@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/set-state-in-effect -- repo changes intentionally reset and refetch file tree state */
 
 import { useCallback, useEffect, useState } from 'react';
 import type { FileNode } from '../../workspace-side-panel/types';

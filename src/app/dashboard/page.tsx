@@ -153,6 +153,24 @@ const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
 const MIN_O8_PANEL_WIDTH = 400;
 const MAX_O8_PANEL_WIDTH = 1200;
+const O8_ACTIVE_TAB_STORAGE_KEY = 'o8ActiveTab';
+
+function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
+  if (!raw) return null;
+  if (raw === 'files' || raw === 'diff' || raw === 'changes') return 'workspace';
+  if (
+    raw === 'workspace'
+    || raw === 'browser'
+    || raw === 'prs'
+    || raw === 'activity'
+    || raw === 'inbox'
+    || raw === 'spec'
+    || raw === 'pulse'
+  ) {
+    return raw;
+  }
+  return null;
+}
 
 export default function DashboardPage() {
   return (
@@ -260,7 +278,7 @@ function DashboardInner() {
   }, [rightPanelKind]);
   const [rightWidth, setRightWidth] = useState(280);
   const [o8Width, setO8Width] = useState(700);
-  const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>('diff');
+  const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>('workspace');
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
   const [o8BrowserUrl, setO8BrowserUrl] = useState<string | null>(null);
@@ -282,6 +300,20 @@ function DashboardInner() {
   const [workspaceSidePanelActivationKey, setWorkspaceSidePanelActivationKey] = useState(0);
   const [workspaceChatTargetKeyByRepoPath, setWorkspaceChatTargetKeyByRepoPath] = useState<Record<string, string>>({});
   const lastWorkspacePanelViewRef = useRef<'diff'>('diff');
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(O8_ACTIVE_TAB_STORAGE_KEY);
+      const migrated = normalizeO8ActiveTab(raw);
+      if (migrated) setO8ActiveTab(migrated);
+      if (raw && migrated && raw !== migrated) {
+        window.localStorage.setItem(O8_ACTIVE_TAB_STORAGE_KEY, migrated);
+      }
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try { window.localStorage.setItem(O8_ACTIVE_TAB_STORAGE_KEY, o8ActiveTab); } catch { /* ignore */ }
+  }, [o8ActiveTab]);
 
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
@@ -824,8 +856,12 @@ function DashboardInner() {
         });
         return;
       }
-      if (request.tab === 'browser' || request.tab === 'changes' || request.tab === 'files' || request.tab === 'prs' || request.tab === 'activity' || request.tab === 'inbox') {
-        setO8ActiveTab(request.tab);
+      const requestedTab = normalizeO8ActiveTab(request.tab);
+      if (requestedTab) {
+        if (requestedTab === 'workspace' && request.artifactId) {
+          setO8SelectedFile(request.artifactId);
+        }
+        setO8ActiveTab(requestedTab);
       }
     });
     return unsubscribe;
@@ -1862,10 +1898,6 @@ function DashboardInner() {
   }, [enqueueFtuxMilestone, setGlobalRepoBranch, setGlobalRepoId, waitForWorkspaceTerminalTarget]);
 
   const handleSelectFile = useCallback((filePath: string, workspace?: string) => {
-    if (workspace) {
-      setRightPanelKind('review');
-      setChatVisible(true);
-    }
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
     const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext);
     const diffWorkspace = workspace ?? activeWorkspace ?? globalRepoEntry?.localPath ?? null;
@@ -1874,6 +1906,9 @@ function DashboardInner() {
     if (diffWorkspace) {
       setO8RepoPathOverride(diffWorkspace);
     }
+    setO8ActiveTab('workspace');
+    setRightPanelKind('o8');
+    setChatVisible(true);
 
     openCanvasTab({
       id: `${isImage ? 'image' : 'file'}:${filePath}${workspace ? `:${workspace}` : ''}`,
@@ -1924,7 +1959,7 @@ function DashboardInner() {
 
     setO8PrNumber(null);
     setO8PrRepo(null);
-    setO8ActiveTab('changes');
+    setO8ActiveTab('workspace');
     setO8CommitSha(hash);
     setO8CommitRepoPath(repoPath);
     setO8CommitRepoSlug(repoSlug);
