@@ -12,6 +12,7 @@ import {
 } from '../lucide-shims';
 import { useLaneArchivedView } from '@/app/dashboard/hooks/useLaneArchivedSet';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
+import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { IssueLinkPickerModal, type LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 import {
@@ -249,6 +250,22 @@ function WorkspaceChatPaneBase({
     onSelectModel,
     onConsumeDraftInjection,
   });
+
+  // Live packet status — the orchestrationPacket badge stored on the tab is
+  // a snapshot at openCliChatSession time. The mission state knows the
+  // current status (running → awaiting_review → released → archived);
+  // resolve it by sessionKey so the PacketHeaderCard reflects reality.
+  const orchestratorData = useOrchestratorData();
+  const livePacket = useMemo(() => {
+    if (!tab.orchestrationPacket) return null;
+    const targetSessionKey = chat.normalizedSessionKey ?? tab.id;
+    const targetPacketId = tab.orchestrationPacket.packetId ?? null;
+    return orchestratorData?.missionState?.packets.find((p) => (
+      (targetPacketId && p.id === targetPacketId)
+      || (targetSessionKey && p.lane?.sessionKey === targetSessionKey)
+    )) ?? null;
+  }, [chat.normalizedSessionKey, orchestratorData?.missionState?.packets, tab.id, tab.orchestrationPacket]);
+  const liveStatus = livePacket?.status ?? tab.orchestrationPacket?.status ?? null;
 
   // When the lane bound to this tab's session has been archived (reviewed +
   // merged, reaped for a missing worktree, or explicitly archived by the
@@ -539,7 +556,7 @@ function WorkspaceChatPaneBase({
                       title={tab.orchestrationPacket.title ?? tab.label ?? 'Dispatched packet'}
                       branch={tab.orchestrationPacket.branchTarget ?? null}
                       runtime={tab.orchestrationPacket.runtime ?? tab.chatRuntime ?? null}
-                      status={tab.orchestrationPacket.status ?? null}
+                      status={liveStatus}
                       prompt={typeof message.content === 'string' ? message.content : String(message.content ?? '')}
                     />
                   );
