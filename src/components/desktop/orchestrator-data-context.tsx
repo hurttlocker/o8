@@ -49,6 +49,12 @@ export interface OrchestratorDataValue {
    */
   selectedPacketId?: string | null;
   onSelectedPacketChange?: (packetId: string | null) => void;
+  /**
+   * Open the wide O8 panel pinned to a specific repo path + tab. Used by
+   * Recent Work click-routing so a NEEDS YOU click lands the operator on
+   * the workspace tab AND auto-pops the diff view for that worktree.
+   */
+  onOpenO8Panel?: (options: { repoPath?: string | null; tab?: 'workspace' | 'pulse' | 'prs' | 'inbox' | 'activity' | 'spec' | 'browser' }) => void;
 }
 
 const OrchestratorDataContext = createContext<OrchestratorDataValue | null>(null);
