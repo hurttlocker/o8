@@ -3038,31 +3038,47 @@ function DashboardInner() {
                     }}
                   >
                     <Suspense fallback={null}>
-                      <LazyO8Panel
-                        onClose={handleToggleO8Panel}
-                        repoPath={o8CommitRepoPath ?? o8RepoPathOverride ?? globalRepoEntry?.localPath}
-                        previews={workspacePreviews}
-                        activeTab={o8ActiveTab}
-                        onActiveTabChange={setO8ActiveTab}
-                        selectedFile={o8SelectedFile}
-                        onSelectedFileChange={setO8SelectedFile}
-                        prNumber={o8PrNumber}
-                        prRepo={o8PrRepo}
-                        repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
-                        browserUrl={o8BrowserUrl}
-                        onBrowserActiveUrlChange={setO8BrowserHoverUrl}
-                        commitSha={o8CommitSha}
-                        onClearCommit={handleClearCommit}
-                        onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
-                        onOpenFile={(filePath) => {
-                          const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
-                          void (async () => {
-                            const target = await waitForWorkspaceTerminalTarget({});
-                            if (target) target.handle.openInspectorTab(tab);
-                            else openCanvasTab(tab);
-                          })();
-                        }}
-                      />
+                      <OrchestratorDataProvider
+                        agents={parsedAgents}
+                        missionState={thoughtsMissionState}
+                        workspaceTargets={orchestratorWorkspaceTargets}
+                        onMissionStateChange={handleThoughtsMissionStateChange}
+                        onLaunchPacket={launchOrchestrationPacket}
+                        draftInjection={thoughtsDraftInjection}
+                        onSelectSession={handleSelectSession}
+                        latestDispatchedTabId={latestDispatchedTabId}
+                        latestDispatchedAt={latestDispatchedAt}
+                        onAcceptDirectiveProposal={handleAcceptDirectiveProposal}
+                        selectedPacketId={selectedPacketId}
+                        onSelectedPacketChange={setSelectedPacketId}
+                        onOpenO8Panel={handleOpenO8Panel}
+                      >
+                        <LazyO8Panel
+                          onClose={handleToggleO8Panel}
+                          repoPath={o8CommitRepoPath ?? o8RepoPathOverride ?? globalRepoEntry?.localPath}
+                          previews={workspacePreviews}
+                          activeTab={o8ActiveTab}
+                          onActiveTabChange={setO8ActiveTab}
+                          selectedFile={o8SelectedFile}
+                          onSelectedFileChange={setO8SelectedFile}
+                          prNumber={o8PrNumber}
+                          prRepo={o8PrRepo}
+                          repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
+                          browserUrl={o8BrowserUrl}
+                          onBrowserActiveUrlChange={setO8BrowserHoverUrl}
+                          commitSha={o8CommitSha}
+                          onClearCommit={handleClearCommit}
+                          onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
+                          onOpenFile={(filePath) => {
+                            const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
+                            void (async () => {
+                              const target = await waitForWorkspaceTerminalTarget({});
+                              if (target) target.handle.openInspectorTab(tab);
+                              else openCanvasTab(tab);
+                            })();
+                          }}
+                        />
+                      </OrchestratorDataProvider>
                     </Suspense>
                   </motion.div>
                 ) : (
