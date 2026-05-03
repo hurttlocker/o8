@@ -244,6 +244,17 @@ export function O8WorkspacePane({
     { value: 'file' as const, label: 'File', detail: 'Worktree' },
   ], [selectedDirty]);
 
+  // Path-lens label — tells the operator at a glance which checkout the
+  // Workspace tab is pointed at. Worktree leaves under .cortex-worktrees/
+  // get the worktree dot; main checkouts get a neutral folder dot.
+  const lensLabel = useMemo(() => {
+    if (!repoPath) return null;
+    const parts = repoPath.split('/').filter(Boolean);
+    const leaf = parts[parts.length - 1] ?? repoPath;
+    const isWorktree = parts.includes('.cortex-worktrees') || /^worktree/.test(leaf);
+    return { text: leaf, isWorktree, fullPath: repoPath };
+  }, [repoPath]);
+
   return (
     <div
       style={{
@@ -270,6 +281,45 @@ export function O8WorkspacePane({
           />
         </div>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12 }}>
+          {lensLabel ? (
+            <span
+              title={lensLabel.fullPath}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                height: 22,
+                paddingTop: 0,
+                paddingRight: 8,
+                paddingBottom: 0,
+                paddingLeft: 8,
+                borderRadius: 999,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'var(--t-border)',
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                fontSize: 10.5,
+                fontWeight: 500,
+                letterSpacing: '0.01em',
+                whiteSpace: 'nowrap',
+                fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
+                flexShrink: 0,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: 999,
+                  background: lensLabel.isWorktree ? '#FF5A1F' : 'var(--t-text-faint)',
+                  flexShrink: 0,
+                }}
+              />
+              {lensLabel.text}
+            </span>
+          ) : null}
           <div style={{ flex: 1, minWidth: 0 }}>
             <Breadcrumb path={selectedFile} />
           </div>
