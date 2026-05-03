@@ -346,13 +346,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     });
   }, []);
 
-  // After the Mission rail consolidation (commit 2), the Mission button in
-  // the Threads dropdown opens the wide O8 Panel pinned to the Activity
-  // tab — that panel is now the single mission-control surface.
-  const handleToggleMission = useCallback(() => {
-    data?.onOpenO8Panel?.({ tab: 'activity' });
-  }, [data]);
-
   const handleToggleContextInspector = useCallback(() => {
     if (!residency) return;
     residency.setOpen(!residency.isOpen);
@@ -496,9 +489,7 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <ThreadsDropdown
         historyOpen={historyOpen}
-        missionOpen={false}
         onToggleHistory={handleToggleHistory}
-        onToggleMission={handleToggleMission}
       />
       {hasMessages ? (
         <button
@@ -580,8 +571,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
       thoughtsMutedGlass={thoughtsMutedGlass}
       permissionMode={permissionMode}
       onTogglePermission={handleTogglePermission}
-      missionOpen={false}
-      onToggleMission={handleToggleMission}
       repoLabel={repoLabel}
       emptyStateOverride={emptyStateNode}
       showInlineExport={false}

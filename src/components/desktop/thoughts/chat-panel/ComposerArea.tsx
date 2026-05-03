@@ -200,8 +200,6 @@ interface ComposerAreaProps {
   adaptiveEnabled: boolean;
   permissionMode: ThoughtsChatPermissionMode;
   onTogglePermission?: () => void;
-  missionOpen?: boolean;
-  onToggleMission?: () => void;
   repoLabel?: string | null;
   displayMessagesCount: number;
   hasAssistantActivity: boolean;
@@ -239,8 +237,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   adaptiveEnabled,
   permissionMode,
   onTogglePermission,
-  missionOpen,
-  onToggleMission,
   repoLabel,
   displayMessagesCount,
   hasAssistantActivity,
@@ -637,8 +633,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             adaptiveEnabled={adaptiveEnabled}
             permissionMode={permissionMode}
             onTogglePermission={onTogglePermission}
-            missionOpen={missionOpen}
-            onToggleMission={onToggleMission}
             repoLabel={isOrchestratorMode ? repoLabel : null}
             working={isOrchestratorMode && displayWaiting}
             onStop={isOrchestratorMode ? onStop : undefined}
