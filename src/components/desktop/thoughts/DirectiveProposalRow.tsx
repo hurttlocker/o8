@@ -37,6 +37,7 @@ const MONO_FAMILY = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
 export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: DirectiveProposalRowProps) {
   const [hovered, setHovered] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const handleAccept = useCallback(() => {
     if (busy) return;
@@ -48,17 +49,15 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
     onDismiss(proposal);
   }, [busy, onDismiss, proposal]);
 
+  const handleRowClick = useCallback(() => {
+    setExpanded((current) => !current);
+  }, []);
+
   return (
     <div
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        height: 34,
-        paddingTop: 0,
-        paddingRight: 8,
-        paddingBottom: 0,
-        paddingLeft: 10,
+        flexDirection: 'column',
         background: hovered ? YELLOW_BG_HOVER : YELLOW_BG_SOFT,
         borderRadius: 8,
         borderWidth: 1,
@@ -66,15 +65,52 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
         borderColor: YELLOW_BORDER,
         transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         fontFamily: FONT_FAMILY,
+        overflow: 'hidden',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          height: 34,
+          paddingTop: 0,
+          paddingRight: 8,
+          paddingBottom: 0,
+          paddingLeft: 10,
+        }}
+      >
+      <button
+        type="button"
+        onClick={handleRowClick}
+        aria-expanded={expanded}
+        title={expanded ? 'Collapse details' : 'Show what this directive says'}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flex: 1,
+          minWidth: 0,
+          height: '100%',
+          paddingTop: 0,
+          paddingRight: 0,
+          paddingBottom: 0,
+          paddingLeft: 0,
+          borderWidth: 0,
+          background: 'transparent',
+          cursor: 'pointer',
+          fontFamily: FONT_FAMILY,
+          textAlign: 'left',
+        }}
+      >
       {proposal.source === 'cross-repo' ? (
         <CrossRepoBody proposal={proposal} />
       ) : (
         <AutoBody proposal={proposal} />
       )}
+      </button>
 
       {/* Actions. Mirror the IssueGroupList "+" pattern (transparent buttons,
           tight padding) but with text labels so Accept/Dismiss are explicit. */}
@@ -134,6 +170,53 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
       >
         Dismiss
       </button>
+      </div>
+      {expanded ? (
+        <div
+          style={{
+            paddingTop: 8,
+            paddingRight: 12,
+            paddingBottom: 12,
+            paddingLeft: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            borderTopWidth: 1,
+            borderTopStyle: 'solid',
+            borderTopColor: YELLOW_BORDER,
+            fontFamily: FONT_FAMILY,
+          }}
+        >
+          {proposal.source === 'cross-repo' ? (
+            <>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                {proposal.directiveTitle}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--t-text-secondary)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+                {proposal.directiveBody || '(no body)'}
+              </div>
+              <div style={{ fontSize: 10, color: YELLOW_TEXT_DARK, marginTop: 2 }}>
+                Imported from {proposal.sourceRepoName} · {Math.round(proposal.similarity * 100)}% stack overlap with {proposal.targetRepoName}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
+                Detected pattern (seen {proposal.hits}× in last 14 days):
+              </div>
+              <div style={{ fontFamily: MONO_FAMILY, fontSize: 11, color: 'var(--t-text)', whiteSpace: 'pre-wrap' }}>
+                {proposal.filePattern} → {proposal.fixPattern}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 6 }}>
+                Draft directive:
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--t-text-secondary)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+                {proposal.draftDirective}
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
