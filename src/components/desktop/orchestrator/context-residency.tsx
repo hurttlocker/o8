@@ -96,7 +96,21 @@ export function OrchestratorContextResidencyProvider({ children }: OrchestratorC
   }, [isOpen]);
 
   const publish = useCallback<OrchestratorContextResidencyValue['publish']>((snapshot) => {
-    setMessages((prev) => (prev === snapshot.messages ? prev : snapshot.messages));
+    setMessages((prev) => {
+      if (prev === snapshot.messages) return prev;
+      // Callers commonly pass a fresh `[]` each render in non-orchestrator
+      // mode; reference equality alone would re-render forever. Treat
+      // same-length + same-last-id as equal — cheap and covers the
+      // streaming-append case where only the tail changes.
+      if (prev.length === snapshot.messages.length) {
+        if (prev.length === 0) return prev;
+        if (prev[prev.length - 1]?.id === snapshot.messages[snapshot.messages.length - 1]?.id
+          && prev[0]?.id === snapshot.messages[0]?.id) {
+          return prev;
+        }
+      }
+      return snapshot.messages;
+    });
     setRunningTotal((prev) => (prev === snapshot.runningTotal ? prev : snapshot.runningTotal));
     setActiveAssistantId((prev) => (prev === snapshot.activeAssistantId ? prev : snapshot.activeAssistantId));
   }, []);
