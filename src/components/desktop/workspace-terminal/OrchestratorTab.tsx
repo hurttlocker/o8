@@ -504,18 +504,24 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
 
   // Per-section click routing for Recent Work. Different sections imply
   // different operator intent:
-  //   - needs-you / in-flight → activate the workspace tab for the lane's
-  //     session so the operator lands on the live transcript + diff view.
-  //     If no live session exists (rare), fall back to mission-rail expand.
+  //   - needs-you → activate workspace tab AND auto-pop O8 Workspace tab
+  //     for that worktree so review-mode is one click away.
+  //   - in-flight → activate workspace tab; operator just wants to watch.
   //   - done-today → no live session anymore; expand the packet card in
   //     the Mission rail so the operator can see the merge + diff context.
+  //     (Future: route to commit viewer when lane carries mergeSha.)
   const handleActivateRecentLane = useCallback((
-    lane: { id: string; sessionKey?: string | null; packetId?: string | null; status: string },
+    lane: { id: string; sessionKey?: string | null; packetId?: string | null; repoPath?: string | null; status: string },
     sectionId: 'needs-you' | 'in-flight' | 'done-today',
   ) => {
     const isActiveSection = sectionId === 'needs-you' || sectionId === 'in-flight';
     if (isActiveSection && lane.sessionKey && data?.onSelectSession) {
       data.onSelectSession(lane.sessionKey);
+      // NEEDS YOU is review-mode — pop the O8 panel into Workspace tab
+      // pinned to that lane's worktree so diff is right there.
+      if (sectionId === 'needs-you' && data.onOpenO8Panel) {
+        data.onOpenO8Panel({ repoPath: lane.repoPath ?? null, tab: 'workspace' });
+      }
       return;
     }
     if (lane.packetId && data?.onSelectedPacketChange) {

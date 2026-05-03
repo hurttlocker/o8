@@ -68,7 +68,7 @@ interface OrchestratorEmptyStateProps {
    *  caller the operator's intent: review (needs-you), watch (in-flight),
    *  or recap (done-today). */
   onActivateLane?: (
-    lane: { id: string; sessionKey?: string | null; packetId?: string | null; status: string },
+    lane: { id: string; sessionKey?: string | null; packetId?: string | null; repoPath?: string | null; status: string },
     sectionId: RecentSectionId,
   ) => void;
   /** Hide the Recent Work column. Default true; OrchestratorTab passes

@@ -1319,6 +1319,17 @@ function DashboardInner() {
   }, [globalRepoEntries, handleSelectRegisteredRepo]);
 
   // ── Routing callbacks for AgentPanel ──
+  // Open the wide O8 panel pinned to a specific repo path + tab. Used by
+  // Recent Work routing — a NEEDS YOU click activates the agent's workspace
+  // tab AND pops the O8 panel to its Workspace tab pinned to that
+  // worktree's diff so the operator lands in review-mode with one click.
+  const handleOpenO8Panel = useCallback((options: { repoPath?: string | null; tab?: O8Tab }) => {
+    if (options.repoPath) setO8RepoPathOverride(options.repoPath);
+    setO8ActiveTab(options.tab ?? 'workspace');
+    setRightPanelKind('o8');
+    setChatVisible(true);
+  }, []);
+
   const handleSelectSession = useCallback((sessionKey: string) => {
     // Open the session transcript in a canvas chat tab
     void (async () => {
@@ -2941,6 +2952,7 @@ function DashboardInner() {
             onAcceptDirectiveProposal={handleAcceptDirectiveProposal}
             selectedPacketId={selectedPacketId}
             onSelectedPacketChange={setSelectedPacketId}
+            onOpenO8Panel={handleOpenO8Panel}
           >
             <TileContainer
               layout={tileLayout}
@@ -3081,6 +3093,7 @@ function DashboardInner() {
                         onAcceptDirectiveProposal={handleAcceptDirectiveProposal}
                         selectedPacketId={selectedPacketId}
                         onSelectedPacketChange={setSelectedPacketId}
+            onOpenO8Panel={handleOpenO8Panel}
                       >
                         <></>
                       </OrchestratorDataProvider>
