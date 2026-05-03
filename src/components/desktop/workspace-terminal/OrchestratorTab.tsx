@@ -34,7 +34,6 @@ import {
   timeOfDayGreeting,
 } from '@/components/desktop/OrchestratorEmptyState';
 import { OrchestratorHistorySidebar } from '@/components/desktop/OrchestratorHistorySidebar';
-import { UnifiedAgentsSidebar } from '@/components/desktop/UnifiedAgentsSidebar';
 import { ContextInspector } from '@/components/desktop/orchestrator/ContextInspector';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
 import { QuickActionPalette } from '@/components/desktop/orchestrator/QuickActionPalette';
@@ -91,7 +90,6 @@ function persistPermissionMode(tabId: string, mode: ThoughtsChatPermissionMode):
 }
 
 const HISTORY_OPEN_KEY = 'o8:orchestrator:history-open';
-const AGENTS_OPEN_KEY = 'o8:orchestrator:agents-open';
 const MISSION_OPEN_KEY = 'o8:orchestrator:mission-open';
 const USERS_THREE_ICON_PATH = 'M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z';
 
@@ -247,7 +245,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   const [contextUsage, setContextUsage] = useState({ tokenCount: 0, runningTotal: 0 });
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
   const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
-  const [agentsOpen, setAgentsOpen] = useState(() => readBooleanPref(AGENTS_OPEN_KEY));
   const [missionOpen, setMissionOpen] = useState(() => readBooleanPref(MISSION_OPEN_KEY));
   // Auto-collapse mission sidebar when the tab is in a narrow split pane —
   // 340px sidebar + chat body needs ~380px to stay readable. Below 720px we
@@ -373,14 +370,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     setHistoryOpen((prev) => {
       const next = !prev;
       writeBooleanPref(HISTORY_OPEN_KEY, next);
-      return next;
-    });
-  }, []);
-
-  const handleToggleAgents = useCallback(() => {
-    setAgentsOpen((prev) => {
-      const next = !prev;
-      writeBooleanPref(AGENTS_OPEN_KEY, next);
       return next;
     });
   }, []);
@@ -561,10 +550,8 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <ThreadsDropdown
         historyOpen={historyOpen}
-        agentsOpen={agentsOpen}
         missionOpen={effectiveMissionOpen}
         onToggleHistory={handleToggleHistory}
-        onToggleAgents={handleToggleAgents}
         onToggleMission={handleToggleMission}
       />
       {hasMessages ? (
@@ -754,13 +741,6 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
           onSelectArchivedLane={data.onSelectSession
             ? (sessionKey) => data.onSelectSession?.(sessionKey)
             : undefined}
-        />
-
-        <UnifiedAgentsSidebar
-          open={agentsOpen}
-          agents={agents}
-          onClose={handleToggleAgents}
-          onSelectSession={data.onSelectSession}
         />
 
         {/* Center: chat body */}
