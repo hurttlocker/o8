@@ -147,13 +147,14 @@ export type ActivityItem =
       checkSummary?: { passed: number; failed: number; pending: number };
       failingChecks?: string[];
     }
-  | { kind: 'ci'; id: number; title: string; status: string; conclusion: string; branch: string; workflow: string; age: string; ts: number; repo: string };
+  | { kind: 'ci'; id: number; title: string; status: string; conclusion: string; branch: string; workflow: string; age: string; ts: number; repo: string }
+  | { kind: 'packet'; packet: OrchestratorPacket; ts: number; repo?: string };
 
 export type RepoTaskLaunchRequest =
   | { kind: 'issue'; repo: string; number: number; title: string; body?: string }
   | { kind: 'pr'; repo: string; number: number; title: string; branch?: string };
 
-export type FeedFilter = 'all' | 'commit' | 'issue' | 'pr' | 'ci';
+export type FeedFilter = 'all' | 'commit' | 'issue' | 'pr' | 'ci' | 'packet';
 
 export interface WorkspaceAgentLaunchRequest {
   repoPath: string;
