@@ -11,14 +11,17 @@ const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   max: 'max',
   xhigh: 'xhigh',
 };
-const EFFORT_OPTIONS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'];
+// xhigh stays in the menu but reads as a sibling option to max, NOT as
+// "even better than max". max gets the brand orange to anchor it as the
+// climax tier; xhigh gets a muted dot so it doesn't outshine max.
+const EFFORT_OPTIONS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'xhigh', 'max'];
 const EFFORT_DOT: Record<ThinkingEffort, string> = {
   adaptive: 'var(--t-text-faint)',
   low: 'var(--t-text-faint)',
   medium: 'var(--t-text-muted)',
   high: 'var(--t-text-muted)',
+  xhigh: 'var(--t-text-muted)',
   max: '#FF5A1F',
-  xhigh: 'var(--t-text)',
 };
 
 /**
@@ -174,8 +177,8 @@ export function InputButtons({
 }) {
   const canSubmit = Boolean(input.trim());
   const effortCycle: ThinkingEffort[] = adaptiveEnabled
-    ? ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh']
-    : ['low', 'medium', 'high', 'max', 'xhigh'];
+    ? ['adaptive', 'low', 'medium', 'high', 'xhigh', 'max']
+    : ['low', 'medium', 'high', 'xhigh', 'max'];
 
   const cycleEffort = (next = effortCycle[(Math.max(effortCycle.indexOf(effort), 0)) + 1] ?? effortCycle[0]) => {
     onEffortChange?.(next);
