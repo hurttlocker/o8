@@ -124,8 +124,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsMutedGlass: string;
   permissionMode?: ThoughtsChatPermissionMode;
   onTogglePermission?: () => void;
-  missionOpen?: boolean;
-  onToggleMission?: () => void;
   repoLabel?: string | null;
   emptyStateOverride?: React.ReactNode;
   showInlineExport?: boolean;
@@ -152,8 +150,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsMutedGlass,
   permissionMode = 'full',
   onTogglePermission,
-  missionOpen,
-  onToggleMission,
   repoLabel,
   emptyStateOverride,
   showInlineExport = true,
@@ -1219,8 +1215,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         adaptiveEnabled={adaptiveThinkingEnabled}
         permissionMode={permissionMode}
         onTogglePermission={onTogglePermission}
-        missionOpen={missionOpen}
-        onToggleMission={onToggleMission}
         repoLabel={repoLabel}
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
