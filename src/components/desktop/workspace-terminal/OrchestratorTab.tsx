@@ -502,67 +502,15 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   // switches dispatch targets, not the orchestrator runtime itself.
   const runtimeLabel = orchestratorRuntimeTone('claude-code').label;
 
-  // Per-section click routing for Recent Work. Different sections imply
-  // different operator intent:
-  //   - needs-you → ALWAYS pop O8 Workspace pinned to the lane's worktree
-  //     so the diff is up. If the session is still alive, also activate
-  //     its workspace tab. If the packet exists, also expand it in
-  //     Mission so the packet meta is visible. Review-mode = diff +
-  //     transcript + meta in one click.
-  //   - in-flight → activate workspace tab; operator just wants to watch.
-  //   - done-today → no live session anymore; expand the packet card in
-  //     the Mission rail so the operator can see the merge + diff context.
-  //     (Future: route to commit viewer when lane carries mergeSha.)
-  const handleActivateRecentLane = useCallback((
-    lane: { id: string; sessionKey?: string | null; packetId?: string | null; repoPath?: string | null; worktreePath?: string | null; status: string },
-    sectionId: 'needs-you' | 'in-flight' | 'done-today',
-  ) => {
-    if (sectionId === 'needs-you') {
-      // Always show the diff. Worktree path beats repo path because the
-      // dirty changes live in the worktree.
-      const focusPath = lane.worktreePath ?? lane.repoPath ?? null;
-      if (focusPath && data?.onOpenO8Panel) {
-        data.onOpenO8Panel({ repoPath: focusPath, tab: 'workspace' });
-      }
-      // If the session is still attached, drop the operator on the
-      // transcript too.
-      if (lane.sessionKey && data?.onSelectSession) {
-        data.onSelectSession(lane.sessionKey);
-      }
-      // Expand the packet in Mission so the meta is one glance away.
-      if (lane.packetId && data?.onSelectedPacketChange) {
-        data.onSelectedPacketChange(lane.packetId);
-      }
-      return;
-    }
-    if (sectionId === 'in-flight' && lane.sessionKey && data?.onSelectSession) {
-      data.onSelectSession(lane.sessionKey);
-      return;
-    }
-    // done-today fallback (or anything without a live session): mission expand
-    if (lane.packetId && data?.onSelectedPacketChange) {
-      data.onSelectedPacketChange(lane.packetId);
-      if (!missionOpen) {
-        setMissionOpen(true);
-        writeBooleanPref(MISSION_OPEN_KEY, true);
-      }
-    }
-  }, [data, missionOpen]);
-
   const emptyStateNode = useMemo(
     () => (
       <OrchestratorEmptyState
         greeting={greeting}
         runtimeLabel={runtimeLabel}
         onActionClick={handleQuickAction}
-        onActivateLane={handleActivateRecentLane}
-        // Hide the Recent Work column when the Mission rail is already
-        // open — the same packets render there, and showing both at once
-        // is just noise.
-        showRecentWork={!effectiveMissionOpen}
       />
     ),
-    [greeting, runtimeLabel, handleQuickAction, handleActivateRecentLane, effectiveMissionOpen],
+    [greeting, runtimeLabel, handleQuickAction],
   );
 
   const hasMessages = chatChromeState.hasMessages;
