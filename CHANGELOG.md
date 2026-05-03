@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-03
 
+- `c4dfad89` feat(o8-panel): path-lens chip on Workspace tab — shows main vs worktree at a glance
 - `7b1eac39` feat: replace o8 file tabs with workspace
 - `0ff128a5` feat: add o8 workspace pane components
 
