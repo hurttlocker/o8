@@ -287,6 +287,48 @@ function DashboardInner() {
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [latestDispatchedTabId, setLatestDispatchedTabId] = useState<string | null>(null);
   const [latestDispatchedAt, setLatestDispatchedAt] = useState<number | null>(null);
+  // Persist the latest-dispatch marker so a reload during an active
+  // dispatch (common during dev-bridge hot-reloads) keeps the orange
+  // highlight on the right tab. Treat anything older than 60min as stale
+  // so old dispatches don't keep highlighting after the work is done.
+  const LATEST_DISPATCH_TTL_MS = 60 * 60 * 1000;
+  useEffect(() => {
+    try {
+      const tabRaw = window.localStorage.getItem('o8:latest-dispatch:tab-id');
+      const atRaw = window.localStorage.getItem('o8:latest-dispatch:at');
+      const at = atRaw ? parseInt(atRaw, 10) : NaN;
+      if (tabRaw && Number.isFinite(at) && Date.now() - at < LATEST_DISPATCH_TTL_MS) {
+        setLatestDispatchedTabId(tabRaw);
+        setLatestDispatchedAt(at);
+      }
+    } catch { /* ignore */ }
+  }, [LATEST_DISPATCH_TTL_MS]);
+  // Back-fill latestDispatchedTabId from the most recent running packet
+  // when the marker is missing. Covers the case where a packet was
+  // dispatched via MCP before the in-memory marker existed (or during a
+  // dev-bridge reload that nuked it). Tab id == lane.sessionKey for
+  // CLI-runtime tabs (see openCliChatSession).
+  useEffect(() => {
+    if (latestDispatchedTabId) return;
+    const packets = thoughtsMissionState.packets;
+    if (!packets.length) return;
+    const candidates = packets
+      .filter((p) => p.lane?.sessionKey && (p.status === 'running' || p.status === 'awaiting_review'))
+      .map((p) => ({ sessionKey: p.lane!.sessionKey!, at: p.lane?.lastEventAt ? new Date(p.lane.lastEventAt).getTime() : 0 }))
+      .filter((c) => Number.isFinite(c.at) && c.at > 0 && Date.now() - c.at < LATEST_DISPATCH_TTL_MS);
+    if (candidates.length === 0) return;
+    candidates.sort((a, b) => b.at - a.at);
+    setLatestDispatchedTabId(candidates[0].sessionKey);
+    setLatestDispatchedAt(candidates[0].at);
+  }, [LATEST_DISPATCH_TTL_MS, latestDispatchedTabId, thoughtsMissionState.packets]);
+  useEffect(() => {
+    try {
+      if (latestDispatchedTabId) window.localStorage.setItem('o8:latest-dispatch:tab-id', latestDispatchedTabId);
+      else window.localStorage.removeItem('o8:latest-dispatch:tab-id');
+      if (latestDispatchedAt) window.localStorage.setItem('o8:latest-dispatch:at', String(latestDispatchedAt));
+      else window.localStorage.removeItem('o8:latest-dispatch:at');
+    } catch { /* ignore */ }
+  }, [latestDispatchedTabId, latestDispatchedAt]);
   // Stable ref so the auto-spawn callback can look up the matching packet
   // by sessionKey without re-binding on every mission-state delta.
   const thoughtsMissionStateRef = useRef(thoughtsMissionState);
