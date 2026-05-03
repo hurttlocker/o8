@@ -1,42 +1,16 @@
 'use client';
-/* eslint-disable react-hooks/set-state-in-effect -- file selection changes intentionally reset and refetch pane state */
+/* eslint-disable react-hooks/set-state-in-effect -- selected file changes intentionally reset and refetch diff state */
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { diffLineTone, splitUnifiedDiff, type DiffLine } from './diff-render';
+import { diffLineTone, splitUnifiedDiff, type DiffLine } from '../diff-render';
 
-type DiffMode = 'unified' | 'side';
-type O8DiffPaneProps = { repoPath?: string | null; selectedFile: string | null };
+export type DiffDisplayMode = 'unified' | 'side';
+
 type FileDiffResponse = { diff?: string; stagedDiff?: string; error?: string };
+
 const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
-function ModeButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        border: '1px solid var(--t-divider-subtle)',
-        borderRadius: 10,
-        background: active ? 'var(--t-input-bg)' : 'transparent',
-        color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
-        cursor: 'pointer',
-        fontFamily: UI_FONT,
-        fontSize: 11,
-        fontWeight: 600,
-        minHeight: 28,
-        paddingTop: 0,
-        paddingRight: 10,
-        paddingBottom: 0,
-        paddingLeft: 10,
-      }}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--t-hover)'; }}
-      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
-    >
-      {label}
-    </button>
-  );
-}
 function lineStyle(line: DiffLine | null): CSSProperties {
   const tone = diffLineTone(line?.kind ?? 'context');
   return {
@@ -50,6 +24,7 @@ function lineStyle(line: DiffLine | null): CSSProperties {
     tabSize: 2,
   };
 }
+
 function UnifiedRows({ lines }: { lines: DiffLine[] }) {
   return (
     <div style={{ minWidth: 'max-content' }}>
@@ -85,6 +60,7 @@ function UnifiedRows({ lines }: { lines: DiffLine[] }) {
     </div>
   );
 }
+
 function sideRows(lines: DiffLine[]) {
   const rows: Array<{ left: DiffLine | null; right: DiffLine | null }> = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -93,24 +69,27 @@ function sideRows(lines: DiffLine[]) {
       rows.push(line?.kind === 'add' ? { left: null, right: line } : { left: line ?? null, right: line ?? null });
       continue;
     }
-    const dels: DiffLine[] = [];
-    const adds: DiffLine[] = [];
+
+    const deletions: DiffLine[] = [];
+    const additions: DiffLine[] = [];
     while (lines[index]?.kind === 'del') {
-      dels.push(lines[index]!);
+      deletions.push(lines[index]!);
       index += 1;
     }
     while (lines[index]?.kind === 'add') {
-      adds.push(lines[index]!);
+      additions.push(lines[index]!);
       index += 1;
     }
     index -= 1;
-    const count = Math.max(dels.length, adds.length);
+
+    const count = Math.max(deletions.length, additions.length);
     for (let offset = 0; offset < count; offset += 1) {
-      rows.push({ left: dels[offset] ?? null, right: adds[offset] ?? null });
+      rows.push({ left: deletions[offset] ?? null, right: additions[offset] ?? null });
     }
   }
   return rows;
 }
+
 function SideRows({ lines }: { lines: DiffLine[] }) {
   const rows = useMemo(() => sideRows(lines), [lines]);
   return (
@@ -134,8 +113,15 @@ function SideRows({ lines }: { lines: DiffLine[] }) {
   );
 }
 
-export function O8DiffPane({ repoPath, selectedFile }: O8DiffPaneProps) {
-  const [mode, setMode] = useState<DiffMode>('unified');
+export function DiffViewer({
+  repoPath,
+  selectedFile,
+  mode,
+}: {
+  repoPath?: string | null;
+  selectedFile: string | null;
+  mode: DiffDisplayMode;
+}) {
   const [diff, setDiff] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,14 +137,16 @@ export function O8DiffPane({ repoPath, selectedFile }: O8DiffPaneProps) {
     if (!repoPath) {
       setDiff('');
       setError('Select a repo before loading a file diff.');
+      setLoading(false);
       return;
     }
+
     let cancelled = false;
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ path: selectedFile, workspace: repoPath });
     fetch(`/api/panel/file-diff?${params.toString()}`)
-      .then((res) => res.json() as Promise<FileDiffResponse>)
+      .then((response) => response.json() as Promise<FileDiffResponse>)
       .then((data) => {
         if (cancelled) return;
         if (data.error) setError(data.error);
@@ -170,47 +158,24 @@ export function O8DiffPane({ repoPath, selectedFile }: O8DiffPaneProps) {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => { cancelled = true; };
   }, [repoPath, selectedFile]);
 
-  return (
-    // Wide O8 Panel chrome scope flips --t-text/--t-text-muted to white. We
-    // render content here, so we rebind the chrome-flipped tokens back to
-    // their chat-surface-* content equivalents. Children that reference
-    // --t-text / --t-text-muted then resolve correctly without per-component
-    // edits.
-    <div style={{
-      display: 'flex',
-      flex: 1,
-      flexDirection: 'column',
-      minHeight: 0,
-      background: 'var(--t-canvas-bg)',
-      color: 'var(--t-chat-surface-text)',
-      ['--t-text' as unknown as string]: 'var(--t-chat-surface-text)',
-      ['--t-text-secondary' as unknown as string]: 'var(--t-chat-surface-text-secondary)',
-      ['--t-text-muted' as unknown as string]: 'var(--t-chat-surface-text-muted)',
-      ['--t-text-faint' as unknown as string]: 'var(--t-chat-surface-text-muted)',
-      ['--t-input-bg' as unknown as string]: 'var(--t-chat-surface-input-bg)',
-    } as React.CSSProperties}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 42, paddingLeft: 12, paddingRight: 12, borderBottom: '1px solid var(--t-divider-subtle)', fontFamily: UI_FONT }}>
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-chat-surface-text-muted)', fontSize: 11, fontWeight: 600 }}>
-          {selectedFile ? `[DIFF] · ${selectedFile}` : '[DIFF] · select a file from Files tab or focus drawer'}
-        </span>
-        <ModeButton active={mode === 'unified'} label="Unified" onClick={() => setMode('unified')} />
-        <ModeButton active={mode === 'side'} label="Side-by-side" onClick={() => setMode('side')} />
+  if (!selectedFile) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontFamily: MONO_FONT, fontSize: 12 }}>
+        Select a file to inspect.
       </div>
-      {!selectedFile ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-chat-surface-text-muted)', fontFamily: MONO_FONT, fontSize: 12 }}>
-          [DIFF] · select a file from Files tab or focus drawer
-        </div>
-      ) : (
-        <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', paddingTop: 10, paddingBottom: 10 }}>
-          {loading ? <div style={{ paddingLeft: 14, color: 'var(--t-chat-surface-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading diff...</div> : null}
-          {!loading && error ? <div style={{ paddingLeft: 14, color: 'var(--t-brand-red)', fontFamily: UI_FONT, fontSize: 12 }}>{error}</div> : null}
-          {!loading && !error && !diff ? <div style={{ paddingLeft: 14, color: 'var(--t-chat-surface-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>No diff available for this file.</div> : null}
-          {!loading && !error && diff ? (mode === 'unified' ? <UnifiedRows lines={lines} /> : <SideRows lines={lines} />) : null}
-        </div>
-      )}
+    );
+  }
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', paddingTop: 10, paddingBottom: 10 }}>
+      {loading ? <div style={{ paddingLeft: 14, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading diff...</div> : null}
+      {!loading && error ? <div style={{ paddingLeft: 14, color: 'var(--t-brand-red)', fontFamily: UI_FONT, fontSize: 12 }}>{error}</div> : null}
+      {!loading && !error && !diff ? <div style={{ paddingLeft: 14, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>No diff available for this file.</div> : null}
+      {!loading && !error && diff ? (mode === 'unified' ? <UnifiedRows lines={lines} /> : <SideRows lines={lines} />) : null}
     </div>
   );
 }
