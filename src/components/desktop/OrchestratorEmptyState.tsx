@@ -58,12 +58,19 @@ const ARCHIVED_KEY = 'cortex-ide:orchestrator:empty:show-archived';
 
 type LaneSummary = Pick<Lane, 'id' | 'label' | 'repoPath' | 'branch' | 'runtime' | 'status' | 'updatedAt' | 'lastEventAt' | 'packetId'>;
 
+type RecentSectionId = 'needs-you' | 'in-flight' | 'done-today';
+
 interface OrchestratorEmptyStateProps {
   greeting: string;
   runtimeLabel: string;
   onActionClick: (prompt: string) => void;
-  /** When provided, clicking a recent-work card expands that packet. */
-  onSelectPacket?: (packetId: string) => void;
+  /** Per-section click routing for Recent Work rows. Section id tells the
+   *  caller the operator's intent: review (needs-you), watch (in-flight),
+   *  or recap (done-today). */
+  onActivateLane?: (
+    lane: { id: string; sessionKey?: string | null; packetId?: string | null; status: string },
+    sectionId: RecentSectionId,
+  ) => void;
   /** Hide the Recent Work column. Default true; OrchestratorTab passes
    *  false when the Mission rail is open since the same packets render
    *  there. */
@@ -177,7 +184,7 @@ function OrchestratorEmptyStateBase({
   greeting,
   runtimeLabel,
   onActionClick,
-  onSelectPacket,
+  onActivateLane,
   showRecentWork = true,
 }: OrchestratorEmptyStateProps) {
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
@@ -550,7 +557,11 @@ function OrchestratorEmptyStateBase({
                         </div>
                       ) : null}
                       {group.lanes.map((lane) => (
-                        <RecentLaneRow key={lane.id} lane={lane} onSelect={onSelectPacket} />
+                        <RecentLaneRow
+                          key={lane.id}
+                          lane={lane}
+                          onActivate={onActivateLane ? () => onActivateLane(lane, section.id) : undefined}
+                        />
                       ))}
                     </div>
                   ))}
@@ -599,21 +610,21 @@ function ToggleChip({ active, label, onClick, title }: { active: boolean; label:
 
 interface RecentLaneRowProps {
   lane: LaneSummary;
-  onSelect?: (packetId: string) => void;
+  onActivate?: () => void;
 }
 
-function RecentLaneRow({ lane, onSelect }: RecentLaneRowProps) {
+function RecentLaneRow({ lane, onActivate }: RecentLaneRowProps) {
   const dotKind = statusDotKind(lane.status);
   const stamp = formatRelativeShort(lane.lastEventAt ?? lane.updatedAt);
   const handleClick = useCallback(() => {
-    if (lane.packetId && onSelect) onSelect(lane.packetId);
-  }, [lane.packetId, onSelect]);
+    if (onActivate) onActivate();
+  }, [onActivate]);
 
   return (
     <button
       type="button"
       onClick={handleClick}
-      disabled={!lane.packetId || !onSelect}
+      disabled={!onActivate}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -625,13 +636,13 @@ function RecentLaneRow({ lane, onSelect }: RecentLaneRowProps) {
         borderRadius: 8,
         borderWidth: 0,
         background: 'transparent',
-        cursor: lane.packetId && onSelect ? 'pointer' : 'default',
+        cursor: onActivate ? 'pointer' : 'default',
         textAlign: 'left',
         transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}
       onMouseEnter={(e) => {
-        if (!lane.packetId || !onSelect) return;
+        if (!onActivate) return;
         e.currentTarget.style.background = 'var(--t-panel-hover)';
       }}
       onMouseLeave={(e) => {

@@ -502,15 +502,28 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   // switches dispatch targets, not the orchestrator runtime itself.
   const runtimeLabel = orchestratorRuntimeTone('claude-code').label;
 
-  // #888/#889 — clicking a recent-work card both expands the packet in
-  // the mission rail and ensures the rail is visible.
-  const handleSelectRecentPacket = useCallback((packetId: string) => {
-    if (data?.onSelectedPacketChange) {
-      data.onSelectedPacketChange(packetId);
+  // Per-section click routing for Recent Work. Different sections imply
+  // different operator intent:
+  //   - needs-you / in-flight → activate the workspace tab for the lane's
+  //     session so the operator lands on the live transcript + diff view.
+  //     If no live session exists (rare), fall back to mission-rail expand.
+  //   - done-today → no live session anymore; expand the packet card in
+  //     the Mission rail so the operator can see the merge + diff context.
+  const handleActivateRecentLane = useCallback((
+    lane: { id: string; sessionKey?: string | null; packetId?: string | null; status: string },
+    sectionId: 'needs-you' | 'in-flight' | 'done-today',
+  ) => {
+    const isActiveSection = sectionId === 'needs-you' || sectionId === 'in-flight';
+    if (isActiveSection && lane.sessionKey && data?.onSelectSession) {
+      data.onSelectSession(lane.sessionKey);
+      return;
     }
-    if (!missionOpen) {
-      setMissionOpen(true);
-      writeBooleanPref(MISSION_OPEN_KEY, true);
+    if (lane.packetId && data?.onSelectedPacketChange) {
+      data.onSelectedPacketChange(lane.packetId);
+      if (!missionOpen) {
+        setMissionOpen(true);
+        writeBooleanPref(MISSION_OPEN_KEY, true);
+      }
     }
   }, [data, missionOpen]);
 
@@ -520,14 +533,14 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
         greeting={greeting}
         runtimeLabel={runtimeLabel}
         onActionClick={handleQuickAction}
-        onSelectPacket={handleSelectRecentPacket}
+        onActivateLane={handleActivateRecentLane}
         // Hide the Recent Work column when the Mission rail is already
         // open — the same packets render there, and showing both at once
         // is just noise.
         showRecentWork={!effectiveMissionOpen}
       />
     ),
-    [greeting, runtimeLabel, handleQuickAction, handleSelectRecentPacket, effectiveMissionOpen],
+    [greeting, runtimeLabel, handleQuickAction, handleActivateRecentLane, effectiveMissionOpen],
   );
 
   const hasMessages = chatChromeState.hasMessages;
