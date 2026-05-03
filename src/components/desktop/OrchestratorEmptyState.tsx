@@ -64,6 +64,10 @@ interface OrchestratorEmptyStateProps {
   onActionClick: (prompt: string) => void;
   /** When provided, clicking a recent-work card expands that packet. */
   onSelectPacket?: (packetId: string) => void;
+  /** Hide the Recent Work column. Default true; OrchestratorTab passes
+   *  false when the Mission rail is open since the same packets render
+   *  there. */
+  showRecentWork?: boolean;
 }
 
 function readBoolPref(key: string, fallback: boolean): boolean {
@@ -174,6 +178,7 @@ function OrchestratorEmptyStateBase({
   runtimeLabel,
   onActionClick,
   onSelectPacket,
+  showRecentWork = true,
 }: OrchestratorEmptyStateProps) {
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -379,7 +384,9 @@ function OrchestratorEmptyStateBase({
         </div>
       </div>
 
-      {/* RIGHT — repo-grouped recent work */}
+      {/* RIGHT — repo-grouped recent work (hidden when Mission rail is open
+          to avoid double-rendering the same packets) */}
+      {showRecentWork ? (
       <div
         style={{
           width: 320,
@@ -478,6 +485,7 @@ function OrchestratorEmptyStateBase({
           )}
         </div>
       </div>
+      ) : null}
     </div>
   );
 }
