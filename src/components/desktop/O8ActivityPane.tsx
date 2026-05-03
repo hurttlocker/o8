@@ -37,9 +37,11 @@ import {
 } from './o8-activity-helpers';
 import { useOrchestratorData } from './orchestrator-data-context';
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
-import { DirectiveProposalSection } from './thoughts/mission-panel/DirectiveProposalSection';
+import { DirectiveProposalRow } from './thoughts/DirectiveProposalRow';
 import { useDirectiveProposals } from './thoughts/mission-panel/useDirectiveProposals';
 import type { DirectiveProposalCandidate } from './thoughts/directive-proposal-types';
+
+const PROPOSALS_OPEN_KEY = 'o8:activity:proposals-open';
 
 const FILTER_TABS_WITH_PACKETS = [
   ...FILTER_TABS,
@@ -74,6 +76,25 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [repoOverride, setRepoOverride] = useState<string | null>(null);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [proposalsOpen, setProposalsOpen] = useState(false);
+
+  // Hydrate the proposals open/closed pref after mount so SSR doesn't
+  // hydrate-mismatch. Default = collapsed; the row is recommendations,
+  // not pending tasks, so it shouldn't dominate the timeline visually.
+  useEffect(() => {
+    try {
+      setProposalsOpen(window.localStorage.getItem(PROPOSALS_OPEN_KEY) === '1');
+    } catch {
+      // ignore
+    }
+  }, []);
+  const handleToggleProposals = useCallback(() => {
+    setProposalsOpen((prev) => {
+      const next = !prev;
+      try { window.localStorage.setItem(PROPOSALS_OPEN_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
   const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
   const mountedRef = useRef(true);
   const orchestratorData = useOrchestratorData();
@@ -471,15 +492,94 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       }}>
         {/* #746 — auto-directive proposals pin above the timeline so they
             read as recommendations (system → operator), distinct from the
-            chronological feed. */}
+            chronological feed. Collapsible (default closed) so the section
+            doesn't visually dominate when several proposals are queued. */}
         {proposals.length > 0 ? (
           <div style={{ paddingTop: 8, paddingRight: 12, paddingLeft: 12 }}>
-            <DirectiveProposalSection
-              proposals={proposals}
-              pendingProposalId={pendingProposalId}
-              onAccept={handleAcceptProposal}
-              onDismiss={handleDismissProposal}
-            />
+            <button
+              type="button"
+              onClick={handleToggleProposals}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                paddingTop: 6,
+                paddingRight: 8,
+                paddingBottom: 6,
+                paddingLeft: 8,
+                borderRadius: 8,
+                borderWidth: 0,
+                background: proposalsOpen ? 'rgba(245, 158, 11, 0.06)' : 'transparent',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+              onMouseEnter={(e) => { if (!proposalsOpen) e.currentTarget.style.background = 'rgba(245, 158, 11, 0.04)'; }}
+              onMouseLeave={(e) => { if (!proposalsOpen) e.currentTarget.style.background = 'transparent'; }}
+              aria-expanded={proposalsOpen}
+              title={proposalsOpen ? 'Hide proposed directives' : 'Show proposed directives'}
+            >
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--t-text-faint)',
+                  transition: 'transform 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transform: proposalsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="7" height="7" viewBox="0 0 7 7" fill="currentColor"><path d="M1.5 0.5L5.5 3.5L1.5 6.5Z" /></svg>
+              </span>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: 'var(--t-text-muted)',
+                  flex: 1,
+                  minWidth: 0,
+                }}
+              >
+                Proposed directives
+              </span>
+              <span
+                title="Surfaced when the same fix-pattern appears 3+ times in the last 14 days"
+                style={{
+                  paddingTop: 1,
+                  paddingRight: 6,
+                  paddingBottom: 1,
+                  paddingLeft: 6,
+                  borderRadius: 999,
+                  background: 'rgba(245, 158, 11, 0.12)',
+                  color: '#b45309',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {proposals.length}
+              </span>
+            </button>
+            {proposalsOpen ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4, marginBottom: 4 }}>
+                {proposals.map((proposal) => (
+                  <DirectiveProposalRow
+                    key={proposal.id}
+                    proposal={proposal}
+                    onAccept={handleAcceptProposal}
+                    onDismiss={handleDismissProposal}
+                    busy={pendingProposalId === proposal.id}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
         {loading ? (
