@@ -521,9 +521,13 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
         runtimeLabel={runtimeLabel}
         onActionClick={handleQuickAction}
         onSelectPacket={handleSelectRecentPacket}
+        // Hide the Recent Work column when the Mission rail is already
+        // open — the same packets render there, and showing both at once
+        // is just noise.
+        showRecentWork={!effectiveMissionOpen}
       />
     ),
-    [greeting, runtimeLabel, handleQuickAction, handleSelectRecentPacket],
+    [greeting, runtimeLabel, handleQuickAction, handleSelectRecentPacket, effectiveMissionOpen],
   );
 
   const hasMessages = chatChromeState.hasMessages;
