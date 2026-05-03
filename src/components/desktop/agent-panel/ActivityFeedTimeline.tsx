@@ -63,6 +63,7 @@ function activityItemTitle(item: ActivityItem) {
   if (item.kind === 'event') return item.data.title;
   if (item.kind === 'issue') return `#${item.number} ${item.title}`;
   if (item.kind === 'pr') return `#${item.number} ${item.title}`;
+  if (item.kind === 'packet') return item.packet.title;
   return item.title;
 }
 
@@ -71,6 +72,7 @@ function activityItemEyebrow(item: ActivityItem) {
   if (item.kind === 'pr') return 'Pull Request';
   if (item.kind === 'ci') return 'CI Run';
   if (item.kind === 'issue') return 'Issue';
+  if (item.kind === 'packet') return 'Packet';
   return 'Activity';
 }
 
@@ -79,6 +81,7 @@ function activityItemSubtitle(item: ActivityItem, agentForEvent: AgentDetail | n
   if (item.kind === 'ci') return `${item.workflow} • ${item.branch}`;
   if (item.kind === 'issue') return `${item.author} opened this in ${shortRepoLabel(item.repo)}`;
   if (item.kind === 'commit') return `${shortRepoLabel(item.repo)} • ${item.hash}`;
+  if (item.kind === 'packet') return `${item.packet.runtime} • ${item.packet.status}`;
   return agentForEvent ? `${agentForEvent.name} • ${agentForEvent.model}` : item.data.timestamp;
 }
 
@@ -318,8 +321,10 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                         <span style={{ color: 'var(--t-text-faint)' }}>·</span>
                         <span>{item.age}</span>
                       </>
-                    ) : (
+                    ) : item.kind === 'event' ? (
                       <span>{item.data.timestamp}</span>
+                    ) : (
+                      <span>{item.packet.runtime}</span>
                     )}
                   </div>
                 </div>
@@ -485,7 +490,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                           onClick={() => window.open(`https://github.com/${item.repo}/issues/${item.number}`, '_blank', 'noopener,noreferrer')}
                         />
                       </>
-                    ) : (
+                    ) : item.kind === 'event' ? (
                       <>
                         <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{item.data.severity}</div>
                         {agentForEvent?.sessionKey && onSelectSession ? (
@@ -496,7 +501,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                           />
                         ) : null}
                       </>
-                    )}
+                    ) : null}
                   >
                     {item.kind === 'event' ? (
                       <>
