@@ -3,9 +3,15 @@
 /**
  * O8ActivityPane — Activity feed for the O8 Panel right-side panel.
  *
- * Fetches commits, PRs, issues, and CI runs from the panel API endpoints.
- * Renders a unified, chronological timeline with segmented filter pills
- * and a repo selector dropdown.
+ * Fetches commits, PRs, issues, and CI runs from the panel API endpoints
+ * AND folds in orchestrator packets + auto-directive proposals from
+ * mission state. Renders a unified, chronological timeline with segmented
+ * filter pills and a repo selector dropdown.
+ *
+ * As of the Mission-rail consolidation (commit 2), packets render
+ * unconditionally and the directive proposals section is pinned above the
+ * timeline. The right-side Mission rail in OrchestratorTab is deleted —
+ * Activity is the single mission-control surface.
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -31,21 +37,14 @@ import {
 } from './o8-activity-helpers';
 import { useOrchestratorData } from './orchestrator-data-context';
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
+import { DirectiveProposalSection } from './thoughts/mission-panel/DirectiveProposalSection';
+import { useDirectiveProposals } from './thoughts/mission-panel/useDirectiveProposals';
+import type { DirectiveProposalCandidate } from './thoughts/directive-proposal-types';
 
-// Mission-rail consolidation, commit 1: packets render inline in the
-// Activity timeline behind a localStorage opt-in. Drop the flag (or set
-// to '0') to fall back to today's behaviour. Commit 2 makes packets the
-// default and deletes the Mission rail.
-const PACKETS_FLAG_KEY = 'o8:activity:show-packets';
-
-function readPacketsFlag(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(PACKETS_FLAG_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
+const FILTER_TABS_WITH_PACKETS = [
+  ...FILTER_TABS,
+  { key: 'packet' as O8FeedFilter, label: 'Packets', icon: (c: string) => <IconZap size={11} color={c} /> },
+];
 
 function parseTs(value?: string | null): number | null {
   if (!value) return null;
@@ -75,22 +74,37 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [repoOverride, setRepoOverride] = useState<string | null>(null);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const [packetsFlag, setPacketsFlag] = useState(false);
   const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
   const mountedRef = useRef(true);
   const orchestratorData = useOrchestratorData();
   const missionPackets = orchestratorData?.missionState?.packets;
 
-  // SSR-safe: hydrate flag after mount + listen for cross-tab toggles so
-  // flipping in DevTools doesn't require a reload.
-  useEffect(() => {
-    setPacketsFlag(readPacketsFlag());
-    const handler = (event: StorageEvent) => {
-      if (event.key === PACKETS_FLAG_KEY) setPacketsFlag(readPacketsFlag());
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, []);
+  // #746 — directive proposals are surfaced above the timeline as
+  // recommendations. Accept routes through OrchestratorDataContext so the
+  // orchestrator chat composer pre-fills with the proposed directive.
+  const handleAcceptDirectiveProposal = useCallback((proposal: DirectiveProposalCandidate) => {
+    const draftText = [
+      'Please save the following directive after I review it:',
+      '',
+      proposal.draftDirective,
+    ].join('\n');
+    orchestratorData?.onAcceptDirectiveProposal?.({
+      id: `proposal-accept-${proposal.id}-${Date.now()}`,
+      text: draftText,
+    });
+  }, [orchestratorData]);
+
+  const {
+    proposals,
+    pendingProposalId,
+    handleAccept: handleAcceptProposal,
+    handleDismiss: handleDismissProposal,
+  } = useDirectiveProposals({
+    open: true,
+    visible: true,
+    retryNonce: 0,
+    onAccept: handleAcceptDirectiveProposal,
+  });
 
   // Fetch registered repos
   useEffect(() => {
@@ -173,21 +187,21 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   }, [effectiveRepo, isAllRepos, registeredRepos]);
 
   // Packet items are derived from orchestrator missionState (not the
-  // /api/panel feed). The flag gates inclusion; the per-repo filter is
-  // applied just below alongside the rest of the timeline.
+  // /api/panel feed). Always-on as of commit 2 — Mission rail is gone, so
+  // Activity is the single read for "what packets are live."
   const packetItems = useMemo<ActivityItem[]>(() => {
-    if (!packetsFlag || !missionPackets) return [];
+    if (!missionPackets) return [];
     const items: ActivityItem[] = [];
     for (const packet of missionPackets) {
       if (packet.archivedAt) continue;
-      // Comparison-group siblings render as ONE ComparisonCard in the
-      // Mission rail today; suppress the duplicates in Activity to match.
+      // Comparison-group siblings — render only the leader, like the
+      // Mission rail used to do via ComparisonCard.
       if (packet.comparisonGroupId && packet.comparisonIndex && packet.comparisonIndex > 0) continue;
       const ts = parseTs(packet.lane?.lastEventAt) ?? parseTs(packet.lastEventAt) ?? Date.now();
       items.push({ kind: 'packet', packet, ts, repo: packet.workspaceTargetPath ?? undefined });
     }
     return items;
-  }, [packetsFlag, missionPackets]);
+  }, [missionPackets]);
 
   // Build sorted timeline
   const allItems = useMemo<ActivityItem[]>(() => {
@@ -203,14 +217,6 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     }
     return c;
   }, [allItems]);
-
-  const tabsToRender = useMemo(() => {
-    if (!packetsFlag) return FILTER_TABS;
-    return [
-      ...FILTER_TABS,
-      { key: 'packet' as O8FeedFilter, label: 'Packets', icon: (c: string) => <IconZap size={11} color={c} /> },
-    ];
-  }, [packetsFlag]);
 
   const filtered = useMemo(() => {
     if (filter === 'all') return allItems;
@@ -410,7 +416,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
           border: '0.5px solid var(--t-divider-subtle)',
           background: 'var(--t-panel)',
         }}>
-          {tabsToRender.map((tab) => {
+          {FILTER_TABS_WITH_PACKETS.map((tab) => {
             const active = filter === tab.key;
             const count = counts[tab.key];
             return (
@@ -463,6 +469,19 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         overflowY: 'auto',
         overflowX: 'hidden',
       }}>
+        {/* #746 — auto-directive proposals pin above the timeline so they
+            read as recommendations (system → operator), distinct from the
+            chronological feed. */}
+        {proposals.length > 0 ? (
+          <div style={{ paddingTop: 8, paddingRight: 12, paddingLeft: 12 }}>
+            <DirectiveProposalSection
+              proposals={proposals}
+              pendingProposalId={pendingProposalId}
+              onAccept={handleAcceptProposal}
+              onDismiss={handleDismissProposal}
+            />
+          </div>
+        ) : null}
         {loading ? (
           <div style={{
             paddingTop: 32,

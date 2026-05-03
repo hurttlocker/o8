@@ -3,32 +3,49 @@
 /**
  * O8ActivityPacketRow — packet row inside the O8 Panel Activity timeline.
  *
- * Commit 1 of the Mission rail consolidation (epic: drop the right-side
- * Mission sidebar; drive packets from the Activity tab). This row is the
- * minimum viable cut — it renders a packet inline with commits/PRs/issues
- * so the operator can FEEL whether the consolidated read is right.
+ * Mission-rail consolidation, commit 2: this row is now the SOLE
+ * packet-control surface (the right-side Mission rail in OrchestratorTab
+ * has been deleted). The collapsed row renders inline with the activity
+ * feed; the expanded body reuses the existing PacketCard component so
+ * Summary/Runtime/Repo/Branch rows, the AGENTS/CONTEXT/CHANGES/FILES
+ * tab strip, the DETAILS popover, the retry/reset/open/copy actions,
+ * and the Hold/Archive/Delete/Launch + Resume + Focus buttons all
+ * survive the migration.
  *
- * Out of scope here (lands in commit 2):
- *   - Launch / Merge / Resume buttons (still happens via Mission rail today)
- *   - Review snapshot fetch
- *   - Inline branch/runtime/repo edit
- *
- * Action wiring intentionally narrow: clicking "View in workspace" calls
- * `onSelectedPacketChange(packet.id)` which pivots the LEFT workspace pane
- * to packet mode (Spec / Agent Overview) via the existing context plumbing.
+ * All packet-lifecycle wiring (patch / launch / focus / delete / review
+ * action / resume / review-snapshot fetch) lives here, mirrored from the
+ * old ThoughtsMissionPanel implementation. Self-contained per-row so the
+ * Activity timeline can host packets without lifting state into the pane.
  */
 
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { useOrchestratorData } from '../orchestrator-data-context';
 import { relativeAge } from '../agent-panel/shared';
+import { PacketCard } from '../thoughts/mission-panel/PacketCard';
+import type { EditingField, ReviewPanelState } from '../thoughts/mission-panel/types';
 
 interface O8ActivityPacketRowProps {
   packet: OrchestratorPacket;
   isExpanded: boolean;
   onToggleExpanded: () => void;
 }
+
+const EMPTY_REVIEW_STATE: ReviewPanelState = {
+  loaded: false,
+  loading: false,
+  laneId: null,
+  worktreePath: null,
+  repoPath: null,
+  snapshot: null,
+  error: null,
+  action: null,
+  actionError: null,
+  actionNote: null,
+  prUrl: null,
+  showAllFiles: false,
+};
 
 function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8ActivityPacketRowProps) {
   const data = useOrchestratorData();
@@ -37,13 +54,243 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
   const targetLabel = data?.workspaceTargets?.find((t) => t.localPath === packet.workspaceTargetPath)?.label
     ?? packet.workspaceTargetPath?.split('/').pop()
     ?? null;
+  const allPackets = data?.missionState?.packets ?? [];
 
   const ageSource = packet.lane?.lastEventAt ?? packet.lastEventAt ?? null;
   const ageLabel = ageSource ? relativeAge(ageSource) : '';
 
-  const handleViewInWorkspace = useCallback(() => {
-    data?.onSelectedPacketChange?.(packet.id);
+  // ── Per-row state for PacketCard's expanded body ──────────────────────
+  const [editingField, setEditingField] = useState<EditingField>(null);
+  const [reviewState, setReviewState] = useState<ReviewPanelState>(EMPTY_REVIEW_STATE);
+  const reviewLoadedKeyRef = useRef<string | null>(null);
+
+  // Derive a remote-url map so PacketCard can resolve issue URLs the same
+  // way ThoughtsMissionPanel did. Workspace targets carry remoteUrl on
+  // some shapes but not all — pass through whatever we have.
+  const repoRemoteUrlByPath = useMemo<Record<string, string | null | undefined>>(() => {
+    const map: Record<string, string | null | undefined> = {};
+    for (const target of data?.workspaceTargets ?? []) {
+      const remote = (target as unknown as { remoteUrl?: string | null }).remoteUrl ?? null;
+      if (target.localPath) map[target.localPath] = remote;
+    }
+    return map;
+  }, [data?.workspaceTargets]);
+
+  // ── Mission-state mutators ────────────────────────────────────────────
+  const patchPacket = useCallback(
+    (updater: (current: OrchestratorPacket) => OrchestratorPacket) => {
+      data?.onMissionStateChange?.((current) => ({
+        ...current,
+        packets: current.packets.map((p) => (p.id === packet.id ? updater(p) : p)),
+      }));
+    },
+    [data, packet.id],
+  );
+
+  const handleDelete = useCallback(() => {
+    data?.onMissionStateChange?.((current) => ({
+      ...current,
+      packets: current.packets.filter((p) => p.id !== packet.id),
+    }));
   }, [data, packet.id]);
+
+  const handleLaunch = useCallback(async () => {
+    try {
+      const binding = await data?.onLaunchPacket?.(packet);
+      patchPacket((current) => ({
+        ...current,
+        queueState: 'queued',
+        status: binding ? 'idle' : current.status,
+        blockedReason: null,
+        lane: binding ?? current.lane ?? null,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to launch this packet.';
+      console.error('[o8-activity-packet] launch failed:', error);
+      patchPacket((current) => ({ ...current, blockedReason: message }));
+    }
+  }, [data, packet, patchPacket]);
+
+  const handleFocus = useCallback(() => {
+    if (packet.lane?.sessionKey) {
+      data?.onSelectSession?.(packet.lane.sessionKey);
+      return;
+    }
+    // Fall back to the workspace pane pivot when no live session is bound.
+    data?.onSelectedPacketChange?.(packet.id);
+  }, [data, packet]);
+
+  const handleResume = useCallback(() => {
+    const laneId = packet.lane?.laneId;
+    if (!laneId) return;
+    fetch('/api/lanes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ verb: 'resume', laneId, message: 'Continue the previous task.', actor: 'user' }),
+    }).catch(() => {});
+  }, [packet.lane?.laneId]);
+
+  const handleReviewAction = useCallback(
+    async (verb: 'create_pr' | 'merge') => {
+      const laneId = packet.lane?.laneId;
+      if (!laneId) return;
+      setReviewState((current) => ({
+        ...current,
+        action: verb,
+        actionError: null,
+        actionNote: null,
+        prUrl: verb === 'create_pr' ? current.prUrl : null,
+      }));
+      try {
+        const response = await fetch('/api/lanes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            verb,
+            laneId,
+            commitMessage: verb === 'create_pr' ? 'Auto-commit from lane' : `Merge lane: ${packet.title}`,
+          }),
+        });
+        const payload = await response.json().catch(() => null) as { ok?: boolean; note?: string } | null;
+        const note = payload?.note ?? (verb === 'create_pr' ? 'Unable to create PR.' : 'Unable to merge this lane.');
+        if (!response.ok || !payload?.ok) {
+          throw new Error(verb === 'merge' && /conflict/i.test(note) ? `${note} Try "Create PR" instead.` : note);
+        }
+        const prUrlMatch = verb === 'create_pr' ? note.match(/https?:\/\/\S+/) : null;
+        const prUrl = prUrlMatch?.[0]?.replace(/[)\].,]+$/, '') ?? null;
+        setReviewState((current) => ({
+          ...current,
+          action: null,
+          actionError: null,
+          actionNote: note,
+          prUrl: prUrl ?? current.prUrl,
+        }));
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : verb === 'create_pr'
+            ? 'Unable to create PR.'
+            : 'Unable to merge this lane.';
+        setReviewState((current) => ({ ...current, action: null, actionError: message }));
+      }
+    },
+    [packet.lane?.laneId, packet.title],
+  );
+
+  const handleToggleShowAllFiles = useCallback(() => {
+    setReviewState((current) => ({ ...current, showAllFiles: !current.showAllFiles }));
+  }, []);
+
+  // ── Review-snapshot fetcher (mirrors ThoughtsMissionPanel:525-631) ─────
+  // Fires when this row is expanded AND the packet is awaiting_review.
+  useEffect(() => {
+    if (!isExpanded) return;
+    if (packet.status !== 'awaiting_review') return;
+    const laneId = packet.lane?.laneId;
+    if (!laneId) return;
+    const cacheKey = `${packet.id}:${laneId}`;
+    if (reviewLoadedKeyRef.current === cacheKey && reviewState.loaded) return;
+    if (reviewState.loading) return;
+
+    let cancelled = false;
+    setReviewState((current) => ({
+      ...current,
+      loading: true,
+      loaded: false,
+      laneId,
+      error: null,
+    }));
+
+    (async () => {
+      try {
+        const laneRes = await fetch(`/api/lanes/${encodeURIComponent(laneId)}`);
+        const laneData = await laneRes.json().catch(() => null) as {
+          lane?: { worktreePath?: string | null; repoPath?: string | null };
+          note?: string;
+        } | null;
+        if (!laneRes.ok) throw new Error(laneData?.note ?? 'Unable to load lane details.');
+
+        const worktreePath = laneData?.lane?.worktreePath ?? null;
+        const repoPath = packet.workspaceTargetPath ?? laneData?.lane?.repoPath ?? null;
+        if (!worktreePath) {
+          if (cancelled) return;
+          setReviewState((current) => ({
+            ...current,
+            loading: false,
+            loaded: true,
+            laneId,
+            worktreePath: null,
+            repoPath,
+            snapshot: null,
+            error: 'No worktree path for this lane yet.',
+          }));
+          reviewLoadedKeyRef.current = cacheKey;
+          return;
+        }
+
+        const reviewRes = await fetch('/api/review/snapshot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ worktreePath, repoPath }),
+        });
+        const reviewData = await reviewRes.json().catch(() => null) as {
+          changedFiles?: Array<{ path: string; status: string; additions?: number | null; deletions?: number | null }>;
+          diffStat?: string;
+          warnings?: string[];
+          recentCommits?: string[];
+          note?: string;
+        } | null;
+        if (cancelled) return;
+        if (!reviewRes.ok) {
+          setReviewState((current) => ({
+            ...current,
+            loading: false,
+            loaded: true,
+            laneId,
+            worktreePath,
+            repoPath,
+            snapshot: null,
+            error: reviewData?.note ?? 'Unable to load review snapshot.',
+          }));
+          reviewLoadedKeyRef.current = cacheKey;
+          return;
+        }
+        setReviewState((current) => ({
+          ...current,
+          loading: false,
+          loaded: true,
+          laneId,
+          worktreePath,
+          repoPath,
+          snapshot: {
+            changedFiles: (reviewData?.changedFiles ?? []).map((file) => ({
+              path: file.path,
+              status: (file.status ?? 'modified') as 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked',
+              additions: file.additions ?? null,
+              deletions: file.deletions ?? null,
+            })),
+            diffStat: reviewData?.diffStat,
+            warnings: reviewData?.warnings,
+            recentCommits: reviewData?.recentCommits,
+          },
+          error: null,
+        }));
+        reviewLoadedKeyRef.current = cacheKey;
+      } catch (error) {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : 'Unable to load review snapshot.';
+        setReviewState((current) => ({
+          ...current,
+          loading: false,
+          loaded: true,
+          laneId,
+          error: message,
+        }));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [isExpanded, packet.id, packet.status, packet.lane?.laneId, packet.workspaceTargetPath, reviewState.loaded, reviewState.loading]);
 
   return (
     <div>
@@ -69,7 +316,6 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
         onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'rgba(37,99,235,0.04)'; }}
         onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}
       >
-        {/* Expand indicator */}
         <div
           style={{
             width: 10,
@@ -86,7 +332,6 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
           <svg width="7" height="7" viewBox="0 0 7 7" fill="currentColor"><path d="M1.5 0.5L5.5 3.5L1.5 6.5Z" /></svg>
         </div>
 
-        {/* Status dot, sized to match the existing Activity icon column */}
         <div
           style={{
             width: 20,
@@ -111,7 +356,6 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
           />
         </div>
 
-        {/* Title + subline */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
@@ -154,7 +398,6 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
           </div>
         </div>
 
-        {/* Trailing status badge */}
         <span
           style={{
             paddingTop: 1,
@@ -181,113 +424,32 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
         <div
           style={{
             paddingTop: 6,
-            paddingRight: 14,
+            paddingRight: 12,
             paddingBottom: 10,
-            paddingLeft: 52,
+            paddingLeft: 12,
             borderBottom: '1px solid var(--t-panel-border, rgba(0,0,0,0.06))',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
           }}
         >
-          <PacketMetaGrid packet={packet} runtimeLabel={runtimeMeta.label} targetLabel={targetLabel} />
-
-          {packet.summary?.trim() ? (
-            <div
-              style={{
-                fontSize: 11,
-                color: 'var(--t-text-muted)',
-                lineHeight: 1.55,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {packet.summary.trim().slice(0, 400)}
-              {packet.summary.trim().length > 400 ? '...' : ''}
-            </div>
-          ) : null}
-
-          <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-            <button
-              type="button"
-              onClick={handleViewInWorkspace}
-              disabled={!data?.onSelectedPacketChange}
-              style={{
-                paddingTop: 3,
-                paddingRight: 10,
-                paddingBottom: 3,
-                paddingLeft: 10,
-                borderRadius: 6,
-                border: '1px solid var(--t-divider-subtle)',
-                background: 'var(--t-panel)',
-                color: 'var(--t-text)',
-                fontSize: 10,
-                fontWeight: 600,
-                cursor: data?.onSelectedPacketChange ? 'pointer' : 'not-allowed',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                opacity: data?.onSelectedPacketChange ? 1 : 0.5,
-              }}
-            >
-              View in workspace
-            </button>
-          </div>
+          <PacketCard
+            packet={packet}
+            allPackets={allPackets}
+            isExpanded
+            onToggleExpanded={onToggleExpanded}
+            editingField={editingField}
+            onEditingFieldChange={setEditingField}
+            workspaceTargets={data?.workspaceTargets ?? []}
+            repoRemoteUrlByPath={repoRemoteUrlByPath}
+            reviewState={reviewState}
+            onPatch={patchPacket}
+            onLaunch={handleLaunch}
+            onFocus={handleFocus}
+            onDelete={handleDelete}
+            onReviewAction={(verb) => { void handleReviewAction(verb); }}
+            onToggleShowAllFiles={handleToggleShowAllFiles}
+            onResume={handleResume}
+          />
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function PacketMetaGrid({
-  packet,
-  runtimeLabel,
-  targetLabel,
-}: {
-  packet: OrchestratorPacket;
-  runtimeLabel: string;
-  targetLabel: string | null;
-}) {
-  const rows: Array<[string, string]> = [
-    ['runtime', runtimeLabel],
-    ['repo', targetLabel ?? '—'],
-  ];
-  if (packet.branchTarget) rows.push(['branch', String(packet.branchTarget)]);
-  if (packet.lane?.laneId) rows.push(['lane', packet.lane.laneId.slice(0, 12)]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {rows.map(([label, value]) => (
-        <div
-          key={label}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            fontSize: 10.5,
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-            color: 'var(--t-text-muted)',
-            lineHeight: 1.5,
-          }}
-        >
-          <span
-            style={{
-              width: 56,
-              flexShrink: 0,
-              fontSize: 9,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--t-text-faint)',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-            }}
-          >
-            {label}
-          </span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {value}
-          </span>
-        </div>
-      ))}
     </div>
   );
 }
