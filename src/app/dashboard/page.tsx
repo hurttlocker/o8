@@ -287,6 +287,10 @@ function DashboardInner() {
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [latestDispatchedTabId, setLatestDispatchedTabId] = useState<string | null>(null);
   const [latestDispatchedAt, setLatestDispatchedAt] = useState<number | null>(null);
+  // Stable ref so the auto-spawn callback can look up the matching packet
+  // by sessionKey without re-binding on every mission-state delta.
+  const thoughtsMissionStateRef = useRef(thoughtsMissionState);
+  useEffect(() => { thoughtsMissionStateRef.current = thoughtsMissionState; }, [thoughtsMissionState]);
   // #888/#895 — packet selection lifted from ThoughtsMissionPanel so the
   // right-side workspace panel can flip into packet mode (Spec / Agent
   // Overview) when one is expanded. See `src/lib/panel/mode.ts`.
@@ -1678,7 +1682,19 @@ function DashboardInner() {
       throw new Error('No workspace terminal is available to launch the CLI session.');
     }
 
-    workspaceTarget.handle.openCliChatSession({
+    // If this auto-spawn corresponds to a packet that was dispatched via
+    // MCP (or any non-UI path), look it up in the mission state and attach
+    // the orchestrationPacket badge + mark the tab as the latest dispatch
+    // so the workspace tab card and the orange tab highlight render
+    // identically to UI-launched packets.
+    const matchingPacket = request.targetSessionKey
+      ? thoughtsMissionStateRef.current.packets.find((p) => p.lane?.sessionKey === request.targetSessionKey) ?? null
+      : null;
+    const orchestrationPacket = matchingPacket
+      ? buildOrchestrationPacketBadge({ ...matchingPacket, status: matchingPacket.status === 'draft' ? 'running' : matchingPacket.status })
+      : undefined;
+
+    const tabId = workspaceTarget.handle.openCliChatSession({
       runtime: request.runtime,
       repo: {
         name: repoEntry.name,
@@ -1695,8 +1711,14 @@ function DashboardInner() {
       targetSessionKey: request.targetSessionKey,
       supervisorStatus: request.supervisorStatus,
       autoArchiveOnIdle: request.autoArchiveOnIdle,
+      orchestrationPacket,
     });
     enqueueFtuxMilestone('firstAgentSpawned');
+
+    if (orchestrationPacket && tabId) {
+      setLatestDispatchedTabId(tabId);
+      setLatestDispatchedAt(Date.now());
+    }
   }, [enqueueFtuxMilestone, globalRepoEntries, loadRegisteredRepos, setGlobalRepoBranch, setGlobalRepoId, waitForWorkspaceTerminalTarget]);
 
   // ── Auto-open workspace tab when orchestrator launches a Codex agent ──
