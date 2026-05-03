@@ -218,6 +218,27 @@ export function O8WorkspacePane({
     setSelectedFile(externalSelectedFile ?? null);
   }, [externalSelectedFile]);
 
+  // Auto-select the first dirty file when the pane lands on a worktree
+  // with changes but nothing picked yet. Without this, the right pane
+  // shows "select a file..." empty-state even though there ARE changes
+  // to review — common when the operator clicks a NEEDS YOU row that
+  // pops the panel here. Only runs when:
+  //   - no file is currently selected
+  //   - no externally-controlled selection is in flight
+  //   - the changes list is non-empty
+  // Switching repos clears externalSelectedFile (above effect), then
+  // this fires and lands on the new repo's first dirty file.
+  useEffect(() => {
+    if (selectedFile) return;
+    if (externalSelectedFile) return;
+    if (listMode !== 'changes') return;
+    if (changes.files.length === 0) return;
+    const firstDirty = changes.files[0]?.path;
+    if (!firstDirty) return;
+    setSelectedFile(firstDirty);
+    onSelectedFileChange?.(firstDirty);
+  }, [changes.files, externalSelectedFile, listMode, onSelectedFileChange, selectedFile]);
+
   const selectedDirty = Boolean(selectedFile && changes.dirtyFileSet.has(selectedFile));
   const viewerMode = useMemo<ViewerMode>(() => {
     if (!selectedFile) return 'file';
