@@ -209,19 +209,50 @@ function OrchestratorEmptyStateBase({
     return list.slice(0, 24);
   }, [lanes, showArchived]);
 
-  const grouped = useMemo(() => {
-    if (!groupedByRepo) {
-      return [{ repoLabel: 'All repos', lanes: filtered }];
-    }
-    const map = new Map<string, LaneSummary[]>();
+  // Status-anchored sectioning. Each lane lands in exactly one of three
+  // buckets ordered by operator urgency: action-required first,
+  // observe-only next, recap last. DONE is capped to 24h unless the
+  // archived toggle is on, so the column doesn't become a graveyard.
+  const sections = useMemo(() => {
+    const needsYou: LaneSummary[] = [];
+    const inFlight: LaneSummary[] = [];
+    const doneToday: LaneSummary[] = [];
+    const dayMs = 24 * 60 * 60 * 1000;
+    const now = Date.now();
     for (const lane of filtered) {
-      const key = repoBaseName(lane.repoPath);
-      const bucket = map.get(key);
-      if (bucket) bucket.push(lane);
-      else map.set(key, [lane]);
+      const status = lane.status;
+      if (status === 'reviewing' || status === 'awaiting_input') {
+        needsYou.push(lane);
+      } else if (status === 'running' || status === 'launching' || status === 'merging' || status === 'paused') {
+        inFlight.push(lane);
+      } else if (status === 'completed' || status === 'archived' || status === 'idle') {
+        const ts = lane.updatedAt ? new Date(lane.updatedAt).getTime() : 0;
+        if (showArchived || (ts && now - ts < dayMs)) {
+          doneToday.push(lane);
+        }
+      }
     }
-    return Array.from(map.entries()).map(([repoLabel, bucket]) => ({ repoLabel, lanes: bucket }));
-  }, [filtered, groupedByRepo]);
+    const buildGrouping = (laneList: LaneSummary[]) => {
+      if (!groupedByRepo) {
+        return [{ repoLabel: 'All repos', lanes: laneList }];
+      }
+      const map = new Map<string, LaneSummary[]>();
+      for (const lane of laneList) {
+        const key = repoBaseName(lane.repoPath);
+        const bucket = map.get(key);
+        if (bucket) bucket.push(lane);
+        else map.set(key, [lane]);
+      }
+      return Array.from(map.entries()).map(([repoLabel, bucket]) => ({ repoLabel, lanes: bucket }));
+    };
+    return [
+      { id: 'needs-you' as const, label: 'Needs you', accentColor: '#FF5A1F', dotColor: '#FF5A1F', lanes: needsYou, groups: buildGrouping(needsYou) },
+      { id: 'in-flight' as const, label: 'In flight', accentColor: 'var(--t-text-secondary)', dotColor: '#22c55e', lanes: inFlight, groups: buildGrouping(inFlight) },
+      { id: 'done-today' as const, label: showArchived ? 'Done' : 'Done today', accentColor: 'var(--t-text-faint)', dotColor: 'var(--t-text-faint)', lanes: doneToday, groups: buildGrouping(doneToday) },
+    ];
+  }, [filtered, groupedByRepo, showArchived]);
+
+  const totalLanes = sections.reduce((sum, s) => sum + s.lanes.length, 0);
 
   const handleToggleGrouped = useCallback(() => {
     setGroupedByRepo((prev) => {
@@ -438,7 +469,7 @@ function OrchestratorEmptyStateBase({
             gap: 14,
           }}
         >
-          {loading && grouped.every((g) => g.lanes.length === 0) ? (
+          {loading && totalLanes === 0 ? (
             <div
               style={{
                 fontSize: 11,
@@ -449,7 +480,7 @@ function OrchestratorEmptyStateBase({
             >
               Loading…
             </div>
-          ) : grouped.every((g) => g.lanes.length === 0) ? (
+          ) : totalLanes === 0 ? (
             <div
               style={{
                 fontSize: 11,
@@ -459,29 +490,72 @@ function OrchestratorEmptyStateBase({
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
             >
-              No recent work yet. Dispatched packets will appear here grouped by repo.
+              No recent work yet. Dispatched packets will appear here.
             </div>
           ) : (
-            grouped.map((group) => (
-              <div key={group.repoLabel} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 700,
-                    color: 'var(--t-text-muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                    fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
-                    paddingBottom: 2,
-                  }}
-                >
-                  {group.repoLabel}
+            sections
+              .filter((section) => section.lanes.length > 0)
+              .map((section) => (
+                <div key={section.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      paddingBottom: 2,
+                    }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{ width: 5, height: 5, borderRadius: 999, background: section.dotColor, flexShrink: 0 }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: section.accentColor,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em',
+                        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                      }}
+                    >
+                      {section.label}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: 'var(--t-text-faint)',
+                        fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+                      }}
+                    >
+                      {section.lanes.length}
+                    </span>
+                  </div>
+                  {section.groups.map((group) => (
+                    <div key={`${section.id}:${group.repoLabel}`} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {groupedByRepo ? (
+                        <div
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 600,
+                            color: 'var(--t-text-faint)',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.06em',
+                            fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+                            paddingTop: 2,
+                          }}
+                        >
+                          {group.repoLabel}
+                        </div>
+                      ) : null}
+                      {group.lanes.map((lane) => (
+                        <RecentLaneRow key={lane.id} lane={lane} onSelect={onSelectPacket} />
+                      ))}
+                    </div>
+                  ))}
                 </div>
-                {group.lanes.map((lane) => (
-                  <RecentLaneRow key={lane.id} lane={lane} onSelect={onSelectPacket} />
-                ))}
-              </div>
-            ))
+              ))
           )}
         </div>
       </div>
