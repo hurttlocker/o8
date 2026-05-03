@@ -237,6 +237,7 @@ export function itemKey(item: ActivityItem): string {
   if (item.kind === 'event') return `e-${item.data.id}`;
   if (item.kind === 'issue') return `i-${item.repo}-${item.number}`;
   if (item.kind === 'pr') return `pr-${item.repo}-${item.number}`;
+  if (item.kind === 'packet') return `pkt-${item.packet.id}`;
   return `ci-${item.repo}-${item.id}`;
 }
 
@@ -245,6 +246,7 @@ export function itemTitle(item: ActivityItem): string {
   if (item.kind === 'event') return item.data.title;
   if (item.kind === 'issue') return `#${item.number} ${item.title}`;
   if (item.kind === 'pr') return `#${item.number} ${item.title}`;
+  if (item.kind === 'packet') return item.packet.title;
   return item.title;
 }
 

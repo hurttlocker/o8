@@ -189,6 +189,7 @@ export function activityItemKey(item: ActivityItem) {
   if (item.kind === 'event') return `e-${item.data.id}`;
   if (item.kind === 'issue') return `i-${item.repo}-${item.number}`;
   if (item.kind === 'pr') return `pr-${item.repo}-${item.number}`;
+  if (item.kind === 'packet') return `pkt-${item.packet.id}`;
   return `ci-${item.repo}-${item.id}`;
 }
 

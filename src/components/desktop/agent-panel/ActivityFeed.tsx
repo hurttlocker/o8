@@ -370,7 +370,7 @@ export const ActivityFeed = memo(function ActivityFeed({
   }, [extras, fallbackCommitItems, isAllRepos, repo, visibleAgentEvents]);
 
   const counts = useMemo(() => {
-    const nextCounts: Record<FeedFilter, number> = { all: items.length, commit: 0, issue: 0, pr: 0, ci: 0 };
+    const nextCounts: Record<FeedFilter, number> = { all: items.length, commit: 0, issue: 0, pr: 0, ci: 0, packet: 0 };
     for (const item of items) {
       if (item.kind === 'event') continue;
       if (item.kind in nextCounts) nextCounts[item.kind as FeedFilter]++;
