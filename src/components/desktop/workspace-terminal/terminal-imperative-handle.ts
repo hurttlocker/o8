@@ -161,9 +161,13 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       activeTabId: deps.activeTabId,
     }),
     setOrchestrationPacket: (tabId, packet) => {
+      // Match by tab.id first; fall back to chatSessionKey since
+      // MCP-dispatched packets bind via lane.sessionKey and the dashboard
+      // doesn't know the auto-generated tab id at packet-launch time.
       let found = false;
       deps.setTabs((previous) => previous.map((tab) => {
-        if (tab.id !== tabId) return tab;
+        const matches = tab.id === tabId || tab.chatSessionKey === tabId;
+        if (!matches) return tab;
         found = true;
         if (sameOrchestrationPacketBadge(tab.orchestrationPacket, packet) && (!packet || tab.autoArchiveOnIdle)) {
           return tab;
