@@ -164,9 +164,14 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       // Match by tab.id first; fall back to chatSessionKey since
       // MCP-dispatched packets bind via lane.sessionKey and the dashboard
       // doesn't know the auto-generated tab id at packet-launch time.
+      // Also fall back to the existing badge's packetId so terminal-state
+      // updates (lane=null after merge) can still find the tab and flip
+      // the badge from awaiting_review → released.
       let found = false;
       deps.setTabs((previous) => previous.map((tab) => {
-        const matches = tab.id === tabId || tab.chatSessionKey === tabId;
+        const matches = tab.id === tabId
+          || tab.chatSessionKey === tabId
+          || (tab.orchestrationPacket?.packetId && tab.orchestrationPacket.packetId === tabId);
         if (!matches) return tab;
         found = true;
         if (sameOrchestrationPacketBadge(tab.orchestrationPacket, packet) && (!packet || tab.autoArchiveOnIdle)) {
