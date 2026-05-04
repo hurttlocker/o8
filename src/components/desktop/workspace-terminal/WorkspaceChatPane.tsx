@@ -27,6 +27,7 @@ import {
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
 import { WorkspaceChatComposer } from '@/components/desktop/workspace-terminal/WorkspaceChatComposer';
+import { ChatPacketStatusBanner } from '@/components/desktop/workspace-terminal/ChatPacketStatusBanner';
 
 const LazyMessageBubble = lazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.MessageBubble })));
 const LazyChainOfThought = lazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.ChainOfThought })));
@@ -620,6 +621,18 @@ function WorkspaceChatPaneBase({
                   </span>
                   <style>{'@keyframes o8ThinkPulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.1); } }'}</style>
                 </div>
+              ) : null}
+              {tab.orchestrationPacket && livePacket ? (
+                <ChatPacketStatusBanner
+                  status={liveStatus}
+                  laneId={livePacket.lane?.laneId ?? null}
+                  packetTitle={livePacket.title ?? tab.orchestrationPacket.title ?? null}
+                  onOpenInActivity={
+                    orchestratorData?.onOpenO8Panel
+                      ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
+                      : undefined
+                  }
+                />
               ) : null}
             </div>
           </Suspense>
