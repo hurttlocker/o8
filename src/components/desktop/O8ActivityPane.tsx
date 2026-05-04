@@ -48,6 +48,7 @@ const FILTER_TABS_WITH_PACKETS = [
   { key: 'packet' as O8FeedFilter, label: 'Packets', icon: (c: string) => <IconZap size={11} color={c} /> },
 ];
 
+/** Returns epoch milliseconds parsed from an optional ISO date string, or null when absent or unparseable. */
 function parseTs(value?: string | null): number | null {
   if (!value) return null;
   const ms = new Date(value).getTime();
