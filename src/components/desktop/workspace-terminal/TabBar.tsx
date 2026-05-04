@@ -21,6 +21,14 @@ const LATEST_DISPATCH_BG = 'rgba(255, 90, 31, 0.08)';
 const LATEST_DISPATCH_BORDER = 'rgba(255, 90, 31, 0.22)';
 const LATEST_DISPATCH_TEXT = '#FF5A1F';
 
+// Terminal-state coloring for dispatched packets that have shipped. The
+// orange "latest dispatch" pill yields to green on `released` so a quick
+// glance at the tab strip reads as "this work is in / this work is done"
+// without having to expand the packet.
+const MERGED_DISPATCH_BG = 'rgba(22, 163, 74, 0.08)';
+const MERGED_DISPATCH_BORDER = 'rgba(22, 163, 74, 0.28)';
+const MERGED_DISPATCH_TEXT = '#15803d';
+
 function formatDispatchedAt(epochMs: number): string {
   try {
     const date = new Date(epochMs);
@@ -217,6 +225,10 @@ export const TabBar = memo(function TabBar({
             const isLatestDispatch = !!tab.orchestrationPacket
               && latestDispatchedTabId !== null
               && (latestDispatchedTabId === tab.id || latestDispatchedTabId === tab.chatSessionKey);
+            // Terminal "this work shipped" signal — wins over orange so a
+            // merged packet's tab reads green even if it's still the most
+            // recent dispatch by time.
+            const isMergedDispatch = tab.orchestrationPacket?.status === 'released';
             const dispatchTooltip = isLatestDispatch && latestDispatchedAt
               ? formatDispatchedAt(latestDispatchedAt)
               : null;
@@ -229,22 +241,28 @@ export const TabBar = memo(function TabBar({
 
             const neoSurface = chromeNeoSurface(isActive);
             const isFlashing = flashTabId === tab.id;
-            const baseBoxShadow = isLatestDispatch
-              ? `inset 0 0 0 1px ${LATEST_DISPATCH_BORDER}`
-              : (isOrchestrator && isActive
-                ? '0 1px 4px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(37, 99, 235, 0.1)'
-                : neoSurface.boxShadow);
-            const tabBackground = isLatestDispatch
-              ? LATEST_DISPATCH_BG
-              : (isOrchestrator && isActive
-                ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))'
-                : neoSurface.background);
+            const baseBoxShadow = isMergedDispatch
+              ? `inset 0 0 0 1px ${MERGED_DISPATCH_BORDER}`
+              : isLatestDispatch
+                ? `inset 0 0 0 1px ${LATEST_DISPATCH_BORDER}`
+                : (isOrchestrator && isActive
+                  ? '0 1px 4px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(37, 99, 235, 0.1)'
+                  : neoSurface.boxShadow);
+            const tabBackground = isMergedDispatch
+              ? MERGED_DISPATCH_BG
+              : isLatestDispatch
+                ? LATEST_DISPATCH_BG
+                : (isOrchestrator && isActive
+                  ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))'
+                  : neoSurface.background);
             const tabBoxShadow = isFlashing
               ? `${baseBoxShadow}, 0 0 0 2px var(--t-accent-soft, rgba(37, 99, 235, 0.22)), 0 6px 18px rgba(37, 99, 235, 0.28)`
               : baseBoxShadow;
-            const tabTextColor = isLatestDispatch
-              ? LATEST_DISPATCH_TEXT
-              : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)');
+            const tabTextColor = isMergedDispatch
+              ? MERGED_DISPATCH_TEXT
+              : isLatestDispatch
+                ? LATEST_DISPATCH_TEXT
+                : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)');
             return (
               <button
                 type="button"
@@ -310,13 +328,13 @@ export const TabBar = memo(function TabBar({
                   position: 'relative',
                 }}
                 onMouseEnter={(event) => {
-                  if (isActive || isLatestDispatch) return;
+                  if (isActive || isLatestDispatch || isMergedDispatch) return;
                   const hover = chromeNeoHoverSurface();
                   event.currentTarget.style.background = hover.background;
                   event.currentTarget.style.boxShadow = hover.boxShadow;
                 }}
                 onMouseLeave={(event) => {
-                  if (isActive || isLatestDispatch) return;
+                  if (isActive || isLatestDispatch || isMergedDispatch) return;
                   event.currentTarget.style.background = neoSurface.background;
                   event.currentTarget.style.boxShadow = neoSurface.boxShadow;
                 }}
