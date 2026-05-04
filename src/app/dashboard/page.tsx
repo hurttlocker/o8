@@ -335,23 +335,32 @@ function DashboardInner() {
       }
     } catch { /* ignore */ }
   }, [LATEST_DISPATCH_TTL_MS]);
-  // Back-fill latestDispatchedTabId from the most recent running packet
-  // when the marker is missing. Covers the case where a packet was
-  // dispatched via MCP before the in-memory marker existed (or during a
-  // dev-bridge reload that nuked it). Tab id == lane.sessionKey for
-  // CLI-runtime tabs (see openCliChatSession).
+  // Latest-dispatch marker derives from mission state: whenever a packet
+  // is launching/running/awaiting_review and lane.sessionKey is bound,
+  // promote it to the orange marker. Re-runs on every mission update so
+  // newer dispatches take over from older ones. CLI-runtime tabs use
+  // sessionKey as the tab id (see openCliChatSession), so this same key
+  // doubles as the highlight target.
+  //
+  // Previously this was a back-fill that only fired when the marker was
+  // null, which meant if the in-process setLatestDispatchedTabId call
+  // missed the race in handleSupervisorUpdate (the most common path for
+  // MCP-dispatched packets, since lane.sessionKey lands milliseconds after
+  // the supervisor "launched" event), the marker stayed null forever
+  // until a manual reload + back-fill from localStorage picked it up.
   useEffect(() => {
-    if (latestDispatchedTabId) return;
     const packets = thoughtsMissionState.packets;
     if (!packets.length) return;
     const candidates = packets
-      .filter((p) => p.lane?.sessionKey && (p.status === 'running' || p.status === 'awaiting_review'))
-      .map((p) => ({ sessionKey: p.lane!.sessionKey!, at: p.lane?.lastEventAt ? new Date(p.lane.lastEventAt).getTime() : 0 }))
+      .filter((p) => p.lane?.sessionKey && (p.status === 'launching' || p.status === 'running' || p.status === 'awaiting_review'))
+      .map((p) => ({ sessionKey: p.lane!.sessionKey!, at: p.lane?.lastEventAt ? new Date(p.lane.lastEventAt).getTime() : Date.now() }))
       .filter((c) => Number.isFinite(c.at) && c.at > 0 && Date.now() - c.at < LATEST_DISPATCH_TTL_MS);
     if (candidates.length === 0) return;
     candidates.sort((a, b) => b.at - a.at);
-    setLatestDispatchedTabId(candidates[0].sessionKey);
-    setLatestDispatchedAt(candidates[0].at);
+    const winner = candidates[0];
+    if (winner.sessionKey === latestDispatchedTabId) return;
+    setLatestDispatchedTabId(winner.sessionKey);
+    setLatestDispatchedAt(winner.at);
   }, [LATEST_DISPATCH_TTL_MS, latestDispatchedTabId, thoughtsMissionState.packets]);
   useEffect(() => {
     try {
