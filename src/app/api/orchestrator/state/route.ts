@@ -5,6 +5,7 @@ import {
   withLockedState,
 } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata } from '@/lib/orchestrator/dag';
+import { findLaneByPacket } from '@/lib/lane/registry';
 import type {
   OrchestratorMissionState,
   OrchestratorPacket,
@@ -15,10 +16,44 @@ import type {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// Enrich packets with live lane info from the lane registry. The persisted
+// packet.lane field is rarely populated (lane bindings live in their own
+// registry, not in the orchestrator state file), so without this pass the
+// React-side mission state sees lane=null on every packet — which breaks
+// the dashboard's tab-badge rebind, the orange "latest dispatch" marker,
+// the WorkspaceChatPane live-status lookup, and anything else that needs
+// lane.sessionKey to thread the in-flight session into the UI. The MCP
+// path (operator-mission-service/mission.ts:294) already does the same
+// merge; keeping the HTTP path in lockstep means dispatch flows look
+// identical regardless of which surface launched the work.
+function enrichMissionWithLanes(mission: OrchestratorMissionState): OrchestratorMissionState {
+  const packets = mission.packets.map((packet) => {
+    const lane = findLaneByPacket(packet.id);
+    if (!lane) return packet;
+    return {
+      ...packet,
+      lane: {
+        tileId: packet.lane?.tileId ?? '',
+        tabId: packet.lane?.tabId ?? '',
+        repoPath: lane.worktreePath ?? lane.repoPath ?? packet.lane?.repoPath ?? null,
+        worktreePath: lane.worktreePath ?? packet.lane?.worktreePath ?? null,
+        runtime: lane.runtime,
+        sessionKey: lane.sessionKey,
+        laneId: lane.id,
+        lastHeartbeatAt: packet.lane?.lastHeartbeatAt ?? null,
+        lastEventAt: lane.lastEventAt,
+        lastEventLabel: lane.lastEventLabel,
+      },
+    };
+  });
+  return { ...mission, packets };
+}
+
 function buildStateResponse(mission: OrchestratorMissionState): OrchestratorStateApiResponse {
+  const enriched = enrichMissionWithLanes(mission);
   return {
-    mission,
-    dag: buildDagMetadata(mission.packets),
+    mission: enriched,
+    dag: buildDagMetadata(enriched.packets),
   };
 }
 
