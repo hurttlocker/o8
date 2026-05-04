@@ -210,8 +210,13 @@ export const TabBar = memo(function TabBar({
             const tabDetail = tab.orchestrationPacket
               ? (chatTabMeta?.detail ?? tab.orchestrationPacket.branchTarget ?? null)
               : (chatTabMeta?.summary ?? chatTabMeta?.detail ?? null);
+            // Match by tab.id OR chatSessionKey — MCP-dispatched packets
+            // store the lane's sessionKey as latestDispatchedTabId because
+            // the auto-generated tab id isn't reachable from the dispatch
+            // path. Both forms of the ref should light the same tab.
             const isLatestDispatch = !!tab.orchestrationPacket
-              && latestDispatchedTabId === tab.id;
+              && latestDispatchedTabId !== null
+              && (latestDispatchedTabId === tab.id || latestDispatchedTabId === tab.chatSessionKey);
             const dispatchTooltip = isLatestDispatch && latestDispatchedAt
               ? formatDispatchedAt(latestDispatchedAt)
               : null;
