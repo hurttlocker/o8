@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-03
 
+- `6d63cfe2` feat(workspace-tab): green tab marker when packet status === released
 - `3a6c58c5` feat(workspace-chat): inline status banner at bottom of dispatched chat
 - `5fbce8ae` feat(o8-panel): consolidate Mission rail into Activity tab
 - `0b48b875` feat(o8-panel): packets render in Activity timeline behind opt-in flag
