@@ -668,22 +668,37 @@ export function useWorkspaceTerminal({
   // packets, leaving their tabs with a stale (or missing)
   // orchestrationPacket badge — which is why the wrong PacketHeaderCard
   // and orange-marker regressions appeared after dispatching via MCP.
+  // Three rebind paths — must all work because the persistent identity
+  // of a packet→tab binding shrinks as the packet moves through status:
+  //   1. orchestrator-spawned: lane.tileId + lane.tabId both present
+  //   2. MCP-dispatched in-flight: only lane.sessionKey is bound
+  //   3. terminal (released/failed/archived): lane is null entirely;
+  //      the only stable handle left is packet.id matching the tab's
+  //      already-bound badge.packetId — without this fallback the tab
+  //      gets stuck at `awaiting_review` and never goes green on merge.
   useEffect(() => {
     thoughtsMissionPackets.forEach((packet) => {
-      if (!packet.lane) return;
       const badge = buildOrchestrationPacketBadge(packet);
 
-      const tileId = packet.lane.tileId;
-      const tabId = packet.lane.tabId;
+      const tileId = packet.lane?.tileId ?? null;
+      const tabId = packet.lane?.tabId ?? null;
       if (tileId && tabId) {
         const handle = workspaceTerminalHandlesRef.current.get(tileId);
         if (handle?.setOrchestrationPacket(tabId, badge)) return;
       }
 
-      const sessionKey = packet.lane.sessionKey;
-      if (!sessionKey) return;
+      const sessionKey = packet.lane?.sessionKey ?? null;
+      if (sessionKey) {
+        for (const handle of workspaceTerminalHandlesRef.current.values()) {
+          if (handle?.setOrchestrationPacket(sessionKey, badge)) return;
+        }
+      }
+
+      // setOrchestrationPacket also matches by an existing badge.packetId
+      // when the third arg matches (added below). Pass packet.id as the
+      // by-packet fallback identifier.
       for (const handle of workspaceTerminalHandlesRef.current.values()) {
-        if (handle?.setOrchestrationPacket(sessionKey, badge)) return;
+        if (handle?.setOrchestrationPacket(packet.id, badge)) return;
       }
     });
   }, [thoughtsMissionPackets]);
