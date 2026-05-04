@@ -653,11 +653,38 @@ export function useWorkspaceTerminal({
     handle.focusTab(packet.lane.tabId);
   }, [setActiveTileId]);
 
+  // Rebind packet badges to workspace tabs whenever mission state changes.
+  //
+  // Two binding paths must both work:
+  //   1. orchestrator-spawned packets come with `lane.tileId` + `lane.tabId`
+  //      already populated (the orchestrator created the tab itself).
+  //   2. MCP-dispatched packets bind via `lane.sessionKey` only — the
+  //      Codex session id IS the tab id for CLI runtime tabs (see
+  //      openCliChatSession). lane.tileId / lane.tabId stay null because
+  //      the tab is created on the dashboard side post-dispatch and the
+  //      backend never gets told which tile/tab caught the session.
+  //
+  // The earlier code only handled path #1 and silently dropped MCP-spawned
+  // packets, leaving their tabs with a stale (or missing)
+  // orchestrationPacket badge — which is why the wrong PacketHeaderCard
+  // and orange-marker regressions appeared after dispatching via MCP.
   useEffect(() => {
     thoughtsMissionPackets.forEach((packet) => {
       if (!packet.lane) return;
-      const handle = workspaceTerminalHandlesRef.current.get(packet.lane.tileId);
-      handle?.setOrchestrationPacket(packet.lane.tabId, buildOrchestrationPacketBadge(packet));
+      const badge = buildOrchestrationPacketBadge(packet);
+
+      const tileId = packet.lane.tileId;
+      const tabId = packet.lane.tabId;
+      if (tileId && tabId) {
+        const handle = workspaceTerminalHandlesRef.current.get(tileId);
+        if (handle?.setOrchestrationPacket(tabId, badge)) return;
+      }
+
+      const sessionKey = packet.lane.sessionKey;
+      if (!sessionKey) return;
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        if (handle?.setOrchestrationPacket(sessionKey, badge)) return;
+      }
     });
   }, [thoughtsMissionPackets]);
 
