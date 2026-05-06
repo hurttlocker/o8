@@ -252,83 +252,89 @@ function RepoRegistryListBase({
           ) : null}
 
           {!loading && !loadError && orderedRepos.length === 0 && (totalReposInRegistry ?? 0) > 0 ? (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                textAlign: 'center',
-                paddingTop: 28,
-                paddingBottom: 16,
-                paddingLeft: 16,
-                paddingRight: 16,
-                gap: 4,
-              }}
-            >
+            <>
+              {/* Centered intro + primary CTA. */}
               <div
                 style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'var(--t-text-secondary)',
-                  letterSpacing: '-0.01em',
-                  lineHeight: 1.3,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  textAlign: 'center',
+                  paddingTop: 28,
+                  paddingBottom: 0,
+                  paddingLeft: 14,
+                  paddingRight: 14,
+                  gap: 4,
                 }}
               >
-                {activeProjectName ? `${activeProjectName} has no repos` : 'This project has no repos'}
-              </div>
-              <div
-                style={{
-                  maxWidth: 260,
-                  fontSize: 11,
-                  lineHeight: 1.5,
-                  color: 'var(--t-text-faint)',
-                  letterSpacing: '-0.005em',
-                }}
-              >
-                Add a new repo, or pull one from another project below.
-              </div>
-
-              {onAddRepoToActiveProject ? (
-                <button
-                  type="button"
-                  onClick={onAddRepoToActiveProject}
+                <div
                   style={{
-                    marginTop: 12,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    paddingTop: 5,
-                    paddingBottom: 5,
-                    paddingLeft: 12,
-                    paddingRight: 14,
-                    borderRadius: 999,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: 'var(--t-input-border, var(--t-divider))',
-                    background: 'var(--t-input-bg, transparent)',
-                    color: 'var(--t-text)',
-                    cursor: 'pointer',
-                    fontSize: 11.5,
+                    fontSize: 12,
                     fontWeight: 600,
-                    letterSpacing: '-0.005em',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    color: 'var(--t-text-secondary)',
+                    letterSpacing: '-0.01em',
+                    lineHeight: 1.3,
                   }}
-                  onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover, rgba(148,163,184,0.12))'; }}
-                  onMouseLeave={(event) => { event.currentTarget.style.background = 'var(--t-input-bg, transparent)'; }}
                 >
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                    <path d="M6 1.5 V10.5 M1.5 6 H10.5" />
-                  </svg>
-                  Add a repo
-                </button>
-              ) : null}
+                  {activeProjectName ? `${activeProjectName} has no repos` : 'This project has no repos'}
+                </div>
+                <div
+                  style={{
+                    maxWidth: 260,
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: 'var(--t-text-faint)',
+                    letterSpacing: '-0.005em',
+                  }}
+                >
+                  Add a new repo, or pull one from another project below.
+                </div>
 
+                {onAddRepoToActiveProject ? (
+                  <button
+                    type="button"
+                    onClick={onAddRepoToActiveProject}
+                    style={{
+                      marginTop: 12,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      paddingTop: 5,
+                      paddingBottom: 5,
+                      paddingLeft: 12,
+                      paddingRight: 14,
+                      borderRadius: 999,
+                      borderWidth: 1,
+                      borderStyle: 'solid',
+                      borderColor: 'var(--t-input-border, var(--t-divider))',
+                      background: 'var(--t-input-bg, transparent)',
+                      color: 'var(--t-text)',
+                      cursor: 'pointer',
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      letterSpacing: '-0.005em',
+                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover, rgba(148,163,184,0.12))'; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = 'var(--t-input-bg, transparent)'; }}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                      <path d="M6 1.5 V10.5 M1.5 6 H10.5" />
+                    </svg>
+                    Add a repo
+                  </button>
+                ) : null}
+              </div>
+
+              {/* Cross-project list — left-aligned to match the panel's 14px
+                  inset (same as the project label header at the top). */}
               {reposInOtherProjects.length > 0 ? (
                 <div
                   style={{
-                    marginTop: 18,
-                    width: '100%',
-                    maxWidth: 280,
+                    marginTop: 22,
+                    paddingLeft: 14,
+                    paddingRight: 14,
+                    paddingBottom: 8,
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 6,
@@ -337,11 +343,11 @@ function RepoRegistryListBase({
                   <div
                     style={{
                       fontSize: 10,
-                      fontWeight: 600,
-                      letterSpacing: '0.08em',
+                      fontWeight: 700,
+                      letterSpacing: '0.12em',
                       textTransform: 'uppercase',
                       color: 'var(--t-text-faint)',
-                      textAlign: 'left',
+                      paddingBottom: 2,
                     }}
                   >
                     From other projects
@@ -415,7 +421,7 @@ function RepoRegistryListBase({
                   ))}
                 </div>
               ) : null}
-            </div>
+            </>
           ) : null}
 
           {!loading && !loadError ? (
