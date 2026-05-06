@@ -15,8 +15,29 @@ import { useOrchestratorData } from '../../orchestrator-data-context';
 
 const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
-const O8_ICON_ACTIVE = 'var(--t-text)';
-const O8_ICON_INACTIVE = 'var(--t-text-muted)';
+const O8_ICON_ACTIVE = 'var(--t-chat-surface-text, #0f172a)';
+const O8_ICON_INACTIVE = 'var(--t-chat-surface-text-secondary, #64748b)';
+const SCRATCH_LOCAL_TOKENS: CSSProperties = {
+  ['--o8-scratch-surface' as string]: 'var(--t-chat-surface-bg, #f4f2ed)',
+  ['--o8-scratch-card' as string]: 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))',
+  ['--o8-scratch-input' as string]: 'var(--t-chat-surface-input-bg, #f4f2ed)',
+  ['--o8-scratch-border' as string]: 'var(--t-chat-surface-border, rgba(15, 23, 42, 0.1))',
+  ['--o8-scratch-input-border' as string]: 'var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))',
+  ['--o8-scratch-text' as string]: 'var(--t-chat-surface-text, #0f172a)',
+  ['--o8-scratch-muted' as string]: 'var(--t-chat-surface-text-secondary, #64748b)',
+  ['--o8-scratch-faint' as string]: 'var(--t-chat-surface-text-muted, #94a3b8)',
+  ['--o8-scratch-action' as string]: 'var(--t-chat-surface-text-secondary, #475569)',
+  ['--t-panel' as string]: 'var(--o8-scratch-surface)',
+  ['--t-panel-solid' as string]: 'var(--o8-scratch-surface)',
+  ['--t-bg-subtle' as string]: 'var(--o8-scratch-card)',
+  ['--t-input-bg' as string]: 'var(--o8-scratch-input)',
+  ['--t-input-border' as string]: 'var(--o8-scratch-input-border)',
+  ['--t-panel-border' as string]: 'var(--o8-scratch-border)',
+  ['--t-divider-subtle' as string]: 'var(--o8-scratch-border)',
+  ['--t-text' as string]: 'var(--o8-scratch-text)',
+  ['--t-text-muted' as string]: 'var(--o8-scratch-muted)',
+  ['--t-text-faint' as string]: 'var(--o8-scratch-faint)',
+};
 const BINARY_EXTENSIONS = new Set([
   'avif',
   'bmp',
@@ -218,9 +239,9 @@ function HeaderButton({
         width: 32,
         height: 32,
         padding: 0,
-        border: 'none',
+        border: active ? '1px solid var(--t-accent-border, rgba(37, 99, 235, 0.26))' : '1px solid var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))',
         borderRadius: 10,
-        background: active ? 'var(--t-panel-active, var(--t-input-bg))' : 'transparent',
+        background: active ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.1))' : 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))',
         color: active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE,
         cursor: disabled ? 'default' : 'pointer',
         display: 'inline-flex',
@@ -231,14 +252,21 @@ function HeaderButton({
         transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         position: 'relative',
         WebkitTapHighlightColor: 'transparent',
-        boxShadow: active ? '0 0 0 3px rgba(96, 165, 250, 0.14)' : 'none',
+        opacity: disabled ? 0.62 : 1,
+        boxShadow: active ? '0 0 0 3px rgba(96, 165, 250, 0.14)' : 'inset 0 1px 0 rgba(255, 255, 255, 0.28)',
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
       onMouseEnter={(event) => {
-        if (!active && !disabled) event.currentTarget.style.background = 'var(--t-hover)';
+        if (!active && !disabled) {
+          event.currentTarget.style.background = 'var(--t-accent-soft, rgba(37, 99, 235, 0.1))';
+          event.currentTarget.style.borderColor = 'var(--t-accent-border, rgba(37, 99, 235, 0.26))';
+        }
       }}
       onMouseLeave={(event) => {
-        if (!active) event.currentTarget.style.background = 'transparent';
+        if (!active) {
+          event.currentTarget.style.background = 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))';
+          event.currentTarget.style.borderColor = 'var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))';
+        }
       }}
     >
       <AskO8Icon size={16} color={active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE} />
@@ -295,6 +323,14 @@ export function O8ScratchChat({
     });
   }, [disabled, syncPanelPosition]);
 
+  const togglePanel = useCallback(() => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    openPanel();
+  }, [open, openPanel]);
+
   useEffect(() => {
     if (!open) return;
     syncPanelPosition();
@@ -313,11 +349,11 @@ export function O8ScratchChat({
       if (target?.dataset.o8ScratchInput === 'true') return;
       if (!buttonRef.current?.getClientRects().length) return;
       event.preventDefault();
-      openPanel();
+      togglePanel();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [openPanel]);
+  }, [togglePanel]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -482,13 +518,14 @@ export function O8ScratchChat({
   return (
     <>
       <div ref={buttonRef} style={{ display: 'inline-flex', flexShrink: 0 }}>
-        <HeaderButton active={open} disabled={disabled} onOpen={openPanel} />
+        <HeaderButton active={open} disabled={disabled && !open} onOpen={togglePanel} />
       </div>
       {open ? (
         <div
           role="dialog"
           aria-label="Ask o8"
           style={{
+            ...SCRATCH_LOCAL_TOKENS,
             position: 'fixed',
             top: panelPosition.top,
             right: panelPosition.right,
@@ -497,8 +534,9 @@ export function O8ScratchChat({
             borderRadius: 18,
             borderWidth: 1,
             borderStyle: 'solid',
-            borderColor: 'var(--t-panel-border)',
-            background: 'var(--t-panel-solid, var(--t-chat-surface-bg, #ffffff))',
+            borderColor: 'var(--o8-scratch-border)',
+            background: 'var(--o8-scratch-surface)',
+            color: 'var(--o8-scratch-text)',
             boxShadow: 'var(--t-panel-shadow), 0 22px 70px rgba(15, 23, 42, 0.18)',
             display: 'flex',
             flexDirection: 'column',
@@ -523,15 +561,20 @@ export function O8ScratchChat({
               onClick={() => setExpanded((current) => !current)}
               style={iconButtonStyle}
             >
-              {expanded ? <ArrowsInSimple size={14} /> : <ArrowsOutSimple size={14} />}
+              {expanded ? (
+                <ArrowsInSimple size={15} weight="bold" color="var(--o8-scratch-action)" />
+              ) : (
+                <ArrowsOutSimple size={15} weight="bold" color="var(--o8-scratch-action)" />
+              )}
             </button>
             <button
               type="button"
               title="Clear scratch chat"
               onClick={clearConversation}
-              style={iconButtonStyle}
+              style={textButtonStyle}
             >
-              <Trash size={14} />
+              <Trash size={14} weight="bold" color="var(--o8-scratch-action)" />
+              Clear
             </button>
             <button
               type="button"
@@ -539,7 +582,7 @@ export function O8ScratchChat({
               onClick={() => setOpen(false)}
               style={iconButtonStyle}
             >
-              <X size={14} />
+              <X size={15} weight="bold" color="var(--o8-scratch-action)" />
             </button>
           </div>
 
@@ -706,17 +749,39 @@ export function O8ScratchChat({
   );
 }
 
-const iconButtonStyle: CSSProperties = {
-  width: 28,
+const actionButtonBaseStyle: CSSProperties = {
+  width: 'auto',
   height: 28,
   borderRadius: 9,
-  border: '1px solid transparent',
-  background: 'transparent',
-  color: 'var(--t-text-muted)',
+  border: '1px solid var(--o8-scratch-input-border)',
+  background: 'var(--o8-scratch-input)',
+  color: 'var(--o8-scratch-action)',
   cursor: 'pointer',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  lineHeight: 0,
+  gap: 6,
+  lineHeight: '14px',
+  paddingTop: 0,
+  paddingRight: 9,
+  paddingBottom: 0,
+  paddingLeft: 8,
+  fontFamily: UI_FONT,
+  fontSize: 11,
+  fontWeight: 750,
   flexShrink: 0,
+  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.24)',
+};
+
+const iconButtonStyle: CSSProperties = {
+  ...actionButtonBaseStyle,
+  width: 30,
+  minWidth: 30,
+  paddingRight: 0,
+  paddingLeft: 0,
+};
+
+const textButtonStyle: CSSProperties = {
+  ...actionButtonBaseStyle,
+  minWidth: 72,
 };
