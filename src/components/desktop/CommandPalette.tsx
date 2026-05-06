@@ -29,6 +29,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle,
   ArrowRight,
+  ChevronRight,
   Clock,
   FileText,
   GitPullRequestDraft,
@@ -94,6 +95,24 @@ export interface CommandPaletteRecent {
   lastUsedAt: number;
 }
 
+/**
+ * Action items are client-side palette entries that don't go through the
+ * server search — used today for "Switch to project" / "Move repo to
+ * project" rows. The host wires `onActivate` directly so the palette never
+ * needs to know which subsystem is being driven.
+ */
+export interface CommandPaletteActionItem {
+  /** Stable id (eg "project:switch:default"). Used for keyboard nav and as
+   *  the React key. */
+  id: string;
+  title: string;
+  detail?: string;
+  /** Optional swatch color rendered inside the icon slot. Used for project
+   *  rows so the palette mirrors the dot color in the bottom bar. */
+  swatchColor?: string;
+  onActivate: () => void;
+}
+
 export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
@@ -101,6 +120,8 @@ export interface CommandPaletteProps {
   workspace?: string | null;
   /** Active repo slug or short name for issue scoping. */
   repo?: string | null;
+  /** Client-side rows that bypass the search index (project switch / move). */
+  actionItems?: CommandPaletteActionItem[];
   onSelectIssue: (issueNumber: number, repo?: string) => void;
   onSelectFile: (filePath: string, line?: number) => void;
   onSelectAgent: (sessionKey: string) => void;
@@ -113,7 +134,12 @@ interface PaletteItem {
   detail: string;
   Icon: LucideIcon;
   iconColor: string;
-  result: CommandPaletteSearchResult;
+  /** Defined for search-backed rows. Action rows use `onActivate` instead. */
+  result?: CommandPaletteSearchResult;
+  /** Defined for client-side action rows. */
+  onActivate?: () => void;
+  /** Solid swatch color rendered in place of an icon. */
+  swatchColor?: string;
 }
 
 interface SearchResponse {
@@ -141,6 +167,7 @@ const GROUP_LABEL: Record<GroupKey, string> = {
   issue: 'Issues',
   file: 'Files',
   agent: 'Agents',
+  action: 'Actions',
 };
 
 // ── localStorage LRU helpers ───────────────────────────────────────────────
@@ -196,6 +223,7 @@ export const CommandPalette = memo(function CommandPalette({
   onClose,
   workspace,
   repo,
+  actionItems,
   onSelectIssue,
   onSelectFile,
   onSelectAgent,
@@ -289,13 +317,37 @@ export const CommandPalette = memo(function CommandPalette({
     };
   }, [open, query, workspace, repo]);
 
+  // Filter client-side action items by the current query so the palette
+  // surfaces "Switch to Marketing" when the operator types "marketing", but
+  // keeps them out of the way at rest.
+  const filteredActionItems = useMemo<PaletteItem[]>(() => {
+    if (!actionItems?.length) return [];
+    const trimmed = query.trim().toLowerCase();
+    const source = trimmed.length === 0
+      ? actionItems
+      : actionItems.filter((entry) => (
+        entry.title.toLowerCase().includes(trimmed)
+        || (entry.detail ?? '').toLowerCase().includes(trimmed)
+      ));
+    return source.map((entry) => ({
+      id: entry.id,
+      groupKey: 'action' as const,
+      title: entry.title,
+      detail: entry.detail ?? '',
+      Icon: ChevronRight,
+      iconColor: 'var(--t-text-muted)',
+      onActivate: entry.onActivate,
+      swatchColor: entry.swatchColor,
+    }));
+  }, [actionItems, query]);
+
   // Build the flat ordered item list (used for keyboard navigation +
   // selection mapping). Sections render off the same array.
   const items = useMemo<PaletteItem[]>(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
-      // Empty query → show recents only
-      return recents.map((entry) => ({
+      // Empty query → show actions + recents
+      const recentItems: PaletteItem[] = recents.map((entry) => ({
         id: `recent:${entry.id}`,
         groupKey: 'recent' as const,
         title: entry.title,
@@ -311,9 +363,12 @@ export const CommandPalette = memo(function CommandPalette({
           score: 0,
         },
       }));
+      return [...filteredActionItems, ...recentItems];
     }
 
     const ordered: PaletteItem[] = [];
+    // Actions first so frequent project switches stay above search noise.
+    ordered.push(...filteredActionItems);
     const pushGroup = (kind: CommandPaletteSearchKind) => {
       for (const result of groups[kind]) {
         ordered.push({
@@ -331,7 +386,7 @@ export const CommandPalette = memo(function CommandPalette({
     pushGroup('issue');
     pushGroup('file');
     return ordered;
-  }, [groups, query, recents]);
+  }, [filteredActionItems, groups, query, recents]);
 
   // Keep selectedIndex in bounds when items shrink.
   useEffect(() => {
@@ -357,8 +412,13 @@ export const CommandPalette = memo(function CommandPalette({
   }, [selectedIndex, items.length]);
 
   const handleActivate = useCallback((item: PaletteItem) => {
-    const target = item.result.target;
-    if (!target) return;
+    if (item.groupKey === 'action') {
+      item.onActivate?.();
+      onClose();
+      return;
+    }
+    const target = item.result?.target;
+    if (!target || !item.result) return;
 
     // Promote to recents (best-effort). For agents we skip recents because
     // sessionKeys are short-lived and stale entries would be useless.
@@ -560,7 +620,20 @@ const PaletteList = memo(function PaletteList({
                 }}
               >
                 <span style={iconWrapStyle}>
-                  <item.Icon size={14} strokeWidth={1.7} color={item.iconColor} />
+                  {item.swatchColor ? (
+                    <span
+                      aria-hidden
+                      style={{
+                        display: 'inline-block',
+                        width: 9,
+                        height: 9,
+                        borderRadius: '50%',
+                        background: item.swatchColor,
+                      }}
+                    />
+                  ) : (
+                    <item.Icon size={14} strokeWidth={1.7} color={item.iconColor} />
+                  )}
                 </span>
                 <span style={titleColumnStyle}>
                   <span style={titleTextStyle}>{item.title}</span>

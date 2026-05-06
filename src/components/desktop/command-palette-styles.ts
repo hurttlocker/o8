@@ -172,12 +172,14 @@ export const detailTextStyle: CSSProperties = {
   fontWeight: 400,
 };
 
-export type GroupKey = 'recent' | 'issue' | 'file' | 'agent';
+export type GroupKey = 'recent' | 'issue' | 'file' | 'agent' | 'action';
 
 export function groupBadgeStyle(group: GroupKey): CSSProperties {
   const tone = group === 'recent'
     ? 'var(--t-text-faint)'
-    : KIND_COLOR[group];
+    : group === 'action'
+      ? 'var(--t-text-muted)'
+      : KIND_COLOR[group];
   return {
     fontSize: 10,
     fontWeight: 600,
