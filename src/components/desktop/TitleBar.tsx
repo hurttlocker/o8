@@ -5,7 +5,7 @@
  *
  * Layout (matching Cursor/Claude Code pattern):
  * Left:  [78px traffic light spacer] [Sidebar toggle] [← Back] [→ Forward]
- * Center: [Search pill / expanded UniversalSearch]
+ * Center: [Search button / Cmd+K trigger]
  * Right: [Bottom panel toggle] [Chat toggle] [Settings gear (red)]
  *
  * Sits ABOVE everything. Height: 44px. Frosted glass.
@@ -16,6 +16,8 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { UsersThree, GlobeSimple } from '@phosphor-icons/react';
 import { ChromeButton } from './chrome/ChromeButton';
+import { O8HeaderTabs } from './o8-panel/O8HeaderTabs';
+import type { O8Tab } from './o8-panel/types';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render Lucide React components) ──
 
@@ -77,7 +79,6 @@ function IconColumns({ size = 16 }: { size?: number }) {
 // ── Types ──
 
 interface TitleBarProps {
-  renderSearch?: (onClose: () => void) => React.ReactNode;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
   bottomPanelVisible?: boolean;
@@ -98,6 +99,9 @@ interface TitleBarProps {
   // Agents slot — migrated out of the NavRail.
   isAgentsSectionActive?: boolean;
   onOpenAgents?: () => void;
+  onOpenCommandPalette?: () => void;
+  o8ActiveTab?: O8Tab;
+  onO8TabChange?: (tab: O8Tab) => void;
 }
 
 // ── Icon Button ──
@@ -444,7 +448,6 @@ function RightPanelMorphButton({
 // ── Main Component ──
 
 export function TitleBar({
-  renderSearch,
   sidebarVisible = true,
   onToggleSidebar,
   bottomPanelVisible = true,
@@ -458,8 +461,10 @@ export function TitleBar({
   onOpenBrowser,
   isAgentsSectionActive = false,
   onOpenAgents,
+  onOpenCommandPalette,
+  o8ActiveTab = 'workspace',
+  onO8TabChange,
 }: TitleBarProps) {
-  const [searchExpanded, setSearchExpanded] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
 
   // Window drag — Tauri v2 startDragging API
@@ -482,26 +487,6 @@ export function TitleBar({
       // Not in Tauri — ignore (browser mode)
     }
   }, []);
-
-  // ⌘K / ⇧⌘P keyboard shortcuts for the command palette
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const isCommandPaletteShortcut = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
-      const isShiftPaletteShortcut = (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'p';
-
-      if (isCommandPaletteShortcut || isShiftPaletteShortcut) {
-        e.preventDefault();
-        setSearchExpanded(true);
-      }
-      if (e.key === 'Escape' && searchExpanded) {
-        setSearchExpanded(false);
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [searchExpanded]);
-
-  const closeSearch = useCallback(() => setSearchExpanded(false), []);
 
   return (
     <header
@@ -568,75 +553,74 @@ export function TitleBar({
         />
       </div>
 
-      {/* ── Center — Search ── */}
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 0,
-      }}>
-        <div style={{
-          width: '100%',
-          maxWidth: searchExpanded ? 640 : 320,
-          transition: 'max-width 250ms cubic-bezier(0.22, 1, 0.36, 1)',
-          position: 'relative',
-        }}>
-          {!searchExpanded ? (
-            <button
-              type="button"
-              onClick={() => setSearchExpanded(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                paddingTop: 6,
-                paddingBottom: 6,
-                paddingLeft: 16,
-                paddingRight: 16,
-                borderRadius: 10,
-                border: 'none',
-                background: 'rgba(255, 255, 255, 0.06)',
-                color: 'rgba(255, 255, 255, 0.78)',
-                fontSize: 13,
-                fontWeight: 500,
-                letterSpacing: '-0.01em',
-                cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
-                transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-                width: '100%',
-                justifyContent: 'center',
-                ['WebkitAppRegion' as string]: 'no-drag',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
-              }}
-            >
-              <IconSearch />
-              <span>Command Palette</span>
-              <kbd style={{
-                fontSize: 10,
-                fontWeight: 500,
-                color: 'var(--t-kbd-color)',
-                background: 'var(--t-kbd-bg)',
-                border: '1px solid var(--t-kbd-border)',
-                borderRadius: 4,
-                padding: '1px 5px',
-                marginLeft: 8,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-              }}>
-                ⌘K
-              </kbd>
-            </button>
-          ) : (
-            <div style={{ position: 'relative', ['WebkitAppRegion' as string]: 'no-drag' }}>
-              {renderSearch ? renderSearch(closeSearch) : null}
-            </div>
-          )}
-        </div>
+      {/* ── Center — Search trigger ── */}
+      <div
+        data-chrome-surface="true"
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: 0,
+        }}
+      >
+        <button
+          type="button"
+          aria-label="Open search"
+          title="Open search (Cmd+K)"
+          onClick={onOpenCommandPalette}
+          disabled={!onOpenCommandPalette}
+          style={{
+            height: 32,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            paddingTop: 0,
+            paddingRight: 10,
+            paddingBottom: 0,
+            paddingLeft: 10,
+            border: 'none',
+            borderRadius: 10,
+            background: 'var(--t-chrome-btn-bg)',
+            boxShadow: 'var(--t-chrome-btn-shadow)',
+            color: 'var(--t-chrome-btn-text, var(--t-text))',
+            cursor: onOpenCommandPalette ? 'pointer' : 'default',
+            opacity: onOpenCommandPalette ? 1 : 0.54,
+            WebkitTapHighlightColor: 'transparent',
+            transition: 'box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1), background 150ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+            ['WebkitAppRegion' as string]: 'no-drag',
+          }}
+          onMouseEnter={(event) => {
+            if (!onOpenCommandPalette) return;
+            event.currentTarget.style.background = 'var(--t-chrome-btn-hover-bg)';
+            event.currentTarget.style.boxShadow = 'var(--t-chrome-btn-hover-shadow)';
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.background = 'var(--t-chrome-btn-bg)';
+            event.currentTarget.style.boxShadow = 'var(--t-chrome-btn-shadow)';
+          }}
+        >
+          <IconSearch size={15} />
+          <kbd
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: 'var(--t-kbd-color)',
+              background: 'var(--t-kbd-bg)',
+              border: '1px solid var(--t-kbd-border)',
+              borderRadius: 5,
+              paddingTop: 1,
+              paddingRight: 5,
+              paddingBottom: 1,
+              paddingLeft: 5,
+              lineHeight: 1.2,
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            }}
+          >
+            ⌘K
+          </kbd>
+        </button>
       </div>
 
       {/* Open In — moved to Command Palette (⌘K → "open in") */}
@@ -647,11 +631,14 @@ export function TitleBar({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 2,
+          gap: 4,
           flexShrink: 0,
           paddingRight: 4,
         }}
       >
+        {o8PanelVisible && onO8TabChange ? (
+          <O8HeaderTabs activeTab={o8ActiveTab} onTabChange={onO8TabChange} />
+        ) : null}
         {onOpenBrowser ? (
           <BrowserHoverButton
             active={browserActive}
@@ -667,19 +654,6 @@ export function TitleBar({
         />
 
       </div>
-
-      {/* Backdrop — closes search when clicking outside */}
-      {searchExpanded && (
-        <div
-          onClick={closeSearch}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            top: 44,
-            zIndex: -1,
-          }}
-        />
-      )}
     </header>
   );
 }

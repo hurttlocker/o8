@@ -7,7 +7,6 @@
  * Modeled after Cursor 3's right panel, adapted for governance.
  */
 
-import { useState } from 'react';
 import { O8ActivityPane } from './O8ActivityPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8PRPane } from './O8PRPane';
@@ -15,71 +14,15 @@ import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
 import { O8PulsePane } from './o8-panel/O8PulsePane';
 import { O8WorkspacePane } from './o8-panel/O8WorkspacePane';
+import type { O8Tab } from './o8-panel/types';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
-// ── Phosphor Icons (raw SVG, per CLAUDE.md) ──
-
-function IconWorkspace({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" />
-      <path d="M8 13h8" />
-      <path d="M12 9v8" />
-    </svg>
-  );
-}
-
-function IconFiles({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-      <polyline points="14 2 14 8 20 8" />
-    </svg>
-  );
-}
-
-function IconGitPullRequest({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <circle cx="18" cy="18" r="3" />
-      <circle cx="6" cy="6" r="3" />
-      <path d="M13 6h3a2 2 0 0 1 2 2v7" />
-      <line x1="6" y1="9" x2="6" y2="21" />
-    </svg>
-  );
-}
-
-function IconActivity({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-    </svg>
-  );
-}
-
-function IconPulse({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <path d="M3 12h4l3-9 4 18 3-9h4" />
-    </svg>
-  );
-}
-
-export type O8Tab = 'workspace' | 'browser' | 'prs' | 'activity' | 'inbox' | 'spec' | 'pulse';
-
-function IconInbox({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-    </svg>
-  );
-}
-
 interface O8PanelProps {
-  onClose: () => void;
   repoPath?: string | null;
+  registeredRepos?: RepoRegistryEntry[];
+  onRepoPathChange?: (repoPath: string) => void;
   previews?: DetectedLocalhostPreview[];
   onEditWithAI?: (context: string) => void;
   onOpenFile?: (filePath: string) => void;
@@ -92,7 +35,6 @@ interface O8PanelProps {
   // Bubbles the browser pane's active URL up so the TitleBar Browser
   // button can render a hover preview iframe pointed at it.
   onBrowserActiveUrlChange?: (url: string | null) => void;
-  onActiveTabChange?: (tab: O8Tab) => void;
   onSelectedFileChange?: (filePath: string) => void;
   commitSha?: string | null;
   onClearCommit?: () => void;
@@ -101,69 +43,11 @@ interface O8PanelProps {
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
 }
 
-// ── Tab Button ──
-
-const O8_ICON_ACTIVE = '#e2e8f0';
-const O8_ICON_INACTIVE = 'var(--t-text-muted)';
-
-function O8TabButton({ icon, active, onClick, label }: {
-  icon: (color: string) => React.ReactNode;
-  active: boolean;
-  onClick: () => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 32,
-        height: 32,
-        border: 'none',
-        borderRadius: 12,
-        background: active ? 'var(--t-input-bg)' : 'transparent',
-        cursor: 'pointer',
-        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-        position: 'relative',
-      }}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--t-hover)'; }}
-      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
-    >
-      {icon(active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE)}
-      {active ? (
-        <span style={{
-          position: 'absolute',
-          bottom: 2,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 12,
-          height: 2,
-          borderRadius: 1,
-          background: 'var(--t-brand-orange)',
-        }} />
-      ) : null}
-    </button>
-  );
-}
-
 // ── Main Component ──
 
-export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile: externalSelectedFile, browserUrl, onBrowserActiveUrlChange, onActiveTabChange, onSelectedFileChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
-  const [internalActiveTab, setInternalActiveTab] = useState<O8Tab>('workspace');
-  const activeTab = externalTab ?? internalActiveTab;
+export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile: externalSelectedFile, browserUrl, onBrowserActiveUrlChange, onSelectedFileChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
+  const activeTab = externalTab ?? 'workspace';
   const selectedFile = externalSelectedFile ?? null;
-
-  const handleTabChange = (tab: O8Tab) => {
-    if (onActiveTabChange) {
-      onActiveTabChange(tab);
-      return;
-    }
-    setInternalActiveTab(tab);
-  };
 
   const handleSelectedFileChange = (filePath: string) => {
     onSelectedFileChange?.(filePath);
@@ -180,59 +64,9 @@ export function O8Panel({ onClose, repoPath, previews = [], onEditWithAI, onOpen
         borderLeft: '1px solid var(--t-divider)',
       }}
     >
-      {/* Tab bar */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        height: 40,
-        paddingLeft: 8,
-        paddingRight: 8,
-        borderBottom: '1px solid var(--t-divider)',
-        flexShrink: 0,
-        gap: 2,
-      }}>
-        <O8TabButton icon={(c) => <IconWorkspace size={16} color={c} />} active={activeTab === 'workspace'} onClick={() => handleTabChange('workspace')} label="Workspace" />
-        <O8TabButton icon={(c) => <IconPulse size={16} color={c} />} active={activeTab === 'pulse'} onClick={() => handleTabChange('pulse')} label="Pulse" />
-        {/* Browser tab moved to the TitleBar — see RightPanelMorphButton's
-            sibling. The active===browser branch below still renders the
-            BrowserPane content when set externally (TitleBar handler). */}
-        <div style={{ width: 1, height: 18, background: 'var(--t-divider-subtle)', marginLeft: 8, marginRight: 8 }} />
-        <O8TabButton icon={(c) => <IconGitPullRequest size={16} color={c} />} active={activeTab === 'prs'} onClick={() => handleTabChange('prs')} label="PRs" />
-        <O8TabButton icon={(c) => <IconInbox size={16} color={c} />} active={activeTab === 'inbox'} onClick={() => handleTabChange('inbox')} label="Inbox" />
-        <O8TabButton icon={(c) => <IconActivity size={16} color={c} />} active={activeTab === 'activity'} onClick={() => handleTabChange('activity')} label="Activity" />
-        <div style={{ width: 1, height: 18, background: 'var(--t-divider-subtle)', marginLeft: 8, marginRight: 8 }} />
-        <O8TabButton icon={(c) => <IconFiles size={16} color={c} />} active={activeTab === 'spec'} onClick={() => handleTabChange('spec')} label="o8.md" />
-        <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={onClose}
-          title="Close panel"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 28,
-            height: 28,
-            border: 'none',
-            borderRadius: 6,
-            background: 'transparent',
-            color: 'var(--t-text-secondary)',
-            cursor: 'pointer',
-            transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
-
       {/* Tab content — all tabs stay mounted to preserve state */}
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'workspace' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8WorkspacePane repoPath={repoPath} selectedFile={selectedFile} onSelectedFileChange={handleSelectedFileChange} />
+        <O8WorkspacePane repoPath={repoPath} registeredRepos={registeredRepos} onRepoPathChange={onRepoPathChange} selectedFile={selectedFile} onSelectedFileChange={handleSelectedFileChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
