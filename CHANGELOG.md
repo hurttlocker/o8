@@ -9,6 +9,8 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-06
 
+- `8952101e` feat: O8 right panel opens on the Pulse tab by default
+- `26e98fb2` feat: projects scope the left panel with a bottom-bar dot switcher
 - `d4c07597` feat: hover × on each spawned agent row to dismiss it from the panel
 - `3666075d` feat: single-runtime chat lifecycle + 3-word tab labels everywhere
 - `dcd8c7d8` feat: breadcrumb minimizes to filename only by default
