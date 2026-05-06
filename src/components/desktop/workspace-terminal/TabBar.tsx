@@ -126,10 +126,12 @@ export const TabBar = memo(function TabBar({
         // the selected tab and workspace body meet on the same edge.
         height: TAB_BAR_HEIGHT,
         minHeight: TAB_BAR_HEIGHT,
-        // Vibrancy passthrough — the strip itself reads as glass over the
-        // macOS material. Inactive tabs float as pills; the active tab is
-        // the only solid surface that anchors into the workspace below.
-        background: 'transparent',
+        // Theme-tinted glass over the macOS vibrancy. --t-panel resolves
+        // to translucent white in light mode and translucent dark in
+        // midnight, so the strip reads as light-on-light or dark-on-dark
+        // glass instead of raw HudWindow vibrancy bleeding through (which
+        // looked correct in midnight but went silver-grey in light mode).
+        background: 'var(--t-panel)',
         // Drop the explicit divider — the workspace card's top edge is now
         // the only horizontal line, and the active tab punches through it.
         borderBottomWidth: 0,
