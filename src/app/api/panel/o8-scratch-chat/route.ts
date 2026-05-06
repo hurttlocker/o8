@@ -14,9 +14,9 @@ const DEFAULT_MODELS = [
 const MAX_MESSAGE_CHARS = 6_000;
 const MAX_CONTEXT_CHARS = 28_000;
 const MAX_HISTORY_MESSAGES = 10;
-const MAX_TOOL_ROUNDS = 6;
+const MAX_TOOL_ROUNDS = 12;
 
-type ScratchRole = 'user' | 'assistant' | 'tool';
+type ScratchRole = 'user' | 'assistant' | 'tool' | 'system';
 
 interface ScratchToolCall {
   id: string;
@@ -423,10 +423,29 @@ export async function POST(request: NextRequest): Promise<Response> {
           }
         }
 
-        controller.enqueue(encodeEvent({
-          type: 'error',
-          message: `Scratch chat reached the ${MAX_TOOL_ROUNDS}-round tool-call ceiling without returning a final answer.`,
-        }));
+        // Tool budget exhausted — force one final no-tools turn so the model
+        // summarizes whatever it discovered instead of leaving the user with
+        // a raw error. Append a nudge as a system message.
+        conversation.push({
+          role: 'system',
+          content: `You have used all ${MAX_TOOL_ROUNDS} tool-call rounds. Stop calling tools and answer the user now using only what you already gathered. Be concise — summarize, don't list everything.`,
+        });
+        const finalResult = await streamRound({
+          apiKey,
+          messages: conversation,
+          signal: request.signal,
+          controller,
+          withTools: false,
+          modelOverride,
+        });
+        if ('error' in finalResult) {
+          controller.enqueue(encodeEvent({
+            type: 'error',
+            message: finalResult.error === 'aborted'
+              ? 'Scratch chat request was cancelled.'
+              : finalResult.error,
+          }));
+        }
         controller.enqueue(encodeEvent({ type: 'done' }));
       } catch (error) {
         try {
