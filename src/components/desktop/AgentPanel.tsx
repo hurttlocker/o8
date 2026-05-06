@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-unused-vars -- AgentPanel keeps a stable prop surface during the refactor */
 
-import { memo, useMemo, type CSSProperties } from 'react';
+import { memo, useCallback, useMemo, type CSSProperties } from 'react';
 import { Clock } from './lucide-shims';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
@@ -80,6 +80,15 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     if (!projects.activeProject) return null;
     return new Set(projects.activeProject.repoPaths);
   }, [projects.activeProject]);
+
+  // Stable callback so RepoRegistrySection doesn't see a new reference on
+  // every render — its useEffect has this in the deps and the section
+  // would otherwise call back into here in an infinite loop.
+  const refreshProjects = projects.refresh;
+  const handleRegistryStateChange = useCallback((state: { loading: boolean; count: number; hasError: boolean }) => {
+    setRepoRegistryState(state);
+    void refreshProjects();
+  }, [refreshProjects, setRepoRegistryState]);
 
   // When focus is active, the column itself widened — render the focus
   // surface inline so it occupies the whole AgentPanel column and keeps
@@ -258,10 +267,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
               onRepoRemoved?.(repo);
             }}
             onLaunchWorkspaceAgent={onLaunchWorkspaceAgent}
-            onRegistryStateChange={(state) => {
-              setRepoRegistryState(state);
-              void projects.refresh();
-            }}
+            onRegistryStateChange={handleRegistryStateChange}
             activeSessionKey={activeSessionKey}
             activeRepoLocalPath={currentLaunchRepoPath}
             activeWorkspacePath={activeWorkspacePath ?? selectedRepoLocalPath ?? null}
