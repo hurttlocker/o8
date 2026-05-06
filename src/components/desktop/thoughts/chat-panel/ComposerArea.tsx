@@ -183,6 +183,7 @@ interface ComposerAreaProps {
   onInputChange: (next: string) => void;
   isOrchestratorMode: boolean;
   isChatMode?: boolean;
+  isSingleMode?: boolean;
   displayWaiting: boolean;
   chatMessages: MobileTranscriptEntry[];
   activeTargetLabel: string;
@@ -221,6 +222,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onInputChange,
   isOrchestratorMode,
   isChatMode = false,
+  isSingleMode = false,
   displayWaiting,
   chatMessages,
   activeTargetLabel,
@@ -283,15 +285,17 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ? getOrchestratorSlashCommandSuggestions(input)
       : []
   ), [dismissedSlashInput, input, isOrchestratorMode]);
-  const isDisabled = (displayWaiting || runningTools.length > 0) || (!isOrchestratorMode && !targetAgentExists);
+  const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
+  const isDisabled = (displayWaiting || runningTools.length > 0) || (!acceptsDirectInput && !targetAgentExists);
+  const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
 
   const activeSlashCommand = slashSuggestions[Math.min(activeSlashIndex, Math.max(0, slashSuggestions.length - 1))] ?? null;
-  const footerLeadingSlot = isOrchestratorMode && !isChatMode ? (
+  const footerLeadingSlot = showReasoningControls ? (
     <ThinkingChip effort={effort} adaptiveEnabled={adaptiveEnabled} onChange={onEffortChange} />
   ) : hasAssistantActivity ? <span>{displayMessagesCount} messages</span> : null;
   const footerMeterProps = isValidElement<FooterMeterSlotProps>(footerMeterSlot) ? footerMeterSlot.props : null;
   const tokenEstimate = useTokenEstimate({
-    enabled: isOrchestratorMode,
+    enabled: showReasoningControls,
     input,
     model: modelLabel,
     runningTotal: footerMeterProps?.runningTotal ?? 0,
@@ -635,7 +639,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             adaptiveEnabled={adaptiveEnabled}
             permissionMode={permissionMode}
             onTogglePermission={onTogglePermission}
-            repoLabel={isOrchestratorMode ? repoLabel : null}
+            repoLabel={showReasoningControls ? repoLabel : null}
             working={isOrchestratorMode && displayWaiting}
             onStop={isOrchestratorMode ? onStop : undefined}
             onUploadDiskFiles={onUploadDiskFiles}

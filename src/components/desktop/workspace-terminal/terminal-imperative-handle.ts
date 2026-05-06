@@ -86,6 +86,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     },
     isRestoreSettled: () => deps.restoreSettledRef.current,
     openCliChatSession: (options) => deps.openWorkspaceCliChatSession(options),
+    openLlmChatSession: (options) => deps.openWorkspaceLlmChatSession(options ?? {}),
     injectIntoCliChat: (text, options) => (
       options?.targetSessionKey?.startsWith('llm-chat:')
         ? deps.openWorkspaceLlmChatSession({

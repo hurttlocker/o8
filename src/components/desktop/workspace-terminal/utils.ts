@@ -481,26 +481,32 @@ export function summarizeWorkspaceTabText(value?: string | null, maxWords = 3) {
 }
 
 export function describeWorkspaceChatTab(tab: TerminalTab) {
-  if (tab.kind !== 'chat' && tab.kind !== 'llm-chat') return null;
+  const isOrchestratorChatTab = tab.kind === 'orchestrator';
+  if (tab.kind !== 'chat' && tab.kind !== 'llm-chat' && !isOrchestratorChatTab) return null;
   const latestDraft = tab.kind === 'chat'
     ? (tab.chatDraftInjection?.text ?? null)
-    : (tab.llmDraftInjection?.text ?? null);
-  const fullSummary = (tab.kind === 'llm-chat'
-    ? (tab.llmSummary ?? latestDraft ?? null)
-    : (() => {
-        const messages = tab.chatMessages ?? [];
-        const latestUser = [...messages].reverse().find((entry) => (
-          entry.role === 'user'
-          && entry.text.trim()
-          && !/^(hi|hey|hello)\b/i.test(entry.text.trim())
-        ));
-        const latestAssistant = [...messages].reverse().find((entry) => (
-          (entry.role === 'assistant' || entry.role === 'system')
-          && entry.text.trim()
-        ));
-        return latestUser?.text ?? latestDraft ?? latestAssistant?.text ?? null;
-      })()
-  )?.replace(/\s+/g, ' ').trim() ?? null;
+    : tab.kind === 'llm-chat'
+      ? (tab.llmDraftInjection?.text ?? null)
+      : null;
+  let fullSummarySource: string | null;
+  if (isOrchestratorChatTab) {
+    fullSummarySource = tab.llmSummary ?? null;
+  } else if (tab.kind === 'llm-chat') {
+    fullSummarySource = tab.llmSummary ?? latestDraft ?? null;
+  } else {
+    const messages = tab.chatMessages ?? [];
+    const latestUser = [...messages].reverse().find((entry) => (
+      entry.role === 'user'
+      && entry.text.trim()
+      && !/^(hi|hey|hello)\b/i.test(entry.text.trim())
+    ));
+    const latestAssistant = [...messages].reverse().find((entry) => (
+      (entry.role === 'assistant' || entry.role === 'system')
+      && entry.text.trim()
+    ));
+    fullSummarySource = latestUser?.text ?? latestDraft ?? latestAssistant?.text ?? null;
+  }
+  const fullSummary = fullSummarySource?.replace(/\s+/g, ' ').trim() ?? null;
   const summary = summarizeWorkspaceTabText(fullSummary, 3);
   const repoLabel = tab.repo?.name ?? (tab.repo?.localPath ? tab.repo.localPath.split('/').pop() : null);
   const detailParts = tab.repo?.isWorktree
@@ -516,6 +522,9 @@ export function describeWorkspaceChatTab(tab: TerminalTab) {
 export function workspaceTabPrimaryLabel(tab: TerminalTab) {
   if (tab.orchestrationPacket) {
     return laneDisplayTitle(tab.orchestrationPacket, tab.kind);
+  }
+  if (tab.kind === 'orchestrator' && tab.mode === 'single') {
+    return orchestratorRuntimeTone(tab.singleRuntime ?? 'codex').label;
   }
   if (tab.label && !/^ad\s*hoc/i.test(tab.label) && !/^chat-/.test(tab.label) && !/^terminal-/.test(tab.label) && tab.label !== 'Assistant' && tab.label !== 'Agent') {
     return tab.label;

@@ -139,7 +139,7 @@ export function buildNewLlmChatTab(
   const now = Date.now();
   return {
     id: tabId,
-    label: adHocLaneTitle('llm-chat'),
+    label: 'Chat',
     kind: 'llm-chat',
     tmuxSession: null,
     repo,

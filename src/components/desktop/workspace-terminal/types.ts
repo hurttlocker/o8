@@ -98,6 +98,15 @@ export interface TerminalTabHandle {
     supervisorStatus?: string | null;
     autoArchiveOnIdle?: boolean;
   }) => string;
+  openLlmChatSession: (options?: {
+    repo?: RegisteredRepo;
+    initialText?: string;
+    draftReason?: string;
+    autoSend?: boolean;
+    createNew?: boolean;
+    label?: string;
+    targetSessionKey?: string;
+  }) => string;
   injectIntoCliChat: (text: string, options?: {
     runtime?: Exclude<WorkspaceChatRuntime, 'chat'>;
     repo?: RegisteredRepo;
