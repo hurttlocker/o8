@@ -479,12 +479,10 @@ function BrowserHoverButton({
 function RightPanelMorphButton({
   workspacePanelVisible,
   o8PanelVisible,
-  onToggleWorkspacePanel,
   onToggleO8Panel,
 }: {
   workspacePanelVisible: boolean;
   o8PanelVisible: boolean;
-  onToggleWorkspacePanel?: () => void;
   onToggleO8Panel?: () => void;
 }) {
   // 3-state model kept for visual transitions, but the click action is now
@@ -589,7 +587,6 @@ export function TitleBar({
   bottomPanelVisible = true,
   onToggleBottomPanel,
   workspacePanelVisible = false,
-  onToggleWorkspacePanel,
   o8PanelVisible = false,
   onToggleO8Panel,
   browserActive = false,
@@ -628,6 +625,7 @@ export function TitleBar({
     <header
       ref={headerRef}
       data-tauri-drag-region=""
+      data-stationary-chrome="true"
       onMouseDown={handleMouseDown}
       style={{
         height: 44,
@@ -817,7 +815,6 @@ export function TitleBar({
         <RightPanelMorphButton
           workspacePanelVisible={workspacePanelVisible}
           o8PanelVisible={o8PanelVisible}
-          onToggleWorkspacePanel={onToggleWorkspacePanel}
           onToggleO8Panel={onToggleO8Panel}
         />
 

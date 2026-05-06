@@ -232,6 +232,7 @@ function FooterPorts({ onPortPreview }: { onPortPreview?: DesktopStatusBarProps[
       </button>
       {open && typeof document !== 'undefined' ? createPortal(
         <div
+          data-stationary-chrome="true"
           onMouseEnter={showPopover}
           onMouseLeave={scheduleHide}
           style={{
@@ -644,6 +645,7 @@ function DesktopStatusBarBase({
     <div
       data-mcp-scope="desktop-status-bar"
       data-chrome-surface="true"
+      data-stationary-chrome="true"
       style={{
         height: 28,
         flexShrink: 0,
