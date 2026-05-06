@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-06
 
+- `b70b1027` feat(palette): switch projects + move repo from Cmd+K
 - `4de26a1a` feat: project colors + drag-drop repos onto dots + empty-project hint
 - `56fc03ad` feat: rename / delete projects + move repos between them
 - `d82af473` feat: status bar centers under the workspace + cluster matches chrome chip shape
