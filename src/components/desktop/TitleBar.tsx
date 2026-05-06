@@ -63,10 +63,34 @@ function IconPanelLeft({ size = 16 }: { size?: number }) {
 
 function IconSearch({ size = 14 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+    <motion.svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0, transformOrigin: '11px 11px' }}
+      variants={{
+        rest: { rotate: 0, scale: 1 },
+        hover: { rotate: -10, scale: 1.08 },
+        tap: { rotate: -4, scale: 0.94 },
+      }}
+      transition={ICON_SPRING}
+    >
       <circle cx="11" cy="11" r="8" />
-      <path d="m21 21-4.3-4.3" />
-    </svg>
+      <motion.path
+        d="m21 21-4.3-4.3"
+        variants={{
+          rest: { x: 0, y: 0 },
+          hover: { x: 1.2, y: 1.2 },
+          tap: { x: 0.4, y: 0.4 },
+        }}
+        transition={ICON_SPRING}
+      />
+    </motion.svg>
   );
 }
 
@@ -306,7 +330,7 @@ function BrowserHoverButton({
       onMouseLeave={scheduleClose}
       style={{ display: 'inline-flex', position: 'relative' }}
     >
-      <button
+      <motion.button
         ref={buttonRef}
         type="button"
         aria-label="Browser"
@@ -318,6 +342,26 @@ function BrowserHoverButton({
           setOpen(false);
           onClick?.();
         }}
+        initial={false}
+        animate={active ? 'active' : 'rest'}
+        whileHover="hover"
+        whileTap="tap"
+        variants={{
+          rest: {
+            background: 'rgba(0, 0, 0, 0)',
+            color: 'var(--t-text-secondary)',
+          },
+          hover: {
+            background: 'var(--t-hover)',
+            color: 'var(--t-text)',
+          },
+          active: {
+            background: 'var(--t-panel-active, var(--t-input-bg))',
+            color: 'var(--t-brand-orange, #FF5A1F)',
+          },
+          tap: {},
+        }}
+        transition={{ type: 'spring', stiffness: 460, damping: 26, mass: 0.6 }}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -327,27 +371,25 @@ function BrowserHoverButton({
           padding: 0,
           border: 'none',
           borderRadius: 8,
-          background: active ? 'var(--t-panel-active, var(--t-input-bg))' : 'transparent',
-          color: active ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text-secondary)',
           cursor: 'pointer',
           flexShrink: 0,
           WebkitTapHighlightColor: 'transparent',
-          transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
           ['WebkitAppRegion' as string]: 'no-drag',
         }}
-        onPointerEnter={(e) => {
-          if (!active) {
-            (e.currentTarget as HTMLButtonElement).style.background = 'var(--t-hover)';
-          }
-        }}
-        onPointerLeave={(e) => {
-          if (!active) {
-            (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-          }
-        }}
       >
-        <GlobeSimple size={16} weight="bold" color={active ? 'var(--t-brand-orange, #FF5A1F)' : 'currentColor'} />
-      </button>
+        <motion.span
+          variants={{
+            rest: { rotate: 0, scale: 1 },
+            hover: { rotate: 18, scale: 1.06 },
+            tap: { scale: 0.88 },
+            active: { rotate: 8, scale: 1.04 },
+          }}
+          transition={{ type: 'spring', stiffness: 420, damping: 20, mass: 0.6 }}
+          style={{ display: 'inline-flex' }}
+        >
+          <GlobeSimple size={16} weight="bold" color={active ? 'var(--t-brand-orange, #FF5A1F)' : 'currentColor'} />
+        </motion.span>
+      </motion.button>
       {open && typeof document !== 'undefined' ? createPortal(
         <div
           onMouseEnter={() => { clearCloseTimer(); }}
@@ -674,12 +716,30 @@ export function TitleBar({
           minWidth: 0,
         }}
       >
-        <button
+        <motion.button
           type="button"
           aria-label="Open search"
           title="Open search (Cmd+K)"
           onClick={onOpenCommandPalette}
           disabled={!onOpenCommandPalette}
+          initial="rest"
+          animate="rest"
+          whileHover={onOpenCommandPalette ? 'hover' : undefined}
+          whileTap={onOpenCommandPalette ? 'tap' : undefined}
+          variants={{
+            rest: {
+              background: 'var(--t-chrome-btn-bg)',
+              boxShadow: 'var(--t-chrome-btn-shadow)',
+              scale: 1,
+            },
+            hover: {
+              background: 'var(--t-chrome-btn-hover-bg)',
+              boxShadow: 'var(--t-chrome-btn-hover-shadow)',
+              scale: 1,
+            },
+            tap: { scale: 0.97 },
+          }}
+          transition={{ type: 'spring', stiffness: 460, damping: 26, mass: 0.6 }}
           style={{
             height: 32,
             display: 'inline-flex',
@@ -692,45 +752,43 @@ export function TitleBar({
             paddingLeft: 10,
             border: 'none',
             borderRadius: 10,
-            background: 'var(--t-chrome-btn-bg)',
-            boxShadow: 'var(--t-chrome-btn-shadow)',
             color: 'var(--t-chrome-btn-text, var(--t-text))',
             cursor: onOpenCommandPalette ? 'pointer' : 'default',
             opacity: onOpenCommandPalette ? 1 : 0.54,
             WebkitTapHighlightColor: 'transparent',
-            transition: 'box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1), background 150ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             ['WebkitAppRegion' as string]: 'no-drag',
-          }}
-          onMouseEnter={(event) => {
-            if (!onOpenCommandPalette) return;
-            event.currentTarget.style.background = 'var(--t-chrome-btn-hover-bg)';
-            event.currentTarget.style.boxShadow = 'var(--t-chrome-btn-hover-shadow)';
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.background = 'var(--t-chrome-btn-bg)';
-            event.currentTarget.style.boxShadow = 'var(--t-chrome-btn-shadow)';
           }}
         >
           <IconSearch size={15} />
-          <kbd
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: 'var(--t-kbd-color)',
-              background: 'var(--t-kbd-bg)',
-              border: '1px solid var(--t-kbd-border)',
-              borderRadius: 5,
-              paddingTop: 1,
-              paddingRight: 5,
-              paddingBottom: 1,
-              paddingLeft: 5,
-              lineHeight: 1.2,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          <motion.span
+            variants={{
+              rest: { y: 0, opacity: 0.78 },
+              hover: { y: -1, opacity: 1 },
+              tap: { y: 0, opacity: 1 },
             }}
+            transition={{ type: 'spring', stiffness: 520, damping: 22 }}
+            style={{ display: 'inline-flex' }}
           >
-            ⌘K
-          </kbd>
-        </button>
+            <kbd
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: 'var(--t-kbd-color)',
+                background: 'var(--t-kbd-bg)',
+                border: '1px solid var(--t-kbd-border)',
+                borderRadius: 5,
+                paddingTop: 1,
+                paddingRight: 5,
+                paddingBottom: 1,
+                paddingLeft: 5,
+                lineHeight: 1.2,
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              }}
+            >
+              ⌘K
+            </kbd>
+          </motion.span>
+        </motion.button>
       </div>
 
       {/* Open In — moved to Command Palette (⌘K → "open in") */}
