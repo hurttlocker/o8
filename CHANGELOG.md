@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-06
 
+- `1ec86716` feat: status bar centers branch + adds contextual merge action pill
 - `8952101e` feat: O8 right panel opens on the Pulse tab by default
 - `26e98fb2` feat: projects scope the left panel with a bottom-bar dot switcher
 - `d4c07597` feat: hover × on each spawned agent row to dismiss it from the panel
