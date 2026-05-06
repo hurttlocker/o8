@@ -195,10 +195,10 @@ function Breadcrumb({
   }
 
   const segments = path.split('/');
-  const shouldCompact = !expanded && segments.length > 4;
-  const visibleSegments = shouldCompact
-    ? [segments[0] ?? '', '...', segments[segments.length - 2] ?? '', segments[segments.length - 1] ?? '']
-    : segments;
+  // Minimized state = filename only. The full path lives in the title
+  // attribute (hover) and shows inline when the operator clicks the
+  // breadcrumb to expand. Frees up the header for what actually matters.
+  const visibleSegments = expanded ? segments : [segments[segments.length - 1] ?? path];
   return (
     <button
       type="button"
