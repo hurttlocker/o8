@@ -162,13 +162,21 @@ function RepoBranchRowBase({
   // updates mid-hover.
   const [hoveredAgentKey, setHoveredAgentKey] = useState<string | null>(null);
   const [hoveredAgentRect, setHoveredAgentRect] = useState<DOMRect | null>(null);
-  const [archivingSessionKey, setArchivingSessionKey] = useState<string | null>(null);
+  // Optimistically hide rows the operator dismissed so the panel feels
+  // instant. The server archive returns asynchronously; the next inventory
+  // snapshot will reconcile this set with the live list. If the archive
+  // fails the row reappears on the next snapshot, which is the right thing.
+  const [dismissedSessionKeys, setDismissedSessionKeys] = useState<Set<string>>(() => new Set());
   const agentHoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentHoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleDismissAgent = useCallback(async (sessionKey: string) => {
-    if (archivingSessionKey) return;
-    setArchivingSessionKey(sessionKey);
+    setDismissedSessionKeys((prev) => {
+      if (prev.has(sessionKey)) return prev;
+      const next = new Set(prev);
+      next.add(sessionKey);
+      return next;
+    });
     try {
       await fetch('/api/runtime/archive', {
         method: 'POST',
@@ -176,12 +184,16 @@ function RepoBranchRowBase({
         body: JSON.stringify({ sessionKey }),
       });
     } catch {
-      // Silent — the row will reappear on the next snapshot if the archive
-      // failed; let the user retry.
-    } finally {
-      setArchivingSessionKey(null);
+      // Server archive failed — drop our optimistic hide so the row comes
+      // back on the next snapshot and the operator can retry.
+      setDismissedSessionKeys((prev) => {
+        if (!prev.has(sessionKey)) return prev;
+        const next = new Set(prev);
+        next.delete(sessionKey);
+        return next;
+      });
     }
-  }, [archivingSessionKey]);
+  }, []);
 
   const scheduleAgentHover = useCallback((key: string, element: HTMLElement) => {
     const rect = element.getBoundingClientRect();
@@ -232,6 +244,7 @@ function RepoBranchRowBase({
   for (const key of allPacketBoundSessionKeys) normalizedPacketKeys.add(stripSessionPrefix(key));
   const orderedBranchAgents = [...branchAgents]
     .filter((agent) => {
+      if (dismissedSessionKeys.has(agent.sessionKey)) return false;
       const normalized = stripSessionPrefix(agent.sessionKey);
       if (normalizedPacketKeys.has(normalized)) return false;
       // Drop orphaned ghost agents — sessions that died without a packet binding.
@@ -944,7 +957,6 @@ function RepoBranchRowBase({
                       || agent.sessionKey.startsWith('gemini-owned:')
                       || agent.sessionKey.startsWith('opencode-owned:')
                     );
-                    const isArchivingThisAgent = archivingSessionKey === agent.sessionKey;
                     return (
                       <div
                         key={agent.sessionKey}
@@ -1020,7 +1032,7 @@ function RepoBranchRowBase({
                             {secondaryLabel}
                           </span>
                         </div>
-                        {canDismiss && (isHoveredAgent || isArchivingThisAgent) ? (
+                        {canDismiss && isHoveredAgent ? (
                           <span
                             role="button"
                             tabIndex={0}
@@ -1047,7 +1059,7 @@ function RepoBranchRowBase({
                               borderRadius: 4,
                               color: 'var(--t-text-faint)',
                               cursor: 'pointer',
-                              opacity: isArchivingThisAgent ? 0.4 : 0.7,
+                              opacity: 0.7,
                               transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1), background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                             }}
                             onMouseEnter={(event) => {
@@ -1055,7 +1067,7 @@ function RepoBranchRowBase({
                               event.currentTarget.style.background = 'rgba(148, 163, 184, 0.18)';
                             }}
                             onMouseLeave={(event) => {
-                              event.currentTarget.style.opacity = isArchivingThisAgent ? '0.4' : '0.7';
+                              event.currentTarget.style.opacity = '0.7';
                               event.currentTarget.style.background = 'transparent';
                             }}
                           >
