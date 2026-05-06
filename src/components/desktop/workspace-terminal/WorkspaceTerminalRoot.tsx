@@ -1,20 +1,27 @@
 'use client';
 
-import { forwardRef } from 'react';
+import { forwardRef, useMemo } from 'react';
 import { RotateCcw } from '../lucide-shims';
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
 import { TabBar } from '@/components/desktop/workspace-terminal/TabBar';
 import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
+import { WorkspaceSpawnProvider, type WorkspaceSpawnHandlers } from '@/components/desktop/workspace-terminal/spawn-context';
 import type { TerminalTabHandle, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
 
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
   function WorkspaceTerminalRoot(props, ref) {
     const controller = useWorkspaceTerminalController(props, ref);
     const hasPreviews = (props.showPreviewPane ?? true) && controller.previews.length > 0;
+    const spawnHandlers = useMemo<WorkspaceSpawnHandlers>(() => ({
+      spawnSingleRuntimeTab: controller.spawnSingleRuntimeTab,
+      spawnChatTab: controller.spawnChatTab,
+      updateTabMode: controller.handleUpdateTabMode,
+    }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnSingleRuntimeTab]);
 
     return (
+      <WorkspaceSpawnProvider value={spawnHandlers}>
       <div
         ref={controller.containerDivRef}
         data-vibrancy-passthrough=""
@@ -202,6 +209,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onLaunchWorkspaceTask={props.onLaunchWorkspaceTask}
         />
       </div>
+      </WorkspaceSpawnProvider>
     );
   },
 );

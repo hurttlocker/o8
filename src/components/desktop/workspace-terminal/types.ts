@@ -1,12 +1,15 @@
 import type { CanvasRepoTaskLaunchRequest, CanvasTab } from '@/components/desktop/Canvas';
 import type { LLMMessage } from '@/components/desktop/LLMChat';
 import type { LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
+import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { PersistedChatCheckpoint } from '@/lib/terminal/tab-state';
 import type {
+  OrchestrationMode,
   OrchestratorLaneSnapshot,
+  OrchestratorRuntime,
   WorkspaceLaneState,
   WorkspaceOrchestrationPacketBadge,
 } from '@/lib/orchestrator/types';
@@ -50,6 +53,22 @@ export interface TerminalTab {
   orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
   supervisorStatus?: string | null;
   autoArchiveOnIdle?: boolean;
+  // Sticky mode for the chooser surface. orchestrator-kind tabs default to
+  // 'fleet' and may be 'single' when spawned from the chooser. llm-chat
+  // kind tabs are always implicitly chat mode (the field is unset there).
+  mode?: OrchestrationMode;
+  // When mode === 'single', which runtime this tab dispatches to.
+  singleRuntime?: OrchestratorRuntime;
+  // Chat-mode model selection (o8 free-tier OpenRouter pool vs BYOK
+  // DeepSeek). Used by mode === 'chat' on orchestrator tabs and by all
+  // llm-chat tabs.
+  chatModelId?: ChatModelId;
+  // When set, overrides the server-side OpenRouter fallback chain for
+  // chat-mode requests on this tab. Lets the operator pin a specific
+  // OpenRouter model slug (e.g. 'openai/gpt-oss-120b:free') for testing
+  // or model-tier preference. Empty/undefined = use the env-configured
+  // chain.
+  chatOpenrouterModel?: string;
 }
 
 export type LocalhostPreview = DetectedLocalhostPreview;

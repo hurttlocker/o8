@@ -48,7 +48,9 @@ import { getChatModelOption, loadChatModelChoice } from '@/components/desktop/or
 import {
   createChatAssistantEntry,
   createChatUserEntry,
-  sendChatMessage,
+  mergeToolCallIntoEntry,
+  mergeToolResultIntoEntry,
+  sendScratchChatMessage,
 } from '@/components/desktop/orchestrator/send-chat-message';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
@@ -129,6 +131,33 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   showInlineExport?: boolean;
   footerMeterSlot?: React.ReactNode;
   composerLeadingExtras?: React.ReactNode;
+  // When set, the chooser surface is hidden and the mode is forced to
+  // this value for the lifetime of the panel. Used by Single-runtime
+  // tabs (lockedMode='single') and Chat tabs (lockedMode='chat').
+  lockedMode?: OrchestrationMode;
+  // Initial mode/runtime/chatModel sourced from the parent tab record.
+  // Overrides the legacy global per-workspace localStorage load when
+  // provided. Combine with onModePersist to round-trip changes.
+  initialMode?: OrchestrationMode;
+  initialSingleRuntime?: OrchestratorRuntime;
+  initialChatModelId?: ChatModelId;
+  // Optional pinned OpenRouter model for chat-mode requests (e.g.
+  // 'openai/gpt-oss-120b:free'). Empty/undefined = use server chain.
+  initialChatOpenrouterModel?: string;
+  // Called when the operator picks a different mode/runtime/chatModel
+  // in the chooser. Lets the parent persist to the tab record instead
+  // of relying on global localStorage. When omitted, falls back to the
+  // legacy per-workspace localStorage path.
+  onModePersist?: (patch: {
+    mode?: OrchestrationMode;
+    singleRuntime?: OrchestratorRuntime;
+    chatModelId?: ChatModelId;
+    chatOpenrouterModel?: string | null;
+  }) => void;
+  // Spawn handlers forwarded to ModePicker so picking Single/Chat opens
+  // a new tab instead of flipping the current tab's mode.
+  onSpawnSingleTab?: (runtime: OrchestratorRuntime) => void;
+  onSpawnChatTab?: () => void;
   onMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
@@ -155,6 +184,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   showInlineExport = true,
   footerMeterSlot,
   composerLeadingExtras,
+  lockedMode,
+  initialMode,
+  initialSingleRuntime,
+  initialChatModelId,
+  initialChatOpenrouterModel,
+  onModePersist,
+  onSpawnSingleTab,
+  onSpawnChatTab,
   onChromeChange,
 }, ref) {
   const [input, setInput] = useState('');
@@ -165,32 +202,68 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // truth at dispatch time. Default repo = parent-provided repoPathProp.
   const [intentRepoPath, setIntentRepoPath] = useState<string | null>(repoPathProp ?? null);
   const [intentBranch, setIntentBranch] = useState<string>('main');
-  // #888/#892 — orchestration mode picker, persisted per-workspace.
+  // Orchestration mode + runtime + chat-model selection. Per-tab when
+  // the parent provides initial values + onModePersist (the orchestrator
+  // tab path); otherwise falls back to the legacy per-workspace
+  // localStorage store keyed off repoPath.
   const workspaceModeKey = repoPathProp ?? '__global__';
-  const [orchestrationMode, setOrchestrationMode] = useState<OrchestrationMode>('fleet');
-  const [singleRuntime, setSingleRuntime] = useState<OrchestratorRuntime>('codex');
-  const [chatModelId, setChatModelId] = useState<ChatModelId>('o8-default');
-  const [orchestrationSettingsKey, setOrchestrationSettingsKey] = useState<string | null>(null);
+  const usesPerTabPersistence = Boolean(onModePersist) || lockedMode !== undefined || initialMode !== undefined;
+  const [orchestrationMode, setOrchestrationMode] = useState<OrchestrationMode>(
+    () => lockedMode ?? initialMode ?? 'fleet',
+  );
+  const [singleRuntime, setSingleRuntime] = useState<OrchestratorRuntime>(
+    () => initialSingleRuntime ?? 'codex',
+  );
+  const [chatModelId, setChatModelId] = useState<ChatModelId>(
+    () => initialChatModelId ?? 'o8-default',
+  );
+  const [chatOpenrouterModel, setChatOpenrouterModel] = useState<string | undefined>(
+    () => initialChatOpenrouterModel,
+  );
+  // Re-sync the pinned OpenRouter model when the parent tab record
+  // changes (e.g. operator picked a different model and the tab updated).
+  useEffect(() => {
+    setChatOpenrouterModel(initialChatOpenrouterModel);
+  }, [initialChatOpenrouterModel]);
+  const [orchestrationSettingsKey, setOrchestrationSettingsKey] = useState<string | null>(
+    () => (usesPerTabPersistence ? workspaceModeKey : null),
+  );
   const orchestrationSettingsLoaded = orchestrationSettingsKey === workspaceModeKey;
   const selectedChatModel = useMemo(() => getChatModelOption(chatModelId), [chatModelId]);
   useEffect(() => {
+    if (usesPerTabPersistence) {
+      // Per-tab path: initial values came in via props; just mark as
+      // loaded so downstream effects can run.
+      setOrchestrationSettingsKey(workspaceModeKey);
+      return;
+    }
     const loaded = loadOrchestrationMode(workspaceModeKey);
     setOrchestrationMode(loaded.mode);
     setSingleRuntime(loaded.runtime);
     setChatModelId(loadChatModelChoice(workspaceModeKey));
     setOrchestrationSettingsKey(workspaceModeKey);
-  }, [workspaceModeKey]);
+  }, [usesPerTabPersistence, workspaceModeKey]);
   const handleSelectOrchestrationMode = useCallback((next: OrchestrationMode) => {
+    if (lockedMode) return;
     setOrchestrationMode(next);
-    persistOrchestrationMode(workspaceModeKey, next, singleRuntime);
-  }, [singleRuntime, workspaceModeKey]);
+    if (onModePersist) {
+      onModePersist({ mode: next });
+    } else {
+      persistOrchestrationMode(workspaceModeKey, next, singleRuntime);
+    }
+  }, [lockedMode, onModePersist, singleRuntime, workspaceModeKey]);
   const handleSelectSingleRuntime = useCallback((next: OrchestratorRuntime) => {
     setSingleRuntime(next);
-    persistOrchestrationMode(workspaceModeKey, orchestrationMode, next);
-  }, [orchestrationMode, workspaceModeKey]);
+    if (onModePersist) {
+      onModePersist({ singleRuntime: next });
+    } else {
+      persistOrchestrationMode(workspaceModeKey, orchestrationMode, next);
+    }
+  }, [onModePersist, orchestrationMode, workspaceModeKey]);
   const handleSelectChatModel = useCallback((next: ChatModelId) => {
     setChatModelId(next);
-  }, []);
+    onModePersist?.({ chatModelId: next });
+  }, [onModePersist]);
   const [operatorDefaults, setOperatorDefaults] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
   const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
@@ -893,14 +966,32 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       clearAttachments();
       setWaitingForReply(true);
       try {
-        await sendChatMessage({
+        // Chat-mode always routes through the OpenRouter scratch-chat
+        // path with tools wired. The model is picked per-tab via the
+        // ChatOpenRouterPicker chip; modelOverride pins it server-side.
+        // BYOK is no longer a separate UI tier — operators with their
+        // own OpenRouter key supply it through env / Settings and the
+        // server-side resolver picks it automatically.
+        await sendScratchChatMessage({
           history: chatMessages,
           message: msg,
-          modelChoice: selectedChatModel,
+          context: resolvedRepoPath ? { repoPath: resolvedRepoPath } : undefined,
+          enableTools: true,
+          modelOverride: chatOpenrouterModel ?? null,
           onDelta: (text) => {
             assistantText += text;
             setChatMessages((prev) => prev.map((entry) => (
               entry.id === assistantEntry.id ? { ...entry, text: assistantText } : entry
+            )));
+          },
+          onToolCall: (call) => {
+            setChatMessages((prev) => prev.map((entry) => (
+              entry.id === assistantEntry.id ? mergeToolCallIntoEntry(entry, call) : entry
+            )));
+          },
+          onToolResult: (result) => {
+            setChatMessages((prev) => prev.map((entry) => (
+              entry.id === assistantEntry.id ? mergeToolResultIntoEntry(entry, result) : entry
             )));
           },
         });
@@ -1182,14 +1273,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       />
 
       <ModePicker
-        visible={input.trim().length > 0}
+        visible={!lockedMode && input.trim().length > 0}
         workspaceKey={workspaceModeKey}
         selectedMode={orchestrationMode}
         onSelectMode={handleSelectOrchestrationMode}
         selectedSingleRuntime={singleRuntime}
         onSelectSingleRuntime={handleSelectSingleRuntime}
-        selectedChatModelId={chatModelId}
-        onSelectChatModel={handleSelectChatModel}
+        onSpawnSingleTab={onSpawnSingleTab}
+        onSpawnChatTab={onSpawnChatTab}
       />
 
       <ComposerArea

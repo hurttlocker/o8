@@ -20,7 +20,10 @@ import {
   subscribeOrchestratorRuntimePreference,
 } from '@/lib/orchestrator/preferences';
 import { loadOrchestratorMissionState } from '@/lib/orchestrator/store';
-import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { OrchestrationMode, OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
+import { ChatOpenRouterPicker } from '@/components/desktop/orchestrator/ChatOpenRouterPicker';
+import { useWorkspaceSpawn } from '@/components/desktop/workspace-terminal/spawn-context';
 import {
   OrchestratorEmptyState,
   timeOfDayGreeting,
@@ -55,6 +58,17 @@ interface OrchestratorTabProps {
   active: boolean;
   repoPath?: string | null;
   repoLabel?: string | null;
+  // When set, ThoughtsChatPanel's mode chooser is hidden and the mode is
+  // forced. Single-runtime tabs pass 'single', Chat tabs pass 'chat'.
+  lockedMode?: OrchestrationMode;
+  // Per-tab initial state sourced from the TerminalTab record. Replaces
+  // the legacy per-workspace localStorage load when provided.
+  initialMode?: OrchestrationMode;
+  initialSingleRuntime?: OrchestratorRuntime;
+  initialChatModelId?: ChatModelId;
+  // Pinned OpenRouter model slug for chat-mode requests on this tab.
+  // Empty/undefined = use server's env-configured fallback chain.
+  initialChatOpenrouterModel?: string;
 }
 
 function permissionStorageKey(tabId: string): string {
@@ -214,9 +228,31 @@ export function OrchestratorTab(props: OrchestratorTabProps) {
   );
 }
 
-function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: OrchestratorTabProps) {
+function OrchestratorTabInner({
+  tabId,
+  active,
+  repoPath,
+  repoLabel,
+  lockedMode,
+  initialMode,
+  initialSingleRuntime,
+  initialChatModelId,
+  initialChatOpenrouterModel,
+}: OrchestratorTabProps) {
   const data = useOrchestratorData();
   const residency = useOrchestratorContextResidency();
+  const spawnHandlers = useWorkspaceSpawn();
+  const handleModePersist = useCallback((patch: {
+    mode?: OrchestrationMode;
+    singleRuntime?: OrchestratorRuntime;
+    chatModelId?: ChatModelId;
+    chatOpenrouterModel?: string | null;
+  }) => {
+    spawnHandlers?.updateTabMode(tabId, patch);
+  }, [spawnHandlers, tabId]);
+  const handlePickChatOpenRouterModel = useCallback((slug: string | null) => {
+    spawnHandlers?.updateTabMode(tabId, { chatOpenrouterModel: slug });
+  }, [spawnHandlers, tabId]);
 
   const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(
     () => readStoredPermissionMode(tabId),
@@ -483,6 +519,12 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
         historyOpen={historyOpen}
         onToggleHistory={handleToggleHistory}
       />
+      {lockedMode === 'chat' && spawnHandlers ? (
+        <ChatOpenRouterPicker
+          selectedSlug={initialChatOpenrouterModel}
+          onSelect={handlePickChatOpenRouterModel}
+        />
+      ) : null}
       {hasMessages ? (
         <button
           type="button"
@@ -566,6 +608,18 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
       repoLabel={repoLabel}
       emptyStateOverride={emptyStateNode}
       showInlineExport={false}
+      lockedMode={lockedMode}
+      initialMode={initialMode}
+      initialSingleRuntime={initialSingleRuntime}
+      initialChatModelId={initialChatModelId}
+      initialChatOpenrouterModel={initialChatOpenrouterModel}
+      onModePersist={spawnHandlers ? handleModePersist : undefined}
+      onSpawnSingleTab={spawnHandlers?.spawnSingleRuntimeTab
+        ? (runtime) => { spawnHandlers.spawnSingleRuntimeTab(runtime); }
+        : undefined}
+      onSpawnChatTab={spawnHandlers?.spawnChatTab
+        ? () => { spawnHandlers.spawnChatTab(); }
+        : undefined}
       footerMeterSlot={(
         <ContextMeter
           tokenCount={contextUsage.tokenCount}
