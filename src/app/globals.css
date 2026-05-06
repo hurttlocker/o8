@@ -182,6 +182,11 @@ button:hover {
   border-color: rgba(37, 99, 235, 0.22);
 }
 
+[data-stationary-chrome="true"] button:hover {
+  transform: none;
+  box-shadow: none;
+}
+
 .button-primary {
   background: var(--blue);
   color: white;
