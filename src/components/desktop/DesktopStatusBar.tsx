@@ -17,15 +17,16 @@
 
 import { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronRight, Copy, GitBranch, Send } from './lucide-shims';
+import { ChevronRight, Copy, Send } from './lucide-shims';
 import { FolderPlus, GearSix, WarningCircle } from '@phosphor-icons/react';
 import { ChromeButton } from './chrome/ChromeButton';
-import { formatBranchDisplayName } from './repo-registry/shared';
 import { UpdateBanner } from './UpdateBanner';
+import { MergeActionCluster } from './MergeActionCluster';
 
 interface DesktopStatusBarProps {
   branchName: string | null;
   repoName: string | null;
+  repoRemoteUrl?: string | null;
   onOpenSettings: () => void;
   onAddRepo: () => void;
   onPortPreview?: (port: number, url: string, repo?: string) => void;
@@ -621,17 +622,11 @@ function SupervisorInboxBadge() {
 function DesktopStatusBarBase({
   branchName,
   repoName,
+  repoRemoteUrl = null,
   onOpenSettings,
   onAddRepo,
   onPortPreview,
 }: DesktopStatusBarProps) {
-  const displayBranch = branchName ? formatBranchDisplayName(branchName) : null;
-  const tooltip = branchName
-    ? repoName
-      ? `${repoName} · ${branchName}`
-      : branchName
-    : null;
-
   return (
     <div
       data-mcp-scope="desktop-status-bar"
@@ -669,31 +664,17 @@ function DesktopStatusBarBase({
       <FooterPorts onPortPreview={onPortPreview} />
       <SupervisorInboxBadge />
 
+      <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }} />
+
+      <MergeActionCluster
+        branchName={branchName}
+        repoName={repoName}
+        repoRemoteUrl={repoRemoteUrl}
+      />
+
       <div style={{ flex: 1 }} />
 
       <UpdateBanner />
-
-      {displayBranch ? (
-        <span
-          title={tooltip ?? undefined}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            fontSize: 11,
-            fontWeight: 440,
-            color: 'var(--t-text-faint)',
-            letterSpacing: '-0.005em',
-            whiteSpace: 'nowrap',
-            maxWidth: 260,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          <GitBranch size={11} strokeWidth={1.8} />
-          {displayBranch}
-        </span>
-      ) : null}
     </div>
   );
 }
