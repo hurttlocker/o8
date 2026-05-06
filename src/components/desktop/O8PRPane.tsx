@@ -82,6 +82,22 @@ function ChevronIcon({ open, size = 10 }: { open: boolean; size?: number }) {
   );
 }
 
+const PR_COLORS = {
+  add: '#70b57f',
+  addSoft: '#91c99d',
+  addBg: 'rgba(112, 181, 127, 0.08)',
+  addLineBg: 'rgba(112, 181, 127, 0.04)',
+  delete: '#c97878',
+  deleteSoft: '#d99a9a',
+  deleteBg: 'rgba(201, 120, 120, 0.08)',
+  deleteLineBg: 'rgba(201, 120, 120, 0.045)',
+  accent: '#8d9fbd',
+  accentBg: 'rgba(141, 159, 189, 0.065)',
+  accentBorder: 'rgba(141, 159, 189, 0.13)',
+  merge: '#aaa0c7',
+  mergeBg: 'rgba(170, 160, 199, 0.095)',
+};
+
 // ── Diff stat bar ──
 
 function DiffBar({ additions, deletions }: { additions: number; deletions: number }) {
@@ -90,8 +106,8 @@ function DiffBar({ additions, deletions }: { additions: number; deletions: numbe
   const addPct = Math.round((additions / total) * 100);
   return (
     <div style={{ display: 'flex', width: 40, height: 4, borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
-      <div style={{ width: `${addPct}%`, background: '#22c55e' }} />
-      <div style={{ flex: 1, background: '#ef4444' }} />
+      <div style={{ width: `${addPct}%`, background: PR_COLORS.add }} />
+      <div style={{ flex: 1, background: PR_COLORS.delete }} />
     </div>
   );
 }
@@ -99,9 +115,9 @@ function DiffBar({ additions, deletions }: { additions: number; deletions: numbe
 // ── State badge ──
 
 function StateBadge({ state, merged }: { state: string; merged: boolean }) {
-  if (merged) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 999, background: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6', fontSize: 10, fontWeight: 700 }}><GitMergeIcon size={10} color="#8b5cf6" />Merged</span>;
-  if (state === 'open') return <span style={{ padding: '2px 8px', borderRadius: 999, background: 'rgba(34, 197, 94, 0.15)', color: '#22c55e', fontSize: 10, fontWeight: 700 }}>Open</span>;
-  return <span style={{ padding: '2px 8px', borderRadius: 999, background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', fontSize: 10, fontWeight: 700 }}>Closed</span>;
+  if (merged) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 999, background: PR_COLORS.mergeBg, color: PR_COLORS.merge, fontSize: 10, fontWeight: 700 }}><GitMergeIcon size={10} color={PR_COLORS.merge} />Merged</span>;
+  if (state === 'open') return <span style={{ padding: '2px 8px', borderRadius: 999, background: PR_COLORS.addBg, color: PR_COLORS.addSoft, fontSize: 10, fontWeight: 700 }}>Open</span>;
+  return <span style={{ padding: '2px 8px', borderRadius: 999, background: PR_COLORS.deleteBg, color: PR_COLORS.deleteSoft, fontSize: 10, fontWeight: 700 }}>Closed</span>;
 }
 
 // ── PR List Item (summary card) ──
@@ -133,7 +149,7 @@ function PRListItem({ pr, active, onClick }: { pr: PRSummary; active: boolean; o
         padding: '10px 14px',
         border: 'none',
         borderBottom: '1px solid var(--t-divider-subtle)',
-        background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+        background: active ? PR_COLORS.accentBg : 'transparent',
         color: 'var(--t-text)',
         cursor: 'pointer',
         textAlign: 'left',
@@ -143,7 +159,7 @@ function PRListItem({ pr, active, onClick }: { pr: PRSummary; active: boolean; o
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
     >
-      <GitMergeIcon size={14} color={pr.state === 'open' ? '#22c55e' : '#8b5cf6'} />
+      <GitMergeIcon size={14} color={pr.state === 'open' ? PR_COLORS.add : PR_COLORS.merge} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {pr.title}
@@ -156,8 +172,8 @@ function PRListItem({ pr, active, onClick }: { pr: PRSummary; active: boolean; o
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, fontSize: 10 }}>
           <span style={{ color: 'var(--t-text-secondary)' }}>{typeof pr.author === 'string' ? pr.author : pr.author?.login}</span>
           <span style={{ color: 'var(--t-text-faint)' }}>&middot;</span>
-          <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
-          <span style={{ color: '#ef4444', fontWeight: 600 }}>-{pr.deletions}</span>
+          <span style={{ color: PR_COLORS.addSoft, fontWeight: 600 }}>+{pr.additions}</span>
+          <span style={{ color: PR_COLORS.deleteSoft, fontWeight: 600 }}>-{pr.deletions}</span>
           <DiffBar additions={pr.additions} deletions={pr.deletions} />
           <span style={{ color: 'var(--t-text-faint)' }}>{pr.changedFiles} file{pr.changedFiles === 1 ? '' : 's'}</span>
         </div>
@@ -330,7 +346,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
 
   if (error || !pr) {
     return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', fontSize: 12 }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: PR_COLORS.deleteSoft, fontSize: 12 }}>
         {error || 'PR not found'}
       </div>
     );
@@ -372,7 +388,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
         </button>
         {/* Title row */}
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-          <GitMergeIcon size={16} color={isMerged ? '#8b5cf6' : '#22c55e'} />
+          <GitMergeIcon size={16} color={isMerged ? PR_COLORS.merge : PR_COLORS.add} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
               fontSize: 13,
@@ -410,14 +426,14 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
         }}>
           <StateBadge state={pr.state} merged={isMerged} />
           {pr.mergeable === true ? (
-            <span style={{ padding: '2px 8px', borderRadius: 999, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', fontSize: 10, fontWeight: 600 }}>No conflicts</span>
+            <span style={{ padding: '2px 8px', borderRadius: 999, background: PR_COLORS.addBg, color: PR_COLORS.addSoft, fontSize: 10, fontWeight: 600 }}>No conflicts</span>
           ) : pr.mergeable === false && !isMerged ? (
-            <span style={{ padding: '2px 8px', borderRadius: 999, background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', fontSize: 10, fontWeight: 600 }}>Conflicts</span>
+            <span style={{ padding: '2px 8px', borderRadius: 999, background: PR_COLORS.deleteBg, color: PR_COLORS.deleteSoft, fontSize: 10, fontWeight: 600 }}>Conflicts</span>
           ) : null}
           <span style={{ color: 'var(--t-text-secondary)' }}>{typeof pr.author === 'string' ? pr.author : pr.author?.login}</span>
           <span style={{ color: 'var(--t-text-faint)' }}>&middot;</span>
-          <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
-          <span style={{ color: '#ef4444', fontWeight: 600 }}>-{pr.deletions}</span>
+          <span style={{ color: PR_COLORS.addSoft, fontWeight: 600 }}>+{pr.additions}</span>
+          <span style={{ color: PR_COLORS.deleteSoft, fontWeight: 600 }}>-{pr.deletions}</span>
           <DiffBar additions={pr.additions} deletions={pr.deletions} />
           <span style={{ color: 'var(--t-text-faint)' }}>{pr.changedFiles} file{pr.changedFiles === 1 ? '' : 's'}</span>
         </div>
@@ -440,7 +456,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
                   padding: '6px 14px',
                   border: 'none',
                   borderBottom: '1px solid var(--t-divider-subtle)',
-                  background: isExpanded ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                  background: isExpanded ? PR_COLORS.accentBg : 'transparent',
                   color: 'var(--t-text)',
                   cursor: 'pointer',
                   fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -455,8 +471,8 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {file.path}
                 </span>
-                <span style={{ color: '#22c55e', fontSize: 10, fontWeight: 600, flexShrink: 0 }}>+{file.additions}</span>
-                <span style={{ color: '#ef4444', fontSize: 10, fontWeight: 600, flexShrink: 0 }}>-{file.deletions}</span>
+                <span style={{ color: PR_COLORS.addSoft, fontSize: 10, fontWeight: 600, flexShrink: 0 }}>+{file.additions}</span>
+                <span style={{ color: PR_COLORS.deleteSoft, fontSize: 10, fontWeight: 600, flexShrink: 0 }}>-{file.deletions}</span>
                 <DiffBar additions={file.additions} deletions={file.deletions} />
               </button>
               {isExpanded ? (
@@ -479,8 +495,8 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
                             key={i}
                             style={{
                               padding: '0 14px 0 36px',
-                              background: isAdd ? 'rgba(34, 197, 94, 0.08)' : isDel ? 'rgba(239, 68, 68, 0.08)' : isHunk ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
-                              color: isAdd ? '#22c55e' : isDel ? '#ef4444' : isHunk ? '#3b82f6' : 'var(--t-text-secondary)',
+                              background: isAdd ? PR_COLORS.addLineBg : isDel ? PR_COLORS.deleteLineBg : isHunk ? PR_COLORS.accentBg : 'transparent',
+                              color: isAdd ? PR_COLORS.addSoft : isDel ? PR_COLORS.deleteSoft : isHunk ? PR_COLORS.accent : 'var(--t-text-secondary)',
                               whiteSpace: 'pre',
                               minHeight: 18,
                             }}
@@ -503,10 +519,10 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
                             marginTop: 4,
                             padding: '5px 8px',
                             borderRadius: 6,
-                            background: 'rgba(37, 99, 235, 0.06)',
-                            border: '1px solid rgba(37, 99, 235, 0.12)',
+                            background: PR_COLORS.accentBg,
+                            border: `1px solid ${PR_COLORS.accentBorder}`,
                           }}>
-                            <div style={{ fontSize: 10, fontWeight: 600, color: '#3b82f6', marginBottom: 2 }}>
+                            <div style={{ fontSize: 10, fontWeight: 600, color: PR_COLORS.accent, marginBottom: 2 }}>
                               {comment.user} {comment.line ? `· L${comment.line}` : ''}
                             </div>
                             <div style={{ fontSize: 11, color: 'var(--t-text)', whiteSpace: 'pre-wrap' }}>{comment.body}</div>
@@ -555,7 +571,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
             {actionResult ? (
-              <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginRight: 'auto' }}>
+              <span style={{ fontSize: 11, color: PR_COLORS.addSoft, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginRight: 'auto' }}>
                 <CheckIcon size={11} /> {actionResult}
               </span>
             ) : null}

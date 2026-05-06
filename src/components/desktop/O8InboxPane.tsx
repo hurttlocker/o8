@@ -132,7 +132,7 @@ export function O8InboxPane() {
         <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', marginBottom: 10 }}>
           Persistent escalation ledger. No transcript bleed.
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <FilterChip
             label={`Active · ${humanRequired.length + pending.length}`}
             active={filter === 'active'}
@@ -158,7 +158,7 @@ export function O8InboxPane() {
         {loading && items.length === 0 ? (
           <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12 }}>Loading…</div>
         ) : visibleItems.length === 0 ? (
-          <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12 }}>
+          <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.5, overflowWrap: 'break-word' }}>
             {filter === 'active'
               ? 'No active supervisor inbox items. Heal-bot caught everything else.'
               : filter === 'self_healed'
@@ -290,37 +290,66 @@ function FilterChip({
   onClick: () => void;
   tone: 'warning' | 'accent' | 'neutral';
 }) {
-  const background = active
+  const activeBackground = active
     ? tone === 'warning'
-      ? 'var(--t-warning-soft, rgba(249, 115, 22, 0.12))'
+      ? 'rgba(249, 115, 22, 0.08)'
       : tone === 'accent'
-        ? 'var(--t-accent-soft)'
-        : 'var(--t-bg-card)'
-    : 'transparent';
+        ? 'var(--t-accent-soft, rgba(96, 165, 250, 0.1))'
+        : 'var(--t-panel-active, var(--t-input-bg))'
+    : 'var(--t-bg-card)';
   const color = active
     ? tone === 'warning'
-      ? 'var(--t-warning, #c2410c)'
+      ? '#f29b62'
       : tone === 'accent'
         ? 'var(--t-accent)'
         : 'var(--t-text)'
     : 'var(--t-text-secondary)';
-  const borderColor = active ? 'var(--t-border)' : 'transparent';
+  const borderColor = active
+    ? tone === 'warning'
+      ? 'rgba(249, 115, 22, 0.2)'
+      : tone === 'accent'
+        ? 'var(--t-accent-border, rgba(96, 165, 250, 0.22))'
+        : 'var(--t-divider-subtle)'
+    : 'var(--t-divider-subtle)';
 
   return (
     <button
       type="button"
       onClick={onClick}
       style={{
-        height: 22,
-        paddingLeft: 9,
-        paddingRight: 9,
-        borderRadius: 6,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 26,
+        paddingLeft: 11,
+        paddingRight: 11,
+        borderRadius: 10,
         border: `1px solid ${borderColor}`,
-        background,
+        background: activeBackground,
         color,
         fontSize: 10,
         fontWeight: 700,
         cursor: 'pointer',
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+        boxShadow: active
+          ? 'inset 0 1px 0 rgba(255, 255, 255, 0.08)'
+          : 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+      }}
+      onMouseEnter={(event) => {
+        if (!active) {
+          event.currentTarget.style.background = 'var(--t-hover)';
+          event.currentTarget.style.borderColor = 'var(--t-border)';
+          event.currentTarget.style.color = 'var(--t-text)';
+        }
+      }}
+      onMouseLeave={(event) => {
+        if (!active) {
+          event.currentTarget.style.background = 'var(--t-bg-card)';
+          event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+          event.currentTarget.style.color = 'var(--t-text-secondary)';
+        }
       }}
     >
       {label}
