@@ -1,23 +1,15 @@
 'use client';
 
 /**
- * OrchestratorTab — full-workspace orchestrator surface inside a
- * WorkspaceTerminal tab. Header + four-pane layout:
+ * OrchestratorTab — full-workspace O8 operator chat surface inside a
+ * WorkspaceTerminal tab.
  *
- *   ┌────────────────────────────────────────┐
- *   │ Header: History | Agents | Mission    │
- *   ├───────┬────────┬────────────────┬─────┤
- *   │History│ Agents │ Chat           │Mission
- *   │(260px)│(280px) │ ThoughtsChat   │(340px)
- *   └───────┴────────┴────────────────┴─────┘
+ * The tab centers ThoughtsChatPanel as the primary surface and layers in
+ * optional chrome around it: history drawer, tiled live sessions, comparison
+ * picker, context meter/inspector, and the Cmd+K quick-action palette.
  *
- * Both side panels are collapsed by default and toggle via the header
- * (History, Agents, Mission). This lets the orchestrator host
- * past-conversation browsing AND mission planning without ever leaving
- * the chat — no tab switching, no lost flow.
- *
- * Data deps come from OrchestratorDataContext (provided at the
- * dashboard level) so WorkspaceTerminal doesn't prop-drill them.
+ * Data comes from OrchestratorDataContext at the dashboard level so the
+ * workspace shell does not prop-drill mission, agent, or packet state.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
