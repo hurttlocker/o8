@@ -69,6 +69,10 @@ interface OrchestratorTabProps {
   // Pinned OpenRouter model slug for chat-mode requests on this tab.
   // Empty/undefined = use server's env-configured fallback chain.
   initialChatOpenrouterModel?: string;
+  // Forwarded to ThoughtsChatPanel — fires with the latest user message
+  // text in chat mode so the tab strip can show a 3-word summary instead
+  // of the generic "Chat" label.
+  onChatSummary?: (text: string) => void;
 }
 
 function permissionStorageKey(tabId: string): string {
@@ -238,6 +242,7 @@ function OrchestratorTabInner({
   initialSingleRuntime,
   initialChatModelId,
   initialChatOpenrouterModel,
+  onChatSummary,
 }: OrchestratorTabProps) {
   const data = useOrchestratorData();
   const residency = useOrchestratorContextResidency();
@@ -620,6 +625,7 @@ function OrchestratorTabInner({
       onSpawnChatTab={spawnHandlers?.spawnChatTab
         ? () => { spawnHandlers.spawnChatTab(); }
         : undefined}
+      onChatSummary={onChatSummary}
       footerMeterSlot={(
         <ContextMeter
           tokenCount={contextUsage.tokenCount}
