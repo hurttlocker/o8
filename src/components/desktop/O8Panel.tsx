@@ -84,7 +84,7 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, prev
         <O8SpecPane repoPath={repoPath} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'pulse' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8PulsePane />
+        <O8PulsePane repoSlug={repoSlug} onSelectCommit={onSelectCommit} onSelectPR={onSelectPR} onSelectIssue={onSelectIssue} />
       </div>
     </div>
   );
