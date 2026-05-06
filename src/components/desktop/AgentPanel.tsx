@@ -1,12 +1,14 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-unused-vars -- AgentPanel keeps a stable prop surface during the refactor */
 
-import { memo, type CSSProperties } from 'react';
+import { memo, useMemo, type CSSProperties } from 'react';
 import { Clock } from './lucide-shims';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
 import { LeftPanelRepoFocus } from './repo-focus/LeftPanelRepoFocus';
 import { useLeftPanelFocus } from './repo-focus/useLeftPanelFocus';
+import { ProjectsBottomBar } from './repo-registry/ProjectsBottomBar';
+import { useProjects } from './repo-registry/useProjects';
 import {
   AgentPanelEmptyState,
   SidebarSection,
@@ -69,6 +71,16 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   const leftPanelFocus = liftedLeftPanelFocus ?? localLeftPanelFocus;
   const focusActive = leftPanelFocus.focusActive;
 
+  // Projects ledger — the bottom-bar dot switcher + the project name header
+  // above the repo list. The ledger groups repos and the active project's
+  // repoPaths drive what shows in the registry list. First-run defaults to
+  // a single "o8" project containing every existing repo.
+  const projects = useProjects();
+  const activeProjectRepoSet = useMemo(() => {
+    if (!projects.activeProject) return null;
+    return new Set(projects.activeProject.repoPaths);
+  }, [projects.activeProject]);
+
   // When focus is active, the column itself widened — render the focus
   // surface inline so it occupies the whole AgentPanel column and keeps
   // the TitleBar + DesktopStatusBar visible above and below.
@@ -129,6 +141,26 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           WebkitAppRegion: 'drag' as unknown as string,
         } as CSSProperties}
       />
+
+      {projects.activeProject ? (
+        <div
+          style={{
+            flexShrink: 0,
+            paddingTop: 4,
+            paddingBottom: 6,
+            paddingLeft: 14,
+            paddingRight: 14,
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: 'var(--t-text-faint)',
+          }}
+        >
+          {projects.activeProject.name}
+        </div>
+      ) : null}
 
       <div
         suppressHydrationWarning
@@ -211,6 +243,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           ) : null}
 
           <RepoRegistrySection
+            repoPathFilter={activeProjectRepoSet}
             onLaunchComplete={refreshNow}
             onSelectSession={onSelectSession}
             onSelectRepo={(repoId) => {
@@ -221,10 +254,14 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             onReviewPR={onReviewPR}
             onRepoRemoved={(repo) => {
               refreshNow();
+              void projects.refresh();
               onRepoRemoved?.(repo);
             }}
             onLaunchWorkspaceAgent={onLaunchWorkspaceAgent}
-            onRegistryStateChange={setRepoRegistryState}
+            onRegistryStateChange={(state) => {
+              setRepoRegistryState(state);
+              void projects.refresh();
+            }}
             activeSessionKey={activeSessionKey}
             activeRepoLocalPath={currentLaunchRepoPath}
             activeWorkspacePath={activeWorkspacePath ?? selectedRepoLocalPath ?? null}
@@ -257,6 +294,15 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             widens). Nothing else to render here. */}
 
       </div>
+
+      {projects.ledger ? (
+        <ProjectsBottomBar
+          projects={projects.ledger.projects}
+          activeProjectId={projects.ledger.activeProjectId}
+          onSwitch={(projectId) => { void projects.switchActive(projectId); }}
+          onCreate={projects.createProject}
+        />
+      ) : null}
     </div>
   );
 });
