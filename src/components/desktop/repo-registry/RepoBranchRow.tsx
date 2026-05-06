@@ -162,8 +162,26 @@ function RepoBranchRowBase({
   // updates mid-hover.
   const [hoveredAgentKey, setHoveredAgentKey] = useState<string | null>(null);
   const [hoveredAgentRect, setHoveredAgentRect] = useState<DOMRect | null>(null);
+  const [archivingSessionKey, setArchivingSessionKey] = useState<string | null>(null);
   const agentHoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentHoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleDismissAgent = useCallback(async (sessionKey: string) => {
+    if (archivingSessionKey) return;
+    setArchivingSessionKey(sessionKey);
+    try {
+      await fetch('/api/runtime/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey }),
+      });
+    } catch {
+      // Silent — the row will reappear on the next snapshot if the archive
+      // failed; let the user retry.
+    } finally {
+      setArchivingSessionKey(null);
+    }
+  }, [archivingSessionKey]);
 
   const scheduleAgentHover = useCallback((key: string, element: HTMLElement) => {
     const rect = element.getBoundingClientRect();
@@ -920,14 +938,28 @@ function RepoBranchRowBase({
                     const isActive = agent.status === 'running' || agent.status === 'reviewing';
                     const taskSummary = isActive ? threeWordTaskSummary(agent.currentTask) : null;
                     const secondaryLabel = taskSummary ?? statusTone.label;
+                    const isHoveredAgent = hoveredAgentKey === agent.sessionKey;
+                    const canDismiss = (
+                      agent.sessionKey.startsWith('codex-owned:')
+                      || agent.sessionKey.startsWith('gemini-owned:')
+                      || agent.sessionKey.startsWith('opencode-owned:')
+                    );
+                    const isArchivingThisAgent = archivingSessionKey === agent.sessionKey;
                     return (
-                      <button
+                      <div
                         key={agent.sessionKey}
-                        type="button"
-                        disabled={!onSelectSession}
+                        role="button"
+                        tabIndex={onSelectSession ? 0 : -1}
+                        aria-disabled={!onSelectSession}
                         onClick={(event) => {
                           event.stopPropagation();
                           onSelectSession?.(agent.sessionKey);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onSelectSession?.(agent.sessionKey);
+                          }
                         }}
                         onMouseEnter={(event) => {
                           scheduleAgentHover(agent.sessionKey, event.currentTarget);
@@ -988,7 +1020,51 @@ function RepoBranchRowBase({
                             {secondaryLabel}
                           </span>
                         </div>
-                      </button>
+                        {canDismiss && (isHoveredAgent || isArchivingThisAgent) ? (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            aria-label="Dismiss agent"
+                            title="Remove this session from the panel"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleDismissAgent(agent.sessionKey);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                void handleDismissAgent(agent.sessionKey);
+                              }
+                            }}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 16,
+                              height: 16,
+                              flexShrink: 0,
+                              borderRadius: 4,
+                              color: 'var(--t-text-faint)',
+                              cursor: 'pointer',
+                              opacity: isArchivingThisAgent ? 0.4 : 0.7,
+                              transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1), background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+                            }}
+                            onMouseEnter={(event) => {
+                              event.currentTarget.style.opacity = '1';
+                              event.currentTarget.style.background = 'rgba(148, 163, 184, 0.18)';
+                            }}
+                            onMouseLeave={(event) => {
+                              event.currentTarget.style.opacity = isArchivingThisAgent ? '0.4' : '0.7';
+                              event.currentTarget.style.background = 'transparent';
+                            }}
+                          >
+                            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+                              <path d="M2 2 L8 8 M8 2 L2 8" />
+                            </svg>
+                          </span>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>
