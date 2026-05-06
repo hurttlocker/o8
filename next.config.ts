@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: __dirname,
   serverExternalPackages: ['better-sqlite3'], // Native module — must be bundled explicitly
   reactStrictMode: true,
+  devIndicators: false,
   images: {
     unoptimized: true, // Required for standalone — no image optimization server
     remotePatterns: [
