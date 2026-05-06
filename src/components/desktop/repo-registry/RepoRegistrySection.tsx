@@ -48,6 +48,7 @@ function RepoRegistrySectionBase({
   orchestratorPackets = [],
   ideWorkspaceSessions,
   hideHeader = false,
+  repoPathFilter = null,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectRepo?: (repoId: string) => void;
@@ -71,6 +72,9 @@ function RepoRegistrySectionBase({
   orchestratorPackets?: OrchestratorPacket[];
   ideWorkspaceSessions?: IdeWorkspaceSession[];
   hideHeader?: boolean;
+  /** When provided, only repos whose localPath is in this set are shown.
+   *  Used by the projects bottom-bar to scope the panel to one project. */
+  repoPathFilter?: Set<string> | null;
 } = {}) {
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -630,9 +634,12 @@ function RepoRegistrySectionBase({
   );
 
   const orderedRepos = useMemo(() => {
-    if (!activeRepoEntry) return repos;
-    return [activeRepoEntry, ...repos.filter((repo) => repo.id !== activeRepoEntry.id)];
-  }, [activeRepoEntry, repos]);
+    const visible = repoPathFilter
+      ? repos.filter((repo) => repoPathFilter.has(repo.localPath))
+      : repos;
+    if (!activeRepoEntry || !visible.includes(activeRepoEntry)) return visible;
+    return [activeRepoEntry, ...visible.filter((repo) => repo.id !== activeRepoEntry.id)];
+  }, [activeRepoEntry, repoPathFilter, repos]);
 
   useEffect(() => {
     if (!activeRepoEntry) return;
