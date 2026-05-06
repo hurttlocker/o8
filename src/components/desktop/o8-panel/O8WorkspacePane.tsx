@@ -515,6 +515,13 @@ export function O8WorkspacePane({
   // Glass: keep the saturating backdrop blur. Solid: drop the backdrop
   // entirely so the paper / graphite paint without ghosting from underneath.
   const isGlass = surface === 'glass';
+  // In light + glass the workspace's bluish shell gradient + inset
+  // didn't match the rest of the o8 panel tabs (which let the OS
+  // vibrancy paint through cleanly). Use a transparent shell + no
+  // inset there so the diff workspace blends with its siblings.
+  const isLightGlass = paletteId === 'light' && surface === 'glass';
+  const shellBg = isLightGlass ? 'transparent' : 'var(--o8-workspace-shell-bg)';
+  const shellInset = isLightGlass ? 'none' : 'var(--o8-workspace-shell-inset)';
 
   return (
     <div
@@ -524,11 +531,11 @@ export function O8WorkspacePane({
         flex: 1,
         flexDirection: 'column',
         minHeight: 0,
-        background: 'var(--o8-workspace-shell-bg)',
+        background: shellBg,
         color: 'var(--t-text)',
         backdropFilter: isGlass ? 'blur(24px) saturate(1.16)' : 'none',
         WebkitBackdropFilter: isGlass ? 'blur(24px) saturate(1.16)' : 'none',
-        boxShadow: 'var(--o8-workspace-shell-inset)',
+        boxShadow: shellInset,
         scrollbarColor: 'var(--o8-workspace-scrollbar)' as unknown as string,
         scrollbarWidth: 'thin',
       } as CSSProperties}
