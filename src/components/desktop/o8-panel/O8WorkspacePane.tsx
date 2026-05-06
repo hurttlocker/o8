@@ -387,15 +387,13 @@ export function O8WorkspacePane({
       } as CSSProperties}
     >
       <div style={{ display: 'flex', minHeight: 42, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', fontFamily: UI_FONT }}>
-        <div style={{ width: RAIL_WIDTH, flexShrink: 0, display: 'flex', alignItems: 'center', borderRight: '1px solid var(--t-divider-subtle)', paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10 }}>
+        <div style={{ width: RAIL_WIDTH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, borderRight: '1px solid var(--t-divider-subtle)', paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10 }}>
           <ModeMenu
             label={listMode === 'changes' ? `Changes ${changes.files.length}` : 'All files'}
             options={listOptions}
             value={listMode}
             onChange={setListMode}
           />
-        </div>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12 }}>
           {repoOptions.length > 0 && onRepoPathChange ? (
             <ModeMenu
               label={currentRepoLabel}
@@ -403,7 +401,7 @@ export function O8WorkspacePane({
               options={repoOptions}
               value={(repoPath ?? '') as string}
               onChange={handleRepoChange}
-              maxWidth={142}
+              maxWidth={120}
               menuMinWidth={224}
               beforeLabel={(
                 <span
@@ -418,7 +416,10 @@ export function O8WorkspacePane({
                 />
               )}
             />
-          ) : lensLabel ? (
+          ) : null}
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12 }}>
+          {!(repoOptions.length > 0 && onRepoPathChange) && lensLabel ? (
             <span
               title={lensLabel.fullPath}
               style={{
