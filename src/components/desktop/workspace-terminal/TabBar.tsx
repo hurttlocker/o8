@@ -5,7 +5,6 @@ import type { RegisteredRepo, TerminalTab, WorkspaceChatRuntime } from '@/compon
 import {
   PhosphorCaretLeft,
   PhosphorCaretRight,
-  PhosphorSplitHorizontal,
   PhosphorSplitVertical,
   PhosphorXBold,
   PhosphorXCircle,
@@ -28,6 +27,9 @@ const LATEST_DISPATCH_TEXT = '#FF5A1F';
 const MERGED_DISPATCH_BG = 'rgba(22, 163, 74, 0.08)';
 const MERGED_DISPATCH_BORDER = 'rgba(22, 163, 74, 0.28)';
 const MERGED_DISPATCH_TEXT = '#15803d';
+const TAB_BAR_HEIGHT = 38;
+const TAB_GAP = 4;
+const TAB_TOP_RADIUS = 14;
 
 function formatDispatchedAt(epochMs: number): string {
   try {
@@ -120,23 +122,24 @@ export const TabBar = memo(function TabBar({
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        // 38px bar — compact strip. Tabs use top-corner radius to flow into
-        // the workspace card below them.
-        height: 38,
-        minHeight: 38,
-        // Match the chat-surface bg so the TabBar blends with the workspace
-        // content below instead of reading as a separate gray strip.
-        background: 'var(--t-chat-surface-bg, #ffffff)',
-        borderBottomWidth: '0.5px',
-        borderBottomStyle: 'solid',
-        borderBottomColor: 'var(--t-divider-subtle)',
+        // Compact strip. Active tabs overlap the bottom divider by 1px so
+        // the selected tab and workspace body meet on the same edge.
+        height: TAB_BAR_HEIGHT,
+        minHeight: TAB_BAR_HEIGHT,
+        // Vibrancy passthrough — the strip itself reads as glass over the
+        // macOS material. Inactive tabs float as pills; the active tab is
+        // the only solid surface that anchors into the workspace below.
+        background: 'transparent',
+        // Drop the explicit divider — the workspace card's top edge is now
+        // the only horizontal line, and the active tab punches through it.
+        borderBottomWidth: 0,
         flexShrink: 0,
         overflow: 'visible',
         zIndex: 10,
         position: 'relative',
       }}
     >
-      <div style={{ position: 'relative', display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div style={{ position: 'relative', display: 'flex', flex: 1, overflow: 'visible' }}>
         {canScrollLeft ? (
           <div
             role="button"
@@ -156,7 +159,7 @@ export const TabBar = memo(function TabBar({
               justifyContent: 'center',
               zIndex: 3,
               cursor: 'pointer',
-              background: 'linear-gradient(to right, var(--t-chat-surface-bg, #ffffff) 60%, transparent)',
+              background: 'linear-gradient(to right, var(--t-panel, rgba(0,0,0,0.18)) 30%, transparent)',
               color: 'var(--t-text-secondary)',
             }}
           >
@@ -197,7 +200,9 @@ export const TabBar = memo(function TabBar({
           style={{
             display: 'flex',
             flex: 1,
-            gap: 0,
+            gap: TAB_GAP,
+            height: TAB_BAR_HEIGHT + 1,
+            marginBottom: -1,
             overflowX: 'auto',
             overflowY: 'hidden',
             scrollbarWidth: 'none',
@@ -263,6 +268,11 @@ export const TabBar = memo(function TabBar({
               : isLatestDispatch
                 ? LATEST_DISPATCH_TEXT
                 : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)');
+            const tabBorderColor = isMergedDispatch
+              ? MERGED_DISPATCH_BORDER
+              : isLatestDispatch
+                ? LATEST_DISPATCH_BORDER
+                : (isActive ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)');
             return (
               <button
                 type="button"
@@ -294,27 +304,30 @@ export const TabBar = memo(function TabBar({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  // Tab button fills the full 38px bar; compact pill.
-                  minHeight: 38,
+                  boxSizing: 'border-box',
+                  height: isActive ? TAB_BAR_HEIGHT + 1 : TAB_BAR_HEIGHT,
+                  minHeight: isActive ? TAB_BAR_HEIGHT + 1 : TAB_BAR_HEIGHT,
                   paddingTop: 8,
                   paddingBottom: 8,
                   paddingLeft: 10,
                   paddingRight: 8,
                   marginTop: 0,
-                  marginBottom: 0,
-                  marginLeft: 2,
-                  marginRight: 2,
-                  borderWidth: 0,
-                  borderStyle: 'none',
-                  // Top corners match workspace card squircle (14px); bottom
-                  // corners square so the pill sits flush onto the card top.
-                  borderTopLeftRadius: 12,
-                  borderTopRightRadius: 12,
+                  marginBottom: isActive ? -1 : 0,
+                  marginLeft: 0,
+                  marginRight: 0,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: tabBorderColor,
+                  borderBottomWidth: isActive ? 0 : 1,
+                  // Top corners match the workspace card squircle; bottom
+                  // corners stay square so the tab lands flush on the body.
+                  borderTopLeftRadius: TAB_TOP_RADIUS,
+                  borderTopRightRadius: TAB_TOP_RADIUS,
                   borderBottomLeftRadius: 0,
                   borderBottomRightRadius: 0,
-                  borderLeftWidth: dragOverTabId === tab.id ? 2 : 0,
-                  borderLeftStyle: dragOverTabId === tab.id ? 'solid' : 'none',
-                  borderLeftColor: '#2563eb',
+                  borderLeftWidth: dragOverTabId === tab.id ? 2 : 1,
+                  borderLeftStyle: 'solid',
+                  borderLeftColor: dragOverTabId === tab.id ? '#2563eb' : tabBorderColor,
                   background: tabBackground,
                   boxShadow: tabBoxShadow,
                   color: tabTextColor,
@@ -326,6 +339,7 @@ export const TabBar = memo(function TabBar({
                   whiteSpace: 'nowrap',
                   transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   position: 'relative',
+                  zIndex: isActive ? 2 : 1,
                 }}
                 onMouseEnter={(event) => {
                   if (isActive || isLatestDispatch || isMergedDispatch) return;
