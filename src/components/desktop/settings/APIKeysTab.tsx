@@ -11,6 +11,7 @@ import {
   FieldLabel,
   HairlineRule,
   SectionLabel,
+  SettingsToggleButton,
   TabBreadcrumb,
   TabHeading,
 } from './shared';
@@ -472,18 +473,12 @@ export function APIKeysTab() {
 
 function ToggleLink({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
   return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      style={{
-        ...accentLinkStyle(false),
-        color: checked ? RAMS_ACCENT : 'var(--t-text-secondary)',
-        borderBottomColor: checked ? RAMS_ACCENT : RAMS_HAIRLINE_SOFT,
-      }}
-      aria-pressed={checked}
-    >
-      {checked ? 'enabled' : 'disabled'}
-    </button>
+    <SettingsToggleButton
+      checked={checked}
+      onChange={onChange}
+      activeLabel="Enabled"
+      inactiveLabel="Disabled"
+    />
   );
 }
 

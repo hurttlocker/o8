@@ -531,8 +531,7 @@ export function TitleBar({
 
         {/* Agents — returns the center workspace to the main agents view.
             Lives here instead of the retired NavRail so users always have a
-            one-click "home" back to the three-pane workspace from Settings
-            or Analytics. */}
+            one-click "home" back to the three-pane workspace from Settings. */}
         {onOpenAgents ? (
           <ChromeButton
             icon={<UsersThree size={18} weight={isAgentsSectionActive ? 'fill' : 'bold'} color={isAgentsSectionActive ? 'var(--t-accent)' : 'var(--t-text)'} />}

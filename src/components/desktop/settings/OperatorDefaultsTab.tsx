@@ -6,12 +6,16 @@ import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_ACCENT,
+  RAMS_CONTROL_BG,
+  RAMS_CONTROL_BORDER,
+  RAMS_CONTROL_ACTIVE_BORDER,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
   CornerBrackets,
   HairlineRule,
   SectionLabel,
+  SettingsToggleButton,
   TabBreadcrumb,
   TabHeading,
 } from './shared';
@@ -138,43 +142,6 @@ function Row({ label, description, source, right, disabledReason }: {
   );
 }
 
-function ToggleLink({ checked, onChange, disabled }: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => { if (!disabled) onChange(!checked); }}
-      disabled={disabled}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        minHeight: 44,
-        fontFamily: MONO_FONT_STACK,
-        fontSize: 11,
-        fontWeight: 400,
-        letterSpacing: '0.14em',
-        textTransform: 'uppercase',
-        color: checked ? RAMS_ACCENT : 'var(--t-text-muted)',
-        background: 'transparent',
-        border: 'none',
-        borderBottom: `1px solid ${checked ? RAMS_ACCENT : RAMS_HAIRLINE_SOFT}`,
-        paddingTop: 3,
-        paddingBottom: 3,
-        paddingLeft: 0,
-        paddingRight: 0,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.6 : 1,
-      }}
-      aria-pressed={checked}
-    >
-      {checked ? '(on)' : '(off)'}
-    </button>
-  );
-}
-
 function SegmentedControl<T extends string>({ value, options, onChange, disabled }: {
   value: T;
   options: Array<{ value: T; label: string }>;
@@ -243,16 +210,18 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
         style={{
           minWidth: minWidth ?? 140,
           minHeight: 44,
-          paddingTop: 4,
-          paddingBottom: 4,
-          paddingLeft: 0,
-          paddingRight: 0,
-          border: 'none',
-          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          background: 'transparent',
+          paddingTop: 0,
+          paddingBottom: 0,
+          paddingLeft: 14,
+          paddingRight: 12,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: open ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
+          borderRadius: 8,
+          background: RAMS_CONTROL_BG,
           color: 'var(--t-text)',
           fontSize: 13,
-          fontWeight: 400,
+          fontWeight: 600,
           textAlign: 'left',
           cursor: disabled ? 'not-allowed' : 'pointer',
           fontFamily: APP_FONT_STACK,
@@ -262,6 +231,7 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
           gap: 8,
           opacity: disabled ? 0.6 : 1,
           letterSpacing: '-0.005em',
+          transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
         <span>{active?.label ?? value}</span>
@@ -286,9 +256,9 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
             top: 'calc(100% + 6px)',
             right: 0,
             minWidth: minWidth ?? 220,
-            border: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-            borderRadius: 4,
-            background: 'var(--t-panel)',
+            border: `1px solid ${RAMS_CONTROL_BORDER}`,
+            borderRadius: 8,
+            background: 'var(--t-panel-solid, var(--t-panel))',
             zIndex: 20,
             paddingTop: 4,
             paddingBottom: 4,
@@ -619,7 +589,7 @@ export function OperatorDefaultsTab() {
           source={sources.healBotEnabled}
           disabledReason={healBotEnv ? envDisabledReason : undefined}
           right={
-            <ToggleLink
+            <SettingsToggleButton
               checked={values.healBotEnabled}
               disabled={healBotEnv || busyField === 'healBotEnabled'}
               onChange={(next) => { void updateField('healBotEnabled', next); }}
@@ -632,7 +602,7 @@ export function OperatorDefaultsTab() {
           source={sources.supervisorAutoEscalate}
           disabledReason={supervisorEnv ? envDisabledReason : undefined}
           right={
-            <ToggleLink
+            <SettingsToggleButton
               checked={values.supervisorAutoEscalate}
               disabled={supervisorEnv || busyField === 'supervisorAutoEscalate'}
               onChange={(next) => { void updateField('supervisorAutoEscalate', next); }}
@@ -691,7 +661,7 @@ export function OperatorDefaultsTab() {
           source={sources.promptCachingEnabled}
           disabledReason={cachingEnv ? envDisabledReason : undefined}
           right={
-            <ToggleLink
+            <SettingsToggleButton
               checked={values.promptCachingEnabled}
               disabled={cachingEnv || busyField === 'promptCachingEnabled'}
               onChange={(next) => { void updateField('promptCachingEnabled', next); }}
@@ -734,7 +704,7 @@ export function OperatorDefaultsTab() {
           source={sources.experimentalOpencode}
           disabledReason={sources?.experimentalOpencode === 'env' ? envDisabledReason : undefined}
           right={
-            <ToggleLink
+            <SettingsToggleButton
               checked={values.experimentalOpencode}
               disabled={sources?.experimentalOpencode === 'env' || busyField === 'experimentalOpencode'}
               onChange={(next) => {

@@ -20,6 +20,10 @@ import {
   RAMS_HAIRLINE_SOFT,
   RAMS_HAIRLINE,
   RAMS_INK_QUIET,
+  RAMS_CONTROL_BG,
+  RAMS_CONTROL_BORDER,
+  RAMS_CONTROL_ACTIVE_BG,
+  RAMS_CONTROL_ACTIVE_BORDER,
   BracketLabel,
   HairlineRule,
   SectionLabel,
@@ -100,24 +104,30 @@ function brandLogoFor(name: string, size = 12): ReactNode | null {
   return null;
 }
 
-// ── Accent-link button style (matches DiagnosticsTab pattern) ──
+// ── Analytics controls ──
 
-function accentLinkStyle(disabled: boolean): React.CSSProperties {
+function analyticsControlStyle(active: boolean, disabled = false): React.CSSProperties {
   return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 32,
     fontFamily: APP_FONT_STACK,
-    fontSize: 13,
-    fontWeight: 400,
-    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    background: 'transparent',
-    border: 'none',
-    borderBottom: `1px solid ${disabled ? RAMS_HAIRLINE_SOFT : RAMS_ACCENT}`,
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingLeft: 0,
-    paddingRight: 0,
+    fontSize: 12,
+    fontWeight: 650,
+    color: active ? 'var(--t-text)' : RAMS_INK_QUIET,
+    background: active ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
+    border: `1px solid ${active ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER}`,
+    borderRadius: 10,
+    paddingTop: 0,
+    paddingBottom: 0,
+    paddingLeft: 12,
+    paddingRight: 12,
     cursor: disabled ? 'default' : 'pointer',
-    letterSpacing: '-0.005em',
+    letterSpacing: '0',
     opacity: disabled ? 0.6 : 1,
+    transition: 'background 160ms ease, border-color 160ms ease, color 160ms ease',
+    boxShadow: active ? '0 10px 24px rgba(37, 99, 235, 0.08)' : 'none',
   };
 }
 
@@ -666,7 +676,7 @@ const TopSessionsRows = memo(function TopSessionsRows({ sessions }: { sessions: 
 // MAIN COMPONENT
 // ══════════════════════════════════════════════════
 
-export const AnalyticsPage = memo(function AnalyticsPage() {
+export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: { embedded?: boolean }) {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedRange, setSelectedRange] = useState(24);
@@ -706,39 +716,40 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
       style={{
         flex: 1,
         minHeight: 0,
-        overflowY: 'auto',
-        paddingTop: 8,
-        paddingLeft: 32,
-        paddingRight: 32,
-        paddingBottom: 40,
+        overflowY: embedded ? 'visible' : 'auto',
+        paddingTop: embedded ? 0 : 8,
+        paddingLeft: embedded ? 0 : 32,
+        paddingRight: embedded ? 0 : 32,
+        paddingBottom: embedded ? 0 : 40,
         scrollbarWidth: 'none',
-        background: 'var(--t-chat-surface-bg)',
+        background: embedded ? 'transparent' : 'var(--t-chat-surface-bg)',
         color: 'var(--t-chat-surface-text)',
         fontFamily: APP_FONT_STACK,
       } as React.CSSProperties}
     >
-      <div style={{ maxWidth: 900, marginLeft: 'auto', marginRight: 'auto' }}>
+      <div style={{ maxWidth: embedded ? 980 : 940, marginLeft: 'auto', marginRight: 'auto' }}>
         {/* Breadcrumb + heading */}
-        <TabBreadcrumb scope="dashboard" tab="analytics" />
+        <TabBreadcrumb scope={embedded ? 'settings' : 'dashboard'} tab="analytics" />
         <div style={{
           display: 'flex',
           alignItems: 'flex-start',
           justifyContent: 'space-between',
           gap: 16,
           flexWrap: 'wrap',
-          marginBottom: 32,
+          marginBottom: 28,
         }}>
           <TabHeading
             title="analytics"
             subtitle="Spend, token usage, and agent efficiency across Codex, Claude Code, Gemini, and IDE chat."
           />
-          {/* Time range picker — mono underline links */}
+          {/* Time range picker */}
           <div style={{
             display: 'flex',
-            gap: 4,
+            gap: 8,
             alignItems: 'center',
             paddingTop: 6,
             flexShrink: 0,
+            flexWrap: 'wrap',
           }}>
             {TIME_RANGES.map(r => (
               <button
@@ -746,20 +757,11 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
                 type="button"
                 onClick={() => setSelectedRange(r.hours)}
                 style={{
+                  ...analyticsControlStyle(selectedRange === r.hours),
+                  minWidth: 44,
                   fontFamily: MONO_FONT_STACK,
                   fontSize: 11,
-                  fontWeight: 400,
-                  letterSpacing: '0.1em',
-                  color: selectedRange === r.hours ? RAMS_ACCENT : RAMS_INK_QUIET,
-                  background: 'transparent',
-                  border: 'none',
-                  borderBottom: `1px solid ${selectedRange === r.hours ? RAMS_ACCENT : 'transparent'}`,
-                  paddingTop: 3,
-                  paddingBottom: 3,
-                  paddingLeft: 6,
-                  paddingRight: 6,
-                  cursor: 'pointer',
-                  transition: 'color 120ms, border-color 120ms',
+                  letterSpacing: '0.08em',
                 }}
               >
                 {r.label}
@@ -769,9 +771,12 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
               type="button"
               onClick={() => { void fetchData(selectedRange); }}
               disabled={loading}
-              style={{ ...accentLinkStyle(loading), marginLeft: 8 }}
+              style={{
+                ...analyticsControlStyle(false, loading),
+                minWidth: 82,
+              }}
             >
-              {loading ? 'loading…' : 'refresh ›'}
+              {loading ? 'Loading' : 'Refresh'}
             </button>
           </div>
         </div>
