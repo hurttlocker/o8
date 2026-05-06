@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-06
 
+- `01613ebb` feat: tab strip uses theme-tinted glass instead of raw vibrancy
 - `71187351` feat: round workspace top corners and inset tab cluster
 - `38a9edc2` feat: tab strip becomes vibrancy-passthrough glass
 - `ef5357fb` feat: hide thinking chooser in chat tabs and rename Assistant row to Chat
