@@ -46,7 +46,7 @@ interface O8PanelProps {
 // ── Main Component ──
 
 export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile: externalSelectedFile, browserUrl, onBrowserActiveUrlChange, onSelectedFileChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
-  const activeTab = externalTab ?? 'workspace';
+  const activeTab = externalTab ?? 'pulse';
   const selectedFile = externalSelectedFile ?? null;
 
   const handleSelectedFileChange = (filePath: string) => {

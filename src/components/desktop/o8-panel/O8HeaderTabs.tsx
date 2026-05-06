@@ -158,8 +158,8 @@ export function O8HeaderTabs({
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
     >
-      <O8HeaderTabButton icon={(color) => <IconWorkspace size={16} color={color} />} active={activeTab === 'workspace'} onClick={() => onTabChange('workspace')} label="Workspace" />
       <O8HeaderTabButton icon={(color) => <IconPulse size={16} color={color} />} active={activeTab === 'pulse'} onClick={() => onTabChange('pulse')} label="Pulse" />
+      <O8HeaderTabButton icon={(color) => <IconWorkspace size={16} color={color} />} active={activeTab === 'workspace'} onClick={() => onTabChange('workspace')} label="Workspace" />
       <O8HeaderDivider />
       <O8HeaderTabButton icon={(color) => <IconGitPullRequest size={16} color={color} />} active={activeTab === 'prs'} onClick={() => onTabChange('prs')} label="PRs" />
       <O8HeaderTabButton icon={(color) => <IconInbox size={16} color={color} />} active={activeTab === 'inbox'} onClick={() => onTabChange('inbox')} label="Inbox" />
