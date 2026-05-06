@@ -584,6 +584,16 @@ export function usePaletteActions({
     });
 
     actions.push({
+      id: 'settings:analytics',
+      category: 'settings',
+      title: 'Open usage analytics',
+      detail: 'Spend, token usage, and agent efficiency.',
+      keywords: ['settings', 'analytics', 'usage', 'cost', 'tokens', 'codex', 'claude'],
+      priority: 190,
+      run: () => handleOpenSettingsTab('analytics'),
+    });
+
+    actions.push({
       id: 'recovery:setup',
       category: 'recovery',
       title: 'Rerun setup',

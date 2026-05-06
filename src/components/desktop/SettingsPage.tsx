@@ -42,6 +42,7 @@ import { CloudWorkersTab } from './settings/CloudWorkersTab';
 import { AppearanceTab } from './settings/AppearanceTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
+import { AnalyticsPage } from './AnalyticsPage';
 
 export type { SettingsTab } from './settings/shared';
 
@@ -283,6 +284,7 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
         <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
+        <TabButton label="Analytics" icon={<ActivityIcon />} active={activeTab === 'analytics'} onClick={() => setActiveTab('analytics')} />
         <TabButton label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} onClick={() => setActiveTab('projects')} />
         <TabButton label="Workers" icon={<UsersIcon />} active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} comingSoon />
         <TabButton label="Cloud Workers" icon={<UsersIcon />} active={activeTab === 'cloud-workers'} onClick={() => setActiveTab('cloud-workers')} comingSoon />
@@ -332,6 +334,9 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         )}
         {activeTab === 'cloud-workers' && (
           <CloudWorkersTab />
+        )}
+        {activeTab === 'analytics' && (
+          <AnalyticsPage embedded />
         )}
         {activeTab === 'appearance' && (
           <AppearanceTab />
