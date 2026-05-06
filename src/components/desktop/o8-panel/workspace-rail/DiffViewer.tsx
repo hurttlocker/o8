@@ -11,7 +11,15 @@ type FileDiffResponse = { diff?: string; stagedDiff?: string; error?: string };
 const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
-function lineStyle(line: DiffLine | null): CSSProperties {
+function formatLoadError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/load failed|failed to fetch|networkerror/i.test(message)) {
+    return 'Unable to reach the local diff service. Reselect the file or refresh the app.';
+  }
+  return message || 'Unable to load diff.';
+}
+
+function lineStyle(line: DiffLine | null, options?: { wrap?: boolean }): CSSProperties {
   const tone = diffLineTone(line?.kind ?? 'context');
   return {
     minHeight: 18,
@@ -20,14 +28,16 @@ function lineStyle(line: DiffLine | null): CSSProperties {
     color: line ? tone.color : 'var(--t-text-faint)',
     fontFamily: MONO_FONT,
     fontSize: 11,
-    whiteSpace: 'pre',
+    whiteSpace: options?.wrap ? 'pre-wrap' : 'pre',
+    overflowWrap: options?.wrap ? 'anywhere' : undefined,
+    wordBreak: options?.wrap ? 'break-word' : undefined,
     tabSize: 2,
   };
 }
 
 function UnifiedRows({ lines }: { lines: DiffLine[] }) {
   return (
-    <div style={{ minWidth: 'max-content' }}>
+    <div style={{ width: '100%', minWidth: 0 }}>
       {lines.map((line, index) => {
         const tone = diffLineTone(line.kind);
         return (
@@ -35,7 +45,7 @@ function UnifiedRows({ lines }: { lines: DiffLine[] }) {
             key={`${index}:${line.text}`}
             style={{
               display: 'grid',
-              gridTemplateColumns: '70px minmax(520px, 1fr)',
+              gridTemplateColumns: '52px minmax(0, 1fr)',
               minHeight: 18,
               background: tone.background,
             }}
@@ -53,7 +63,7 @@ function UnifiedRows({ lines }: { lines: DiffLine[] }) {
             >
               {line.oldNumber ?? line.newNumber ?? ''}
             </span>
-            <span style={{ ...lineStyle(line), background: 'transparent' }}>{line.text || ' '}</span>
+            <span style={{ ...lineStyle(line, { wrap: true }), background: 'transparent', paddingRight: 12 }}>{line.text || ' '}</span>
           </div>
         );
       })}
@@ -142,24 +152,34 @@ export function DiffViewer({
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ path: selectedFile, workspace: repoPath });
-    fetch(`/api/panel/file-diff?${params.toString()}`)
-      .then((response) => response.json() as Promise<FileDiffResponse>)
+    fetch(`/api/panel/file-diff?${params.toString()}`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({})) as FileDiffResponse;
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        return data;
+      })
       .then((data) => {
         if (cancelled) return;
         if (data.error) setError(data.error);
         setDiff(data.diff ?? data.stagedDiff ?? '');
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled && (err as { name?: string })?.name !== 'AbortError') {
+          setError(formatLoadError(err));
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [repoPath, selectedFile]);
 
   if (!selectedFile) {
@@ -171,7 +191,7 @@ export function DiffViewer({
   }
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', paddingTop: 10, paddingBottom: 10 }}>
+    <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', paddingTop: 10, paddingBottom: 10, paddingRight: mode === 'unified' ? 8 : 0 }}>
       {loading ? <div style={{ paddingLeft: 14, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading diff...</div> : null}
       {!loading && error ? <div style={{ paddingLeft: 14, color: 'var(--t-brand-red)', fontFamily: UI_FONT, fontSize: 12 }}>{error}</div> : null}
       {!loading && !error && !diff ? <div style={{ paddingLeft: 14, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>No diff available for this file.</div> : null}

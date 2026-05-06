@@ -2,6 +2,14 @@ import { buildLinkedIssueContext, type LinkedIssueRef } from '../IssueLinkPicker
 
 import { buildRepoRequestHeaders, type ActiveThinkingState, type LLMMessage, MODELS, type ModelOption, type PendingApprovalState, type PreferredRepoContext, type SourceInfo, type ThinkingStep, type ToolCallInfo } from './shared';
 
+function normalizeFetchFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/load failed|failed to fetch|networkerror/i.test(message)) {
+    return new Error('Network request failed. The app may have refreshed or the local LLM route was unavailable; try sending again.');
+  }
+  return error instanceof Error ? error : new Error(message || 'Request failed');
+}
+
 export async function generateFollowUps(lastResponse: string, model: { id: string; label: string; provider: string }, userQuestion: string): Promise<string[]> {
   try {
     const response = await fetch('/api/v2/proxy/llm', {
@@ -115,10 +123,10 @@ export async function streamAssistantResponse({
         await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
         continue;
       }
-      throw error;
+      throw normalizeFetchFailure(error);
     }
   }
-  if (!response) throw new Error('Load failed');
+  if (!response) throw new Error('Network request failed. The local LLM route did not return a response.');
   if (!response.ok) {
     const errorPayload = await response.json().catch(() => ({ error: 'Request failed' }));
     throw new Error(errorPayload.error || `HTTP ${response.status}`);
