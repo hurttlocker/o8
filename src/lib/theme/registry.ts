@@ -87,6 +87,10 @@ const LIGHT_BASE: Record<string, string> = {
   '--t-accent-soft-strong': 'rgba(37, 99, 235, 0.18)',
   '--t-accent-border': 'rgba(37, 99, 235, 0.26)',
   '--t-accent-ring': 'rgba(37, 99, 235, 0.16)',
+  // Brand orange — bright vermillion in dark, dark ink in light. Light
+  // surfaces don't read bright orange well as button-active foreground;
+  // ink-on-faint-blue gives much better contrast.
+  '--t-brand-orange': '#0f172a',
   // Celebration
   '--t-celebration': '#c8923b',
   '--t-celebration-soft': 'rgba(200, 146, 59, 0.14)',
@@ -235,6 +239,7 @@ const DARK_BASE: Record<string, string> = {
   '--t-accent-soft-strong': 'rgba(143, 180, 255, 0.22)',
   '--t-accent-border': 'rgba(143, 180, 255, 0.28)',
   '--t-accent-ring': 'rgba(143, 180, 255, 0.14)',
+  '--t-brand-orange': '#FF5A1F',
   '--t-celebration': '#f1c36a',
   '--t-celebration-soft': 'rgba(241, 195, 106, 0.14)',
   '--t-celebration-border': 'rgba(241, 195, 106, 0.3)',
