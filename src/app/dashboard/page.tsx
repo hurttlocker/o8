@@ -14,7 +14,6 @@ import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import { useLeftPanelFocus } from '@/components/desktop/repo-focus/useLeftPanelFocus';
 import type { CanvasTab } from '@/components/desktop/Canvas';
-import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 // UpdateBanner is now rendered inside DesktopStatusBar.
 import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
@@ -29,7 +28,7 @@ import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import type { WorkspaceSidePanelRepo, WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
-import type { O8Tab } from '@/components/desktop/O8Panel';
+import type { O8Tab } from '@/components/desktop/o8-panel/types';
 import {
   markDashboardScriptStart,
   markDashboardFirstRender,
@@ -93,7 +92,6 @@ import { useFtuxMilestones } from './hooks/useFtuxMilestones';
 import { useGlobalRepoState } from './hooks/useGlobalRepoState';
 import { useLaneArchivedView } from './hooks/useLaneArchivedSet';
 import { useOrchestratorMission } from './hooks/useOrchestratorMission';
-import { usePaletteActions } from './hooks/usePaletteActions';
 import { useSessionState } from './hooks/useSessionState';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useTileLayout } from './hooks/useTileLayout';
@@ -288,6 +286,7 @@ function DashboardInner() {
   // current URL of whichever tab is selected inside the pane.
   const [o8BrowserHoverUrl, setO8BrowserHoverUrl] = useState<string | null>(null);
   const [o8SelectedFile, setO8SelectedFile] = useState<string | null>(null);
+  const [o8SelectedFileRepoPath, setO8SelectedFileRepoPath] = useState<string | null>(null);
   const [o8RepoPathOverride, setO8RepoPathOverride] = useState<string | null>(null);
   const [o8CommitSha, setO8CommitSha] = useState<string | null>(null);
   const [o8CommitRepoPath, setO8CommitRepoPath] = useState<string | null>(null);
@@ -499,6 +498,13 @@ function DashboardInner() {
     setSidebarVisible,
     sidebarVisible,
   });
+  const currentO8RepoPath = o8CommitRepoPath ?? o8RepoPathOverride ?? globalRepoEntry?.localPath ?? null;
+  const scopedO8SelectedFile = o8SelectedFileRepoPath === currentO8RepoPath ? o8SelectedFile : null;
+
+  const handleO8SelectedFileChange = useCallback((filePath: string) => {
+    setO8SelectedFile(filePath);
+    setO8SelectedFileRepoPath(currentO8RepoPath);
+  }, [currentO8RepoPath]);
 
   // Repo focus state owns whether the left column is in expanded "repo focus"
   // mode. Lifted here (instead of inside AgentPanel) so the column animation
@@ -915,12 +921,13 @@ function DashboardInner() {
       if (requestedTab) {
         if (requestedTab === 'workspace' && request.artifactId) {
           setO8SelectedFile(request.artifactId);
+          setO8SelectedFileRepoPath(currentO8RepoPath);
         }
         setO8ActiveTab(requestedTab);
       }
     });
     return unsubscribe;
-  }, [chatVisible, rightPanelKind]);
+  }, [chatVisible, currentO8RepoPath, rightPanelKind]);
 
   useEffect(() => {
     const handleOpenInbox = () => {
@@ -1000,6 +1007,7 @@ function DashboardInner() {
     if (pathBelongsToRepoScope(o8RepoPathOverride, removedRepoPath)) {
       setO8RepoPathOverride(null);
       setO8SelectedFile(null);
+      setO8SelectedFileRepoPath(null);
     }
 
     setWorkspaceChatSessionsByTileId(nextWorkspaceChatSessionsByTileId);
@@ -1316,6 +1324,7 @@ function DashboardInner() {
     if (targetRepo) {
       setO8RepoPathOverride(targetRepo.localPath);
       setO8SelectedFile(null);
+      setO8SelectedFileRepoPath(null);
       setWorkspaceSidePanelRepoPath(targetRepo.localPath);
       setWorkspaceSidePanelRepoContext({
         name: targetRepo.name,
@@ -1389,6 +1398,10 @@ function DashboardInner() {
 
   // Stable callbacks passed to CommandPalette — extracted to avoid defeating
   // memo boundaries with fresh inline arrows on every render (#809).
+  const handlePaletteOpen = useCallback(() => {
+    setCommandPaletteOpen(true);
+  }, []);
+
   const handlePaletteClose = useCallback(() => {
     setCommandPaletteOpen(false);
   }, []);
@@ -1987,6 +2000,7 @@ function DashboardInner() {
     const diffWorkspace = workspace ?? activeWorkspace ?? globalRepoEntry?.localPath ?? null;
 
     setO8SelectedFile(filePath);
+    setO8SelectedFileRepoPath(diffWorkspace);
     if (diffWorkspace) {
       setO8RepoPathOverride(diffWorkspace);
     }
@@ -2056,6 +2070,13 @@ function DashboardInner() {
     setO8CommitRepoPath(null);
     setO8CommitRepoSlug(null);
   }, []);
+
+  const handleSelectO8RepoPath = useCallback((repoPath: string) => {
+    handleClearCommit();
+    setO8RepoPathOverride(repoPath);
+    setO8SelectedFile(null);
+    setO8SelectedFileRepoPath(null);
+  }, [handleClearCommit]);
 
   // ── Left drag handle ──
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
@@ -2365,46 +2386,6 @@ function DashboardInner() {
     void mutateWorkspaceLifecycle('mark_read', currentWorkspaceLifecycleRecord.id).catch(() => undefined);
   }, [currentWorkspaceLifecycleRecord, mutateWorkspaceLifecycle]);
 
-  const paletteActions = usePaletteActions({
-    activeSessionKey,
-    archivedWorkspaceCandidate,
-    currentIssueTarget,
-    currentReviewAgent,
-    currentWorkspaceLifecycleRecord,
-    focusRepoSetup,
-    globalRepo,
-    globalRepoEntries,
-    globalRepoEntry,
-    handleLaunchWorkspaceAgent,
-    handleLaunchWorkspaceRepoTask,
-    handleOpenCI,
-    handleOpenFolder,
-    handleOpenSettingsTab,
-    handleReviewPR,
-    handleRunInTerminal,
-    handleSelectIssue,
-    handleSelectRegisteredRepo,
-    handleSelectSession,
-    mutateWorkspaceLifecycle,
-    nextAttentionWorkspace,
-    openRepoWorkspaceModal,
-    paletteAgents,
-    scopedRepoAgents,
-    selectedRepoWorktrees,
-    selectedRepoWorktreesLoading,
-    selectedSessionAgent,
-    selectedSessionWorktree,
-    staleSelectedRepoWorktrees,
-    wsStatus,
-    setActiveSessionKey,
-    setActiveWorkspace,
-    setChatVisible,
-    setSelectedRepoWorktreeRefreshNonce,
-    setSetupWizardOpen,
-    setSidebarVisible,
-    setRightPanelMode,
-  });
-
   const tileRegistry = useMemo(() => createTileRegistry({
     activeTileId,
     canvasStateByTileId,
@@ -2570,6 +2551,8 @@ function DashboardInner() {
         o8PanelVisible={chatVisible && rightPanelKind === 'o8'}
         onToggleO8Panel={handleToggleO8Panel}
         browserActive={chatVisible && rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
+        o8ActiveTab={o8ActiveTab}
+        onO8TabChange={setO8ActiveTab}
         browserPreviewUrl={o8BrowserHoverUrl}
         onOpenBrowser={handleOpenBrowser}
         isAgentsSectionActive={activeNavSection === 'agents'}
@@ -2578,31 +2561,7 @@ function DashboardInner() {
           if (!chatVisible) setChatVisible(true);
           setRightPanelMode('chat');
         }}
-        renderSearch={(onClose) => (
-          <UniversalSearch
-            variant="desktop"
-            workspace={activeWorkspace}
-            repo={globalRepo ?? undefined}
-            agentsJson={agentsJson}
-            actions={paletteActions}
-            onSelectSession={(sessionKey) => { handleSelectSession(sessionKey); onClose(); }}
-            onSelectIssue={(num) => { handleSelectIssue(num); onClose(); }}
-            onSelectFile={(filePath, line) => {
-              openCanvasTab({
-                id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
-                kind: 'file',
-                label: filePath.split('/').pop() ?? filePath,
-                resourceId: filePath,
-                meta: {
-                  ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
-                  ...(line ? { line: String(line) } : {}),
-                },
-              });
-              onClose();
-            }}
-            onClose={onClose}
-          />
-        )}
+        onOpenCommandPalette={handlePaletteOpen}
       />
 
       <ApprovalBanner />
@@ -3063,13 +3022,13 @@ function DashboardInner() {
                         onOpenO8Panel={handleOpenO8Panel}
                       >
                         <LazyO8Panel
-                          onClose={handleToggleO8Panel}
-                          repoPath={o8CommitRepoPath ?? o8RepoPathOverride ?? globalRepoEntry?.localPath}
+                          repoPath={currentO8RepoPath}
+                          registeredRepos={globalRepoEntries}
+                          onRepoPathChange={handleSelectO8RepoPath}
                           previews={workspacePreviews}
                           activeTab={o8ActiveTab}
-                          onActiveTabChange={setO8ActiveTab}
-                          selectedFile={o8SelectedFile}
-                          onSelectedFileChange={setO8SelectedFile}
+                          selectedFile={scopedO8SelectedFile}
+                          onSelectedFileChange={handleO8SelectedFileChange}
                           prNumber={o8PrNumber}
                           prRepo={o8PrRepo}
                           repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
