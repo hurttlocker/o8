@@ -551,7 +551,7 @@ export function O8WorkspacePane({
           fontFamily: UI_FONT,
         }}
       >
-        <div style={{ width: RAIL_WIDTH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, borderRight: '1px solid var(--o8-workspace-header-divider)', paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10 }}>
+        <div style={{ width: RAIL_WIDTH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10 }}>
           <ModeMenu
             label={listMode === 'changes' ? 'Changes' : 'All files'}
             options={listOptions}
