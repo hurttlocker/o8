@@ -47,9 +47,21 @@ function RepoCardBase(props: RepoCardBaseProps) {
     setContextMenu({ x: event.clientX, y: event.clientY });
   }, [moveTargets.length, props.onMoveToProject]);
 
+  const handleDragStart = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!props.onMoveToProject) return;
+    // application/x-o8-repo-path is the scoped MIME used by ProjectsBottomBar
+    // drop targets. Plain text fallback so a drop into a generic input still
+    // surfaces the path instead of nothing at all.
+    event.dataTransfer.setData('application/x-o8-repo-path', props.repo.localPath);
+    event.dataTransfer.setData('text/plain', props.repo.localPath);
+    event.dataTransfer.effectAllowed = 'move';
+  }, [props.onMoveToProject, props.repo.localPath]);
+
   return (
     <div
       ref={cardRef}
+      draggable={Boolean(props.onMoveToProject && moveTargets.length > 0)}
+      onDragStart={handleDragStart}
       onContextMenu={handleContextMenu}
       style={{
         position: 'relative',

@@ -2,11 +2,25 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+export const PROJECT_COLOR_PALETTE = [
+  '#5b8db8',
+  '#7fa68f',
+  '#a39565',
+  '#a37b7b',
+  '#9079a8',
+  '#7a9a8c',
+  '#a87f5b',
+  '#7a87a3',
+] as const;
+
+export type ProjectColor = typeof PROJECT_COLOR_PALETTE[number];
+
 export interface ProjectRecord {
   id: string;
   name: string;
   repoPaths: string[];
   createdAt: string;
+  color?: ProjectColor;
 }
 
 export interface ProjectsLedger {
@@ -25,6 +39,7 @@ interface UseProjectsResult {
   renameProject: (projectId: string, name: string) => Promise<boolean>;
   deleteProject: (projectId: string) => Promise<boolean>;
   moveRepoToProject: (repoPath: string, targetProjectId: string) => Promise<boolean>;
+  setProjectColor: (projectId: string, color: ProjectColor) => Promise<boolean>;
 }
 
 export function useProjects(): UseProjectsResult {
@@ -164,6 +179,28 @@ export function useProjects(): UseProjectsResult {
     }
   }, [ledger, refresh]);
 
+  const setProjectColor = useCallback(async (projectId: string, color: ProjectColor) => {
+    setLedger((prev) => (prev ? {
+      ...prev,
+      projects: prev.projects.map((p) => (p.id === projectId ? { ...p, color } : p)),
+    } : prev));
+    try {
+      const res = await fetch(`/api/panel/projects/${encodeURIComponent(projectId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as ProjectsLedger;
+      setLedger(data);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to set project color');
+      void refresh();
+      return false;
+    }
+  }, [refresh]);
+
   const activeProject = ledger
     ? ledger.projects.find((p) => p.id === ledger.activeProjectId) ?? ledger.projects[0] ?? null
     : null;
@@ -179,5 +216,6 @@ export function useProjects(): UseProjectsResult {
     renameProject,
     deleteProject,
     moveRepoToProject,
+    setProjectColor,
   };
 }

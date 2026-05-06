@@ -46,6 +46,13 @@ interface RepoRegistryListProps {
   projectsForMove?: Array<{ id: string; name: string }>;
   currentProjectId?: string | null;
   onMoveRepoToProject?: (repoLocalPath: string, targetProjectId: string) => void | Promise<void>;
+  /** Display label for the active project. Used in the empty-state hint
+   *  ("No repos in {name} yet") so the operator knows which scope is empty. */
+  activeProjectName?: string | null;
+  /** Total count of repos in the registry, ignoring the current project
+   *  filter. When this is > 0 but the filtered list is empty, the empty
+   *  state nudges the operator toward dragging from another project. */
+  totalReposInRegistry?: number;
 }
 
 function RepoRegistryListBase({
@@ -81,6 +88,8 @@ function RepoRegistryListBase({
   projectsForMove,
   currentProjectId = null,
   onMoveRepoToProject,
+  activeProjectName,
+  totalReposInRegistry,
 }: RepoRegistryListProps) {
   return (
     <>
@@ -224,6 +233,46 @@ function RepoRegistryListBase({
                 }}
               >
                 Click <span style={{ color: 'var(--t-text-muted)', fontWeight: 600 }}>+</span> to add a local Git repository.
+              </div>
+            </div>
+          ) : null}
+
+          {!loading && !loadError && orderedRepos.length === 0 && (totalReposInRegistry ?? 0) > 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                paddingTop: 32,
+                paddingBottom: 12,
+                paddingLeft: 20,
+                paddingRight: 20,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'var(--t-text-secondary)',
+                  letterSpacing: '-0.01em',
+                  lineHeight: 1.3,
+                }}
+              >
+                {activeProjectName ? `${activeProjectName} has no repos` : 'This project has no repos'}
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  maxWidth: 240,
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                  color: 'var(--t-text-faint)',
+                  letterSpacing: '-0.005em',
+                }}
+              >
+                Drag a repo onto a project dot below, or right-click a repo card and pick <span style={{ color: 'var(--t-text-muted)', fontWeight: 600 }}>Move to project</span>.
               </div>
             </div>
           ) : null}

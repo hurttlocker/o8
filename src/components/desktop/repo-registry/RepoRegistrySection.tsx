@@ -52,6 +52,7 @@ function RepoRegistrySectionBase({
   projectsForMove,
   currentProjectId = null,
   onMoveRepoToProject,
+  activeProjectName,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectRepo?: (repoId: string) => void;
@@ -81,6 +82,7 @@ function RepoRegistrySectionBase({
   projectsForMove?: Array<{ id: string; name: string }>;
   currentProjectId?: string | null;
   onMoveRepoToProject?: (repoLocalPath: string, targetProjectId: string) => void | Promise<void>;
+  activeProjectName?: string | null;
 } = {}) {
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -691,6 +693,8 @@ function RepoRegistrySectionBase({
         projectsForMove={projectsForMove}
         currentProjectId={currentProjectId}
         onMoveRepoToProject={onMoveRepoToProject}
+        activeProjectName={activeProjectName}
+        totalReposInRegistry={repos.length}
         hideHeader={hideHeader}
         reposOpen={reposOpen}
         loading={loading}
