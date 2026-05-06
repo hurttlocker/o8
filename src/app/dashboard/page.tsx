@@ -22,6 +22,8 @@ import { AlertToast } from '@/components/shared/AlertToast';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
+import { useProjects } from '@/components/desktop/repo-registry/useProjects';
+import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { ApprovalBanner } from '@/components/desktop/ApprovalBanner';
 import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
@@ -387,6 +389,7 @@ function DashboardInner() {
   // contentEditable so existing native shortcuts (Cmd+K text-link in
   // markdown editors, etc.) don't break.
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const dashboardProjects = useProjects();
 
   const {
     activeFtuxMilestone,
@@ -2594,6 +2597,46 @@ function DashboardInner() {
             onClose={handlePaletteClose}
             workspace={activeWorkspace ?? null}
             repo={globalRepo ?? null}
+            actionItems={(() => {
+              const ledger = dashboardProjects.ledger;
+              if (!ledger) return [];
+              const items: CommandPaletteActionItem[] = [];
+              const activeRepoPath = globalRepoEntry?.localPath
+                ?? workspaceTerminalPreferredRepo?.localPath
+                ?? null;
+              const activeRepoName = globalRepoEntry?.name
+                ?? workspaceTerminalPreferredRepo?.name
+                ?? null;
+
+              // Switch-to entries for every project that isn't the active one.
+              for (const project of ledger.projects) {
+                if (project.id === ledger.activeProjectId) continue;
+                items.push({
+                  id: `project:switch:${project.id}`,
+                  title: `Switch to ${project.name}`,
+                  detail: `${project.repoPaths.length} repo${project.repoPaths.length === 1 ? '' : 's'}`,
+                  swatchColor: project.color,
+                  onActivate: () => { void dashboardProjects.switchActive(project.id); },
+                });
+              }
+
+              // Move-active-repo entries — only when there's a focused repo.
+              if (activeRepoPath && activeRepoName) {
+                const currentOwner = ledger.projects.find((p) => p.repoPaths.includes(activeRepoPath));
+                for (const project of ledger.projects) {
+                  if (project.id === currentOwner?.id) continue;
+                  items.push({
+                    id: `project:move:${project.id}`,
+                    title: `Move ${activeRepoName} to ${project.name}`,
+                    detail: currentOwner ? `From ${currentOwner.name}` : 'Currently unassigned',
+                    swatchColor: project.color,
+                    onActivate: () => { void dashboardProjects.moveRepoToProject(activeRepoPath, project.id); },
+                  });
+                }
+              }
+
+              return items;
+            })()}
             onSelectIssue={handlePaletteSelectIssue}
             onSelectFile={handlePaletteSelectFile}
             onSelectAgent={handlePaletteSelectAgent}
