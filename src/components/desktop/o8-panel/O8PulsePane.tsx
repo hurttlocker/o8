@@ -497,9 +497,6 @@ export const O8PulsePane = memo(function O8PulsePane({
         tone="neutral"
       />
       <style>{`
-        html[data-palette='light'] .o8-pulse-pane {
-          --o8-pulse-hero-text: #F4F2ED;
-        }
         @keyframes o8-pulse {
           0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.28); }
           70% { box-shadow: 0 0 0 7px rgba(249, 115, 22, 0); }
