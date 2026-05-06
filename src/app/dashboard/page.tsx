@@ -3036,6 +3036,9 @@ function DashboardInner() {
                           onBrowserActiveUrlChange={setO8BrowserHoverUrl}
                           commitSha={o8CommitSha}
                           onClearCommit={handleClearCommit}
+                          onSelectCommit={handleSelectCommit}
+                          onSelectPR={handleReviewPR}
+                          onSelectIssue={handleSelectIssue}
                           onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
                           onOpenFile={(filePath) => {
                             const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };

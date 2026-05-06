@@ -6,7 +6,7 @@
  */
 
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { ActivityItem, FeedFilter } from './agent-panel/types';
 import { relativeAge } from './agent-panel/shared';
 
@@ -101,6 +101,22 @@ export type O8FeedFilter = FeedFilter;
 
 export const ALL_REPOS_KEY = '__all__';
 
+export const ACTIVITY_COLORS = {
+  add: '#91c99d',
+  success: '#70b57f',
+  successBg: 'rgba(112, 181, 127, 0.08)',
+  delete: '#d99a9a',
+  danger: '#c97878',
+  dangerBg: 'rgba(201, 120, 120, 0.08)',
+  accent: '#8d9fbd',
+  accentBg: 'rgba(141, 159, 189, 0.08)',
+  accentBorder: 'rgba(141, 159, 189, 0.16)',
+  merge: '#aaa0c7',
+  mergeBg: 'rgba(170, 160, 199, 0.08)',
+  attention: '#cf9d60',
+  attentionBg: 'rgba(207, 157, 96, 0.08)',
+};
+
 export const FILTER_TABS: { key: O8FeedFilter; label: string; icon: (color: string) => React.ReactNode }[] = [
   { key: 'all', label: 'All', icon: (c) => <IconZap size={11} color={c} /> },
   { key: 'commit', label: 'Commits', icon: (c) => <IconGitCommit size={11} color={c} /> },
@@ -110,12 +126,12 @@ export const FILTER_TABS: { key: O8FeedFilter; label: string; icon: (color: stri
 ];
 
 const FEED_ICON_MAP: Record<string, { bg: string; color: string; icon: React.ReactNode }> = {
-  commit: { bg: 'rgba(34,197,94,0.08)', color: '#22c55e', icon: <IconGitCommit size={11} color="#22c55e" /> },
-  issue: { bg: 'rgba(139,92,246,0.08)', color: '#8b5cf6', icon: <IconAlertCircle size={11} color="#8b5cf6" /> },
-  pr: { bg: 'rgba(37,99,235,0.08)', color: '#2563eb', icon: <IconGitPullRequest size={11} color="#2563eb" /> },
-  ci_success: { bg: 'rgba(34,197,94,0.08)', color: '#22c55e', icon: <IconCheckCircle size={11} color="#22c55e" /> },
-  ci_failure: { bg: 'rgba(239,68,68,0.08)', color: '#ef4444', icon: <IconXCircle size={11} color="#ef4444" /> },
-  ci_pending: { bg: 'rgba(245,158,11,0.08)', color: '#f59e0b', icon: <IconClock size={11} color="#f59e0b" /> },
+  commit: { bg: ACTIVITY_COLORS.successBg, color: ACTIVITY_COLORS.success, icon: <IconGitCommit size={11} color={ACTIVITY_COLORS.success} /> },
+  issue: { bg: ACTIVITY_COLORS.mergeBg, color: ACTIVITY_COLORS.merge, icon: <IconAlertCircle size={11} color={ACTIVITY_COLORS.merge} /> },
+  pr: { bg: ACTIVITY_COLORS.accentBg, color: ACTIVITY_COLORS.accent, icon: <IconGitPullRequest size={11} color={ACTIVITY_COLORS.accent} /> },
+  ci_success: { bg: ACTIVITY_COLORS.successBg, color: ACTIVITY_COLORS.success, icon: <IconCheckCircle size={11} color={ACTIVITY_COLORS.success} /> },
+  ci_failure: { bg: ACTIVITY_COLORS.dangerBg, color: ACTIVITY_COLORS.danger, icon: <IconXCircle size={11} color={ACTIVITY_COLORS.danger} /> },
+  ci_pending: { bg: ACTIVITY_COLORS.attentionBg, color: ACTIVITY_COLORS.attention, icon: <IconClock size={11} color={ACTIVITY_COLORS.attention} /> },
 };
 
 export function feedIconForItem(item: ActivityItem) {
@@ -263,8 +279,8 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
   if (item.kind === 'pr') {
     return (
       <>
-        <span style={{ color: '#22c55e' }}>+{item.additions}</span>
-        <span style={{ color: '#ef4444' }}>-{item.deletions}</span>
+        <span style={{ color: ACTIVITY_COLORS.add }}>+{item.additions}</span>
+        <span style={{ color: ACTIVITY_COLORS.delete }}>-{item.deletions}</span>
         <span style={{ color: 'var(--t-text-faint)' }}>·</span>
         <span>{item.branch}</span>
         <span style={{ color: 'var(--t-text-faint)' }}>·</span>
@@ -280,7 +296,7 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
         <span>{item.branch}</span>
         <span style={{ color: 'var(--t-text-faint)' }}>·</span>
         <span style={{
-          color: item.conclusion === 'success' ? '#22c55e' : item.conclusion === 'failure' ? '#ef4444' : '#f59e0b',
+          color: item.conclusion === 'success' ? ACTIVITY_COLORS.success : item.conclusion === 'failure' ? ACTIVITY_COLORS.danger : ACTIVITY_COLORS.attention,
           fontWeight: 600,
         }}>
           {item.conclusion || item.status}
@@ -399,11 +415,13 @@ const DETAIL_ROW_STYLE: React.CSSProperties = {
 };
 
 function DetailPill({ label, color }: { label: string; color: string }) {
+  const background = color.startsWith('#') ? `${color}14` : 'var(--t-bg-card)';
   return (
     <span style={{
       paddingTop: 1, paddingRight: 6, paddingBottom: 1, paddingLeft: 6,
       borderRadius: 6, fontSize: 9, fontWeight: 700,
-      background: `${color}14`, color,
+      background,
+      color,
     }}>
       {label}
     </span>
@@ -436,16 +454,16 @@ export function renderExpandedDetail(
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <DetailPill label={item.state} color={item.state === 'merged' ? '#8b5cf6' : item.state === 'open' ? '#22c55e' : '#ef4444'} />
-          <DetailPill label={`+${item.additions} -${item.deletions}`} color={item.additions > item.deletions ? '#22c55e' : '#ef4444'} />
+          <DetailPill label={item.state} color={item.state === 'merged' ? ACTIVITY_COLORS.merge : item.state === 'open' ? ACTIVITY_COLORS.success : ACTIVITY_COLORS.danger} />
+          <DetailPill label={`+${item.additions} -${item.deletions}`} color={item.additions > item.deletions ? ACTIVITY_COLORS.add : ACTIVITY_COLORS.delete} />
           <DetailPill label={`${item.changedFiles} file${item.changedFiles === 1 ? '' : 's'}`} color='var(--t-text-muted)' />
-          {item.reviewDecision ? <DetailPill label={item.reviewDecision.replace('_', ' ').toLowerCase()} color={item.reviewDecision === 'APPROVED' ? '#22c55e' : '#f59e0b'} /> : null}
+          {item.reviewDecision ? <DetailPill label={item.reviewDecision.replace('_', ' ').toLowerCase()} color={item.reviewDecision === 'APPROVED' ? ACTIVITY_COLORS.success : ACTIVITY_COLORS.attention} /> : null}
         </div>
         {item.checkSummary ? (
           <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8 }}>
-            {item.checkSummary.passed > 0 ? <span style={{ color: '#22c55e' }}>{item.checkSummary.passed} passed</span> : null}
-            {item.checkSummary.failed > 0 ? <span style={{ color: '#ef4444' }}>{item.checkSummary.failed} failed</span> : null}
-            {item.checkSummary.pending > 0 ? <span style={{ color: '#f59e0b' }}>{item.checkSummary.pending} pending</span> : null}
+            {item.checkSummary.passed > 0 ? <span style={{ color: ACTIVITY_COLORS.success }}>{item.checkSummary.passed} passed</span> : null}
+            {item.checkSummary.failed > 0 ? <span style={{ color: ACTIVITY_COLORS.danger }}>{item.checkSummary.failed} failed</span> : null}
+            {item.checkSummary.pending > 0 ? <span style={{ color: ACTIVITY_COLORS.attention }}>{item.checkSummary.pending} pending</span> : null}
           </div>
         ) : null}
         {detail?.files && detail.files.length > 0 ? (
@@ -454,8 +472,8 @@ export function renderExpandedDetail(
             {detail.files.map((f) => (
               <div key={f.path} style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8 }}>
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.path}</span>
-                <span style={{ color: '#22c55e', flexShrink: 0 }}>+{f.additions}</span>
-                <span style={{ color: '#ef4444', flexShrink: 0 }}>-{f.deletions}</span>
+                <span style={{ color: ACTIVITY_COLORS.add, flexShrink: 0 }}>+{f.additions}</span>
+                <span style={{ color: ACTIVITY_COLORS.delete, flexShrink: 0 }}>-{f.deletions}</span>
               </div>
             ))}
           </div>
@@ -476,7 +494,7 @@ export function renderExpandedDetail(
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <DetailPill label={item.conclusion || item.status} color={item.conclusion === 'success' ? '#22c55e' : item.conclusion === 'failure' ? '#ef4444' : '#f59e0b'} />
+          <DetailPill label={item.conclusion || item.status} color={item.conclusion === 'success' ? ACTIVITY_COLORS.success : item.conclusion === 'failure' ? ACTIVITY_COLORS.danger : ACTIVITY_COLORS.attention} />
           <span style={{ ...DETAIL_ROW_STYLE }}>
             {item.workflow} on {item.branch}
           </span>
@@ -486,7 +504,7 @@ export function renderExpandedDetail(
             <div style={DETAIL_LABEL_STYLE}>Failing jobs</div>
             {detail.failingJobs.map((j) => (
               <div key={j.name} style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 6, alignItems: 'center' }}>
-                <IconXCircle size={10} color="#ef4444" />
+                <IconXCircle size={10} color={ACTIVITY_COLORS.danger} />
                 <span>{j.name}</span>
                 {j.failingStep ? <span style={{ color: 'var(--t-text-faint)' }}>{j.failingStep}</span> : null}
               </div>
@@ -496,7 +514,7 @@ export function renderExpandedDetail(
           <div style={{ ...DETAIL_ROW_STYLE, color: 'var(--t-text-faint)' }}>Loading...</div>
         ) : null}
         {detail?.summaryLine ? (
-          <div style={{ ...DETAIL_ROW_STYLE, color: '#ef4444', fontWeight: 500 }}>
+          <div style={{ ...DETAIL_ROW_STYLE, color: ACTIVITY_COLORS.danger, fontWeight: 500 }}>
             {detail.summaryLine.slice(0, 200)}
           </div>
         ) : null}
@@ -508,7 +526,7 @@ export function renderExpandedDetail(
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <DetailPill label={item.state} color={item.state === 'open' ? '#22c55e' : '#8b5cf6'} />
+          <DetailPill label={item.state} color={item.state === 'open' ? ACTIVITY_COLORS.success : ACTIVITY_COLORS.merge} />
           {item.labels.slice(0, 4).map((l) => (
             <DetailPill key={l.name} label={l.name} color={`#${l.color}`} />
           ))}
@@ -543,8 +561,8 @@ export function itemBadge(item: ActivityItem): React.ReactNode {
         fontWeight: 700,
         flexShrink: 0,
         marginTop: 4,
-        background: item.state === 'merged' ? 'rgba(139,92,246,0.1)' : item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-        color: item.state === 'merged' ? '#8b5cf6' : item.state === 'open' ? '#22c55e' : '#ef4444',
+        background: item.state === 'merged' ? ACTIVITY_COLORS.mergeBg : item.state === 'open' ? ACTIVITY_COLORS.successBg : ACTIVITY_COLORS.dangerBg,
+        color: item.state === 'merged' ? ACTIVITY_COLORS.merge : item.state === 'open' ? ACTIVITY_COLORS.success : ACTIVITY_COLORS.danger,
         textTransform: 'uppercase',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}>
@@ -564,8 +582,8 @@ export function itemBadge(item: ActivityItem): React.ReactNode {
         fontWeight: 700,
         flexShrink: 0,
         marginTop: 4,
-        background: item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(139,92,246,0.1)',
-        color: item.state === 'open' ? '#22c55e' : '#8b5cf6',
+        background: item.state === 'open' ? ACTIVITY_COLORS.successBg : ACTIVITY_COLORS.mergeBg,
+        color: item.state === 'open' ? ACTIVITY_COLORS.success : ACTIVITY_COLORS.merge,
         textTransform: 'uppercase',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}>
