@@ -2,6 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- external focus requests intentionally sync selected workspace file */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useTheme } from '@/lib/theme/context';
 import { AllFilesTree } from './workspace-rail/AllFilesTree';
 import { ChangesList, useWorkspaceChanges } from './workspace-rail/ChangesList';
 import { DiffViewer } from './workspace-rail/DiffViewer';
@@ -16,7 +17,11 @@ type WorkspaceRepoOption = Pick<RepoRegistryEntry, 'id' | 'name' | 'localPath' |
 const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const RAIL_WIDTH = 'clamp(224px, 30%, 292px)';
-const O8_WORKSPACE_GLASS_TOKENS = {
+// Workspace pane local token block. Originally hardcoded for dark vibrancy
+// (rgba whites). We now ship two variants and pick at render time via
+// useTheme().paletteId so light + solid mode renders as paper instead of
+// invisible white-on-white.
+const O8_WORKSPACE_TOKENS_DARK = {
   colorScheme: 'dark',
   ['--t-bg' as string]: 'rgba(50, 57, 66, 0.42)',
   ['--t-bg-card' as string]: 'rgba(255, 255, 255, 0.07)',
@@ -60,6 +65,58 @@ const O8_WORKSPACE_GLASS_TOKENS = {
   ['--o8-workspace-control-border' as string]: 'rgba(255, 255, 255, 0.13)',
   ['--o8-workspace-control-shadow' as string]: 'inset 0 1px 0 rgba(255, 255, 255, 0.1)',
   ['--o8-workspace-rail-header-bg' as string]: 'linear-gradient(180deg, rgba(255, 255, 255, 0.052) 0%, rgba(255, 255, 255, 0.028) 100%)',
+  ['--o8-workspace-shell-bg' as string]: 'linear-gradient(180deg, rgba(70, 78, 90, 0.42) 0%, rgba(44, 52, 63, 0.34) 100%)',
+  ['--o8-workspace-shell-inset' as string]: 'inset 0 1px 0 rgba(255, 255, 255, 0.09)',
+  ['--o8-workspace-scrollbar' as string]: 'rgba(226, 232, 240, 0.34) rgba(255, 255, 255, 0.06)',
+} satisfies CSSProperties;
+
+const O8_WORKSPACE_TOKENS_LIGHT = {
+  colorScheme: 'light',
+  ['--t-bg' as string]: '#F4F2ED',
+  ['--t-bg-card' as string]: 'rgba(15, 23, 42, 0.04)',
+  ['--t-bg-subtle' as string]: '#EFEDE6',
+  ['--t-panel' as string]: '#FAF9F4',
+  ['--t-panel-translucent' as string]: '#F4F2ED',
+  ['--t-panel-solid' as string]: '#FAF9F4',
+  ['--t-panel-border' as string]: 'rgba(15, 23, 42, 0.1)',
+  ['--t-panel-shadow' as string]: '0 16px 36px rgba(15, 23, 42, 0.06)',
+  ['--t-input-bg' as string]: '#FFFFFF',
+  ['--t-input-border' as string]: 'rgba(15, 23, 42, 0.12)',
+  ['--t-border' as string]: 'rgba(15, 23, 42, 0.1)',
+  ['--t-divider' as string]: 'rgba(15, 23, 42, 0.08)',
+  ['--t-divider-subtle' as string]: 'rgba(15, 23, 42, 0.05)',
+  ['--t-hover' as string]: 'rgba(15, 23, 42, 0.04)',
+  ['--t-canvas-bg' as string]: '#F4F2ED',
+  ['--t-text' as string]: '#0f172a',
+  ['--t-text-strong' as string]: '#020617',
+  ['--t-text-secondary' as string]: '#475569',
+  ['--t-text-muted' as string]: '#64748b',
+  ['--t-text-faint' as string]: '#94a3b8',
+  ['--t-accent' as string]: '#2563eb',
+  ['--t-accent-soft' as string]: 'rgba(37, 99, 235, 0.1)',
+  ['--t-accent-border' as string]: 'rgba(37, 99, 235, 0.26)',
+  ['--t-brand-orange' as string]: '#c8923b',
+  ['--t-brand-red' as string]: '#dc2626',
+  ['--t-chat-surface-bg' as string]: '#F4F2ED',
+  ['--t-chat-surface-text' as string]: '#0f172a',
+  ['--t-chat-surface-text-secondary' as string]: '#475569',
+  ['--t-chat-surface-text-muted' as string]: '#64748b',
+  ['--t-chat-surface-border' as string]: 'rgba(15, 23, 42, 0.08)',
+  ['--t-chat-surface-input-bg' as string]: '#FFFFFF',
+  ['--t-chat-surface-input-border' as string]: 'rgba(15, 23, 42, 0.12)',
+  ['--t-chat-surface-card-bg' as string]: 'rgba(15, 23, 42, 0.04)',
+  ['--t-terminal-ansi-green' as string]: '#16a34a',
+  ['--t-terminal-ansi-bright-green' as string]: '#22c55e',
+  ['--t-terminal-ansi-bright-red' as string]: '#ef4444',
+  ['--o8-workspace-header-bg' as string]: '#F4F2ED',
+  ['--o8-workspace-header-divider' as string]: 'rgba(15, 23, 42, 0.08)',
+  ['--o8-workspace-control-bg' as string]: '#FFFFFF',
+  ['--o8-workspace-control-border' as string]: 'rgba(15, 23, 42, 0.12)',
+  ['--o8-workspace-control-shadow' as string]: 'inset 0 0 0 1px rgba(15, 23, 42, 0.04)',
+  ['--o8-workspace-rail-header-bg' as string]: '#FAF9F4',
+  ['--o8-workspace-shell-bg' as string]: '#F4F2ED',
+  ['--o8-workspace-shell-inset' as string]: 'inset 0 0 0 1px rgba(15, 23, 42, 0.04)',
+  ['--o8-workspace-scrollbar' as string]: 'rgba(15, 23, 42, 0.24) rgba(15, 23, 42, 0.06)',
 } satisfies CSSProperties;
 
 // Easter-egg color ramp for the Changes count: the badge cools-to-warm
@@ -447,20 +504,26 @@ export function O8WorkspacePane({
     return repoOptions.find((option) => option.value === repoPath)?.label ?? lensLabel?.text ?? leafFromPath(repoPath);
   }, [lensLabel?.text, repoOptions, repoPath]);
 
+  const { paletteId, surface } = useTheme();
+  const workspaceTokens = paletteId === 'light' ? O8_WORKSPACE_TOKENS_LIGHT : O8_WORKSPACE_TOKENS_DARK;
+  // Glass: keep the saturating backdrop blur. Solid: drop the backdrop
+  // entirely so the paper / graphite paint without ghosting from underneath.
+  const isGlass = surface === 'glass';
+
   return (
     <div
       style={{
-        ...O8_WORKSPACE_GLASS_TOKENS,
+        ...workspaceTokens,
         display: 'flex',
         flex: 1,
         flexDirection: 'column',
         minHeight: 0,
-        background: 'linear-gradient(180deg, rgba(70, 78, 90, 0.42) 0%, rgba(44, 52, 63, 0.34) 100%)',
+        background: 'var(--o8-workspace-shell-bg)',
         color: 'var(--t-text)',
-        backdropFilter: 'blur(24px) saturate(1.16)',
-        WebkitBackdropFilter: 'blur(24px) saturate(1.16)',
-        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.09)',
-        scrollbarColor: 'rgba(226, 232, 240, 0.34) rgba(255, 255, 255, 0.06)',
+        backdropFilter: isGlass ? 'blur(24px) saturate(1.16)' : 'none',
+        WebkitBackdropFilter: isGlass ? 'blur(24px) saturate(1.16)' : 'none',
+        boxShadow: 'var(--o8-workspace-shell-inset)',
+        scrollbarColor: 'var(--o8-workspace-scrollbar)' as unknown as string,
         scrollbarWidth: 'thin',
       } as CSSProperties}
     >

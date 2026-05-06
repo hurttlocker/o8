@@ -288,7 +288,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
           paddingRight: 12,
           paddingBottom: 10,
           paddingLeft: 12,
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          borderBottom: '1px solid var(--t-border)',
         }}
       >
         <div style={{ position: 'relative' }}>
@@ -305,9 +305,9 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
               paddingBottom: 0,
               paddingLeft: 10,
               borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.1)',
-              background: 'rgba(255,255,255,0.04)',
-              color: 'rgba(255,255,255,0.85)',
+              border: '1px solid var(--t-border)',
+              background: 'var(--t-bg-card)',
+              color: 'var(--t-text)',
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
@@ -334,8 +334,8 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                   paddingBottom: 4,
                   paddingLeft: 4,
                   borderRadius: 12,
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  background: '#232631',
+                  border: '1px solid var(--t-border)',
+                  background: 'var(--t-panel-solid)',
                   boxShadow: '0 14px 32px rgba(0,0,0,0.35)',
                   zIndex: 100,
                 }}
@@ -361,7 +361,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                       border: 'none',
                       borderRadius: 8,
                       background: filter === option ? 'rgba(59,130,246,0.16)' : 'transparent',
-                      color: '#e2e8f0',
+                      color: 'var(--t-text)',
                       fontSize: 12,
                       fontWeight: 500,
                       cursor: 'pointer',
@@ -370,7 +370,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                     }}
                     onMouseEnter={(event) => {
                       if (filter === option) return;
-                      event.currentTarget.style.background = 'rgba(255,255,255,0.06)';
+                      event.currentTarget.style.background = 'var(--t-hover)';
                     }}
                     onMouseLeave={(event) => {
                       if (filter === option) return;
@@ -386,7 +386,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
           ) : null}
         </div>
         {activeItemsCount > 0 ? (
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.58)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+          <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
             <span style={{ color: '#4ade80' }}>+{totalAdditions}</span>
             {' '}
             <span style={{ color: '#f87171' }}>-{totalDeletions}</span>
@@ -406,10 +406,10 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
             border: 'none',
             borderRadius: 6,
             background: 'transparent',
-            color: 'rgba(255,255,255,0.52)',
+            color: 'var(--t-text-muted)',
             cursor: 'pointer',
           }}
-          onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+          onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -430,7 +430,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
             paddingRight: 12,
             paddingBottom: 8,
             paddingLeft: 12,
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            borderBottom: '1px solid var(--t-border)',
             background: 'rgba(59,130,246,0.08)',
             flexShrink: 0,
           }}
@@ -446,7 +446,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
               minWidth: 0,
               fontSize: 11,
               fontWeight: 600,
-              color: '#93c5fd',
+              color: 'var(--t-accent)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -469,9 +469,9 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
               paddingBottom: 0,
               paddingLeft: 8,
               borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.06)',
-              color: '#e2e8f0',
+              border: '1px solid var(--t-divider-strong)',
+              background: 'var(--t-hover)',
+              color: 'var(--t-text)',
               fontSize: 11,
               fontWeight: 600,
               cursor: 'pointer',
@@ -479,8 +479,8 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
               transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
               flexShrink: 0,
             }}
-            onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+            onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-divider-strong)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
               <polyline points="15 18 9 12 15 6" />
@@ -490,12 +490,12 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
         </div>
       ) : null}
 
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflow: 'auto' }}>
         {loading ? (
-          <div style={{ paddingTop: 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, color: 'rgba(255,255,255,0.5)', fontSize: 13, textAlign: 'center' }}>Loading...</div>
+          <div style={{ paddingTop: 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, color: 'var(--t-text-muted)', fontSize: 13, textAlign: 'center' }}>Loading...</div>
         ) : filter === 'commits' ? (
           commits.length === 0 ? (
-            <div style={{ paddingTop: 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center' }}>
+            <div style={{ paddingTop: 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, color: 'var(--t-text-faint)', fontSize: 13, textAlign: 'center' }}>
               No recent commits
             </div>
           ) : (
@@ -512,8 +512,8 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                     key={commit.sha}
                     style={{
                       borderRadius: 14,
-                      border: isExpanded ? '1px solid rgba(96,165,250,0.26)' : '1px solid rgba(255,255,255,0.08)',
-                      background: isExpanded ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.03)',
+                      border: isExpanded ? '1px solid rgba(96,165,250,0.26)' : '1px solid var(--t-border)',
+                      background: isExpanded ? 'rgba(59,130,246,0.08)' : 'var(--t-bg-card)',
                       boxShadow: isExpanded ? '0 8px 24px rgba(15,23,42,0.22)' : 'none',
                       marginBottom: 10,
                       overflow: 'hidden',
@@ -533,13 +533,13 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                         paddingLeft: 14,
                         border: 'none',
                         background: 'transparent',
-                        color: '#e2e8f0',
+                        color: 'var(--t-text)',
                         cursor: 'pointer',
                         textAlign: 'left',
                       }}
                       onMouseEnter={(event) => {
                         if (isExpanded) return;
-                        event.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                        event.currentTarget.style.background = 'var(--t-bg-card)';
                       }}
                       onMouseLeave={(event) => {
                         if (isExpanded) return;
@@ -547,7 +547,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                       }}
                     >
                       <div style={{ paddingTop: 3 }}>
-                        <ChevronIcon open={isExpanded} size={11} color="rgba(255,255,255,0.7)" />
+                        <ChevronIcon open={isExpanded} size={11} color="var(--t-text-secondary)" />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div
@@ -558,7 +558,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                             fontSize: 13,
                             fontWeight: 600,
                             letterSpacing: '-0.01em',
-                            color: '#e2e8f0',
+                            color: 'var(--t-text)',
                           }}
                         >
                           {displayMessage}
@@ -571,7 +571,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                             gap: 6,
                             marginTop: 5,
                             fontSize: 11,
-                            color: 'rgba(255,255,255,0.65)',
+                            color: 'var(--t-text-secondary)',
                             fontFamily: '"SF Mono", ui-monospace, monospace',
                           }}
                         >
@@ -594,7 +594,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                           paddingRight: 14,
                           paddingBottom: 14,
                           paddingLeft: 14,
-                          borderTop: '1px solid rgba(255,255,255,0.06)',
+                          borderTop: '1px solid var(--t-divider-subtle)',
                         }}
                       >
                         <div
@@ -603,7 +603,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                             paddingRight: 0,
                             paddingBottom: 0,
                             paddingLeft: 0,
-                            color: 'rgba(255,255,255,0.78)',
+                            color: 'var(--t-text)',
                             fontSize: 12,
                             lineHeight: 1.6,
                             whiteSpace: 'pre-wrap',
@@ -622,12 +622,12 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                           }}
                         >
                           <ActionButton
-                            icon={<CopyIcon size={12} color="#cbd5e1" />}
+                            icon={<CopyIcon size={12} color="var(--t-text-secondary)" />}
                             label={copiedCommitSha === commit.sha ? 'Copied!' : 'Copy SHA'}
                             onClick={() => void handleCopySha(commit.sha)}
                           />
                           <ActionButton
-                            icon={<ExternalLinkIcon size={12} color={repoSlug ? '#cbd5e1' : 'rgba(255,255,255,0.3)'} />}
+                            icon={<ExternalLinkIcon size={12} color={repoSlug ? 'var(--t-text-secondary)' : 'var(--t-text-faint)'} />}
                             label="View on GitHub"
                             onClick={() => handleViewOnGitHub(commit.sha)}
                             disabled={!repoSlug}
@@ -636,11 +636,11 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
 
                         <div style={{ marginTop: 16 }}>
                           {diffLoading ? (
-                            <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Loading commit diff...</div>
+                            <div style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Loading commit diff...</div>
                           ) : diffError ? (
                             <div style={{ color: '#fca5a5', fontSize: 12 }}>{diffError}</div>
                           ) : commitDiffFiles.length === 0 ? (
-                            <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>No file diff available</div>
+                            <div style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>No file diff available</div>
                           ) : (
                             commitDiffFiles.map((file) => (
                               <div
@@ -650,7 +650,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                                   paddingRight: 0,
                                   paddingBottom: 0,
                                   paddingLeft: 0,
-                                  borderTop: '1px solid rgba(255,255,255,0.06)',
+                                  borderTop: '1px solid var(--t-divider-subtle)',
                                 }}
                               >
                                 <div
@@ -672,7 +672,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                                         ? '#4ade80'
                                         : file.status === 'deleted'
                                           ? '#f87171'
-                                          : '#e2e8f0',
+                                          : 'var(--t-text)',
                                       fontSize: 12,
                                       fontWeight: 600,
                                       fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -680,7 +680,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                                   >
                                     {file.path}
                                   </span>
-                                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
+                                  <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
                                     {file.status === 'renamed' && file.previousPath ? `from ${file.previousPath}` : file.status}
                                   </span>
                                   <span style={{ fontSize: 11, fontWeight: 600, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
@@ -702,7 +702,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
             </div>
           )
         ) : files.length === 0 ? (
-          <div style={{ paddingTop: 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center' }}>
+          <div style={{ paddingTop: 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, color: 'var(--t-text-faint)', fontSize: 13, textAlign: 'center' }}>
             {filter === 'branch' ? 'No branch changes' : `No ${filterLabel(filter).toLowerCase()} changes`}
           </div>
         ) : (
@@ -725,23 +725,23 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                     paddingLeft: 12,
                     border: 'none',
                     background: isExpanded ? 'rgba(59,130,246,0.12)' : 'transparent',
-                    color: 'rgba(255,255,255,0.85)',
+                    color: 'var(--t-text)',
                     fontSize: 12,
                     fontFamily: '"SF Mono", ui-monospace, monospace',
                     cursor: 'pointer',
                     textAlign: 'left',
-                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    borderBottom: '1px solid var(--t-divider-subtle)',
                   }}
                   onMouseEnter={(event) => {
                     if (isExpanded) return;
-                    event.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                    event.currentTarget.style.background = 'var(--t-bg-card)';
                   }}
                   onMouseLeave={(event) => {
                     if (isExpanded) return;
                     event.currentTarget.style.background = 'transparent';
                   }}
                 >
-                  <ChevronIcon open={isExpanded} size={10} color="rgba(255,255,255,0.7)" />
+                  <ChevronIcon open={isExpanded} size={10} color="var(--t-text-secondary)" />
                   <span
                     style={{
                       flex: 1,
@@ -752,7 +752,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                         ? '#4ade80'
                         : file.status === 'deleted'
                           ? '#f87171'
-                          : 'rgba(255,255,255,0.85)',
+                          : 'var(--t-text)',
                     }}
                   >
                     {file.path}
@@ -770,7 +770,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                       paddingRight: 0,
                       paddingBottom: 0,
                       paddingLeft: 0,
-                      borderBottom: '1px solid rgba(255,255,255,0.06)',
+                      borderBottom: '1px solid var(--t-divider-subtle)',
                     }}
                   >
                     <DiffBlock diff={expandedDiff} />
@@ -783,8 +783,8 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
                       paddingBottom: 12,
                       paddingLeft: 16,
                       fontSize: 12,
-                      color: 'rgba(255,255,255,0.5)',
-                      borderBottom: '1px solid rgba(255,255,255,0.06)',
+                      color: 'var(--t-text-muted)',
+                      borderBottom: '1px solid var(--t-divider-subtle)',
                     }}
                   >
                     Loading diff...
