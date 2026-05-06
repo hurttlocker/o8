@@ -124,8 +124,8 @@ function RepoCardBase(props: RepoCardBaseProps) {
             left: contextMenu.x,
             top: contextMenu.y,
             minWidth: 200,
-            background: 'var(--t-bg-card, rgba(20, 24, 30, 0.96))',
-            border: '1px solid var(--t-divider)',
+            background: 'rgba(20, 24, 30, 0.96)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
             borderRadius: 10,
             boxShadow: '0 18px 44px rgba(0, 0, 0, 0.32)',
             paddingTop: 4,
@@ -134,6 +134,8 @@ function RepoCardBase(props: RepoCardBaseProps) {
             paddingRight: 4,
             zIndex: 60,
             fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            // Overlay chrome — always dark + light text regardless of theme.
+            color: 'rgba(255, 255, 255, 0.94)',
           }}
         >
           <div
@@ -142,7 +144,7 @@ function RepoCardBase(props: RepoCardBaseProps) {
               fontWeight: 600,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              color: 'var(--t-text-faint)',
+              color: 'rgba(226, 232, 240, 0.62)',
               paddingTop: 6,
               paddingBottom: 4,
               paddingLeft: 10,
@@ -172,7 +174,7 @@ function RepoCardBase(props: RepoCardBaseProps) {
                 borderRadius: 7,
                 border: 'none',
                 background: 'transparent',
-                color: 'var(--t-text)',
+                color: 'rgba(255, 255, 255, 0.94)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontSize: 12,
@@ -180,7 +182,7 @@ function RepoCardBase(props: RepoCardBaseProps) {
                 letterSpacing: '-0.005em',
                 fontFamily: 'inherit',
               }}
-              onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover, rgba(148, 163, 184, 0.14))'; }}
+              onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; }}
               onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
             >
               {target.name}

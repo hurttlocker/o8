@@ -433,8 +433,9 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
                 bottom: 'calc(100% + 6px)',
                 right: 0,
                 minWidth: 240,
-                background: 'var(--t-bg-card, rgba(20, 24, 30, 0.96))',
-                border: '1px solid var(--t-divider)',
+                // Overlay chrome — always dark + light text regardless of theme.
+                background: 'rgba(20, 24, 30, 0.96)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
                 borderRadius: 10,
                 boxShadow: '0 18px 44px rgba(0, 0, 0, 0.32)',
                 paddingTop: 4,
@@ -443,6 +444,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
                 paddingRight: 4,
                 zIndex: 60,
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                color: 'rgba(255, 255, 255, 0.94)',
               }}
             >
               {(['squash', 'merge', 'rebase'] as const).map((method) => {
@@ -468,19 +470,19 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
                       paddingRight: 10,
                       borderRadius: 7,
                       border: 'none',
-                      background: isActive ? 'var(--t-hover, rgba(148, 163, 184, 0.14))' : 'transparent',
-                      color: 'var(--t-text)',
+                      background: isActive ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                      color: 'rgba(255, 255, 255, 0.94)',
                       cursor: 'pointer',
                       textAlign: 'left',
                       fontFamily: 'inherit',
                     }}
-                    onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover, rgba(148, 163, 184, 0.14))'; }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; }}
                     onMouseLeave={(event) => {
-                      event.currentTarget.style.background = isActive ? 'var(--t-hover, rgba(148, 163, 184, 0.14))' : 'transparent';
+                      event.currentTarget.style.background = isActive ? 'rgba(255, 255, 255, 0.08)' : 'transparent';
                     }}
                   >
                     <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: '-0.005em' }}>{meta.menuLabel}</span>
-                    <span style={{ fontSize: 10.5, color: 'var(--t-text-muted)', letterSpacing: '-0.005em', marginTop: 1 }}>{meta.description}</span>
+                    <span style={{ fontSize: 10.5, color: 'rgba(226, 232, 240, 0.62)', letterSpacing: '-0.005em', marginTop: 1 }}>{meta.description}</span>
                   </button>
                 );
               })}

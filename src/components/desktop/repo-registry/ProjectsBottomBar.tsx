@@ -360,8 +360,8 @@ function ProjectsBottomBarBase({
             top: menu.y - 8,
             transform: 'translateY(-100%)',
             minWidth: 200,
-            background: 'var(--t-bg-card, rgba(20, 24, 30, 0.96))',
-            border: '1px solid var(--t-divider)',
+            background: 'rgba(20, 24, 30, 0.96)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
             borderRadius: 10,
             boxShadow: '0 18px 44px rgba(0, 0, 0, 0.32)',
             paddingTop: 6,
@@ -370,6 +370,10 @@ function ProjectsBottomBarBase({
             paddingRight: 4,
             zIndex: 60,
             fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            // Overlay chrome stays dark + light-text in every theme so the
+            // popover never inherits the page's body text color (which is
+            // dark in light theme and would render invisible here).
+            color: 'rgba(255, 255, 255, 0.94)',
           }}
         >
           <div
@@ -378,7 +382,7 @@ function ProjectsBottomBarBase({
               fontWeight: 600,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              color: 'var(--t-text-faint)',
+              color: 'rgba(226, 232, 240, 0.62)',
               paddingTop: 2,
               paddingBottom: 6,
               paddingLeft: 10,
@@ -426,7 +430,7 @@ function ProjectsBottomBarBase({
               );
             })}
           </div>
-          <div style={{ height: 1, background: 'var(--t-divider-subtle)', marginTop: 6, marginBottom: 4 }} />
+          <div style={{ height: 1, background: 'rgba(255, 255, 255, 0.08)', marginTop: 6, marginBottom: 4 }} />
           <MenuItem
             label="Rename"
             onClick={() => {
@@ -465,6 +469,12 @@ function MenuItem({
   disabled?: boolean;
   tone?: 'default' | 'fail';
 }) {
+  // Overlay chrome — always dark surface + light text, see the popover wrapper.
+  const color = tone === 'fail'
+    ? '#c98686'
+    : disabled
+      ? 'rgba(226, 232, 240, 0.4)'
+      : 'rgba(255, 255, 255, 0.94)';
   return (
     <button
       type="button"
@@ -485,7 +495,7 @@ function MenuItem({
         borderRadius: 7,
         border: 'none',
         background: 'transparent',
-        color: tone === 'fail' ? '#a37b7b' : disabled ? 'var(--t-text-faint)' : 'var(--t-text)',
+        color,
         cursor: disabled ? 'default' : 'pointer',
         textAlign: 'left',
         fontSize: 12,
@@ -494,7 +504,7 @@ function MenuItem({
         fontFamily: 'inherit',
       }}
       onMouseEnter={(event) => {
-        if (!disabled) event.currentTarget.style.background = 'var(--t-hover, rgba(148, 163, 184, 0.14))';
+        if (!disabled) event.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
       }}
       onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
     >
