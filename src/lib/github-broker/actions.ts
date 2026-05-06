@@ -216,12 +216,16 @@ async function getGitHubPullRequestHeadRef(repoFullName: string, prNumber: numbe
   };
 }
 
-export async function mergeGitHubPullRequest(repoFullName: string, prNumber: number, options?: { deleteBranch?: boolean }) {
+export async function mergeGitHubPullRequest(
+  repoFullName: string,
+  prNumber: number,
+  options?: { deleteBranch?: boolean; mergeMethod?: 'squash' | 'merge' | 'rebase' },
+) {
   const head = await getGitHubPullRequestHeadRef(repoFullName, prNumber);
   const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/merge`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ merge_method: 'squash' }),
+    body: JSON.stringify({ merge_method: options?.mergeMethod ?? 'squash' }),
   });
   const merged = await parseGitHubJson<{ merged?: boolean; sha?: string | null }>(response);
 

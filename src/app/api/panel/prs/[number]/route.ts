@@ -92,7 +92,7 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid PR number' }, { status: 400 });
   }
 
-  let body: { action: string; repo?: string; comment?: string };
+  let body: { action: string; repo?: string; comment?: string; mergeMethod?: 'squash' | 'merge' | 'rebase' };
   try {
     body = await request.json();
   } catch {
@@ -129,7 +129,10 @@ export async function POST(
     }
 
     if (action === 'merge') {
-      await mergeGitHubPullRequest(repo, prNum, { deleteBranch: true });
+      await mergeGitHubPullRequest(repo, prNum, {
+        deleteBranch: true,
+        mergeMethod: body.mergeMethod ?? 'squash',
+      });
       return NextResponse.json({ ok: true, action: 'merged' });
     }
 

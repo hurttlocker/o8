@@ -3113,6 +3113,8 @@ function DashboardInner() {
         branchName={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
+        leftColumnWidth={sidebarVisible ? (leftPanelFocus.focusActive ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
+        rightColumnWidth={chatVisible ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
         onOpenSettings={() => setActiveNavSection('settings')}
         onAddRepo={() => {
           if (typeof window !== 'undefined') {
