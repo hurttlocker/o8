@@ -22,8 +22,7 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
-import { ChatModelPicker } from './ChatModelPicker';
-import { getChatModelOption, type ChatModelId } from './chat-models';
+import type { ChatModelId } from './chat-models';
 
 export type { ChatModelId, OrchestrationMode };
 export { CHAT_MODEL_OPTIONS } from './chat-models';
@@ -35,8 +34,14 @@ interface ModePickerProps {
   onSelectMode: (mode: OrchestrationMode) => void;
   selectedSingleRuntime: OrchestratorRuntime;
   onSelectSingleRuntime: (runtime: OrchestratorRuntime) => void;
-  selectedChatModelId: ChatModelId;
-  onSelectChatModel: (modelId: ChatModelId) => void;
+  // When set, picking a runtime spawns a new Single tab instead of
+  // flipping the current tab's mode. The card click opens the
+  // sub-picker; the runtime button is the spawn trigger.
+  onSpawnSingleTab?: (runtime: OrchestratorRuntime) => void;
+  // When set, clicking the Chat card spawns a new Chat tab directly.
+  // The spawned tab carries its own model picker chip in the composer
+  // — there's no longer a sub-picker drawer at the chooser level.
+  onSpawnChatTab?: () => void;
 }
 
 const SINGLE_RUNTIMES: Array<{ id: OrchestratorRuntime; label: string }> = [
@@ -48,42 +53,47 @@ const SINGLE_RUNTIMES: Array<{ id: OrchestratorRuntime; label: string }> = [
 
 function ModePickerBase({
   visible,
-  workspaceKey,
   selectedMode,
   onSelectMode,
   selectedSingleRuntime,
   onSelectSingleRuntime,
-  selectedChatModelId,
-  onSelectChatModel,
+  onSpawnSingleTab,
+  onSpawnChatTab,
 }: ModePickerProps) {
   const opencodeEnabled = useExperimentalOpencodeFlag();
   const visibleRuntimes = useMemo(
     () => (opencodeEnabled ? SINGLE_RUNTIMES : SINGLE_RUNTIMES.filter((r) => r.id !== 'opencode')),
     [opencodeEnabled],
   );
-  const selectedChatModel = getChatModelOption(selectedChatModelId);
-  // Whether the runtime sub-picker drawer is open. We derive openness
-  // from selectedMode + an explicit user toggle in the same setter so we
-  // never have to "sync" two states inside an effect (per react-hooks/
-  // set-state-in-effect lint rule).
+  // Single still has a sub-drawer (operator picks the runtime). Chat
+  // spawns immediately — the spawned tab carries its own model picker.
   const [singleOpen, setSingleOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
-  const effectiveSingleOpen = selectedMode === 'single' && singleOpen;
-  const effectiveChatOpen = selectedMode === 'chat' && chatOpen;
 
   const handleClickFleet = useCallback(() => {
     onSelectMode('fleet');
+    setSingleOpen(false);
   }, [onSelectMode]);
 
   const handleClickSingle = useCallback(() => {
-    onSelectMode('single');
-    setSingleOpen(true);
-  }, [onSelectMode]);
+    setSingleOpen((prev) => !prev);
+  }, []);
 
   const handleClickChat = useCallback(() => {
-    onSelectMode('chat');
-    setChatOpen(true);
-  }, [onSelectMode]);
+    if (onSpawnChatTab) {
+      onSpawnChatTab();
+      setSingleOpen(false);
+    } else {
+      onSelectMode('chat');
+    }
+  }, [onSelectMode, onSpawnChatTab]);
+
+  const handlePickSingleRuntime = useCallback((runtime: OrchestratorRuntime) => {
+    onSelectSingleRuntime(runtime);
+    if (onSpawnSingleTab) {
+      onSpawnSingleTab(runtime);
+      setSingleOpen(false);
+    }
+  }, [onSelectSingleRuntime, onSpawnSingleTab]);
 
   if (!visible) return null;
 
@@ -112,12 +122,14 @@ function ModePickerBase({
         <ModeCard
           active={selectedMode === 'single'}
           title="Single runtime"
-          copy="Dispatches one agent without orchestration overhead."
+          copy={onSpawnSingleTab
+            ? 'Pick a runtime to open a new tab — no orchestration overhead.'
+            : 'Dispatches one agent without orchestration overhead.'}
           tag={`using ${SINGLE_RUNTIMES.find((r) => r.id === selectedSingleRuntime)?.label ?? selectedSingleRuntime}`}
           onClick={handleClickSingle}
           glyph={<SingleGlyph />}
         />
-        {effectiveSingleOpen ? (
+        {singleOpen ? (
           <div
             style={{
               display: 'flex',
@@ -135,7 +147,7 @@ function ModePickerBase({
                 <button
                   key={runtime.id}
                   type="button"
-                  onClick={() => onSelectSingleRuntime(runtime.id)}
+                  onClick={() => handlePickSingleRuntime(runtime.id)}
                   aria-pressed={selected}
                   style={{
                     height: 22,
@@ -168,18 +180,13 @@ function ModePickerBase({
         <ModeCard
           active={selectedMode === 'chat'}
           title="Chat"
-          copy="Talk to o8 about anything. Pick a model, no dispatch."
-          tag={`using ${selectedChatModel.label}`}
+          copy={onSpawnChatTab
+            ? 'Spawn a new chat tab — talk to o8, switch models from inside the tab.'
+            : 'Talk to o8 about anything. No dispatch.'}
+          tag="model picker in tab"
           onClick={handleClickChat}
           glyph={<ChatGlyph />}
         />
-        {effectiveChatOpen ? (
-          <ChatModelPicker
-            workspaceKey={workspaceKey}
-            selectedModelId={selectedChatModelId}
-            onSelectModel={onSelectChatModel}
-          />
-        ) : null}
       </div>
     </div>
   );

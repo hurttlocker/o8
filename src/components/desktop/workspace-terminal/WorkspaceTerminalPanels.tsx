@@ -8,7 +8,10 @@ import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace
 import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-terminal/utils';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 
-const LazyLLMChat = lazy(() => import('@/components/desktop/LLMChat'));
+// LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
+// chooser-spawn rewrite routes both orchestrator and llm-chat tabs
+// through OrchestratorTab now (chat tabs run with lockedMode='chat'),
+// so the standalone LLMChat surface is no longer mounted from here.
 const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then((module) => ({ default: module.Canvas })));
 const LazyOrchestratorTab = lazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })));
 
@@ -82,37 +85,25 @@ function WorkspaceTerminalPanelsBase({
               active={tab.id === effectiveActiveTabId}
               repoPath={tab.repo?.localPath ?? null}
               repoLabel={tab.repo?.name ?? null}
+              lockedMode={tab.mode === 'single' ? 'single' : undefined}
+              initialMode={tab.mode}
+              initialSingleRuntime={tab.singleRuntime}
+              initialChatModelId={tab.chatModelId}
             />
           </Suspense>
         ) : tab.kind === 'llm-chat' ? (
-          <div
-            key={tab.id}
-            aria-hidden={tab.id !== effectiveActiveTabId}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              visibility: tab.id === effectiveActiveTabId ? 'visible' : 'hidden',
-              pointerEvents: tab.id === effectiveActiveTabId ? 'auto' : 'none',
-              position: tab.id === effectiveActiveTabId ? 'relative' : 'absolute',
-              inset: 0,
-              flex: tab.id === effectiveActiveTabId ? 1 : undefined,
-              height: '100%',
-            }}
-          >
-            <Suspense fallback={null}>
-              <LazyLLMChat
-                tabId={tab.id}
-                preferredRepo={tab.repo ?? null}
-                linkedIssue={tab.linkedIssue ?? null}
-                draftInjection={tab.llmDraftInjection ?? null}
-                onSummaryChange={onUpdateLlmSummary}
-                onConsumeDraftInjection={(injectionId) => onConsumeLlmDraftInjection(tab.id, injectionId)}
-                onLinkedIssueChange={(issue) => onUpdateLinkedIssue(tab.id, issue)}
-                onOpenHistoryChat={(historyTabId: string, title: string, historyRepo) => onOpenHistoryChat(tab, historyTabId, title, historyRepo)}
-                onRunInTerminal={onRunInTerminal}
-              />
-            </Suspense>
-          </div>
+          <Suspense key={tab.id} fallback={null}>
+            <LazyOrchestratorTab
+              tabId={tab.id}
+              active={tab.id === effectiveActiveTabId}
+              repoPath={tab.repo?.localPath ?? null}
+              repoLabel={tab.repo?.name ?? null}
+              lockedMode="chat"
+              initialMode="chat"
+              initialChatModelId={tab.chatModelId}
+              initialChatOpenrouterModel={tab.chatOpenrouterModel}
+            />
+          </Suspense>
         ) : tab.kind === 'chat' ? (
           <div
             key={tab.id}

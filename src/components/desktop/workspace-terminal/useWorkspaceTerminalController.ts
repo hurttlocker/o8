@@ -9,6 +9,8 @@ import {
   type PersistedTabState,
 } from '@/lib/terminal/tab-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
+import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { ORCHESTRATED_TAB_AUTO_ARCHIVE_MS } from '@/components/desktop/workspace-terminal/constants';
 import type {
   LocalhostPreview,
@@ -306,9 +308,10 @@ export function useWorkspaceTerminalController(
   }), []);
 
   const createDefaultChatTab = useCallback((): TerminalTab => ({
-    id: generateLlmChatTabId(), label: 'Assistant', kind: 'llm-chat',
+    id: generateLlmChatTabId(), label: 'Chat', kind: 'llm-chat',
     tmuxSession: null, repo: preferredRepoRef.current ?? undefined,
     linkedIssue: null, createdAt: Date.now(), lastActivity: Date.now(),
+    chatModelId: 'o8-default',
   }), []);
 
   const createDefaultOrchestratorTab = useCallback((): TerminalTab => ({
@@ -319,13 +322,62 @@ export function useWorkspaceTerminalController(
     repo: preferredRepoRef.current ?? undefined,
     createdAt: Date.now(),
     lastActivity: Date.now(),
+    mode: 'fleet',
   }), []);
 
-  // Default tab set for a fresh LLM-chat workspace: Orchestrator FIRST
-  // (it's the governance surface), Assistant (LLM chat) second.
+  // Fresh workspace = a single Orchestrator tab. The Chat tab spawns from
+  // the chooser when the operator picks "Chat", instead of always being
+  // present. Single-runtime tabs spawn the same way.
   const createDefaultChatTabSet = useCallback((): TerminalTab[] => {
-    return [createDefaultOrchestratorTab(), createDefaultChatTab()];
-  }, [createDefaultOrchestratorTab, createDefaultChatTab]);
+    return [createDefaultOrchestratorTab()];
+  }, [createDefaultOrchestratorTab]);
+
+  const spawnSingleRuntimeTab = useCallback((runtime: OrchestratorRuntime): string => {
+    const newTab: TerminalTab = {
+      id: createWorkspaceTabId('orchestrator'),
+      label: 'Single',
+      kind: 'orchestrator',
+      tmuxSession: null,
+      repo: preferredRepoRef.current ?? undefined,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      mode: 'single',
+      singleRuntime: runtime,
+    };
+    setTabs((previous) => [...previous, newTab]);
+    setActiveTabIdFromUser(newTab.id);
+    return newTab.id;
+  }, [setActiveTabIdFromUser]);
+
+  const spawnChatTab = useCallback((): string => {
+    const newTab = createDefaultChatTab();
+    setTabs((previous) => [...previous, newTab]);
+    setActiveTabIdFromUser(newTab.id);
+    return newTab.id;
+  }, [createDefaultChatTab, setActiveTabIdFromUser]);
+
+  const handleUpdateTabMode = useCallback((
+    tabId: string,
+    patch: {
+      mode?: OrchestrationMode;
+      singleRuntime?: OrchestratorRuntime;
+      chatModelId?: ChatModelId;
+      chatOpenrouterModel?: string | null;
+    },
+  ) => {
+    setTabs((previous) => previous.map((tab) => {
+      if (tab.id !== tabId) return tab;
+      const next: typeof tab = { ...tab, lastActivity: Date.now() };
+      if (patch.mode !== undefined) next.mode = patch.mode;
+      if (patch.singleRuntime !== undefined) next.singleRuntime = patch.singleRuntime;
+      if (patch.chatModelId !== undefined) next.chatModelId = patch.chatModelId;
+      if (patch.chatOpenrouterModel !== undefined) {
+        // null clears the override; string sets it.
+        next.chatOpenrouterModel = patch.chatOpenrouterModel ?? undefined;
+      }
+      return next;
+    }));
+  }, []);
 
   const applyPersistedState = useCallback(async (saved: PersistedTabState, cancelled?: () => boolean) => {
     // Capture the user-nav version at the start of restore. If the user
@@ -922,6 +974,9 @@ export function useWorkspaceTerminalController(
     primaryRestoreSettled,
     restoreSettledRef,
     setLaunchRequestKey,
+    spawnSingleRuntimeTab,
+    spawnChatTab,
+    handleUpdateTabMode,
     tabs,
     termWsConnected,
     visibleTabs,
