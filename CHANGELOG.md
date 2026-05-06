@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-06
 
+- `e1010740` feat: align titlebar left buttons with right side; agents glows orange
 - `ab71b761` feat: empty project gets a primary "Add a repo" + quick-pick from other projects
 - `b70b1027` feat(palette): switch projects + move repo from Cmd+K
 - `4de26a1a` feat: project colors + drag-drop repos onto dots + empty-project hint
