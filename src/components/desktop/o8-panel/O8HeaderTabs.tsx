@@ -57,7 +57,9 @@ function IconInbox({ size = 16, color = '#e2e8f0' }: { size?: number; color?: st
   );
 }
 
-const O8_ICON_ACTIVE = '#e2e8f0';
+// Active icon picks up the palette text color (dark on paper, light on
+// graphite). Was hardcoded #e2e8f0 which rendered invisible on light + solid.
+const O8_ICON_ACTIVE = 'var(--t-text)';
 const O8_ICON_INACTIVE = 'var(--t-text-muted)';
 
 function O8HeaderTabButton({
@@ -104,20 +106,6 @@ function O8HeaderTabButton({
       }}
     >
       {icon(active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE)}
-      {active ? (
-        <span
-          style={{
-            position: 'absolute',
-            bottom: 3,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 12,
-            height: 2,
-            borderRadius: 1,
-            background: 'var(--t-brand-orange)',
-          }}
-        />
-      ) : null}
     </button>
   );
 }
