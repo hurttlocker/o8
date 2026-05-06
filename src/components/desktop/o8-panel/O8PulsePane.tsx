@@ -35,10 +35,11 @@ const MAX_REPOS = 6;
 // can't fix this from CSS alone — the component picks the right block at
 // render time based on the active palette.
 const PULSE_VARS_DARK: CSSProperties = {
-  ['--t-text' as string]: 'var(--t-chat-surface-text)',
-  ['--t-text-secondary' as string]: 'var(--t-chat-surface-text-secondary)',
-  ['--t-text-muted' as string]: 'var(--t-chat-surface-text-muted)',
-  ['--t-text-faint' as string]: 'var(--t-chat-surface-text-muted)',
+  // Don't override --t-text* here — the parent surface (chrome-surface scope
+  // in light+glass, the registry base elsewhere) already provides the right
+  // text colors. Forcing chat-surface-text broke light+glass because that
+  // palette resolves chat-surface-text to dark ink, which then sat on top
+  // of the dark vibrancy and disappeared.
   ['--t-input-bg' as string]: 'var(--t-chat-surface-input-bg)',
   ['--t-bg-card' as string]: 'var(--t-chat-surface-card-bg)',
   ['--o8-pulse-surface' as string]: 'rgba(255, 255, 255, 0.035)',
@@ -54,10 +55,10 @@ const PULSE_VARS_DARK: CSSProperties = {
 };
 
 const PULSE_VARS_LIGHT: CSSProperties = {
-  ['--t-text' as string]: 'var(--t-chat-surface-text)',
-  ['--t-text-secondary' as string]: 'var(--t-chat-surface-text-secondary)',
-  ['--t-text-muted' as string]: 'var(--t-chat-surface-text-muted)',
-  ['--t-text-faint' as string]: 'var(--t-chat-surface-text-muted)',
+  // Same rationale as PULSE_VARS_DARK: don't override --t-text*. In
+  // light + solid the registry's base text tokens (#0f172a / #475569 /
+  // #64748b / #94a3b8) already paint dark ink on paper, which is what
+  // we want.
   ['--t-input-bg' as string]: 'var(--t-chat-surface-input-bg)',
   ['--t-bg-card' as string]: 'var(--t-chat-surface-card-bg)',
   ['--o8-pulse-surface' as string]: 'rgba(15, 23, 42, 0.04)',

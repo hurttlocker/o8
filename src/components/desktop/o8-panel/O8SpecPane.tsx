@@ -2,6 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- repo changes intentionally reload editor state from o8.md */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTheme } from '@/lib/theme/context';
 import { MarkdownRender } from './markdown-render';
 
 type SpecView = 'split' | 'edit' | 'preview';
@@ -142,12 +143,22 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
   const showEditor = view === 'split' || view === 'edit';
   const showPreview = view === 'split' || view === 'preview';
 
-  // The wide O8 Panel root carries data-chrome-surface="true", which flips
-  // --t-text + --t-input-bg to white-on-glass values for chrome chips. The
-  // spec editor renders CONTENT (paper bg, dark text), so we re-bind the
-  // common token names back to their content values via inline custom
-  // properties — children that reference --t-text / --t-input-bg etc. then
-  // resolve correctly without needing edits in every nested component.
+  // The wide O8 Panel root carries data-chrome-surface="true". In SOLID
+  // surface mode the spec editor renders as CONTENT (paper bg, dark text),
+  // so we re-bind the common text tokens back to chat-surface content
+  // values. In GLASS mode we want the editor to read as glass like every
+  // other o8 panel tab — let the chrome-surface scope win (white text on
+  // translucent vibrancy), no re-binding.
+  const { surface } = useTheme();
+  const contentRebinds = surface === 'solid'
+    ? {
+        ['--t-text' as unknown as string]: 'var(--t-chat-surface-text)',
+        ['--t-text-secondary' as unknown as string]: 'var(--t-chat-surface-text-secondary)',
+        ['--t-text-muted' as unknown as string]: 'var(--t-chat-surface-text-muted)',
+        ['--t-text-faint' as unknown as string]: 'var(--t-chat-surface-text-muted)',
+        ['--t-input-bg' as unknown as string]: 'var(--t-chat-surface-input-bg)',
+      }
+    : {};
   return (
     <div style={{
       display: 'flex',
@@ -155,12 +166,8 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
       flexDirection: 'column',
       minHeight: 0,
       background: 'var(--t-canvas-bg)',
-      color: 'var(--t-chat-surface-text)',
-      ['--t-text' as unknown as string]: 'var(--t-chat-surface-text)',
-      ['--t-text-secondary' as unknown as string]: 'var(--t-chat-surface-text-secondary)',
-      ['--t-text-muted' as unknown as string]: 'var(--t-chat-surface-text-muted)',
-      ['--t-text-faint' as unknown as string]: 'var(--t-chat-surface-text-muted)',
-      ['--t-input-bg' as unknown as string]: 'var(--t-chat-surface-input-bg)',
+      color: surface === 'solid' ? 'var(--t-chat-surface-text)' : 'var(--t-text)',
+      ...contentRebinds,
     } as React.CSSProperties}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 42, paddingLeft: 12, paddingRight: 12, borderBottom: '1px solid var(--t-divider-subtle)', fontFamily: UI_FONT }}>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: error ? 'var(--t-brand-red)' : 'var(--t-chat-surface-text-muted)', fontSize: 11, fontWeight: 600 }}>
@@ -177,6 +184,7 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
               <div style={{ paddingTop: 16, paddingLeft: 16, color: 'var(--t-chat-surface-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading o8.md...</div>
             ) : (
               <textarea
+                className="cortex-scroll-fade-y cortex-themed-scroll"
                 value={content}
                 onChange={(e) => handleChange(e.target.value)}
                 spellCheck={false}
@@ -204,7 +212,7 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
           </div>
         ) : null}
         {showPreview ? (
-          <div style={{ flex: view === 'split' ? '0 0 50%' : 1, minWidth: 0, overflowY: 'auto', paddingTop: 14, paddingRight: 18, paddingBottom: 18, paddingLeft: 18, color: 'var(--t-chat-surface-text)' }}>
+          <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: view === 'split' ? '0 0 50%' : 1, minWidth: 0, overflowY: 'auto', paddingTop: 14, paddingRight: 18, paddingBottom: 18, paddingLeft: 18, color: 'var(--t-chat-surface-text)' }}>
             {content.trim() ? <MarkdownRender content={content} /> : <div style={{ color: 'var(--t-chat-surface-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>No o8.md content yet.</div>}
           </div>
         ) : null}
