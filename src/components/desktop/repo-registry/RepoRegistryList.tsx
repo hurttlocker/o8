@@ -326,14 +326,20 @@ function RepoRegistryListBase({
                 ) : null}
               </div>
 
-              {/* Cross-project list — left-aligned to match the panel's 14px
-                  inset (same as the project label header at the top). */}
+              {/* Cross-project list — left-aligned so the F in
+                  "FROM OTHER PROJECTS" lands directly under the U in the
+                  active project label above. Math:
+                    parent marginLeft -14 (RepoCards bleed to the edge)
+                    + 14 to neutralize that
+                    + 14 to match the project label's panel inset
+                    + 12 (dot 6 + gap 6) to skip past the project's color dot
+                    = 40px paddingLeft. */}
               {reposInOtherProjects.length > 0 ? (
                 <div
                   style={{
                     marginTop: 22,
-                    paddingLeft: 14,
-                    paddingRight: 14,
+                    paddingLeft: 40,
+                    paddingRight: 28,
                     paddingBottom: 8,
                     display: 'flex',
                     flexDirection: 'column',
