@@ -1,25 +1,66 @@
 'use client';
 
 /**
- * ThemeProvider — manages theme state and applies CSS custom properties.
+ * ThemeProvider — manages palette + surface state and applies CSS custom
+ * properties to <html>.
  *
- * On theme change:
- * 1. Updates CSS vars on <html>
- * 2. Injects brief transition for smooth visual switch
- * 3. Persists selection to localStorage
+ * Two-axis model:
+ *   - Palette: 'light' | 'dark'         (color family, user-facing)
+ *   - Surface: 'glass' | 'solid'         (chrome layer, driven by reduce-transparency)
+ *
+ * Public API (kept backwards compatible — legacy callers pass `themeId`):
+ *   - paletteId, setPalette, palettes
+ *   - surface, reduceTransparency, setReduceTransparency
+ *   - themeId (composed `${palette}-${surface}`), setTheme (accepts both
+ *     legacy ids 'light'/'midnight'/'dark' and composed ids)
+ *   - themes: ResolvedTheme[] for legacy enumerators
  */
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { themes, type ThemeTokens } from './themes';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
+import {
+  PALETTES,
+  resolveTheme,
+  getPalette,
+  type PaletteId,
+  type SurfaceMode,
+  type ThemePalette,
+  type ResolvedTheme,
+} from './registry';
+
+export type ReduceTransparency = 'on' | 'off' | 'system';
 
 interface ThemeContextValue {
+  // New API
+  paletteId: PaletteId;
+  setPalette: (id: PaletteId) => void;
+  palettes: ThemePalette[];
+  surface: SurfaceMode;
+  reduceTransparency: ReduceTransparency;
+  setReduceTransparency: (v: ReduceTransparency) => void;
+  systemReduceTransparency: boolean;
+  // Legacy API (kept for existing call sites)
   themeId: string;
   setTheme: (id: string) => void;
-  themes: ThemeTokens[];
+  themes: ResolvedTheme[];
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  themeId: 'midnight',
+  paletteId: 'dark',
+  setPalette: () => {},
+  palettes: PALETTES,
+  surface: 'glass',
+  reduceTransparency: 'system',
+  setReduceTransparency: () => {},
+  systemReduceTransparency: false,
+  themeId: 'dark-glass',
   setTheme: () => {},
   themes: [],
 });
@@ -28,30 +69,60 @@ export function useTheme() {
   return useContext(ThemeContext);
 }
 
-const STORAGE_KEY = 'cortex-theme';
-// Legacy ids get remapped onto shipping themes. `dark` used to be its own
-// variant — it's gone now, so anyone still stored on it lands on midnight.
-const LEGACY_THEME_IDS: Record<string, string> = {
-  chocolate: 'midnight',
-  dark: 'midnight',
+const PALETTE_STORAGE_KEY = 'cortex-theme-palette';
+const TRANSPARENCY_STORAGE_KEY = 'cortex-reduce-transparency';
+const LEGACY_THEME_KEY = 'cortex-theme';
+
+// Legacy theme ids → palette ids. 'midnight' was the only dark variant; it
+// gets renamed to 'dark' here to align with macOS naming conventions.
+const LEGACY_PALETTE_REMAP: Record<string, PaletteId> = {
+  light: 'light',
+  midnight: 'dark',
+  dark: 'dark',
+  chocolate: 'dark',
 };
 
-function normalizeThemeId(themeId: string | null) {
-  if (!themeId) return null;
-  return LEGACY_THEME_IDS[themeId] ?? themeId;
-}
-
-function readStoredThemeId() {
-  if (typeof window === 'undefined') return 'midnight';
+function readPaletteId(): PaletteId {
+  if (typeof window === 'undefined') return 'dark';
   try {
-    const saved = normalizeThemeId(localStorage.getItem(STORAGE_KEY));
-    return saved && themes.find((theme) => theme.id === saved) ? saved : 'midnight';
+    const stored = localStorage.getItem(PALETTE_STORAGE_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+    // Migration: read legacy key
+    const legacy = localStorage.getItem(LEGACY_THEME_KEY);
+    if (legacy && LEGACY_PALETTE_REMAP[legacy]) return LEGACY_PALETTE_REMAP[legacy];
   } catch {
-    return 'midnight';
+    // localStorage unavailable
   }
+  return 'dark';
 }
 
-function applyThemeVars(theme: ThemeTokens, animate: boolean) {
+function readReduceTransparency(): ReduceTransparency {
+  if (typeof window === 'undefined') return 'system';
+  try {
+    const stored = localStorage.getItem(TRANSPARENCY_STORAGE_KEY);
+    if (stored === 'on' || stored === 'off' || stored === 'system') return stored;
+  } catch {
+    // localStorage unavailable
+  }
+  return 'system';
+}
+
+/**
+ * Resolve the effective surface mode based on user preference + system
+ * reduce-transparency setting. The `system` value mirrors macOS's
+ * Accessibility → Display → Reduce transparency toggle (read via Tauri
+ * IPC in a follow-up; for now defaults to glass).
+ */
+function resolveSurface(
+  pref: ReduceTransparency,
+  systemReduceTransparency: boolean,
+): SurfaceMode {
+  if (pref === 'on') return 'solid';
+  if (pref === 'off') return 'glass';
+  return systemReduceTransparency ? 'solid' : 'glass';
+}
+
+function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
   const root = document.documentElement;
   const body = document.body;
 
@@ -71,46 +142,40 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
       '    background 0.5s ease !important;',
       '}',
     ].join('\n');
-    setTimeout(() => { styleEl?.remove(); }, 700);
+    setTimeout(() => {
+      styleEl?.remove();
+    }, 700);
   }
 
   for (const [key, value] of Object.entries(theme.cssVars)) {
     root.style.setProperty(key, value);
   }
 
-  // Tauri vibrancy: both shipping themes (light + midnight) pass chrome
-  // through to the OS vibrancy backdrop. Light reads as frosted silver
-  // glass with dark text; midnight reads as dark graphite glass with
-  // light text. The workspace/terminal/chat-surface tokens stay solid
-  // per-theme so the main content area is never translucent.
-  //
-  // We detect Tauri TWO ways because the inline script in layout.tsx
-  // that sets `data-tauri='true'` races against the Tauri runtime's
-  // injection of `window.__TAURI_INTERNALS__` — if the script runs
-  // first, the check fails, the attribute never lands, and the
-  // vibrancy-passthrough CSS rules in globals.css never match. By
-  // also checking for `__TAURI_INTERNALS__` directly here (this runs
-  // in a React useEffect, well after hydration, so the runtime is
-  // guaranteed to be present), we self-heal the attribute.
-  const hasTauriInternals = typeof window !== 'undefined'
-    && typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
+  // Tauri detection — self-heals if the inline data-tauri attribute from
+  // layout.tsx raced the runtime. Only matters for vibrancy passthrough,
+  // which itself only matters in glass surface mode.
+  const hasTauriInternals =
+    typeof window !== 'undefined' &&
+    typeof (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !==
+      'undefined';
   if (hasTauriInternals && root.dataset.tauri !== 'true') {
     root.dataset.tauri = 'true';
     if (body) body.dataset.tauri = 'true';
-    // The hardcoded inline background on <html>/<body> from layout.tsx
-    // (set before React hydrates to prevent FOUC in browser mode) keeps
-    // fighting the `html[data-tauri='true'] { background: transparent
-    // !important }` rule on some Tauri builds. Nuke the inline style
-    // directly once we know we're in Tauri so the CSS rule can win.
     root.style.background = '';
     if (body) body.style.background = '';
   }
-  if (root.dataset.tauri === 'true') {
+
+  const inTauri = root.dataset.tauri === 'true';
+
+  // Vibrancy passthrough — only in Tauri AND glass surface mode. In solid
+  // mode the chrome tokens are fully opaque and we WANT them painted on
+  // top of whatever vibrancy material the OS still has applied (a Phase 2
+  // follow-up will toggle the macOS material itself for GPU savings).
+  let vibrancyStyle = document.getElementById('tauri-vibrancy-overrides');
+  if (inTauri && theme.surface === 'glass') {
     root.style.setProperty('--t-chrome', 'transparent');
     root.style.setProperty('--t-bg-gradient', 'transparent');
     root.style.setProperty('--t-chrome-nav', 'transparent');
-
-    let vibrancyStyle = document.getElementById('tauri-vibrancy-overrides');
     if (!vibrancyStyle) {
       vibrancyStyle = document.createElement('style');
       vibrancyStyle.id = 'tauri-vibrancy-overrides';
@@ -123,91 +188,182 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
         -webkit-backdrop-filter: none !important;
       }
     `;
+  } else if (vibrancyStyle) {
+    vibrancyStyle.remove();
   }
 
-  // Chrome-surface scope — flips text + button tokens to glass-on-white for
-  // regions that sit on top of the vibrancy bleed in light mode. Chrome
-  // surfaces are marked with `data-chrome-surface="true"` in the component
-  // tree (right panel, title bar right-controls, etc). In midnight the
-  // normal text tokens are already light, so this scope is a no-op and
-  // lives only under the light theme selector.
+  // Chrome-surface scope — only meaningful in glass+light combo, where the
+  // dark vibrancy material bleeds through chrome and we need to flip text
+  // to white. Solid mode and dark palette don't need this.
   let chromeScopeStyle = document.getElementById('theme-chrome-surface');
-  if (!chromeScopeStyle) {
-    chromeScopeStyle = document.createElement('style');
-    chromeScopeStyle.id = 'theme-chrome-surface';
-    document.head.appendChild(chromeScopeStyle);
-  }
-  chromeScopeStyle.textContent = `
-    [data-theme="light"] [data-chrome-surface="true"] {
-      --t-bg: transparent;
-      --t-bg-subtle: transparent;
-      --t-panel: transparent;
-      --t-panel-translucent: transparent;
-      --t-panel-solid: transparent;
-      --t-text: rgba(255, 255, 255, 0.96);
-      --t-text-strong: #ffffff;
-      --t-text-secondary: rgba(255, 255, 255, 0.78);
-      --t-text-muted: rgba(255, 255, 255, 0.6);
-      --t-text-faint: rgba(255, 255, 255, 0.42);
-      --t-tab-active-text: #ffffff;
-      --t-tab-text: rgba(255, 255, 255, 0.6);
-      --t-border: rgba(255, 255, 255, 0.14);
-      --t-divider: rgba(255, 255, 255, 0.12);
-      --t-divider-strong: rgba(255, 255, 255, 0.2);
-      --t-divider-subtle: rgba(255, 255, 255, 0.07);
-      --t-hover: rgba(255, 255, 255, 0.1);
-      --t-panel-border: rgba(255, 255, 255, 0.14);
-      --t-panel-hover: rgba(255, 255, 255, 0.08);
-      --t-btn-secondary-bg: rgba(255, 255, 255, 0.1);
-      --t-btn-secondary-border: rgba(255, 255, 255, 0.16);
-      --t-btn-secondary-hover: rgba(255, 255, 255, 0.16);
-      --t-input-bg: rgba(255, 255, 255, 0.08);
-      --t-input-border: rgba(255, 255, 255, 0.16);
-      --t-bg-card: rgba(255, 255, 255, 0.06);
-      --t-code-bg: rgba(255, 255, 255, 0.08);
-      --t-chrome-btn-bg: rgba(255, 255, 255, 0.08);
-      --t-chrome-btn-hover-bg: rgba(255, 255, 255, 0.16);
-      --t-chrome-btn-active-bg: rgba(143, 180, 255, 0.18);
-      --t-chrome-btn-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-      --t-chrome-btn-hover-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
-      --t-chrome-btn-active-shadow: inset 0 0 0 1px rgba(143, 180, 255, 0.36), 0 0 12px rgba(143, 180, 255, 0.28);
-      --t-chrome-btn-text: rgba(255, 255, 255, 0.96);
-      --t-accent: #8fb4ff;
-      --t-accent-soft: rgba(143, 180, 255, 0.14);
-      --t-accent-soft-strong: rgba(143, 180, 255, 0.22);
-      --t-accent-border: rgba(143, 180, 255, 0.28);
-      --t-accent-ring: rgba(143, 180, 255, 0.14);
+  const needsChromeFlip = theme.paletteId === 'light' && theme.surface === 'glass';
+  if (needsChromeFlip) {
+    if (!chromeScopeStyle) {
+      chromeScopeStyle = document.createElement('style');
+      chromeScopeStyle.id = 'theme-chrome-surface';
+      document.head.appendChild(chromeScopeStyle);
     }
-  `;
+    chromeScopeStyle.textContent = `
+      [data-palette="light"][data-surface="glass"] [data-chrome-surface="true"] {
+        --t-bg: transparent;
+        --t-bg-subtle: transparent;
+        --t-panel: transparent;
+        --t-panel-translucent: transparent;
+        --t-panel-solid: transparent;
+        --t-text: rgba(255, 255, 255, 0.96);
+        --t-text-strong: #ffffff;
+        --t-text-secondary: rgba(255, 255, 255, 0.78);
+        --t-text-muted: rgba(255, 255, 255, 0.6);
+        --t-text-faint: rgba(255, 255, 255, 0.42);
+        --t-tab-active-text: #ffffff;
+        --t-tab-text: rgba(255, 255, 255, 0.6);
+        --t-border: rgba(255, 255, 255, 0.14);
+        --t-divider: rgba(255, 255, 255, 0.12);
+        --t-divider-strong: rgba(255, 255, 255, 0.2);
+        --t-divider-subtle: rgba(255, 255, 255, 0.07);
+        --t-hover: rgba(255, 255, 255, 0.1);
+        --t-panel-border: rgba(255, 255, 255, 0.14);
+        --t-panel-hover: rgba(255, 255, 255, 0.08);
+        --t-btn-secondary-bg: rgba(255, 255, 255, 0.1);
+        --t-btn-secondary-border: rgba(255, 255, 255, 0.16);
+        --t-btn-secondary-hover: rgba(255, 255, 255, 0.16);
+        --t-input-bg: rgba(255, 255, 255, 0.08);
+        --t-input-border: rgba(255, 255, 255, 0.16);
+        --t-bg-card: rgba(255, 255, 255, 0.06);
+        --t-code-bg: rgba(255, 255, 255, 0.08);
+        --t-chrome-btn-bg: rgba(255, 255, 255, 0.08);
+        --t-chrome-btn-hover-bg: rgba(255, 255, 255, 0.16);
+        --t-chrome-btn-active-bg: rgba(143, 180, 255, 0.18);
+        --t-chrome-btn-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+        --t-chrome-btn-hover-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+        --t-chrome-btn-active-shadow: inset 0 0 0 1px rgba(143, 180, 255, 0.36), 0 0 12px rgba(143, 180, 255, 0.28);
+        --t-chrome-btn-text: rgba(255, 255, 255, 0.96);
+        --t-accent: #8fb4ff;
+        --t-accent-soft: rgba(143, 180, 255, 0.14);
+        --t-accent-soft-strong: rgba(143, 180, 255, 0.22);
+        --t-accent-border: rgba(143, 180, 255, 0.28);
+        --t-accent-ring: rgba(143, 180, 255, 0.14);
+      }
+    `;
+  } else if (chromeScopeStyle) {
+    chromeScopeStyle.remove();
+  }
 
+  // data-theme = palette id (preserves legacy CSS selectors like
+  // `[data-theme='light']`). data-palette is an alias of the same value.
+  // data-surface is the new axis ('glass' | 'solid'); CSS that needs both
+  // can compound: `[data-palette='light'][data-surface='glass']`.
   root.style.colorScheme = theme.colorScheme;
-  root.dataset.theme = theme.id;
+  root.dataset.theme = theme.paletteId;
+  root.dataset.palette = theme.paletteId;
+  root.dataset.surface = theme.surface;
   if (body) {
-    body.dataset.theme = theme.id;
+    body.dataset.theme = theme.paletteId;
+    body.dataset.palette = theme.paletteId;
+    body.dataset.surface = theme.surface;
   }
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [themeId, setThemeId] = useState(readStoredThemeId);
+  const [paletteId, setPaletteId] = useState<PaletteId>(() => readPaletteId());
+  const [reduceTransparency, setReduceTransparencyState] = useState<ReduceTransparency>(
+    () => readReduceTransparency(),
+  );
+  // Phase 2 hookup point: read macOS NSWorkspace
+  // accessibilityDisplayShouldReduceTransparency via Tauri IPC. For now
+  // stays false — 'system' preference resolves to 'glass'. When the IPC
+  // lands, swap this to a useState seeded by an initial Tauri call +
+  // an effect subscribing to system setting changes.
+  const [systemReduceTransparency] = useState(false);
 
+  const surface = useMemo(
+    () => resolveSurface(reduceTransparency, systemReduceTransparency),
+    [reduceTransparency, systemReduceTransparency],
+  );
+
+  const palette = useMemo(() => getPalette(paletteId), [paletteId]);
+  const resolved = useMemo(() => resolveTheme(palette, surface), [palette, surface]);
+
+  // Mount once without animation, then animate on every subsequent change.
+  const mountedRef = useRef(false);
   useEffect(() => {
-    const selectedTheme = themes.find((theme) => theme.id === themeId) ?? themes[0];
-    applyThemeVars(selectedTheme, false);
-  }, [themeId]);
+    applyThemeVars(resolved, mountedRef.current);
+    mountedRef.current = true;
+  }, [resolved]);
 
-  const setTheme = useCallback((id: string) => {
-    const normalizedId = normalizeThemeId(id);
-    if (!normalizedId) return;
-    const theme = themes.find(t => t.id === normalizedId);
-    if (!theme) return;
-    setThemeId(normalizedId);
-    localStorage.setItem(STORAGE_KEY, normalizedId);
-    applyThemeVars(theme, true);
+  const setPalette = useCallback((id: PaletteId) => {
+    setPaletteId(id);
+    try {
+      localStorage.setItem(PALETTE_STORAGE_KEY, id);
+      // Drop legacy key so it doesn't fight us on next boot
+      localStorage.removeItem(LEGACY_THEME_KEY);
+    } catch {
+      /* noop */
+    }
   }, []);
 
-  return (
-    <ThemeContext.Provider value={{ themeId, setTheme, themes }}>
-      {children}
-    </ThemeContext.Provider>
+  const setReduceTransparency = useCallback((v: ReduceTransparency) => {
+    setReduceTransparencyState(v);
+    try {
+      localStorage.setItem(TRANSPARENCY_STORAGE_KEY, v);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  // Legacy: setTheme accepts old ids ('light'/'midnight'/'dark'/'chocolate')
+  // OR composed ids ('light-glass'/'light-solid'/etc). Old ids only set
+  // the palette; transparency stays where it is.
+  const setTheme = useCallback(
+    (id: string) => {
+      // Composed id?
+      if (id.includes('-')) {
+        const [pal, surf] = id.split('-');
+        if ((pal === 'light' || pal === 'dark') && (surf === 'glass' || surf === 'solid')) {
+          setPalette(pal);
+          setReduceTransparency(surf === 'solid' ? 'on' : 'off');
+          return;
+        }
+      }
+      const remapped = LEGACY_PALETTE_REMAP[id];
+      if (remapped) setPalette(remapped);
+    },
+    [setPalette, setReduceTransparency],
   );
+
+  const themes = useMemo(
+    () => PALETTES.flatMap((p) => [resolveTheme(p, 'glass'), resolveTheme(p, 'solid')]),
+    [],
+  );
+
+  const value = useMemo<ThemeContextValue>(
+    () => ({
+      paletteId,
+      setPalette,
+      palettes: PALETTES,
+      surface,
+      reduceTransparency,
+      setReduceTransparency,
+      systemReduceTransparency,
+      // Legacy: themeId returns the palette id only (e.g. 'light' / 'dark')
+      // so existing call sites doing `themeId === 'light'` keep working.
+      // Use `surface` and `reduceTransparency` for the new axis.
+      themeId: resolved.paletteId,
+      setTheme,
+      themes,
+    }),
+    [
+      paletteId,
+      setPalette,
+      surface,
+      reduceTransparency,
+      setReduceTransparency,
+      systemReduceTransparency,
+      resolved.paletteId,
+      setTheme,
+      themes,
+    ],
+  );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
