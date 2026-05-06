@@ -79,7 +79,7 @@ function RepoRegistrySectionBase({
   /** When provided, only repos whose localPath is in this set are shown.
    *  Used by the projects bottom-bar to scope the panel to one project. */
   repoPathFilter?: Set<string> | null;
-  projectsForMove?: Array<{ id: string; name: string }>;
+  projectsForMove?: Array<{ id: string; name: string; color?: string; repoPaths?: string[] }>;
   currentProjectId?: string | null;
   onMoveRepoToProject?: (repoLocalPath: string, targetProjectId: string) => void | Promise<void>;
   activeProjectName?: string | null;
@@ -649,6 +649,30 @@ function RepoRegistrySectionBase({
     return [activeRepoEntry, ...visible.filter((repo) => repo.id !== activeRepoEntry.id)];
   }, [activeRepoEntry, repoPathFilter, repos]);
 
+  // Cross-project repo list for the empty-state quick-pick. Walks each
+  // non-active project's claimed paths, joins with the global registry to
+  // resolve the human-readable repo name, and skips paths that aren't
+  // actually registered (eg. removed from disk but still on the ledger).
+  const reposInOtherProjects = useMemo(() => {
+    if (!projectsForMove?.length) return [];
+    const reposByPath = new Map(repos.map((entry) => [entry.localPath, entry]));
+    const out: Array<{ repoName: string; repoLocalPath: string; projectName: string; projectColor?: string }> = [];
+    for (const project of projectsForMove) {
+      if (project.id === currentProjectId) continue;
+      for (const path of project.repoPaths ?? []) {
+        const repo = reposByPath.get(path);
+        if (!repo) continue;
+        out.push({
+          repoName: repo.name,
+          repoLocalPath: repo.localPath,
+          projectName: project.name,
+          projectColor: project.color,
+        });
+      }
+    }
+    return out;
+  }, [currentProjectId, projectsForMove, repos]);
+
   useEffect(() => {
     if (!activeRepoEntry) return;
     setExpandedRepoIds((prev) => prev.size > 0 ? prev : new Set([activeRepoEntry.id]));
@@ -694,6 +718,8 @@ function RepoRegistrySectionBase({
         currentProjectId={currentProjectId}
         onMoveRepoToProject={onMoveRepoToProject}
         activeProjectName={activeProjectName}
+        reposInOtherProjects={reposInOtherProjects}
+        onAddRepoToActiveProject={() => setAddOpen(true)}
         totalReposInRegistry={repos.length}
         hideHeader={hideHeader}
         reposOpen={reposOpen}

@@ -53,6 +53,18 @@ interface RepoRegistryListProps {
    *  filter. When this is > 0 but the filtered list is empty, the empty
    *  state nudges the operator toward dragging from another project. */
   totalReposInRegistry?: number;
+  /** Repos that exist in other projects (not the active one). The empty
+   *  state lists these as quick-pick targets so the operator can pull them
+   *  into the active project without dragging or right-clicking. */
+  reposInOtherProjects?: Array<{
+    repoName: string;
+    repoLocalPath: string;
+    projectName: string;
+    projectColor?: string;
+  }>;
+  /** Open the add-repo modal scoped to the active project. Called by the
+   *  empty-state primary button. */
+  onAddRepoToActiveProject?: () => void;
 }
 
 function RepoRegistryListBase({
@@ -90,6 +102,8 @@ function RepoRegistryListBase({
   onMoveRepoToProject,
   activeProjectName,
   totalReposInRegistry,
+  reposInOtherProjects = [],
+  onAddRepoToActiveProject,
 }: RepoRegistryListProps) {
   return (
     <>
@@ -243,12 +257,12 @@ function RepoRegistryListBase({
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                justifyContent: 'center',
                 textAlign: 'center',
-                paddingTop: 32,
-                paddingBottom: 12,
-                paddingLeft: 20,
-                paddingRight: 20,
+                paddingTop: 28,
+                paddingBottom: 16,
+                paddingLeft: 16,
+                paddingRight: 16,
+                gap: 4,
               }}
             >
               <div
@@ -264,16 +278,143 @@ function RepoRegistryListBase({
               </div>
               <div
                 style={{
-                  marginTop: 4,
-                  maxWidth: 240,
+                  maxWidth: 260,
                   fontSize: 11,
                   lineHeight: 1.5,
                   color: 'var(--t-text-faint)',
                   letterSpacing: '-0.005em',
                 }}
               >
-                Drag a repo onto a project dot below, or right-click a repo card and pick <span style={{ color: 'var(--t-text-muted)', fontWeight: 600 }}>Move to project</span>.
+                Add a new repo, or pull one from another project below.
               </div>
+
+              {onAddRepoToActiveProject ? (
+                <button
+                  type="button"
+                  onClick={onAddRepoToActiveProject}
+                  style={{
+                    marginTop: 12,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingTop: 5,
+                    paddingBottom: 5,
+                    paddingLeft: 12,
+                    paddingRight: 14,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: 'var(--t-input-border, var(--t-divider))',
+                    background: 'var(--t-input-bg, transparent)',
+                    color: 'var(--t-text)',
+                    cursor: 'pointer',
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    letterSpacing: '-0.005em',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  }}
+                  onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover, rgba(148,163,184,0.12))'; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.background = 'var(--t-input-bg, transparent)'; }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                    <path d="M6 1.5 V10.5 M1.5 6 H10.5" />
+                  </svg>
+                  Add a repo
+                </button>
+              ) : null}
+
+              {reposInOtherProjects.length > 0 ? (
+                <div
+                  style={{
+                    marginTop: 18,
+                    width: '100%',
+                    maxWidth: 280,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      color: 'var(--t-text-faint)',
+                      textAlign: 'left',
+                    }}
+                  >
+                    From other projects
+                  </div>
+                  {reposInOtherProjects.map((entry) => (
+                    <button
+                      key={entry.repoLocalPath}
+                      type="button"
+                      onClick={() => onMoveRepoToProject?.(entry.repoLocalPath, currentProjectId ?? '')}
+                      disabled={!onMoveRepoToProject || !currentProjectId}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        width: '100%',
+                        paddingTop: 6,
+                        paddingBottom: 6,
+                        paddingLeft: 10,
+                        paddingRight: 10,
+                        borderRadius: 7,
+                        borderWidth: 1,
+                        borderStyle: 'solid',
+                        borderColor: 'var(--t-divider-subtle)',
+                        background: 'transparent',
+                        color: 'var(--t-text)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                      }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover, rgba(148,163,184,0.08))'; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+                        {entry.projectColor ? (
+                          <span
+                            aria-hidden
+                            style={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: '50%',
+                              background: entry.projectColor,
+                              flexShrink: 0,
+                            }}
+                          />
+                        ) : null}
+                        <span
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: 500,
+                            letterSpacing: '-0.005em',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {entry.repoName}
+                        </span>
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: 'var(--t-text-faint)',
+                          letterSpacing: '-0.005em',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {entry.projectName}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 

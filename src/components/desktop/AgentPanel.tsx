@@ -267,7 +267,12 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
 
           <RepoRegistrySection
             repoPathFilter={activeProjectRepoSet}
-            projectsForMove={projects.ledger?.projects.map((p) => ({ id: p.id, name: p.name })) ?? []}
+            projectsForMove={projects.ledger?.projects.map((p) => ({
+              id: p.id,
+              name: p.name,
+              color: p.color,
+              repoPaths: p.repoPaths,
+            })) ?? []}
             currentProjectId={projects.activeProject?.id ?? null}
             activeProjectName={projects.activeProject?.name ?? null}
             onMoveRepoToProject={async (repoPath, targetId) => {
