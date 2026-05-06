@@ -2,6 +2,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+/** Window-level broadcast so every useProjects instance refreshes after any
+ *  mutation (the palette + the AgentPanel + any future surface). Lets us
+ *  skip lifting state to a single context without going stale. */
+const PROJECTS_UPDATED_EVENT = 'o8:projects-updated';
+
+function broadcastProjectsUpdated() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(PROJECTS_UPDATED_EVENT));
+}
+
 export const PROJECT_COLOR_PALETTE = [
   '#5b8db8',
   '#7fa68f',
@@ -52,6 +62,8 @@ export function useProjects(): UseProjectsResult {
       const res = await fetch('/api/panel/projects');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as ProjectsLedger;
+      // Don't broadcast on refresh — that would feed back into every other
+      // instance's refresh listener and loop forever. Mutations broadcast.
       setLedger(data);
       setError(null);
     } catch (err) {
@@ -63,6 +75,10 @@ export function useProjects(): UseProjectsResult {
 
   useEffect(() => {
     void refresh();
+    if (typeof window === 'undefined') return;
+    const handler = () => { void refresh(); };
+    window.addEventListener(PROJECTS_UPDATED_EVENT, handler);
+    return () => { window.removeEventListener(PROJECTS_UPDATED_EVENT, handler); };
   }, [refresh]);
 
   const switchActive = useCallback(async (projectId: string) => {
@@ -75,7 +91,7 @@ export function useProjects(): UseProjectsResult {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as ProjectsLedger;
-      setLedger(data);
+      setLedger(data); broadcastProjectsUpdated();
     } catch {
       void refresh();
     }
@@ -93,7 +109,7 @@ export function useProjects(): UseProjectsResult {
         throw new Error(body?.error || `HTTP ${res.status}`);
       }
       const data = await res.json() as ProjectsLedger;
-      setLedger(data);
+      setLedger(data); broadcastProjectsUpdated();
       const created = data.projects.find((p) => p.id === data.activeProjectId) ?? null;
       return created;
     } catch (err) {
@@ -114,7 +130,7 @@ export function useProjects(): UseProjectsResult {
         throw new Error(body?.error || `HTTP ${res.status}`);
       }
       const data = await res.json() as ProjectsLedger;
-      setLedger(data);
+      setLedger(data); broadcastProjectsUpdated();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to rename project');
@@ -132,7 +148,7 @@ export function useProjects(): UseProjectsResult {
         throw new Error(body?.error || `HTTP ${res.status}`);
       }
       const data = await res.json() as ProjectsLedger;
-      setLedger(data);
+      setLedger(data); broadcastProjectsUpdated();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete project');
@@ -170,7 +186,7 @@ export function useProjects(): UseProjectsResult {
         throw new Error(body?.error || `Failed to add repo to ${targetProject.name}`);
       }
       const data = await res.json() as ProjectsLedger;
-      setLedger(data);
+      setLedger(data); broadcastProjectsUpdated();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to move repo');
@@ -192,7 +208,7 @@ export function useProjects(): UseProjectsResult {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as ProjectsLedger;
-      setLedger(data);
+      setLedger(data); broadcastProjectsUpdated();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set project color');
