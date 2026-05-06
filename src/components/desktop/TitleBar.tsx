@@ -20,12 +20,44 @@ import type { O8Tab } from './o8-panel/types';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render Lucide React components) ──
 
+// Icons in the left cluster use motion variants that propagate down from
+// their parent TitleBarButton. The button declares whileHover="hover" /
+// whileTap="tap" / animate="active|rest" — children with matching keys
+// follow along. Pattern lifted from skiper-ui/skiper99 (animated-icons).
+
+const ICON_SPRING = { type: 'spring' as const, stiffness: 520, damping: 22, mass: 0.6 };
+
 function IconPanelLeft({ size = 16 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+    <motion.svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 }}
+      variants={{
+        rest: { rotate: 0 },
+        hover: { rotate: 0 },
+        tap: { rotate: 0 },
+        active: { rotate: 0 },
+      }}
+    >
       <rect width="18" height="18" x="3" y="3" rx="2" />
-      <path d="M9 3v18" />
-    </svg>
+      <motion.path
+        d="M9 3v18"
+        variants={{
+          rest: { x: 0 },
+          hover: { x: -1.6 },
+          tap: { x: -1.6 },
+          active: { x: -1.6 },
+        }}
+        transition={ICON_SPRING}
+      />
+    </motion.svg>
   );
 }
 
@@ -40,10 +72,29 @@ function IconSearch({ size = 14 }: { size?: number }) {
 
 function IconTerminal({ size = 16 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <polyline points="4 17 10 11 4 5" />
+    <motion.svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 }}
+    >
+      <motion.polyline
+        points="4 17 10 11 4 5"
+        variants={{
+          rest: { x: 0 },
+          hover: { x: 1.6 },
+          tap: { x: 1.6 },
+          active: { x: 1.6 },
+        }}
+        transition={ICON_SPRING}
+      />
       <line x1="12" x2="20" y1="19" y2="19" />
-    </svg>
+    </motion.svg>
   );
 }
 
@@ -109,6 +160,10 @@ interface TitleBarProps {
 // (BrowserHoverButton / RightPanelMorphButton). Transparent at rest, hover
 // fills with --t-hover, active uses --t-panel-active. Pass `accent="orange"`
 // to make the active state glow brand orange (matches the Browser button).
+//
+// Motion: parent declares variants (rest / hover / tap / active) and child
+// motion.* SVG primitives inside `icon` follow along via framer-motion's
+// variant propagation — same pattern as skiper-ui/skiper99 animated icons.
 function TitleBarButton({
   icon,
   label,
@@ -126,11 +181,34 @@ function TitleBarButton({
     ? 'var(--t-brand-orange, #FF5A1F)'
     : 'var(--t-text)';
   return (
-    <button
+    <motion.button
       type="button"
       aria-label={label}
       title={label}
       onClick={onClick}
+      initial={false}
+      animate={active ? 'active' : 'rest'}
+      whileHover="hover"
+      whileTap="tap"
+      variants={{
+        rest: {
+          background: 'rgba(0, 0, 0, 0)',
+          color: 'var(--t-text-secondary)',
+          scale: 1,
+        },
+        hover: {
+          background: 'var(--t-hover)',
+          color: 'var(--t-text)',
+          scale: 1,
+        },
+        active: {
+          background: 'var(--t-panel-active, var(--t-input-bg))',
+          color: activeColor,
+          scale: 1,
+        },
+        tap: { scale: 0.92 },
+      }}
+      transition={{ type: 'spring', stiffness: 460, damping: 26, mass: 0.6 }}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -140,27 +218,14 @@ function TitleBarButton({
         padding: 0,
         border: 'none',
         borderRadius: 8,
-        background: active ? 'var(--t-panel-active, var(--t-input-bg))' : 'transparent',
-        color: active ? activeColor : 'var(--t-text-secondary)',
         cursor: 'pointer',
         flexShrink: 0,
         WebkitTapHighlightColor: 'transparent',
-        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         ['WebkitAppRegion' as string]: 'no-drag',
-      }}
-      onMouseEnter={(e) => {
-        if (!active) {
-          (e.currentTarget as HTMLButtonElement).style.background = 'var(--t-hover)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!active) {
-          (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-        }
       }}
     >
       {icon}
-    </button>
+    </motion.button>
   );
 }
 
@@ -564,11 +629,22 @@ export function TitleBar({
         {onOpenAgents ? (
           <TitleBarButton
             icon={
-              <UsersThree
-                size={16}
-                weight={isAgentsSectionActive ? 'fill' : 'bold'}
-                color={isAgentsSectionActive ? 'var(--t-brand-orange, #FF5A1F)' : 'currentColor'}
-              />
+              <motion.span
+                variants={{
+                  rest: { scale: 1, rotate: 0 },
+                  hover: { scale: 1.08, rotate: -3 },
+                  tap: { scale: 0.9 },
+                  active: { scale: 1.04, rotate: 0 },
+                }}
+                transition={{ type: 'spring', stiffness: 520, damping: 18, mass: 0.5 }}
+                style={{ display: 'inline-flex' }}
+              >
+                <UsersThree
+                  size={16}
+                  weight={isAgentsSectionActive ? 'fill' : 'bold'}
+                  color={isAgentsSectionActive ? 'var(--t-brand-orange, #FF5A1F)' : 'currentColor'}
+                />
+              </motion.span>
             }
             label="Agents"
             onClick={onOpenAgents}
