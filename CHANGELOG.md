@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-06
 
+- `67960804` feat: move repo selector into the changes rail to free file path space
 - `5c564bf0` feat: chat tabs adopt 3-word summary from latest user message
 - `01613ebb` feat: tab strip uses theme-tinted glass instead of raw vibrancy
 - `71187351` feat: round workspace top corners and inset tab cluster
