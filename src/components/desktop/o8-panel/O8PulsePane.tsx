@@ -441,8 +441,16 @@ export const O8PulsePane = memo(function O8PulsePane({
 
   const totalAttention = stats.awaiting + briefing.prsNeedingReview + briefing.failedCi + briefing.openIssues;
 
-  const { paletteId } = useTheme();
-  const pulseVars = paletteId === 'light' ? PULSE_VARS_LIGHT : PULSE_VARS_DARK;
+  // Light tokens only apply in light + SOLID. In glass mode (any palette)
+  // the chrome-surface scope flips text to white over dark vibrancy, so
+  // dark pulse tokens (rgba whites) are the right paint. Using LIGHT vars
+  // in glass mode would stack a dark wash on top of the dark vibrancy
+  // and produce a heavy blob in the middle of the panel.
+  const { paletteId, surface } = useTheme();
+  const pulseVars =
+    paletteId === 'light' && surface === 'solid'
+      ? PULSE_VARS_LIGHT
+      : PULSE_VARS_DARK;
 
   return (
     <div
