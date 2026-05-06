@@ -76,7 +76,7 @@ function WorkspaceTerminalPanelsBase({
   onLaunchWorkspaceTask,
 }: WorkspaceTerminalPanelsProps) {
   return (
-    <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))', borderTopLeftRadius: 12, borderTopRightRadius: 12 }}>
+    <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
       {visibleTabs.map((tab) => (
         tab.kind === 'orchestrator' ? (
           <Suspense key={tab.id} fallback={null}>
