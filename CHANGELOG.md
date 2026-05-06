@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-06
 
+- `dcd8c7d8` feat: breadcrumb minimizes to filename only by default
 - `4d1b05b4` feat: Changes count gains a cool-to-warm urgency badge
 - `67960804` feat: move repo selector into the changes rail to free file path space
 - `5c564bf0` feat: chat tabs adopt 3-word summary from latest user message
