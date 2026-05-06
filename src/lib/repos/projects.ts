@@ -12,11 +12,30 @@ const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
 const DEFAULT_PROJECT_ID = 'default';
 const DEFAULT_PROJECT_NAME = 'o8';
 
+/**
+ * Curated palette for project dots. Hex strings rather than tailwind tokens
+ * so the color renders identically in every theme + the picker, and so the
+ * persisted ledger is portable across versions.
+ */
+export const PROJECT_COLOR_PALETTE = [
+  '#5b8db8', // slate blue
+  '#7fa68f', // sage
+  '#a39565', // amber
+  '#a37b7b', // rose
+  '#9079a8', // muted violet
+  '#7a9a8c', // teal
+  '#a87f5b', // ochre
+  '#7a87a3', // steel
+] as const;
+
+export type ProjectColor = typeof PROJECT_COLOR_PALETTE[number];
+
 export interface ProjectRecord {
   id: string;
   name: string;
   repoPaths: string[];
   createdAt: string;
+  color?: ProjectColor;
 }
 
 export interface ProjectsLedger {
@@ -61,6 +80,7 @@ async function readRawLedger(): Promise<ProjectsLedger | null> {
         name: entry.name,
         repoPaths: entry.repoPaths.map(normalizeRepoPath),
         createdAt: entry.createdAt ?? nowIso(),
+        color: PROJECT_COLOR_PALETTE.includes(entry.color as ProjectColor) ? entry.color : undefined,
       }));
     if (projects.length === 0) return null;
     const activeProjectId = typeof parsed.activeProjectId === 'string'
@@ -87,6 +107,7 @@ async function bootstrapDefaultLedger(): Promise<ProjectsLedger> {
       name: DEFAULT_PROJECT_NAME,
       repoPaths,
       createdAt: nowIso(),
+      color: PROJECT_COLOR_PALETTE[0],
     }],
     activeProjectId: DEFAULT_PROJECT_ID,
   };
@@ -110,20 +131,42 @@ export async function setActiveProject(projectId: string): Promise<ProjectsLedge
   return next;
 }
 
+function pickAutoColor(used: Set<ProjectColor | undefined>): ProjectColor {
+  for (const candidate of PROJECT_COLOR_PALETTE) {
+    if (!used.has(candidate)) return candidate;
+  }
+  return PROJECT_COLOR_PALETTE[0];
+}
+
 export async function createProject(name: string): Promise<ProjectsLedger> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Project name is required.');
   if (trimmed.length > 60) throw new Error('Project name must be 60 characters or fewer.');
   const ledger = await getProjectsLedger();
+  const used = new Set<ProjectColor | undefined>(ledger.projects.map((p) => p.color));
   const project: ProjectRecord = {
     id: makeId(),
     name: trimmed,
     repoPaths: [],
     createdAt: nowIso(),
+    color: pickAutoColor(used),
   };
   const next: ProjectsLedger = {
     projects: [...ledger.projects, project],
     activeProjectId: project.id,
+  };
+  await writeLedger(next);
+  return next;
+}
+
+export async function setProjectColor(projectId: string, color: ProjectColor): Promise<ProjectsLedger> {
+  if (!PROJECT_COLOR_PALETTE.includes(color)) {
+    throw new Error('Unknown project color.');
+  }
+  const ledger = await getProjectsLedger();
+  const next: ProjectsLedger = {
+    ...ledger,
+    projects: ledger.projects.map((p) => (p.id === projectId ? { ...p, color } : p)),
   };
   await writeLedger(next);
   return next;

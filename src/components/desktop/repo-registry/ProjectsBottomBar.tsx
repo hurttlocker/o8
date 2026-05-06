@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ProjectRecord } from './useProjects';
+import { PROJECT_COLOR_PALETTE, type ProjectColor, type ProjectRecord } from './useProjects';
 
 interface ProjectsBottomBarProps {
   projects: ProjectRecord[];
@@ -11,6 +11,9 @@ interface ProjectsBottomBarProps {
   onCreate: (name: string) => Promise<ProjectRecord | null>;
   onRename: (projectId: string, name: string) => Promise<boolean>;
   onDelete: (projectId: string) => Promise<boolean>;
+  onSetColor: (projectId: string, color: ProjectColor) => Promise<boolean>;
+  /** Called when a repo card is dropped onto a project dot. */
+  onDropRepoOnProject?: (repoLocalPath: string, targetProjectId: string) => void | Promise<void>;
 }
 
 interface DotMenuState {
@@ -19,6 +22,13 @@ interface DotMenuState {
   y: number;
 }
 
+const DEFAULT_COLOR: ProjectColor = PROJECT_COLOR_PALETTE[0];
+
+/** MIME-ish key used by the repo-card drag source. Kept in sync with
+ *  RepoCard so any drag stays scoped to project moves and doesn't conflict
+ *  with native file drops. */
+export const REPO_DRAG_TYPE = 'application/x-o8-repo-path';
+
 function ProjectsBottomBarBase({
   projects,
   activeProjectId,
@@ -26,6 +36,8 @@ function ProjectsBottomBarBase({
   onCreate,
   onRename,
   onDelete,
+  onSetColor,
+  onDropRepoOnProject,
 }: ProjectsBottomBarProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -35,6 +47,7 @@ function ProjectsBottomBarBase({
   const [renameDraft, setRenameDraft] = useState('');
   const [menu, setMenu] = useState<DotMenuState | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -52,7 +65,6 @@ function ProjectsBottomBarBase({
     }
   }, [renamingId]);
 
-  // Close menu on any outside interaction.
   useEffect(() => {
     if (!menu) return;
     const handler = () => setMenu(null);
@@ -115,6 +127,27 @@ function ProjectsBottomBarBase({
 
   const canDelete = projects.length > 1;
 
+  const handleDotDragOver = useCallback((event: React.DragEvent<HTMLButtonElement>, projectId: string) => {
+    if (!onDropRepoOnProject) return;
+    if (!event.dataTransfer.types.includes(REPO_DRAG_TYPE)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropTargetId(projectId);
+  }, [onDropRepoOnProject]);
+
+  const handleDotDragLeave = useCallback((projectId: string) => {
+    setDropTargetId((current) => (current === projectId ? null : current));
+  }, []);
+
+  const handleDotDrop = useCallback((event: React.DragEvent<HTMLButtonElement>, projectId: string) => {
+    if (!onDropRepoOnProject) return;
+    const payload = event.dataTransfer.getData(REPO_DRAG_TYPE);
+    if (!payload) return;
+    event.preventDefault();
+    setDropTargetId(null);
+    void onDropRepoOnProject(payload, projectId);
+  }, [onDropRepoOnProject]);
+
   return (
     <div
       style={{
@@ -146,6 +179,8 @@ function ProjectsBottomBarBase({
           const isActive = project.id === activeProjectId;
           const isHovered = hoveredId === project.id;
           const isRenaming = renamingId === project.id;
+          const isDropTarget = dropTargetId === project.id;
+          const color: ProjectColor = (project.color ?? DEFAULT_COLOR);
 
           if (isRenaming) {
             return (
@@ -204,30 +239,35 @@ function ProjectsBottomBarBase({
               }}
               onMouseEnter={() => setHoveredId(project.id)}
               onMouseLeave={() => setHoveredId((current) => (current === project.id ? null : current))}
+              onDragOver={(event) => handleDotDragOver(event, project.id)}
+              onDragLeave={() => handleDotDragLeave(project.id)}
+              onDrop={(event) => handleDotDrop(event, project.id)}
               style={{
+                position: 'relative',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: 18,
-                height: 18,
+                width: 22,
+                height: 22,
                 padding: 0,
                 borderRadius: 999,
-                border: 'none',
-                background: 'transparent',
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: isDropTarget ? color : 'transparent',
+                background: isDropTarget ? `${color}1a` : 'transparent',
                 cursor: 'pointer',
+                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               <span
                 style={{
-                  width: isActive ? 7 : 6,
-                  height: isActive ? 7 : 6,
+                  width: isActive ? 9 : 8,
+                  height: isActive ? 9 : 8,
                   borderRadius: '50%',
-                  background: isActive
-                    ? 'var(--t-text)'
-                    : isHovered
-                      ? 'var(--t-text-muted)'
-                      : 'var(--t-text-faint)',
-                  transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), width 120ms cubic-bezier(0.22, 1, 0.36, 1), height 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  background: color,
+                  opacity: isActive ? 1 : isHovered ? 0.78 : 0.55,
+                  transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1), width 120ms cubic-bezier(0.22, 1, 0.36, 1), height 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  boxShadow: isActive ? `0 0 0 1.5px ${color}33` : 'none',
                 }}
               />
             </button>
@@ -319,12 +359,12 @@ function ProjectsBottomBarBase({
             left: menu.x,
             top: menu.y - 8,
             transform: 'translateY(-100%)',
-            minWidth: 160,
+            minWidth: 200,
             background: 'var(--t-bg-card, rgba(20, 24, 30, 0.96))',
             border: '1px solid var(--t-divider)',
             borderRadius: 10,
             boxShadow: '0 18px 44px rgba(0, 0, 0, 0.32)',
-            paddingTop: 4,
+            paddingTop: 6,
             paddingBottom: 4,
             paddingLeft: 4,
             paddingRight: 4,
@@ -332,6 +372,61 @@ function ProjectsBottomBarBase({
             fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
           }}
         >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--t-text-faint)',
+              paddingTop: 2,
+              paddingBottom: 6,
+              paddingLeft: 10,
+              paddingRight: 10,
+            }}
+          >
+            Color
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: 6,
+              paddingTop: 2,
+              paddingBottom: 4,
+              paddingLeft: 8,
+              paddingRight: 8,
+            }}
+          >
+            {PROJECT_COLOR_PALETTE.map((swatch) => {
+              const project = projects.find((p) => p.id === menu.projectId);
+              const active = (project?.color ?? DEFAULT_COLOR) === swatch;
+              return (
+                <button
+                  key={swatch}
+                  type="button"
+                  aria-label={`Color ${swatch}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void onSetColor(menu.projectId, swatch);
+                    setMenu(null);
+                  }}
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 999,
+                    borderWidth: 1.5,
+                    borderStyle: 'solid',
+                    borderColor: active ? 'var(--t-text)' : 'transparent',
+                    background: swatch,
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                />
+              );
+            })}
+          </div>
+          <div style={{ height: 1, background: 'var(--t-divider-subtle)', marginTop: 6, marginBottom: 4 }} />
           <MenuItem
             label="Rename"
             onClick={() => {

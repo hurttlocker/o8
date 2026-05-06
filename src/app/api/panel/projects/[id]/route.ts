@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteProject, renameProject, setProjectRepos } from '@/lib/repos/projects';
+import {
+  deleteProject,
+  renameProject,
+  setProjectColor,
+  setProjectRepos,
+  type ProjectColor,
+  PROJECT_COLOR_PALETTE,
+} from '@/lib/repos/projects';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,7 +20,7 @@ interface RouteContext {
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const body = (await request.json().catch(() => null)) as
-    | { name?: string; repoPaths?: string[] }
+    | { name?: string; repoPaths?: string[]; color?: string }
     | null;
   if (!body) {
     return NextResponse.json({ error: 'invalid body' }, { status: 400, headers: NO_STORE });
@@ -25,6 +32,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     if (Array.isArray(body.repoPaths)) {
       ledger = await setProjectRepos(id, body.repoPaths);
+    }
+    if (typeof body.color === 'string') {
+      if (!PROJECT_COLOR_PALETTE.includes(body.color as ProjectColor)) {
+        return NextResponse.json({ error: 'unknown project color' }, { status: 400, headers: NO_STORE });
+      }
+      ledger = await setProjectColor(id, body.color as ProjectColor);
     }
     if (!ledger) {
       return NextResponse.json({ error: 'nothing to update' }, { status: 400, headers: NO_STORE });
