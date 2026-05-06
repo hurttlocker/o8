@@ -272,7 +272,7 @@ export function computeLlmChatSession(
     updatedTabId: null,
     newTab: {
       id: resolvedTabId,
-      label: options.label ?? 'Assistant',
+      label: options.label ?? 'Chat',
       kind: 'llm-chat',
       tmuxSession: null,
       repo: options.repo,

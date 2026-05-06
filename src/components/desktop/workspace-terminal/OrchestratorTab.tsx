@@ -483,9 +483,9 @@ function OrchestratorTabInner({
   }, []);
 
   const greeting = useMemo(() => timeOfDayGreeting(), []);
-  // Empty-state chrome is branded as the O8 operator surface; dispatch target
-  // labels still come from the runtime picker below.
-  const runtimeLabel = 'O8 Operator';
+  const runtimeLabel = lockedMode === 'single'
+    ? orchestratorRuntimeTone(initialSingleRuntime ?? 'codex').label
+    : 'O8 Operator';
 
   const emptyStateNode = useMemo(
     () => (

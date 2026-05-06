@@ -99,6 +99,7 @@ import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
 import { useDesignMode } from '@/hooks/useDesignMode';
 import { createTileRegistry } from './tileRegistry';
+import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
 
 // Mark the dashboard module load as early as possible. Runs once when the
 // bundle is first parsed, before the React component is even invoked, so
@@ -2790,7 +2791,9 @@ function DashboardInner() {
               }
             }}
             onFocusAssistantTab={() => {
+              let fallbackHandle: TerminalTabHandle | null = null;
               for (const handle of workspaceTerminalHandlesRef.current.values()) {
+                fallbackHandle ??= handle;
                 const snap = handle.getTabsSnapshot();
                 const assistantTab = snap.tabs.find((tab) => tab.kind === 'llm-chat');
                 if (assistantTab) {
@@ -2798,6 +2801,13 @@ function DashboardInner() {
                   window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId: assistantTab.id } }));
                   return;
                 }
+              }
+              if (fallbackHandle) {
+                const tabId = fallbackHandle.openLlmChatSession({
+                  repo: workspaceTerminalPreferredRepo ?? undefined,
+                  label: 'Chat',
+                });
+                window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
               }
             }}
             selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
