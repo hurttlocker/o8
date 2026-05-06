@@ -153,6 +153,7 @@ const MAX_RIGHT_PANEL_WIDTH = 600;
 const MIN_O8_PANEL_WIDTH = 400;
 const MAX_O8_PANEL_WIDTH = 1200;
 const O8_ACTIVE_TAB_STORAGE_KEY = 'o8ActiveTab';
+const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'pulse';
 
 function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
   if (!raw) return null;
@@ -277,7 +278,7 @@ function DashboardInner() {
   }, [rightPanelKind]);
   const [rightWidth, setRightWidth] = useState(280);
   const [o8Width, setO8Width] = useState(700);
-  const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>('workspace');
+  const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
   const [o8BrowserUrl, setO8BrowserUrl] = useState<string | null>(null);
@@ -1338,13 +1339,12 @@ function DashboardInner() {
   }, [globalRepoEntries, handleSelectRegisteredRepo]);
 
   // ── Routing callbacks for AgentPanel ──
-  // Open the wide O8 panel pinned to a specific repo path + tab. Used by
-  // Recent Work routing — a NEEDS YOU click activates the agent's workspace
-  // tab AND pops the O8 panel to its Workspace tab pinned to that
-  // worktree's diff so the operator lands in review-mode with one click.
+  // Open the wide O8 panel pinned to a specific repo path + tab. Callers
+  // that need review mode pass `workspace`; otherwise the panel lands on
+  // the operator briefing pulse.
   const handleOpenO8Panel = useCallback((options: { repoPath?: string | null; tab?: O8Tab }) => {
     if (options.repoPath) setO8RepoPathOverride(options.repoPath);
-    setO8ActiveTab(options.tab ?? 'workspace');
+    setO8ActiveTab(options.tab ?? DEFAULT_O8_ACTIVE_TAB);
     setRightPanelKind('o8');
     setChatVisible(true);
   }, []);
