@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ProjectRecord } from './useProjects';
 
 interface ProjectsBottomBarProps {
@@ -8,6 +9,14 @@ interface ProjectsBottomBarProps {
   activeProjectId: string;
   onSwitch: (projectId: string) => void;
   onCreate: (name: string) => Promise<ProjectRecord | null>;
+  onRename: (projectId: string, name: string) => Promise<boolean>;
+  onDelete: (projectId: string) => Promise<boolean>;
+}
+
+interface DotMenuState {
+  projectId: string;
+  x: number;
+  y: number;
 }
 
 function ProjectsBottomBarBase({
@@ -15,12 +24,19 @@ function ProjectsBottomBarBase({
   activeProjectId,
   onSwitch,
   onCreate,
+  onRename,
+  onDelete,
 }: ProjectsBottomBarProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [menu, setMenu] = useState<DotMenuState | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (creating && inputRef.current) {
@@ -28,6 +44,25 @@ function ProjectsBottomBarBase({
       inputRef.current.select();
     }
   }, [creating]);
+
+  useEffect(() => {
+    if (renamingId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingId]);
+
+  // Close menu on any outside interaction.
+  useEffect(() => {
+    if (!menu) return;
+    const handler = () => setMenu(null);
+    window.addEventListener('mousedown', handler);
+    window.addEventListener('keydown', handler);
+    return () => {
+      window.removeEventListener('mousedown', handler);
+      window.removeEventListener('keydown', handler);
+    };
+  }, [menu]);
 
   const cancelCreate = useCallback(() => {
     setCreating(false);
@@ -46,6 +81,39 @@ function ProjectsBottomBarBase({
     setSubmitting(false);
     if (created) cancelCreate();
   }, [cancelCreate, draftName, onCreate]);
+
+  const beginRename = useCallback((project: ProjectRecord) => {
+    setRenamingId(project.id);
+    setRenameDraft(project.name);
+    setMenu(null);
+  }, []);
+
+  const cancelRename = useCallback(() => {
+    setRenamingId(null);
+    setRenameDraft('');
+  }, []);
+
+  const submitRename = useCallback(async () => {
+    if (!renamingId) return;
+    const name = renameDraft.trim();
+    if (!name) {
+      cancelRename();
+      return;
+    }
+    const project = projects.find((p) => p.id === renamingId);
+    if (project && project.name !== name) {
+      await onRename(renamingId, name);
+    }
+    cancelRename();
+  }, [cancelRename, onRename, projects, renameDraft, renamingId]);
+
+  const handleDelete = useCallback(async (projectId: string) => {
+    setMenu(null);
+    setConfirmDeleteId(null);
+    await onDelete(projectId);
+  }, [onDelete]);
+
+  const canDelete = projects.length > 1;
 
   return (
     <div
@@ -77,12 +145,63 @@ function ProjectsBottomBarBase({
         {projects.map((project) => {
           const isActive = project.id === activeProjectId;
           const isHovered = hoveredId === project.id;
+          const isRenaming = renamingId === project.id;
+
+          if (isRenaming) {
+            return (
+              <input
+                key={project.id}
+                ref={renameInputRef}
+                type="text"
+                value={renameDraft}
+                onChange={(event) => setRenameDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void submitRename();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancelRename();
+                  }
+                }}
+                onBlur={() => { void submitRename(); }}
+                placeholder={project.name}
+                maxLength={60}
+                style={{
+                  flexShrink: 0,
+                  minWidth: 90,
+                  maxWidth: 160,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: 'var(--t-text)',
+                  background: 'var(--t-input-bg)',
+                  border: '1px solid var(--t-input-border, var(--t-divider))',
+                  borderRadius: 6,
+                  paddingTop: 3,
+                  paddingBottom: 3,
+                  paddingLeft: 8,
+                  paddingRight: 8,
+                  outline: 'none',
+                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                }}
+              />
+            );
+          }
+
           return (
             <button
               key={project.id}
               type="button"
               title={project.name}
               onClick={() => onSwitch(project.id)}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                beginRename(project);
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setMenu({ projectId: project.id, x: event.clientX, y: event.clientY });
+              }}
               onMouseEnter={() => setHoveredId(project.id)}
               onMouseLeave={() => setHoveredId((current) => (current === project.id ? null : current))}
               style={{
@@ -189,7 +308,103 @@ function ProjectsBottomBarBase({
           </button>
         )}
       </div>
+
+      {menu && typeof document !== 'undefined' ? createPortal(
+        <div
+          role="menu"
+          onMouseDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+          style={{
+            position: 'fixed',
+            left: menu.x,
+            top: menu.y - 8,
+            transform: 'translateY(-100%)',
+            minWidth: 160,
+            background: 'var(--t-bg-card, rgba(20, 24, 30, 0.96))',
+            border: '1px solid var(--t-divider)',
+            borderRadius: 10,
+            boxShadow: '0 18px 44px rgba(0, 0, 0, 0.32)',
+            paddingTop: 4,
+            paddingBottom: 4,
+            paddingLeft: 4,
+            paddingRight: 4,
+            zIndex: 60,
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          }}
+        >
+          <MenuItem
+            label="Rename"
+            onClick={() => {
+              const project = projects.find((p) => p.id === menu.projectId);
+              if (project) beginRename(project);
+            }}
+          />
+          <MenuItem
+            label={confirmDeleteId === menu.projectId ? 'Confirm delete' : 'Delete'}
+            tone={confirmDeleteId === menu.projectId ? 'fail' : 'default'}
+            disabled={!canDelete}
+            onClick={() => {
+              if (!canDelete) return;
+              if (confirmDeleteId === menu.projectId) {
+                void handleDelete(menu.projectId);
+              } else {
+                setConfirmDeleteId(menu.projectId);
+              }
+            }}
+          />
+        </div>,
+        document.body,
+      ) : null}
     </div>
+  );
+}
+
+function MenuItem({
+  label,
+  onClick,
+  disabled = false,
+  tone = 'default',
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: 'default' | 'fail';
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={(event) => {
+        event.stopPropagation();
+        if (!disabled) onClick();
+      }}
+      disabled={disabled}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        width: '100%',
+        paddingTop: 6,
+        paddingBottom: 6,
+        paddingLeft: 10,
+        paddingRight: 10,
+        borderRadius: 7,
+        border: 'none',
+        background: 'transparent',
+        color: tone === 'fail' ? '#a37b7b' : disabled ? 'var(--t-text-faint)' : 'var(--t-text)',
+        cursor: disabled ? 'default' : 'pointer',
+        textAlign: 'left',
+        fontSize: 12,
+        fontWeight: 500,
+        letterSpacing: '-0.005em',
+        fontFamily: 'inherit',
+      }}
+      onMouseEnter={(event) => {
+        if (!disabled) event.currentTarget.style.background = 'var(--t-hover, rgba(148, 163, 184, 0.14))';
+      }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+    >
+      {label}
+    </button>
   );
 }
 

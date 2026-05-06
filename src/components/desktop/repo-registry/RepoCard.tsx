@@ -1,18 +1,56 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { RepoCardExpandedContent } from './RepoCardExpandedContent';
 import { RepoCardHeader } from './RepoCardHeader';
 import { RepoCardSettings } from './RepoCardSettings';
 import { useRepoCardModel, type RepoCardProps } from './useRepoCardModel';
 
-function RepoCardBase(props: RepoCardProps) {
+interface ProjectMoveOption {
+  id: string;
+  name: string;
+}
+
+interface RepoCardBaseProps extends RepoCardProps {
+  /** All projects available to the operator. The right-click "Move to →"
+   *  menu is populated from this list, minus the current project. */
+  projectsForMove?: ProjectMoveOption[];
+  /** Project that currently owns this repo. Filtered out of the move list. */
+  currentProjectId?: string | null;
+  /** Move the repo to a different project. */
+  onMoveToProject?: (repoLocalPath: string, targetProjectId: string) => void | Promise<void>;
+}
+
+function RepoCardBase(props: RepoCardBaseProps) {
   const model = useRepoCardModel(props);
   const { cardRef, ...renderModel } = model;
+
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    window.addEventListener('mousedown', handler);
+    window.addEventListener('keydown', handler);
+    return () => {
+      window.removeEventListener('mousedown', handler);
+      window.removeEventListener('keydown', handler);
+    };
+  }, [contextMenu]);
+
+  const moveTargets = (props.projectsForMove ?? []).filter((entry) => entry.id !== props.currentProjectId);
+
+  const handleContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!props.onMoveToProject || moveTargets.length === 0) return;
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY });
+  }, [moveTargets.length, props.onMoveToProject]);
 
   return (
     <div
       ref={cardRef}
+      onContextMenu={handleContextMenu}
       style={{
         position: 'relative',
         borderRadius: 0,
@@ -63,6 +101,82 @@ function RepoCardBase(props: RepoCardProps) {
       ) : null}
 
       <RepoCardSettings repo={props.repo} model={renderModel} />
+
+      {contextMenu && typeof document !== 'undefined' ? createPortal(
+        <div
+          role="menu"
+          onMouseDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            minWidth: 200,
+            background: 'var(--t-bg-card, rgba(20, 24, 30, 0.96))',
+            border: '1px solid var(--t-divider)',
+            borderRadius: 10,
+            boxShadow: '0 18px 44px rgba(0, 0, 0, 0.32)',
+            paddingTop: 4,
+            paddingBottom: 4,
+            paddingLeft: 4,
+            paddingRight: 4,
+            zIndex: 60,
+            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--t-text-faint)',
+              paddingTop: 6,
+              paddingBottom: 4,
+              paddingLeft: 10,
+              paddingRight: 10,
+            }}
+          >
+            Move to project
+          </div>
+          {moveTargets.map((target) => (
+            <button
+              key={target.id}
+              type="button"
+              role="menuitem"
+              onClick={(event) => {
+                event.stopPropagation();
+                setContextMenu(null);
+                void props.onMoveToProject?.(props.repo.localPath, target.id);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                width: '100%',
+                paddingTop: 6,
+                paddingBottom: 6,
+                paddingLeft: 10,
+                paddingRight: 10,
+                borderRadius: 7,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-text)',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontSize: 12,
+                fontWeight: 500,
+                letterSpacing: '-0.005em',
+                fontFamily: 'inherit',
+              }}
+              onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover, rgba(148, 163, 184, 0.14))'; }}
+              onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+            >
+              {target.name}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      ) : null}
     </div>
   );
 }

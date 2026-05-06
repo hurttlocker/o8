@@ -22,6 +22,9 @@ interface UseProjectsResult {
   refresh: () => Promise<void>;
   switchActive: (projectId: string) => Promise<void>;
   createProject: (name: string) => Promise<ProjectRecord | null>;
+  renameProject: (projectId: string, name: string) => Promise<boolean>;
+  deleteProject: (projectId: string) => Promise<boolean>;
+  moveRepoToProject: (repoPath: string, targetProjectId: string) => Promise<boolean>;
 }
 
 export function useProjects(): UseProjectsResult {
@@ -84,9 +87,97 @@ export function useProjects(): UseProjectsResult {
     }
   }, []);
 
+  const renameProject = useCallback(async (projectId: string, name: string) => {
+    try {
+      const res = await fetch(`/api/panel/projects/${encodeURIComponent(projectId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json() as ProjectsLedger;
+      setLedger(data);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename project');
+      return false;
+    }
+  }, []);
+
+  const deleteProject = useCallback(async (projectId: string) => {
+    try {
+      const res = await fetch(`/api/panel/projects/${encodeURIComponent(projectId)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json() as ProjectsLedger;
+      setLedger(data);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete project');
+      return false;
+    }
+  }, []);
+
+  const moveRepoToProject = useCallback(async (repoPath: string, targetProjectId: string) => {
+    if (!ledger) return false;
+    const sourceProject = ledger.projects.find((p) => p.repoPaths.includes(repoPath));
+    const targetProject = ledger.projects.find((p) => p.id === targetProjectId);
+    if (!targetProject) return false;
+    if (sourceProject?.id === targetProjectId) return true;
+
+    try {
+      // Remove from the source first (if any) so a transient state never has
+      // the repo in two projects. Then add to the target.
+      if (sourceProject) {
+        const nextSource = sourceProject.repoPaths.filter((p) => p !== repoPath);
+        const res = await fetch(`/api/panel/projects/${encodeURIComponent(sourceProject.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repoPaths: nextSource }),
+        });
+        if (!res.ok) throw new Error(`Failed to remove repo from ${sourceProject.name}`);
+      }
+      const nextTarget = Array.from(new Set([...targetProject.repoPaths, repoPath]));
+      const res = await fetch(`/api/panel/projects/${encodeURIComponent(targetProject.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoPaths: nextTarget }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `Failed to add repo to ${targetProject.name}`);
+      }
+      const data = await res.json() as ProjectsLedger;
+      setLedger(data);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to move repo');
+      void refresh();
+      return false;
+    }
+  }, [ledger, refresh]);
+
   const activeProject = ledger
     ? ledger.projects.find((p) => p.id === ledger.activeProjectId) ?? ledger.projects[0] ?? null
     : null;
 
-  return { ledger, activeProject, loading, error, refresh, switchActive, createProject };
+  return {
+    ledger,
+    activeProject,
+    loading,
+    error,
+    refresh,
+    switchActive,
+    createProject,
+    renameProject,
+    deleteProject,
+    moveRepoToProject,
+  };
 }
