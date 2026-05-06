@@ -110,8 +110,10 @@ html[data-tauri='true'] body {
   background-color: transparent !important;
 }
 
-/* Tauri vibrancy — boost text contrast on frosted glass (light theme) */
-html[data-tauri='true'][data-theme='light'] {
+/* Tauri vibrancy — boost text contrast on frosted glass (light + glass surface only).
+ * Solid surface mode keeps chrome opaque so these overrides would only fight
+ * the registry tokens. Selectors are gated on data-surface='glass'. */
+html[data-tauri='true'][data-palette='light'][data-surface='glass'] {
   --t-text: #0f172a;
   --t-text-strong: #0c1220;
   --t-text-secondary: #374151;
@@ -125,12 +127,12 @@ html[data-tauri='true'][data-theme='light'] {
   --neo-hover-bg: rgba(255, 255, 255, 0.55);
 }
 
-/* Tauri vibrancy — blend nav into dark frosted glass */
-html[data-theme='dark'] {
+/* Tab bar tone — applies to dark palette regardless of surface */
+html[data-palette='dark'] {
   --t-tab-bar-bg: rgba(30, 33, 38, 0.95);
 }
 
-html[data-tauri='true'][data-theme='dark'] {
+html[data-tauri='true'][data-palette='dark'][data-surface='glass'] {
   --t-chrome-nav: transparent;
   --t-chrome: transparent !important;
   --t-bg-gradient: transparent !important;
@@ -140,6 +142,22 @@ html[data-tauri='true'][data-theme='dark'] {
   --neo-inactive-shadow: 0 1px 3px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --neo-active-shadow: 0 1px 4px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   --neo-hover-shadow: 0 1px 4px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Solid-surface neo button tones — opaque palette colors. Tauri or browser. */
+html[data-palette='light'][data-surface='solid'] {
+  --neo-inactive-bg: #FAF9F4;
+  --neo-active-bg: #FFFFFF;
+  --neo-hover-bg: #F4F2ED;
+}
+
+html[data-palette='dark'][data-surface='solid'] {
+  --neo-inactive-bg: #2A2E36;
+  --neo-active-bg: #33373F;
+  --neo-hover-bg: #2E323A;
+  --neo-inactive-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --neo-active-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --neo-hover-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 a {
@@ -1524,6 +1542,78 @@ button.workflow-file-item.workflow-file-item-active {
 .cortex-themed-scroll {
   scrollbar-width: thin;
   scrollbar-color: var(--t-divider-strong) transparent;
+}
+
+/* Scroll-fade mask adapted from Skiper UI's scroll fade pattern. */
+.cortex-scroll-fade-y,
+.scroll-fade-y,
+.cortex-terminal-fade .xterm-viewport {
+  --cortex-scroll-fade-top: 24px;
+  --cortex-scroll-fade-bottom: 24px;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--cortex-scroll-fade-top),
+    #000 calc(100% - var(--cortex-scroll-fade-bottom)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--cortex-scroll-fade-top),
+    #000 calc(100% - var(--cortex-scroll-fade-bottom)),
+    transparent 100%
+  );
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+@supports (animation-timeline: scroll()) {
+  @property --cortex-scroll-fade-top {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+  }
+
+  @property --cortex-scroll-fade-bottom {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 32px;
+  }
+
+  .cortex-scroll-fade-y,
+  .scroll-fade-y,
+  .cortex-terminal-fade .xterm-viewport {
+    --cortex-scroll-fade-top: 0px;
+    --cortex-scroll-fade-bottom: 32px;
+    animation:
+      cortexScrollFadeTop 1 linear both,
+      cortexScrollFadeBottom 1 linear both;
+    animation-timeline: scroll(self), scroll(self);
+    animation-range:
+      0% 12%,
+      88% 100%;
+  }
+
+  @keyframes cortexScrollFadeTop {
+    from {
+      --cortex-scroll-fade-top: 0px;
+    }
+    to {
+      --cortex-scroll-fade-top: 32px;
+    }
+  }
+
+  @keyframes cortexScrollFadeBottom {
+    from {
+      --cortex-scroll-fade-bottom: 32px;
+    }
+    to {
+      --cortex-scroll-fade-bottom: 0px;
+    }
+  }
 }
 
 @media (max-width: 820px) {
