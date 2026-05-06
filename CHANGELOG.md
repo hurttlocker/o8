@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-05
+
+- `478ec8bf` feat: refine o8 workspace panel
+
 ## 2026-05-03
 
 - `6d63cfe2` feat(workspace-tab): green tab marker when packet status === released
