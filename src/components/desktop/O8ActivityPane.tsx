@@ -18,6 +18,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActivityItem } from './agent-panel/types';
 import { shortRepoLabel, normalizeRepoSlug } from './agent-panel/shared';
 import {
+  ACTIVITY_COLORS,
   ALL_REPOS_KEY,
   EMPTY_DATA,
   FILTER_TABS,
@@ -35,11 +36,13 @@ import {
   type O8FeedFilter,
   type RepoActivityData,
 } from './o8-activity-helpers';
+import { repoSlugFromRemote } from './canvas-utils';
 import { useOrchestratorData } from './orchestrator-data-context';
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
 import { DirectiveProposalRow } from './thoughts/DirectiveProposalRow';
 import { useDirectiveProposals } from './thoughts/mission-panel/useDirectiveProposals';
 import type { DirectiveProposalCandidate } from './thoughts/directive-proposal-types';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
 
 const PROPOSALS_OPEN_KEY = 'o8:activity:proposals-open';
 
@@ -59,6 +62,7 @@ function parseTs(value?: string | null): number | null {
 
 interface O8ActivityPaneProps {
   repoSlug?: string | null;
+  registeredRepos?: RepoRegistryEntry[];
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
@@ -66,6 +70,7 @@ interface O8ActivityPaneProps {
 
 export const O8ActivityPane = memo(function O8ActivityPane({
   repoSlug,
+  registeredRepos: registeredRepoEntries = [],
   onSelectCommit,
   onSelectPR,
   onSelectIssue,
@@ -73,7 +78,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [data, setData] = useState<RepoActivityData>(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<O8FeedFilter>('all');
-  const [registeredRepos, setRegisteredRepos] = useState<string[]>([]);
+  const [fallbackRepoOptions, setFallbackRepoOptions] = useState<string[]>([]);
   const [repoOverride, setRepoOverride] = useState<string | null>(null);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -128,31 +133,40 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     onAccept: handleAcceptDirectiveProposal,
   });
 
-  // Fetch registered repos
+  const registeredRepos = useMemo(() => {
+    const slugs = registeredRepoEntries
+      .map((entry) => repoSlugFromRemote(entry.remoteUrl) ?? normalizeRepoSlug(entry.name))
+      .filter((slug): slug is string => Boolean(slug));
+    return Array.from(new Set(slugs));
+  }, [registeredRepoEntries]);
+
+  const repoOptions = registeredRepos.length > 0 ? registeredRepos : fallbackRepoOptions;
+
+  // Fallback for legacy callers/tests that do not pass the dashboard registry.
   useEffect(() => {
+    if (registeredRepos.length > 0) return;
+    let cancelled = false;
     fetch('/api/panel/repos')
       .then((res) => res.json())
       .then((d) => {
         const slugs = (d.repos ?? [])
-          .map((r: { remoteUrl?: string }) => {
-            const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
-            const parts = url.split('/');
-            return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : null;
+          .map((r: { remoteUrl?: string | null; name?: string | null }) => {
+            return repoSlugFromRemote(r.remoteUrl) ?? normalizeRepoSlug(r.name);
           })
           .filter(Boolean) as string[];
-        if (mountedRef.current) setRegisteredRepos(slugs);
+        if (!cancelled && mountedRef.current) setFallbackRepoOptions(Array.from(new Set(slugs)));
       })
       .catch(() => {});
-    return () => { mountedRef.current = false; };
-  }, []);
+    return () => { cancelled = true; };
+  }, [registeredRepos.length]);
 
   const effectiveRepo = useMemo(() => {
     if (repoOverride && repoOverride !== ALL_REPOS_KEY) return repoOverride;
     const normalized = normalizeRepoSlug(repoSlug);
     if (normalized) return normalized;
-    if (registeredRepos.length > 0) return registeredRepos[0];
+    if (repoOptions.length > 0) return repoOptions[0];
     return null;
-  }, [repoOverride, repoSlug, registeredRepos]);
+  }, [repoOverride, repoSlug, repoOptions]);
 
   const isAllRepos = repoOverride === ALL_REPOS_KEY;
 
@@ -165,7 +179,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       try {
         if (isAllRepos) {
           const results = await Promise.all(
-            registeredRepos.map((slug) => fetchRepoActivity(slug).catch(() => EMPTY_DATA))
+            repoOptions.map((slug) => fetchRepoActivity(slug).catch(() => EMPTY_DATA))
           );
           if (cancelled) return;
           const merged: RepoActivityData = { commits: [], prs: [], issues: [], ciRuns: [] };
@@ -206,7 +220,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       window.removeEventListener('o8:lane-lifecycle', handler);
       clearInterval(fallbackId);
     };
-  }, [effectiveRepo, isAllRepos, registeredRepos]);
+  }, [effectiveRepo, isAllRepos, repoOptions]);
 
   // Packet items are derived from orchestrator missionState (not the
   // /api/panel feed). Always-on as of commit 2 — Mission rail is gone, so
@@ -334,10 +348,10 @@ export const O8ActivityPane = memo(function O8ActivityPane({
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: 999,
-              background: 'rgba(37, 99, 235, 0.12)',
-              color: '#2563eb',
+              background: ACTIVITY_COLORS.accentBg,
+              color: ACTIVITY_COLORS.accent,
             }}>
-              <IconFolder size={11} color="#2563eb" />
+              <IconFolder size={11} color={ACTIVITY_COLORS.accent} />
             </span>
             {repoLabel}
             <IconChevronDown size={10} color="var(--t-text-muted)" />
@@ -371,8 +385,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   paddingLeft: 12,
                   border: 'none',
                   borderBottom: '1px solid var(--t-divider-subtle)',
-                  background: isAllRepos ? 'rgba(37,99,235,0.12)' : 'transparent',
-                  color: isAllRepos ? '#2563eb' : 'var(--t-text)',
+                  background: isAllRepos ? ACTIVITY_COLORS.accentBg : 'transparent',
+                  color: isAllRepos ? ACTIVITY_COLORS.accent : 'var(--t-text)',
                   fontSize: 12,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -382,7 +396,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
               >
                 All repos
               </button>
-              {registeredRepos.map((slug) => {
+              {repoOptions.map((slug) => {
                 const selected = slug === effectiveRepo && !isAllRepos;
                 return (
                   <button
@@ -399,8 +413,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                       paddingBottom: 7,
                       paddingLeft: 12,
                       border: 'none',
-                      background: selected ? 'rgba(37,99,235,0.12)' : 'transparent',
-                      color: selected ? '#2563eb' : 'var(--t-text)',
+                      background: selected ? ACTIVITY_COLORS.accentBg : 'transparent',
+                      color: selected ? ACTIVITY_COLORS.accent : 'var(--t-text)',
                       fontSize: 12,
                       fontWeight: selected ? 600 : 400,
                       cursor: 'pointer',
@@ -408,7 +422,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                       textAlign: 'left',
                     }}
                   >
-                    <IconFolder size={12} color={selected ? '#2563eb' : 'var(--t-text-muted)'} />
+                    <IconFolder size={12} color={selected ? ACTIVITY_COLORS.accent : 'var(--t-text-muted)'} />
                     {shortRepoLabel(slug)}
                     <span style={{
                       marginLeft: 'auto',
@@ -457,8 +471,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   paddingLeft: 6,
                   borderRadius: 999,
                   border: 'none',
-                  background: active ? 'rgba(37, 99, 235, 0.12)' : 'transparent',
-                  color: active ? '#2563eb' : 'var(--t-text-muted)',
+                  background: active ? ACTIVITY_COLORS.accentBg : 'transparent',
+                  color: active ? ACTIVITY_COLORS.accent : 'var(--t-text-muted)',
                   fontSize: 10,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -467,13 +481,13 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   letterSpacing: '-0.01em',
                 }}
               >
-                {tab.icon(active ? '#2563eb' : 'var(--t-text-muted)')}
+                {tab.icon(active ? ACTIVITY_COLORS.accent : 'var(--t-text-muted)')}
                 {tab.label}
                 {count > 0 && tab.key !== 'all' ? (
                   <span style={{
                     fontSize: 9,
                     fontWeight: 700,
-                    color: active ? '#2563eb' : 'var(--t-text-faint)',
+                    color: active ? ACTIVITY_COLORS.accent : 'var(--t-text-faint)',
                     fontFamily: '"SF Mono", ui-monospace, monospace',
                   }}>
                     {count}
@@ -511,13 +525,13 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                 paddingLeft: 8,
                 borderRadius: 8,
                 borderWidth: 0,
-                background: proposalsOpen ? 'rgba(245, 158, 11, 0.06)' : 'transparent',
+                background: proposalsOpen ? ACTIVITY_COLORS.attentionBg : 'transparent',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
-              onMouseEnter={(e) => { if (!proposalsOpen) e.currentTarget.style.background = 'rgba(245, 158, 11, 0.04)'; }}
+              onMouseEnter={(e) => { if (!proposalsOpen) e.currentTarget.style.background = ACTIVITY_COLORS.attentionBg; }}
               onMouseLeave={(e) => { if (!proposalsOpen) e.currentTarget.style.background = 'transparent'; }}
               aria-expanded={proposalsOpen}
               title={proposalsOpen ? 'Hide proposed directives' : 'Show proposed directives'}
@@ -558,8 +572,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   paddingBottom: 1,
                   paddingLeft: 6,
                   borderRadius: 999,
-                  background: 'rgba(245, 158, 11, 0.12)',
-                  color: '#b45309',
+                  background: ACTIVITY_COLORS.attentionBg,
+                  color: ACTIVITY_COLORS.attention,
                   fontSize: 10,
                   fontWeight: 700,
                   flexShrink: 0,
@@ -648,6 +662,10 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                     <button
                       type="button"
                       onClick={() => {
+                        if (item.kind === 'pr') {
+                          handleItemClick(item);
+                          return;
+                        }
                         if (isExpanded) {
                           setExpandedKey(null);
                         } else {
@@ -656,6 +674,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                         }
                       }}
                       onDoubleClick={() => handleItemClick(item)}
+                      title={item.kind === 'pr' ? 'Open pull request details' : undefined}
                       style={{
                         display: 'flex',
                         alignItems: 'flex-start',
@@ -666,12 +685,12 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                         paddingBottom: 7,
                         paddingLeft: 14,
                         border: 'none',
-                        background: isExpanded ? 'rgba(37,99,235,0.06)' : 'transparent',
+                        background: isExpanded ? ACTIVITY_COLORS.accentBg : 'transparent',
                         cursor: 'pointer',
                         textAlign: 'left',
                         transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1)',
                       }}
-                      onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'rgba(37,99,235,0.04)'; }}
+                      onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = ACTIVITY_COLORS.accentBg; }}
                       onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}
                     >
                       {/* Expand indicator */}

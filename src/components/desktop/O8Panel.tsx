@@ -75,7 +75,7 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, prev
         <O8PRPane prNumber={prNumber} repo={prRepo ?? repoSlug} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'activity' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8ActivityPane repoSlug={repoSlug} onSelectCommit={onSelectCommit} onSelectPR={onSelectPR} onSelectIssue={onSelectIssue} />
+        <O8ActivityPane repoSlug={repoSlug} registeredRepos={registeredRepos} onSelectCommit={onSelectCommit} onSelectPR={onSelectPR} onSelectIssue={onSelectIssue} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'inbox' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8InboxPane />
