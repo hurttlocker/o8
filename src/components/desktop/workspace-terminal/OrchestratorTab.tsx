@@ -450,9 +450,9 @@ function OrchestratorTabInner({ tabId, active, repoPath, repoLabel }: Orchestrat
   }, []);
 
   const greeting = useMemo(() => timeOfDayGreeting(), []);
-  // Orchestrator brain is always Claude Code — the target picker below
-  // switches dispatch targets, not the orchestrator runtime itself.
-  const runtimeLabel = orchestratorRuntimeTone('claude-code').label;
+  // Empty-state chrome is branded as the O8 operator surface; dispatch target
+  // labels still come from the runtime picker below.
+  const runtimeLabel = 'O8 Operator';
 
   const emptyStateNode = useMemo(
     () => (
