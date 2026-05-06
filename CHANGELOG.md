@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-06
 
+- `5f672464` feat: two-axis theme system (palette × surface) + reduce-transparency toggle
 - `c017bc38` feat: skiper-style motion on search + browser titlebar buttons
 - `98f546b5` feat: skiper-style motion on titlebar left buttons
 - `e1010740` feat: align titlebar left buttons with right side; agents glows orange
