@@ -250,7 +250,7 @@ function RepoCardExpandedContentBase({
             </button>
             <button
               type="button"
-              title={assistantActive ? 'Assistant tab is active' : 'Switch to the Assistant tab'}
+              title={assistantActive ? 'Chat tab is active' : 'Switch to the Chat tab'}
               onClick={() => onFocusAssistantTab?.()}
               style={{
                 display: 'flex',
@@ -283,7 +283,7 @@ function RepoCardExpandedContentBase({
                       : null),
                   }}
                 >
-                  Assistant
+                  Chat
                 </span>
                 <span style={{ fontSize: 10, fontWeight: 400, color: assistantStatusColor, letterSpacing: '-0.005em', lineHeight: 1.3 }}>
                   {assistantStatus}

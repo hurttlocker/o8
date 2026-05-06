@@ -1288,6 +1288,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         input={input}
         onInputChange={setInput}
         isOrchestratorMode={isOrchestratorMode}
+        isChatMode={isChatMode}
         displayWaiting={displayWaiting}
         chatMessages={chatMessages}
         activeTargetLabel={activeTargetLabel}
