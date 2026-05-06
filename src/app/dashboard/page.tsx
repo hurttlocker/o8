@@ -3112,6 +3112,7 @@ function DashboardInner() {
       <DesktopStatusBar
         branchName={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
+        repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
         onOpenSettings={() => setActiveNavSection('settings')}
         onAddRepo={() => {
           if (typeof window !== 'undefined') {
