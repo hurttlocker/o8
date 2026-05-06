@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-06
 
+- `ef5357fb` feat: hide thinking chooser in chat tabs and rename Assistant row to Chat
 - `56744b34` feat: chat-mode chooser spawns dedicated tabs with tool-wired chat
 - `fa396dbe` feat: align orchestrator empty state
 - `1aee38c5` feat: refine o8 settings and analytics ui
