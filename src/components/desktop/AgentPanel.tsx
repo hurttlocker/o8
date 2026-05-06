@@ -165,8 +165,22 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             color: 'var(--t-text-faint)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
           }}
         >
+          {projects.activeProject.color ? (
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: projects.activeProject.color,
+                flexShrink: 0,
+              }}
+            />
+          ) : null}
           {projects.activeProject.name}
         </div>
       ) : null}
@@ -255,6 +269,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             repoPathFilter={activeProjectRepoSet}
             projectsForMove={projects.ledger?.projects.map((p) => ({ id: p.id, name: p.name })) ?? []}
             currentProjectId={projects.activeProject?.id ?? null}
+            activeProjectName={projects.activeProject?.name ?? null}
             onMoveRepoToProject={async (repoPath, targetId) => {
               await projects.moveRepoToProject(repoPath, targetId);
             }}
@@ -314,6 +329,10 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           onCreate={projects.createProject}
           onRename={projects.renameProject}
           onDelete={projects.deleteProject}
+          onSetColor={projects.setProjectColor}
+          onDropRepoOnProject={async (repoPath, targetId) => {
+            await projects.moveRepoToProject(repoPath, targetId);
+          }}
         />
       ) : null}
     </div>
