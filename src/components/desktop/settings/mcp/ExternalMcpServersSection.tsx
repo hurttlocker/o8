@@ -5,10 +5,15 @@ import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_ACCENT,
+  RAMS_CONTROL_BG,
+  RAMS_CONTROL_BORDER,
+  RAMS_CONTROL_ACTIVE_BG,
+  RAMS_CONTROL_ACTIVE_BORDER,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
   FieldLabel,
+  SettingsToggleButton,
 } from '../shared';
 import { Globe, Plus, Terminal } from '../../lucide-shims';
 import {
@@ -376,7 +381,7 @@ export function ExternalMcpServersSection() {
                     onClick={() => setForm((current) => ({ ...current, transport }))}
                     style={transportPillStyle(active)}
                   >
-                    ({transport})
+                    {transport}
                   </button>
                 );
               })}
@@ -453,13 +458,12 @@ export function ExternalMcpServersSection() {
             <Plus size={12} strokeWidth={2} />
             {creating ? 'adding...' : 'add server'}
           </button>
-          <button
-            type="button"
-            onClick={() => setForm((current) => ({ ...current, enabled: !current.enabled }))}
-            style={quietActionStyle(false)}
-          >
-            {form.enabled ? '(enabled on add)' : '(added disabled)'}
-          </button>
+          <SettingsToggleButton
+            checked={form.enabled}
+            onChange={(next) => setForm((current) => ({ ...current, enabled: next }))}
+            activeLabel="Enabled"
+            inactiveLabel="Disabled"
+          />
         </div>
       </div>
 
@@ -709,24 +713,7 @@ function ServerRow({
               <button
                 type="button"
                 onClick={onToggleStderr}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  minHeight: 44,
-                  fontFamily: MONO_FONT_STACK,
-                  fontSize: 10,
-                  fontWeight: 400,
-                  letterSpacing: '0.14em',
-                  textTransform: 'uppercase',
-                  color: RAMS_INK_QUIET,
-                  background: 'transparent',
-                  border: 'none',
-                  paddingTop: 0,
-                  paddingBottom: 0,
-                  paddingLeft: 0,
-                  paddingRight: 0,
-                  cursor: 'pointer',
-                }}
+                style={rowLinkStyle(false)}
               >
                 {expandedStderr ? 'hide stderr' : 'show stderr'}
               </button>
@@ -806,20 +793,19 @@ function transportPillStyle(active: boolean): React.CSSProperties {
     minHeight: 44,
     minWidth: 44,
     fontFamily: MONO_FONT_STACK,
-    fontSize: 11,
-    fontWeight: 400,
-    letterSpacing: '0.14em',
+    fontSize: 11.5,
+    fontWeight: 600,
+    letterSpacing: '0.04em',
     textTransform: 'uppercase',
-    color: active ? 'var(--t-text)' : RAMS_INK_QUIET,
-    background: active ? 'rgba(255, 90, 31, 0.1)' : 'transparent',
-    border: `1px solid ${active ? RAMS_ACCENT : RAMS_HAIRLINE_SOFT}`,
-    borderRadius: 4,
-    paddingTop: 4,
-    paddingBottom: 4,
+    color: active ? RAMS_ACCENT : 'var(--t-text-secondary)',
+    background: active ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
+    border: `1px solid ${active ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER}`,
+    borderRadius: 8,
     paddingLeft: 12,
     paddingRight: 12,
     cursor: 'pointer',
     outline: 'none',
+    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }
 
@@ -827,21 +813,24 @@ function parseButtonStyle(disabled: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
+    justifyContent: 'center',
     minHeight: 44,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 13,
-    fontWeight: 500,
+    paddingLeft: 14,
+    paddingRight: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: disabled ? RAMS_CONTROL_BORDER : RAMS_CONTROL_ACTIVE_BORDER,
+    background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
+    fontFamily: MONO_FONT_STACK,
+    fontSize: 11.5,
+    fontWeight: 600,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    background: 'transparent',
-    border: 'none',
-    borderBottom: `1px solid ${disabled ? RAMS_HAIRLINE_SOFT : RAMS_ACCENT}`,
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingLeft: 0,
-    paddingRight: 0,
     cursor: disabled ? 'default' : 'pointer',
-    letterSpacing: '-0.005em',
     opacity: disabled ? 0.6 : 1,
+    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }
 
@@ -856,8 +845,8 @@ function submitButtonStyle(disabled: boolean): React.CSSProperties {
     borderRadius: 8,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: disabled ? RAMS_HAIRLINE_SOFT : 'rgba(255, 90, 31, 0.32)',
-    background: disabled ? 'transparent' : 'rgba(255, 90, 31, 0.1)',
+    borderColor: disabled ? RAMS_CONTROL_BORDER : RAMS_CONTROL_ACTIVE_BORDER,
+    background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
@@ -874,21 +863,24 @@ function quietActionStyle(disabled: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
+    justifyContent: 'center',
     minHeight: 44,
+    paddingLeft: 14,
+    paddingRight: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: RAMS_CONTROL_BORDER,
+    background: disabled ? 'transparent' : RAMS_CONTROL_BG,
     fontFamily: MONO_FONT_STACK,
-    fontSize: 11,
-    fontWeight: 400,
-    letterSpacing: '0.14em',
+    fontSize: 11.5,
+    fontWeight: 600,
+    letterSpacing: '0.04em',
     textTransform: 'uppercase',
-    color: 'var(--t-text-muted)',
-    background: 'transparent',
-    border: 'none',
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingLeft: 0,
-    paddingRight: 0,
+    color: 'var(--t-text-secondary)',
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.6 : 1,
+    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }
 
@@ -896,20 +888,23 @@ function rowLinkStyle(disabled: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
-    minHeight: 44,
+    justifyContent: 'center',
+    minHeight: 36,
+    paddingLeft: 11,
+    paddingRight: 11,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: RAMS_CONTROL_BORDER,
+    background: disabled ? 'transparent' : RAMS_CONTROL_BG,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11,
-    fontWeight: 400,
-    letterSpacing: '0.14em',
+    fontWeight: 600,
+    letterSpacing: '0.04em',
     textTransform: 'uppercase',
-    color: disabled ? RAMS_INK_QUIET : 'var(--t-text-muted)',
-    background: 'transparent',
-    border: 'none',
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingLeft: 0,
-    paddingRight: 0,
+    color: disabled ? RAMS_INK_QUIET : 'var(--t-text-secondary)',
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.6 : 1,
+    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }

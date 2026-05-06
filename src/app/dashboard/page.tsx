@@ -2731,7 +2731,7 @@ function DashboardInner() {
         minHeight: 0, // critical: allow flex children to shrink for scroll
       }}>
       {/* NavRail retired — its Agents / Alerts buttons live in the TitleBar,
-          and Analytics / Settings / Ports / Add-repo live in the
+          and Settings / Ports / Add-repo live in the
           DesktopStatusBar at the bottom. The AgentPanel stays docked as the
           left column below. */}
 
@@ -3102,13 +3102,7 @@ function DashboardInner() {
       <DesktopStatusBar
         branchName={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
-        isAnalyticsSectionActive={activeNavSection === 'analytics'}
         onOpenSettings={() => setActiveNavSection('settings')}
-        onOpenAnalytics={() => {
-          setActiveNavSection('analytics');
-          if (!chatVisible) setChatVisible(true);
-          setRightPanelMode('chat');
-        }}
         onAddRepo={() => {
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent(REQUEST_ADD_REPO_EVENT));

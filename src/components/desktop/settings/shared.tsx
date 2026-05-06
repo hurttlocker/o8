@@ -55,7 +55,7 @@ export interface GitHubDeviceFlowState {
 
 export type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'operator-defaults' | 'projects' | 'workers' | 'cloud-workers' | 'appearance' | 'diagnostics' | 'about';
+export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'operator-defaults' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'diagnostics' | 'about';
 
 // ── Constants ──
 
@@ -72,6 +72,10 @@ export const RAMS_ACCENT = '#FF5A1F';
 export const RAMS_HAIRLINE_SOFT = 'rgba(17, 17, 17, 0.08)';
 export const RAMS_HAIRLINE = 'rgba(17, 17, 17, 0.18)';
 export const RAMS_INK_QUIET = 'var(--t-text-muted, #9A968E)';
+export const RAMS_CONTROL_BG = 'var(--t-bg-card, rgba(17, 17, 17, 0.035))';
+export const RAMS_CONTROL_BORDER = 'var(--t-panel-border, rgba(17, 17, 17, 0.14))';
+export const RAMS_CONTROL_ACTIVE_BG = 'rgba(255, 90, 31, 0.1)';
+export const RAMS_CONTROL_ACTIVE_BORDER = 'rgba(255, 90, 31, 0.32)';
 
 // ── Helpers ──
 
@@ -257,17 +261,19 @@ export function TabButton({ label, icon, active, onClick, comingSoon = false }: 
         paddingRight: 12,
         paddingBottom: 9,
         paddingLeft: 14,
-        borderRadius: 0,
-        border: 'none',
-        background: 'transparent',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: active ? RAMS_CONTROL_ACTIVE_BORDER : 'transparent',
+        background: active ? RAMS_CONTROL_ACTIVE_BG : 'transparent',
         color: active ? RAMS_ACCENT : 'var(--t-text-secondary)',
         fontSize: 13,
-        fontWeight: active ? 500 : 400,
+        fontWeight: active ? 600 : 500,
         cursor: 'pointer',
         textAlign: 'left',
         fontFamily: APP_FONT_STACK,
         letterSpacing: '-0.01em',
-        transition: 'color 120ms',
+        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms',
         opacity: comingSoon && !active ? 0.55 : 1,
       }}
     >
@@ -385,6 +391,67 @@ export function SectionLabel({ number, children }: { number: string; children: R
   );
 }
 
+export function SettingsToggleButton({
+  checked,
+  onChange,
+  disabled = false,
+  activeLabel = 'On',
+  inactiveLabel = 'Off',
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  activeLabel?: string;
+  inactiveLabel?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => { if (!disabled) onChange(!checked); }}
+      disabled={disabled}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        minHeight: 44,
+        minWidth: 78,
+        paddingLeft: 14,
+        paddingRight: 14,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: checked ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
+        background: disabled ? 'transparent' : checked ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
+        color: disabled ? RAMS_INK_QUIET : checked ? RAMS_ACCENT : 'var(--t-text-secondary)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 11.5,
+        fontWeight: 600,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+        opacity: disabled ? 0.62 : 1,
+      }}
+      aria-pressed={checked}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: 2,
+          background: checked ? RAMS_ACCENT : 'var(--t-text-faint)',
+          boxShadow: checked ? '0 0 0 3px rgba(255, 90, 31, 0.12)' : 'none',
+          flexShrink: 0,
+        }}
+      />
+      <span>{checked ? activeLabel : inactiveLabel}</span>
+    </button>
+  );
+}
+
 export function RamsButton({
   children,
   onClick,
@@ -404,17 +471,17 @@ export function RamsButton({
 }) {
   const tone = variant === 'danger' ? '#d94f3a' : variant === 'ghost' ? 'var(--t-text-secondary)' : RAMS_ACCENT;
   const border = variant === 'ghost'
-    ? RAMS_HAIRLINE
+    ? RAMS_CONTROL_BORDER
     : variant === 'danger'
       ? 'rgba(217, 79, 58, 0.32)'
-      : 'rgba(255, 90, 31, 0.32)';
+      : RAMS_CONTROL_ACTIVE_BORDER;
   const bg = disabled
     ? 'transparent'
     : variant === 'ghost'
-      ? 'transparent'
+      ? RAMS_CONTROL_BG
       : variant === 'danger'
         ? 'rgba(217, 79, 58, 0.08)'
-        : 'rgba(255, 90, 31, 0.1)';
+        : RAMS_CONTROL_ACTIVE_BG;
   return (
     <button
       type={type}

@@ -17,6 +17,10 @@ import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_ACCENT,
+  RAMS_CONTROL_BG,
+  RAMS_CONTROL_BORDER,
+  RAMS_CONTROL_ACTIVE_BG,
+  RAMS_CONTROL_ACTIVE_BORDER,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
@@ -401,30 +405,30 @@ export function MCPTab() {
                 onClick={() => { void copyToClipboard(); }}
                 style={{
                   position: 'absolute',
-                  top: 4,
-                  right: 4,
+                  top: 8,
+                  right: 8,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  minHeight: 44,
-                  minWidth: 44,
-                  paddingTop: 3,
-                  paddingBottom: 3,
+                  minHeight: 36,
                   paddingLeft: 10,
                   paddingRight: 10,
-                  border: 'none',
-                  background: 'transparent',
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: copied ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
+                  background: copied ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
                   color: copied ? RAMS_ACCENT : 'var(--t-text-muted)',
                   fontSize: 11,
                   fontFamily: MONO_FONT_STACK,
-                  fontWeight: 400,
-                  letterSpacing: '0.12em',
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
                   textTransform: 'uppercase',
                   cursor: 'pointer',
                   zIndex: 1,
                 }}
               >
-                {copied ? '(copied)' : '(copy)'}
+                {copied ? 'copied' : 'copy'}
               </button>
               <pre style={{
                 margin: 0,
@@ -507,7 +511,6 @@ function Disclosure({
 // ── Claude target row ──
 
 function ClaudeTargetRow({
-  target: _target,
   status,
   installing,
   disabled = false,
@@ -609,7 +612,7 @@ function ClaudeTargetRow({
             disabled={primaryDisabled}
             style={accentActionStyle(primaryDisabled)}
           >
-            {installing ? 'working...' : `(${primaryLabel})`}
+            {installing ? 'working...' : primaryLabel}
           </button>
         </div>
       </div>
@@ -664,21 +667,24 @@ function accentActionStyle(disabled: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
+    justifyContent: 'center',
     minHeight: 44,
+    paddingLeft: 14,
+    paddingRight: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: disabled ? RAMS_CONTROL_BORDER : RAMS_CONTROL_ACTIVE_BORDER,
+    background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
     fontFamily: MONO_FONT_STACK,
-    fontSize: 11,
-    fontWeight: 400,
-    letterSpacing: '0.14em',
+    fontSize: 11.5,
+    fontWeight: 600,
+    letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    background: 'transparent',
-    border: 'none',
-    paddingTop: 4,
-    paddingBottom: 4,
-    paddingLeft: 0,
-    paddingRight: 0,
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.6 : 1,
+    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }
 
@@ -686,20 +692,23 @@ function quietActionStyle(disabled: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
+    justifyContent: 'center',
     minHeight: 44,
+    paddingLeft: 14,
+    paddingRight: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: RAMS_CONTROL_BORDER,
+    background: disabled ? 'transparent' : RAMS_CONTROL_BG,
     fontFamily: MONO_FONT_STACK,
-    fontSize: 11,
-    fontWeight: 400,
-    letterSpacing: '0.14em',
+    fontSize: 11.5,
+    fontWeight: 600,
+    letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: 'var(--t-text-muted)',
-    background: 'transparent',
-    border: 'none',
-    paddingTop: 4,
-    paddingBottom: 4,
-    paddingLeft: 0,
-    paddingRight: 0,
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.6 : 1,
+    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }

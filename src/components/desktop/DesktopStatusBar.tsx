@@ -6,11 +6,11 @@
  * Mirrors the TitleBar pattern at the top (transparent background, neomorphic
  * buttons) but lives at the foot of the flex column.
  *
- *   [⚙] [📊] [🟢 N]  [+]                             [⎇ branch-name]
- *     settings analytics ports addRepo               current branch
+ *   [⚙] [🟢 N]  [+]                                  [⎇ branch-name]
+ *     settings ports addRepo                         current branch
  *
- * Content migrated here from the retired NavRail (settings, analytics, ports,
- * alerts all used to live on the left side column). Every button uses the
+ * Content migrated here from the retired NavRail (settings, ports, alerts
+ * all used to live on the left side column). Every button uses the
  * shared ChromeButton so the style matches TitleBar + future WorkspaceTerminal
  * tabs.
  */
@@ -18,7 +18,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, Copy, GitBranch, Send } from './lucide-shims';
-import { ChartBar, FolderPlus, GearSix, WarningCircle } from '@phosphor-icons/react';
+import { FolderPlus, GearSix, WarningCircle } from '@phosphor-icons/react';
 import { ChromeButton } from './chrome/ChromeButton';
 import { formatBranchDisplayName } from './repo-registry/shared';
 import { UpdateBanner } from './UpdateBanner';
@@ -26,9 +26,7 @@ import { UpdateBanner } from './UpdateBanner';
 interface DesktopStatusBarProps {
   branchName: string | null;
   repoName: string | null;
-  isAnalyticsSectionActive?: boolean;
   onOpenSettings: () => void;
-  onOpenAnalytics: () => void;
   onAddRepo: () => void;
   onPortPreview?: (port: number, url: string, repo?: string) => void;
 }
@@ -623,9 +621,7 @@ function SupervisorInboxBadge() {
 function DesktopStatusBarBase({
   branchName,
   repoName,
-  isAnalyticsSectionActive = false,
   onOpenSettings,
-  onOpenAnalytics,
   onAddRepo,
   onPortPreview,
 }: DesktopStatusBarProps) {
@@ -660,14 +656,6 @@ function DesktopStatusBarBase({
         icon={<GearSix size={14} weight="bold" color="var(--t-text)" />}
         label="Settings"
         onClick={onOpenSettings}
-        size={22}
-        radius={6}
-      />
-      <ChromeButton
-        icon={<ChartBar size={14} weight={isAnalyticsSectionActive ? 'fill' : 'bold'} color={isAnalyticsSectionActive ? 'var(--t-accent)' : 'var(--t-text)'} />}
-        label="Analytics"
-        onClick={onOpenAnalytics}
-        active={isAnalyticsSectionActive}
         size={22}
         radius={6}
       />

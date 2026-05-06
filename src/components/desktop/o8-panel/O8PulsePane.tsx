@@ -416,6 +416,7 @@ export const O8PulsePane = memo(function O8PulsePane({
 
   return (
     <div
+      className="o8-pulse-pane"
       style={{
         ...PULSE_CANVAS_VARS,
         display: 'flex',
@@ -466,6 +467,9 @@ export const O8PulsePane = memo(function O8PulsePane({
         tone="neutral"
       />
       <style>{`
+        html[data-theme='light'] .o8-pulse-pane {
+          --o8-pulse-hero-text: #F4F2ED;
+        }
         @keyframes o8-pulse {
           0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.28); }
           70% { box-shadow: 0 0 0 7px rgba(249, 115, 22, 0); }
@@ -525,10 +529,10 @@ function PulseHero({
         <div style={{ flex: 1, minWidth: 0 }}>
           <SectionLabel>[PULSE]</SectionLabel>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 9, marginTop: 6, minWidth: 0 }}>
-            <span style={{ fontSize: 28, fontWeight: 760, lineHeight: 1, color: 'var(--t-text)', fontFeatureSettings: '"tnum"' }}>
+            <span style={{ fontSize: 28, fontWeight: 760, lineHeight: 1, color: 'var(--o8-pulse-hero-text, var(--t-text))', fontFeatureSettings: '"tnum"' }}>
               {running}
             </span>
-            <span style={{ fontSize: 14, fontWeight: 760, color: 'var(--t-text)' }}>
+            <span style={{ fontSize: 14, fontWeight: 760, color: 'var(--o8-pulse-hero-text, var(--t-text))' }}>
               {stateLabel}
             </span>
           </div>
