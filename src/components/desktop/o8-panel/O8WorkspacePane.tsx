@@ -504,8 +504,14 @@ export function O8WorkspacePane({
     return repoOptions.find((option) => option.value === repoPath)?.label ?? lensLabel?.text ?? leafFromPath(repoPath);
   }, [lensLabel?.text, repoOptions, repoPath]);
 
+  // Light tokens only apply in light + SOLID. Glass mode (any palette)
+  // gets the original dark-translucent tokens because the chrome-surface
+  // scope already paints white text over the OS vibrancy in light + glass.
   const { paletteId, surface } = useTheme();
-  const workspaceTokens = paletteId === 'light' ? O8_WORKSPACE_TOKENS_LIGHT : O8_WORKSPACE_TOKENS_DARK;
+  const workspaceTokens =
+    paletteId === 'light' && surface === 'solid'
+      ? O8_WORKSPACE_TOKENS_LIGHT
+      : O8_WORKSPACE_TOKENS_DARK;
   // Glass: keep the saturating backdrop blur. Solid: drop the backdrop
   // entirely so the paper / graphite paint without ghosting from underneath.
   const isGlass = surface === 'glass';
