@@ -110,6 +110,16 @@ function mapHistoryMessagesToTranscript(messages: ThoughtsHistoryMessage[]): Mob
     }));
 }
 
+function isRuntimeSessionKey(sessionKey: string): boolean {
+  return sessionKey.startsWith('claude-code:')
+    || sessionKey.startsWith('codex:')
+    || sessionKey.startsWith('codex-owned:')
+    || sessionKey.startsWith('codex-discovered:')
+    || sessionKey.startsWith('codex-live:')
+    || sessionKey.startsWith('gemini-owned:')
+    || sessionKey.startsWith('opencode-owned:');
+}
+
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   open: boolean;
   draftInjection?: { id: string; text: string } | null;
@@ -401,14 +411,20 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [repoPathProp, resolvedRepoPath]);
 
-  const ensureSingleRuntimeSession = useCallback(async () => {
-    if (singleRuntimeSessionRef.current) return singleRuntimeSessionRef.current;
-    if (singleRuntimeLaunchPromiseRef.current) return singleRuntimeLaunchPromiseRef.current;
+  const ensureSingleRuntimeSession = useCallback(async (initialMessage?: string): Promise<{ sessionKey: string; launched: boolean } | null> => {
+    if (singleRuntimeSessionRef.current) {
+      return { sessionKey: singleRuntimeSessionRef.current, launched: false };
+    }
+    if (singleRuntimeLaunchPromiseRef.current) {
+      const sessionKey = await singleRuntimeLaunchPromiseRef.current;
+      return sessionKey ? { sessionKey, launched: false } : null;
+    }
 
     const launchPromise = (async () => {
       const repoPath = await resolveRuntimeRepoPath();
       if (!repoPath) return null;
       const runtimeLabel = orchestratorRuntimeTone(singleRuntime).label;
+      const prompt = initialMessage?.trim() || `You are ${runtimeLabel} running as a single-runtime o8 workspace chat. Acknowledge ready.`;
       try {
         setSingleRuntimeSpawning(true);
         const launchRes = await fetch('/api/runtime/launch', {
@@ -416,9 +432,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             runtime: singleRuntime,
-            prompt: `You are ${runtimeLabel} running as a single-runtime o8 workspace chat. Acknowledge ready.`,
+            prompt,
             repoPath,
             cwd: repoPath,
+            taskName: initialMessage?.trim() || undefined,
             skipSetup: true,
           }),
         });
@@ -435,7 +452,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     })();
 
     singleRuntimeLaunchPromiseRef.current = launchPromise;
-    return launchPromise;
+    const sessionKey = await launchPromise;
+    return sessionKey ? { sessionKey, launched: true } : null;
   }, [resolveRuntimeRepoPath, singleRuntime]);
 
   // ── Pre-warm orchestrator session on mount ──
@@ -594,7 +612,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, []);
 
   const transcriptUrl = useCallback((sessionKey: string) => {
-    if (sessionKey.startsWith('claude-code:') || sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-owned:') || sessionKey.startsWith('codex-discovered:')) {
+    if (isRuntimeSessionKey(sessionKey)) {
       return `/api/runtime/transcript?sessionKey=${encodeURIComponent(sessionKey)}&limit=20`;
     }
     return `/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=20&fresh=1`;
@@ -616,6 +634,34 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [transcriptUrl]);
 
+  const isOwnedRuntimeSession = useCallback((sessionKey: string) => (
+    sessionKey.startsWith('codex-owned:')
+    || sessionKey.startsWith('gemini-owned:')
+    || sessionKey.startsWith('opencode-owned:')
+  ), []);
+
+  // Owned codex/gemini/opencode sessions can't accept the next turn until
+  // their CLI emits a thread id and the lifecycle flips to ready-for-resume.
+  // The transcript poller can declare "response done" before that happens
+  // (the launch banner counts as a non-user entry), so the composer would
+  // unlock and the next steer call would 501 with "cannot accept the next
+  // input yet". Gate the composer on the inventory snapshot for these
+  // sessions to keep the user from sending into a not-yet-resumable lane.
+  const checkOwnedSessionReady = useCallback(async (sessionKey: string) => {
+    try {
+      const res = await fetch('/api/runtime/inventory');
+      if (!res.ok) return false;
+      const data = await res.json();
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      const agent = agents.find((entry: { sessionKey?: string }) => entry?.sessionKey === sessionKey);
+      const availability = agent?.runtimeSurface?.lifecycle?.availability;
+      const sendInput = agent?.runtimeSurface?.capabilities?.sendInput;
+      return availability === 'ready-for-resume' || sendInput === true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const startPollingForSession = useCallback((sessionKey: string) => {
     clearPolling();
     responseSeenRef.current = false;
@@ -623,12 +669,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
     let attempts = 0;
     const maxAttempts = 60;
+    const requiresReadiness = isOwnedRuntimeSession(sessionKey);
+
+    const finishPolling = () => {
+      clearPolling();
+      setWaitingForReply(false);
+    };
 
     const poll = async () => {
       attempts++;
       if (attempts > maxAttempts) {
-        clearPolling();
-        setWaitingForReply(false);
+        finishPolling();
         return;
       }
 
@@ -664,8 +715,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         if (responseSeenRef.current) {
           idlePollsRef.current += 1;
           if (idlePollsRef.current >= 4) {
-            clearPolling();
-            setWaitingForReply(false);
+            if (requiresReadiness) {
+              const ready = await checkOwnedSessionReady(sessionKey);
+              if (!ready) {
+                idlePollsRef.current = 3;
+                return;
+              }
+            }
+            finishPolling();
           }
         }
       } catch {
@@ -679,7 +736,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         void poll();
       }, 2000);
     }, 400);
-  }, [clearPolling, transcriptUrl]);
+  }, [checkOwnedSessionReady, clearPolling, isOwnedRuntimeSession, transcriptUrl]);
 
   const startPolling = useCallback(() => {
     const sessionKey = isOrchestratorMode ? orchestratorSessionRef.current : targetSessionKey;
@@ -951,20 +1008,22 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     });
   }, [activeTargetLabel, displayMessages.length, displayWaiting, onChromeChange, orchStream.busyState, threadId]);
 
-  // Fire onChatSummary whenever the latest user message changes in chat
-  // mode. The parent stashes it on the tab record and the tab strip
-  // truncates it to ~3 words for the visible label.
+  // Fire onChatSummary whenever the latest user message changes in any chat
+  // surface (orchestrator / chat / single runtime). The parent stashes it on
+  // the tab record and the tab strip truncates it to ~3 words for the visible
+  // label so the user can see at a glance what each tab is about.
   const lastReportedChatSummaryRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isChatMode || !onChatSummary) return;
-    const latestUser = [...chatMessages].reverse().find((entry) => (
+    if (!onChatSummary) return;
+    const source = isOrchestratorMode && !isChatMode ? displayMessages : chatMessages;
+    const latestUser = [...source].reverse().find((entry) => (
       entry.role === 'user' && entry.text.trim()
     ));
     const text = latestUser?.text?.trim() ?? '';
     if (!text || text === lastReportedChatSummaryRef.current) return;
     lastReportedChatSummaryRef.current = text;
     onChatSummary(text);
-  }, [chatMessages, isChatMode, onChatSummary]);
+  }, [chatMessages, displayMessages, isChatMode, isOrchestratorMode, onChatSummary]);
 
   // #587 — publish live transcript + running token total into the context
   // residency provider so the ContextInspector side panel (mounted at the
@@ -1117,30 +1176,37 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setWaitingForReply(true);
 
       try {
-        const sessionKey = await ensureSingleRuntimeSession();
-        if (!sessionKey) {
+        const launch = await ensureSingleRuntimeSession(msg);
+        if (!launch?.sessionKey) {
           throw new Error('Unable to launch selected runtime');
         }
+        const { sessionKey } = launch;
         await captureServerSnapshot(sessionKey);
-        const response = await fetch('/api/runtime/action', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: msg }),
-        });
+        if (!launch.launched) {
+          const response = await fetch('/api/runtime/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: msg }),
+          });
 
-        if (!response.ok) {
-          throw new Error('Send failed');
+          if (!response.ok) {
+            const body = await response.json().catch(() => null) as { note?: string; error?: string } | null;
+            const reason = body?.note?.trim() || body?.error?.trim();
+            throw new Error(reason || 'Send failed');
+          }
         }
 
         startPollingForSession(sessionKey);
-      } catch {
+      } catch (err) {
         const runtimeLabel = orchestratorRuntimeTone(singleRuntime).label;
+        const rawMessage = err instanceof Error ? err.message.trim() : '';
+        const fallback = `Unable to reach the selected ${runtimeLabel} lane. Make sure the runtime is available.`;
         setChatMessages((prev) => [
           ...prev,
           {
             id: `local-error-${Date.now()}`,
             role: 'system',
-            text: `Unable to reach the selected ${runtimeLabel} lane. Make sure the runtime is available.`,
+            text: rawMessage || fallback,
             timestamp: Date.now(),
             timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
@@ -1188,7 +1254,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     try {
       await captureServerSnapshot(sessionKey);
 
-      const isRuntimeSession = sessionKey.startsWith('claude-code:') || sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-owned:');
+      const isRuntimeSession = isRuntimeSessionKey(sessionKey);
       const response = await fetch(isRuntimeSession ? '/api/runtime/action' : '/api/mobile/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1431,6 +1497,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onInputChange={setInput}
         isOrchestratorMode={isOrchestratorMode}
         isChatMode={isChatMode}
+        isSingleMode={isSingleMode}
         displayWaiting={displayWaiting}
         chatMessages={chatMessages}
         activeTargetLabel={activeTargetLabel}

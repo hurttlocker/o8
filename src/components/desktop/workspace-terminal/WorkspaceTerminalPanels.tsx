@@ -89,6 +89,7 @@ function WorkspaceTerminalPanelsBase({
               initialMode={tab.mode}
               initialSingleRuntime={tab.singleRuntime}
               initialChatModelId={tab.chatModelId}
+              onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
             />
           </Suspense>
         ) : tab.kind === 'llm-chat' ? (

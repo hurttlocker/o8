@@ -16,6 +16,51 @@ type WorkspaceRepoOption = Pick<RepoRegistryEntry, 'id' | 'name' | 'localPath' |
 const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const RAIL_WIDTH = 'clamp(224px, 30%, 292px)';
+const O8_WORKSPACE_GLASS_TOKENS = {
+  colorScheme: 'dark',
+  ['--t-bg' as string]: 'rgba(50, 57, 66, 0.42)',
+  ['--t-bg-card' as string]: 'rgba(255, 255, 255, 0.07)',
+  ['--t-bg-subtle' as string]: 'rgba(255, 255, 255, 0.055)',
+  ['--t-panel' as string]: 'rgba(255, 255, 255, 0.055)',
+  ['--t-panel-translucent' as string]: 'rgba(255, 255, 255, 0.045)',
+  ['--t-panel-solid' as string]: 'linear-gradient(180deg, rgba(72, 80, 92, 0.54) 0%, rgba(50, 58, 69, 0.44) 100%)',
+  ['--t-panel-border' as string]: 'rgba(255, 255, 255, 0.14)',
+  ['--t-panel-shadow' as string]: '0 18px 44px rgba(0, 0, 0, 0.18)',
+  ['--t-input-bg' as string]: 'rgba(255, 255, 255, 0.08)',
+  ['--t-input-border' as string]: 'rgba(255, 255, 255, 0.16)',
+  ['--t-border' as string]: 'rgba(255, 255, 255, 0.14)',
+  ['--t-divider' as string]: 'rgba(255, 255, 255, 0.12)',
+  ['--t-divider-subtle' as string]: 'rgba(255, 255, 255, 0.08)',
+  ['--t-hover' as string]: 'rgba(255, 255, 255, 0.1)',
+  ['--t-canvas-bg' as string]: 'rgba(49, 56, 66, 0.38)',
+  ['--t-text' as string]: 'rgba(255, 255, 255, 0.94)',
+  ['--t-text-strong' as string]: '#ffffff',
+  ['--t-text-secondary' as string]: 'rgba(244, 248, 252, 0.78)',
+  ['--t-text-muted' as string]: 'rgba(226, 232, 240, 0.62)',
+  ['--t-text-faint' as string]: 'rgba(203, 213, 225, 0.44)',
+  ['--t-accent' as string]: '#8fb4ff',
+  ['--t-accent-soft' as string]: 'rgba(143, 180, 255, 0.14)',
+  ['--t-accent-border' as string]: 'rgba(143, 180, 255, 0.28)',
+  ['--t-brand-orange' as string]: '#f1c36a',
+  ['--t-brand-red' as string]: '#f87171',
+  ['--t-chat-surface-bg' as string]: 'rgba(255, 255, 255, 0.05)',
+  ['--t-chat-surface-text' as string]: 'rgba(255, 255, 255, 0.94)',
+  ['--t-chat-surface-text-secondary' as string]: 'rgba(244, 248, 252, 0.76)',
+  ['--t-chat-surface-text-muted' as string]: 'rgba(226, 232, 240, 0.58)',
+  ['--t-chat-surface-border' as string]: 'rgba(255, 255, 255, 0.12)',
+  ['--t-chat-surface-input-bg' as string]: 'rgba(255, 255, 255, 0.08)',
+  ['--t-chat-surface-input-border' as string]: 'rgba(255, 255, 255, 0.16)',
+  ['--t-chat-surface-card-bg' as string]: 'rgba(255, 255, 255, 0.07)',
+  ['--t-terminal-ansi-green' as string]: '#86efac',
+  ['--t-terminal-ansi-bright-green' as string]: '#bbf7d0',
+  ['--t-terminal-ansi-bright-red' as string]: '#fca5a5',
+  ['--o8-workspace-header-bg' as string]: 'linear-gradient(180deg, rgba(255, 255, 255, 0.072) 0%, rgba(255, 255, 255, 0.035) 100%)',
+  ['--o8-workspace-header-divider' as string]: 'rgba(255, 255, 255, 0.075)',
+  ['--o8-workspace-control-bg' as string]: 'rgba(255, 255, 255, 0.062)',
+  ['--o8-workspace-control-border' as string]: 'rgba(255, 255, 255, 0.13)',
+  ['--o8-workspace-control-shadow' as string]: 'inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+  ['--o8-workspace-rail-header-bg' as string]: 'linear-gradient(180deg, rgba(255, 255, 255, 0.052) 0%, rgba(255, 255, 255, 0.028) 100%)',
+} satisfies CSSProperties;
 
 // Easter-egg color ramp for the Changes count: the badge cools-to-warm
 // as uncommitted files pile up. Nudges the operator to PR before the
@@ -83,8 +128,9 @@ function ModeMenu<TMode extends string>({
           borderRadius: 9,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: 'var(--t-divider-subtle)',
-          background: 'var(--t-input-bg)',
+          borderColor: 'var(--o8-workspace-control-border, var(--t-divider-subtle))',
+          background: 'var(--o8-workspace-control-bg, var(--t-input-bg))',
+          boxShadow: 'var(--o8-workspace-control-shadow, none)',
           color: 'var(--t-text)',
           cursor: 'pointer',
           display: 'inline-flex',
@@ -404,21 +450,32 @@ export function O8WorkspacePane({
   return (
     <div
       style={{
+        ...O8_WORKSPACE_GLASS_TOKENS,
         display: 'flex',
         flex: 1,
         flexDirection: 'column',
         minHeight: 0,
-        background: 'var(--t-canvas-bg)',
-        color: 'var(--t-chat-surface-text)',
-        ['--t-text' as unknown as string]: 'var(--t-chat-surface-text)',
-        ['--t-text-secondary' as unknown as string]: 'var(--t-chat-surface-text-secondary)',
-        ['--t-text-muted' as unknown as string]: 'var(--t-chat-surface-text-muted)',
-        ['--t-text-faint' as unknown as string]: 'var(--t-chat-surface-text-muted)',
-        ['--t-input-bg' as unknown as string]: 'var(--t-chat-surface-input-bg)',
+        background: 'linear-gradient(180deg, rgba(70, 78, 90, 0.42) 0%, rgba(44, 52, 63, 0.34) 100%)',
+        color: 'var(--t-text)',
+        backdropFilter: 'blur(24px) saturate(1.16)',
+        WebkitBackdropFilter: 'blur(24px) saturate(1.16)',
+        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.09)',
+        scrollbarColor: 'rgba(226, 232, 240, 0.34) rgba(255, 255, 255, 0.06)',
+        scrollbarWidth: 'thin',
       } as CSSProperties}
     >
-      <div style={{ display: 'flex', minHeight: 42, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', fontFamily: UI_FONT }}>
-        <div style={{ width: RAIL_WIDTH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, borderRight: '1px solid var(--t-divider-subtle)', paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10 }}>
+      <div
+        style={{
+          display: 'flex',
+          minHeight: 42,
+          flexShrink: 0,
+          borderBottom: '1px solid var(--o8-workspace-header-divider)',
+          background: 'var(--o8-workspace-header-bg)',
+          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.055)',
+          fontFamily: UI_FONT,
+        }}
+      >
+        <div style={{ width: RAIL_WIDTH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, borderRight: '1px solid var(--o8-workspace-header-divider)', paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10 }}>
           <ModeMenu
             label={listMode === 'changes' ? 'Changes' : 'All files'}
             options={listOptions}

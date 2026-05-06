@@ -218,6 +218,7 @@ export const TabBar = memo(function TabBar({
           {tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
             const isOrchestrator = tab.kind === 'orchestrator';
+            const isSingleRuntimeTab = isOrchestrator && tab.mode === 'single';
             const isPermanentOrchestrator = isOrchestrator && tab.mode !== 'single';
             const rawLabel = workspaceTabPrimaryLabel(tab);
             const chatTabMeta = describeWorkspaceChatTab(tab);
@@ -225,7 +226,11 @@ export const TabBar = memo(function TabBar({
             const compactLabel = packetTitle ? compactPacketLabel(packetTitle) : '';
             const primaryLabel = compactLabel
               ? compactLabel
-              : ((rawLabel === 'Assistant' || rawLabel === 'Agent' || rawLabel === 'Chat') && chatTabMeta?.summary
+              : ((isOrchestrator
+                  || rawLabel === 'Assistant'
+                  || rawLabel === 'Agent'
+                  || rawLabel === 'Chat'
+                ) && chatTabMeta?.summary
                 ? chatTabMeta.summary
                 : rawLabel);
             const tabDetail = tab.orchestrationPacket
@@ -364,7 +369,13 @@ export const TabBar = memo(function TabBar({
                 {tab.unseen ? (
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#2563eb', flexShrink: 0 }} />
                 ) : null}
-                {tab.kind === 'orchestrator' || tab.chatRuntime === 'claude-code' ? (
+                {isSingleRuntimeTab && tab.singleRuntime === 'codex' ? (
+                  <CodexIcon size={13} />
+                ) : isSingleRuntimeTab && tab.singleRuntime === 'gemini' ? (
+                  <GeminiIcon size={13} />
+                ) : isSingleRuntimeTab && tab.singleRuntime === 'opencode' ? (
+                  <OpenCodeIcon size={13} />
+                ) : tab.kind === 'orchestrator' || tab.chatRuntime === 'claude-code' ? (
                   <ClaudeIcon size={13} />
                 ) : tab.chatRuntime === 'codex' ? (
                   <CodexIcon size={13} />

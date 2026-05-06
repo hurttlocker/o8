@@ -201,7 +201,8 @@ export function ChangesList({
           paddingBottom: 0,
           paddingLeft: 10,
           borderBottom: '1px solid var(--t-divider-subtle)',
-          background: 'var(--t-canvas-bg)',
+          background: 'var(--o8-workspace-rail-header-bg, var(--t-canvas-bg))',
+          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.035)',
           fontFamily: UI_FONT,
         }}
       >

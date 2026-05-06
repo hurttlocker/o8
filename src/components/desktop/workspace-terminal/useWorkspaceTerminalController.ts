@@ -10,6 +10,7 @@ import {
 } from '@/lib/terminal/tab-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
+import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { ORCHESTRATED_TAB_AUTO_ARCHIVE_MS } from '@/components/desktop/workspace-terminal/constants';
 import type {
@@ -138,7 +139,9 @@ export function useWorkspaceTerminalController(
     return true;
   }, []);
 
-  preferredRepoRef.current = preferredRepo;
+  useEffect(() => {
+    preferredRepoRef.current = preferredRepo;
+  }, [preferredRepo]);
 
   const stableRepoScope = !splitCreated && preferredRepo?.localPath
     ? buildRepoStateScope(preferredRepo.localPath)
@@ -325,17 +328,17 @@ export function useWorkspaceTerminalController(
     mode: 'fleet',
   }), []);
 
-  // Fresh workspace = a single Orchestrator tab. The Chat tab spawns from
-  // the chooser when the operator picks "Chat", instead of always being
-  // present. Single-runtime tabs spawn the same way.
+  // Fresh workspace = Orchestrator first, Chat ready but not focused. The
+  // orchestrator stays the command center while the left rail's Chat row has
+  // a real tab to focus on first load.
   const createDefaultChatTabSet = useCallback((): TerminalTab[] => {
-    return [createDefaultOrchestratorTab()];
-  }, [createDefaultOrchestratorTab]);
+    return [createDefaultOrchestratorTab(), createDefaultChatTab()];
+  }, [createDefaultChatTab, createDefaultOrchestratorTab]);
 
   const spawnSingleRuntimeTab = useCallback((runtime: OrchestratorRuntime): string => {
     const newTab: TerminalTab = {
       id: createWorkspaceTabId('orchestrator'),
-      label: 'Single',
+      label: orchestratorRuntimeTone(runtime).label,
       kind: 'orchestrator',
       tmuxSession: null,
       repo: preferredRepoRef.current ?? undefined,
@@ -842,7 +845,9 @@ export function useWorkspaceTerminalController(
     });
   }, [activeTabId, sendTerminalDetach, setActiveTabIdFromUser]);
 
-  handleCloseTabRef.current = handleCloseTab;
+  useEffect(() => {
+    handleCloseTabRef.current = handleCloseTab;
+  }, [handleCloseTab]);
 
   const archiveWorkspaceTab = useCallback((tabId: string, packetId?: string | null) => {
     handleCloseTab(tabId);
