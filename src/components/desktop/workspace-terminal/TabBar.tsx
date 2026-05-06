@@ -203,6 +203,11 @@ export const TabBar = memo(function TabBar({
             gap: TAB_GAP,
             height: TAB_BAR_HEIGHT + 1,
             marginBottom: -1,
+            // Inset the row so the workspace's curved top-left/right corners
+            // are visible on either side of the tab cluster instead of being
+            // covered by the leftmost/rightmost tab.
+            paddingLeft: 12,
+            paddingRight: 12,
             overflowX: 'auto',
             overflowY: 'hidden',
             scrollbarWidth: 'none',
@@ -211,6 +216,7 @@ export const TabBar = memo(function TabBar({
           {tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
             const isOrchestrator = tab.kind === 'orchestrator';
+            const isPermanentOrchestrator = isOrchestrator && tab.mode !== 'single';
             const rawLabel = workspaceTabPrimaryLabel(tab);
             const chatTabMeta = describeWorkspaceChatTab(tab);
             const packetTitle = tab.orchestrationPacket?.title ?? null;
@@ -375,7 +381,7 @@ export const TabBar = memo(function TabBar({
                 >
                   {primaryLabel}
                 </span>
-                {tabs.length > 1 && !isOrchestrator ? (
+                {tabs.length > 1 && !isPermanentOrchestrator ? (
                   <span
                     role="button"
                     tabIndex={0}
