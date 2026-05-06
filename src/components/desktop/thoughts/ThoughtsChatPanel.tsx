@@ -163,6 +163,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   ) => void;
   onLaunchPacket?: (packet: OrchestratorPacket) => void;
   onChromeChange: (state: ThoughtsChatPanelChromeState) => void;
+  // Called with the latest user message text in chat mode so the parent
+  // can stash it on the tab record and the tab strip can show a 3-word
+  // summary instead of the generic "Chat" label.
+  onChatSummary?: (text: string) => void;
 }>(function ThoughtsChatPanel({
   open,
   draftInjection,
@@ -193,6 +197,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onSpawnSingleTab,
   onSpawnChatTab,
   onChromeChange,
+  onChatSummary,
 }, ref) {
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
@@ -286,7 +291,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const orchestratorSessionRef = useRef<string | null>(null);
+  const singleRuntimeSessionRef = useRef<string | null>(null);
+  const singleRuntimeLaunchPromiseRef = useRef<Promise<string | null> | null>(null);
   const [orchestratorSpawning, setOrchestratorSpawning] = useState(false);
+  const [singleRuntimeSpawning, setSingleRuntimeSpawning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
   const exportFeedbackTimerRef = useRef<number | null>(null);
@@ -305,8 +313,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     clearAttachments,
   } = useThoughtsComposerAttachments();
 
-  const isOrchestratorMode = targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey);
-  const isChatMode = isOrchestratorMode && orchestrationMode === 'chat';
+  const isSingleMode = orchestrationMode === 'single';
+  const isChatMode = orchestrationMode === 'chat';
+  const isOrchestratorMode = !isSingleMode && !isChatMode && (targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey));
 
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
     seededPlanText: planText,
@@ -373,6 +382,61 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     })();
     return () => { cancelled = true; };
   }, [repoPathProp]);
+
+  useEffect(() => {
+    singleRuntimeSessionRef.current = null;
+    singleRuntimeLaunchPromiseRef.current = null;
+  }, [resolvedRepoPath, singleRuntime]);
+
+  const resolveRuntimeRepoPath = useCallback(async () => {
+    if (resolvedRepoPath) return resolvedRepoPath;
+    if (repoPathProp) return repoPathProp;
+    try {
+      const res = await fetch('/api/panel/repos');
+      if (!res.ok) return null;
+      const data = await res.json() as { repos?: Array<{ localPath: string }> };
+      return data.repos?.[0]?.localPath ?? null;
+    } catch {
+      return null;
+    }
+  }, [repoPathProp, resolvedRepoPath]);
+
+  const ensureSingleRuntimeSession = useCallback(async () => {
+    if (singleRuntimeSessionRef.current) return singleRuntimeSessionRef.current;
+    if (singleRuntimeLaunchPromiseRef.current) return singleRuntimeLaunchPromiseRef.current;
+
+    const launchPromise = (async () => {
+      const repoPath = await resolveRuntimeRepoPath();
+      if (!repoPath) return null;
+      const runtimeLabel = orchestratorRuntimeTone(singleRuntime).label;
+      try {
+        setSingleRuntimeSpawning(true);
+        const launchRes = await fetch('/api/runtime/launch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runtime: singleRuntime,
+            prompt: `You are ${runtimeLabel} running as a single-runtime o8 workspace chat. Acknowledge ready.`,
+            repoPath,
+            cwd: repoPath,
+            skipSetup: true,
+          }),
+        });
+        const data = await launchRes.json() as { ok?: boolean; surfaceId?: string };
+        if (!data.ok || !data.surfaceId) return null;
+        singleRuntimeSessionRef.current = data.surfaceId;
+        return data.surfaceId;
+      } catch {
+        return null;
+      } finally {
+        setSingleRuntimeSpawning(false);
+        singleRuntimeLaunchPromiseRef.current = null;
+      }
+    })();
+
+    singleRuntimeLaunchPromiseRef.current = launchPromise;
+    return launchPromise;
+  }, [resolveRuntimeRepoPath, singleRuntime]);
 
   // ── Pre-warm orchestrator session on mount ──
   useEffect(() => {
@@ -663,6 +727,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
     cancelPendingPersist();
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
+    singleRuntimeSessionRef.current = null;
+    singleRuntimeLaunchPromiseRef.current = null;
     if (isOrchestratorMode) {
       void persistThreadNow([], placeholderId, null);
     }
@@ -816,6 +882,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       orchStream.replaceTranscript(msgs);
       seenServerEntriesRef.current.clear();
       orchestratorSessionRef.current = null;
+      singleRuntimeSessionRef.current = null;
+      singleRuntimeLaunchPromiseRef.current = null;
       setTimeout(() => inputRef.current?.focus(), 50);
     } catch {
       // silent
@@ -830,11 +898,21 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (!isOrchestratorMode || isChatMode) return chatMessages;
     return orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
   }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages]);
-  const displayWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
+  const displayWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : (waitingForReply || (isSingleMode && singleRuntimeSpawning));
   const displayPlanText = isOrchestratorMode && !isChatMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
-  const activeTargetLabel = isChatMode ? selectedChatModel.label : isOrchestratorMode ? 'Claude Code' : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
-  const activeTargetColor = isOrchestratorMode ? '#e07a3a' : (targetAgent?.color ?? orchestratorRuntimeTone(preferredRuntime).color);
+  const activeTargetLabel = isChatMode
+    ? selectedChatModel.label
+    : isSingleMode
+      ? orchestratorRuntimeTone(singleRuntime).label
+      : isOrchestratorMode
+        ? 'Claude Code'
+        : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
+  const activeTargetColor = isSingleMode
+    ? orchestratorRuntimeTone(singleRuntime).color
+    : isOrchestratorMode
+      ? '#e07a3a'
+      : (targetAgent?.color ?? orchestratorRuntimeTone(preferredRuntime).color);
   // #771 — Augment Intent-style chip row under the last assistant message.
   // Only fires in orchestrator mode; CLI lanes still steer via the composer.
   const {
@@ -872,6 +950,21 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       orchestratorBusyState: orchStream.busyState,
     });
   }, [activeTargetLabel, displayMessages.length, displayWaiting, onChromeChange, orchStream.busyState, threadId]);
+
+  // Fire onChatSummary whenever the latest user message changes in chat
+  // mode. The parent stashes it on the tab record and the tab strip
+  // truncates it to ~3 words for the visible label.
+  const lastReportedChatSummaryRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isChatMode || !onChatSummary) return;
+    const latestUser = [...chatMessages].reverse().find((entry) => (
+      entry.role === 'user' && entry.text.trim()
+    ));
+    const text = latestUser?.text?.trim() ?? '';
+    if (!text || text === lastReportedChatSummaryRef.current) return;
+    lastReportedChatSummaryRef.current = text;
+    onChatSummary(text);
+  }, [chatMessages, isChatMode, onChatSummary]);
 
   // #587 — publish live transcript + running token total into the context
   // residency provider so the ContextInspector side panel (mounted at the
@@ -1008,6 +1101,55 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       return;
     }
 
+    if (isSingleMode) {
+      setInput('');
+      latestInputRef.current = '';
+
+      const userMsg: MobileTranscriptEntry = {
+        id: `local-user-${Date.now()}`,
+        role: 'user',
+        text: msg,
+        timestamp: Date.now(),
+        timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setChatMessages((prev) => [...prev, userMsg]);
+      clearAttachments();
+      setWaitingForReply(true);
+
+      try {
+        const sessionKey = await ensureSingleRuntimeSession();
+        if (!sessionKey) {
+          throw new Error('Unable to launch selected runtime');
+        }
+        await captureServerSnapshot(sessionKey);
+        const response = await fetch('/api/runtime/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: msg }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Send failed');
+        }
+
+        startPollingForSession(sessionKey);
+      } catch {
+        const runtimeLabel = orchestratorRuntimeTone(singleRuntime).label;
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `local-error-${Date.now()}`,
+            role: 'system',
+            text: `Unable to reach the selected ${runtimeLabel} lane. Make sure the runtime is available.`,
+            timestamp: Date.now(),
+            timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        setWaitingForReply(false);
+      }
+      return;
+    }
+
     if (isOrchestratorMode && await runLocalOrchestratorSlash(msg)) {
       setInput('');
       return;
@@ -1074,7 +1216,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [captureServerSnapshot, chatMessages, clearAttachments, input, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, selectedChatModel, startPolling, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
+  }, [captureServerSnapshot, chatMessages, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -1301,7 +1443,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSubmit={() => { void handleTaskSend(); }}
         onStop={orchStream.interrupt}
         onSlashCommand={handleSlashCommand}
-        modelLabel={isChatMode ? selectedChatModel.label : isOrchestratorMode ? formatModelLabel(orchestratorModel) : activeTargetLabel}
+        modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? formatModelLabel(orchestratorModel) : activeTargetLabel}
         effort={thinkingEffort}
         onEffortChange={handleEffortChange}
         adaptiveEnabled={adaptiveThinkingEnabled}

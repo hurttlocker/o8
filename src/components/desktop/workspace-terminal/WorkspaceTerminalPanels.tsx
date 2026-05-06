@@ -102,6 +102,7 @@ function WorkspaceTerminalPanelsBase({
               initialMode="chat"
               initialChatModelId={tab.chatModelId}
               initialChatOpenrouterModel={tab.chatOpenrouterModel}
+              onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
             />
           </Suspense>
         ) : tab.kind === 'chat' ? (
