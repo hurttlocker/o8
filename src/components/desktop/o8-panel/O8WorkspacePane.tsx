@@ -17,6 +17,18 @@ const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const RAIL_WIDTH = 'clamp(224px, 30%, 292px)';
 
+// Easter-egg color ramp for the Changes count: the badge cools-to-warm
+// as uncommitted files pile up. Nudges the operator to PR before the
+// changeset gets unwieldy. 0 hides, 1–3 green, 4–7 amber, 8–15 orange,
+// 16+ red.
+function changesUrgencyColor(count: number): string {
+  if (count <= 0) return 'var(--t-text-faint)';
+  if (count <= 3) return '#22c55e';
+  if (count <= 7) return '#f59e0b';
+  if (count <= 15) return '#FF5A1F';
+  return '#ef4444';
+}
+
 function leafFromPath(path: string) {
   const parts = path.split('/').filter(Boolean);
   return parts[parts.length - 1] ?? path;
@@ -39,6 +51,7 @@ function DownIcon({ size = 12 }: { size?: number }) {
 function ModeMenu<TMode extends string>({
   align = 'left',
   beforeLabel,
+  afterLabel,
   label,
   maxWidth,
   menuMinWidth = 164,
@@ -49,6 +62,7 @@ function ModeMenu<TMode extends string>({
 }: {
   align?: 'left' | 'right';
   beforeLabel?: ReactNode;
+  afterLabel?: ReactNode;
   label: string;
   maxWidth?: number | string;
   menuMinWidth?: number;
@@ -88,6 +102,7 @@ function ModeMenu<TMode extends string>({
       >
         {beforeLabel}
         <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        {afterLabel}
         <DownIcon size={12} />
       </summary>
       <div
@@ -389,10 +404,36 @@ export function O8WorkspacePane({
       <div style={{ display: 'flex', minHeight: 42, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', fontFamily: UI_FONT }}>
         <div style={{ width: RAIL_WIDTH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, borderRight: '1px solid var(--t-divider-subtle)', paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10 }}>
           <ModeMenu
-            label={listMode === 'changes' ? `Changes ${changes.files.length}` : 'All files'}
+            label={listMode === 'changes' ? 'Changes' : 'All files'}
             options={listOptions}
             value={listMode}
             onChange={setListMode}
+            afterLabel={listMode === 'changes' && changes.files.length > 0 ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 18,
+                  height: 18,
+                  paddingTop: 0,
+                  paddingRight: 5,
+                  paddingBottom: 0,
+                  paddingLeft: 5,
+                  borderRadius: 999,
+                  fontFamily: MONO_FONT,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: 0,
+                  lineHeight: 1,
+                  color: changesUrgencyColor(changes.files.length),
+                  background: `${changesUrgencyColor(changes.files.length)}1f`,
+                  transition: 'color 240ms cubic-bezier(0.22, 1, 0.36, 1), background 240ms cubic-bezier(0.22, 1, 0.36, 1)',
+                }}
+              >
+                {changes.files.length}
+              </span>
+            ) : null}
           />
           {repoOptions.length > 0 && onRepoPathChange ? (
             <ModeMenu
