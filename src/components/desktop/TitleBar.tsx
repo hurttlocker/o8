@@ -15,7 +15,6 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { UsersThree, GlobeSimple } from '@phosphor-icons/react';
-import { ChromeButton } from './chrome/ChromeButton';
 import { O8HeaderTabs } from './o8-panel/O8HeaderTabs';
 import type { O8Tab } from './o8-panel/types';
 
@@ -106,32 +105,62 @@ interface TitleBarProps {
 
 // ── Icon Button ──
 
-// TitleBarButton is now a thin wrapper around the shared ChromeButton so
-// every button in the title bar uses the same neomorphic look pioneered by
-// the NavRail. Color / hoverBg props are ignored (the neomorphic preset
-// handles all tint variants from the active theme), preserved only for
-// existing callers that still pass them.
+// TitleBarButton — flat 32×32 chip matching the right-side title bar buttons
+// (BrowserHoverButton / RightPanelMorphButton). Transparent at rest, hover
+// fills with --t-hover, active uses --t-panel-active. Pass `accent="orange"`
+// to make the active state glow brand orange (matches the Browser button).
 function TitleBarButton({
   icon,
   label,
   onClick,
   active,
+  accent,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick?: () => void;
   active?: boolean;
-  color?: string;
-  hoverBg?: string;
+  accent?: 'orange';
 }) {
+  const activeColor = accent === 'orange'
+    ? 'var(--t-brand-orange, #FF5A1F)'
+    : 'var(--t-text)';
   return (
-    <ChromeButton
-      icon={icon}
-      label={label}
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
       onClick={onClick}
-      active={active}
-      noDrag
-    />
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 32,
+        height: 32,
+        padding: 0,
+        border: 'none',
+        borderRadius: 8,
+        background: active ? 'var(--t-panel-active, var(--t-input-bg))' : 'transparent',
+        color: active ? activeColor : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        flexShrink: 0,
+        WebkitTapHighlightColor: 'transparent',
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+        ['WebkitAppRegion' as string]: 'no-drag',
+      }}
+      onMouseEnter={(e) => {
+        if (!active) {
+          (e.currentTarget as HTMLButtonElement).style.background = 'var(--t-hover)';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!active) {
+          (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+        }
+      }}
+    >
+      {icon}
+    </button>
   );
 }
 
@@ -513,7 +542,7 @@ export function TitleBar({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 4,
           flexShrink: 0,
         }}
       >
@@ -533,12 +562,18 @@ export function TitleBar({
             Lives here instead of the retired NavRail so users always have a
             one-click "home" back to the three-pane workspace from Settings. */}
         {onOpenAgents ? (
-          <ChromeButton
-            icon={<UsersThree size={18} weight={isAgentsSectionActive ? 'fill' : 'bold'} color={isAgentsSectionActive ? 'var(--t-accent)' : 'var(--t-text)'} />}
+          <TitleBarButton
+            icon={
+              <UsersThree
+                size={16}
+                weight={isAgentsSectionActive ? 'fill' : 'bold'}
+                color={isAgentsSectionActive ? 'var(--t-brand-orange, #FF5A1F)' : 'currentColor'}
+              />
+            }
             label="Agents"
             onClick={onOpenAgents}
             active={isAgentsSectionActive}
-            noDrag
+            accent="orange"
           />
         ) : null}
 
