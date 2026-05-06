@@ -19,6 +19,7 @@ import {
   type RepoActivityData,
 } from '@/components/desktop/o8-activity-helpers';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
+import { useTheme } from '@/lib/theme/context';
 import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { compactPacketLabel } from '@/lib/workspace-terminal/compact-packet-label';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
@@ -28,7 +29,12 @@ const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 const MONO = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 const MAX_REPOS = 6;
 
-const PULSE_CANVAS_VARS: CSSProperties = {
+// Pulse panel surface tokens. The dark-palette set was the original — rgba
+// whites that read as glass over dark vibrancy. Light mode needs the inverse:
+// subtle dark washes over paper. Inline styles beat <style> tags so we
+// can't fix this from CSS alone — the component picks the right block at
+// render time based on the active palette.
+const PULSE_VARS_DARK: CSSProperties = {
   ['--t-text' as string]: 'var(--t-chat-surface-text)',
   ['--t-text-secondary' as string]: 'var(--t-chat-surface-text-secondary)',
   ['--t-text-muted' as string]: 'var(--t-chat-surface-text-muted)',
@@ -43,6 +49,27 @@ const PULSE_CANVAS_VARS: CSSProperties = {
   ['--o8-pulse-inset-strong' as string]: 'inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 12px 30px rgba(0, 0, 0, 0.10)',
   ['--o8-pulse-muted' as string]: 'rgba(226, 232, 240, 0.52)',
   ['--o8-pulse-faint' as string]: 'rgba(226, 232, 240, 0.36)',
+  ['--o8-pulse-hero-bg' as string]:
+    'linear-gradient(135deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.025) 100%)',
+};
+
+const PULSE_VARS_LIGHT: CSSProperties = {
+  ['--t-text' as string]: 'var(--t-chat-surface-text)',
+  ['--t-text-secondary' as string]: 'var(--t-chat-surface-text-secondary)',
+  ['--t-text-muted' as string]: 'var(--t-chat-surface-text-muted)',
+  ['--t-text-faint' as string]: 'var(--t-chat-surface-text-muted)',
+  ['--t-input-bg' as string]: 'var(--t-chat-surface-input-bg)',
+  ['--t-bg-card' as string]: 'var(--t-chat-surface-card-bg)',
+  ['--o8-pulse-surface' as string]: 'rgba(15, 23, 42, 0.04)',
+  ['--o8-pulse-surface-strong' as string]: 'rgba(15, 23, 42, 0.06)',
+  ['--o8-pulse-row' as string]: 'rgba(15, 23, 42, 0.035)',
+  ['--o8-pulse-row-hover' as string]: 'rgba(15, 23, 42, 0.07)',
+  ['--o8-pulse-inset' as string]: 'inset 0 1px 0 rgba(15, 23, 42, 0.05)',
+  ['--o8-pulse-inset-strong' as string]: 'inset 0 1px 0 rgba(15, 23, 42, 0.08), 0 12px 30px rgba(15, 23, 42, 0.06)',
+  ['--o8-pulse-muted' as string]: 'rgba(15, 23, 42, 0.62)',
+  ['--o8-pulse-faint' as string]: 'rgba(15, 23, 42, 0.42)',
+  ['--o8-pulse-hero-bg' as string]:
+    'linear-gradient(135deg, rgba(15, 23, 42, 0.05) 0%, rgba(15, 23, 42, 0.025) 100%)',
 };
 
 const EMPTY_ACTIVITY: RepoActivityData = { commits: [], prs: [], issues: [], ciRuns: [] };
@@ -414,11 +441,14 @@ export const O8PulsePane = memo(function O8PulsePane({
 
   const totalAttention = stats.awaiting + briefing.prsNeedingReview + briefing.failedCi + briefing.openIssues;
 
+  const { paletteId } = useTheme();
+  const pulseVars = paletteId === 'light' ? PULSE_VARS_LIGHT : PULSE_VARS_DARK;
+
   return (
     <div
       className="o8-pulse-pane"
       style={{
-        ...PULSE_CANVAS_VARS,
+        ...pulseVars,
         display: 'flex',
         flexDirection: 'column',
         flex: 1,
@@ -510,7 +540,7 @@ function PulseHero({
         paddingRight: 16,
         paddingBottom: 16,
         paddingLeft: 16,
-        background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.025) 100%)',
+        background: 'var(--o8-pulse-hero-bg)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
@@ -549,7 +579,7 @@ function PulseHero({
             borderWidth: 0,
             background: 'var(--o8-pulse-row)',
             boxShadow: 'var(--o8-pulse-inset)',
-            color: 'rgba(226, 232, 240, 0.78)',
+            color: 'var(--o8-pulse-muted)',
             cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -659,7 +689,7 @@ function NowRow({ entry, onSelectSession }: { entry: RunningEntry; onSelectSessi
         }}
       />
       <span style={{ display: 'inline-flex', flexShrink: 0 }}>{runtimeIcon(entry.runtime)}</span>
-      <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 680, color: 'rgba(226, 232, 240, 0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 680, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {entry.title}
       </span>
       {entry.branch ? <InlinePill>{entry.branch}</InlinePill> : null}
@@ -688,7 +718,7 @@ function MixBar({ mixCounts, totalRunning }: { mixCounts: Record<OrchestratorRun
         <div style={{ marginTop: 10 }}><EmptyLine>Runtime mix appears once agents are active.</EmptyLine></div>
       ) : (
         <>
-          <div style={{ display: 'flex', height: 7, borderRadius: 999, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.05)', marginTop: 12 }}>
+          <div style={{ display: 'flex', height: 7, borderRadius: 999, overflow: 'hidden', background: 'var(--o8-pulse-row)', marginTop: 12 }}>
             {visible.map((runtime) => (
               <div
                 key={runtime}
@@ -759,7 +789,7 @@ function DigestRow({ item, onOpen, tone }: { item: ActivityItem; onOpen: () => v
           width: 24,
           height: 24,
           borderRadius: 9,
-          background: 'rgba(255, 255, 255, 0.055)',
+          background: 'var(--o8-pulse-surface-strong)',
           color: icon.color,
           display: 'inline-flex',
           alignItems: 'center',
@@ -770,7 +800,7 @@ function DigestRow({ item, onOpen, tone }: { item: ActivityItem; onOpen: () => v
         {icon.icon}
       </span>
       <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontSize: 12, fontWeight: 680, color: 'rgba(226, 232, 240, 0.92)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 12, fontWeight: 680, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {itemTitle(item)}
         </span>
         <span style={{ fontFamily: MONO, color: 'var(--o8-pulse-muted)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -851,7 +881,7 @@ function InlinePill({ children, tone = 'neutral' }: { children: ReactNode; tone?
         fontSize: 10,
         fontWeight: 680,
         color,
-        background: 'rgba(255, 255, 255, 0.04)',
+        background: 'var(--o8-pulse-surface)',
         borderWidth: 0,
         boxShadow: `inset 0 0 0 1px ${color}22`,
         borderRadius: 999,
