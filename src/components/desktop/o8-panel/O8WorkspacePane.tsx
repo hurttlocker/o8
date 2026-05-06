@@ -195,10 +195,10 @@ function Breadcrumb({
   }
 
   const segments = path.split('/');
-  // Minimized state = filename only. The full path lives in the title
-  // attribute (hover) and shows inline when the operator clicks the
-  // breadcrumb to expand. Frees up the header for what actually matters.
-  const visibleSegments = expanded ? segments : [segments[segments.length - 1] ?? path];
+  // Minimized state = filename only, centered in the available space so a
+  // narrow header doesn't clip leading characters. Click to expand to the
+  // full slash-segmented path; click again to collapse.
+  const filename = segments[segments.length - 1] ?? path;
   return (
     <button
       type="button"
@@ -217,12 +217,28 @@ function Breadcrumb({
         gap: 4,
         overflow: 'hidden',
         padding: 0,
-        textAlign: 'left',
+        justifyContent: expanded ? 'flex-start' : 'center',
+        textAlign: expanded ? 'left' : 'center',
       }}
     >
-      {visibleSegments.map((segment, index) => {
-        const isLast = index === visibleSegments.length - 1;
-        const isEllipsis = segment === '...';
+      {!expanded ? (
+        <span
+          style={{
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: 'var(--t-text)',
+            fontFamily: MONO_FONT,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: 0,
+          }}
+        >
+          {filename}
+        </span>
+      ) : segments.map((segment, index) => {
+        const isLast = index === segments.length - 1;
         return (
         <span key={`${index}:${segment}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: isLast ? 0 : undefined, flexShrink: isLast ? 1 : 0 }}>
           {index > 0 ? <span style={{ color: 'var(--t-text-faint)', fontFamily: MONO_FONT, fontSize: 10 }}>&gt;</span> : null}
@@ -235,7 +251,7 @@ function Breadcrumb({
               color: isLast ? 'var(--t-text)' : 'var(--t-text-secondary)',
               fontFamily: MONO_FONT,
               fontSize: 11,
-              fontWeight: isLast ? 700 : isEllipsis ? 750 : 500,
+              fontWeight: isLast ? 700 : 500,
               letterSpacing: 0,
             }}
           >
