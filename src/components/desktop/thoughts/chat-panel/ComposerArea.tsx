@@ -182,6 +182,7 @@ interface ComposerAreaProps {
   input: string;
   onInputChange: (next: string) => void;
   isOrchestratorMode: boolean;
+  isChatMode?: boolean;
   displayWaiting: boolean;
   chatMessages: MobileTranscriptEntry[];
   activeTargetLabel: string;
@@ -219,6 +220,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   input,
   onInputChange,
   isOrchestratorMode,
+  isChatMode = false,
   displayWaiting,
   chatMessages,
   activeTargetLabel,
@@ -284,7 +286,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const isDisabled = (displayWaiting || runningTools.length > 0) || (!isOrchestratorMode && !targetAgentExists);
 
   const activeSlashCommand = slashSuggestions[Math.min(activeSlashIndex, Math.max(0, slashSuggestions.length - 1))] ?? null;
-  const footerLeadingSlot = isOrchestratorMode ? (
+  const footerLeadingSlot = isOrchestratorMode && !isChatMode ? (
     <ThinkingChip effort={effort} adaptiveEnabled={adaptiveEnabled} onChange={onEffortChange} />
   ) : hasAssistantActivity ? <span>{displayMessagesCount} messages</span> : null;
   const footerMeterProps = isValidElement<FooterMeterSlotProps>(footerMeterSlot) ? footerMeterSlot.props : null;
