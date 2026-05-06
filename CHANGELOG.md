@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-06
+
+- `62100102` feat: refine o8 activity review surfaces
+
 ## 2026-05-05
 
 - `7c43f059` feat: redesign o8 pulse briefing
