@@ -253,6 +253,11 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
 
           <RepoRegistrySection
             repoPathFilter={activeProjectRepoSet}
+            projectsForMove={projects.ledger?.projects.map((p) => ({ id: p.id, name: p.name })) ?? []}
+            currentProjectId={projects.activeProject?.id ?? null}
+            onMoveRepoToProject={async (repoPath, targetId) => {
+              await projects.moveRepoToProject(repoPath, targetId);
+            }}
             onLaunchComplete={refreshNow}
             onSelectSession={onSelectSession}
             onSelectRepo={(repoId) => {
@@ -307,6 +312,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           activeProjectId={projects.ledger.activeProjectId}
           onSwitch={(projectId) => { void projects.switchActive(projectId); }}
           onCreate={projects.createProject}
+          onRename={projects.renameProject}
+          onDelete={projects.deleteProject}
         />
       ) : null}
     </div>

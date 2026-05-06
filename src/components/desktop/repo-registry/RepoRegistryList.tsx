@@ -42,6 +42,10 @@ interface RepoRegistryListProps {
   onFocusOrchestratorTab?: () => void;
   onFocusAssistantTab?: () => void;
   onSelectRepo?: (repoId: string) => void;
+  /** Used to populate the right-click "Move to →" menu on each repo card. */
+  projectsForMove?: Array<{ id: string; name: string }>;
+  currentProjectId?: string | null;
+  onMoveRepoToProject?: (repoLocalPath: string, targetProjectId: string) => void | Promise<void>;
 }
 
 function RepoRegistryListBase({
@@ -74,6 +78,9 @@ function RepoRegistryListBase({
   onFocusOrchestratorTab,
   onFocusAssistantTab,
   onSelectRepo,
+  projectsForMove,
+  currentProjectId = null,
+  onMoveRepoToProject,
 }: RepoRegistryListProps) {
   return (
     <>
@@ -260,6 +267,9 @@ function RepoRegistryListBase({
                 activeWorkspaceTabKind={activeWorkspaceTabKind}
                 onFocusOrchestratorTab={onFocusOrchestratorTab}
                 onFocusAssistantTab={onFocusAssistantTab}
+                projectsForMove={projectsForMove}
+                currentProjectId={currentProjectId}
+                onMoveToProject={onMoveRepoToProject}
               />
             ))
           ) : null}

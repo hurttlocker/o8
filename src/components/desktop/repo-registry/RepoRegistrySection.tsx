@@ -49,6 +49,9 @@ function RepoRegistrySectionBase({
   ideWorkspaceSessions,
   hideHeader = false,
   repoPathFilter = null,
+  projectsForMove,
+  currentProjectId = null,
+  onMoveRepoToProject,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectRepo?: (repoId: string) => void;
@@ -75,6 +78,9 @@ function RepoRegistrySectionBase({
   /** When provided, only repos whose localPath is in this set are shown.
    *  Used by the projects bottom-bar to scope the panel to one project. */
   repoPathFilter?: Set<string> | null;
+  projectsForMove?: Array<{ id: string; name: string }>;
+  currentProjectId?: string | null;
+  onMoveRepoToProject?: (repoLocalPath: string, targetProjectId: string) => void | Promise<void>;
 } = {}) {
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -682,6 +688,9 @@ function RepoRegistrySectionBase({
   return (
     <>
       <RepoRegistryList
+        projectsForMove={projectsForMove}
+        currentProjectId={currentProjectId}
+        onMoveRepoToProject={onMoveRepoToProject}
         hideHeader={hideHeader}
         reposOpen={reposOpen}
         loading={loading}
