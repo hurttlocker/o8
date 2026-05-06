@@ -119,8 +119,9 @@ const LIGHT_BASE: Record<string, string> = {
   '--t-glass-border-strong': 'rgba(15, 23, 42, 0.1)',
   '--t-tab-active-text': '#0f172a',
   '--t-tab-text': '#64748b',
-  // Workspace surface — already solid in both modes
-  '--t-canvas-bg': '#F4F2ED',
+  // Chat surface — pinned solid paper in both surface modes (always content,
+  // never chrome). --t-canvas-bg is split per-surface below so the o8.md
+  // editor and other canvas surfaces can be translucent in glass mode.
   '--t-chat-surface-bg': '#F4F2ED',
   '--t-chat-surface-text': '#0f172a',
   '--t-chat-surface-text-secondary': '#475569',
@@ -157,6 +158,9 @@ const LIGHT_BASE: Record<string, string> = {
 };
 
 const LIGHT_GLASS: Record<string, string> = {
+  // Canvas surfaces (o8.md editor, code/diff viewers) read as glass over
+  // vibrancy in light + glass — same treatment as the other o8 panel tabs.
+  '--t-canvas-bg': 'rgba(0, 0, 0, 0)',
   '--t-bg': 'rgba(244, 242, 237, 0.62)',
   '--t-bg-gradient':
     'radial-gradient(circle at 0% 0%, rgba(244, 242, 237, 0.35) 0%, rgba(244, 242, 237, 0) 28%), linear-gradient(180deg, rgba(244, 242, 237, 0.56) 0%, rgba(238, 235, 227, 0.48) 100%)',
@@ -194,6 +198,7 @@ const LIGHT_GLASS: Record<string, string> = {
 // Solid light: opaque paper. Slight elevation between layers via tonal
 // shifts (#FFFFFF brightest, #F4F2ED canvas, #EDE9DF subtle wells).
 const LIGHT_SOLID: Record<string, string> = {
+  '--t-canvas-bg': '#F4F2ED',
   '--t-bg': '#F4F2ED',
   '--t-bg-gradient': '#F4F2ED',
   '--t-bg-subtle': '#EFEDE6',
