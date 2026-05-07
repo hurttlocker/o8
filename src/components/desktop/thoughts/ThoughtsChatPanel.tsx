@@ -42,7 +42,13 @@ import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
 import { IntentChips } from '@/components/desktop/orchestrator/IntentChips';
-import { ModePicker, loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
+import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
+import { ModeChip } from '@/components/desktop/orchestrator/ModeChip';
+import {
+  consumePendingComposerDraft,
+  parseModeRoutingPrefix,
+  stashPendingComposerDraft,
+} from '@/lib/composer-mode-routing';
 import { WaitingFooter } from '@/components/desktop/orchestrator/WaitingFooter';
 import { getChatModelOption, loadChatModelChoice } from '@/components/desktop/orchestrator/chat-models';
 import {
@@ -243,6 +249,27 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [orchestrationSettingsKey, setOrchestrationSettingsKey] = useState<string | null>(
     () => (usesPerTabPersistence ? workspaceModeKey : null),
   );
+  // Consume any pending slash-routed draft (`/codex foo`, `/chat hi`, ...)
+  // stashed by the source tab right before it called the spawn handler.
+  // Fires once per tab mount; ignored when this panel isn't a spawn
+  // target (Fleet panels never have a matching pending draft).
+  const slashDraftConsumedRef = useRef(false);
+  useEffect(() => {
+    if (slashDraftConsumedRef.current) return;
+    if (!lockedMode) return;
+    const target = lockedMode === 'chat'
+      ? ({ kind: 'chat' } as const)
+      : lockedMode === 'single'
+        ? ({ kind: 'single', runtime: initialSingleRuntime ?? 'codex' } as const)
+        : null;
+    if (!target) return;
+    const body = consumePendingComposerDraft(target);
+    slashDraftConsumedRef.current = true;
+    if (body) {
+      setInput(body);
+      latestInputRef.current = body;
+    }
+  }, [initialSingleRuntime, lockedMode]);
   const orchestrationSettingsLoaded = orchestrationSettingsKey === workspaceModeKey;
   const selectedChatModel = useMemo(() => getChatModelOption(chatModelId), [chatModelId]);
   useEffect(() => {
@@ -1105,6 +1132,33 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     const msg = (explicitText ?? input).trim();
     if (!msg) return;
 
+    // Mode-routing slash prefix (`/chat ...`, `/codex ...`, `/gemini ...`,
+    // `/opencode ...`) — peel the prefix, stash the body for the spawned
+    // tab to pick up on mount, and dispatch to the appropriate spawn
+    // handler instead of dispatching on this tab. Only honor when the
+    // tab is not lockedMode (Fleet-level Orchestrator tabs only).
+    if (!lockedMode) {
+      const routing = parseModeRoutingPrefix(msg);
+      if (routing) {
+        if (routing.target.kind === 'single' && onSpawnSingleTab) {
+          stashPendingComposerDraft(routing.target, routing.body);
+          onSpawnSingleTab(routing.target.runtime);
+          setInput('');
+          latestInputRef.current = '';
+          return;
+        }
+        if (routing.target.kind === 'chat' && onSpawnChatTab) {
+          stashPendingComposerDraft(routing.target, routing.body);
+          onSpawnChatTab();
+          setInput('');
+          latestInputRef.current = '';
+          return;
+        }
+        // No spawn handler available — fall through and dispatch as a
+        // normal Fleet message so the user isn't silently swallowed.
+      }
+    }
+
     const effectiveWaiting = isChatMode ? waitingForReply : isOrchestratorMode ? orchStream.status === 'busy' : waitingForReply;
     if (effectiveWaiting) return;
 
@@ -1480,17 +1534,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSelectBranch={setIntentBranch}
       />
 
-      <ModePicker
-        visible={!lockedMode && input.trim().length > 0}
-        workspaceKey={workspaceModeKey}
-        selectedMode={orchestrationMode}
-        onSelectMode={handleSelectOrchestrationMode}
-        selectedSingleRuntime={singleRuntime}
-        onSelectSingleRuntime={handleSelectSingleRuntime}
-        onSpawnSingleTab={onSpawnSingleTab}
-        onSpawnChatTab={onSpawnChatTab}
-      />
-
       <ComposerArea
         ref={inputRef}
         input={input}
@@ -1520,7 +1563,20 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
         footerMeterSlot={footerMeterSlot}
-        composerLeadingExtras={composerLeadingExtras}
+        composerLeadingExtras={
+          lockedMode ? composerLeadingExtras : (
+            <>
+              <ModeChip
+                selectedMode={orchestrationMode}
+                selectedSingleRuntime={singleRuntime}
+                onSelectFleet={() => handleSelectOrchestrationMode('fleet')}
+                onSpawnSingleTab={onSpawnSingleTab}
+                onSpawnChatTab={onSpawnChatTab}
+              />
+              {composerLeadingExtras}
+            </>
+          )
+        }
         attachedImages={attachedImages}
         attachedFiles={attachedFiles}
         dragOver={attachmentDragOver}
