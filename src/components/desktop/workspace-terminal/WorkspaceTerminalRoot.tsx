@@ -17,8 +17,9 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     const spawnHandlers = useMemo<WorkspaceSpawnHandlers>(() => ({
       spawnSingleRuntimeTab: controller.spawnSingleRuntimeTab,
       spawnChatTab: controller.spawnChatTab,
+      spawnOrchestratorTab: controller.spawnOrchestratorTab,
       updateTabMode: controller.handleUpdateTabMode,
-    }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnSingleRuntimeTab]);
+    }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnOrchestratorTab, controller.spawnSingleRuntimeTab]);
 
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
@@ -170,10 +171,8 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onSelectTab={controller.handleSelectTab}
           onCloseTab={controller.handleCloseTab}
           onNewTab={controller.handleNewTab}
-          onNewChatTab={controller.handleNewChatTab}
           onNewLLMChatTab={controller.handleNewLLMChatTab}
           scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
-          onRegisterRepo={controller.handleRegisterRepo}
           onSplitVertical={props.onSplitVertical}
           onSplitHorizontal={props.onSplitHorizontal}
           canCloseTile={props.canCloseTile}

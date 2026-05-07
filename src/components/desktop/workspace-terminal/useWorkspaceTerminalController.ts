@@ -359,6 +359,13 @@ export function useWorkspaceTerminalController(
     return newTab.id;
   }, [createDefaultChatTab, setActiveTabIdFromUser]);
 
+  const spawnOrchestratorTab = useCallback((): string => {
+    const newTab = createDefaultOrchestratorTab();
+    setTabs((previous) => [...previous, newTab]);
+    setActiveTabIdFromUser(newTab.id);
+    return newTab.id;
+  }, [createDefaultOrchestratorTab, setActiveTabIdFromUser]);
+
   const handleUpdateTabMode = useCallback((
     tabId: string,
     patch: {
@@ -981,6 +988,7 @@ export function useWorkspaceTerminalController(
     setLaunchRequestKey,
     spawnSingleRuntimeTab,
     spawnChatTab,
+    spawnOrchestratorTab,
     handleUpdateTabMode,
     tabs,
     termWsConnected,
