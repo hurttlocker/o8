@@ -2,56 +2,36 @@
 
 import { memo, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import {
-  ChevronRight,
-  FolderOpen,
   MessageSquare,
-  Radio,
   Terminal as TerminalIcon,
 } from '../lucide-shims';
-import { CLI_AGENTS, THEME_ACCENT, THEME_ACCENT_SOFT } from '@/components/desktop/workspace-terminal/constants';
-import { AgentDot, PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
-import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
-import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
-import type { RegisteredRepo, WorkspaceChatRuntime } from '@/components/desktop/workspace-terminal/types';
+import { THEME_ACCENT, THEME_ACCENT_SOFT } from '@/components/desktop/workspace-terminal/constants';
+import { PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
+import { useWorkspaceSpawn } from '@/components/desktop/workspace-terminal/spawn-context';
+import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/types';
 
 interface WorkspaceLaunchPickerProps {
   launchRequestKey?: number;
   scopedRepo?: RegisteredRepo | null;
-  onRegisterRepo?: (localPath: string) => void;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
-  onNewChatTab: (runtime: Exclude<WorkspaceChatRuntime, 'chat'>, repo?: RegisteredRepo) => void;
   onNewLLMChatTab: (repo?: RegisteredRepo) => void;
 }
 
 function WorkspaceLaunchPickerBase({
   launchRequestKey,
   scopedRepo,
-  onRegisterRepo,
   onNewTab,
-  onNewChatTab,
   onNewLLMChatTab,
 }: WorkspaceLaunchPickerProps) {
-  type CliSessionRuntime = Exclude<WorkspaceChatRuntime, 'chat'>;
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerStep, setPickerStep] = useState<'main' | 'terminal' | 'session' | 'repo'>('main');
-  const [selectedAgent, setSelectedAgent] = useState<(typeof CLI_AGENTS)[number] | null>(null);
-  const [repos, setRepos] = useState<RegisteredRepo[]>([]);
-  const opencodeEnabled = useExperimentalOpencodeFlag();
   const pickerRef = useRef<HTMLDivElement>(null);
-
-  const openLaunchPicker = () => {
-    setSelectedAgent(null);
-    setPickerStep('main');
-    setPickerOpen(true);
-  };
+  const spawnHandlers = useWorkspaceSpawn();
 
   useEffect(() => {
     if (!pickerOpen) return undefined;
     const handler = (event: globalThis.MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
         setPickerOpen(false);
-        setPickerStep('main');
-        setSelectedAgent(null);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -59,34 +39,31 @@ function WorkspaceLaunchPickerBase({
   }, [pickerOpen]);
 
   useEffect(() => {
-    if (launchRequestKey) {
-      openLaunchPicker();
-    }
+    if (launchRequestKey) setPickerOpen(true);
   }, [launchRequestKey]);
 
-  useEffect(() => {
-    if (!pickerOpen) return;
-    fetch('/api/panel/repos')
-      .then((response) => response.json())
-      .then((data) => setRepos(data.repos ?? []))
-      .catch(() => setRepos([]));
-  }, [pickerOpen]);
+  const handleNewOrchestrator = () => {
+    spawnHandlers?.spawnOrchestratorTab();
+    setPickerOpen(false);
+  };
+
+  const handleNewChat = () => {
+    onNewLLMChatTab(scopedRepo ?? undefined);
+    setPickerOpen(false);
+  };
+
+  const handleNewTerminal = () => {
+    onNewTab('shell', scopedRepo ?? undefined);
+    setPickerOpen(false);
+  };
 
   return (
     <div ref={pickerRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
       <button
         type="button"
-        onClick={() => {
-          if (pickerOpen) {
-            setPickerOpen(false);
-            setPickerStep('main');
-            setSelectedAgent(null);
-            return;
-          }
-          openLaunchPicker();
-        }}
-        aria-label="Launch agent"
-        title="Launch agent"
+        onClick={() => setPickerOpen((prev) => !prev)}
+        aria-label="New tab"
+        title="New tab"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -125,7 +102,7 @@ function WorkspaceLaunchPickerBase({
             right: 0,
             zIndex: 9000,
             marginTop: 4,
-            minWidth: 220,
+            minWidth: 240,
             background: 'var(--t-panel-solid)',
             backdropFilter: 'none',
             WebkitBackdropFilter: 'none',
@@ -135,266 +112,74 @@ function WorkspaceLaunchPickerBase({
             boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.12)',
           } as CSSProperties}
         >
-          {pickerStep === 'main' ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  onNewLLMChatTab(scopedRepo ?? undefined);
-                  setPickerOpen(false);
-                  setPickerStep('main');
-                }}
-                style={menuButtonStyle}
-                onMouseEnter={highlightOn}
-                onMouseLeave={resetOn}
-              >
-                <span style={iconSlotStyle}>
-                  <MessageSquare size={14} style={{ color: THEME_ACCENT }} />
-                </span>
-                <div>
-                  <div style={{ fontWeight: 500 }}>New Chat</div>
-                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Direct LLM conversation</div>
-                </div>
-              </button>
+          <button
+            type="button"
+            onClick={handleNewOrchestrator}
+            disabled={!spawnHandlers}
+            style={menuButtonStyle}
+            onMouseEnter={highlightOn}
+            onMouseLeave={resetOn}
+          >
+            <span style={iconSlotStyle}>
+              <OrchestratorGlyph color={THEME_ACCENT} />
+            </span>
+            <div>
+              <div style={{ fontWeight: 500 }}>Orchestrator</div>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Fleet by default · switch mode in-tab</div>
+            </div>
+          </button>
 
-              <div style={{ height: 1, background: 'var(--t-divider)' }} />
+          <div style={dividerStyle} />
 
-              <button
-                type="button"
-                onClick={() => setPickerStep('terminal')}
-                style={menuButtonStyle}
-                onMouseEnter={highlightOn}
-                onMouseLeave={resetOn}
-              >
-                <span style={iconSlotStyle}>
-                  <TerminalIcon size={14} style={{ color: 'var(--t-text-secondary)' }} />
-                </span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 500 }}>CLI Terminal</div>
-                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Shell or agent CLI</div>
-                </div>
-                <ChevronRight size={12} style={{ color: 'var(--t-text-muted)' }} />
-              </button>
+          <button
+            type="button"
+            onClick={handleNewChat}
+            style={menuButtonStyle}
+            onMouseEnter={highlightOn}
+            onMouseLeave={resetOn}
+          >
+            <span style={iconSlotStyle}>
+              <MessageSquare size={14} style={{ color: THEME_ACCENT }} />
+            </span>
+            <div>
+              <div style={{ fontWeight: 500 }}>Chat</div>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Direct LLM conversation</div>
+            </div>
+          </button>
 
-              <button
-                type="button"
-                onClick={() => setPickerStep('session')}
-                style={menuButtonStyle}
-                onMouseEnter={highlightOn}
-                onMouseLeave={resetOn}
-              >
-                <span style={iconSlotStyle}>
-                  <Radio size={14} style={{ color: '#8b5cf6' }} />
-                </span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 500 }}>CLI Session</div>
-                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Agent conversation</div>
-                </div>
-                <ChevronRight size={12} style={{ color: 'var(--t-text-muted)' }} />
-              </button>
-            </>
-          ) : null}
+          <div style={dividerStyle} />
 
-          {pickerStep === 'terminal' ? (
-            <>
-              <button type="button" onClick={() => setPickerStep('main')} style={backButtonStyle}>
-                Back to CLI Terminal
-              </button>
-              {CLI_AGENTS.map((agent) => (
-                <button
-                  type="button"
-                  key={agent.id}
-                  onClick={() => {
-                    if (scopedRepo) {
-                      onNewTab(agent.id, scopedRepo);
-                      setPickerOpen(false);
-                      setPickerStep('main');
-                      return;
-                    }
-                    if (agent.id === 'shell') {
-                      onNewTab(agent.id);
-                      setPickerOpen(false);
-                      setPickerStep('main');
-                      return;
-                    }
-                    setSelectedAgent(agent);
-                    setPickerStep('repo');
-                  }}
-                  style={submenuButtonStyle}
-                  onMouseEnter={hoverOn}
-                  onMouseLeave={hoverOff}
-                >
-                  <span style={iconSlotStyle}>
-                    {agent.id === 'shell' ? (
-                      <TerminalIcon size={14} style={{ color: 'var(--t-text-muted)' }} />
-                    ) : agent.id === 'claude' ? (
-                      <ClaudeIcon size={18} />
-                    ) : agent.id === 'codex' ? (
-                      <CodexIcon size={18} />
-                    ) : agent.id === 'opencode' ? (
-                      <OpenCodeIcon size={18} />
-                    ) : (
-                      <GeminiIcon size={18} />
-                    )}
-                  </span>
-                  <div>
-                    <div style={{ fontWeight: 500 }}>{agent.label}</div>
-                    {agent.command ? (
-                      <div style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: 'ui-monospace, monospace' }}>
-                        $ {agent.command}
-                      </div>
-                    ) : null}
-                  </div>
-                </button>
-              ))}
-            </>
-          ) : null}
-
-          {pickerStep === 'session' ? (
-            <>
-              <button type="button" onClick={() => setPickerStep('main')} style={backButtonStyle}>
-                Back to CLI Session
-              </button>
-              {([
-                { id: 'codex' as CliSessionRuntime, label: 'Codex', color: '#10b981' },
-                { id: 'claude-code' as CliSessionRuntime, label: 'Claude Code', color: '#8b5cf6' },
-                { id: 'gemini' as CliSessionRuntime, label: 'Gemini', color: '#4285f4' },
-                ...(opencodeEnabled
-                  ? [{ id: 'opencode' as CliSessionRuntime, label: 'opencode', color: '#a855f7' }]
-                  : []),
-              ]).map((runtime) => (
-                <button
-                  type="button"
-                  key={runtime.id}
-                  onClick={() => {
-                    onNewChatTab(runtime.id, scopedRepo ?? undefined);
-                    setPickerOpen(false);
-                    setPickerStep('main');
-                  }}
-                  style={submenuButtonStyle}
-                  onMouseEnter={hoverOn}
-                  onMouseLeave={hoverOff}
-                >
-                  <span style={iconSlotStyle}>
-                    {runtime.id === 'claude-code' ? <ClaudeIcon size={18} />
-                      : runtime.id === 'gemini' ? <GeminiIcon size={18} />
-                      : runtime.id === 'opencode' ? <OpenCodeIcon size={18} />
-                      : <CodexIcon size={18} />}
-                  </span>
-                  <div>
-                    <div style={{ fontWeight: 500 }}>{runtime.label}</div>
-                    <div style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>Agent conversation</div>
-                  </div>
-                </button>
-              ))}
-            </>
-          ) : null}
-
-          {pickerStep === 'repo' && selectedAgent ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setPickerStep('terminal');
-                  setSelectedAgent(null);
-                }}
-                style={backButtonStyle}
-              >
-                Back to {selectedAgent.label}
-              </button>
-              <div style={sectionLabelStyle}>Select Repo</div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  onNewTab(selectedAgent.id);
-                  setPickerOpen(false);
-                  setPickerStep('terminal');
-                  setSelectedAgent(null);
-                }}
-                style={submenuButtonStyle}
-                onMouseEnter={hoverOn}
-                onMouseLeave={hoverOff}
-              >
-                <TerminalIcon size={14} style={{ color: 'var(--t-text-muted)' }} />
-                <div>
-                  <div style={{ fontWeight: 500 }}>No repo (home dir)</div>
-                  <div style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>~/</div>
-                </div>
-              </button>
-
-              {repos.length > 0 ? <div style={sectionLabelStyle}>Repos</div> : null}
-              {repos.map((repo) => (
-                <button
-                  type="button"
-                  key={repo.localPath}
-                  onClick={() => {
-                    onNewTab(selectedAgent.id, repo);
-                    setPickerOpen(false);
-                    setPickerStep('terminal');
-                    setSelectedAgent(null);
-                  }}
-                  style={submenuButtonStyle}
-                  onMouseEnter={hoverOn}
-                  onMouseLeave={hoverOff}
-                >
-                  <AgentDot color={selectedAgent.color} size={8} />
-                  <div>
-                    <div style={{ fontWeight: 500 }}>{repo.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: 'ui-monospace, monospace' }}>
-                      {repo.localPath.replace(/^\/Users\/[^/]+\//, '~/')}
-                    </div>
-                  </div>
-                </button>
-              ))}
-
-              <div style={{ height: 1, background: 'var(--t-divider)', marginTop: 4, marginBottom: 4 }} />
-
-              <button
-                type="button"
-                onClick={async () => {
-                  let folderPath: string | null = null;
-                  try {
-                    const { open } = await import('@tauri-apps/plugin-dialog');
-                    const result = await open({ directory: true, title: 'Select project folder' });
-                    if (typeof result === 'string') {
-                      folderPath = result;
-                    }
-                  } catch {
-                    try {
-                      const res = await fetch('/api/panel/browse-folder', { method: 'POST' });
-                      const data = await res.json();
-                      if (data.path) {
-                        folderPath = data.path;
-                      }
-                    } catch {
-                      folderPath = window.prompt('Enter folder path:');
-                    }
-                  }
-
-                  if (folderPath && selectedAgent) {
-                    const folderName = folderPath.split('/').filter(Boolean).pop() ?? 'folder';
-                    onNewTab(selectedAgent.id, { name: folderName, localPath: folderPath });
-                    onRegisterRepo?.(folderPath);
-                    setPickerOpen(false);
-                    setPickerStep('terminal');
-                    setSelectedAgent(null);
-                  }
-                }}
-                style={submenuButtonStyle}
-                onMouseEnter={hoverOn}
-                onMouseLeave={hoverOff}
-              >
-                <span style={iconSlotStyle}>
-                  <FolderOpen size={14} style={{ color: 'var(--t-text-muted)' }} />
-                </span>
-                <div style={{ fontWeight: 500 }}>Open folder...</div>
-              </button>
-            </>
-          ) : null}
+          <button
+            type="button"
+            onClick={handleNewTerminal}
+            style={menuButtonStyle}
+            onMouseEnter={highlightOn}
+            onMouseLeave={resetOn}
+          >
+            <span style={iconSlotStyle}>
+              <TerminalIcon size={14} style={{ color: 'var(--t-text-secondary)' }} />
+            </span>
+            <div>
+              <div style={{ fontWeight: 500 }}>Terminal</div>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Plain shell · no chat</div>
+            </div>
+          </button>
         </div>
       ) : null}
     </div>
+  );
+}
+
+function OrchestratorGlyph({ color }: { color: string }) {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="6" r="2" />
+      <circle cx="6" cy="18" r="2" />
+      <circle cx="18" cy="18" r="2" />
+      <path d="M12 8v4" />
+      <path d="m12 12-6 4" />
+      <path d="m12 12 6 4" />
+    </svg>
   );
 }
 
@@ -419,54 +204,7 @@ const menuButtonStyle = {
   transition: 'background 100ms',
 };
 
-const submenuButtonStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  width: '100%',
-  paddingTop: 8,
-  paddingBottom: 8,
-  paddingLeft: 12,
-  paddingRight: 12,
-  border: 'none',
-  background: 'transparent',
-  color: 'var(--t-text)',
-  fontSize: 13,
-  cursor: 'pointer',
-  textAlign: 'left' as const,
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-  transition: 'background 100ms',
-};
-
-const backButtonStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  width: '100%',
-  paddingTop: 6,
-  paddingBottom: 6,
-  paddingLeft: 10,
-  paddingRight: 10,
-  border: 'none',
-  borderBottom: '1px solid var(--t-divider)',
-  background: 'transparent',
-  color: 'var(--t-text-muted)',
-  fontSize: 11,
-  cursor: 'pointer',
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-};
-
-const sectionLabelStyle = {
-  paddingTop: 6,
-  paddingBottom: 4,
-  paddingLeft: 10,
-  paddingRight: 10,
-  fontSize: 10,
-  fontWeight: 600,
-  color: 'var(--t-text-faint)',
-  letterSpacing: '0.05em',
-  textTransform: 'uppercase' as const,
-};
+const dividerStyle = { height: 1, background: 'var(--t-divider)' } as const;
 
 const iconSlotStyle = {
   width: 20,
@@ -480,13 +218,5 @@ function highlightOn(event: ReactMouseEvent<HTMLButtonElement>) {
 }
 
 function resetOn(event: ReactMouseEvent<HTMLButtonElement>) {
-  event.currentTarget.style.background = 'transparent';
-}
-
-function hoverOn(event: ReactMouseEvent<HTMLButtonElement>) {
-  event.currentTarget.style.background = 'var(--t-hover)';
-}
-
-function hoverOff(event: ReactMouseEvent<HTMLButtonElement>) {
   event.currentTarget.style.background = 'transparent';
 }
