@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import type { RegisteredRepo, TerminalTab, WorkspaceChatRuntime } from '@/components/desktop/workspace-terminal/types';
+import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import {
   PhosphorCaretLeft,
   PhosphorCaretRight,
@@ -48,10 +48,8 @@ interface TabBarProps {
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
-  onNewChatTab: (runtime: Exclude<WorkspaceChatRuntime, 'chat'>, repo?: RegisteredRepo) => void;
   onNewLLMChatTab: (repo?: RegisteredRepo) => void;
   scopedRepo?: RegisteredRepo | null;
-  onRegisterRepo?: (localPath: string) => void;
   onSplitVertical?: () => void;
   onSplitHorizontal?: () => void;
   canCloseTile?: boolean;
@@ -66,10 +64,8 @@ export const TabBar = memo(function TabBar({
   onSelectTab,
   onCloseTab,
   onNewTab,
-  onNewChatTab,
   onNewLLMChatTab,
   scopedRepo,
-  onRegisterRepo,
   onSplitVertical,
   onSplitHorizontal,
   canCloseTile,
@@ -460,9 +456,7 @@ export const TabBar = memo(function TabBar({
       <WorkspaceLaunchPicker
         launchRequestKey={launchRequestKey}
         scopedRepo={scopedRepo}
-        onRegisterRepo={onRegisterRepo}
         onNewTab={onNewTab}
-        onNewChatTab={onNewChatTab}
         onNewLLMChatTab={onNewLLMChatTab}
       />
 
