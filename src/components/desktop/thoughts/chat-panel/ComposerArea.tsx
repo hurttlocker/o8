@@ -599,7 +599,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onPaste={handleTextareaPaste}
             placeholder={
               isOrchestratorMode
-                ? 'Type a message...'
+                ? 'Ask anything · /codex /gemini for one-shot · /chat for casual'
                 : displayWaiting
                   ? `${activeTargetLabel} is thinking...`
                   : `Message ${activeTargetLabel}…`
