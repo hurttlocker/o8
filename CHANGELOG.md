@@ -7,8 +7,19 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-08
+
+- `4bb987a4` feat: agents archive drawer shows every concluded packet
+- `987202e9` feat: unified project panel + agent / timeline polish
+- `76dcc4f0` feat: add slash orchestration routing
+- `c46e8b3c` feat: pulse the rightmost timeline cell, drop drilldown trigger
+- `7251e0a1` feat: rolling 24h timeline + error surfacing + settings toggle
+- `f7c64712` feat: rewrite SessionTimeline as Tracker strip + redesign hover card
+
 ## 2026-05-06
 
+- `5800c266` feat: flatten new-tab drawer to Orchestrator / Chat / Terminal
+- `b32cef59` feat: orchestrator mode chip + slash-command routing
 - `5f672464` feat: two-axis theme system (palette × surface) + reduce-transparency toggle
 - `c017bc38` feat: skiper-style motion on search + browser titlebar buttons
 - `98f546b5` feat: skiper-style motion on titlebar left buttons
