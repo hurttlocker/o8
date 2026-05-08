@@ -62,7 +62,7 @@ interface OrchestratorStreamResult {
   tokenCount: number;
   runningTotal: number;
   estimateNextTurnTokens: (message: string) => number;
-  send: (message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: ThinkingEffort; model?: string }) => void;
+  send: (message: string, options?: OrchestratorSendOptions) => void;
   interrupt: () => void;
   appendLocalEntries: (entries: MobileTranscriptEntry[]) => void;
   replaceTranscript: (entries: MobileTranscriptEntry[]) => void;
@@ -75,6 +75,19 @@ interface OrchestratorStreamResult {
   } | null>;
   reset: () => void;
   connected: boolean;
+}
+
+interface OrchestratorSendOptions {
+  permissionMode?: OrchestratorPermissionMode;
+  thinkingEffort?: ThinkingEffort;
+  model?: string;
+  /**
+   * Text shown in the transcript for the user's turn. The outbound `message`
+   * can be a structured dispatcher prompt while the visible chat stays clean.
+   */
+  displayMessage?: string;
+  /** Local system/command entries inserted immediately after the user bubble. */
+  localEntriesAfterUser?: MobileTranscriptEntry[];
 }
 
 interface ActiveTurnState {
@@ -641,12 +654,14 @@ export function useOrchestratorStream(
     }
   }, [connected]);
 
-  const send = useCallback((message: string, options?: { permissionMode?: OrchestratorPermissionMode; thinkingEffort?: ThinkingEffort; model?: string }) => {
+  const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
     if (!repoPathRef.current) return;
 
     const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
     const thinkingEffort = options?.thinkingEffort;
     const model = options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
+    const displayMessage = options?.displayMessage?.trim() || message;
+    const localEntriesAfterUser = options?.localEntriesAfterUser ?? [];
 
     void (async () => {
       const activeRepoPath = repoPathRef.current;
@@ -708,12 +723,12 @@ export function useOrchestratorStream(
       const userEntry: MobileTranscriptEntry = {
         id: `orch-user-${Date.now()}`,
         role: 'user',
-        text: message,
+        text: displayMessage,
         timestamp: Date.now(),
         timestampLabel: formatTimestampLabel(Date.now()),
       };
-      messagesRef.current = [...messagesRef.current, userEntry];
-      setMessages((prev) => [...prev, userEntry]);
+      messagesRef.current = [...messagesRef.current, userEntry, ...localEntriesAfterUser];
+      setMessages((prev) => [...prev, userEntry, ...localEntriesAfterUser]);
       currentAssistantRef.current = null;
       captureFirstTurnPlanRef.current = !planTextRef.current
         && !hasHistoryRef.current

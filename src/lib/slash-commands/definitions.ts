@@ -2,24 +2,37 @@ import type { OrchestratorSlashCommandDefinition } from './types';
 
 export const ORCHESTRATOR_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] = [
   {
+    command: '/orchestrate',
+    name: 'orchestrate',
+    title: 'Orchestrate',
+    description: 'Claude coordinates; Codex codes; Claude verifies.',
+    argHint: '<task>',
+    requiresArgument: true,
+    group: 'route',
+    aliases: ['/fleet'],
+  },
+  {
     command: '/ask',
     name: 'ask',
     title: 'Ask the Brain',
     description: 'Query the Brain — directives, decisions, past outcomes.',
     argHint: '<question>',
     requiresArgument: true,
+    group: 'context',
   },
   {
     command: '/compact',
     name: 'compact',
     title: 'Compact context',
     description: 'Run the compactor now and keep only the live tail verbatim.',
+    group: 'thread',
   },
   {
     command: '/clear',
     name: 'clear',
     title: 'Clear thread',
     description: 'Archive the current thread and reset the orchestrator session.',
+    group: 'thread',
   },
   {
     command: '/focus',
@@ -28,12 +41,14 @@ export const ORCHESTRATOR_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] =
     description: 'Keep only turns tied to one issue ref or file path.',
     argHint: '<packet>',
     requiresArgument: true,
+    group: 'context',
   },
   {
     command: '/status',
     name: 'status',
     title: 'Thread status',
     description: 'Show tokens, cost, active dispatches, and recent decisions.',
+    group: 'command',
   },
   {
     command: '/recall',
@@ -42,11 +57,13 @@ export const ORCHESTRATOR_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] =
     description: 'Pull relevant archived context back into the next turn.',
     argHint: '<keyword>',
     requiresArgument: true,
+    group: 'context',
   },
   {
     command: '/handoff',
     name: 'handoff',
     title: 'Prep handoff',
     description: 'Prepare a compacted handoff prelude for a fresh session.',
+    group: 'thread',
   },
 ];

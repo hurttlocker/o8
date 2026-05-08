@@ -15,6 +15,11 @@ function normalizeCommandKey(value: string) {
   return value.trim().toLowerCase();
 }
 
+function commandMatches(definition: OrchestratorSlashCommandDefinition, commandToken: string) {
+  if (definition.command === commandToken) return true;
+  return (definition.aliases ?? []).includes(commandToken);
+}
+
 function entryText(entry: MobileTranscriptEntry) {
   const text = entry.type === 'compaction'
     ? entry.compaction?.summary ?? entry.text
@@ -63,7 +68,7 @@ export function parseOrchestratorSlashCommand(value: string): ParsedOrchestrator
   if (!normalized.startsWith('/')) return null;
 
   const [commandToken, ...argParts] = normalized.split(/\s+/);
-  const definition = ORCHESTRATOR_SLASH_COMMANDS.find((item) => item.command === normalizeCommandKey(commandToken));
+  const definition = ORCHESTRATOR_SLASH_COMMANDS.find((item) => commandMatches(item, normalizeCommandKey(commandToken)));
   if (!definition) return null;
 
   return {
@@ -80,7 +85,10 @@ export function getOrchestratorSlashCommandSuggestions(value: string) {
   const commandToken = normalizeCommandKey(normalized.split(/\s+/, 1)[0] ?? '');
   if (!commandToken) return ORCHESTRATOR_SLASH_COMMANDS;
 
-  return ORCHESTRATOR_SLASH_COMMANDS.filter((item) => item.command.startsWith(commandToken));
+  return ORCHESTRATOR_SLASH_COMMANDS.filter((item) => (
+    item.command.startsWith(commandToken)
+    || (item.aliases ?? []).some((alias) => alias.startsWith(commandToken))
+  ));
 }
 
 export function autocompleteOrchestratorSlashCommand(value: string) {

@@ -1,12 +1,14 @@
 'use client';
 
-import { forwardRef, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, isValidElement, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { InputButtons, ThinkingChip, type ThinkingEffort } from '../InputButtons';
 import { useTokenEstimate } from '../useTokenEstimate';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import type { ThoughtsChatPermissionMode } from './types';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
+import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
 import { formatTokens } from '@/lib/util/format-tokens';
 import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useThoughtsComposerAttachments';
 
@@ -214,6 +216,9 @@ interface ComposerAreaProps {
   onAttachedFileRemove?: (fileName: string) => void;
   onUploadDiskFiles?: (files: FileList | File[]) => void;
   repoPath?: string | null;
+  workspaceTargets?: OrchestratorWorkspaceTarget[];
+  selectedRepoPath?: string | null;
+  onSelectRepoPath?: (next: string) => void;
   composerLeadingExtras?: React.ReactNode;
 }
 
@@ -253,10 +258,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onAttachedFileRemove,
   onUploadDiskFiles,
   repoPath,
+  workspaceTargets,
+  selectedRepoPath,
+  onSelectRepoPath,
   composerLeadingExtras,
 }, inputRef) {
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
+  const workingLockHintId = useId();
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
     if (!isOrchestratorMode) return [];
     // Scan the latest assistant message for any tool calls still marked as
@@ -280,14 +289,37 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     }
     return null;
   }, [chatMessages]);
-  const slashSuggestions = useMemo(() => (
-    isOrchestratorMode && dismissedSlashInput !== input
-      ? getOrchestratorSlashCommandSuggestions(input)
-      : []
-  ), [dismissedSlashInput, input, isOrchestratorMode]);
+  const slashSuggestions = useMemo(() => {
+    const normalizedInput = input.trimStart();
+    if (!isOrchestratorMode || dismissedSlashInput === input || !normalizedInput.startsWith('/')) {
+      return [];
+    }
+    const commandToken = normalizedInput.split(/\s+/, 1)[0]?.toLowerCase() ?? '';
+    return [
+      ...getOrchestratorSlashCommandSuggestions(input),
+      ...MODE_ROUTING_SLASH_COMMANDS.filter((item) => item.command.startsWith(commandToken)),
+    ];
+  }, [dismissedSlashInput, input, isOrchestratorMode]);
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
   const isDisabled = (displayWaiting || runningTools.length > 0) || (!acceptsDirectInput && !targetAgentExists);
   const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
+  const isWorkingLocked = acceptsDirectInput && (displayWaiting || runningTools.length > 0);
+  const workingTargetLabel = activeTargetLabel.trim() || 'The agent';
+  const canStopWorkingTurn = isOrchestratorMode && displayWaiting && Boolean(onStop);
+  const workingLockReason = runningTools.length > 0
+    ? `${workingTargetLabel} is running tools.`
+    : `${workingTargetLabel} is finishing the current turn.`;
+  const workingLockAction = canStopWorkingTurn
+    ? 'Use Stop to interrupt, or wait for the next turn.'
+    : 'Wait for the next turn before typing.';
+  let composerPlaceholder = `Message ${activeTargetLabel}…`;
+  if (isWorkingLocked) {
+    composerPlaceholder = 'Composer unlocks when this turn finishes';
+  } else if (isOrchestratorMode) {
+    composerPlaceholder = 'Ask anything · / for commands';
+  } else if (displayWaiting) {
+    composerPlaceholder = `${activeTargetLabel} is thinking...`;
+  }
 
   const activeSlashCommand = slashSuggestions[Math.min(activeSlashIndex, Math.max(0, slashSuggestions.length - 1))] ?? null;
   const footerLeadingSlot = showReasoningControls ? (
@@ -538,6 +570,66 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             </div>
           ) : null}
 
+          {isWorkingLocked ? (
+            <div
+              id={workingLockHintId}
+              role="status"
+              aria-live="polite"
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                marginTop: attachedImages.length > 0 || attachedFiles.length > 0 ? 6 : 10,
+                marginRight: 12,
+                marginBottom: 0,
+                marginLeft: 12,
+                paddingTop: 7,
+                paddingRight: 10,
+                paddingBottom: 7,
+                paddingLeft: 10,
+                borderRadius: 10,
+                border: '1px solid rgba(249, 115, 22, 0.2)',
+                background: 'rgba(249, 115, 22, 0.08)',
+                color: 'var(--t-text-muted)',
+                fontSize: 11,
+                lineHeight: 1.35,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 18,
+                  height: 18,
+                  borderRadius: 999,
+                  background: 'rgba(249, 115, 22, 0.13)',
+                  color: '#f97316',
+                  flexShrink: 0,
+                }}
+              >
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="5" y="11" width="14" height="10" rx="2" />
+                  <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                </svg>
+              </span>
+              <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                <span style={{ color: 'var(--t-text)', fontWeight: 700 }}>Composer locked.</span>{' '}
+                {workingLockReason} {workingLockAction}
+              </span>
+            </div>
+          ) : null}
+
           <textarea
             ref={inputRef}
             value={input}
@@ -577,11 +669,20 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 if (slashSuggestions.length > 0 && activeSlashCommand) {
                   const normalized = input.trim();
                   const [commandToken] = normalized.split(/\s+/, 1);
-                  if (activeSlashCommand.requiresArgument && normalized === commandToken) {
+                  const commandAliases = activeSlashCommand.aliases ?? [];
+                  const exactCommandToken = commandToken === activeSlashCommand.command
+                    || commandAliases.includes(commandToken);
+                  if (!exactCommandToken && normalized === commandToken) {
+                    updateInput(`${activeSlashCommand.command}${activeSlashCommand.requiresArgument ? ' ' : ''}`);
+                    return;
+                  }
+                  if (activeSlashCommand.requiresArgument && exactCommandToken && normalized === commandToken) {
                     updateInput(`${activeSlashCommand.command} `);
                     return;
                   }
-                  const nextCommand = normalized.startsWith(activeSlashCommand.command)
+                  const typedCommandMatches = normalized.startsWith(activeSlashCommand.command)
+                    || commandAliases.some((alias) => normalized.startsWith(alias));
+                  const nextCommand = typedCommandMatches
                     ? normalized
                     : activeSlashCommand.command;
                   onSlashCommand(nextCommand);
@@ -597,13 +698,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }
             }}
             onPaste={handleTextareaPaste}
-            placeholder={
-              isOrchestratorMode
-                ? 'Ask anything · /codex /gemini for one-shot · /chat for casual'
-                : displayWaiting
-                  ? `${activeTargetLabel} is thinking...`
-                  : `Message ${activeTargetLabel}…`
-            }
+            aria-describedby={isWorkingLocked ? workingLockHintId : undefined}
+            placeholder={composerPlaceholder}
             disabled={isDisabled}
             rows={2}
             style={{
@@ -645,6 +741,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onUploadDiskFiles={onUploadDiskFiles}
             onFileReferenceSelect={handleFileReferenceSelect}
             repoPath={repoPath}
+            workspaceTargets={workspaceTargets}
+            selectedRepoPath={selectedRepoPath}
+            onSelectRepoPath={onSelectRepoPath}
           />
         </div>
       </div>

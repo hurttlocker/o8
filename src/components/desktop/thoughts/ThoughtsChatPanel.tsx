@@ -27,7 +27,11 @@ import type {
 } from '@/lib/orchestrator/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
-import { executeOrchestratorSlashCommand, parseOrchestratorSlashCommand } from '@/lib/slash-commands';
+import {
+  executeOrchestratorSlashCommand,
+  parseOrchestratorSlashCommand,
+  type SlashOrchestrationRequest,
+} from '@/lib/slash-commands';
 import type { AgentTarget, FleetAgent } from './types';
 import {
   entrySignature,
@@ -41,7 +45,6 @@ import { useOrchestratorContextResidency } from '@/components/desktop/orchestrat
 import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
-import { IntentChips } from '@/components/desktop/orchestrator/IntentChips';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
 import { ModeChip } from '@/components/desktop/orchestrator/ModeChip';
 import {
@@ -124,6 +127,11 @@ function isRuntimeSessionKey(sessionKey: string): boolean {
     || sessionKey.startsWith('codex-live:')
     || sessionKey.startsWith('gemini-owned:')
     || sessionKey.startsWith('opencode-owned:');
+}
+
+function repoPathLabel(path: string | null | undefined): string | null {
+  if (!path?.trim()) return null;
+  return path.split('/').filter(Boolean).pop() ?? path;
 }
 
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
@@ -218,11 +226,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
-  // #888/#891 — repo + branch chips below the composer once intent has
-  // text. The chips advise scope; the orchestrator still reads its own
-  // truth at dispatch time. Default repo = parent-provided repoPathProp.
-  const [intentRepoPath, setIntentRepoPath] = useState<string | null>(repoPathProp ?? null);
-  const [intentBranch, setIntentBranch] = useState<string>('main');
   // Orchestration mode + runtime + chat-model selection. Per-tab when
   // the parent provides initial values + onModePersist (the orchestrator
   // tab path); otherwise falls back to the legacy per-workspace
@@ -399,6 +402,21 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     [isOrchestratorMode, sessionTargets, targetAgentKey],
   );
   const targetSessionKey = targetAgent?.key ?? null;
+  const selectedWorkspaceTarget = useMemo(
+    () => workspaceTargets.find((target) => target.localPath === resolvedRepoPath) ?? null,
+    [resolvedRepoPath, workspaceTargets],
+  );
+  const composerRepoLabel = selectedWorkspaceTarget?.label
+    ?? repoLabel
+    ?? repoPathLabel(resolvedRepoPath);
+  const handleSelectComposerRepoPath = useCallback((next: string) => {
+    setResolvedRepoPath(next);
+    setPlanText(null);
+    setWaitingForReply(false);
+    orchestratorSessionRef.current = null;
+    singleRuntimeSessionRef.current = null;
+    singleRuntimeLaunchPromiseRef.current = null;
+  }, []);
 
   // ── Resolve repo path for orchestrator stream ──
   useEffect(() => {
@@ -421,6 +439,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [repoPathProp]);
 
   useEffect(() => {
+    orchestratorSessionRef.current = null;
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
   }, [resolvedRepoPath, singleRuntime]);
@@ -489,7 +508,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
     let cancelled = false;
     (async () => {
-      let repoPath = repoPathProp;
+      let repoPath = resolvedRepoPath;
       if (!repoPath) {
         try {
           const res = await fetch('/api/panel/repos');
@@ -538,7 +557,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       }
     })();
     return () => { cancelled = true; };
-  }, [isChatMode, isOrchestratorMode, orchestrationSettingsLoaded, orchestratorSpawning, repoPathProp]);
+  }, [isChatMode, isOrchestratorMode, orchestrationSettingsLoaded, orchestratorSpawning, resolvedRepoPath]);
 
   useEffect(() => {
     if (!open || !draftInjection?.id) return;
@@ -1082,6 +1101,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const latestInputRef = useRef('');
   useEffect(() => { latestInputRef.current = input; }, [input]);
 
+  const startSlashOrchestration = useCallback(async (request: SlashOrchestrationRequest) => {
+    const localEntriesAfterUser = request.commandEntry ? [request.commandEntry] : [];
+    orchStream.send(request.prompt, {
+      permissionMode,
+      thinkingEffort,
+      model: orchestratorModel,
+      displayMessage: request.displayMessage,
+      localEntriesAfterUser,
+    });
+  }, [orchStream, orchestratorModel, permissionMode, thinkingEffort]);
+
   const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
     if (!isOrchestratorMode || isChatMode) return false;
 
@@ -1110,6 +1140,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           model: snapshot.model,
         };
       },
+      startOrchestration: startSlashOrchestration,
       appendEntries: suppressCommandEntries ? () => {} : orchStream.appendLocalEntries,
       clearThread: handleClearCommand,
     });
@@ -1126,6 +1157,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     orchestratorModel,
     resetRemoteSession,
     resolvedRepoPath,
+    startSlashOrchestration,
   ]);
 
   const handleTaskSend = useCallback(async (explicitText?: string) => {
@@ -1152,6 +1184,29 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           onSpawnChatTab();
           setInput('');
           latestInputRef.current = '';
+          return;
+        }
+        if (routing.target.kind === 'fleet') {
+          const body = routing.body.trim();
+          if (!body) {
+            setInput('');
+            latestInputRef.current = '';
+            return;
+          }
+          if (orchStream.status === 'busy') return;
+
+          const attachments = attachedImages.length > 0
+            ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
+            : undefined;
+          setInput('');
+          latestInputRef.current = '';
+          orchStream.send(body, {
+            permissionMode,
+            thinkingEffort,
+            model: orchestratorModel,
+            ...(attachments ? { attachments } : {}),
+          });
+          clearAttachments();
           return;
         }
         // No spawn handler available — fall through and dispatch as a
@@ -1336,7 +1391,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [captureServerSnapshot, chatMessages, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
+  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -1377,7 +1432,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
-  }, [clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, waitingForReply]);
+  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, waitingForReply]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
@@ -1525,15 +1580,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onStop={orchStream.interrupt}
       />
 
-      <IntentChips
-        visible={input.trim().length > 0}
-        workspaceTargets={workspaceTargets ?? []}
-        selectedRepoPath={intentRepoPath}
-        onSelectRepoPath={setIntentRepoPath}
-        selectedBranch={intentBranch}
-        onSelectBranch={setIntentBranch}
-      />
-
       <ComposerArea
         ref={inputRef}
         input={input}
@@ -1559,7 +1605,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         adaptiveEnabled={adaptiveThinkingEnabled}
         permissionMode={permissionMode}
         onTogglePermission={onTogglePermission}
-        repoLabel={repoLabel}
+        repoLabel={composerRepoLabel}
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
         footerMeterSlot={footerMeterSlot}
@@ -1585,6 +1631,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onAttachedFileRemove={removeAttachedFile}
         onUploadDiskFiles={processAttachmentFiles}
         repoPath={resolvedRepoPath}
+        workspaceTargets={workspaceTargets}
+        selectedRepoPath={resolvedRepoPath}
+        onSelectRepoPath={handleSelectComposerRepoPath}
       />
     </>
   );
