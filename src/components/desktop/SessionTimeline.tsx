@@ -101,8 +101,10 @@ export function SessionTimeline({
   firstMergeCelebration,
 }: SessionTimelineProps) {
   // The route's `windowMinutes` is informational — the strip's width is
-  // pinned to a true 24h rolling window, so the API anchor doesn't matter.
-  const { segments, loading } = useTimelineData();
+  // pinned to a true 24h rolling window. The anchor is what we DO need
+  // — formatTime turns minutesSinceAnchor into the activity's real
+  // clock time using it.
+  const { segments, anchorMs, loading } = useTimelineData();
   const liveSessions = useTimelineSessions();
   const [hoverInfo, setHoverInfo] = useState<TrackerHoverInfo | null>(null);
 
@@ -231,8 +233,8 @@ export function SessionTimeline({
     const { startMin, durationMin } = hoveredMeta;
     const cursorMin = Math.round(startMin + hoverInfo.blockFraction * durationMin);
     const rangeLabel = hoveredSeg
-      ? `${formatTime(startMin)} – ${formatTime(Math.min(totalSpan, startMin + durationMin))}`
-      : formatTime(cursorMin);
+      ? `${formatTime(startMin, anchorMs)} – ${formatTime(Math.min(totalSpan, startMin + durationMin), anchorMs)}`
+      : formatTime(cursorMin, anchorMs);
     const durationLabel = hoveredSeg ? formatDuration(durationMin) : null;
     const kindLabel = hoveredSeg ? SEGMENT_LABELS[hoveredSeg.kind] : 'IDLE';
     const kindColor = hoveredSeg ? SEGMENT_COLORS[hoveredSeg.kind] : '#94a3b8';
@@ -254,7 +256,7 @@ export function SessionTimeline({
       errorMessage: hoveredSeg?.kind === 'error' ? hoveredSeg.errorMessage ?? null : null,
       isIdle: !hoveredSeg,
     };
-  }, [hoverInfo, hoveredMeta, hoveredSeg, hoveredContext, totalSpan]);
+  }, [hoverInfo, hoveredMeta, hoveredSeg, hoveredContext, totalSpan, anchorMs]);
 
   const celebrationWash = (
     <AnimatePresence>

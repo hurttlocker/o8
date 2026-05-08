@@ -79,6 +79,68 @@ export function formatElapsed(value: string | number | null | undefined): string
   return `${Math.floor(delta / day)}d`;
 }
 
+const LIVE_PACKET_STATUSES = new Set([
+  'launching',
+  'running',
+  'recovering',
+  'awaiting_review',
+  'blocked',
+  'failed',
+  'idle',
+  'queued',
+]);
+
+const TERMINAL_PACKET_STATUSES = new Set(['released', 'archived', 'merged']);
+
+/**
+ * True when the packet is live work the operator should see in the
+ * Agents tab. Released / archived / merged packets graduate to the
+ * Mission tab (history) and drop out of the live list.
+ *
+ * Failed packets count as live so the operator notices them.
+ */
+export function isLivePacket(packet: OrchestratorPacket): boolean {
+  const release = (packet.releaseState ?? '').toLowerCase();
+  if (TERMINAL_PACKET_STATUSES.has(release)) return false;
+  const status = (packet.status ?? '').toLowerCase();
+  if (TERMINAL_PACKET_STATUSES.has(status)) return false;
+  return LIVE_PACKET_STATUSES.has(status);
+}
+
+const RECENT_MERGE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Released/failed packets whose last event lands inside the rolling
+ *  24h window. Drives the "N recently merged" footer link. */
+export function isRecentlyConcluded(packet: OrchestratorPacket): boolean {
+  const release = (packet.releaseState ?? '').toLowerCase();
+  const status = (packet.status ?? '').toLowerCase();
+  const concluded = TERMINAL_PACKET_STATUSES.has(release)
+    || TERMINAL_PACKET_STATUSES.has(status)
+    || status === 'failed';
+  if (!concluded) return false;
+  const at = packet.lane?.lastEventAt ?? packet.lastEventAt;
+  const time = typeof at === 'string' ? Date.parse(at) : Number(at);
+  if (!Number.isFinite(time)) return false;
+  return Date.now() - time <= RECENT_MERGE_WINDOW_MS;
+}
+
+/** Label for the elapsed slot — adjusts wording when the packet has
+ *  finished (it's not elapsing anymore, it concluded). */
+export function packetTimeLabel(packet: OrchestratorPacket): string {
+  const release = (packet.releaseState ?? '').toLowerCase();
+  const status = (packet.status ?? '').toLowerCase();
+  const at = packet.lane?.lastEventAt ?? packet.lastEventAt;
+  const elapsed = formatElapsed(at);
+  if (release === 'released' || status === 'released' || status === 'merged') {
+    return `merged ${elapsed} ago`;
+  }
+  if (release === 'archived' || status === 'archived') {
+    return `archived ${elapsed} ago`;
+  }
+  if (status === 'failed') return `failed ${elapsed} ago`;
+  return `${elapsed} elapsed`;
+}
+
 export function missionLabel(missionState: { missionId?: string; prompt?: string } | undefined): string {
   const id = missionState?.missionId?.trim();
   if (id) return id;
