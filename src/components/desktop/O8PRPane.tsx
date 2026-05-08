@@ -1,126 +1,16 @@
 'use client';
 
 /**
- * O8PRPane — Pull request review pane for the O8 panel.
+ * O8PRPane — Pull request surface for the o8 right panel.
  *
- * Fetches PR detail from /api/panel/prs/[number], renders header with
- * branch info + stats, collapsible file diffs, and approve/merge actions.
- * Apple-minimal: dense but readable, no clutter.
+ * Two modes:
+ *   • List (no PR selected) — fetches /api/panel/prs and shows a scrollable
+ *     summary list grouped by repo. Picking one opens the detail view.
+ *   • Detail — delegates to <PrPanel> (Cursor-style header + tabs).
  */
 
 import { useCallback, useEffect, useState } from 'react';
-
-// ── Types ──
-
-interface PRFile {
-  path: string;
-  additions: number;
-  deletions: number;
-  status?: string;
-  patch?: string | null;
-}
-
-interface PRDetail {
-  number: number;
-  title: string;
-  body: string;
-  state: string;
-  author: { login: string };
-  headRefName: string;
-  baseRefName: string;
-  additions: number;
-  deletions: number;
-  changedFiles: number;
-  mergedAt: string | null;
-  mergeable?: boolean;
-  files: PRFile[];
-  diffStat: string;
-  url: string;
-  reviewComments: Array<{ id: number; body: string; user: string; path: string; line: number | null }>;
-}
-
-interface O8PRPaneProps {
-  prNumber?: number | null;
-  repo?: string | null;
-  onClose?: () => void;
-}
-
-// ── Icons ──
-
-function GitMergeIcon({ size = 14, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <circle cx="18" cy="18" r="3" />
-      <circle cx="6" cy="6" r="3" />
-      <path d="M6 21V9a9 9 0 0 0 9 9" />
-    </svg>
-  );
-}
-
-function CheckIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-function FileIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-    </svg>
-  );
-}
-
-function ChevronIcon({ open, size = 10 }: { open: boolean; size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', transition: 'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  );
-}
-
-const PR_COLORS = {
-  add: '#70b57f',
-  addSoft: '#91c99d',
-  addBg: 'rgba(112, 181, 127, 0.08)',
-  addLineBg: 'rgba(112, 181, 127, 0.04)',
-  delete: '#c97878',
-  deleteSoft: '#d99a9a',
-  deleteBg: 'rgba(201, 120, 120, 0.08)',
-  deleteLineBg: 'rgba(201, 120, 120, 0.045)',
-  accent: '#8d9fbd',
-  accentBg: 'rgba(141, 159, 189, 0.065)',
-  accentBorder: 'rgba(141, 159, 189, 0.13)',
-  merge: '#aaa0c7',
-  mergeBg: 'rgba(170, 160, 199, 0.095)',
-};
-
-// ── Diff stat bar ──
-
-function DiffBar({ additions, deletions }: { additions: number; deletions: number }) {
-  const total = additions + deletions;
-  if (total === 0) return null;
-  const addPct = Math.round((additions / total) * 100);
-  return (
-    <div style={{ display: 'flex', width: 40, height: 4, borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
-      <div style={{ width: `${addPct}%`, background: PR_COLORS.add }} />
-      <div style={{ flex: 1, background: PR_COLORS.delete }} />
-    </div>
-  );
-}
-
-// ── State badge ──
-
-function StateBadge({ state, merged }: { state: string; merged: boolean }) {
-  if (merged) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 999, background: PR_COLORS.mergeBg, color: PR_COLORS.merge, fontSize: 10, fontWeight: 700 }}><GitMergeIcon size={10} color={PR_COLORS.merge} />Merged</span>;
-  if (state === 'open') return <span style={{ padding: '2px 8px', borderRadius: 999, background: PR_COLORS.addBg, color: PR_COLORS.addSoft, fontSize: 10, fontWeight: 700 }}>Open</span>;
-  return <span style={{ padding: '2px 8px', borderRadius: 999, background: PR_COLORS.deleteBg, color: PR_COLORS.deleteSoft, fontSize: 10, fontWeight: 700 }}>Closed</span>;
-}
-
-// ── PR List Item (summary card) ──
+import { PrPanel } from './pr-panel/PrPanel';
 
 interface PRSummary {
   number: number;
@@ -136,7 +26,45 @@ interface PRSummary {
   url: string;
 }
 
-function PRListItem({ pr, active, onClick }: { pr: PRSummary; active: boolean; onClick: () => void }) {
+interface O8PRPaneProps {
+  prNumber?: number | null;
+  repo?: string | null;
+}
+
+const ADD_SOFT = '#91c99d';
+const DELETE_SOFT = '#d99a9a';
+const ADD = '#70b57f';
+const DELETE = '#c97878';
+const MERGE = '#aaa0c7';
+const MERGE_BG = 'rgba(170, 160, 199, 0.095)';
+const ADD_BG = 'rgba(112, 181, 127, 0.08)';
+const DELETE_BG = 'rgba(201, 120, 120, 0.08)';
+const ACCENT_BG = 'rgba(141, 159, 189, 0.065)';
+
+function GitMergeIcon({ size = 14, color = 'currentColor' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <path d="M6 21V9a9 9 0 0 0 9 9" />
+    </svg>
+  );
+}
+
+function DiffBar({ additions, deletions }: { additions: number; deletions: number }) {
+  const total = additions + deletions;
+  if (total === 0) return null;
+  const addPct = Math.round((additions / total) * 100);
+  return (
+    <div style={{ display: 'flex', width: 40, height: 4, borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
+      <div style={{ width: `${addPct}%`, background: ADD }} />
+      <div style={{ flex: 1, background: DELETE }} />
+    </div>
+  );
+}
+
+function PRListItem({ pr, onClick }: { pr: PRSummary; onClick: () => void }) {
+  const merged = pr.state === 'merged';
   return (
     <button
       type="button"
@@ -146,20 +74,25 @@ function PRListItem({ pr, active, onClick }: { pr: PRSummary; active: boolean; o
         alignItems: 'flex-start',
         gap: 10,
         width: '100%',
-        padding: '10px 14px',
-        border: 'none',
-        borderBottom: '1px solid var(--t-divider-subtle)',
-        background: active ? PR_COLORS.accentBg : 'transparent',
+        paddingTop: 10,
+        paddingRight: 14,
+        paddingBottom: 10,
+        paddingLeft: 14,
+        borderWidth: 0,
+        borderBottomWidth: 1,
+        borderBottomStyle: 'solid',
+        borderBottomColor: 'var(--t-divider-subtle)',
+        background: 'transparent',
         color: 'var(--t-text)',
         cursor: 'pointer',
         textAlign: 'left',
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
         transition: 'background 80ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
-      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = ACCENT_BG; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
     >
-      <GitMergeIcon size={14} color={pr.state === 'open' ? PR_COLORS.add : PR_COLORS.merge} />
+      <GitMergeIcon size={14} color={merged ? MERGE : ADD} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {pr.title}
@@ -172,37 +105,71 @@ function PRListItem({ pr, active, onClick }: { pr: PRSummary; active: boolean; o
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, fontSize: 10 }}>
           <span style={{ color: 'var(--t-text-secondary)' }}>{typeof pr.author === 'string' ? pr.author : pr.author?.login}</span>
           <span style={{ color: 'var(--t-text-faint)' }}>&middot;</span>
-          <span style={{ color: PR_COLORS.addSoft, fontWeight: 600 }}>+{pr.additions}</span>
-          <span style={{ color: PR_COLORS.deleteSoft, fontWeight: 600 }}>-{pr.deletions}</span>
+          <span style={{ color: ADD_SOFT, fontWeight: 600 }}>+{pr.additions}</span>
+          <span style={{ color: DELETE_SOFT, fontWeight: 600 }}>-{pr.deletions}</span>
           <DiffBar additions={pr.additions} deletions={pr.deletions} />
           <span style={{ color: 'var(--t-text-faint)' }}>{pr.changedFiles} file{pr.changedFiles === 1 ? '' : 's'}</span>
+          {merged ? (
+            <span style={{
+              marginLeft: 'auto',
+              paddingTop: 2,
+              paddingBottom: 2,
+              paddingLeft: 6,
+              paddingRight: 6,
+              borderRadius: 999,
+              background: MERGE_BG,
+              color: MERGE,
+              fontWeight: 700,
+            }}>
+              Merged
+            </span>
+          ) : pr.state === 'open' ? (
+            <span style={{
+              marginLeft: 'auto',
+              paddingTop: 2,
+              paddingBottom: 2,
+              paddingLeft: 6,
+              paddingRight: 6,
+              borderRadius: 999,
+              background: ADD_BG,
+              color: ADD_SOFT,
+              fontWeight: 700,
+            }}>
+              Open
+            </span>
+          ) : (
+            <span style={{
+              marginLeft: 'auto',
+              paddingTop: 2,
+              paddingBottom: 2,
+              paddingLeft: 6,
+              paddingRight: 6,
+              borderRadius: 999,
+              background: DELETE_BG,
+              color: DELETE_SOFT,
+              fontWeight: 700,
+            }}>
+              Closed
+            </span>
+          )}
         </div>
       </div>
     </button>
   );
 }
 
-// ── Main ──
-
 export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
-  const [pr, setPr] = useState<PRDetail | null>(null);
   const [prList, setPrList] = useState<PRSummary[]>([]);
   const [prListLoading, setPrListLoading] = useState(false);
   const [selectedPr, setSelectedPr] = useState<number | null>(prNumber ?? null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
-  const [fileDiffs, setFileDiffs] = useState<Map<string, string>>(new Map());
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [actionResult, setActionResult] = useState<string | null>(null);
-  const [reviewComment, setReviewComment] = useState('');
 
-  // Sync external prNumber
+  // Sync external prNumber — when the user clicks a PR ref in the
+  // transcript, dashboard/page.tsx routes through here.
   useEffect(() => {
     if (prNumber) setSelectedPr(prNumber);
   }, [prNumber]);
 
-  // Fetch all open PRs for the repo
+  // Fetch the open-PR list whenever the repo scope changes.
   useEffect(() => {
     setPrListLoading(true);
     const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
@@ -213,425 +180,67 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
       .finally(() => setPrListLoading(false));
   }, [repo]);
 
-  // Fetch PR detail when one is selected
-  useEffect(() => {
-    if (!selectedPr) { setPr(null); return; }
-    setLoading(true);
-    setError(null);
-    setPr(null);
-    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
-    fetch(`/api/panel/prs/${selectedPr}${repoParam}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.pr) setPr(data.pr);
-        else setError(data.error || 'PR not found');
-      })
-      .catch(() => setError('Failed to fetch PR'))
-      .finally(() => setLoading(false));
-  }, [selectedPr, repo]);
+  const handleClose = useCallback(() => {
+    setSelectedPr(null);
+  }, []);
 
-  // Fetch individual file diff
-  const handleToggleFile = useCallback((filePath: string) => {
-    setExpandedFiles((prev) => {
-      const next = new Set(prev);
-      if (next.has(filePath)) {
-        next.delete(filePath);
-      } else {
-        next.add(filePath);
-        // Fetch diff if not cached
-        if (!fileDiffs.has(filePath) && pr) {
-          const repoParam = repo ? `&repo=${encodeURIComponent(repo)}` : '';
-          fetch(`/api/panel/pr?number=${pr.number}${repoParam}`)
-            .then((r) => r.json())
-            .then(() => {
-              // Use diffStat as fallback — individual file diffs from git
-              setFileDiffs((m) => new Map(m).set(filePath, `File: ${filePath}`));
-            })
-            .catch(() => {});
-        }
-      }
-      return next;
-    });
-  }, [fileDiffs, pr, repo]);
-
-  // Submit review action
-  const handleAction = useCallback(async (action: 'approve' | 'request_changes' | 'merge') => {
-    if (!pr) return;
-    setActionLoading(action);
-    setActionResult(null);
-    try {
-      const res = await fetch('/api/panel/pr/review', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          repo: repo || undefined,
-          number: pr.number,
-          action,
-          comment: reviewComment || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setActionResult(action === 'approve' ? 'Approved' : action === 'merge' ? 'Merged' : 'Changes requested');
-        setReviewComment('');
-        // Re-fetch PR to update state (Open → Merged, hide action buttons)
-        if (action === 'merge') {
-          setPr((prev) => prev ? { ...prev, state: 'closed', mergedAt: new Date().toISOString() } : prev);
-          // Refresh PR list too
-          const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
-          fetch(`/api/panel/prs${repoParam}`).then((r) => r.json()).then((d) => setPrList(d.prs ?? [])).catch(() => {});
-        }
-      } else {
-        setActionResult(data.error || 'Action failed');
-      }
-    } catch {
-      setActionResult('Action failed');
-    } finally {
-      setActionLoading(null);
-    }
-  }, [pr, repo, reviewComment]);
-
-  // No PR selected — show the list of all open PRs
-  if (!selectedPr) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <div style={{
-          padding: '8px 14px',
-          borderBottom: '1px solid var(--t-divider-subtle)',
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}>
-          <GitMergeIcon size={13} color="var(--t-text-secondary)" />
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-            Pull Requests
-          </span>
-          {prList.length > 0 ? (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              minWidth: 18, height: 18, padding: '0 6px', borderRadius: 999,
-              background: 'var(--t-divider-subtle)', color: 'var(--t-text-secondary)',
-              fontSize: 10, fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace',
-            }}>
-              {prList.length}
-            </span>
-          ) : null}
-        </div>
-        <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto' }}>
-          {prListLoading ? (
-            <div style={{ padding: '20px 14px', color: 'var(--t-text-faint)', fontSize: 12, textAlign: 'center' }}>Loading pull requests...</div>
-          ) : prList.length === 0 ? (
-            <div style={{ padding: '40px 14px', textAlign: 'center', color: 'var(--t-text-faint)' }}>
-              <GitMergeIcon size={28} color="var(--t-text-faint)" />
-              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 500 }}>No open pull requests</div>
-            </div>
-          ) : (
-            prList.map((item) => (
-              <PRListItem key={item.number} pr={item} active={false} onClick={() => setSelectedPr(item.number)} />
-            ))
-          )}
-        </div>
-      </div>
-    );
+  if (selectedPr) {
+    return <PrPanel prNumber={selectedPr} repoSlug={repo ?? null} onClose={handleClose} />;
   }
-
-  if (loading) {
-    return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', fontSize: 12 }}>
-        Loading PR #{selectedPr}...
-      </div>
-    );
-  }
-
-  if (error || !pr) {
-    return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: PR_COLORS.deleteSoft, fontSize: 12 }}>
-        {error || 'PR not found'}
-      </div>
-    );
-  }
-
-  const isMerged = Boolean(pr.mergedAt);
-  const canAct = pr.state === 'open' && !isMerged;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      {/* PR Header */}
       <div style={{
-        padding: '12px 14px',
-        borderBottom: '1px solid var(--t-divider-subtle)',
+        paddingTop: 8,
+        paddingRight: 14,
+        paddingBottom: 8,
+        paddingLeft: 14,
+        borderBottomWidth: 1,
+        borderBottomStyle: 'solid',
+        borderBottomColor: 'var(--t-divider-subtle)',
         flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
       }}>
-        {/* Back button */}
-        <button
-          type="button"
-          onClick={() => setSelectedPr(null)}
-          style={{
+        <GitMergeIcon size={13} color="var(--t-text-secondary)" />
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+          Pull Requests
+        </span>
+        {prList.length > 0 ? (
+          <span style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 4,
-            padding: 0,
-            marginBottom: 6,
-            border: 'none',
-            background: 'transparent',
-            color: 'var(--t-text-faint)',
+            justifyContent: 'center',
+            minWidth: 18,
+            height: 18,
+            paddingLeft: 6,
+            paddingRight: 6,
+            borderRadius: 999,
+            background: 'var(--t-divider-subtle)',
+            color: 'var(--t-text-secondary)',
             fontSize: 10,
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-faint)'; }}
-        >
-          &larr; All PRs
-        </button>
-        {/* Title row */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-          <GitMergeIcon size={16} color={isMerged ? PR_COLORS.merge : PR_COLORS.add} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: 'var(--t-text)',
-              letterSpacing: '-0.01em',
-              lineHeight: 1.3,
-            }}>
-              {pr.title}
-            </div>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              marginTop: 4,
-              fontSize: 11,
-              color: 'var(--t-text-secondary)',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-            }}>
-              <span>{pr.baseRefName}</span>
-              <span style={{ color: 'var(--t-text-faint)' }}>&larr;</span>
-              <span>{pr.headRefName}</span>
-            </div>
-          </div>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text-faint)', flexShrink: 0 }}>#{pr.number}</span>
-        </div>
-
-        {/* Stats row */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          marginTop: 8,
-          fontSize: 11,
-        }}>
-          <StateBadge state={pr.state} merged={isMerged} />
-          {pr.mergeable === true ? (
-            <span style={{ padding: '2px 8px', borderRadius: 999, background: PR_COLORS.addBg, color: PR_COLORS.addSoft, fontSize: 10, fontWeight: 600 }}>No conflicts</span>
-          ) : pr.mergeable === false && !isMerged ? (
-            <span style={{ padding: '2px 8px', borderRadius: 999, background: PR_COLORS.deleteBg, color: PR_COLORS.deleteSoft, fontSize: 10, fontWeight: 600 }}>Conflicts</span>
-          ) : null}
-          <span style={{ color: 'var(--t-text-secondary)' }}>{typeof pr.author === 'string' ? pr.author : pr.author?.login}</span>
-          <span style={{ color: 'var(--t-text-faint)' }}>&middot;</span>
-          <span style={{ color: PR_COLORS.addSoft, fontWeight: 600 }}>+{pr.additions}</span>
-          <span style={{ color: PR_COLORS.deleteSoft, fontWeight: 600 }}>-{pr.deletions}</span>
-          <DiffBar additions={pr.additions} deletions={pr.deletions} />
-          <span style={{ color: 'var(--t-text-faint)' }}>{pr.changedFiles} file{pr.changedFiles === 1 ? '' : 's'}</span>
-        </div>
+            fontWeight: 700,
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}>
+            {prList.length}
+          </span>
+        ) : null}
       </div>
-
-      {/* Files list */}
-      <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-        {pr.files.map((file) => {
-          const isExpanded = expandedFiles.has(file.path);
-          return (
-            <div key={file.path}>
-              <button
-                type="button"
-                onClick={() => handleToggleFile(file.path)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  width: '100%',
-                  padding: '6px 14px',
-                  border: 'none',
-                  borderBottom: '1px solid var(--t-divider-subtle)',
-                  background: isExpanded ? PR_COLORS.accentBg : 'transparent',
-                  color: 'var(--t-text)',
-                  cursor: 'pointer',
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                  fontSize: 11,
-                  textAlign: 'left',
-                }}
-                onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
-                onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}
-              >
-                <ChevronIcon open={isExpanded} size={9} />
-                <FileIcon size={12} />
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {file.path}
-                </span>
-                <span style={{ color: PR_COLORS.addSoft, fontSize: 10, fontWeight: 600, flexShrink: 0 }}>+{file.additions}</span>
-                <span style={{ color: PR_COLORS.deleteSoft, fontSize: 10, fontWeight: 600, flexShrink: 0 }}>-{file.deletions}</span>
-                <DiffBar additions={file.additions} deletions={file.deletions} />
-              </button>
-              {isExpanded ? (
-                <div style={{
-                  borderBottom: '1px solid var(--t-divider-subtle)',
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                  fontSize: 11,
-                  lineHeight: 1.5,
-                  overflow: 'hidden',
-                }}>
-                  {/* Inline diff patch */}
-                  {file.patch ? (
-                    <div style={{ overflowX: 'auto' }}>
-                      {file.patch.split('\n').map((line, i) => {
-                        const isAdd = line.startsWith('+') && !line.startsWith('+++');
-                        const isDel = line.startsWith('-') && !line.startsWith('---');
-                        const isHunk = line.startsWith('@@');
-                        return (
-                          <div
-                            key={i}
-                            style={{
-                              padding: '0 14px 0 36px',
-                              background: isAdd ? PR_COLORS.addLineBg : isDel ? PR_COLORS.deleteLineBg : isHunk ? PR_COLORS.accentBg : 'transparent',
-                              color: isAdd ? PR_COLORS.addSoft : isDel ? PR_COLORS.deleteSoft : isHunk ? PR_COLORS.accent : 'var(--t-text-secondary)',
-                              whiteSpace: 'pre',
-                              minHeight: 18,
-                            }}
-                          >
-                            {line || '\u200b'}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div style={{ padding: '8px 14px 8px 36px', color: 'var(--t-text-faint)' }}>Diff not available</div>
-                  )}
-                  {/* Review comments on this file */}
-                  {pr.reviewComments.filter((c) => c.path === file.path).length > 0 ? (
-                    <div style={{ padding: '6px 14px 8px 36px' }}>
-                      {pr.reviewComments
-                        .filter((c) => c.path === file.path)
-                        .map((comment) => (
-                          <div key={comment.id} style={{
-                            marginTop: 4,
-                            padding: '5px 8px',
-                            borderRadius: 6,
-                            background: PR_COLORS.accentBg,
-                            border: `1px solid ${PR_COLORS.accentBorder}`,
-                          }}>
-                            <div style={{ fontSize: 10, fontWeight: 600, color: PR_COLORS.accent, marginBottom: 2 }}>
-                              {comment.user} {comment.line ? `· L${comment.line}` : ''}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--t-text)', whiteSpace: 'pre-wrap' }}>{comment.body}</div>
-                          </div>
-                        ))
-                      }
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Action bar */}
-      {canAct ? (
-        <div style={{
-          padding: '10px 14px',
-          borderTop: '1px solid var(--t-divider-subtle)',
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-        }}>
-          {/* Comment input */}
-          <textarea
-            value={reviewComment}
-            onChange={(e) => setReviewComment(e.target.value)}
-            placeholder="Review comment (optional)..."
-            rows={2}
-            style={{
-              width: '100%',
-              resize: 'vertical',
-              border: '1px solid var(--t-divider)',
-              borderRadius: 8,
-              background: 'rgba(255,255,255,0.04)',
-              color: 'var(--t-text)',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-              fontSize: 12,
-              padding: '6px 10px',
-              outline: 'none',
-              boxSizing: 'border-box',
-            }}
-          />
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-            {actionResult ? (
-              <span style={{ fontSize: 11, color: PR_COLORS.addSoft, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginRight: 'auto' }}>
-                <CheckIcon size={11} /> {actionResult}
-              </span>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => void handleAction('request_changes')}
-              disabled={actionLoading !== null}
-              style={{
-                padding: '5px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--t-divider)',
-                background: 'transparent',
-                color: 'var(--t-text-secondary)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: actionLoading ? 'wait' : 'pointer',
-                opacity: actionLoading ? 0.6 : 1,
-              }}
-            >
-              Request Changes
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleAction('approve')}
-              disabled={actionLoading !== null}
-              style={{
-                padding: '5px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--t-divider)',
-                background: 'rgba(255, 255, 255, 0.06)',
-                color: 'var(--t-text)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: actionLoading ? 'wait' : 'pointer',
-                opacity: actionLoading ? 0.6 : 1,
-              }}
-            >
-              Approve
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleAction('merge')}
-              disabled={actionLoading !== null}
-              style={{
-                padding: '5px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--t-divider)',
-                background: 'rgba(255, 255, 255, 0.1)',
-                color: 'var(--t-text)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: actionLoading ? 'wait' : 'pointer',
-                opacity: actionLoading ? 0.6 : 1,
-              }}
-            >
-              Merge
-            </button>
+      <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto' }}>
+        {prListLoading ? (
+          <div style={{ paddingTop: 20, paddingBottom: 20, paddingLeft: 14, paddingRight: 14, color: 'var(--t-text-faint)', fontSize: 12, textAlign: 'center' }}>Loading pull requests...</div>
+        ) : prList.length === 0 ? (
+          <div style={{ paddingTop: 40, paddingBottom: 40, paddingLeft: 14, paddingRight: 14, textAlign: 'center', color: 'var(--t-text-faint)' }}>
+            <GitMergeIcon size={28} color="var(--t-text-faint)" />
+            <div style={{ marginTop: 8, fontSize: 12, fontWeight: 500 }}>No open pull requests</div>
           </div>
-        </div>
-      ) : null}
+        ) : (
+          prList.map((item) => (
+            <PRListItem key={item.number} pr={item} onClick={() => setSelectedPr(item.number)} />
+          ))
+        )}
+      </div>
     </div>
   );
 }

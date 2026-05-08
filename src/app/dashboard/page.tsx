@@ -1464,6 +1464,20 @@ function DashboardInner() {
     handleReviewPR(prNumber, repo);
   }, [handleReviewPR, handleSelectPR]);
 
+  // Bridge for transcript PR-link clicks. LLMMarkdown intercepts GitHub
+  // PR URLs and dispatches `o8:open-pr` instead of opening the browser;
+  // the listener routes through handleReviewPR so the right panel pops
+  // open at the new PrPanel.
+  useEffect(() => {
+    const handleOpenPr = (event: Event) => {
+      const detail = (event as CustomEvent<{ prNumber?: number; repo?: string }>).detail;
+      if (!detail || typeof detail.prNumber !== 'number') return;
+      handleReviewPR(detail.prNumber, detail.repo);
+    };
+    window.addEventListener('o8:open-pr', handleOpenPr);
+    return () => { window.removeEventListener('o8:open-pr', handleOpenPr); };
+  }, [handleReviewPR]);
+
   const handleExpandWorkspace = useCallback((workspace: string, repo: string | null) => {
     setActiveWorkspace(workspace);
     // Only open README tab if workspace actually has a README
