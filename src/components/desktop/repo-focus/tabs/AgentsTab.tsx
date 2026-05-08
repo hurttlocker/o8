@@ -4,8 +4,9 @@ import { useMemo, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../types';
 import {
+  isConcluded,
   isLivePacket,
-  isRecentlyConcluded,
+  packetEventTime,
   REPO_FOCUS_FONT,
   repoOwnsCandidate,
 } from '../utils';
@@ -29,12 +30,19 @@ export function AgentsTab({
   const [idleOpen, setIdleOpen] = useState(false);
   const [mergedOpen, setMergedOpen] = useState(false);
 
-  // Split packets into live work + recently-concluded. Live drives the
-  // primary list; recently-concluded sits behind a collapsible drawer so
-  // the operator can audit yesterday's merges without them dominating
-  // today's view.
+  // Split packets into live work + the concluded archive. Live drives
+  // the primary list; concluded packets (released / archived / merged /
+  // failed) sit behind a collapsible drawer, sorted newest first, so
+  // the operator can audit every shipped packet for this repo without
+  // them dominating today's view.
   const livePackets = useMemo(() => packets.filter(isLivePacket), [packets]);
-  const concludedPackets = useMemo(() => packets.filter(isRecentlyConcluded), [packets]);
+  const concludedPackets = useMemo(
+    () => packets
+      .filter(isConcluded)
+      .slice()
+      .sort((a, b) => packetEventTime(b) - packetEventTime(a)),
+    [packets],
+  );
 
   const packetSessionKeys = useMemo(() => new Set(livePackets.map((packet) => packet.lane?.sessionKey).filter(Boolean)), [livePackets]);
   const idleSessions = useMemo(() => ideWorkspaceSessions.filter((session) => (
@@ -81,7 +89,7 @@ export function AgentsTab({
         <>
           <DrawerHeader
             open={mergedOpen}
-            label={`${concludedPackets.length} recently merged`}
+            label={`${concludedPackets.length} archived`}
             dotColor="#16a34a"
             onToggle={() => setMergedOpen((current) => !current)}
           />
