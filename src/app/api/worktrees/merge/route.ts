@@ -74,7 +74,9 @@ export async function POST(req: NextRequest) {
         break;
 
       case 'merge':
-        result = await mergeToTarget(body.repo, worktree.path, worktree.branch, body.targetBranch ?? 'main');
+        result = await mergeToTarget(body.repo, worktree.path, worktree.branch, body.targetBranch ?? 'main', {
+          importBranchFromWorkspace: worktree.isolationKind === 'apfs-cow-clone',
+        });
         if (result.ok) {
           await mgr.cleanup(body.worktreeId, { force: true, deleteBranch: true });
           // #538 — Post-merge decomposition pipeline. Never blocks the response
@@ -215,6 +217,7 @@ async function mergeToTarget(
   worktreePath: string,
   branch: string,
   targetBranch: string,
+  opts?: { importBranchFromWorkspace?: boolean },
 ): Promise<MergeResult> {
   // Commit any uncommitted changes first
   try {
@@ -225,6 +228,21 @@ async function mergeToTarget(
     });
   } catch {
     // Already committed
+  }
+
+  if (opts?.importBranchFromWorkspace) {
+    try {
+      await execFileAsync('git', ['fetch', worktreePath, `${branch}:refs/heads/${branch}`], {
+        cwd: repoRoot,
+        timeout: 30_000,
+      });
+    } catch (err) {
+      return {
+        action: 'merge',
+        ok: false,
+        note: `Failed to import workspace branch before merge: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   // Safety: refuse to merge if repo root has uncommitted changes

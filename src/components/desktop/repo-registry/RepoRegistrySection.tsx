@@ -585,6 +585,7 @@ function RepoRegistrySectionBase({
           skipSetup: !workspaceUseSetup,
           envMode: workspaceRepo.setup.envMode,
           envFiles: workspaceRepo.setup.envFiles,
+          isolationPreference: workspaceRepo.setup.workspaceIsolationPreference,
         }),
       });
 

@@ -28,6 +28,7 @@ import {
   sessionStatusTone,
   AgentSpinner,
   shortenPath,
+  worktreeIsolationLabel,
   worktreeStageTone,
   type BranchAgent,
   type BranchInfo,
@@ -472,7 +473,7 @@ function RepoBranchRowBase({
                 {branch.name}
               </div>
               <div style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>
-                {branch.isWorktree ? (worktreeTone?.label ?? 'Worktree') : branch.current ? 'Current branch' : 'Branch'}
+                {branch.isWorktree ? `${worktreeTone?.label ?? 'Worktree'} · ${worktreeIsolationLabel(worktree)}` : branch.current ? 'Current branch' : 'Branch'}
                 {worktree?.path ? ` · ${shortenPath(worktree.path)}` : ''}
               </div>
             </div>
@@ -1130,7 +1131,7 @@ function RepoBranchRowBase({
                 letterSpacing: '-0.002em',
               }}
             >
-              {branch.isWorktree ? (worktreeTone?.label ?? 'Worktree') : branch.current ? 'Current branch' : 'Branch'}
+              {branch.isWorktree ? `${worktreeTone?.label ?? 'Worktree'} · ${worktreeIsolationLabel(worktree)}` : branch.current ? 'Current branch' : 'Branch'}
               {worktree?.path ? ` · ${shortenPath(worktree.path)}` : ''}
             </div>
             {branch.lastCommitMessage ? (
@@ -1176,8 +1177,8 @@ function RepoBranchRowBase({
           ) : null}
           {worktree ? (
             <BranchStatusRow
-              label="Workspace"
-              value={worktree.status === 'stale' ? 'Needs cleanup' : 'Tracked'}
+              label="Isolation"
+              value={worktree.status === 'stale' ? 'Needs cleanup' : worktreeIsolationLabel(worktree)}
               tone={worktree.status === 'stale' ? 'attention' : 'neutral'}
             />
           ) : null}
