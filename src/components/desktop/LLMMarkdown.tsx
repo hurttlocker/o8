@@ -583,7 +583,7 @@ function renderTable(headerLine: string, alignLine: string, rows: string[]): Rea
 
 // ── Inline formatting ──
 
-function renderInline(text: string): React.ReactNode {
+export function renderInline(text: string): React.ReactNode {
   if (!text) return null;
 
   const parts: React.ReactNode[] = [];

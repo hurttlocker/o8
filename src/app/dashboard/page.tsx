@@ -26,6 +26,7 @@ import { useProjects } from '@/components/desktop/repo-registry/useProjects';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { ApprovalBanner } from '@/components/desktop/ApprovalBanner';
+import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
@@ -2541,6 +2542,7 @@ function DashboardInner() {
   }
 
   return (
+    <DictationHost>
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
       height: '100vh',
       display: 'flex',
@@ -3208,5 +3210,6 @@ function DashboardInner() {
       )}
 
     </div>
+    </DictationHost>
   );
 }
