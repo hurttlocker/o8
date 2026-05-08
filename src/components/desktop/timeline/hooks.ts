@@ -7,6 +7,10 @@ import type { TimelineSegment } from './types';
 export function useTimelineData() {
   const [segments, setSegments] = useState<TimelineSegment[]>([]);
   const [windowMinutes, setWindowMinutes] = useState(0);
+  // Absolute timestamp the route used as minute-zero for every segment's
+  // startMin. The strip is rolling 24h so this slides forward each fetch;
+  // formatTime needs it to render correct clock times in the hover card.
+  const [anchorMs, setAnchorMs] = useState<number>(() => Date.now() - 24 * 60 * 60 * 1000);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
@@ -15,6 +19,10 @@ export function useTimelineData() {
       if (res.ok) {
         const data = await res.json();
         setWindowMinutes(data.windowMinutes ?? 0);
+        if (typeof data.anchorStartIso === 'string') {
+          const parsed = Date.parse(data.anchorStartIso);
+          if (Number.isFinite(parsed)) setAnchorMs(parsed);
+        }
         if (data.segments?.length > 0) {
           setSegments(data.segments);
           try {
@@ -22,6 +30,7 @@ export function useTimelineData() {
               ts: Date.now(),
               segments: data.segments,
               windowMinutes: data.windowMinutes ?? 0,
+              anchorStartIso: data.anchorStartIso ?? null,
             }));
           } catch {}
           setLoading(false);
@@ -36,6 +45,10 @@ export function useTimelineData() {
         if (Date.now() - parsed.ts < 300_000 && parsed.segments?.length > 0) {
           setSegments(parsed.segments);
           setWindowMinutes(parsed.windowMinutes ?? 0);
+          if (typeof parsed.anchorStartIso === 'string') {
+            const parsedAnchor = Date.parse(parsed.anchorStartIso);
+            if (Number.isFinite(parsedAnchor)) setAnchorMs(parsedAnchor);
+          }
           setLoading(false);
           return;
         }
@@ -58,7 +71,7 @@ export function useTimelineData() {
     };
   }, [fetchData]);
 
-  return { segments, windowMinutes, loading };
+  return { segments, windowMinutes, anchorMs, loading };
 }
 
 export function useTimelineSessions() {

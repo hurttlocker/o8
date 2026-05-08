@@ -7,6 +7,7 @@ import {
   formatElapsed,
   packetStatusColor,
   packetStatusLabel,
+  packetTimeLabel,
   REPO_FOCUS_FONT,
   runtimeFromValue,
 } from '../utils';
@@ -95,7 +96,7 @@ export function PacketRow({
           {packet.referenceLabel ? `${packet.referenceLabel}: ${packet.title}` : packet.title}
         </span>
         <span style={{ display: 'block', marginTop: 3, color: 'var(--t-text-faint)', fontSize: 10.5 }}>
-          {formatElapsed(packet.lane?.lastEventAt ?? packet.lastEventAt)} elapsed
+          {packetTimeLabel(packet)}
         </span>
       </span>
       <StatusPill label={packetStatusLabel(packet)} color={packetStatusColor(packet)} />
