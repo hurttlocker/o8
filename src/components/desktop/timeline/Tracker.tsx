@@ -201,7 +201,6 @@ export function Tracker({
                 width: '100%',
                 height: '100%',
                 background: block.color,
-                color: block.color,
                 opacity: effectiveOpacity,
                 transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 borderTopLeftRadius: isFirst ? trackRadius : blockRadius,
