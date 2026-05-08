@@ -2,6 +2,7 @@
 
 import { memo, useMemo } from 'react';
 import { ChevronDown, ChevronRight } from '../lucide-shims';
+import { renderInline } from '../LLMMarkdown';
 
 interface PrPanelTitleProps {
   title: string;
@@ -85,7 +86,7 @@ export const PrPanelTitle = memo(function PrPanelTitle({
                   lineHeight: 1.5,
                 }}
               >
-                {bullet}
+                {renderInline(bullet)}
               </li>
             ))}
           </ul>

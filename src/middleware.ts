@@ -132,6 +132,9 @@ const GATED_PREFIXES = [
   // o8.md spec surface — reads/writes a repo-local file. Repo path is
   // operator-trusted; we don't expose this cross-origin without a token.
   '/api/repo-spec',
+  // Dictation (transcribe + polish) hits paid OpenRouter endpoints with
+  // the operator's key. Loopback-only so a LAN client can't drain credits.
+  '/api/dictation/',
   // Setup routes are gated too — GET is allowlisted above, POST needs loopback
   // or a token (so an evil cross-origin page can't POST to /api/setup/claude-desktop
   // and silently write to the user's Claude config).
