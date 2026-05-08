@@ -3,6 +3,7 @@ import { handleClearSlashCommand } from './clear';
 import { handleCompactSlashCommand } from './compact';
 import { handleFocusSlashCommand } from './focus';
 import { handleHandoffSlashCommand } from './handoff';
+import { handleOrchestrateSlashCommand } from './orchestrate';
 import { handleRecallSlashCommand } from './recall';
 import { parseOrchestratorSlashCommand } from './shared';
 import { handleStatusSlashCommand } from './status';
@@ -15,6 +16,7 @@ export type {
   ParsedOrchestratorSlashCommand,
   SlashCommandContext,
   SlashCommandExecutionResult,
+  SlashOrchestrationRequest,
   SlashCommandStripChip,
 } from './types';
 
@@ -34,6 +36,7 @@ const HANDLERS: Record<ParsedOrchestratorSlashCommand['command']['name'], (
   compact: handleCompactSlashCommand,
   focus: handleFocusSlashCommand,
   handoff: handleHandoffSlashCommand,
+  orchestrate: handleOrchestrateSlashCommand,
   recall: handleRecallSlashCommand,
   status: handleStatusSlashCommand,
 };

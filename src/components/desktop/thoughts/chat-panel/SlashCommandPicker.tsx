@@ -10,6 +10,17 @@ interface SlashCommandPickerProps {
 
 function commandIcon(name: OrchestratorSlashCommandDefinition['name']) {
   switch (name) {
+    case 'orchestrate':
+      return (
+        <>
+          <circle cx="12" cy="6" r="2" />
+          <circle cx="6" cy="18" r="2" />
+          <circle cx="18" cy="18" r="2" />
+          <path d="M12 8v4" />
+          <path d="m12 12-6 4" />
+          <path d="m12 12 6 4" />
+        </>
+      );
     case 'ask':
       return (
         <>
@@ -72,20 +83,23 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
     <div style={{
       position: 'absolute',
       bottom: '100%',
-      left: 0,
-      right: 0,
-      marginBottom: 8,
-      padding: 6,
-      borderRadius: 18,
+      left: 12,
+      width: 'min(520px, calc(100% - 24px))',
+      maxHeight: 292,
+      overflowY: 'auto',
+      scrollbarWidth: 'none',
+      marginBottom: 6,
+      padding: 5,
+      borderRadius: 14,
       background: 'linear-gradient(180deg, rgba(255,255,255,0.92), rgba(248,250,252,0.96))',
       border: '1px solid rgba(148, 163, 184, 0.16)',
-      boxShadow: '0 18px 42px rgba(15, 23, 42, 0.08)',
+      boxShadow: '0 12px 28px rgba(15, 23, 42, 0.08)',
       backdropFilter: 'blur(22px)',
       zIndex: 20,
     }}>
       <div style={{
-        padding: '4px 10px 8px',
-        fontSize: 9.5,
+        padding: '3px 8px 5px',
+        fontSize: 9,
         fontWeight: 700,
         color: 'var(--t-text-muted)',
         textTransform: 'uppercase',
@@ -95,9 +109,16 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
         Slash commands
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {suggestions.map((suggestion, index) => {
           const active = index === activeIndex;
+          const groupLabel = suggestion.group === 'route'
+            ? 'Route'
+            : suggestion.group === 'context'
+              ? 'Context'
+              : suggestion.group === 'thread'
+                ? 'Thread'
+                : 'Command';
           return (
             <button
               key={suggestion.command}
@@ -106,12 +127,12 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
               onClick={() => onSelect(suggestion)}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '24px minmax(0, 1fr)',
+                gridTemplateColumns: '20px minmax(0, 1fr)',
                 alignItems: 'center',
-                gap: 10,
+                gap: 8,
                 width: '100%',
-                padding: '10px 12px',
-                borderRadius: 14,
+                padding: '7px 8px',
+                borderRadius: 10,
                 border: 'none',
                 background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
                 color: 'inherit',
@@ -120,8 +141,8 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
               }}
             >
               <span style={{
-                width: 24,
-                height: 24,
+                width: 20,
+                height: 20,
                 borderRadius: 999,
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -129,7 +150,7 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
                 background: active ? 'rgba(37, 99, 235, 0.12)' : 'rgba(148, 163, 184, 0.08)',
                 color: active ? '#2563eb' : '#64748b',
               }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                   {commandIcon(suggestion.name)}
                 </svg>
               </span>
@@ -137,7 +158,7 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
                   <span style={{
-                    fontSize: 12,
+                    fontSize: 11.5,
                     fontWeight: 700,
                     color: active ? '#1d4ed8' : 'var(--t-text)',
                     fontFamily: '"SFMono-Regular", ui-monospace, Menlo, monospace',
@@ -147,7 +168,7 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
                   </span>
                   {suggestion.argHint ? (
                     <span style={{
-                      fontSize: 10.5,
+                      fontSize: 10,
                       color: 'var(--t-text-faint)',
                       fontFamily: '"SFMono-Regular", ui-monospace, Menlo, monospace',
                       overflow: 'hidden',
@@ -157,12 +178,23 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
                       {suggestion.argHint}
                     </span>
                   ) : null}
+                  <span style={{
+                    marginLeft: 'auto',
+                    fontSize: 8.5,
+                    color: active ? '#2563eb' : 'var(--t-text-faint)',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  }}>
+                    {groupLabel}
+                  </span>
                 </div>
                 <div style={{
-                  fontSize: 11,
-                  lineHeight: 1.45,
+                  fontSize: 10.5,
+                  lineHeight: 1.35,
                   color: 'var(--t-text-muted)',
-                  marginTop: 2,
+                  marginTop: 1,
                   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 }}>
                   {suggestion.description}
