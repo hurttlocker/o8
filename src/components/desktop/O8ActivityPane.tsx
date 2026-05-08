@@ -358,7 +358,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
           </button>
 
           {repoPickerOpen ? (
-            <div style={{
+            <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{
               position: 'absolute',
               top: 32,
               left: 0,
@@ -500,7 +500,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       </div>
 
       {/* Activity list */}
-      <div style={{
+      <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{
         flex: 1,
         overflowY: 'auto',
         overflowX: 'hidden',

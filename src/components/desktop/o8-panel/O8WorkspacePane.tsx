@@ -536,8 +536,7 @@ export function O8WorkspacePane({
         backdropFilter: isGlass ? 'blur(24px) saturate(1.16)' : 'none',
         WebkitBackdropFilter: isGlass ? 'blur(24px) saturate(1.16)' : 'none',
         boxShadow: shellInset,
-        scrollbarColor: 'var(--o8-workspace-scrollbar)' as unknown as string,
-        scrollbarWidth: 'thin',
+        scrollbarWidth: 'auto',
       } as CSSProperties}
     >
       <div

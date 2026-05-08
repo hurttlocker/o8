@@ -1,7 +1,6 @@
 import { memo } from 'react';
 import { AlertCircle, Eye, GitPullRequest, Pencil, Plus, Terminal, Trash2 } from '../lucide-shims';
 
-import type { LLMMessage } from './shared';
 import { type PendingApprovalState } from './shared';
 
 function approvalVisual(toolName: string) {
@@ -61,7 +60,7 @@ function ApprovalBannerBase({
         <>
           <div style={{ fontSize: 12, color: '#475569', marginBottom: 10, lineHeight: 1.5 }}>{pendingApproval.summary}</div>
           {pendingApproval.diff ? (
-            <div style={{ background: 'rgba(15,23,42,0.95)', borderRadius: 8, paddingTop: 8, paddingRight: 0, paddingBottom: 8, paddingLeft: 0, marginBottom: 10, fontSize: 11, fontFamily: 'ui-monospace, SFMono-Regular, monospace', maxHeight: 200, overflowY: 'auto', overflowX: 'auto' }}>
+            <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ background: 'rgba(15,23,42,0.95)', borderRadius: 8, paddingTop: 8, paddingRight: 0, paddingBottom: 8, paddingLeft: 0, marginBottom: 10, fontSize: 11, fontFamily: 'ui-monospace, SFMono-Regular, monospace', maxHeight: 200, overflowY: 'auto', overflowX: 'auto' }}>
               {pendingApproval.diff.path ? <div style={{ paddingLeft: 10, paddingBottom: 6, color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 4 }}>{pendingApproval.diff.path}</div> : null}
               {(() => {
                 const before = (pendingApproval.diff?.before || '').split('\n');
@@ -84,7 +83,7 @@ function ApprovalBannerBase({
               {(pendingApproval.diff?.after || '').split('\n').length > 30 ? <div style={{ paddingLeft: 10, paddingTop: 4, color: '#64748b', fontStyle: 'italic' }}>... {(pendingApproval.diff?.after || '').split('\n').length - 30} more lines</div> : null}
             </div>
           ) : pendingApproval.args && (pendingApproval.name === 'create_github_issue' || pendingApproval.name === 'create_pull_request' || pendingApproval.name === 'delete_file') ? (
-            <div style={{ background: 'rgba(255,255,255,0.6)', borderRadius: 8, paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10, marginBottom: 10, fontSize: 11, fontFamily: 'ui-monospace, monospace', color: '#334155', maxHeight: 80, overflowY: 'auto' }}>
+            <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ background: 'rgba(255,255,255,0.6)', borderRadius: 8, paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10, marginBottom: 10, fontSize: 11, fontFamily: 'ui-monospace, monospace', color: '#334155', maxHeight: 80, overflowY: 'auto' }}>
               {pendingApproval.name === 'create_github_issue' ? <><div><strong>Repo:</strong> {String(pendingApproval.args.repo)}</div><div><strong>Title:</strong> {String(pendingApproval.args.title)}</div>{pendingApproval.args.labels ? <div><strong>Labels:</strong> {(pendingApproval.args.labels as string[]).join(', ')}</div> : null}</> : null}
               {pendingApproval.name === 'create_pull_request' ? <><div><strong>Repo:</strong> {String(pendingApproval.args.repo)}</div><div><strong>Branch:</strong> {String(pendingApproval.args.branch)}</div><div><strong>Title:</strong> {String(pendingApproval.args.title)}</div><div><strong>Base:</strong> {String(pendingApproval.args.baseBranch || 'main')}</div></> : null}
               {pendingApproval.name === 'delete_file' ? <div style={{ color: '#ef4444' }}><strong>File:</strong> {String(pendingApproval.args.path)}</div> : null}

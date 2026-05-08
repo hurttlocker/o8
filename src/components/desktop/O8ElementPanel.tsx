@@ -147,6 +147,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
 
   return (
     <div
+      className="cortex-scroll-fade-y cortex-themed-scroll"
       style={{
         margin: '0 12px 0',
         borderTop: '1px solid rgba(255,255,255,0.1)',

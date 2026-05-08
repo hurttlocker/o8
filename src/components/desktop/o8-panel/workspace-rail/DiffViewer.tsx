@@ -191,7 +191,7 @@ export function DiffViewer({
   }
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', paddingTop: 10, paddingBottom: 10, paddingRight: mode === 'unified' ? 8 : 0 }}>
+    <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', paddingTop: 10, paddingBottom: 10, paddingRight: mode === 'unified' ? 8 : 0 }}>
       {loading ? <div style={{ paddingLeft: 14, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading diff...</div> : null}
       {!loading && error ? <div style={{ paddingLeft: 14, color: 'var(--t-brand-red)', fontFamily: UI_FONT, fontSize: 12 }}>{error}</div> : null}
       {!loading && !error && !diff ? <div style={{ paddingLeft: 14, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>No diff available for this file.</div> : null}

@@ -793,7 +793,9 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
               hideCursorInOverviewRuler: true,
               overviewRulerBorder: false,
               scrollbar: {
-                verticalScrollbarSize: 8,
+                vertical: 'hidden',
+                horizontal: 'auto',
+                verticalScrollbarSize: 0,
                 horizontalScrollbarSize: 8,
                 useShadows: false,
               },

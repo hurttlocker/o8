@@ -716,7 +716,9 @@ export function CommitViewer({ commitHash, workspace }: { commitHash: string; wo
                       overviewRulerBorder: false,
                       glyphMargin: false,
                       scrollbar: {
-                        verticalScrollbarSize: 8,
+                        vertical: 'hidden',
+                        horizontal: 'auto',
+                        verticalScrollbarSize: 0,
                         horizontalScrollbarSize: 8,
                         useShadows: false,
                       },
@@ -750,7 +752,9 @@ export function CommitViewer({ commitHash, workspace }: { commitHash: string; wo
                       overviewRulerLanes: 0,
                       overviewRulerBorder: false,
                       scrollbar: {
-                        verticalScrollbarSize: 8,
+                        vertical: 'hidden',
+                        horizontal: 'auto',
+                        verticalScrollbarSize: 0,
                         horizontalScrollbarSize: 8,
                         useShadows: false,
                       },

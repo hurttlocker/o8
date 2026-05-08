@@ -152,8 +152,12 @@ function buildPreviewClientScript(currentUrl: URL): string {
   const state = {
     currentUrl: TARGET_URL,
     selectionEnabled: false,
+    annotationEnabled: false,
+    drawing: false,
     hovered: null,
     overlay: null,
+    annotationOverlay: null,
+    annotationPath: [],
     observer: null,
   };
 
@@ -404,6 +408,56 @@ function buildPreviewClientScript(currentUrl: URL): string {
     overlay.style.height = Math.max(rect.height, 0) + 'px';
   }
 
+  function ensureAnnotationOverlay() {
+    if (state.annotationOverlay) return state.annotationOverlay;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('data-cortex-preview-annotation', 'true');
+    Object.assign(svg.style, {
+      position: 'fixed',
+      inset: '0px',
+      width: '100vw',
+      height: '100vh',
+      pointerEvents: 'none',
+      zIndex: '2147483647',
+      overflow: 'visible',
+      display: 'none',
+    });
+    document.documentElement.appendChild(svg);
+    state.annotationOverlay = svg;
+    return svg;
+  }
+
+  function clearAnnotationOverlay() {
+    state.annotationPath = [];
+    const overlay = ensureAnnotationOverlay();
+    overlay.style.display = 'none';
+    overlay.innerHTML = '';
+  }
+
+  function normalizePoint(event) {
+    return {
+      x: Math.round(event.clientX * 10) / 10,
+      y: Math.round(event.clientY * 10) / 10,
+    };
+  }
+
+  function renderAnnotationPath() {
+    const overlay = ensureAnnotationOverlay();
+    if (!state.annotationEnabled || state.annotationPath.length < 1) {
+      overlay.style.display = 'none';
+      overlay.innerHTML = '';
+      return;
+    }
+
+    overlay.style.display = 'block';
+    const points = state.annotationPath.map((point) => point.x + ',' + point.y).join(' ');
+    const end = state.annotationPath[state.annotationPath.length - 1];
+    overlay.innerHTML =
+      '<defs><marker id="cortex-annotation-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f97316"></path></marker></defs>' +
+      '<polyline points="' + points + '" fill="none" stroke="#f97316" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#cortex-annotation-arrow)" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.28));"></polyline>' +
+      '<circle cx="' + end.x + '" cy="' + end.y + '" r="5" fill="#f97316"></circle>';
+  }
+
   function cssEscape(value) {
     if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
     return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\\\$&');
@@ -440,7 +494,10 @@ function buildPreviewClientScript(currentUrl: URL): string {
     return parts.join(' > ');
   }
 
-  function buildSelectionPayload(element) {
+  function buildDomTargetPayload(element) {
+    if (!(element instanceof Element) || element.closest('[data-cortex-preview-overlay="true"], [data-cortex-preview-annotation="true"]')) {
+      return null;
+    }
     const computed = window.getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     const text = (element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 240);
@@ -452,8 +509,6 @@ function buildPreviewClientScript(currentUrl: URL): string {
     );
 
     return {
-      targetUrl: state.currentUrl,
-      pageTitle: document.title || '',
       selector: buildSelector(element),
       tagName: element.tagName,
       id: element.id || null,
@@ -472,8 +527,97 @@ function buildPreviewClientScript(currentUrl: URL): string {
     };
   }
 
+  function buildSelectionPayload(element) {
+    return {
+      targetUrl: state.currentUrl,
+      pageTitle: document.title || '',
+      ...buildDomTargetPayload(element),
+    };
+  }
+
+  function dedupeDomTargets(elements) {
+    const bySelector = new Map();
+    elements.forEach((element) => {
+      const target = buildDomTargetPayload(element);
+      if (!target || bySelector.has(target.selector)) return;
+      bySelector.set(target.selector, target);
+    });
+    return Array.from(bySelector.values());
+  }
+
+  function annotationBounds(path) {
+    const xs = path.map((point) => point.x);
+    const ys = path.map((point) => point.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+    };
+  }
+
+  function buildAnnotationPayload(path) {
+    const start = path[0];
+    const end = path[path.length - 1];
+    const stride = Math.max(1, Math.floor(path.length / 14));
+    const sampledElements = [];
+    for (let index = 0; index < path.length; index += stride) {
+      const point = path[index];
+      const element = elementFromPoint(document, point.x, point.y);
+      if (element) sampledElements.push(element);
+    }
+
+    const startElement = elementFromPoint(document, start.x, start.y);
+    const endElement = elementFromPoint(document, end.x, end.y);
+    if (startElement) sampledElements.unshift(startElement);
+    if (endElement) sampledElements.push(endElement);
+
+    return {
+      targetUrl: state.currentUrl,
+      pageTitle: document.title || '',
+      kind: 'arrow',
+      createdAt: new Date().toISOString(),
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio || 1,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+      },
+      annotation: {
+        start,
+        end,
+        path,
+        bounds: annotationBounds(path),
+      },
+      domMap: {
+        start: buildDomTargetPayload(startElement),
+        end: buildDomTargetPayload(endElement),
+        touched: dedupeDomTargets(sampledElements).slice(0, 16),
+      },
+    };
+  }
+
+  function setAnnotationMode(enabled) {
+    state.annotationEnabled = Boolean(enabled);
+    state.drawing = false;
+    if (state.annotationEnabled) {
+      state.selectionEnabled = false;
+      state.hovered = null;
+      updateOverlay(null);
+      clearAnnotationOverlay();
+    }
+    document.documentElement.style.cursor = state.annotationEnabled ? 'crosshair' : (state.selectionEnabled ? 'crosshair' : '');
+    if (!state.annotationEnabled) clearAnnotationOverlay();
+  }
+
   function setSelectionMode(enabled) {
     state.selectionEnabled = Boolean(enabled);
+    if (state.selectionEnabled) setAnnotationMode(false);
     state.hovered = null;
     document.documentElement.style.cursor = state.selectionEnabled ? 'crosshair' : '';
     updateOverlay(null);
@@ -500,10 +644,64 @@ function buildPreviewClientScript(currentUrl: URL): string {
     }, '*');
   }, true);
 
+  document.addEventListener('pointerdown', (event) => {
+    if (!state.annotationEnabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    state.drawing = true;
+    state.annotationPath = [normalizePoint(event)];
+    renderAnnotationPath();
+  }, true);
+
+  document.addEventListener('pointermove', (event) => {
+    if (!state.annotationEnabled || !state.drawing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = normalizePoint(event);
+    const previous = state.annotationPath[state.annotationPath.length - 1];
+    if (!previous || Math.abs(previous.x - point.x) > 2 || Math.abs(previous.y - point.y) > 2) {
+      state.annotationPath.push(point);
+      renderAnnotationPath();
+    }
+  }, true);
+
+  function finishAnnotation(event) {
+    if (!state.annotationEnabled || !state.drawing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    state.drawing = false;
+    state.annotationPath.push(normalizePoint(event));
+    const path = state.annotationPath.slice();
+    if (path.length >= 2) {
+      window.parent?.postMessage({
+        source: MESSAGE_SOURCE,
+        type: 'annotation',
+        annotation: buildAnnotationPayload(path),
+      }, '*');
+    }
+    state.annotationEnabled = false;
+    document.documentElement.style.cursor = state.selectionEnabled ? 'crosshair' : '';
+    window.parent?.postMessage({ source: MESSAGE_SOURCE, type: 'annotation-mode', enabled: false }, '*');
+  }
+
+  document.addEventListener('pointerup', finishAnnotation, true);
+  document.addEventListener('pointercancel', (event) => {
+    if (!state.annotationEnabled) return;
+    event.preventDefault();
+    state.drawing = false;
+    clearAnnotationOverlay();
+  }, true);
+
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && state.selectionEnabled) {
       setSelectionMode(false);
       window.parent?.postMessage({ source: MESSAGE_SOURCE, type: 'selection-mode', enabled: false }, '*');
+    }
+    if (event.key === 'Escape' && state.annotationEnabled) {
+      setAnnotationMode(false);
+      window.parent?.postMessage({ source: MESSAGE_SOURCE, type: 'annotation-mode', enabled: false }, '*');
     }
   });
 
@@ -513,6 +711,10 @@ function buildPreviewClientScript(currentUrl: URL): string {
     if (!data || typeof data !== 'object' || data.source !== HOST_MESSAGE_SOURCE) return;
     if (data.type === 'selection-mode') {
       setSelectionMode(data.enabled);
+      return;
+    }
+    if (data.type === 'annotation-mode') {
+      setAnnotationMode(data.enabled);
     }
   });
 

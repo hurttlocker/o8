@@ -125,7 +125,7 @@ function ThinkingText({ text }: { text: string }) {
         View raw thinking
       </button>
       {showRaw ? (
-        <div style={{ marginTop: 4, paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10, background: '#f8fafc', borderRadius: 6, fontSize: 11, color: '#64748b', lineHeight: '1.6', fontFamily: 'ui-monospace, monospace', maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', animation: 'llmFadeIn 200ms ease-out' }}>
+        <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ marginTop: 4, paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10, background: '#f8fafc', borderRadius: 6, fontSize: 11, color: '#64748b', lineHeight: '1.6', fontFamily: 'ui-monospace, monospace', maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', animation: 'llmFadeIn 200ms ease-out' }}>
           {text}
         </div>
       ) : null}

@@ -544,6 +544,7 @@ const InlineTerminal = forwardRef<TerminalHandle, InlineTerminalProps>(function 
   return (
     <div
       ref={containerRef}
+      className="cortex-terminal-fade"
       style={{
         flex: 1,
         minHeight: 0,
@@ -834,6 +835,7 @@ export function LiveOutput({
           {!standaloneTerminal && (
             <div
               ref={scrollRef}
+              className="cortex-scroll-fade-y cortex-themed-scroll"
               style={{
                 flex: hasTerminal ? `0 0 ${splitPct}%` : 1,
                 overflow: 'auto',

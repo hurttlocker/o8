@@ -127,7 +127,7 @@ function MediaPreview({
     : assetUrl;
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+    <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div
         style={{
           maxWidth: '100%',
@@ -344,7 +344,7 @@ export function FileViewer({
             onError={() => setError('Unable to preview this file.')}
           />
         ) : fileKind === 'markdown' && viewMode === 'preview' && fileContent !== null ? (
-          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingTop: 18, paddingRight: 22, paddingBottom: 22, paddingLeft: 22 }}>
+          <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingTop: 18, paddingRight: 22, paddingBottom: 22, paddingLeft: 22 }}>
             <MarkdownRender content={editContent} />
           </div>
         ) : fileContent !== null ? (
@@ -381,6 +381,7 @@ export function FileViewer({
               ))}
             </div>
             <textarea
+              className="cortex-scroll-fade-y cortex-themed-scroll"
               ref={textareaRef}
               value={editContent}
               onChange={(event) => {

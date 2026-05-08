@@ -164,6 +164,7 @@ export const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: {
   return (
     <div
       ref={containerRef}
+      className="cortex-scroll-fade-y cortex-themed-scroll"
       style={{
         overflowY: 'auto',
         height: '100%',
