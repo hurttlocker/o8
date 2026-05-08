@@ -82,6 +82,13 @@ interface TrackerProps {
   style?: CSSProperties;
   /** Optional overlay rendered ON TOP of the strip (scrubber line, etc). */
   overlay?: ReactNode;
+  /**
+   * When true, the LAST block gets a `timelineNowPulse` CSS animation
+   * applied to its inner color fill. Lets the rightmost cell read as
+   * "live now" without painting an extra tick outside the strip.
+   * Requires the keyframe to be defined globally (see globals.css).
+   */
+  pulseLastBlock?: boolean;
 }
 
 export function Tracker({
@@ -97,6 +104,7 @@ export function Tracker({
   onBlockClick,
   style,
   overlay,
+  pulseLastBlock = false,
 }: TrackerProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const totalWeight = blocks.reduce((sum, b) => sum + Math.max(0, b.weight), 0);
@@ -193,12 +201,16 @@ export function Tracker({
                 width: '100%',
                 height: '100%',
                 background: block.color,
+                color: block.color,
                 opacity: effectiveOpacity,
                 transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 borderTopLeftRadius: isFirst ? trackRadius : blockRadius,
                 borderBottomLeftRadius: isFirst ? trackRadius : blockRadius,
                 borderTopRightRadius: isLast ? trackRadius : blockRadius,
                 borderBottomRightRadius: isLast ? trackRadius : blockRadius,
+                animation: isLast && pulseLastBlock
+                  ? 'timelineNowPulse 1.6s ease-in-out infinite'
+                  : undefined,
               }}
             />
           </div>
