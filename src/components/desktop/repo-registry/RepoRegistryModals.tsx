@@ -12,6 +12,9 @@ import {
   AlertCircle,
   GlassModal,
   shortenPath,
+  workspaceIsolationPreferenceDetail,
+  workspaceIsolationPreferenceLabel,
+  worktreeIsolationLabel,
   type RepoRegistryEntry,
   type ValidatedRepoCandidate,
   type WorkspaceCreateResult,
@@ -190,6 +193,9 @@ function RepoRegistryModalsBase({
   const launchRuntimeOptions = listDispatchableRuntimes({
     includeExperimental: opencodeEnabled || launchRuntime === 'opencode',
   });
+  const workspaceIsolationPreference = workspaceRepo?.setup.workspaceIsolationPreference ?? 'auto';
+  const launchIsolationPreference = launchRepo?.setup.workspaceIsolationPreference ?? 'auto';
+
   return (
     <>
       <GlassModal
@@ -451,7 +457,7 @@ function RepoRegistryModalsBase({
         open={workspaceRepo !== null}
         onClose={closeWorkspaceModal}
         title={workspaceRepo ? `New Workspace · ${workspaceRepo.name}` : 'New Workspace'}
-        subtitle="This reuses the existing worktree API. Cortex derives a worktree branch from the name below and returns the new workspace path after creation."
+        subtitle="Every agent gets a private workspace. On macOS, o8 can use APFS copy-on-write so the workspace appears fast without duplicating the full checkout."
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <label htmlFor="create-workspace-name" style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
@@ -517,6 +523,24 @@ function RepoRegistryModalsBase({
             }}
           />
         </div>
+
+        {workspaceRepo ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(37, 99, 235, 0.14)',
+              background: 'rgba(239, 246, 255, 0.72)',
+              fontSize: 11,
+              lineHeight: 1.5,
+              color: '#1d4ed8',
+            }}
+          >
+            <strong>{workspaceIsolationPreferenceLabel(workspaceIsolationPreference)}</strong>
+            {' · '}
+            {workspaceIsolationPreferenceDetail(workspaceIsolationPreference)}
+          </div>
+        ) : null}
 
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
           <input
@@ -619,6 +643,18 @@ function RepoRegistryModalsBase({
               <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
                 {workspaceResult.baseBranch}
               </span>
+              <span style={{ color: 'var(--t-text-muted)' }}>Isolation</span>
+              <span style={{ color: 'var(--t-text)' }}>
+                {worktreeIsolationLabel(workspaceResult)}
+              </span>
+              {workspaceResult.hydrationPaths && workspaceResult.hydrationPaths.length > 0 ? (
+                <>
+                  <span style={{ color: 'var(--t-text-muted)' }}>Hydrated</span>
+                  <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
+                    {workspaceResult.hydrationPaths.join(', ')}
+                  </span>
+                </>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -764,7 +800,7 @@ function RepoRegistryModalsBase({
             color: '#1d4ed8',
           }}
         >
-          This opens a new workspace CLI tab in the middle panel. Use the primary Launch Agent button for the fastest path, and use this sheet only when you want to choose the runtime or pre-seed the task prompt.
+          This opens a new workspace CLI tab in the middle panel. {launchRepo ? `This repo is set to ${workspaceIsolationPreferenceLabel(launchIsolationPreference)} isolation.` : 'Workspace isolation follows the saved repo setup.'}
         </div>
 
         {launchError ? (

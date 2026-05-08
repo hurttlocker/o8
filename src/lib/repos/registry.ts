@@ -12,6 +12,7 @@ import type {
   RepoSetupConfig,
   ValidatedRepoCandidate,
 } from './types';
+import { isRepoWorkspaceIsolationPreference } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -20,6 +21,30 @@ const REGISTRY_PATH = path.join(REGISTRY_DIR, 'repos.json');
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function normalizeSetupConfig(setup: Partial<RepoSetupConfig> | null | undefined): RepoSetupConfig {
+  const installCommand = setup?.installCommand?.trim() || null;
+  return {
+    envMode: setup?.envMode ?? 'copy',
+    envFiles: Array.isArray(setup?.envFiles) ? setup.envFiles : ['.env', '.env.local'],
+    installCommand,
+    installOnCreateWorkspace: setup?.installOnCreateWorkspace ?? Boolean(installCommand),
+    buildCommand: setup?.buildCommand?.trim() || null,
+    runBuildOnCreateWorkspace: setup?.runBuildOnCreateWorkspace ?? false,
+    devCommand: setup?.devCommand?.trim() || null,
+    defaultPort: setup?.defaultPort ?? null,
+    workspaceIsolationPreference: isRepoWorkspaceIsolationPreference(setup?.workspaceIsolationPreference)
+      ? setup.workspaceIsolationPreference
+      : 'auto',
+  };
+}
+
+function normalizeRepoEntry(repo: RepoRegistryEntry): RepoRegistryEntry {
+  return {
+    ...repo,
+    setup: normalizeSetupConfig(repo.setup),
+  };
 }
 
 async function pathExists(target: string) {
@@ -202,6 +227,7 @@ async function detectSetupConfig(repoRoot: string): Promise<RepoSetupConfig> {
     runBuildOnCreateWorkspace: false,
     devCommand,
     defaultPort,
+    workspaceIsolationPreference: 'auto',
   };
 }
 
@@ -273,7 +299,7 @@ async function readStore(): Promise<RepoRegistryStore> {
 
   return {
     version: 1,
-    repos: sortRepos(parsed.repos as RepoRegistryEntry[]),
+    repos: sortRepos((parsed.repos as RepoRegistryEntry[]).map(normalizeRepoEntry)),
   };
 }
 
@@ -351,7 +377,7 @@ export async function addRepo(localPath: string) {
       name: candidate.name,
       remoteUrl: candidate.remoteUrl,
       defaultBranch: candidate.defaultBranch,
-      setup: existing.setup ?? candidate.setup,
+      setup: normalizeSetupConfig(existing.setup ?? candidate.setup),
       lastOpenedAt: now,
     };
 
@@ -396,7 +422,7 @@ export async function updateRepo(
 
   const next: RepoRegistryEntry = {
     ...existing,
-    setup: updates.setup ?? existing.setup,
+    setup: normalizeSetupConfig(updates.setup ?? existing.setup),
     lastOpenedAt: updates.lastOpenedAt === undefined ? existing.lastOpenedAt : updates.lastOpenedAt,
   };
 

@@ -1,5 +1,18 @@
 export type RepoSetupEnvMode = 'copy' | 'symlink' | 'skip';
 
+export const REPO_WORKSPACE_ISOLATION_PREFERENCES = [
+  'auto',
+  'git-worktree',
+  'apfs-cow-clone',
+] as const;
+
+export type RepoWorkspaceIsolationPreference = typeof REPO_WORKSPACE_ISOLATION_PREFERENCES[number];
+
+export function isRepoWorkspaceIsolationPreference(value: unknown): value is RepoWorkspaceIsolationPreference {
+  return typeof value === 'string'
+    && (REPO_WORKSPACE_ISOLATION_PREFERENCES as readonly string[]).includes(value);
+}
+
 export type RepoReadinessState = 'ready' | 'needs_setup' | 'blocked' | 'unknown';
 
 export interface RepoReadiness {
@@ -23,6 +36,7 @@ export interface RepoSetupConfig {
   runBuildOnCreateWorkspace: boolean;
   devCommand: string | null;
   defaultPort: number | null;
+  workspaceIsolationPreference: RepoWorkspaceIsolationPreference;
 }
 
 export interface RepoRegistryEntry {

@@ -20,7 +20,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { access, copyFile, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -31,7 +31,10 @@ import type {
   WorktreeMetaEntry,
   WorktreeMetaStore,
   WorktreeStatus,
+  WorkspaceIsolationKind,
+  WorkspaceIsolationPreference,
 } from './types';
+import { getApfsCowCapability } from './apfs';
 import {
   gitCommandErrorMessage,
   shouldClassifyFetchAsOriginMissing,
@@ -44,6 +47,24 @@ const META_FILENAME = '.meta.json';
 const CLAUDE_WORKTREE_DIR = '.claude/worktrees';
 const STALE_THRESHOLD_MS = 24 * 60 * 60_000; // 24 hours
 const AUTO_PRUNE_COOLDOWN_MS = 6 * 60 * 60_000; // 6 hours
+const APFS_COW_ENV_FLAG = 'O8_APFS_COW_WORKSPACES';
+const APFS_HYDRATION_CANDIDATES = [
+  'node_modules',
+  '.next/cache',
+  '.turbo',
+  '.venv',
+  'vendor',
+  'target',
+  'Pods',
+  'DerivedData',
+];
+const NODE_LOCK_FILES = [
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lockb',
+  'bun.lock',
+];
 let lastAutoPruneAt = 0;
 
 /**
@@ -142,6 +163,11 @@ function sanitizeBranchName(name: string) {
     .slice(0, 120);
 }
 
+function resolveIsolationPreference(opts: CreateWorktreeOptions): WorkspaceIsolationPreference {
+  if (opts.isolationPreference) return opts.isolationPreference;
+  return process.env[APFS_COW_ENV_FLAG] === '1' ? 'auto' : 'git-worktree';
+}
+
 export class WorktreeManager {
   private repoRoot: string;
   private worktreeBase: string;
@@ -233,6 +259,7 @@ export class WorktreeManager {
         lastActivityAt: now,
         dirtyFiles: [],
         claudeManaged: true,
+        isolationKind: 'git-worktree',
       };
 
       await this.saveMeta(taskId, {
@@ -242,7 +269,9 @@ export class WorktreeManager {
         createdAt: now,
         claudeManaged: true,
         taskName: opts.taskName,
+        branchName,
         status: 'creating',
+        isolationKind: 'git-worktree',
       });
 
       return info;
@@ -254,6 +283,18 @@ export class WorktreeManager {
     // Ensure worktree base directory exists
     await mkdir(this.worktreeBase, { recursive: true });
 
+    const isolationKind = await this.resolveIsolationKind(resolveIsolationPreference(opts));
+    if (isolationKind === 'apfs-cow-clone') {
+      return this.createApfsCowClone({
+        opts,
+        taskId,
+        branchName,
+        baseBranch,
+        worktreePath,
+        now,
+      });
+    }
+
     // Save metadata with 'creating' status before git operation
     await this.saveMeta(taskId, {
       id: taskId,
@@ -262,7 +303,9 @@ export class WorktreeManager {
       createdAt: now,
       claudeManaged: false,
       taskName: opts.taskName,
+      branchName,
       status: 'creating',
+      isolationKind: 'git-worktree',
     });
 
     // Create the worktree + branch
@@ -314,6 +357,7 @@ export class WorktreeManager {
       lastActivityAt: now,
       dirtyFiles: [],
       claudeManaged: false,
+      isolationKind: 'git-worktree',
     };
 
     await this.bootstrapEnvFiles(worktreePath, opts);
@@ -329,6 +373,112 @@ export class WorktreeManager {
     info.status = 'ready';
     await this.updateMetaStatus(taskId, 'ready');
     return info;
+  }
+
+  private async resolveIsolationKind(
+    preference: WorkspaceIsolationPreference,
+  ): Promise<WorkspaceIsolationKind> {
+    if (preference === 'git-worktree') return 'git-worktree';
+
+    const capability = await getApfsCowCapability(this.repoRoot, this.worktreeBase);
+    if (capability.canCowClone) return 'apfs-cow-clone';
+
+    if (preference === 'apfs-cow-clone') {
+      throw new Error(capability.reason ?? 'APFS copy-on-write workspaces are unavailable for this repository.');
+    }
+
+    if (process.env[APFS_COW_ENV_FLAG] === '1') {
+      console.warn(`[worktree] APFS CoW unavailable, falling back to git worktree: ${capability.reason ?? 'unknown reason'}`);
+    }
+    return 'git-worktree';
+  }
+
+  private async createApfsCowClone(params: {
+    opts: CreateWorktreeOptions;
+    taskId: string;
+    branchName: string;
+    baseBranch: string;
+    worktreePath: string;
+    now: number;
+  }): Promise<WorktreeInfo> {
+    const { opts, taskId, branchName, baseBranch, worktreePath, now } = params;
+
+    await this.saveMeta(taskId, {
+      id: taskId,
+      agentType: opts.agentType,
+      baseBranch,
+      createdAt: now,
+      claudeManaged: false,
+      taskName: opts.taskName,
+      branchName,
+      status: 'creating',
+      isolationKind: 'apfs-cow-clone',
+      hydrationPaths: [],
+    });
+
+    try {
+      await execFileAsync('git', ['clone', '--local', '--no-checkout', this.repoRoot, worktreePath], {
+        cwd: this.repoRoot,
+        timeout: 60_000,
+      });
+
+      const originUrl = await this.getOriginUrl();
+      if (originUrl) {
+        await execFileAsync('git', ['remote', 'set-url', 'origin', originUrl], {
+          cwd: worktreePath,
+          timeout: 5000,
+        });
+      }
+
+      await execFileAsync('git', ['checkout', '-B', branchName, baseBranch], {
+        cwd: worktreePath,
+        timeout: 30_000,
+      });
+
+      try {
+        await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
+      } catch (err) {
+        await this.removeMeta(taskId);
+        await rm(worktreePath, { recursive: true, force: true });
+        throw err;
+      }
+
+      const info: WorktreeInfo = {
+        id: taskId,
+        path: worktreePath,
+        branch: branchName,
+        baseBranch,
+        agentType: opts.agentType,
+        status: 'setup',
+        createdAt: now,
+        lastActivityAt: now,
+        dirtyFiles: [],
+        claudeManaged: false,
+        isolationKind: 'apfs-cow-clone',
+        hydrationPaths: [],
+      };
+
+      const hydrationPaths = await this.hydrateApfsCowAssets(worktreePath);
+      info.hydrationPaths = hydrationPaths;
+      await this.updateMetaHydrationPaths(taskId, hydrationPaths);
+
+      await this.bootstrapEnvFiles(worktreePath, opts);
+      await this.injectSafetyHooks(worktreePath);
+
+      if (!opts.skipSetup) {
+        info.status = 'setup';
+        await this.updateMetaStatus(taskId, 'setup');
+        await this.runSetup(worktreePath);
+      }
+
+      info.status = 'ready';
+      await this.updateMetaStatus(taskId, 'ready');
+      return info;
+    } catch (err) {
+      await rm(worktreePath, { recursive: true, force: true }).catch(() => {});
+      await this.removeMeta(taskId).catch(() => {});
+      throw err;
+    }
   }
 
   // ── Rebase ──
@@ -483,10 +633,10 @@ export class WorktreeManager {
     const results: WorktreeInfo[] = [];
 
     for (const [id, entry] of Object.entries(meta)) {
-      const gitWt = gitWorktrees.find((g) => g.path === entry.id || g.branch?.includes(id));
       const worktreePath = entry.claudeManaged
         ? path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)
         : path.join(this.worktreeBase, id);
+      const gitWt = gitWorktrees.find((g) => g.path === worktreePath || g.branch?.includes(id));
 
       // Check if directory actually exists
       const exists = await this.pathExists(worktreePath);
@@ -496,11 +646,12 @@ export class WorktreeManager {
       const lastActivity = exists ? await this.getLastModified(worktreePath) : entry.createdAt;
       const status = this.inferStatus(lastActivity, dirtyFiles, entry);
       const diskUsageBytes = exists ? await this.getDiskUsage(worktreePath) : 0;
+      const isolationKind = entry.isolationKind ?? 'git-worktree';
 
       results.push({
         id,
         path: worktreePath,
-        branch: gitWt?.branch ?? `worktree/${entry.agentType}/${id}`,
+        branch: entry.branchName ?? gitWt?.branch ?? `worktree/${entry.agentType}/${id}`,
         baseBranch: entry.baseBranch,
         agentType: entry.agentType,
         sessionKey: entry.sessionKey,
@@ -510,6 +661,8 @@ export class WorktreeManager {
         diskUsageBytes,
         dirtyFiles,
         claudeManaged: entry.claudeManaged,
+        isolationKind,
+        hydrationPaths: entry.hydrationPaths ?? [],
       });
     }
 
@@ -521,7 +674,7 @@ export class WorktreeManager {
     const knownPaths = new Set(results.map((r) => r.path));
     for (const gitWt of gitWorktrees) {
       if (knownPaths.has(gitWt.path)) continue;
-      if (gitWt.path === this.repoRoot) continue;
+      if (await this.samePath(gitWt.path, this.repoRoot)) continue;
       const exists = await this.pathExists(gitWt.path);
       if (!exists) continue;
 
@@ -550,6 +703,7 @@ export class WorktreeManager {
         diskUsageBytes: 0,
         dirtyFiles,
         claudeManaged: false,
+        isolationKind: 'git-worktree',
       });
     }
 
@@ -587,6 +741,7 @@ export class WorktreeManager {
         try {
           const mainNodeModules = path.join(this.repoRoot, 'node_modules');
           const wtNodeModules = path.join(worktreePath, 'node_modules');
+          if (await this.pathExists(wtNodeModules)) return;
           if (await this.pathExists(mainNodeModules)) {
             await execFileAsync('ln', ['-s', mainNodeModules, wtNodeModules], { timeout: 5000 });
             return;
@@ -630,6 +785,63 @@ export class WorktreeManager {
         timeout: 120_000,
       }).catch(() => { /* cargo may not be available */ });
     }
+  }
+
+  private async getOriginUrl(): Promise<string | null> {
+    try {
+      const { stdout } = await execFileAsync('git', ['config', '--get', 'remote.origin.url'], {
+        cwd: this.repoRoot,
+        timeout: 5000,
+      });
+      return stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async hydrateApfsCowAssets(worktreePath: string): Promise<string[]> {
+    const capability = await getApfsCowCapability(this.repoRoot, worktreePath);
+    if (!capability.canCowClone) return [];
+
+    const hydrated: string[] = [];
+    for (const relativePath of APFS_HYDRATION_CANDIDATES) {
+      const sourcePath = path.join(this.repoRoot, relativePath);
+      const targetPath = path.join(worktreePath, relativePath);
+
+      if (!(await this.pathExists(sourcePath))) continue;
+      if (await this.pathExists(targetPath)) continue;
+      if (relativePath === 'node_modules' && !(await this.nodeDependencyInputsMatch(worktreePath))) {
+        continue;
+      }
+
+      try {
+        await mkdir(path.dirname(targetPath), { recursive: true });
+        await execFileAsync('cp', ['-cR', sourcePath, targetPath], {
+          timeout: 120_000,
+        });
+        hydrated.push(relativePath);
+      } catch (err) {
+        console.warn(
+          `[worktree] APFS hydration skipped for ${relativePath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return hydrated;
+  }
+
+  private async nodeDependencyInputsMatch(worktreePath: string): Promise<boolean> {
+    const mainPackageJson = await this.safeReadFile(path.join(this.repoRoot, 'package.json'));
+    const wtPackageJson = await this.safeReadFile(path.join(worktreePath, 'package.json'));
+    if (!mainPackageJson || !wtPackageJson || mainPackageJson !== wtPackageJson) return false;
+
+    for (const lockFile of NODE_LOCK_FILES) {
+      const mainLock = await this.safeReadFile(path.join(this.repoRoot, lockFile));
+      const wtLock = await this.safeReadFile(path.join(worktreePath, lockFile));
+      if (mainLock !== wtLock) return false;
+    }
+
+    return true;
   }
 
   private async bootstrapEnvFiles(worktreePath: string, opts: CreateWorktreeOptions): Promise<void> {
@@ -780,21 +992,25 @@ export class WorktreeManager {
       if (preserved === 'skip') return; // Could not save work — abort prune
     }
 
-    // Remove the git worktree
-    const args = ['worktree', 'remove', worktreePath];
-    if (opts?.force) args.push('--force');
+    if ((entry?.isolationKind ?? 'git-worktree') === 'apfs-cow-clone') {
+      await rm(worktreePath, { recursive: true, force: true });
+    } else {
+      // Remove the git worktree
+      const args = ['worktree', 'remove', worktreePath];
+      if (opts?.force) args.push('--force');
 
-    try {
-      await execFileAsync('git', args, { cwd: this.repoRoot, timeout: 15_000 });
-    } catch (err) {
-      // If directory already gone, that's fine
-      const msg = err instanceof Error ? err.message : '';
-      if (!msg.includes('is not a working tree')) throw err;
+      try {
+        await execFileAsync('git', args, { cwd: this.repoRoot, timeout: 15_000 });
+      } catch (err) {
+        // If directory already gone, that's fine
+        const msg = err instanceof Error ? err.message : '';
+        if (!msg.includes('is not a working tree')) throw err;
+      }
     }
 
     // Optionally delete the branch
     if (opts?.deleteBranch && entry) {
-      const branchName = `worktree/${entry.agentType}/${worktreeId}`;
+      const branchName = entry.branchName ?? `worktree/${entry.agentType}/${worktreeId}`;
       await execFileAsync('git', ['branch', '-D', branchName], {
         cwd: this.repoRoot,
         timeout: 5000,
@@ -1022,6 +1238,16 @@ export class WorktreeManager {
     }
   }
 
+  private async samePath(a: string, b: string): Promise<boolean> {
+    if (a === b) return true;
+    try {
+      const [realA, realB] = await Promise.all([realpath(a), realpath(b)]);
+      return realA === realB;
+    } catch {
+      return path.resolve(a) === path.resolve(b);
+    }
+  }
+
   private async safeReadFile(p: string): Promise<string | null> {
     try {
       return await readFile(p, 'utf-8');
@@ -1064,6 +1290,15 @@ export class WorktreeManager {
     const entry = existing[id];
     if (entry) {
       entry.status = status;
+      await this.writeMetaStore({ version: 1, worktrees: existing });
+    }
+  }
+
+  private async updateMetaHydrationPaths(id: string, hydrationPaths: string[]): Promise<void> {
+    const existing = await this.loadAllMeta();
+    const entry = existing[id];
+    if (entry) {
+      entry.hydrationPaths = hydrationPaths;
       await this.writeMetaStore({ version: 1, worktrees: existing });
     }
   }

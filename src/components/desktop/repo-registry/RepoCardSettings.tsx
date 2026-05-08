@@ -1,12 +1,30 @@
 'use client';
 
-import { memo } from 'react';
-import { AlertCircle, SetupModeButton, type RepoRegistryEntry } from './shared';
+import { memo, useEffect, useState } from 'react';
+import {
+  AlertCircle,
+  SetupModeButton,
+  workspaceIsolationPreferenceDetail,
+  type RepoRegistryEntry,
+} from './shared';
 import type { RepoCardModel } from './useRepoCardModel';
 
 interface RepoCardSettingsProps {
   repo: RepoRegistryEntry;
   model: Omit<RepoCardModel, 'cardRef'>;
+}
+
+interface ApfsCowCapabilityResponse {
+  apfsCow?: {
+    canCowClone: boolean;
+    reason?: string;
+  };
+}
+
+interface ApfsCowCapabilityState {
+  repoPath: string;
+  available: boolean;
+  reason: string | null;
 }
 
 function RepoCardSettingsBase({ repo, model }: RepoCardSettingsProps) {
@@ -21,10 +39,49 @@ function RepoCardSettingsBase({ repo, model }: RepoCardSettingsProps) {
     handleSave,
     updateEnvMode,
   } = model;
+  const [apfsCowCapability, setApfsCowCapability] = useState<ApfsCowCapabilityState | null>(null);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+
+    let cancelled = false;
+
+    fetch(`/api/worktrees/capabilities?repo=${encodeURIComponent(repo.localPath)}`, { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Capability check failed.')))
+      .then((data: ApfsCowCapabilityResponse) => {
+        if (cancelled) return;
+        setApfsCowCapability({
+          repoPath: repo.localPath,
+          available: Boolean(data.apfsCow?.canCowClone),
+          reason: data.apfsCow?.reason ?? null,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setApfsCowCapability({
+          repoPath: repo.localPath,
+          available: false,
+          reason: error instanceof Error ? error.message : 'Capability check failed.',
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [repo.localPath, settingsOpen]);
 
   if (!settingsOpen) {
     return null;
   }
+
+  const currentApfsCowCapability = apfsCowCapability?.repoPath === repo.localPath ? apfsCowCapability : null;
+  const apfsCowAvailable = currentApfsCowCapability?.available ?? null;
+  const apfsCowReason = currentApfsCowCapability?.reason ?? null;
+  const instantMacDisabled = apfsCowAvailable === false;
+  const showInstantMacOption = !instantMacDisabled || draftSetup.workspaceIsolationPreference === 'apfs-cow-clone';
+  const workspaceIsolationDetail = instantMacDisabled
+    ? `Instant macOS is unavailable here${apfsCowReason ? `: ${apfsCowReason}` : ''}. Auto will use Git worktree fallback.`
+    : workspaceIsolationPreferenceDetail(draftSetup.workspaceIsolationPreference);
 
   return (
     <div
@@ -57,6 +114,46 @@ function RepoCardSettingsBase({ repo, model }: RepoCardSettingsProps) {
           }}
         >
           Environment handling and optional bootstrap commands are stored per repo here. Build and env hooks are scaffolded and not yet injected into workspace bootstrap.
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+          Workspace isolation
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <SetupModeButton
+            label="Auto"
+            selected={draftSetup.workspaceIsolationPreference === 'auto'}
+            onClick={() => setDraftSetup((current) => ({ ...current, workspaceIsolationPreference: 'auto' }))}
+          />
+          {showInstantMacOption ? (
+            <SetupModeButton
+              label="Instant macOS"
+              selected={draftSetup.workspaceIsolationPreference === 'apfs-cow-clone'}
+              disabled={instantMacDisabled}
+              title={instantMacDisabled ? workspaceIsolationDetail : undefined}
+              onClick={() => setDraftSetup((current) => ({ ...current, workspaceIsolationPreference: 'apfs-cow-clone' }))}
+            />
+          ) : null}
+          <SetupModeButton
+            label="Git worktree"
+            selected={draftSetup.workspaceIsolationPreference === 'git-worktree'}
+            onClick={() => setDraftSetup((current) => ({ ...current, workspaceIsolationPreference: 'git-worktree' }))}
+          />
+        </div>
+        <div
+          style={{
+            padding: '9px 10px',
+            borderRadius: 10,
+            border: '1px solid var(--t-divider-subtle)',
+            background: 'var(--t-bg-card)',
+            fontSize: 11,
+            lineHeight: 1.45,
+            color: 'var(--t-text-muted)',
+          }}
+        >
+          No conflicts while working: each agent gets its own private workspace. o8 still warns before changes collide. {workspaceIsolationDetail}
         </div>
       </div>
 

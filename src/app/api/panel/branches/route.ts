@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { getWorktreeManager } from '@/lib/worktree/launch';
+import type { WorktreeInfo } from '@/lib/worktree/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +33,56 @@ function parseShortstat(raw: string): { additions: number; deletions: number } {
     additions: insMatch ? parseInt(insMatch[1], 10) : 0,
     deletions: delMatch ? parseInt(delMatch[1], 10) : 0,
   };
+}
+
+function diskSizeForPath(targetPath: string): string | undefined {
+  try {
+    return execSync(
+      `du -sh "${targetPath}" 2>/dev/null | cut -f1`,
+      { encoding: 'utf-8', timeout: 3000 },
+    ).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function gitLogSummary(repoPath: string): { age: string; message: string; unixMs: number } {
+  try {
+    const raw = execSync(
+      `git -C "${repoPath}" log -1 --format='%cr|||%s|||%ct'`,
+      { encoding: 'utf-8', timeout: 3000 },
+    ).trim();
+    const [age, message, unixStr] = raw.split('|||');
+    return {
+      age: age?.trim() ?? '',
+      message: (message?.trim() ?? '').split('\n')[0],
+      unixMs: parseInt(unixStr?.trim() ?? '0', 10) * 1000,
+    };
+  } catch {
+    return { age: '', message: '', unixMs: 0 };
+  }
+}
+
+function worktreeDiffStats(worktree: WorktreeInfo): { additions: number; deletions: number } {
+  const refs = [
+    `origin/${worktree.baseBranch}...HEAD`,
+    `${worktree.baseBranch}...HEAD`,
+  ];
+
+  for (const ref of refs) {
+    try {
+      const stats = execSync(
+        `git -C "${worktree.path}" diff --shortstat ${ref} 2>/dev/null`,
+        { encoding: 'utf-8', timeout: 3000 },
+      ).trim();
+      if (stats) return parseShortstat(stats);
+      return { additions: 0, deletions: 0 };
+    } catch {
+      // Try the next ref shape.
+    }
+  }
+
+  return { additions: 0, deletions: 0 };
 }
 
 export async function GET(req: NextRequest) {
@@ -80,7 +132,13 @@ export async function GET(req: NextRequest) {
       }
     } catch { /* no worktrees */ }
 
+    const trackedWorktrees = await getWorktreeManager(repoPath).list().catch(() => [] as WorktreeInfo[]);
+    for (const worktree of trackedWorktrees) {
+      worktrees.set(worktree.branch, worktree.path);
+    }
+
     const branches: BranchInfo[] = [];
+    const branchNames = new Set<string>();
     const now = Date.now();
     for (const line of branchRaw.split('\n').filter(Boolean)) {
       const [name, age, message, head, unixStr] = line.split('|||');
@@ -176,14 +234,10 @@ export async function GET(req: NextRequest) {
       // Disk size for worktrees
       let diskSize: string | undefined;
       if (isWt && worktrees.get(trimmedName)) {
-        try {
-          diskSize = execSync(
-            `du -sh "${worktrees.get(trimmedName)}" 2>/dev/null | cut -f1`,
-            { encoding: 'utf-8', timeout: 3000 },
-          ).trim();
-        } catch { /* ignore */ }
+        diskSize = diskSizeForPath(worktrees.get(trimmedName)!);
       }
 
+      branchNames.add(trimmedName);
       branches.push({
         name: trimmedName,
         current: isCurrent,
@@ -201,6 +255,35 @@ export async function GET(req: NextRequest) {
         diskSize,
       });
     }
+
+    for (const worktree of trackedWorktrees) {
+      if (branchNames.has(worktree.branch)) continue;
+      branchNames.add(worktree.branch);
+
+      const log = gitLogSummary(worktree.path);
+      const commitUnix = log.unixMs || worktree.createdAt;
+      const daysSinceCommit = Math.floor((now - commitUnix) / (1000 * 60 * 60 * 24));
+      const diff = worktreeDiffStats(worktree);
+
+      branches.push({
+        name: worktree.branch,
+        current: false,
+        lastCommitAge: log.age || '',
+        lastCommitMessage: log.message,
+        lastCommitUnix: commitUnix,
+        isWorktree: true,
+        worktreePath: worktree.path,
+        ahead: 0,
+        behind: 0,
+        additions: diff.additions,
+        deletions: diff.deletions,
+        isStale: worktree.status === 'stale' || daysSinceCommit >= STALE_THRESHOLD_DAYS,
+        staleDays: daysSinceCommit >= STALE_THRESHOLD_DAYS ? daysSinceCommit : undefined,
+        diskSize: diskSizeForPath(worktree.path),
+      });
+    }
+
+    branches.sort((a, b) => b.lastCommitUnix - a.lastCommitUnix);
 
     return NextResponse.json({ branches, repoPath });
   } catch (err) {

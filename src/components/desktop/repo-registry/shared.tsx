@@ -35,6 +35,8 @@ export interface WorkspaceCreateResult {
   branch: string;
   path: string;
   baseBranch: string;
+  isolationKind?: WorktreeInfo['isolationKind'];
+  hydrationPaths?: string[];
 }
 
 export interface WorkspaceAgentLaunchRequest {
@@ -343,6 +345,7 @@ export function normalizeSetupDraft(setup: RepoSetupConfig): RepoSetupConfig {
     buildCommand: setup.buildCommand?.trim() || null,
     devCommand: setup.devCommand?.trim() || null,
     defaultPort: setup.defaultPort ?? null,
+    workspaceIsolationPreference: setup.workspaceIsolationPreference ?? 'auto',
   };
 }
 
@@ -384,6 +387,33 @@ export function worktreeStatusExplanation(worktree?: WorktreeInfo | null) {
     default:
       return null;
   }
+}
+
+export function workspaceIsolationPreferenceLabel(value: RepoSetupConfig['workspaceIsolationPreference']) {
+  switch (value) {
+    case 'apfs-cow-clone':
+      return 'Instant macOS';
+    case 'git-worktree':
+      return 'Git worktree';
+    default:
+      return 'Auto';
+  }
+}
+
+export function workspaceIsolationPreferenceDetail(value: RepoSetupConfig['workspaceIsolationPreference']) {
+  switch (value) {
+    case 'apfs-cow-clone':
+      return 'Uses APFS copy-on-write clones on macOS. Each agent gets a private workspace without duplicating the full checkout.';
+    case 'git-worktree':
+      return 'Uses the classic Git worktree path for repos that need the old model.';
+    default:
+      return 'Uses instant macOS workspaces when APFS is available and falls back to Git worktrees everywhere else.';
+  }
+}
+
+export function worktreeIsolationLabel(worktree?: Pick<WorktreeInfo, 'isolationKind'> | null) {
+  if (worktree?.isolationKind === 'apfs-cow-clone') return 'Instant macOS';
+  return 'Git worktree';
 }
 
 export function sortRepoEntries(entries: RepoRegistryEntry[]) {
@@ -907,15 +937,21 @@ export function SetupModeButton({
   label,
   selected,
   onClick,
+  disabled = false,
+  title,
 }: {
   label: string;
   selected: boolean;
   onClick: () => void;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
+      title={title}
       style={{
         flex: 1,
         minHeight: 34,
@@ -929,7 +965,8 @@ export function SetupModeButton({
         color: selected ? 'var(--t-text)' : 'var(--t-text-muted)',
         fontSize: 11,
         fontWeight: 600,
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.48 : 1,
         fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
       }}
     >
