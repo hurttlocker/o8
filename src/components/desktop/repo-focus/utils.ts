@@ -107,21 +107,23 @@ export function isLivePacket(packet: OrchestratorPacket): boolean {
   return LIVE_PACKET_STATUSES.has(status);
 }
 
-const RECENT_MERGE_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-/** Released/failed packets whose last event lands inside the rolling
- *  24h window. Drives the "N recently merged" footer link. */
-export function isRecentlyConcluded(packet: OrchestratorPacket): boolean {
+/** Any released / archived / merged / failed packet — the per-repo
+ *  archive of work that's already shipped (or stalled). Lives behind
+ *  the merged drawer in AgentsTab, sorted newest-first. No time cap;
+ *  the operator should see every concluded packet for the repo. */
+export function isConcluded(packet: OrchestratorPacket): boolean {
   const release = (packet.releaseState ?? '').toLowerCase();
   const status = (packet.status ?? '').toLowerCase();
-  const concluded = TERMINAL_PACKET_STATUSES.has(release)
+  return TERMINAL_PACKET_STATUSES.has(release)
     || TERMINAL_PACKET_STATUSES.has(status)
     || status === 'failed';
-  if (!concluded) return false;
+}
+
+/** Sort key — newest event first; missing timestamps sort last. */
+export function packetEventTime(packet: OrchestratorPacket): number {
   const at = packet.lane?.lastEventAt ?? packet.lastEventAt;
   const time = typeof at === 'string' ? Date.parse(at) : Number(at);
-  if (!Number.isFinite(time)) return false;
-  return Date.now() - time <= RECENT_MERGE_WINDOW_MS;
+  return Number.isFinite(time) ? time : 0;
 }
 
 /** Label for the elapsed slot — adjusts wording when the packet has
