@@ -9,6 +9,8 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-08
 
+- `920e629d` feat: competing product-style PR panel + segmented context popover
+- `033f580e` feat: add macOS APFS workspace isolation
 - `4bb987a4` feat: agents archive drawer shows every concluded packet
 - `987202e9` feat: unified project panel + agent / timeline polish
 - `76dcc4f0` feat: add slash orchestration routing
