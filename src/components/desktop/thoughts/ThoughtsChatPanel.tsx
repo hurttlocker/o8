@@ -42,6 +42,7 @@ import {
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
+import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
@@ -1436,6 +1437,44 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
+  const fillInput = useCallback((text: string) => {
+    if (!text) return;
+    setInput((prev) => {
+      const trimmed = prev.trimEnd();
+      if (!trimmed) return text;
+      const needsSpace = !/\s$/.test(prev);
+      return `${prev}${needsSpace ? ' ' : ''}${text}`;
+    });
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  // Dictation bridge — register this composer with the dashboard-level
+  // DictationHost on focus. Registration is sticky: clicking the mic
+  // button blurs the textarea, but the host should still route the
+  // polished transcript here. Another composer focusing will take over;
+  // unmount clears the registration.
+  const dictationHost = useDictationHostOptional();
+  // Pull the stable callback out — depending on the whole host value
+  // would re-run this effect every state transition (snapshotState is
+  // in the host's memo deps), unregistering us mid-recording.
+  const setActiveComposer = dictationHost?.setActiveComposer;
+  useEffect(() => {
+    if (!setActiveComposer) return;
+    const node = inputRef.current;
+    if (!node) return;
+    const claim = () => {
+      setActiveComposer({ node, fill: fillInput });
+    };
+    // Eager-claim on mount so the user can press the mic button or
+    // Ctrl+Z without first clicking into the textarea.
+    claim();
+    node.addEventListener('focus', claim);
+    return () => {
+      node.removeEventListener('focus', claim);
+      setActiveComposer(null);
+    };
+  }, [setActiveComposer, fillInput]);
+
   useImperativeHandle(ref, () => ({
     focusInput() {
       inputRef.current?.focus();
@@ -1443,8 +1482,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     reset: handleReset,
     loadThread: handleLoadThread,
     sendNow,
+    fillInput,
     copyAsMarkdown: () => handleCopyMarkdownRef.current(),
-  }), [handleReset, handleLoadThread, sendNow]);
+  }), [handleReset, handleLoadThread, sendNow, fillInput]);
 
   const fallbackEmptyState = useMemo(() => (
     <EmptyStateCard

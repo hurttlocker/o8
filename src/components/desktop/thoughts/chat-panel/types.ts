@@ -16,6 +16,13 @@ export interface ThoughtsChatPanelHandle {
    * that click-to-dispatch.
    */
   sendNow: (text?: string) => void;
+  /**
+   * Drop text into the composer at the current caret without sending.
+   * Used by dictation: the user can review the polished transcript and
+   * press send themselves. Appends a leading space if the existing
+   * input doesn't already end with whitespace.
+   */
+  fillInput: (text: string) => void;
   copyAsMarkdown: () => Promise<boolean>;
 }
 

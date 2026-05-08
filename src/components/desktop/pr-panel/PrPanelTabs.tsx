@@ -4,6 +4,8 @@ import { memo } from 'react';
 import { Eye, XCircle } from '../lucide-shims';
 import type { PrTabId } from './types';
 
+const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+
 interface PrPanelTabsProps {
   activeTab: PrTabId;
   onChange: (tab: PrTabId) => void;
@@ -72,64 +74,108 @@ export const PrPanelTabs = memo(function PrPanelTabs({
     <div
       style={{
         display: 'flex',
-        alignItems: 'stretch',
-        gap: 0,
+        alignItems: 'center',
+        gap: 6,
+        paddingTop: 10,
+        paddingBottom: 10,
         paddingLeft: 14,
         paddingRight: 14,
-        borderBottom: '1px solid var(--t-divider-subtle)',
+        borderBottomWidth: 1,
+        borderBottomStyle: 'solid',
+        borderBottomColor: 'var(--t-divider-subtle)',
       }}
     >
-      {tabs.map((tab) => {
-        const active = tab.id === activeTab;
-        const danger = tab.tone === 'danger';
-        const color = danger
-          ? '#ef4444'
-          : active
-            ? 'var(--t-text)'
-            : 'var(--t-text-muted)';
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onChange(tab.id)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              paddingTop: 8,
-              paddingBottom: 8,
-              paddingLeft: 10,
-              paddingRight: 10,
-              border: 'none',
-              background: 'transparent',
-              color,
-              fontSize: 12,
-              fontWeight: active ? 700 : 500,
-              cursor: 'pointer',
-              borderBottom: active
-                ? `2px solid ${danger ? '#ef4444' : 'var(--t-text)'}`
-                : '2px solid transparent',
-              marginBottom: -1,
-            }}
-          >
-            {tab.leading}
-            <span>{tab.label}</span>
-            {tab.count !== null ? (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: danger ? '#ef4444' : 'var(--t-text-muted)',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                {tab.count}
-              </span>
-            ) : null}
-            {tab.trailing}
-          </button>
-        );
-      })}
+      {tabs.map((tab) => (
+        <PrTabButton
+          key={tab.id}
+          spec={tab}
+          active={tab.id === activeTab}
+          onClick={() => onChange(tab.id)}
+        />
+      ))}
     </div>
   );
 });
+
+function PrTabButton({
+  spec,
+  active,
+  onClick,
+}: {
+  spec: TabSpec;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const danger = spec.tone === 'danger';
+  // Mirror O8SpecPane.ViewButton: orange border + input-bg when active,
+  // divider-subtle hairline + transparent when inactive. Danger keeps the
+  // red border/text in both states so a failing checks tab reads loud
+  // even when it isn't the active tab.
+  const borderColor = danger
+    ? '#ef4444'
+    : active
+      ? 'var(--t-brand-orange, #FF5A1F)'
+      : 'var(--t-divider-subtle)';
+  const background = active ? 'var(--t-input-bg)' : 'transparent';
+  const labelColor = danger
+    ? '#ef4444'
+    : active
+      ? 'var(--t-text)'
+      : 'var(--t-text-muted)';
+  const countColor = danger
+    ? '#ef4444'
+    : active
+      ? 'var(--t-text-muted)'
+      : 'var(--t-text-faint)';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        minHeight: 28,
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: 10,
+        paddingRight: 10,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor,
+        background,
+        color: labelColor,
+        cursor: 'pointer',
+        fontFamily: UI_FONT,
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: '-0.005em',
+        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+      }}
+      onMouseEnter={(e) => {
+        if (!active && !danger) e.currentTarget.style.background = 'var(--t-hover)';
+      }}
+      onMouseLeave={(e) => {
+        if (!active && !danger) e.currentTarget.style.background = 'transparent';
+      }}
+    >
+      {spec.leading}
+      <span>{spec.label}</span>
+      {spec.count !== null ? (
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: countColor,
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {spec.count}
+        </span>
+      ) : null}
+      {spec.trailing}
+    </button>
+  );
+}

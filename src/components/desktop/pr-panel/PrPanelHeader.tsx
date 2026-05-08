@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { ChevronDown, Expand, GitBranch, MoreHorizontal, PanelRight, Plus, X } from '../lucide-shims';
+import { ExternalLink, GitBranch, X } from '../lucide-shims';
 
 const MONO_FONT = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
 
@@ -12,7 +12,7 @@ const HEADER_BTN: React.CSSProperties = {
   width: 26,
   height: 26,
   borderRadius: 8,
-  border: '1px solid transparent',
+  borderWidth: 0,
   background: 'transparent',
   color: 'var(--t-text-muted)',
   cursor: 'pointer',
@@ -32,6 +32,7 @@ interface PrPanelHeaderProps {
   state: string;
   baseRefName?: string | null;
   headRefName?: string | null;
+  url?: string | null;
   onClose: () => void;
 }
 
@@ -40,6 +41,7 @@ export const PrPanelHeader = memo(function PrPanelHeader({
   state,
   baseRefName,
   headRefName,
+  url,
   onClose,
 }: PrPanelHeaderProps) {
   const pill = statePill(state);
@@ -54,10 +56,16 @@ export const PrPanelHeader = memo(function PrPanelHeader({
         paddingBottom: 10,
         paddingLeft: 14,
         paddingRight: 10,
-        borderBottom: '1px solid var(--t-divider-subtle)',
+        borderBottomWidth: 1,
+        borderBottomStyle: 'solid',
+        borderBottomColor: 'var(--t-divider-subtle)',
       }}
     >
-      {/* Top strip: PR pill + window controls */}
+      {/* Top strip: PR pill + close. The orchestrator owns merge/auto-merge
+        * through approve_and_merge, so we don't expose GitHub-side actions
+        * (auto-merge, more-options, side-panel-toggle, expand) here. The
+        * one external escape hatch we keep is "View on GitHub" for things
+        * we haven't surfaced yet. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div
           style={{
@@ -70,7 +78,9 @@ export const PrPanelHeader = memo(function PrPanelHeader({
             paddingRight: 10,
             borderRadius: 999,
             background: 'var(--t-bg-card)',
-            border: '1px solid var(--t-divider-subtle)',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider-subtle)',
             fontSize: 11,
             fontWeight: 600,
             color: 'var(--t-text)',
@@ -80,20 +90,6 @@ export const PrPanelHeader = memo(function PrPanelHeader({
           <GitBranch size={12} strokeWidth={2} />
           PR #{prNumber}
         </div>
-        <div style={{ flex: 1 }} />
-        <button type="button" style={HEADER_BTN} title="New" onClick={() => {}}>
-          <Plus size={14} strokeWidth={2} />
-        </button>
-        <button type="button" style={HEADER_BTN} title="Expand" onClick={() => {}}>
-          <Expand size={14} strokeWidth={2} />
-        </button>
-        <button type="button" style={HEADER_BTN} title="Close" onClick={onClose}>
-          <X size={14} strokeWidth={2} />
-        </button>
-      </div>
-
-      {/* Status row: state pill + branches + auto-merge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span
           style={{
             display: 'inline-flex',
@@ -122,6 +118,10 @@ export const PrPanelHeader = memo(function PrPanelHeader({
             display: 'inline-flex',
             alignItems: 'center',
             gap: 4,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
           }}
         >
           {headRefName || 'branch'}
@@ -129,35 +129,19 @@ export const PrPanelHeader = memo(function PrPanelHeader({
           {baseRefName || 'main'}
         </span>
         <div style={{ flex: 1 }} />
-        <button type="button" style={HEADER_BTN} title="More options" onClick={() => {}}>
-          <MoreHorizontal size={14} strokeWidth={2} />
-        </button>
-        <button
-          type="button"
-          title="Coming soon"
-          onClick={() => {}}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            paddingTop: 4,
-            paddingBottom: 4,
-            paddingLeft: 10,
-            paddingRight: 8,
-            borderRadius: 10,
-            border: '1px solid transparent',
-            background: 'var(--t-text)',
-            color: 'var(--t-bg, #ffffff)',
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
-          Enable Auto-Merge
-          <ChevronDown size={12} strokeWidth={2} />
-        </button>
-        <button type="button" style={HEADER_BTN} title="Side panel" onClick={() => {}}>
-          <PanelRight size={14} strokeWidth={2} />
+        {url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="View on GitHub"
+            style={{ ...HEADER_BTN, textDecoration: 'none' }}
+          >
+            <ExternalLink size={14} strokeWidth={2} />
+          </a>
+        ) : null}
+        <button type="button" style={HEADER_BTN} title="Close" onClick={onClose}>
+          <X size={14} strokeWidth={2} />
         </button>
       </div>
     </div>

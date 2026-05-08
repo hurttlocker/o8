@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AttachFilesButton } from './AttachFilesButton';
 import { SparklesIcon } from './ThoughtsIcons';
+import { MicButton } from './MicButton';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
@@ -627,6 +628,10 @@ export function InputButtons({
         onFileReferenceSelect={onFileReferenceSelect}
         repoPath={repoPath}
       />
+
+      {/* Dictation — hold to record. Sits adjacent to Send because
+          mic-then-send is the natural flow. */}
+      <MicButton />
 
       {/* Send — Rams pill matching ContextMeter/ThinkingChip aesthetic.
           Three states with 180ms morph: idle (hairline faint) → armed

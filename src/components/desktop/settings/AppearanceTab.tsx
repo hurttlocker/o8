@@ -9,6 +9,13 @@ import {
   writeTimelineVisible,
 } from '@/lib/appearance/timeline';
 import {
+  DEFAULT_DICTATION_INPUT_MODE,
+  readDictationInputMode,
+  subscribeDictationInputMode,
+  writeDictationInputMode,
+  type DictationInputMode,
+} from '@/lib/appearance/dictation-input-mode';
+import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_ACCENT,
@@ -301,6 +308,98 @@ function useTimelineVisible(): [boolean, (next: boolean) => void] {
   return [visible, writeTimelineVisible];
 }
 
+// ── Dictation input mode toggle ───────────────────────────────────────────
+
+const dictationModeFallback = (): DictationInputMode => DEFAULT_DICTATION_INPUT_MODE;
+
+function useDictationInputMode(): [DictationInputMode, (next: DictationInputMode) => void] {
+  const mode = useSyncExternalStore(
+    typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
+    typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
+    dictationModeFallback,
+  );
+  return [mode, writeDictationInputMode];
+}
+
+function DictationInputModeToggle() {
+  const [mode, setMode] = useDictationInputMode();
+  const options: Array<{ value: DictationInputMode; label: string; caption: string }> = [
+    {
+      value: 'toggle',
+      label: 'tap — click to start, click to send',
+      caption: 'Single tap on the mic icon starts recording. Tap again to stop and submit. Easier on the hands for long dictations.',
+    },
+    {
+      value: 'hold',
+      label: 'hold — press and hold while speaking',
+      caption: 'Press and hold the mic icon (or Ctrl+Z) for the duration of your phrase. Release to submit. Ctrl+Z always uses hold even in tap mode.',
+    },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 620 }}>
+      {options.map((opt) => {
+        const active = mode === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => setMode(opt.value)}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              width: '100%',
+              textAlign: 'left',
+              padding: 14,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: active ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
+              borderRadius: 6,
+              background: active ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
+              cursor: 'pointer',
+              fontFamily: APP_FONT_STACK,
+              transition: 'border-color 160ms, background 160ms',
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                flexShrink: 0,
+                marginTop: 2,
+                border: `1.5px solid ${active ? RAMS_ACCENT : 'var(--t-text-muted, #9A968E)'}`,
+                background: active ? RAMS_ACCENT : 'transparent',
+                boxShadow: active ? 'inset 0 0 0 3px var(--t-bg-card, rgba(255,255,255,0.4))' : 'none',
+                transition: 'background 160ms, border-color 160ms',
+              }}
+            />
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span
+                style={{
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 11.5,
+                  fontWeight: 500,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                  color: active ? RAMS_ACCENT : 'var(--t-text)',
+                }}
+              >
+                {opt.label}
+              </span>
+              <span style={{ fontSize: 12.5, color: RAMS_INK_QUIET, lineHeight: 1.45 }}>
+                {opt.caption}
+              </span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function TimelineVisibilityToggle() {
   const [visible, setVisible] = useTimelineVisible();
   const options: Array<{ value: boolean; label: string; caption: string }> = [
@@ -481,6 +580,32 @@ export function AppearanceTab() {
             />
           ))}
         </div>
+
+        <div style={{ marginTop: 28 }}>
+          <HairlineRule />
+        </div>
+      </section>
+
+      <section style={{ marginTop: 32 }}>
+        <SectionLabel number="04">DICTATION</SectionLabel>
+        <p
+          style={{
+            margin: 0,
+            marginTop: 4,
+            marginBottom: 14,
+            fontSize: 13,
+            lineHeight: 1.55,
+            color: 'var(--t-text-secondary)',
+            maxWidth: 620,
+          }}
+        >
+          The mic icon next to Send drops voice input into the composer. We
+          transcribe with Whisper Turbo, then a Gemini polish pass formats
+          file paths and code identifiers correctly. Choose how clicking the
+          mic should feel.
+        </p>
+
+        <DictationInputModeToggle />
 
         <div style={{ marginTop: 28 }}>
           <HairlineRule />

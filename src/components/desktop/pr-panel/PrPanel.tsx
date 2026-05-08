@@ -80,6 +80,7 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, onClose }: Pr
         state={detail.state}
         baseRefName={detail.baseRefName}
         headRefName={detail.headRefName}
+        url={detail.url}
         onClose={onClose}
       />
       <PrPanelTitle
