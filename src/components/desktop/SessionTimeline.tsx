@@ -15,7 +15,7 @@
  * if nothing happened at 11am).
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import type { FirstMergeCelebrationState } from '@/lib/ftux/first-merge';
@@ -26,7 +26,6 @@ import {
   SEGMENT_COLORS,
   SEGMENT_LABELS,
   TIMELINE_BAR_HEIGHT,
-  TIMELINE_DRILLDOWN_ENABLED,
 } from './timeline/constants';
 import type { SegmentKind, TimelineSegment } from './timeline/types';
 import {
@@ -75,19 +74,41 @@ const TIMELINE_WINDOW_MINUTES = 24 * 60;
 // + symmetric regardless of how quiet the day is.
 const TIMELINE_CELL_COUNT = 240;
 
+// Strip the `cc:` / `codex` / `gemini` agent prefix into a clean
+// runtime kind + display name. The route emits `cc:<projectName>` for
+// Claude Code, the literal string `codex` for Codex, etc. Centralising
+// the parse keeps the hover card memo readable.
+type TimelineAgentRuntime = 'codex' | 'claude' | 'gemini' | null;
+
+interface ParsedTimelineAgent {
+  runtimeKind: TimelineAgentRuntime;
+  runtimeLabel: string | null;
+  displayName: string;
+}
+
+function parseTimelineAgent(raw: string | undefined | null): ParsedTimelineAgent {
+  const value = raw ?? '';
+  if (value.startsWith('cc:')) {
+    return { runtimeKind: 'claude', runtimeLabel: 'Claude Code', displayName: value.slice(3) || 'Claude Code' };
+  }
+  if (value === 'codex') return { runtimeKind: 'codex', runtimeLabel: 'Codex', displayName: 'Codex' };
+  if (value === 'gemini') return { runtimeKind: 'gemini', runtimeLabel: 'Gemini', displayName: 'Gemini' };
+  return { runtimeKind: null, runtimeLabel: null, displayName: value };
+}
+
 export function SessionTimeline({
   onExpand,
   repoPath,
   repoName,
   firstMergeCelebration,
 }: SessionTimelineProps) {
-  const { segments, windowMinutes, loading } = useTimelineData();
+  // The route's `windowMinutes` is informational — the strip's width is
+  // pinned to a true 24h rolling window, so the API anchor doesn't matter.
+  const { segments, loading } = useTimelineData();
   const liveSessions = useTimelineSessions();
   const [hoverInfo, setHoverInfo] = useState<TrackerHoverInfo | null>(null);
   const [drillOpen, setDrillOpen] = useState(false);
 
-  // 24h rolling window pinned regardless of API anchor or fallback.
-  void windowMinutes;
   const totalSpan = TIMELINE_WINDOW_MINUTES;
   const hasActivity = segments.length > 0;
 
@@ -120,11 +141,13 @@ export function SessionTimeline({
       const totals: Partial<Record<SegmentKind, number>> = {};
       let topSeg: TimelineSegment | null = null;
       let topOverlap = 0;
+      let errorSeg: TimelineSegment | null = null;
       for (const seg of segments) {
         if (seg.kind === 'idle') continue;
         const overlap = Math.max(0, Math.min(cellEnd, seg.startMin + seg.durationMin) - Math.max(cellStart, seg.startMin));
         if (overlap <= 0) continue;
         totals[seg.kind] = (totals[seg.kind] || 0) + overlap;
+        if (seg.kind === 'error' && !errorSeg) errorSeg = seg;
         const better = overlap > topOverlap
           || (overlap === topOverlap && topSeg && priority[seg.kind] > priority[topSeg.kind]);
         if (better) {
@@ -133,21 +156,27 @@ export function SessionTimeline({
         }
       }
 
+      // Errors are loud — any overlap, even a brief one, wins the cell.
+      // Otherwise the cell takes the kind with the longest overlap.
       let winningKind: SegmentKind | null = null;
-      let winningWeight = 0;
-      let winningPriority = -1;
-      (Object.entries(totals) as Array<[SegmentKind, number]>).forEach(([kind, weight]) => {
-        const p = priority[kind];
-        if (weight > winningWeight || (weight === winningWeight && p > winningPriority)) {
-          winningKind = kind;
-          winningWeight = weight;
-          winningPriority = p;
-        }
-      });
+      if (errorSeg) {
+        winningKind = 'error';
+      } else {
+        let winningWeight = 0;
+        let winningPriority = -1;
+        (Object.entries(totals) as Array<[SegmentKind, number]>).forEach(([kind, weight]) => {
+          const p = priority[kind];
+          if (weight > winningWeight || (weight === winningWeight && p > winningPriority)) {
+            winningKind = kind;
+            winningWeight = weight;
+            winningPriority = p;
+          }
+        });
+      }
 
       const color = winningKind ? SEGMENT_COLORS[winningKind] : IDLE_BLOCK_COLOR;
       out.push({ key: `cell:${i}`, weight: 1, color });
-      meta.push({ segment: topSeg, startMin: cellStart, durationMin: cellSpan });
+      meta.push({ segment: errorSeg ?? topSeg, startMin: cellStart, durationMin: cellSpan });
     }
 
     return { blocks: out, blockMeta: meta };
@@ -161,6 +190,11 @@ export function SessionTimeline({
     return totals;
   }, [segments]);
 
+  const errorSegmentCount = useMemo(
+    () => segments.reduce((count, seg) => count + (seg.kind === 'error' ? 1 : 0), 0),
+    [segments],
+  );
+
   const liveAgentContext = useMemo(() => {
     const contexts = new Map<string, {
       runtime: string;
@@ -168,8 +202,6 @@ export function SessionTimeline({
       label: string;
       summary: string;
       location: string | null;
-      count: number;
-      extra: string | null;
     }>();
     const agentNames = new Set<string>();
     for (const seg of segments) {
@@ -186,15 +218,12 @@ export function SessionTimeline({
         ? `${matchedRepoName}${primary.branch ? ` · ${primary.branch}` : ''}`
         : compactWorkspacePath(primary.workspace) ?? primary.surfaceLabel ?? primary.branch ?? null;
       const label = primary.surfaceLabel || primary.name || runtimeLabel(primary.runtime);
-      const extra = matches.length > 1 ? `+${matches.length - 1} more` : null;
       contexts.set(agentName, {
         runtime: runtimeLabel(primary.runtime),
         status: primary.status,
         label,
         summary: cleanTask || primary.surfaceLabel || primary.name || 'No current task detail',
         location,
-        count: matches.length,
-        extra,
       });
     }
     return contexts;
@@ -203,6 +232,23 @@ export function SessionTimeline({
   const hoveredMeta = hoverInfo ? blockMeta[hoverInfo.blockIndex] ?? null : null;
   const hoveredSeg = hoveredMeta?.segment ?? null;
   const hoveredContext = hoveredSeg?.agent ? liveAgentContext.get(hoveredSeg.agent) ?? null : null;
+
+  // Midnight tick — fraction-based so it slides as time passes. The
+  // strip's right edge is "now" and the left edge is "now − 24h", so
+  // midnight sits at (1440 − minutesElapsedToday) / 1440 of the way
+  // from the left. State + 60s ticker so the marker stays correct
+  // across long-open sessions and recomputes after the calendar flips.
+  // Hooks must stay above any early returns (rules of hooks).
+  const [midnightTickAt, setMidnightTickAt] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setMidnightTickAt(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const midnightFraction = useMemo(() => {
+    const now = new Date(midnightTickAt);
+    const minutesElapsedToday = now.getHours() * 60 + now.getMinutes();
+    return Math.max(0, Math.min(1, 1 - minutesElapsedToday / TIMELINE_WINDOW_MINUTES));
+  }, [midnightTickAt]);
 
   const hoverCard = useMemo(() => {
     if (!hoverInfo || !hoveredMeta) return null;
@@ -215,44 +261,21 @@ export function SessionTimeline({
     const kindLabel = hoveredSeg ? SEGMENT_LABELS[hoveredSeg.kind] : 'IDLE';
     const kindColor = hoveredSeg ? SEGMENT_COLORS[hoveredSeg.kind] : '#94a3b8';
 
-    // Parse seg.agent into a runtime kind + clean display name. Both
-    // Codex and Claude Code paint the timeline (any local session, not
-    // just o8-launched ones); we detect by the prefix the route emits.
-    const rawAgent = hoveredSeg?.agent ?? '';
-    let agentRuntimeKind: 'codex' | 'claude' | 'gemini' | null = null;
-    let agentDisplayName = '';
-    if (rawAgent.startsWith('cc:')) {
-      agentRuntimeKind = 'claude';
-      agentDisplayName = rawAgent.slice(3) || 'Claude Code';
-    } else if (rawAgent === 'codex') {
-      agentRuntimeKind = 'codex';
-      agentDisplayName = 'Codex';
-    } else if (rawAgent === 'gemini') {
-      agentRuntimeKind = 'gemini';
-      agentDisplayName = 'Gemini';
-    } else if (rawAgent) {
-      agentDisplayName = rawAgent;
-    }
-
-    const runtimeLabel = agentRuntimeKind === 'claude'
-      ? 'Claude Code'
-      : agentRuntimeKind === 'codex'
-        ? 'Codex'
-        : agentRuntimeKind === 'gemini'
-          ? 'Gemini'
-          : hoveredContext?.runtime ?? null;
+    const parsedAgent = parseTimelineAgent(hoveredSeg?.agent);
+    const resolvedRuntimeLabel = parsedAgent.runtimeLabel ?? hoveredContext?.runtime ?? null;
 
     return {
       rangeLabel,
       durationLabel,
       kindLabel,
       kindColor,
-      agentRuntimeKind,
-      agentDisplayName: agentDisplayName || (hoveredSeg ? 'Active session' : 'Idle'),
-      runtimeLabel,
+      agentRuntimeKind: parsedAgent.runtimeKind,
+      agentDisplayName: parsedAgent.displayName || (hoveredSeg ? 'Active session' : 'Idle'),
+      runtimeLabel: resolvedRuntimeLabel,
       statusLabel: hoveredSeg && hoveredContext?.status ? humanizeStatus(hoveredContext.status) : null,
       locationLabel: hoveredSeg ? hoveredContext?.location ?? null : null,
       summaryLabel: hoveredSeg ? hoveredContext?.summary ?? null : null,
+      errorMessage: hoveredSeg?.kind === 'error' ? hoveredSeg.errorMessage ?? null : null,
       isIdle: !hoveredSeg,
     };
   }, [hoverInfo, hoveredMeta, hoveredSeg, hoveredContext, totalSpan]);
@@ -301,22 +324,55 @@ export function SessionTimeline({
     return <TimelineEmptyState onExpand={onExpand} repoName={repoName} />;
   }
 
-  const scrubberOverlay = hoverInfo ? (
-    <div
-      style={{
-        position: 'absolute',
-        left: hoverInfo.x,
-        top: -4,
-        bottom: -4,
-        width: 1.5,
-        background: hoveredSeg ? SEGMENT_COLORS[hoveredSeg.kind] : 'var(--t-text-secondary)',
-        borderRadius: 1,
-        pointerEvents: 'none',
-        zIndex: 10,
-        boxShadow: hoveredSeg ? `0 0 6px ${SEGMENT_COLORS[hoveredSeg.kind]}40` : 'none',
-      }}
-    />
-  ) : null;
+  const overlayLayers = (
+    <>
+      <div
+        style={{
+          position: 'absolute',
+          left: `${midnightFraction * 100}%`,
+          top: -2,
+          bottom: -2,
+          width: 1,
+          background: 'var(--t-text-faint)',
+          opacity: 0.35,
+          pointerEvents: 'none',
+          zIndex: 9,
+        }}
+      />
+      {/* Live "now" pulse on the right edge — keeps the strip feeling live. */}
+      <div
+        style={{
+          position: 'absolute',
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 4,
+          borderTopRightRadius: TIMELINE_TRACK_RADIUS,
+          borderBottomRightRadius: TIMELINE_TRACK_RADIUS,
+          background: 'var(--t-accent, #2563eb)',
+          animation: 'timelineNowPulse 1.6s ease-in-out infinite',
+          pointerEvents: 'none',
+          zIndex: 8,
+        }}
+      />
+      {hoverInfo ? (
+        <div
+          style={{
+            position: 'absolute',
+            left: hoverInfo.x,
+            top: -4,
+            bottom: -4,
+            width: 1.5,
+            background: hoveredSeg ? SEGMENT_COLORS[hoveredSeg.kind] : 'var(--t-text-secondary)',
+            borderRadius: 1,
+            pointerEvents: 'none',
+            zIndex: 10,
+            boxShadow: hoveredSeg ? `0 0 6px ${SEGMENT_COLORS[hoveredSeg.kind]}40` : 'none',
+          }}
+        />
+      ) : null}
+    </>
+  );
 
   return (
     <motion.div
@@ -328,12 +384,37 @@ export function SessionTimeline({
       <div style={leftClusterStyle}>
         <TimelineButton icon={<PlayIcon />} label="Play session replay" />
         {onExpand ? <TimelineButton icon={<ExpandIcon />} label="Expand timeline" onClick={onExpand} /> : null}
-        <span style={kickerStyle}>Today: {formatDuration(totalSpan)}</span>
+        <span style={kickerStyle}>Last 24h</span>
+        {errorSegmentCount > 0 ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              paddingTop: 2,
+              paddingRight: 7,
+              paddingBottom: 2,
+              paddingLeft: 7,
+              borderRadius: 999,
+              background: 'rgba(239, 68, 68, 0.12)',
+              color: '#ef4444',
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            }}
+            title={`${errorSegmentCount} error block${errorSegmentCount === 1 ? '' : 's'} in the last 24h`}
+          >
+            <span style={{ width: 5, height: 5, borderRadius: 999, background: '#ef4444' }} />
+            {errorSegmentCount} error{errorSegmentCount === 1 ? '' : 's'}
+          </span>
+        ) : null}
       </div>
 
       <div
         style={{ flex: 1, position: 'relative' }}
-        onDoubleClick={TIMELINE_DRILLDOWN_ENABLED ? () => setDrillOpen(true) : undefined}
+        onDoubleClick={() => setDrillOpen(true)}
       >
         {celebrationWash}
         <Tracker
@@ -345,7 +426,11 @@ export function SessionTimeline({
           blockGap={TIMELINE_BLOCK_GAP}
           hoveredIndex={hoverInfo?.blockIndex ?? null}
           onHoverMove={setHoverInfo}
-          overlay={scrubberOverlay}
+          onBlockClick={(info) => {
+            const meta = blockMeta[info.blockIndex];
+            if (meta?.segment?.kind === 'error') setDrillOpen(true);
+          }}
+          overlay={overlayLayers}
         />
       </div>
 
@@ -370,7 +455,7 @@ export function SessionTimeline({
         document.body,
       )}
 
-      {TIMELINE_DRILLDOWN_ENABLED && drillOpen ? (
+      {drillOpen ? (
         <TimelineDrilldown
           segments={segments}
           totalSpan={totalSpan}
@@ -449,6 +534,7 @@ interface HoverCardData {
   statusLabel: string | null;
   locationLabel: string | null;
   summaryLabel: string | null;
+  errorMessage: string | null;
   isIdle: boolean;
 }
 
@@ -623,6 +709,22 @@ function TimelineHoverCard({ info, card }: { info: TrackerHoverInfo; card: Hover
             lineHeight: 1.4,
           }}>
             {card.summaryLabel}
+          </span>
+        </HoverStatusRow>
+      ) : null}
+
+      {card.errorMessage ? (
+        <HoverStatusRow label="Error" tone="danger">
+          <span style={{
+            fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+            fontSize: 11.5,
+            display: '-webkit-box',
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            lineHeight: 1.4,
+          }}>
+            {card.errorMessage}
           </span>
         </HoverStatusRow>
       ) : null}
