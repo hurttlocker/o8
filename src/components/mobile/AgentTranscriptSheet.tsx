@@ -13,6 +13,7 @@ import type { CSSProperties } from 'react';
 import { triggerHaptic } from '@/lib/mobile/haptic';
 import { useTheme } from './ThemeContext';
 import { MobileMarkdown } from '@/app/mobile/mobile-markdown';
+import { mobileScrollFadeStyle } from '@/app/mobile/mobile-approvals-shared';
 
 const MobileDiffViewer = lazy(async () => ({
   default: (await import('./MobileDiffViewer')).MobileDiffViewer,
@@ -221,6 +222,7 @@ export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({
             paddingTop: 14, paddingRight: 16, paddingBottom: 14, paddingLeft: 16,
             display: 'flex', flexDirection: 'column', gap: 10,
             WebkitOverflowScrolling: 'touch',
+            ...mobileScrollFadeStyle({ top: 16, bottom: 16 }),
           }}
         >
           {loading && entries.length === 0 ? (

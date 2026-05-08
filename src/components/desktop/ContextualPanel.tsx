@@ -335,7 +335,7 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
           </div>
         </div>
       ))}
-      <div ref={containerRef} style={{
+      <div ref={containerRef} className="cortex-terminal-fade" style={{
         flex: 1, width: '100%', background: 'var(--t-terminal-bg, #16191e)', paddingTop: 2, paddingLeft: 2,
       }} />
     </div>

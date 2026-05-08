@@ -96,10 +96,10 @@
     /* On OS X this is required in order for the scroll bar to appear fully opaque */
     background-color: var(--t-terminal-bg, #16191e);
     overflow-y: scroll;
-    scrollbar-width: thin;
-    scrollbar-color: var(--t-terminal-scrollbar-thumb, rgba(255,255,255,0.12)) transparent;
+    scrollbar-width: none;
+    scrollbar-color: transparent transparent;
     color-scheme: dark;
-    scrollbar-gutter: stable;
+    scrollbar-gutter: auto;
     cursor: default;
     position: absolute;
     right: 0;
@@ -109,7 +109,7 @@
 }
 
 .xterm .xterm-viewport::-webkit-scrollbar {
-    width: 10px;
+    width: 0;
     height: 10px;
 }
 

@@ -170,6 +170,7 @@ export function DiffBlock({ diff }: { diff: string }) {
       }}
     >
       <div
+        className="cortex-scroll-fade-y cortex-themed-scroll"
         style={{
           maxHeight: 280,
           overflow: 'auto',

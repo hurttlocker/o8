@@ -303,6 +303,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       ))}
       <div
         ref={containerRef}
+        className="cortex-terminal-fade"
         style={{
           flex: 1,
           width: '100%',
