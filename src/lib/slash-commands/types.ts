@@ -3,6 +3,7 @@ import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 
 export type OrchestratorSlashCommandName =
   | 'ask'
+  | 'orchestrate'
   | 'compact'
   | 'clear'
   | 'focus'
@@ -11,12 +12,14 @@ export type OrchestratorSlashCommandName =
   | 'handoff';
 
 export interface OrchestratorSlashCommandDefinition {
-  command: `/${OrchestratorSlashCommandName}`;
+  command: `/${string}`;
   name: OrchestratorSlashCommandName;
   title: string;
   description: string;
   argHint?: string;
   requiresArgument?: boolean;
+  group?: 'route' | 'command' | 'context' | 'thread';
+  aliases?: string[];
 }
 
 export interface ParsedOrchestratorSlashCommand {
@@ -38,6 +41,14 @@ export interface OrchestratorArchiveMatch {
 export interface SlashCommandStripChip {
   label: string;
   tone?: 'blue' | 'amber' | 'emerald' | 'slate' | 'red';
+}
+
+export interface SlashOrchestrationRequest {
+  goal: string;
+  rawCommand: string;
+  displayMessage: string;
+  prompt: string;
+  commandEntry?: MobileTranscriptEntry;
 }
 
 export interface SlashCommandContext {
@@ -63,6 +74,7 @@ export interface SlashCommandContext {
     estimatedCostUsd: number | null;
     model: string | null;
   }>;
+  startOrchestration?: (request: SlashOrchestrationRequest) => Promise<void>;
   clearThread: () => Promise<void>;
 }
 

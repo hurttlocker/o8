@@ -1,6 +1,8 @@
-import { useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AttachFilesButton } from './AttachFilesButton';
 import { SparklesIcon } from './ThoughtsIcons';
+import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 const EFFORT_LABELS: Record<ThinkingEffort, string> = {
@@ -130,6 +132,313 @@ export function ThinkingChip({
  */
 export type { ThinkingEffort };
 
+function repoPathLabel(path: string | null | undefined): string | null {
+  if (!path?.trim()) return null;
+  return path.split('/').filter(Boolean).pop() ?? path;
+}
+
+function repoGroupLabel(target: OrchestratorWorkspaceTarget): string {
+  return target.repoName?.trim() || repoPathLabel(target.localPath) || target.label;
+}
+
+function repoTargetRowLabel(target: OrchestratorWorkspaceTarget, groupLabel: string): string {
+  if (!target.isWorktree) return 'Base repo';
+  if (target.branch?.trim()) return target.branch;
+
+  const pathLabel = repoPathLabel(target.localPath);
+  if (pathLabel && pathLabel !== groupLabel) return pathLabel;
+
+  const prefix = `${groupLabel} · `;
+  return target.label.startsWith(prefix) ? target.label.slice(prefix.length) : target.label;
+}
+
+function compactRepoPath(path: string): string {
+  return path.replace(/^\/Users\/[^/]+/, '~');
+}
+
+const REPO_TARGET_MENU_WIDTH = 320;
+const REPO_TARGET_MENU_HEIGHT = 280;
+
+function RepoTargetChip({
+  repoLabel,
+  workspaceTargets,
+  selectedRepoPath,
+  onSelectRepoPath,
+}: {
+  repoLabel?: string | null;
+  workspaceTargets?: OrchestratorWorkspaceTarget[];
+  selectedRepoPath?: string | null;
+  onSelectRepoPath?: (next: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const targets = useMemo(() => workspaceTargets ?? [], [workspaceTargets]);
+  const targetGroups = useMemo(() => {
+    const groups = new Map<string, {
+      key: string;
+      label: string;
+      targets: Array<{ target: OrchestratorWorkspaceTarget; index: number }>;
+    }>();
+
+    targets.forEach((target, index) => {
+      const label = repoGroupLabel(target);
+      const key = label.toLowerCase();
+      const group = groups.get(key) ?? {
+        key,
+        label,
+        targets: [],
+      };
+      group.targets.push({ target, index });
+      groups.set(key, group);
+    });
+
+    return Array.from(groups.values()).map((group) => ({
+      key: group.key,
+      label: group.label,
+      targets: group.targets
+        .sort((a, b) => {
+          const aRank = a.target.isWorktree ? 1 : 0;
+          const bRank = b.target.isWorktree ? 1 : 0;
+          return aRank === bRank ? a.index - b.index : aRank - bRank;
+        })
+        .map(({ target }) => target),
+    }));
+  }, [targets]);
+  const selectedTarget = useMemo(
+    () => targets.find((target) => target.localPath === selectedRepoPath) ?? null,
+    [selectedRepoPath, targets],
+  );
+  const label = selectedTarget?.label
+    ?? repoLabel
+    ?? repoPathLabel(selectedRepoPath)
+    ?? (targets[0]?.label ?? null);
+  const canSelect = targets.length > 0 && Boolean(onSelectRepoPath);
+  const showingAffordance = canSelect && (hovered || focused || open);
+
+  useEffect(() => {
+    if (!open) return;
+    const updateMenuPosition = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportWidth = window.innerWidth;
+      setMenuPosition({
+        left: Math.min(Math.max(8, rect.left - 12), Math.max(8, viewportWidth - REPO_TARGET_MENU_WIDTH - 8)),
+        top: Math.max(8, rect.top - REPO_TARGET_MENU_HEIGHT - 8),
+      });
+    };
+    const handlePointer = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && containerRef.current?.contains(target)) return;
+      if (target && menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    updateMenuPosition();
+    document.addEventListener('pointerdown', handlePointer);
+    document.addEventListener('keydown', handleKey);
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointer);
+      document.removeEventListener('keydown', handleKey);
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [open]);
+
+  if (!label) return null;
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => { if (canSelect) setOpen((value) => !value); }}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        disabled={!canSelect}
+        title={selectedRepoPath ? `Chat target: ${selectedRepoPath}` : 'Chat target'}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          maxWidth: 180,
+          height: 22,
+          paddingTop: 0,
+          paddingRight: canSelect ? 6 : 0,
+          paddingBottom: 0,
+          paddingLeft: canSelect ? 6 : 0,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: showingAffordance ? 'rgba(37, 99, 235, 0.16)' : 'transparent',
+          borderRadius: 7,
+          background: showingAffordance ? 'rgba(37, 99, 235, 0.055)' : 'transparent',
+          color: showingAffordance ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+          cursor: canSelect ? 'pointer' : 'default',
+          outline: focused && canSelect ? '2px solid rgba(37, 99, 235, 0.14)' : 'none',
+          outlineOffset: 1,
+          fontSize: 10.5,
+          fontWeight: 500,
+          letterSpacing: '-0.005em',
+          whiteSpace: 'nowrap',
+          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {label}
+        </span>
+        {canSelect ? (
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: showingAffordance ? 0.92 : 0.58, transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        ) : null}
+      </button>
+
+      {open && menuPosition ? createPortal(
+        <div
+          ref={menuRef}
+          role="listbox"
+          aria-label="Chat target repo"
+          style={{
+            position: 'fixed',
+            top: menuPosition.top,
+            left: menuPosition.left,
+            width: REPO_TARGET_MENU_WIDTH,
+            maxHeight: REPO_TARGET_MENU_HEIGHT,
+            overflowY: 'auto',
+            scrollbarWidth: 'none',
+            paddingTop: 5,
+            paddingRight: 5,
+            paddingBottom: 5,
+            paddingLeft: 5,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-border)',
+            background: 'var(--t-panel)',
+            backdropFilter: 'blur(18px) saturate(1.3)',
+            boxShadow: 'var(--t-panel-shadow)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            zIndex: 1000,
+          }}
+        >
+          {targetGroups.map((group) => {
+            const groupActive = group.targets.some((target) => target.localPath === selectedRepoPath);
+            return (
+              <div
+                key={group.key}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  paddingTop: 3,
+                  paddingBottom: 3,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1fr) auto',
+                    alignItems: 'center',
+                    columnGap: 8,
+                    paddingTop: 4,
+                    paddingRight: 8,
+                    paddingBottom: 3,
+                    paddingLeft: 8,
+                    color: groupActive ? 'var(--t-accent)' : 'var(--t-text-muted)',
+                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 700 }}>
+                    {group.label}
+                  </span>
+                  <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace" }}>
+                    {group.targets.length === 1 ? '1 target' : `${group.targets.length} targets`}
+                  </span>
+                </div>
+                {group.targets.map((target, index) => {
+                  const active = target.localPath === selectedRepoPath;
+                  const targetLabel = repoTargetRowLabel(target, group.label);
+                  return (
+                    <button
+                      key={`${target.id}:${target.localPath}:${target.branch ?? 'default'}:${index}`}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      onClick={() => {
+                        onSelectRepoPath?.(target.localPath);
+                        setOpen(false);
+                      }}
+                      style={{
+                        width: '100%',
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(0, 1fr) auto',
+                        columnGap: 10,
+                        rowGap: 2,
+                        alignItems: 'center',
+                        paddingTop: 6,
+                        paddingRight: 9,
+                        paddingBottom: 6,
+                        paddingLeft: 12,
+                        borderWidth: 0,
+                        borderRadius: 9,
+                        background: active ? 'var(--t-accent-soft)' : 'rgba(255, 255, 255, 0.02)',
+                        color: active ? 'var(--t-accent)' : 'var(--t-text)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                      }}
+                    >
+                      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {targetLabel}
+                        </span>
+                        <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace" }}>
+                          {compactRepoPath(target.localPath)}
+                        </span>
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 9.5, color: active ? 'var(--t-accent)' : 'var(--t-text-faint)', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace" }}>
+                          {target.isWorktree ? 'worktree' : 'base'}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: 999,
+                            background: active ? 'var(--t-accent)' : 'transparent',
+                            boxShadow: active ? '0 0 0 3px var(--t-accent-soft)' : 'none',
+                          }}
+                        />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>,
+        document.body,
+      ) : null}
+    </div>
+  );
+}
+
 export function InputButtons({
   input,
   enhancing,
@@ -149,6 +458,9 @@ export function InputButtons({
   onUploadDiskFiles,
   onFileReferenceSelect,
   repoPath,
+  workspaceTargets,
+  selectedRepoPath,
+  onSelectRepoPath,
 }: {
   input: string;
   enhancing: boolean;
@@ -170,6 +482,9 @@ export function InputButtons({
   onUploadDiskFiles?: (files: FileList | File[]) => void;
   onFileReferenceSelect?: (path: string) => void;
   repoPath?: string | null;
+  workspaceTargets?: OrchestratorWorkspaceTarget[];
+  selectedRepoPath?: string | null;
+  onSelectRepoPath?: (next: string) => void;
 }) {
   const canSubmit = Boolean(input.trim());
   const effortCycle: ThinkingEffort[] = adaptiveEnabled
@@ -213,23 +528,17 @@ export function InputButtons({
         </span>
       ) : null}
 
-      {/* Repo focus label */}
+      {/* Repo / workspace target */}
       {repoLabel ? (
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            fontSize: 10,
-            fontWeight: 500,
-            color: 'var(--t-text-faint)',
-            letterSpacing: '-0.005em',
-            whiteSpace: 'nowrap',
-          }}
-        >
+        <>
           <span style={{ color: 'var(--t-text-faint)' }}>·</span>
-          {repoLabel}
-        </span>
+          <RepoTargetChip
+            repoLabel={repoLabel}
+            workspaceTargets={workspaceTargets}
+            selectedRepoPath={selectedRepoPath}
+            onSelectRepoPath={onSelectRepoPath}
+          />
+        </>
       ) : null}
 
       {/* Enhance */}
