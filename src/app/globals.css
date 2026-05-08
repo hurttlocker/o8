@@ -1521,6 +1521,11 @@ button.workflow-file-item.workflow-file-item-active {
   50% { opacity: 0.5; transform: scale(0.8); }
 }
 
+@keyframes timelineNowPulse {
+  0%, 100% { opacity: 0.42; box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.0); }
+  50% { opacity: 1; box-shadow: 0 0 8px 0 rgba(37, 99, 235, 0.55); }
+}
+
 @keyframes slide-in-preview {
   from { max-height: 0; opacity: 0; }
   to { max-height: 2000px; opacity: 1; }
