@@ -12,7 +12,7 @@ import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
-import { useLeftPanelFocus } from '@/components/desktop/repo-focus/useLeftPanelFocus';
+import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 // UpdateBanner is now rendered inside DesktopStatusBar.
@@ -515,7 +515,10 @@ function DashboardInner() {
   // mode. Lifted here (instead of inside AgentPanel) so the column animation
   // can react to the same focusActive boolean and widen from the default
   // sidebar width to FOCUS_LEFT_PANEL_WIDTH without an overlay.
-  const leftPanelFocus = useLeftPanelFocus(globalRepoEntries);
+  const leftPanelFocus = useLeftPanelProjectFocus({
+    registeredRepos: globalRepoEntries,
+    ledger: dashboardProjects.ledger,
+  });
 
   const {
     activeWorkspaceChatSessionKey,
@@ -2781,12 +2784,12 @@ function DashboardInner() {
         // operator dragged the resizer wider — not an overlay sliding over
         // the workspace. The width is animated; the focus content renders
         // inline inside AgentPanel.
-        const effectiveLeftWidth = leftPanelFocus.focusActive ? FOCUS_LEFT_PANEL_WIDTH : leftWidth;
+        const effectiveLeftWidth = leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth;
         return (
         <motion.div
           animate={{ width: effectiveLeftWidth }}
           transition={
-            leftPanelFocus.focusActive
+            leftPanelFocus.active
               ? { type: 'spring', stiffness: 360, damping: 32 }
               : showAgentPanelFtux
                 ? FTUX_SPRING_TRANSITION
@@ -3152,7 +3155,7 @@ function DashboardInner() {
         branchName={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
-        leftColumnWidth={sidebarVisible ? (leftPanelFocus.focusActive ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
+        leftColumnWidth={sidebarVisible ? (leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
         rightColumnWidth={chatVisible ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
         onOpenSettings={() => setActiveNavSection('settings')}
         onAddRepo={() => {

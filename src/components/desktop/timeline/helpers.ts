@@ -16,12 +16,18 @@ export function formatDuration(minutes: number): string {
   return `${h}h ${m}m`;
 }
 
-export function formatTime(minutesSinceAnchor: number): string {
-  // Anchor is 6 AM (matches API route rolling window)
-  const h = 6 + Math.floor(minutesSinceAnchor / 60);
-  const m = minutesSinceAnchor % 60;
+export function formatTime(minutesSinceAnchor: number, anchorMs?: number): string {
+  // The strip is a rolling 24h window — the anchor (minute zero) is
+  // whatever the server returned for this fetch (now − 24h). Default
+  // to a now-24h fallback so the helper stays callable in old call
+  // sites, but pass the fetched anchor whenever available so the
+  // displayed clock time matches the activity's actual hour.
+  const baseMs = anchorMs ?? (Date.now() - 24 * 60 * 60 * 1000);
+  const date = new Date(baseMs + minutesSinceAnchor * 60_000);
+  const h = date.getHours();
+  const m = date.getMinutes();
   const period = h >= 12 ? 'PM' : 'AM';
-  const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 

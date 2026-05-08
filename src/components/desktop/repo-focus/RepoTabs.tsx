@@ -3,7 +3,7 @@
 import type { RepoFocusTabId } from './types';
 import { REPO_FOCUS_FONT } from './utils';
 
-const TABS: Array<{ id: RepoFocusTabId; label: string }> = [
+const DEFAULT_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
   { id: 'agents', label: 'Agents' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
@@ -14,16 +14,22 @@ const TABS: Array<{ id: RepoFocusTabId; label: string }> = [
 interface RepoTabsProps {
   activeTab: RepoFocusTabId;
   onTabChange: (tab: RepoFocusTabId) => void;
+  /**
+   * Tabs to render — defaults to the full 5-tab repo set. The project
+   * panel passes a 4-tab list (no o8.md) when the panel is in
+   * project-wide mode.
+   */
+  tabs?: Array<{ id: RepoFocusTabId; label: string }>;
 }
 
-export function RepoTabs({ activeTab, onTabChange }: RepoTabsProps) {
+export function RepoTabs({ activeTab, onTabChange, tabs = DEFAULT_TABS }: RepoTabsProps) {
   return (
     <div
       role="tablist"
       aria-label="Repo focus tabs"
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+        gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`,
         borderTopWidth: 1,
         borderTopStyle: 'solid',
         borderTopColor: 'var(--t-divider-subtle)',
@@ -33,8 +39,9 @@ export function RepoTabs({ activeTab, onTabChange }: RepoTabsProps) {
         background: 'var(--t-panel)',
       }}
     >
-      {TABS.map((tab) => {
+      {tabs.map((tab, index) => {
         const selected = tab.id === activeTab;
+        const isLast = index === tabs.length - 1;
         return (
           <button
             key={tab.id}
@@ -45,7 +52,7 @@ export function RepoTabs({ activeTab, onTabChange }: RepoTabsProps) {
             style={{
               minHeight: 44,
               borderWidth: 0,
-              borderRightWidth: tab.id === 'files' ? 0 : 1,
+              borderRightWidth: isLast ? 0 : 1,
               borderRightStyle: 'solid',
               borderRightColor: 'var(--t-divider-subtle)',
               background: selected ? 'var(--t-input-bg)' : 'transparent',

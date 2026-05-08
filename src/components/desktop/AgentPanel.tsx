@@ -5,8 +5,8 @@ import { memo, useCallback, useMemo, type CSSProperties } from 'react';
 import { Clock } from './lucide-shims';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
-import { LeftPanelRepoFocus } from './repo-focus/LeftPanelRepoFocus';
-import { useLeftPanelFocus } from './repo-focus/useLeftPanelFocus';
+import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
+import { useLeftPanelProjectFocus } from './repo-focus/useLeftPanelProjectFocus';
 import { ProjectsBottomBar } from './repo-registry/ProjectsBottomBar';
 import { useProjects } from './repo-registry/useProjects';
 import {
@@ -64,18 +64,21 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onSelectSession,
     onAgentsUpdate: props.onAgentsUpdate,
   });
-  // Prefer the lifted focus state when the dashboard supplies it, so column
-  // width and panel content share a single source of truth. Falls back to a
-  // local hook for legacy callers that mount AgentPanel without the prop.
-  const localLeftPanelFocus = useLeftPanelFocus(registeredRepos);
-  const leftPanelFocus = liftedLeftPanelFocus ?? localLeftPanelFocus;
-  const focusActive = leftPanelFocus.focusActive;
-
   // Projects ledger — the bottom-bar dot switcher + the project name header
   // above the repo list. The ledger groups repos and the active project's
   // repoPaths drive what shows in the registry list. First-run defaults to
   // a single "o8" project containing every existing repo.
   const projects = useProjects();
+
+  // Prefer the lifted focus state when the dashboard supplies it, so column
+  // width and panel content share a single source of truth. Falls back to a
+  // local hook for legacy callers that mount AgentPanel without the prop.
+  const localLeftPanelFocus = useLeftPanelProjectFocus({
+    registeredRepos,
+    ledger: projects.ledger,
+  });
+  const leftPanelFocus = liftedLeftPanelFocus ?? localLeftPanelFocus;
+  const focusActive = leftPanelFocus.active;
   const activeProjectRepoSet = useMemo(() => {
     if (!projects.activeProject) return null;
     return new Set(projects.activeProject.repoPaths);
@@ -93,7 +96,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   // When focus is active, the column itself widened — render the focus
   // surface inline so it occupies the whole AgentPanel column and keeps
   // the TitleBar + DesktopStatusBar visible above and below.
-  if (focusActive && leftPanelFocus.focusedRepo) {
+  if (focusActive && leftPanelFocus.view) {
     return (
       <div
         suppressHydrationWarning
@@ -116,8 +119,11 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             WebkitAppRegion: 'drag' as unknown as string,
           } as CSSProperties}
         />
-        <LeftPanelRepoFocus
-          repo={leftPanelFocus.focusedRepo}
+        <LeftPanelProjectFocus
+          project={leftPanelFocus.view.project}
+          repos={leftPanelFocus.view.repos}
+          selectedRepoPath={leftPanelFocus.view.selectedRepo?.localPath ?? null}
+          onSelectRepoPath={leftPanelFocus.setSelectedRepoPath}
           onBack={leftPanelFocus.clearFocus}
           packets={orchestratorPackets}
           missionState={orchestratorMissionState}
@@ -152,26 +158,39 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       />
 
       {projects.activeProject ? (
-        <div
+        <button
+          type="button"
+          onClick={() => leftPanelFocus.focusByProjectId(projects.activeProject!.id)}
+          aria-label={`Open project — ${projects.activeProject.name}`}
+          title={`Open project — ${projects.activeProject.name}`}
           style={{
             flexShrink: 0,
             paddingTop: 4,
+            paddingRight: 14,
             paddingBottom: 6,
             paddingLeft: 14,
-            paddingRight: 14,
             fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             fontSize: 10,
             fontWeight: 700,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             color: 'var(--t-text-faint)',
+            background: 'transparent',
+            borderWidth: 0,
+            borderRadius: 0,
+            cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
+            alignSelf: 'flex-start',
             gap: 6,
+            transition: 'color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-faint)'; }}
         >
           {projects.activeProject.color ? (
             <span
+              aria-hidden
               style={{
                 width: 6,
                 height: 6,
@@ -182,7 +201,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             />
           ) : null}
           {projects.activeProject.name}
-        </div>
+        </button>
       ) : null}
 
       <div
