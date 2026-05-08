@@ -615,20 +615,59 @@ function renderInline(text: string): React.ReactNode {
         />
       );
     } else if (match[5]) {
-      // Link: [text](url)
-      parts.push(
-        <a
-          key={`a-${match.index}`}
-          href={match[5]}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: THEME_ACCENT, textDecoration: 'none' }}
-          onMouseEnter={(e) => { (e.currentTarget).style.textDecoration = 'underline'; }}
-          onMouseLeave={(e) => { (e.currentTarget).style.textDecoration = 'none'; }}
-        >
-          {match[4]}
-        </a>
-      );
+      // Link: [text](url) — when the URL is a GitHub PR, hijack the click
+      // and dispatch `o8:open-pr` so the dashboard opens the PR in the o8
+      // right panel instead of bouncing out to the browser.
+      const url = match[5];
+      const prMatch = /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/i.exec(url);
+      if (prMatch) {
+        const repo = prMatch[1];
+        const prNumber = Number(prMatch[2]);
+        parts.push(
+          <button
+            key={`pr-${match.index}`}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('o8:open-pr', { detail: { prNumber, repo } }));
+              }
+            }}
+            style={{
+              background: 'transparent',
+              borderWidth: 0,
+              padding: 0,
+              color: THEME_ACCENT,
+              cursor: 'pointer',
+              textAlign: 'inherit',
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+              fontWeight: 'inherit',
+              textDecoration: 'none',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+            title={`Open PR #${prNumber} in side panel`}
+          >
+            {match[4]}
+          </button>
+        );
+      } else {
+        parts.push(
+          <a
+            key={`a-${match.index}`}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: THEME_ACCENT, textDecoration: 'none' }}
+            onMouseEnter={(e) => { (e.currentTarget).style.textDecoration = 'underline'; }}
+            onMouseLeave={(e) => { (e.currentTarget).style.textDecoration = 'none'; }}
+          >
+            {match[4]}
+          </a>
+        );
+      }
     } else if (match[6]) {
       // Bold
       parts.push(<strong key={`b-${match.index}`}>{match[6]}</strong>);

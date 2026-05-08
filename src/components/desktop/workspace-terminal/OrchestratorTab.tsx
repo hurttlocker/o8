@@ -29,14 +29,10 @@ import {
   timeOfDayGreeting,
 } from '@/components/desktop/OrchestratorEmptyState';
 import { OrchestratorHistorySidebar } from '@/components/desktop/OrchestratorHistorySidebar';
-import { ContextInspector } from '@/components/desktop/orchestrator/ContextInspector';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
 import { QuickActionPalette } from '@/components/desktop/orchestrator/QuickActionPalette';
 import type { QuickAction } from '@/lib/orchestrator/quick-actions';
-import {
-  OrchestratorContextResidencyProvider,
-  useOrchestratorContextResidency,
-} from '@/components/desktop/orchestrator/context-residency';
+import { OrchestratorContextResidencyProvider } from '@/components/desktop/orchestrator/context-residency';
 import { ThreadsDropdown } from '@/components/desktop/orchestrator/ThreadsDropdown';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import {
@@ -245,7 +241,6 @@ function OrchestratorTabInner({
   onChatSummary,
 }: OrchestratorTabProps) {
   const data = useOrchestratorData();
-  const residency = useOrchestratorContextResidency();
   const spawnHandlers = useWorkspaceSpawn();
   const handleModePersist = useCallback((patch: {
     mode?: OrchestrationMode;
@@ -378,12 +373,6 @@ function OrchestratorTabInner({
       return next;
     });
   }, []);
-
-  const handleToggleContextInspector = useCallback(() => {
-    if (!residency) return;
-    residency.setOpen(!residency.isOpen);
-  }, [residency]);
-
 
   const handleSelectThread = useCallback((threadTabId: string) => {
     chatPanelRef.current?.loadThread(threadTabId);
@@ -630,7 +619,6 @@ function OrchestratorTabInner({
         <ContextMeter
           tokenCount={contextUsage.tokenCount}
           runningTotal={contextUsage.runningTotal}
-          onClick={handleToggleContextInspector}
         />
       )}
       composerLeadingExtras={composerLeadingExtras}
@@ -750,14 +738,6 @@ function OrchestratorTabInner({
             />
           ) : thoughtsChatPanel}
         </div>
-
-        {/* Right: context inspector (toggles with ContextMeter click, #587) */}
-        {residency?.isOpen ? (
-          <ContextInspector
-            open
-            onClose={handleToggleContextInspector}
-          />
-        ) : null}
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
       <QuickActionPalette
