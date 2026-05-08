@@ -1,7 +1,13 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
 import { useTheme, type ReduceTransparency } from '@/lib/theme/context';
 import type { ThemePalette } from '@/lib/theme/registry';
+import {
+  readTimelineVisible,
+  subscribeTimelineVisible,
+  writeTimelineVisible,
+} from '@/lib/appearance/timeline';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
@@ -281,6 +287,99 @@ function TransparencyOptionRow({
   );
 }
 
+// ── Session Timeline visibility toggle ──────────────────────────────────────
+
+const noopSubscribe = () => () => {};
+const falseSnapshot = () => false;
+
+function useTimelineVisible(): [boolean, (next: boolean) => void] {
+  const visible = useSyncExternalStore(
+    typeof window !== 'undefined' ? subscribeTimelineVisible : noopSubscribe,
+    typeof window !== 'undefined' ? readTimelineVisible : falseSnapshot,
+    falseSnapshot,
+  );
+  return [visible, writeTimelineVisible];
+}
+
+function TimelineVisibilityToggle() {
+  const [visible, setVisible] = useTimelineVisible();
+  const options: Array<{ value: boolean; label: string; caption: string }> = [
+    {
+      value: true,
+      label: 'show — strip below title bar',
+      caption: 'Live 24-hour activity strip. Click red cells to drill into errors.',
+    },
+    {
+      value: false,
+      label: 'hide — reclaim the row',
+      caption: 'Frees ~32px at the top of every workspace. Toggle back here anytime.',
+    },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 620 }}>
+      {options.map((opt) => {
+        const active = visible === opt.value;
+        return (
+          <button
+            key={String(opt.value)}
+            type="button"
+            onClick={() => setVisible(opt.value)}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              width: '100%',
+              textAlign: 'left',
+              padding: 14,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: active ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
+              borderRadius: 6,
+              background: active ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
+              cursor: 'pointer',
+              fontFamily: APP_FONT_STACK,
+              transition: 'border-color 160ms, background 160ms',
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                flexShrink: 0,
+                marginTop: 2,
+                border: `1.5px solid ${active ? RAMS_ACCENT : 'var(--t-text-muted, #9A968E)'}`,
+                background: active ? RAMS_ACCENT : 'transparent',
+                boxShadow: active ? 'inset 0 0 0 3px var(--t-bg-card, rgba(255,255,255,0.4))' : 'none',
+                transition: 'background 160ms, border-color 160ms',
+              }}
+            />
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span
+                style={{
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 11.5,
+                  fontWeight: 500,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                  color: active ? RAMS_ACCENT : 'var(--t-text)',
+                }}
+              >
+                {opt.label}
+              </span>
+              <span style={{ fontSize: 12.5, color: RAMS_INK_QUIET, lineHeight: 1.45 }}>
+                {opt.caption}
+              </span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Appearance Tab ──────────────────────────────────────────────────────────
 
 export function AppearanceTab() {
@@ -329,7 +428,33 @@ export function AppearanceTab() {
       </section>
 
       <section style={{ marginTop: 32 }}>
-        <SectionLabel number="02">REDUCE TRANSPARENCY</SectionLabel>
+        <SectionLabel number="02">SESSION TIMELINE</SectionLabel>
+        <p
+          style={{
+            margin: 0,
+            marginTop: 4,
+            marginBottom: 14,
+            fontSize: 13,
+            lineHeight: 1.55,
+            color: 'var(--t-text-secondary)',
+            maxWidth: 620,
+          }}
+        >
+          The 24-hour activity strip that lives below the title bar. Surfaces every
+          Codex and Claude Code session on this machine — colored by what each
+          minute was spent on (thinking, coding, testing) and red when an error
+          showed up. Hide it if you'd rather work without the live signal.
+        </p>
+
+        <TimelineVisibilityToggle />
+
+        <div style={{ marginTop: 28 }}>
+          <HairlineRule />
+        </div>
+      </section>
+
+      <section style={{ marginTop: 32 }}>
+        <SectionLabel number="03">REDUCE TRANSPARENCY</SectionLabel>
         <p
           style={{
             margin: 0,

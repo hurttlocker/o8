@@ -21,6 +21,7 @@ interface TimelineSegment {
   durationMin: number;
   label?: string;
   agent?: string;
+  errorMessage?: string;
 }
 
 interface TimelineMilestone {
@@ -392,6 +393,21 @@ function classifyCodex(entry: any): SegmentKind {
   return 'thinking';
 }
 
+/** Pull the first ERROR_PATTERN-matched line from an entry's text. */
+function extractErrorSnippet(entry: any): string | undefined {
+  const text = flattenUnknown(entry);
+  if (!text) return undefined;
+  const candidates = text.split(/\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of candidates) {
+    const lc = line.toLowerCase();
+    if (!ERROR_PATTERNS.some((pattern) => pattern.test(lc))) continue;
+    if (ERROR_IGNORE_PATTERNS.some((pattern) => pattern.test(lc))) continue;
+    // Trim noisy prefixes / hard cap so the hover card stays readable.
+    return line.length > 180 ? `${line.slice(0, 177)}…` : line;
+  }
+  return undefined;
+}
+
 /** Generic segment accumulator — shared by all three runtimes */
 function accumulateSegments(
   lines: string,
@@ -404,7 +420,19 @@ function accumulateSegments(
   let currentKind: string | null = null;
   let blockStart = 0;
   let blockDur = 0;
+  let blockErrorMessage: string | undefined;
   let hasToday = false;
+
+  const flushBlock = () => {
+    if (currentKind === null) return;
+    segments.push({
+      kind: currentKind as SegmentKind,
+      startMin: blockStart,
+      durationMin: Math.max(blockDur, 1),
+      agent,
+      ...(currentKind === 'error' && blockErrorMessage ? { errorMessage: blockErrorMessage } : {}),
+    });
+  };
 
   for (const line of lines.split('\n')) {
     if (!line.trim()) continue;
@@ -424,24 +452,27 @@ function accumulateSegments(
         currentKind = kind;
         blockStart = minSinceStart;
         blockDur = 1;
+        blockErrorMessage = kind === 'error' ? extractErrorSnippet(entry) : undefined;
       } else if (kind === currentKind && minSinceStart - (blockStart + blockDur) < 3) {
         blockDur = Math.max(blockDur, minSinceStart - blockStart + 1);
+        if (kind === 'error' && !blockErrorMessage) {
+          blockErrorMessage = extractErrorSnippet(entry);
+        }
       } else {
         const gapMin = minSinceStart - (blockStart + blockDur);
-        segments.push({ kind: currentKind as SegmentKind, startMin: blockStart, durationMin: Math.max(blockDur, 1), agent });
+        flushBlock();
         if (gapMin >= 5) {
           segments.push({ kind: 'idle', startMin: blockStart + blockDur, durationMin: gapMin, agent });
         }
         currentKind = kind;
         blockStart = minSinceStart;
         blockDur = 1;
+        blockErrorMessage = kind === 'error' ? extractErrorSnippet(entry) : undefined;
       }
     } catch { continue; }
   }
 
-  if (currentKind !== null && hasToday) {
-    segments.push({ kind: currentKind as SegmentKind, startMin: blockStart, durationMin: Math.max(blockDur, 1), agent });
-  }
+  if (hasToday) flushBlock();
 
   return segments;
 }
@@ -449,14 +480,11 @@ function accumulateSegments(
 export async function GET(req: NextRequest) {
   try {
     const now = new Date();
-    // Use a rolling 24h window anchored to 6 AM. Before 6 AM, show yesterday's activity.
-    const todayStart = new Date(now);
-    if (now.getHours() < 6) {
-      // Before 6 AM — anchor to yesterday 6 AM
-      todayStart.setDate(todayStart.getDate() - 1);
-    }
-    todayStart.setHours(6, 0, 0, 0);
-    const windowMinutes = Math.max(1, Math.min(24 * 60, Math.floor((now.getTime() - todayStart.getTime()) / 60000)));
+    // True 24h rolling window: right edge = now, left edge = now − 24h.
+    // The strip never resets — activity slides off the left as new minutes
+    // tick by on the right. Survives late-night work and time-zone drift.
+    const todayStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const windowMinutes = 24 * 60;
 
     const home = os.homedir();
     const allSegments: TimelineSegment[] = [];
@@ -479,13 +507,11 @@ export async function GET(req: NextRequest) {
 
     // ── 3. Codex sessions ──
     // Codex stores sessions in date-partitioned dirs: ~/.codex/sessions/YYYY/MM/DD/*.jsonl
-    const todayStr = `${todayStart.getFullYear()}/${String(todayStart.getMonth() + 1).padStart(2, '0')}/${String(todayStart.getDate()).padStart(2, '0')}`;
-    // Also check yesterday if we're in the early hours
-    const yesterday = new Date(todayStart);
-    yesterday.setDate(yesterday.getDate());
-    const nowDate = new Date();
-    const nowStr = `${nowDate.getFullYear()}/${String(nowDate.getMonth() + 1).padStart(2, '0')}/${String(nowDate.getDate()).padStart(2, '0')}`;
-    const codexDirs = new Set([todayStr, nowStr]);
+    // The rolling 24h window can straddle midnight, so always scan both
+    // the window-start date AND the now date.
+    const datePartition = (d: Date) =>
+      `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    const codexDirs = new Set([datePartition(todayStart), datePartition(now)]);
     const codexFiles: string[] = [];
     for (const dir of codexDirs) {
       const found = execQuiet(`ls -t ${home}/.codex/sessions/${dir}/*.jsonl 2>/dev/null | head -5`);
