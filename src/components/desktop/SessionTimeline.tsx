@@ -124,56 +124,35 @@ export function SessionTimeline({
 
     const cellCount = TIMELINE_CELL_COUNT;
     const cellSpan = totalSpan / cellCount;
-    const priority: Record<SegmentKind, number> = {
-      error: 4,
-      coding: 3,
-      testing: 2,
-      thinking: 1,
-      idle: 0,
-    };
+    // Strict priority ladder. Whichever kind is PRESENT in the cell at
+    // the highest priority wins — duration is irrelevant. Same rule
+    // whether one agent or ten are running in this slice. Surfaces
+    // errors first, then real coding, then test runs, then thinking.
+    const PRIORITY: SegmentKind[] = ['error', 'coding', 'testing', 'thinking'];
 
     for (let i = 0; i < cellCount; i += 1) {
       const cellStart = i * cellSpan;
       const cellEnd = cellStart + cellSpan;
-      const totals: Partial<Record<SegmentKind, number>> = {};
-      let topSeg: TimelineSegment | null = null;
-      let topOverlap = 0;
-      let errorSeg: TimelineSegment | null = null;
+      const presentSeg: Partial<Record<SegmentKind, TimelineSegment>> = {};
       for (const seg of segments) {
         if (seg.kind === 'idle') continue;
         const overlap = Math.max(0, Math.min(cellEnd, seg.startMin + seg.durationMin) - Math.max(cellStart, seg.startMin));
         if (overlap <= 0) continue;
-        totals[seg.kind] = (totals[seg.kind] || 0) + overlap;
-        if (seg.kind === 'error' && !errorSeg) errorSeg = seg;
-        const better = overlap > topOverlap
-          || (overlap === topOverlap && topSeg && priority[seg.kind] > priority[topSeg.kind]);
-        if (better) {
-          topOverlap = overlap;
-          topSeg = seg;
-        }
+        if (!presentSeg[seg.kind]) presentSeg[seg.kind] = seg;
       }
 
-      // Errors are loud — any overlap, even a brief one, wins the cell.
-      // Otherwise the cell takes the kind with the longest overlap.
       let winningKind: SegmentKind | null = null;
-      if (errorSeg) {
-        winningKind = 'error';
-      } else {
-        let winningWeight = 0;
-        let winningPriority = -1;
-        (Object.entries(totals) as Array<[SegmentKind, number]>).forEach(([kind, weight]) => {
-          const p = priority[kind];
-          if (weight > winningWeight || (weight === winningWeight && p > winningPriority)) {
-            winningKind = kind;
-            winningWeight = weight;
-            winningPriority = p;
-          }
-        });
+      for (const kind of PRIORITY) {
+        if (presentSeg[kind]) { winningKind = kind; break; }
       }
 
       const color = winningKind ? SEGMENT_COLORS[winningKind] : IDLE_BLOCK_COLOR;
       out.push({ key: `cell:${i}`, weight: 1, color });
-      meta.push({ segment: errorSeg ?? topSeg, startMin: cellStart, durationMin: cellSpan });
+      meta.push({
+        segment: winningKind ? presentSeg[winningKind] ?? null : null,
+        startMin: cellStart,
+        durationMin: cellSpan,
+      });
     }
 
     return { blocks: out, blockMeta: meta };

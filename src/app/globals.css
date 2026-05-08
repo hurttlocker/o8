@@ -1522,13 +1522,12 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 /* Live "now" cell pulse — applied to the rightmost block of the
- * SessionTimeline strip. Uses CSS filter so the glow renders inside
- * the strip's overflow:hidden bounds (a box-shadow halo would be
- * clipped). brightness + a soft drop-shadow gives a clean "breathe"
- * without distorting the cell color or making it bleed outside. */
+ * SessionTimeline strip. Soft opacity breathe (no filter, no color
+ * shift) so adjacent error cells can't bleed their hue into the
+ * pulsing cell at the antialias boundary. */
 @keyframes timelineNowPulse {
-  0%, 100% { filter: brightness(1) drop-shadow(0 0 0 transparent); }
-  50% { filter: brightness(1.45) drop-shadow(0 0 5px currentColor); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 @keyframes slide-in-preview {
