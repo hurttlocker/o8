@@ -2749,22 +2749,18 @@ function DashboardInner() {
               },
             ]}
           />
-          {/* SessionTimeline: hidden in this build. Code kept intentionally —
-              re-enable by flipping SHOW_SESSION_TIMELINE in @/lib/flags. */}
-          {false ? (
-            <SessionTimeline
-              repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
-              repoName={globalRepoEntry?.name ?? null}
-              onExpand={() => {
-                openCanvasTab({
-                  id: 'timeline:session',
-                  kind: 'timeline',
-                  label: 'Session Replay',
-                  resourceId: 'session',
-                });
-              }}
-            />
-          ) : null}
+          <SessionTimeline
+            repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
+            repoName={globalRepoEntry?.name ?? null}
+            onExpand={() => {
+              openCanvasTab({
+                id: 'timeline:session',
+                kind: 'timeline',
+                label: 'Session Replay',
+                resourceId: 'session',
+              });
+            }}
+          />
         </div>
 
       {/* ── Main Layout (horizontal) ── */}
