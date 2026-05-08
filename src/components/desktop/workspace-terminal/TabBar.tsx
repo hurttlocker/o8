@@ -29,7 +29,8 @@ const MERGED_DISPATCH_BORDER = 'rgba(22, 163, 74, 0.28)';
 const MERGED_DISPATCH_TEXT = '#15803d';
 const TAB_BAR_HEIGHT = 38;
 const TAB_GAP = 4;
-const TAB_TOP_RADIUS = 14;
+const TAB_TOP_RADIUS = 15;
+const PRIMARY_TAB_MIN_WIDTH = 214;
 
 function formatDispatchedAt(epochMs: number): string {
   try {
@@ -201,18 +202,19 @@ export const TabBar = memo(function TabBar({
             gap: TAB_GAP,
             height: TAB_BAR_HEIGHT + 1,
             marginBottom: -1,
-            // Inset the row so the workspace's curved top-left/right corners
-            // are visible on either side of the tab cluster instead of being
-            // covered by the leftmost/rightmost tab.
-            paddingLeft: 12,
+            // Dock tabs to the workspace edge. Active tabs use the same
+            // surface as the strip, so the rounded left edge feels flush
+            // instead of exposing a cutout.
+            paddingLeft: 0,
             paddingRight: 12,
             overflowX: 'auto',
             overflowY: 'hidden',
             scrollbarWidth: 'none',
           }}
         >
-          {tabs.map((tab) => {
+          {tabs.map((tab, index) => {
             const isActive = tab.id === activeTabId;
+            const isFirstTab = index === 0;
             const isOrchestrator = tab.kind === 'orchestrator';
             const isSingleRuntimeTab = isOrchestrator && tab.mode === 'single';
             const isPermanentOrchestrator = isOrchestrator && tab.mode !== 'single';
@@ -255,19 +257,20 @@ export const TabBar = memo(function TabBar({
 
             const neoSurface = chromeNeoSurface(isActive);
             const isFlashing = flashTabId === tab.id;
+            const isPlainActive = isActive && !isLatestDispatch && !isMergedDispatch;
             const baseBoxShadow = isMergedDispatch
               ? `inset 0 0 0 1px ${MERGED_DISPATCH_BORDER}`
               : isLatestDispatch
                 ? `inset 0 0 0 1px ${LATEST_DISPATCH_BORDER}`
-                : (isOrchestrator && isActive
-                  ? '0 1px 4px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(37, 99, 235, 0.1)'
+                : (isPlainActive
+                  ? 'inset 0 1px 0 rgba(255, 255, 255, 0.18)'
                   : neoSurface.boxShadow);
             const tabBackground = isMergedDispatch
               ? MERGED_DISPATCH_BG
               : isLatestDispatch
                 ? LATEST_DISPATCH_BG
-                : (isOrchestrator && isActive
-                  ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))'
+                : (isActive
+                  ? 'var(--t-panel)'
                   : neoSurface.background);
             const tabBoxShadow = isFlashing
               ? `${baseBoxShadow}, 0 0 0 2px var(--t-accent-soft, rgba(37, 99, 235, 0.22)), 0 6px 18px rgba(37, 99, 235, 0.28)`
@@ -281,7 +284,7 @@ export const TabBar = memo(function TabBar({
               ? MERGED_DISPATCH_BORDER
               : isLatestDispatch
                 ? LATEST_DISPATCH_BORDER
-                : (isActive ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)');
+                : 'var(--t-divider-subtle)';
             return (
               <button
                 type="button"
@@ -316,9 +319,10 @@ export const TabBar = memo(function TabBar({
                   boxSizing: 'border-box',
                   height: isActive ? TAB_BAR_HEIGHT + 1 : TAB_BAR_HEIGHT,
                   minHeight: isActive ? TAB_BAR_HEIGHT + 1 : TAB_BAR_HEIGHT,
+                  minWidth: isFirstTab ? PRIMARY_TAB_MIN_WIDTH : undefined,
                   paddingTop: 8,
                   paddingBottom: 8,
-                  paddingLeft: 10,
+                  paddingLeft: isFirstTab ? 22 : 10,
                   paddingRight: 8,
                   marginTop: 0,
                   marginBottom: isActive ? -1 : 0,
@@ -328,8 +332,8 @@ export const TabBar = memo(function TabBar({
                   borderStyle: 'solid',
                   borderColor: tabBorderColor,
                   borderBottomWidth: isActive ? 0 : 1,
-                  // Top corners match the workspace card squircle; bottom
-                  // corners stay square so the tab lands flush on the body.
+                  // Top corners keep the Apple-style squircle while the fill
+                  // matches the header surface, avoiding a visible edge bite.
                   borderTopLeftRadius: TAB_TOP_RADIUS,
                   borderTopRightRadius: TAB_TOP_RADIUS,
                   borderBottomLeftRadius: 0,
