@@ -42,7 +42,6 @@ import { useTimelineData, useTimelineSessions } from './timeline/hooks';
 import { PlayIcon, ExpandIcon } from './timeline/icons';
 import { TimelineButton } from './timeline/TimelineButton';
 import { TimelineEmptyState } from './timeline/TimelineEmptyState';
-import { TimelineDrilldown } from './timeline/TimelineDrilldown';
 
 interface SessionTimelineProps {
   onExpand?: () => void;
@@ -98,7 +97,6 @@ function parseTimelineAgent(raw: string | undefined | null): ParsedTimelineAgent
 
 export function SessionTimeline({
   onExpand,
-  repoPath,
   repoName,
   firstMergeCelebration,
 }: SessionTimelineProps) {
@@ -107,7 +105,6 @@ export function SessionTimeline({
   const { segments, loading } = useTimelineData();
   const liveSessions = useTimelineSessions();
   const [hoverInfo, setHoverInfo] = useState<TrackerHoverInfo | null>(null);
-  const [drillOpen, setDrillOpen] = useState(false);
 
   const totalSpan = TIMELINE_WINDOW_MINUTES;
   const hasActivity = segments.length > 0;
@@ -324,7 +321,9 @@ export function SessionTimeline({
     return <TimelineEmptyState onExpand={onExpand} repoName={repoName} />;
   }
 
-  const overlayLayers = (
+  // Inside-the-strip overlays (clipped by Tracker's overflow:hidden):
+  // midnight tick + the hover scrubber line.
+  const trackerOverlay = (
     <>
       <div
         style={{
@@ -337,22 +336,6 @@ export function SessionTimeline({
           opacity: 0.35,
           pointerEvents: 'none',
           zIndex: 9,
-        }}
-      />
-      {/* Live "now" pulse on the right edge — keeps the strip feeling live. */}
-      <div
-        style={{
-          position: 'absolute',
-          right: 0,
-          top: 0,
-          bottom: 0,
-          width: 4,
-          borderTopRightRadius: TIMELINE_TRACK_RADIUS,
-          borderBottomRightRadius: TIMELINE_TRACK_RADIUS,
-          background: 'var(--t-accent, #2563eb)',
-          animation: 'timelineNowPulse 1.6s ease-in-out infinite',
-          pointerEvents: 'none',
-          zIndex: 8,
         }}
       />
       {hoverInfo ? (
@@ -412,10 +395,7 @@ export function SessionTimeline({
         ) : null}
       </div>
 
-      <div
-        style={{ flex: 1, position: 'relative' }}
-        onDoubleClick={() => setDrillOpen(true)}
-      >
+      <div style={{ flex: 1, position: 'relative' }}>
         {celebrationWash}
         <Tracker
           blocks={blocks}
@@ -426,11 +406,8 @@ export function SessionTimeline({
           blockGap={TIMELINE_BLOCK_GAP}
           hoveredIndex={hoverInfo?.blockIndex ?? null}
           onHoverMove={setHoverInfo}
-          onBlockClick={(info) => {
-            const meta = blockMeta[info.blockIndex];
-            if (meta?.segment?.kind === 'error') setDrillOpen(true);
-          }}
-          overlay={overlayLayers}
+          pulseLastBlock
+          overlay={trackerOverlay}
         />
       </div>
 
@@ -455,15 +432,6 @@ export function SessionTimeline({
         document.body,
       )}
 
-      {drillOpen ? (
-        <TimelineDrilldown
-          segments={segments}
-          totalSpan={totalSpan}
-          repoPath={repoPath}
-          repoName={repoName}
-          onClose={() => setDrillOpen(false)}
-        />
-      ) : null}
     </motion.div>
   );
 }
