@@ -58,7 +58,7 @@ function HistorySidebarBase({
               }}
             />
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
+          <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
             {historyLoading ? (
               <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 12 }}>Loading...</div>
             ) : historyItems.length === 0 ? (

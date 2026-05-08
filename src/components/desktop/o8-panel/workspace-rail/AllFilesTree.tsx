@@ -234,7 +234,7 @@ export function AllFilesTree({
       <div style={{ flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-muted)', fontFamily: MONO_FONT, fontSize: 11, fontWeight: 700, letterSpacing: 0, paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10 }}>
         {repoName}
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingTop: 3, paddingBottom: 3 }}>
+      <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingTop: 3, paddingBottom: 3 }}>
         {!repoPath ? (
           <div style={{ paddingTop: 13, paddingRight: 12, paddingBottom: 13, paddingLeft: 12, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>
             Select a repo to browse files.

@@ -144,7 +144,7 @@ function ChatSurfaceBase({
         </div>
       ) : null}
 
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', paddingTop: isEmpty ? 0 : 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, position: 'relative' }}>
+      <div ref={scrollRef} className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingTop: isEmpty ? 0 : 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, position: 'relative' }}>
         {/* Floating history toggle — shown only in the empty state, since
             the inline meta bar is hidden there. Gives users a discoverable
             way to browse past conversations without stacking chrome bars. */}

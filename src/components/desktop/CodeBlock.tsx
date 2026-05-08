@@ -602,7 +602,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid
         isMermaid ? (
           <MermaidDiagram code={code} onOpenMermaid={onOpenMermaid} />
         ) : (
-          <pre style={{
+          <pre className="cortex-scroll-fade-y cortex-themed-scroll" style={{
             margin: 0,
             paddingTop: 12,
             paddingRight: 14,

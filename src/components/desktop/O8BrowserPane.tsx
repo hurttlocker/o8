@@ -8,7 +8,14 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
+import {
+  PREVIEW_HOST_MESSAGE_SOURCE,
+  PREVIEW_MESSAGE_SOURCE,
+  PREVIEW_PROXY_ROUTE,
+  formatPreviewAnnotationContext,
+  type DetectedLocalhostPreview,
+  type PreviewAnnotationPayload,
+} from '@/lib/panel/preview';
 import {
   ELEMENT_PICKER_START_EVENT,
   ELEMENT_PICKER_RESULT_EVENT,
@@ -48,6 +55,12 @@ function proxiedPickUrl(url: string): string {
     : url;
 }
 
+function proxiedLiveUrl(url: string): string {
+  return isLoopbackUrl(url)
+    ? `${PREVIEW_PROXY_ROUTE}?url=${encodeURIComponent(url.replace('0.0.0.0', 'localhost'))}`
+    : url;
+}
+
 // ── Types ──
 
 interface BrowserTab {
@@ -64,6 +77,31 @@ interface O8BrowserPaneProps {
   // Bubbles the currently-loaded URL up to the dashboard so the TitleBar
   // Browser button can render a hover-preview iframe pointed at it.
   onActiveUrlChange?: (url: string | null) => void;
+}
+
+type AnnotationScreenshot = NonNullable<PreviewAnnotationPayload['screenshot']>;
+
+interface AnnotationScreenshotResponse {
+  ok?: boolean;
+  screenshot?: AnnotationScreenshot;
+  error?: string;
+}
+
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+function iframePanelRect(iframe: HTMLIFrameElement | null) {
+  const rect = iframe?.getBoundingClientRect();
+  if (!rect) return null;
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+  };
 }
 
 // ── Helpers ──
@@ -88,6 +126,17 @@ function titleFromUrl(url: string): string {
   }
 }
 
+function annotationTargetLabel(target: PreviewAnnotationPayload['domMap']['start']): string {
+  if (!target) return 'unknown element';
+  if (target.id) return `#${target.id}`;
+  if (target.classes.length > 0) return `.${target.classes.slice(0, 2).join('.')}`;
+  return target.selector || `<${target.tagName.toLowerCase()}>`;
+}
+
+function formatAnnotationSummary(annotation: PreviewAnnotationPayload): string {
+  return `${annotationTargetLabel(annotation.domMap.start)} -> ${annotationTargetLabel(annotation.domMap.end)}`;
+}
+
 let tabCounter = 0;
 function newTabId(): string {
   tabCounter += 1;
@@ -105,7 +154,11 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const seeded = useRef(false);
   const [pickerActive, setPickerActive] = useState(false);
+  const [annotationActive, setAnnotationActive] = useState(false);
   const [selectedElement, setSelectedElement] = useState<PickedElement | null>(null);
+  const [visualAnnotation, setVisualAnnotation] = useState<PreviewAnnotationPayload | null>(null);
+  const [capturingAnnotation, setCapturingAnnotation] = useState(false);
+  const [annotationCaptureError, setAnnotationCaptureError] = useState<string | null>(null);
 
   // Seed tabs from previews on first render
   useEffect(() => {
@@ -116,9 +169,14 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
       url: p.url || `http://localhost:${p.port}`,
       title: `localhost:${p.port}`,
     }));
-    setTabs(initial);
-    setActiveTabId(initial[0].id);
-    setUrlInput(initial[0].url);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setTabs(initial);
+      setActiveTabId(initial[0].id);
+      setUrlInput(initial[0].url);
+    });
+    return () => { cancelled = true; };
   }, [previews]);
 
   // Navigate to externally-provided URL (e.g. from port popover)
@@ -131,23 +189,33 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
     // Check if a tab with this URL already exists
     const existing = tabs.find(t => t.url === normalized);
     if (existing) {
-      setActiveTabId(existing.id);
-      setUrlInput(normalized);
-      return;
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setActiveTabId(existing.id);
+        setUrlInput(normalized);
+      });
+      return () => { cancelled = true; };
     }
     // Create a new tab for this URL
     const id = newTabId();
     const newTab: BrowserTab = { id, url: normalized, title: titleFromUrl(normalized) };
-    setTabs(prev => [...prev, newTab]);
-    setActiveTabId(id);
-    setUrlInput(normalized);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setTabs(prev => [...prev, newTab]);
+      setActiveTabId(id);
+      setUrlInput(normalized);
+    });
+    return () => { cancelled = true; };
   }, [navigateToUrl, tabs]);
 
   const activeTab = tabs.find(t => t.id === activeTabId) ?? null;
 
   // Sync URL input when switching tabs
   useEffect(() => {
-    setUrlInput(activeTab?.url ?? '');
+    const frame = requestAnimationFrame(() => setUrlInput(activeTab?.url ?? ''));
+    return () => cancelAnimationFrame(frame);
   }, [activeTabId, activeTab?.url]);
 
   // Bubble active URL up so the TitleBar can hover-preview it. Empty string
@@ -232,15 +300,44 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
   const togglePicker = useCallback(() => {
     setPickerActive((prev) => {
       const next = !prev;
-      if (next) setSelectedElement(null);
+      if (next) {
+        setSelectedElement(null);
+        setVisualAnnotation(null);
+        setAnnotationCaptureError(null);
+        setAnnotationActive(false);
+      }
       return next;
     });
   }, []);
 
+  const syncAnnotationMode = useCallback((enabled: boolean) => {
+    const iframe = iframeRef.current;
+    iframe?.contentWindow?.postMessage({
+      source: PREVIEW_HOST_MESSAGE_SOURCE,
+      type: 'annotation-mode',
+      enabled,
+    }, window.location.origin);
+  }, []);
+
+  const toggleAnnotation = useCallback(() => {
+    setAnnotationActive((prev) => {
+      const next = !prev;
+      if (next) {
+        setPickerActive(false);
+        setSelectedElement(null);
+        setVisualAnnotation(null);
+        setAnnotationCaptureError(null);
+      } else {
+        syncAnnotationMode(false);
+      }
+      return next;
+    });
+  }, [syncAnnotationMode]);
+
   // Build the iframe src based on picker state. When picking, proxy + strip
   // scripts. Otherwise direct-load for full SPA functionality.
   const iframeSrc = activeTab?.url
-    ? (pickerActive ? proxiedPickUrl(activeTab.url) : activeTab.url)
+    ? (pickerActive ? proxiedPickUrl(activeTab.url) : annotationActive || visualAnnotation ? proxiedLiveUrl(activeTab.url) : activeTab.url)
     : '';
 
   // When the proxied iframe finishes loading, kick the bridge script into
@@ -249,16 +346,65 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
   // When the user toggles picker OFF, the iframe navigates back to the
   // direct URL and the old document is unloaded — no explicit STOP needed.
   const handleIframeLoad = useCallback(() => {
-    if (!pickerActive) return;
     const iframe = iframeRef.current;
     if (!iframe?.contentWindow) return;
+    if (annotationActive) {
+      syncAnnotationMode(true);
+      return;
+    }
+    if (!pickerActive) return;
     try {
       iframe.contentWindow.postMessage({ type: ELEMENT_PICKER_START_EVENT }, '*');
     } catch {
       // Target origin is '*' so postMessage rarely throws, but swallow in case
       // the iframe is cross-origin (non-loopback URL) and doesn't hear it.
     }
-  }, [pickerActive]);
+  }, [annotationActive, pickerActive, syncAnnotationMode]);
+
+  const captureAnnotationScreenshot = useCallback(async (annotation: PreviewAnnotationPayload): Promise<PreviewAnnotationPayload> => {
+    setCapturingAnnotation(true);
+    setAnnotationCaptureError(null);
+
+    try {
+      await nextPaint();
+      const response = await fetch('/api/panel/annotation-screenshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          annotation,
+          panelRect: iframePanelRect(iframeRef.current),
+        }),
+      });
+      const payload = await response.json().catch(() => null) as AnnotationScreenshotResponse | null;
+      if (!response.ok || !payload?.ok || !payload.screenshot) {
+        throw new Error(payload?.error || `Screenshot capture failed with status ${response.status}`);
+      }
+
+      const enriched = { ...annotation, screenshot: payload.screenshot };
+      setVisualAnnotation(enriched);
+      return enriched;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Screenshot capture failed';
+      const enriched = {
+        ...annotation,
+        screenshot: {
+          error: message,
+          capturedAt: new Date().toISOString(),
+        },
+      };
+      setAnnotationCaptureError(message);
+      setVisualAnnotation(enriched);
+      return enriched;
+    } finally {
+      setCapturingAnnotation(false);
+    }
+  }, []);
+
+  const handleSendVisualAnnotation = useCallback(async () => {
+    if (!visualAnnotation || !onEditWithAI || capturingAnnotation) return;
+    const enriched = await captureAnnotationScreenshot(visualAnnotation);
+    onEditWithAI(formatPreviewAnnotationContext(enriched));
+  }, [captureAnnotationScreenshot, capturingAnnotation, onEditWithAI, visualAnnotation]);
 
   // Listen for picker results
   useEffect(() => {
@@ -266,6 +412,30 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
       if (e.data?.type === ELEMENT_PICKER_RESULT_EVENT && e.data.element) {
         setSelectedElement(e.data.element as PickedElement);
         setPickerActive(false);
+        setVisualAnnotation(null);
+        setAnnotationCaptureError(null);
+        return;
+      }
+
+      if (e.origin !== window.location.origin) return;
+      const data = e.data as {
+        source?: string;
+        type?: string;
+        enabled?: boolean;
+        annotation?: PreviewAnnotationPayload;
+      };
+      if (!data || data.source !== PREVIEW_MESSAGE_SOURCE) return;
+
+      if (data.type === 'annotation-mode') {
+        setAnnotationActive(Boolean(data.enabled));
+        return;
+      }
+
+      if (data.type === 'annotation' && data.annotation) {
+        setVisualAnnotation(data.annotation);
+        setAnnotationCaptureError(null);
+        setSelectedElement(null);
+        setAnnotationActive(false);
       }
     }
     window.addEventListener('message', handleMessage);
@@ -415,6 +585,29 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
             <line x1="12" y1="22" x2="12" y2="18" />
           </svg>
         </button>
+        {/* Visual annotation toggle */}
+        <button
+          type="button"
+          onClick={toggleAnnotation}
+          title={annotationActive ? 'Cancel visual annotation' : 'Draw visual annotation'}
+          disabled={!activeTab?.url || !isLoopbackUrl(activeTab.url)}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 26, height: 26, border: 'none', borderRadius: 6,
+            background: annotationActive ? 'rgba(249,115,22,0.22)' : 'transparent',
+            cursor: activeTab?.url && isLoopbackUrl(activeTab.url) ? 'pointer' : 'default',
+            padding: 0,
+            opacity: activeTab?.url && isLoopbackUrl(activeTab.url) ? 1 : 0.35,
+          }}
+          onMouseEnter={(e) => { if (!annotationActive && activeTab?.url && isLoopbackUrl(activeTab.url)) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+          onMouseLeave={(e) => { if (!annotationActive) e.currentTarget.style.background = 'transparent'; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={annotationActive ? '#f97316' : 'rgba(255,255,255,0.5)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: 14, height: 14, minWidth: 14, minHeight: 14, flexShrink: 0 }}>
+            <path d="M4 20 20 4" />
+            <path d="M14 4h6v6" />
+            <path d="M5 15c3-1 4 3 7 1" />
+          </svg>
+        </button>
         {/* Reload */}
         <button
           type="button"
@@ -558,7 +751,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
               onLoad={handleIframeLoad}
               sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
               style={{
-                width: '100%', height: selectedElement ? 'calc(100% - 32px)' : '100%',
+                width: '100%', height: selectedElement || visualAnnotation ? 'calc(100% - 32px)' : '100%',
                 border: 'none', background: '#ffffff',
               }}
             />
@@ -597,6 +790,39 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
                 </button>
               </div>
             ) : null}
+            {/* Visual annotation info bar */}
+            {visualAnnotation ? (
+              <div style={{
+                height: 32, display: 'flex', alignItems: 'center', gap: 8,
+                paddingLeft: 10, paddingRight: 10,
+                borderTop: '1px solid rgba(255,255,255,0.1)',
+                background: 'rgba(249,115,22,0.10)', flexShrink: 0,
+                fontSize: 11, fontFamily: '"SF Mono", ui-monospace, monospace',
+                color: 'rgba(255,255,255,0.78)',
+              }}>
+                <span style={{ color: '#fb923c', fontWeight: 700 }}>arrow</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.58)' }}>
+                  {formatAnnotationSummary(visualAnnotation)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVisualAnnotation(null);
+                    setAnnotationCaptureError(null);
+                  }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 18, height: 18, border: 'none', borderRadius: 4,
+                    background: 'transparent', cursor: 'pointer', padding: 0,
+                  }}
+                >
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="3" strokeLinecap="round" style={{ display: 'block' }}>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            ) : null}
             {/* Element editing panel */}
             {selectedElement ? (
               <div style={{
@@ -608,6 +834,85 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
                   onEditWithAI={onEditWithAI}
                   onOpenSource={onOpenFile ? (file) => onOpenFile(file) : undefined}
                 />
+              </div>
+            ) : null}
+            {/* Visual annotation dispatch panel */}
+            {visualAnnotation && !capturingAnnotation ? (
+              <div style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10,
+              }}>
+                <div
+                  style={{
+                    margin: '0 12px 0',
+                    borderTop: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 14,
+                    background: 'rgba(20,20,25,0.95)',
+                    backdropFilter: 'blur(12px)',
+                    boxShadow: '0 22px 40px rgba(0,0,0,0.24)',
+                    padding: 14,
+                    display: 'grid',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ display: 'grid', gap: 5 }}>
+                    <div style={{ color: 'rgba(255,255,255,0.88)', fontSize: 13, fontWeight: 700 }}>
+                      Visual annotation
+                    </div>
+                    <div style={{ color: 'rgba(255,255,255,0.52)', fontSize: 12, fontFamily: '"SF Mono", ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {formatAnnotationSummary(visualAnnotation)}
+                    </div>
+                    {annotationCaptureError ? (
+                      <div style={{ color: 'rgba(251,146,60,0.76)', fontSize: 11 }}>
+                        Screenshot unavailable; agent will receive DOM map and annotation JSON.
+                      </div>
+                    ) : visualAnnotation.screenshot?.path ? (
+                      <div style={{ color: 'rgba(255,255,255,0.42)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        Screenshot attached: {visualAnnotation.screenshot.path}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => { void handleSendVisualAnnotation(); }}
+                      disabled={!onEditWithAI || capturingAnnotation}
+                      style={{
+                        height: 28,
+                        border: 'none',
+                        borderRadius: 8,
+                        background: '#f97316',
+                        color: '#ffffff',
+                        padding: '0 12px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: onEditWithAI && !capturingAnnotation ? 'pointer' : 'default',
+                        opacity: onEditWithAI && !capturingAnnotation ? 1 : 0.55,
+                      }}
+                    >
+                      Send to agent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVisualAnnotation(null);
+                        setAnnotationCaptureError(null);
+                      }}
+                      style={{
+                        height: 28,
+                        borderRadius: 8,
+                        border: '1px solid rgba(255,255,255,0.14)',
+                        background: 'transparent',
+                        color: 'rgba(255,255,255,0.78)',
+                        padding: '0 12px',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : null}
             {/* Hint for non-localhost URLs that may block iframe embedding */}

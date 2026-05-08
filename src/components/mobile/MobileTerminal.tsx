@@ -256,6 +256,7 @@ export function MobileTerminal({ tmuxSession }: { tmuxSession: string }) {
       >
         <div
           ref={containerRef}
+          className="cortex-terminal-fade"
           data-tmux-session={tmuxSession}
           style={{
             width: '100%',

@@ -318,7 +318,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
             </span>
           ) : null}
         </div>
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto' }}>
           {prListLoading ? (
             <div style={{ padding: '20px 14px', color: 'var(--t-text-faint)', fontSize: 12, textAlign: 'center' }}>Loading pull requests...</div>
           ) : prList.length === 0 ? (
@@ -440,7 +440,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
       </div>
 
       {/* Files list */}
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+      <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
         {pr.files.map((file) => {
           const isExpanded = expandedFiles.has(file.path);
           return (

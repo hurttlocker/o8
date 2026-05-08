@@ -285,6 +285,7 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
 
       <div
         ref={scrollRef}
+        className="cortex-scroll-fade-y cortex-themed-scroll"
         style={{
           flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12,
           paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14, background: 'var(--t-panel)',

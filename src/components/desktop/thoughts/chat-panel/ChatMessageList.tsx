@@ -85,7 +85,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
     displayMessages[displayMessages.length - 1]?.text?.toLowerCase().includes('compact');
 
   return (
-    <div className="thoughts-scroll" style={{
+    <div className="thoughts-scroll cortex-scroll-fade-y cortex-themed-scroll" style={{
       flex: 1,
       overflowY: 'auto',
       padding: '14px 16px 12px',

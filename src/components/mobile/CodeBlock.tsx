@@ -184,6 +184,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockPr
       isMermaid
         ? createElement(MermaidDiagram, { code })
         : createElement('pre', {
+            className: 'cortex-scroll-fade-y cortex-themed-scroll',
             style: {
               margin: 0,
               paddingTop: 12,

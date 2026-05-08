@@ -22,7 +22,6 @@ import {
   THEME_ACCENT_RING,
   THEME_ACCENT_SOFT,
   THEME_BG_CARD,
-  THEME_PANEL_GLASS,
 } from '@/components/desktop/workspace-terminal/constants';
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
@@ -307,12 +306,21 @@ function WorkspaceChatPaneBase({
     return () => window.clearTimeout(timer);
   }, [fallbackPill]);
 
+  const [streamingTimestamp, setStreamingTimestamp] = useState<number | null>(null);
+  useEffect(() => {
+    if (!chat.agentRunning) {
+      setStreamingTimestamp(null);
+      return;
+    }
+    setStreamingTimestamp(Date.now());
+  }, [chat.agentRunning, chat.tabId]);
+
   const streamingMessage = useMemo<import('@/components/desktop/LLMChat').LLMMessage>(() => ({
     id: `stream:${chat.tabId}`,
     role: 'assistant',
     content: chat.streamingText || 'Thinking...',
     model: chat.selectedModel.label,
-    timestamp: Date.now(),
+    timestamp: streamingTimestamp ?? 0,
     tokens: chat.streamMeta.tokens,
     costUsd: chat.streamMeta.costUsd,
     sources: chat.streamMeta.sources,
@@ -323,7 +331,7 @@ function WorkspaceChatPaneBase({
       args: tool.args,
       preview: tool.preview,
     })),
-  }), [chat.tabId, chat.streamingText, chat.selectedModel.label, chat.streamMeta, chat.activeToolCalls]);
+  }), [chat.tabId, chat.streamingText, chat.selectedModel.label, streamingTimestamp, chat.streamMeta, chat.activeToolCalls]);
 
   return (
     <div
@@ -379,6 +387,7 @@ function WorkspaceChatPaneBase({
       <div
         ref={chat.scrollRef}
         onScroll={chat.handleScroll}
+        className="cortex-scroll-fade-y cortex-themed-scroll"
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -387,7 +396,6 @@ function WorkspaceChatPaneBase({
           paddingLeft: 24,
           paddingRight: 24,
           background: 'transparent',
-          scrollbarWidth: 'thin',
         }}
       >
         {chat.visibleMessages.length === 0 && !chat.agentRunning ? (
@@ -718,7 +726,7 @@ function WorkspaceChatPaneBase({
           <CheckCircle2 size={14} style={{ color: '#22c55e', flexShrink: 0 }} />
           <span>Merged · read-only</span>
           <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>
-            This session's lane has been archived. The transcript stays for review.
+            This session&apos;s lane has been archived. The transcript stays for review.
           </span>
         </div>
       ) : null}

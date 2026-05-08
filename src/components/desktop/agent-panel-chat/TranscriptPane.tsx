@@ -587,7 +587,7 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
       <div
         ref={setScrollRef}
         onScroll={handleScroll}
-        className="remodex-message-stack"
+        className="remodex-message-stack cortex-scroll-fade-y cortex-themed-scroll"
         style={{
           flex: 1,
           overflowY: 'auto',
