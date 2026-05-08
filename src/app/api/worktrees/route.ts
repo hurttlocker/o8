@@ -13,7 +13,8 @@ export const dynamic = 'force-dynamic';
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { getWorktreeManager, getActiveWorktreeSummary } from '@/lib/worktree/launch';
-import type { RepoSetupEnvMode } from '@/lib/repos/types';
+import { isRepoWorkspaceIsolationPreference, type RepoSetupEnvMode } from '@/lib/repos/types';
+import type { WorkspaceIsolationPreference } from '@/lib/worktree/types';
 
 // ── GET: List worktrees + conflicts ──
 
@@ -49,6 +50,7 @@ interface CreateBody {
   skipSetup?: boolean;
   envMode?: RepoSetupEnvMode;
   envFiles?: string[];
+  isolationPreference?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -69,6 +71,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  let isolationPreference: WorkspaceIsolationPreference | undefined;
+  if (body.isolationPreference !== undefined) {
+    if (!isRepoWorkspaceIsolationPreference(body.isolationPreference)) {
+      return NextResponse.json({ error: 'Invalid isolationPreference.' }, { status: 400 });
+    }
+    isolationPreference = body.isolationPreference;
+  }
+
   try {
     const mgr = getWorktreeManager(body.repo);
     const worktree = await mgr.create({
@@ -80,6 +90,7 @@ export async function POST(req: NextRequest) {
       skipSetup: body.skipSetup,
       envMode: body.envMode,
       envFiles: body.envFiles,
+      isolationPreference,
     });
 
     return NextResponse.json({ worktree }, { status: 201 });

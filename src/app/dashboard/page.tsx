@@ -1221,6 +1221,7 @@ function DashboardInner() {
             baseBranch: currentBranch,
             managed: packet.runtime === 'claude-code',
             skipSetup: true,
+            isolationPreference: rootRepo.setup.workspaceIsolationPreference,
           }),
         });
         const payload = await response.json().catch(() => ({})) as { worktree?: WorktreeInfo; error?: string };

@@ -5,11 +5,15 @@
  * Designed to generalize to IsolationProvider (containers, VMs) in 2028.
  */
 
-import type { RepoSetupEnvMode } from '@/lib/repos/types';
+import type { RepoSetupEnvMode, RepoWorkspaceIsolationPreference } from '@/lib/repos/types';
 
 export type WorktreeStatus = 'creating' | 'setup' | 'ready' | 'active' | 'stale' | 'merging' | 'cleaning';
 
 export type AgentType = 'claude-code' | 'codex' | (string & {});
+
+export type WorkspaceIsolationKind = 'git-worktree' | 'apfs-cow-clone';
+
+export type WorkspaceIsolationPreference = RepoWorkspaceIsolationPreference;
 
 /**
  * Metadata for a single worktree.
@@ -39,6 +43,10 @@ export interface WorktreeInfo {
   dirtyFiles: string[];
   /** Whether Claude manages this worktree natively (--worktree flag) */
   claudeManaged: boolean;
+  /** Backing isolation implementation for this workspace */
+  isolationKind?: WorkspaceIsolationKind;
+  /** Ignored dependency/cache paths hydrated into this workspace */
+  hydrationPaths?: string[];
 }
 
 /**
@@ -79,6 +87,8 @@ export interface CreateWorktreeOptions {
   envMode?: RepoSetupEnvMode;
   /** Env files to copy/symlink when bootstrapping */
   envFiles?: string[];
+  /** Preferred workspace isolation implementation */
+  isolationPreference?: WorkspaceIsolationPreference;
 }
 
 /**
@@ -125,6 +135,12 @@ export interface WorktreeMetaEntry {
   createdAt: number;
   claudeManaged: boolean;
   taskName: string;
+  /** Git branch name for providers that are not visible in git worktree list */
+  branchName?: string;
   /** Explicit lifecycle status — preserved through inferStatus */
   status?: WorktreeStatus;
+  /** Backing isolation implementation. Missing means legacy git worktree. */
+  isolationKind?: WorkspaceIsolationKind;
+  /** Ignored dependency/cache paths hydrated into this workspace */
+  hydrationPaths?: string[];
 }

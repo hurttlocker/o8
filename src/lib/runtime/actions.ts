@@ -173,6 +173,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         skipSetup: payload.skipSetup,
         envMode: repoEntry?.setup.envMode,
         envFiles: repoEntry?.setup.envFiles,
+        isolationPreference: repoEntry?.setup.workspaceIsolationPreference,
       });
       if (launchWorktree?.worktree) {
         clearFetchUnreachable(repoPath);

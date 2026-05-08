@@ -19,7 +19,7 @@
  */
 
 import { WorktreeManager } from './manager';
-import type { AgentType, WorktreeInfo } from './types';
+import type { AgentType, WorktreeInfo, WorkspaceIsolationPreference } from './types';
 import type { RepoSetupEnvMode } from '@/lib/repos/types';
 
 // Cache managers per repo to avoid re-instantiating
@@ -72,6 +72,8 @@ export interface WorktreeLaunchOptions {
   envMode?: RepoSetupEnvMode;
   /** Env files to copy/symlink into the worktree */
   envFiles?: string[];
+  /** Preferred workspace isolation implementation */
+  isolationPreference?: WorkspaceIsolationPreference;
 }
 
 /**
@@ -123,6 +125,7 @@ export async function prepareLaunchWorktree(
     skipSetup: opts.skipSetup,
     envMode: opts.envMode,
     envFiles: opts.envFiles,
+    isolationPreference: opts.isolationPreference,
     managed: opts.agentType === 'claude-code' ? true : undefined,
   });
 

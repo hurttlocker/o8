@@ -26,6 +26,8 @@ export type {
   WorktreeInfo,
   WorktreeStatus,
   AgentType,
+  WorkspaceIsolationKind,
+  WorkspaceIsolationPreference,
   ConflictReport,
   ConflictEntry,
   CreateWorktreeOptions,
