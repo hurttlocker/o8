@@ -113,9 +113,62 @@ function RepoCardHeaderBase({
     },
   ];
   if (rowStatusLabel) {
+    // When the status is a blocker (env files missing, needs setup,
+    // worktree stale), make the pill clickable. Click → dispatches
+    // o8:resolve-blocker which the dashboard catches: focuses this
+    // repo and injects a draft message into the orchestrator chat
+    // explaining the issue so the user can ask the agent for help.
+    const isBlocker = showStatusInfo && Boolean(rowStatusExplanation);
+    const handleBlockerClick = (event: React.MouseEvent<HTMLElement>) => {
+      event.stopPropagation();
+      if (typeof window === 'undefined') return;
+      window.dispatchEvent(new CustomEvent('o8:resolve-blocker', {
+        detail: {
+          repoPath: repo.localPath,
+          repoName: repo.name,
+          explanation: rowStatusExplanation,
+          statusLabel: rowStatusLabel,
+        },
+      }));
+    };
     rowMetaSegments.push({
       key: 'status',
-      content: (
+      content: isBlocker ? (
+        <button
+          type="button"
+          onClick={handleBlockerClick}
+          title={`${rowStatusExplanation ?? ''} — click to ask the orchestrator`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            minWidth: 0,
+            color: rowStatusColor,
+            fontWeight: 600,
+            background: 'transparent',
+            borderWidth: 0,
+            padding: 0,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 'inherit',
+          }}
+        >
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {rowStatusLabel}
+          </span>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+            aria-hidden
+          >
+            <AlertCircle size={10} strokeWidth={2.1} />
+          </span>
+        </button>
+      ) : (
         <span
           style={{
             display: 'inline-flex',
@@ -130,21 +183,6 @@ function RepoCardHeaderBase({
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {rowStatusLabel}
           </span>
-          {showStatusInfo ? (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                cursor: 'help',
-              }}
-              title={rowStatusExplanation ?? undefined}
-              aria-label={rowStatusExplanation ?? undefined}
-            >
-              <AlertCircle size={10} strokeWidth={2.1} />
-            </span>
-          ) : null}
         </span>
       ),
     });

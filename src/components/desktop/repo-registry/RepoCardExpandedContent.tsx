@@ -200,9 +200,9 @@ function RepoCardExpandedContentBase({
           || (activeWorkspacePath && activeWorkspacePath.startsWith(repo.localPath + '/'));
         const orchestratorActive = Boolean(isActiveRepo && activeWorkspaceTabKind === 'orchestrator');
         const assistantActive = Boolean(isActiveRepo && activeWorkspaceTabKind === 'llm-chat');
-        const orchestratorStatus = orchestratorActive ? 'Focused' : isActiveRepo ? 'Available' : 'Idle';
+        const orchestratorStatus = orchestratorActive ? 'Focused' : isActiveRepo ? 'Open' : 'Idle';
         const orchestratorStatusColor = orchestratorActive ? '#22c55e' : 'var(--t-text-faint)';
-        const assistantStatus = assistantActive ? 'Focused' : isActiveRepo ? 'Available' : 'Idle';
+        const assistantStatus = assistantActive ? 'Focused' : isActiveRepo ? 'Open' : 'Idle';
         const assistantStatusColor = assistantActive ? '#22c55e' : 'var(--t-text-faint)';
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 4 }}>

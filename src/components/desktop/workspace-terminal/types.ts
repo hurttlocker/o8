@@ -32,6 +32,18 @@ export interface RegisteredRepo {
 export interface TerminalTab {
   id: string;
   label: string;
+  /**
+   * NAMING GOTCHA — read carefully:
+   *   - 'orchestrator'  → Fleet/Claude orchestrator tab (planning + dispatch)
+   *   - 'llm-chat'      → casual o8 Chat tab (the user-facing "Chat")
+   *   - 'chat'          → SINGLE-RUNTIME CLI session (Codex / Gemini / opencode).
+   *                       NOT the casual chat tab — that's 'llm-chat'.
+   *                       Confusing; left as-is to avoid a 75-site rename
+   *                       + persisted-state migration. Future cleanup:
+   *                       rename 'chat' → 'session'.
+   *   - 'terminal'      → tmux/PTY shell tab
+   *   - 'canvas'        → file/diff viewer tab
+   */
   kind: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator';
   tmuxSession: string | null;
   cliAgent?: string;
