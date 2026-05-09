@@ -239,6 +239,28 @@ export function ChevronDownIcon({ rotated }: { rotated?: boolean }) {
 
 // ── Settings Tab Button ──
 
+export function SettingsTabSectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 9.5,
+        fontWeight: 500,
+        color: RAMS_INK_QUIET,
+        textTransform: 'uppercase',
+        letterSpacing: '0.18em',
+        paddingTop: 14,
+        paddingRight: 14,
+        paddingBottom: 6,
+        paddingLeft: 14,
+        userSelect: 'none',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function TabButton({ label, icon, active, onClick, comingSoon = false }: {
   label: string;
   icon: React.ReactNode;

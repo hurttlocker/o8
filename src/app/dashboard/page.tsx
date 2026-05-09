@@ -30,7 +30,7 @@ import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
-import type { WorkspaceSidePanelRepo, WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
+import type { WorkspaceSidePanelRepo } from '@/components/desktop/WorkspaceSidePanel';
 import type { O8Tab } from '@/components/desktop/o8-panel/types';
 import {
   markDashboardScriptStart,
@@ -38,7 +38,6 @@ import {
   markDashboardInteractive,
 } from '@/lib/perf/dashboard-marks';
 import {
-  publishO8PanelToast,
   subscribeO8PanelFocus,
 } from '@/lib/events/o8-panel-focus';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
@@ -87,7 +86,6 @@ import {
   pathBelongsToRepoScope,
   repoSlugFromAgent,
   repoSlugFromRemote,
-  sameWorkspaceSidePanelRepo,
   sessionBelongsToRepoScope,
   summarizeLifecycleRecords,
 } from './utils';
@@ -120,7 +118,6 @@ const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage'
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
 const LazyCommandPalette = lazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })));
 const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })));
-const LazyWorkspaceSidePanel = lazy(() => import('@/components/desktop/WorkspaceSidePanel').then(m => ({ default: m.WorkspaceSidePanel })));
 const LazyO8Panel = lazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })));
 // #888/#895 — packet-mode right panel (Spec / Agent Overview / Changes).
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
@@ -279,8 +276,31 @@ function DashboardInner() {
   useEffect(() => {
     try { window.localStorage.setItem('o8:right-panel:kind', rightPanelKind); } catch { /* ignore */ }
   }, [rightPanelKind]);
-  const [rightWidth, setRightWidth] = useState(280);
-  const [o8Width, setO8Width] = useState(700);
+  const [rightWidth, setRightWidth] = useState(() => {
+    if (typeof window === 'undefined') return 280;
+    try {
+      const stored = Number(window.localStorage.getItem('o8:right-panel:width-chat') ?? 0);
+      if (Number.isFinite(stored) && stored >= MIN_RIGHT_PANEL_WIDTH && stored <= MAX_RIGHT_PANEL_WIDTH) return stored;
+    } catch { /* ignore */ }
+    return 280;
+  });
+  // Default 440px is a balance: wide enough for PRs/Activity content but
+  // doesn't eat the workspace on a 1280px laptop viewport. User resizes
+  // persist via the o8:right-panel:width-o8 key.
+  const [o8Width, setO8Width] = useState(() => {
+    if (typeof window === 'undefined') return 440;
+    try {
+      const stored = Number(window.localStorage.getItem('o8:right-panel:width-o8') ?? 0);
+      if (Number.isFinite(stored) && stored >= MIN_O8_PANEL_WIDTH && stored <= MAX_O8_PANEL_WIDTH) return stored;
+    } catch { /* ignore */ }
+    return 440;
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('o8:right-panel:width-chat', String(rightWidth)); } catch { /* ignore */ }
+  }, [rightWidth]);
+  useEffect(() => {
+    try { window.localStorage.setItem('o8:right-panel:width-o8', String(o8Width)); } catch { /* ignore */ }
+  }, [o8Width]);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
@@ -298,12 +318,7 @@ function DashboardInner() {
   const [o8CommitRepoSlug, setO8CommitRepoSlug] = useState<string | null>(null);
   const rightPanelMode = 'workspace' as const;
   const setRightPanelMode = (_mode: 'chat' | 'workspace') => { /* v1: right panel is always workspace */ };
-  const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
-  const [workspaceSidePanelRepoPath, setWorkspaceSidePanelRepoPath] = useState<string | null>(null);
-  const [workspaceSidePanelRepoContext, setWorkspaceSidePanelRepoContext] = useState<WorkspaceSidePanelRepo | null>(null);
-  const [workspaceSidePanelActivationKey, setWorkspaceSidePanelActivationKey] = useState(0);
   const [workspaceChatTargetKeyByRepoPath, setWorkspaceChatTargetKeyByRepoPath] = useState<Record<string, string>>({});
-  const lastWorkspacePanelViewRef = useRef<'diff'>('diff');
 
   useEffect(() => {
     try {
@@ -412,14 +427,12 @@ function DashboardInner() {
   // Workspace + side-panel chunks are deferred off the critical path so the
   // initial render is small. We then warm them on the first idle frame so
   // when the user actually clicks (or the right rail mounts), the chunk is
-  // already parsed. WorkspaceSidePanel + O8Panel are both candidates because
-  // the right rail starts open by default.
+  // already parsed.
   useEffect(() => {
     const prefetch = () => {
       import('@/components/desktop/WorkspaceTerminal');
       import('@/components/desktop/Canvas');
       import('@/components/desktop/workspace-terminal/OrchestratorTab');
-      import('@/components/desktop/WorkspaceSidePanel');
       import('@/components/desktop/O8Panel');
     };
     if (typeof requestIdleCallback === 'undefined') {
@@ -742,64 +755,6 @@ function DashboardInner() {
     () => thoughtsMissionState.packets.filter((packet) => !archivedLaneView.packetIds.has(packet.id)),
     [thoughtsMissionState.packets, archivedLaneView.packetIds],
   );
-  const getWorkspaceSidePanelRepoBySlug = useCallback((repoSlug?: string | null): WorkspaceSidePanelRepo | null => {
-    if (!repoSlug) return globalRepoEntry ? {
-      name: globalRepoEntry.name,
-      localPath: globalRepoEntry.localPath,
-      branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
-      readiness: globalRepoEntry.readiness ?? null,
-      remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
-    } : null;
-
-    const matched = globalRepoEntries.find((entry) => repoSlugFromRemote(entry.remoteUrl) === repoSlug) ?? null;
-    if (!matched) return null;
-    return {
-      name: matched.name,
-      localPath: matched.localPath,
-      branch: matched.readiness?.currentBranch ?? matched.defaultBranch,
-      readiness: matched.readiness ?? null,
-      remoteUrl: matched.remoteUrl ?? undefined,
-    };
-  }, [globalRepoBranch, globalRepoEntries, globalRepoEntry]);
-  const getWorkspaceSidePanelRepoByPath = useCallback((repoPath?: string | null): WorkspaceSidePanelRepo | null => {
-    if (!repoPath) {
-      return globalRepoEntry ? {
-        name: globalRepoEntry.name,
-        localPath: globalRepoEntry.localPath,
-        branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
-        readiness: globalRepoEntry.readiness ?? null,
-        remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
-      } : null;
-    }
-
-    const matched = workspaceScopeEntries.find((entry) => entry.localPath === repoPath) ?? null;
-    if (!matched) return null;
-    return {
-      name: matched.name,
-      localPath: matched.localPath,
-      branch: matched.branch ?? matched.readiness?.currentBranch ?? null,
-      readiness: matched.readiness ?? null,
-      remoteUrl: matched.remoteUrl ?? undefined,
-    };
-  }, [globalRepoBranch, globalRepoEntry, workspaceScopeEntries]);
-  const openWorkspaceSidePanel = useCallback((
-    view: WorkspaceSidePanelView,
-    repo?: WorkspaceSidePanelRepo | null,
-  ) => {
-    setChatVisible(true);
-    setRightPanelMode('workspace');
-    setWorkspaceSidePanelView(view);
-    setWorkspaceSidePanelRepoPath(repo?.localPath ?? globalRepoEntry?.localPath ?? null);
-    setWorkspaceSidePanelRepoContext(repo ?? (globalRepoEntry ? {
-      name: globalRepoEntry.name,
-      localPath: globalRepoEntry.localPath,
-      branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
-      readiness: globalRepoEntry.readiness ?? null,
-      remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
-    } : null));
-    setWorkspaceSidePanelActivationKey((value) => value + 1);
-  }, [globalRepoBranch, globalRepoEntry]);
-
   const {
     activeSurfaceRepoPath,
     activeWorkspaceChatTargetKey,
@@ -838,73 +793,11 @@ function DashboardInner() {
     tileLayout,
     workspaceChatTargetKeyByRepoPath,
     workspaceChatTargets,
-    workspaceSidePanelRepoPath,
+    workspaceSidePanelRepoPath: null,
     workspaceTerminalHandlesRef,
     workspaceTerminalPreferredRepo,
     waitForWorkspaceTerminalTarget,
   });
-
-  const workspaceSidePanelRepo = useMemo<WorkspaceSidePanelRepo | null>(() => {
-    // Resolve the target path from the explicit path first, then the stored context.
-    const targetPath = workspaceSidePanelRepoPath ?? workspaceSidePanelRepoContext?.localPath ?? null;
-    if (!targetPath) return null;
-
-    // Validate the target path against the LIVE scope + registry before returning
-    // anything. When a repo is removed from the workspace, the stored context may
-    // still point to it — returning that stale context would make the Changes tab
-    // keep rendering the removed repo's diff. Always trust live data first.
-    const scopeMatch = workspaceScopeEntries.find((entry) => entry.localPath === targetPath) ?? null;
-    const globalMatch = globalRepoEntry?.localPath === targetPath ? globalRepoEntry : null;
-    if (!scopeMatch && !globalMatch) {
-      return null;
-    }
-
-    // If the caller passed an explicit context (e.g. a lane-scoped repo with a
-    // custom branch), honour it now that we've confirmed the path is still live.
-    if (workspaceSidePanelRepoContext && workspaceSidePanelRepoContext.localPath === targetPath) {
-      return workspaceSidePanelRepoContext;
-    }
-
-    if (scopeMatch) {
-      return {
-        name: scopeMatch.name,
-        localPath: scopeMatch.localPath,
-        branch: scopeMatch.branch ?? scopeMatch.readiness?.currentBranch ?? null,
-        readiness: scopeMatch.readiness ?? null,
-        remoteUrl: scopeMatch.remoteUrl ?? undefined,
-        isWorktree: scopeMatch.isWorktree ?? undefined,
-        worktreeStatus: scopeMatch.worktreeStatus ?? undefined,
-      };
-    }
-
-    return {
-      name: globalMatch!.name,
-      localPath: globalMatch!.localPath,
-      branch: globalMatch!.readiness?.currentBranch ?? globalRepoBranch,
-      readiness: globalMatch!.readiness ?? null,
-      remoteUrl: globalMatch!.remoteUrl ?? undefined,
-    };
-  }, [globalRepoBranch, globalRepoEntry, workspaceScopeEntries, workspaceSidePanelRepoContext, workspaceSidePanelRepoPath]);
-
-  const workspaceSidePanelAgentContext = useMemo(() => {
-    if (!workspaceSidePanelRepo?.isWorktree) return null;
-    const agent = parsedAgents.find(
-      (a) => (a.workspace ?? a.runtimeSurface?.cwd) === workspaceSidePanelRepo.localPath,
-    );
-    if (!agent) return null;
-    return {
-      branch: workspaceSidePanelRepo.branch ?? 'unknown',
-      fileCount: agent.localDiff?.changedFiles ?? 0,
-      agentLabel: agent.name ?? agent.sessionKey?.split(':').pop()?.slice(0, 12) ?? 'Agent',
-      agentRunning: agent.status === 'running',
-    };
-  }, [parsedAgents, workspaceSidePanelRepo]);
-
-  useEffect(() => {
-    if (workspaceSidePanelView === 'diff') {
-      lastWorkspacePanelViewRef.current = workspaceSidePanelView;
-    }
-  }, [workspaceSidePanelView]);
 
   // Cmd/Ctrl+J toggles the orchestrator chat tile. Global shortcut,
   // ignored while the user is typing in an input.
@@ -921,9 +814,8 @@ function DashboardInner() {
     const unsubscribe = subscribeO8PanelFocus((request) => {
       const panelOpen = chatVisible && rightPanelKind === 'o8';
       if (!panelOpen) {
-        publishO8PanelToast({
-          message: 'Open the right panel to view this change.',
-        });
+        // Panel closed — silently drop the focus request. We used to
+        // publish a toast here but no consumer ever subscribed.
         return;
       }
       const requestedTab = normalizeO8ActiveTab(request.tab);
@@ -1004,13 +896,6 @@ function DashboardInner() {
 
     if (pathBelongsToRepoScope(activeWorkspace, removedRepoPath)) {
       setActiveWorkspace(undefined);
-    }
-
-    if (pathBelongsToRepoScope(workspaceSidePanelRepoPath, removedRepoPath)) {
-      setWorkspaceSidePanelRepoPath(null);
-      setWorkspaceSidePanelRepoContext(null);
-      setWorkspaceSidePanelView('blank');
-      setWorkspaceSidePanelActivationKey((value) => value + 1);
     }
 
     if (pathBelongsToRepoScope(o8RepoPathOverride, removedRepoPath)) {
@@ -1120,7 +1005,6 @@ function DashboardInner() {
     workspaceChatSessionsByTileId,
     workspaceLifecycleRecords,
     o8RepoPathOverride,
-    workspaceSidePanelRepoPath,
   ]);
 
   useEffect(() => {
@@ -1335,14 +1219,6 @@ function DashboardInner() {
       setO8RepoPathOverride(targetRepo.localPath);
       setO8SelectedFile(null);
       setO8SelectedFileRepoPath(null);
-      setWorkspaceSidePanelRepoPath(targetRepo.localPath);
-      setWorkspaceSidePanelRepoContext({
-        name: targetRepo.name,
-        localPath: targetRepo.localPath,
-        branch: targetRepo.readiness?.currentBranch ?? targetRepo.defaultBranch ?? 'main',
-        readiness: targetRepo.readiness ?? null,
-        remoteUrl: targetRepo.remoteUrl ?? undefined,
-      });
     }
   }, [globalRepoEntries, handleSelectRegisteredRepo]);
 
@@ -1372,26 +1248,8 @@ function DashboardInner() {
         label: sessionKey.split(':').pop()?.slice(0, 12) ?? 'Session',
       });
 
-      // Scope workspace panel to the agent's worktree/workspace
-      const agent = parsedAgents.find((a) => a.sessionKey === sessionKey);
-      const agentWorkspace = agent?.workspace ?? agent?.runtimeSurface?.cwd ?? null;
-      if (agentWorkspace) {
-        const scopeEntry = workspaceScopeEntries.find((entry) => entry.localPath === agentWorkspace);
-        if (scopeEntry) {
-          setWorkspaceSidePanelRepoPath(scopeEntry.localPath);
-          setWorkspaceSidePanelRepoContext({
-            name: scopeEntry.name ?? scopeEntry.localPath.split('/').pop() ?? scopeEntry.localPath,
-            localPath: scopeEntry.localPath,
-            branch: scopeEntry.branch ?? null,
-            readiness: scopeEntry.readiness ?? null,
-            remoteUrl: scopeEntry.remoteUrl,
-            isWorktree: scopeEntry.isWorktree,
-            worktreeStatus: scopeEntry.worktreeStatus ?? null,
-          });
-        }
-      }
     })();
-  }, [parsedAgents, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
+  }, [waitForWorkspaceTerminalTarget]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     setRightPanelKind('review');
@@ -1479,6 +1337,35 @@ function DashboardInner() {
     return () => { window.removeEventListener('o8:open-pr', handleOpenPr); };
   }, [handleReviewPR]);
 
+  // Bridge for "Needs attention" clicks on a repo card. The status pill
+  // dispatches `o8:resolve-blocker` with the repo + explanation. We
+  // focus the affected repo and inject a draft into the orchestrator
+  // chat composer so the user can ask the agent for help. Does NOT
+  // auto-send — user reviews + presses send.
+  useEffect(() => {
+    const handleResolveBlocker = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        repoPath?: string;
+        repoName?: string;
+        explanation?: string;
+        statusLabel?: string;
+      }>).detail;
+      if (!detail?.repoPath) return;
+      // Focus this repo as the active workspace.
+      setActiveWorkspace(detail.repoPath);
+      // Compose a draft message — short and direct.
+      const repoLabel = detail.repoName ?? detail.repoPath.split('/').pop() ?? 'this repo';
+      const issue = (detail.explanation ?? detail.statusLabel ?? 'has an unspecified blocker').trim();
+      const draftText = `\`${repoLabel}\` needs attention: ${issue}\n\nHelp me resolve this — read the repo, figure out what's missing or misconfigured, and propose a concrete fix.`;
+      setThoughtsDraftInjection({
+        id: `blocker-${Date.now()}`,
+        text: draftText,
+      });
+    };
+    window.addEventListener('o8:resolve-blocker', handleResolveBlocker);
+    return () => { window.removeEventListener('o8:resolve-blocker', handleResolveBlocker); };
+  }, [setActiveWorkspace, setThoughtsDraftInjection]);
+
   const handleExpandWorkspace = useCallback((workspace: string, repo: string | null) => {
     setActiveWorkspace(workspace);
     // Only open README tab if workspace actually has a README
@@ -1498,9 +1385,9 @@ function DashboardInner() {
       .catch(() => { /* no README, skip */ });
   }, [openCanvasTab, setActiveWorkspace]);
 
-  const handleOpenGitLog = useCallback((workspace?: string) => {
-    openWorkspaceSidePanel('git-log', getWorkspaceSidePanelRepoByPath(workspace));
-  }, [getWorkspaceSidePanelRepoByPath, openWorkspaceSidePanel]);
+  const handleOpenGitLog = useCallback((_workspace?: string) => {
+    /* git-log surface deferred — was wired to dead WorkspaceSidePanel */
+  }, []);
 
   const handleOpenAuditLog = useCallback(() => {
     const tab: CanvasTab = {
@@ -1538,9 +1425,8 @@ function DashboardInner() {
   const handleToggleWorkspacePanel = useCallback(() => {
     // Open the narrow workspace side panel (Changes / Git Log).
     setRightPanelKind('review');
-    const nextView = workspaceSidePanelView === 'diff' ? 'diff' : lastWorkspacePanelViewRef.current;
-    openWorkspaceSidePanel(nextView, workspaceSidePanelRepo);
-  }, [openWorkspaceSidePanel, workspaceSidePanelRepo, workspaceSidePanelView]);
+    setChatVisible(true);
+  }, []);
 
   const handleToggleO8Panel = useCallback(() => {
     if (chatVisible && rightPanelKind === 'o8') {
@@ -1566,66 +1452,6 @@ function DashboardInner() {
     setChatVisible(true);
     setO8ActiveTab('browser');
   }, []);
-
-  useEffect(() => {
-    if (rightPanelMode !== 'workspace') return;
-    // [workspace-side-panel] Skip auto-sync when panel is in blank/idle state —
-    // repo context will be set explicitly when a view is opened via openWorkspaceSidePanel.
-    if (workspaceSidePanelView === 'blank') return;
-
-    // Lane-scoped context: when the active lane has branch info, use it
-    // so the review rail shows the selected lane's diff, not main's.
-    // BUT only when the lane's repo matches the user's sidebar focus —
-    // otherwise the lane is stale relative to the explicit sidebar choice.
-    let nextRepoContext: WorkspaceSidePanelRepo | null = null;
-    const sidebarRepoPath = globalRepoEntry?.localPath ?? null;
-    const laneMatchesSidebar = activeWorkspaceLane?.repoPath
-      && (!sidebarRepoPath || activeWorkspaceLane.repoPath === sidebarRepoPath);
-    if (laneMatchesSidebar && activeWorkspaceLane?.repoPath && activeWorkspaceLane.branch) {
-      const laneName = activeWorkspaceLane.repoPath.split('/').pop() ?? 'repo';
-      nextRepoContext = {
-        name: laneName,
-        localPath: activeWorkspaceLane.repoPath,
-        branch: activeWorkspaceLane.branch,
-        readiness: null,
-        isWorktree: activeWorkspaceLane.branch !== 'main',
-      };
-    }
-
-    // Fall through to terminal/global when no lane branch context
-    if (!nextRepoContext) {
-      nextRepoContext = workspaceTerminalPreferredRepo
-        ?? (globalRepoEntry ? {
-          name: globalRepoEntry.name,
-          localPath: globalRepoEntry.localPath,
-          branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
-          readiness: globalRepoEntry.readiness ?? null,
-          remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
-        } : null);
-    }
-
-    const nextRepoPath = nextRepoContext?.localPath
-      ?? activeSurfaceRepoPath
-      ?? workspaceTerminalPreferredRepo?.localPath
-      ?? globalRepoEntry?.localPath
-      ?? null;
-    setWorkspaceSidePanelRepoPath((current) => (
-      current === nextRepoPath ? current : nextRepoPath
-    ));
-    setWorkspaceSidePanelRepoContext((current) => (
-      sameWorkspaceSidePanelRepo(current, nextRepoContext) ? current : nextRepoContext
-    ));
-  }, [
-    activeWorkspaceLane?.branch,
-    activeWorkspaceLane?.repoPath,
-    activeSurfaceRepoPath,
-    globalRepoBranch,
-    globalRepoEntry,
-    rightPanelMode,
-    workspaceScopeEntries,
-    workspaceSidePanelView,
-    workspaceTerminalPreferredRepo,
-  ]);
 
   const handleSelectWorkspaceChatTarget = useCallback((sessionKey: string) => {
     setWorkspaceChatTargetKeyByRepoPath((current) => {
@@ -2431,7 +2257,6 @@ function DashboardInner() {
     handleSplitTile,
     handleThoughtsMissionStateChange,
     launchOrchestrationPacket,
-    openWorkspaceSidePanel,
     orchestratorWorkspaceTargets,
     parsedAgents,
     registerContextualPanelHandle,
@@ -2446,7 +2271,6 @@ function DashboardInner() {
     setWorkspaceChatSessionByTileId,
     setWorkspaceChatSessionsByTileId,
     setWorkspaceLaneByTileId,
-    setWorkspaceSidePanelRepoContext,
     sendAgentKill,
     sendTerminalAttach,
     sendTerminalCreate,
@@ -2481,7 +2305,6 @@ function DashboardInner() {
     handleOpenCI,
     handleOpenGitLog,
     handleThoughtsMissionStateChange,
-    openWorkspaceSidePanel,
     parsedAgents,
     registerContextualPanelHandle,
     registerWorkspaceTerminalHandle,
@@ -2496,7 +2319,6 @@ function DashboardInner() {
     setWorkspaceChatSessionByTileId,
     setWorkspaceChatSessionsByTileId,
     setWorkspaceLaneByTileId,
-    setWorkspaceSidePanelRepoContext,
     sendAgentKill,
     sendTerminalAttach,
     sendTerminalCreate,

@@ -1,5 +1,4 @@
 import type { DetectionResult } from '@/components/desktop/setup-wizard/types';
-import type { WorkspaceSidePanelRepo } from '@/components/desktop/WorkspaceSidePanel';
 import type { CommandPaletteStateTone } from '@/components/shared/UniversalSearch';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type {
@@ -451,16 +450,6 @@ export function summarizeLifecycleRecords(records: WorkspaceLifecycleRecordView[
     archivedCount: records.filter((record) => Boolean(record.archivedAt)).length,
     nextAttentionWorkspaceId: nextAttention?.id ?? null,
   };
-}
-
-export function sameWorkspaceSidePanelRepo(left: WorkspaceSidePanelRepo | null, right: WorkspaceSidePanelRepo | null) {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return left.localPath === right.localPath
-    && (left.branch ?? null) === (right.branch ?? null)
-    && Boolean(left.isWorktree) === Boolean(right.isWorktree)
-    && (left.worktreeStatus ?? null) === (right.worktreeStatus ?? null)
-    && (left.remoteUrl ?? null) === (right.remoteUrl ?? null);
 }
 
 export function collectRepoScopedTileIds(

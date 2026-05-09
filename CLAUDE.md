@@ -178,36 +178,44 @@ The Rust shell runs pre-flight checks before spawning any Node process:
 
 `src/lib/cortex/client.ts` wraps the `~/bin/cortex` CLI binary. Three client variants: `LocalCortexClient` (exec), `CloudCortexClient` (HTTPS), `HybridCortexClient`.
 
-### Orchestrator Architecture (April 2026 refactor)
+### Orchestrator Architecture (current — May 2026)
 
 **The Orchestrator is a TAB inside WorkspaceTerminal, not a floating tile.**
 
-There are exactly two tabs in a fresh workspace: `Orchestrator` and `Assistant`. Both render inside `WorkspaceTerminal` via the `kind` field on `TerminalTab` (see `workspace-terminal/types.ts`). Clicking either takes over the full workspace area.
+A fresh workspace has two default tabs: `Orchestrator` (`kind: 'orchestrator'`) and the assistant chat (`kind: 'llm-chat'`). Both render inside `WorkspaceTerminal`. The full set of tab kinds lives in `workspace-terminal/types.ts`: `'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator'`. ⚠️ Naming gotcha: `kind: 'chat'` is a SINGLE-RUNTIME CLI session (Codex / Gemini / opencode), NOT the casual chat tab — the casual chat is `kind: 'llm-chat'`.
 
-The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a three-pane layout:
+The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a two-pane layout:
 
 ```
-┌──────────┬────────────────────┬──────────┐
-│ History  │      Chat          │ Mission  │
-│ (260px)  │  ThoughtsChatPanel │ (340px)  │
-│ (toggle) │                    │ (toggle) │
-└──────────┴────────────────────┴──────────┘
+┌──────────┬───────────────────────┐
+│ History  │      Chat             │
+│ (260px)  │  ThoughtsChatPanel    │
+│ (toggle) │  + SessionVisualizer  │
+└──────────┴───────────────────────┘
 ```
 
 - **Left sidebar**: `OrchestratorHistorySidebar.tsx` — past orchestrator threads grouped by day, hover-reveal trash-icon delete. Collapsed by default, `cortex-ide:orchestrator:history-open` localStorage key.
-- **Center**: `ThoughtsChatPanel` with `emptyStateOverride={<OrchestratorEmptyState/>}` — the empty state shows the greeting + 4 quick-action cards.
-- **Right sidebar**: `ThoughtsMissionPanel` re-used as-is — Mission Control, Open Issues, Packet cards. Collapsed by default, `cortex-ide:orchestrator:mission-open` localStorage key.
+- **Center**: `ThoughtsChatPanel` with `emptyStateOverride={<OrchestratorEmptyState/>}` — the empty state shows the greeting + 4 quick-action cards. When agent sessions exist, `SessionVisualizer` renders a horizontal strip above the chat.
 - **Permission chip** (Full access / Read-only) persists per-tab to localStorage `cortex-ide:orchestrator-permission:tab:<tabId>`.
 
-**Retired tile kinds** (do not reintroduce): `thoughts`, `mission-control`, `orchestrator-history`. The old floating tile versions were deleted: `OrchestratorChatTile`, `MissionControlTile`, `OrchestratorHistoryTile`, `orchestrator-tile-bus`.
+**Mission Control / Packets / Issues** no longer render as a right-side panel inside the Orchestrator tab. They live distributed across:
+- **O8Panel right side** (`O8Panel.tsx`) — Activity tab shows recent commits / PRs / deployments. Inbox tab. PRs tab routes to `PrPanel`. Pulse / Browser / o8.md / Workspace round out the 7 right-panel tabs.
+- **Left sidebar — `LeftPanelProjectFocus`** — AgentsTab inside the project-focus drawer surfaces live + archived packets per repo. Click a project name OR a repo name to open this drawer.
+- **Mission state itself** lives in `OrchestratorDataProvider` (data flow below) — the right-side ThoughtsMissionPanel that used to render it is **deleted**. Don't reintroduce.
+
+**Retired surfaces** (do not reintroduce):
+- Tile kinds `thoughts`, `mission-control`, `orchestrator-history`.
+- Components `OrchestratorChatTile`, `MissionControlTile`, `OrchestratorHistoryTile`, `orchestrator-tile-bus`, `ThoughtsMissionPanel`, `WorkspaceSidePanel` (deleted May 2026 — was zombie code with state-machine wiring around it).
 
 **TILE_LAYOUT_VERSION is 4.** Any persisted layout with the retired kinds gets migrated to a plain `terminal` leaf via `migrateNode()` in `lib/tiles/operations.ts`. Bump the version if you add another breaking change.
 
-**Data flow** — `OrchestratorDataProvider` (`components/desktop/orchestrator-data-context.tsx`) sits in `dashboard/page.tsx` and exposes `{ agents, missionState, workspaceTargets, onMissionStateChange, onLaunchPacket, draftInjection }`. The OrchestratorTab consumes via `useOrchestratorData()` — this avoids prop-drilling through WorkspaceTerminal.
+**Data flow** — `OrchestratorDataProvider` (`components/desktop/orchestrator-data-context.tsx`) sits in `dashboard/page.tsx` and exposes `{ agents, missionState, workspaceTargets, onMissionStateChange, onLaunchPacket, draftInjection }`. Consumers (OrchestratorTab, AgentPanel, PacketCard, etc.) consume via `useOrchestratorData()` — avoids prop-drilling.
 
 **NavRail discipline** — the left nav rail no longer carries orchestrator-related launchers. The "small panels" (tile layer) are reserved for the global terminal (`contextual-panel` kind). Do not add a Lightbulb/Rocket/Clock back to the NavRail.
 
-**Packet cards use Issues-style rows.** When a packet is expanded in Mission Control, metadata (Summary / Runtime / Repo / Branch) renders as clickable rows with uppercase labels + values + chevrons. Click to inline-edit (textarea/input) or open a floating popover (runtime/repo). No native `<select>` or `<input>` boxes in the packet card — they read as chunky bubbles against the Issues density.
+**O8 right-panel default width** is 440px, persisted via `o8:right-panel:width-o8` localStorage key. Do not raise the default above 480px — it eats the workspace center on narrow viewports.
+
+**Packet cards use Issues-style rows.** When a packet is expanded (in AgentsTab or anywhere packets surface), metadata (Summary / Runtime / Repo / Branch) renders as clickable rows with uppercase labels + values + chevrons. Click to inline-edit (textarea/input) or open a floating popover (runtime/repo). No native `<select>` or `<input>` boxes in the packet card — they read as chunky bubbles against the Issues density.
 
 ### Key Files (largest, most active)
 
@@ -216,12 +224,15 @@ The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a three-pane 
 | `src/app/dashboard/page.tsx` | Main layout orchestrator. Wraps TileContainer in `OrchestratorDataProvider`. |
 | `src/components/desktop/AgentPanel.tsx` | Agent fleet view: repo-grouped cards, status groups, activity feed, issues, PRs, CI, deploys. |
 | `src/components/desktop/LLMChat.tsx` | Chat panel with LLM conversation (the **Assistant** tab). |
-| `src/components/desktop/workspace-terminal/OrchestratorTab.tsx` | The **Orchestrator** tab — three-pane layout with collapsible History + Mission sidebars. |
+| `src/components/desktop/workspace-terminal/OrchestratorTab.tsx` | The **Orchestrator** tab — two-pane layout: History sidebar (collapsible) + chat body. |
 | `src/components/desktop/OrchestratorEmptyState.tsx` | Empty-state greeting + 4 quick-action cards for the Orchestrator. |
 | `src/components/desktop/OrchestratorHistorySidebar.tsx` | Left sidebar — past orchestrator threads with delete. |
 | `src/components/desktop/SessionVisualizer.tsx` | Horizontal strip of active agent sessions, shown inside the Orchestrator tab when agents exist. |
 | `src/components/desktop/thoughts/ThoughtsChatPanel.tsx` | Chat transcript + composer for the orchestrator and CLI lanes. Supports `emptyStateOverride` + `fillInput`/`sendNow` imperative methods. |
-| `src/components/desktop/thoughts/ThoughtsMissionPanel.tsx` | Mission Control — framed input, Open Issues, Issues-style packet cards with inline-edit rows. |
+| `src/components/desktop/O8Panel.tsx` | Right-side wide panel — 7 tabs (Pulse / Workspace / Browser / PRs / Inbox / Activity / o8.md). Default width 440px, resizable. |
+| `src/components/desktop/pr-panel/PrPanel.tsx` | Cursor-style PR review surface — header + tabs (Changes / Checks / Commits / Reviews). Mounted inside O8Panel's PRs tab. |
+| `src/components/desktop/repo-focus/LeftPanelProjectFocus.tsx` | Project drawer in the left sidebar — surfaces AgentsTab (live + archived packets), Context, Spec, Files. |
+| `src/components/desktop/dictation/DictationHost.tsx` | Push-to-talk voice input — mounted at dashboard level. Hosts the pill overlay + Ctrl+Z hold shortcut. Mic button lives next to Send in the composer. |
 | `src/components/desktop/Canvas.tsx` | Bottom workspace: issue viewer, transcript viewer, file viewer, timeline. |
 | `src/ws-server.ts` | WebSocket multiplexer for mobile real-time data. |
 
