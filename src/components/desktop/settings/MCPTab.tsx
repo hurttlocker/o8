@@ -65,6 +65,8 @@ interface McpConfigResponse {
 }
 
 type Target = 'claude-desktop' | 'claude-code';
+type ExternalTarget = 'hermes' | 'openclaw';
+type AnyTarget = Target | ExternalTarget;
 
 interface ClaudeTargetStatus {
   target: Target;
@@ -76,14 +78,24 @@ interface ClaudeTargetStatus {
   size: number;
 }
 
+interface ExternalTargetStatus {
+  target: ExternalTarget;
+  installed: boolean;
+  cliPath: string | null;
+  registered: boolean;
+  hint?: string;
+}
+
 export function MCPTab() {
   const [data, setData] = useState<McpConfigResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [desktopStatus, setDesktopStatus] = useState<ClaudeTargetStatus | null>(null);
   const [codeStatus, setCodeStatus] = useState<ClaudeTargetStatus | null>(null);
-  const [installing, setInstalling] = useState<Target | null>(null);
-  const [installNote, setInstallNote] = useState<{ target: Target; message: string; ok: boolean } | null>(null);
+  const [hermesStatus, setHermesStatus] = useState<ExternalTargetStatus | null>(null);
+  const [openclawStatus, setOpenclawStatus] = useState<ExternalTargetStatus | null>(null);
+  const [installing, setInstalling] = useState<AnyTarget | null>(null);
+  const [installNote, setInstallNote] = useState<{ target: AnyTarget; message: string; ok: boolean } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -110,7 +122,24 @@ export function MCPTab() {
     }
   }, []);
 
-  useEffect(() => { void load(); void loadClaudeStatus(); }, [load, loadClaudeStatus]);
+  const loadExternalStatus = useCallback(async () => {
+    try {
+      const [hermes, openclaw] = await Promise.all([
+        fetch('/api/setup/external-client?target=hermes').then((r) => r.json() as Promise<ExternalTargetStatus>),
+        fetch('/api/setup/external-client?target=openclaw').then((r) => r.json() as Promise<ExternalTargetStatus>),
+      ]);
+      setHermesStatus(hermes);
+      setOpenclawStatus(openclaw);
+    } catch {
+      // Silent — fall back to "not installed" rendering.
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    void loadClaudeStatus();
+    void loadExternalStatus();
+  }, [load, loadClaudeStatus, loadExternalStatus]);
 
   const installToClaude = useCallback(async (target: Target) => {
     setInstalling(target);
@@ -138,6 +167,60 @@ export function MCPTab() {
       setInstalling(null);
     }
   }, [loadClaudeStatus]);
+
+  const installExternal = useCallback(async (target: ExternalTarget) => {
+    setInstalling(target);
+    setInstallNote(null);
+    try {
+      const res = await fetch('/api/setup/external-client', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      });
+      const body = await res.json() as { ok: boolean; detail?: string; error?: string };
+      if (res.ok && body.ok) {
+        setInstallNote({ target, message: body.detail || 'Installed.', ok: true });
+        await loadExternalStatus();
+      } else {
+        setInstallNote({ target, message: body.error || body.detail || 'Failed to install.', ok: false });
+      }
+    } catch (e) {
+      setInstallNote({
+        target,
+        message: e instanceof Error ? e.message : 'Request failed.',
+        ok: false,
+      });
+    } finally {
+      setInstalling(null);
+    }
+  }, [loadExternalStatus]);
+
+  const removeExternal = useCallback(async (target: ExternalTarget) => {
+    setInstalling(target);
+    setInstallNote(null);
+    try {
+      const res = await fetch('/api/setup/external-client', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, remove: true }),
+      });
+      const body = await res.json() as { ok: boolean; detail?: string; error?: string };
+      if (res.ok && body.ok) {
+        setInstallNote({ target, message: body.detail || 'Removed.', ok: true });
+        await loadExternalStatus();
+      } else {
+        setInstallNote({ target, message: body.error || body.detail || 'Failed.', ok: false });
+      }
+    } catch (e) {
+      setInstallNote({
+        target,
+        message: e instanceof Error ? e.message : 'Request failed.',
+        ok: false,
+      });
+    } finally {
+      setInstalling(null);
+    }
+  }, [loadExternalStatus]);
 
   const removeFromClaude = useCallback(async (target: Target) => {
     setInstalling(target);
@@ -307,15 +390,45 @@ export function MCPTab() {
         />
       </section>
 
-      {/* 03 — EXTERNAL SERVERS */}
+      {/* 03 — HERMES AGENT */}
       <section style={{ marginBottom: 28 }}>
-        <SectionLabel number="03">EXTERNAL SERVERS</SectionLabel>
+        <SectionLabel number="03">HERMES AGENT</SectionLabel>
+        <ExternalClientRow
+          target="hermes"
+          status={hermesStatus}
+          installing={installing === 'hermes'}
+          disabled={!ready}
+          note={installNote?.target === 'hermes' ? installNote : null}
+          onInstall={() => { void installExternal('hermes'); }}
+          onRemove={() => { void removeExternal('hermes'); }}
+          restartHint="Run /reload-mcp inside hermes to load the o8 tools."
+        />
+      </section>
+
+      {/* 04 — OPENCLAW */}
+      <section style={{ marginBottom: 28 }}>
+        <SectionLabel number="04">OPENCLAW</SectionLabel>
+        <ExternalClientRow
+          target="openclaw"
+          status={openclawStatus}
+          installing={installing === 'openclaw'}
+          disabled={!ready}
+          note={installNote?.target === 'openclaw' ? installNote : null}
+          onInstall={() => { void installExternal('openclaw'); }}
+          onRemove={() => { void removeExternal('openclaw'); }}
+          restartHint="Restart your OpenClaw gateway / agent session to pick up the new server."
+        />
+      </section>
+
+      {/* 05 — EXTERNAL SERVERS */}
+      <section style={{ marginBottom: 28 }}>
+        <SectionLabel number="05">EXTERNAL SERVERS</SectionLabel>
         <ExternalMcpServersSection />
       </section>
 
-      {/* 04 — DIAGNOSTICS */}
+      {/* 06 — DIAGNOSTICS */}
       <section style={{ marginBottom: 24 }}>
-        <SectionLabel number="04">DIAGNOSTICS</SectionLabel>
+        <SectionLabel number="06">DIAGNOSTICS</SectionLabel>
         <Disclosure title="System details" subtitle="Show the runtime environment o8 is using.">
           <div style={{
             paddingTop: 8,
@@ -523,7 +636,7 @@ function ClaudeTargetRow({
   status: ClaudeTargetStatus | null;
   installing: boolean;
   disabled?: boolean;
-  note: { target: Target; message: string; ok: boolean } | null;
+  note: { target: AnyTarget; message: string; ok: boolean } | null;
   onInstall: () => void;
   onRemove: () => void;
   restartHint: string;
@@ -597,6 +710,129 @@ function ClaudeTargetRow({
 
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           {status?.alreadyRegistered ? (
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={installing || disabled}
+              style={quietActionStyle(installing || disabled)}
+            >
+              remove
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onInstall}
+            disabled={primaryDisabled}
+            style={accentActionStyle(primaryDisabled)}
+          >
+            {installing ? 'working...' : primaryLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExternalClientRow({
+  target,
+  status,
+  installing,
+  disabled = false,
+  note,
+  onInstall,
+  onRemove,
+  restartHint,
+}: {
+  target: ExternalTarget;
+  status: ExternalTargetStatus | null;
+  installing: boolean;
+  disabled?: boolean;
+  note: { target: AnyTarget; message: string; ok: boolean } | null;
+  onInstall: () => void;
+  onRemove: () => void;
+  restartHint: string;
+}) {
+  const cliInstalled = Boolean(status?.installed);
+  const registered = Boolean(status?.registered);
+
+  const labelText = target === 'hermes' ? 'Hermes Agent' : 'OpenClaw';
+
+  const statusLine = !status
+    ? 'Checking...'
+    : !cliInstalled
+      ? `${labelText} CLI not found.`
+      : registered
+        ? `Connected. The o8 tools are wired into ${labelText}.`
+        : `Ready to connect. ${labelText} CLI detected.`;
+
+  const primaryLabel = registered ? 'connected' : 'install';
+  const primaryDisabled = disabled || installing || !cliInstalled || registered;
+
+  return (
+    <div style={{
+      paddingTop: 10,
+      paddingBottom: 16,
+      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+      opacity: disabled ? 0.55 : 1,
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 20,
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+            <BracketLabel tone={registered ? 'quiet' : cliInstalled ? 'accent' : 'quiet'}>
+              {!cliInstalled ? 'not installed' : registered ? 'connected' : 'not connected'}
+            </BracketLabel>
+          </div>
+          <div style={{
+            fontSize: 13,
+            color: 'var(--t-text-secondary)',
+            lineHeight: 1.55,
+          }}>
+            {statusLine}
+          </div>
+          {status?.cliPath ? (
+            <div style={{
+              marginTop: 6,
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              letterSpacing: '0.02em',
+              color: RAMS_INK_QUIET,
+              wordBreak: 'break-all',
+            }}>
+              {status.cliPath}
+            </div>
+          ) : null}
+          {!cliInstalled && status?.hint ? (
+            <div style={{
+              marginTop: 8,
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              color: 'var(--t-text-muted)',
+              lineHeight: 1.5,
+              wordBreak: 'break-all',
+            }}>
+              {status.hint}
+            </div>
+          ) : null}
+          {note ? (
+            <div style={{
+              marginTop: 8,
+              fontSize: 12,
+              lineHeight: 1.55,
+              color: note.ok ? '#15803d' : '#dc2626',
+            }}>
+              {note.ok ? `${note.message} ${restartHint}` : note.message}
+            </div>
+          ) : null}
+        </div>
+
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          {registered ? (
             <button
               type="button"
               onClick={onRemove}
