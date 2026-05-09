@@ -5,7 +5,6 @@ import type { CanvasRepoTaskLaunchRequest } from '@/components/desktop/Canvas';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from '@/components/desktop/ContextualPanel';
 import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
 import type { TileContentRegistry } from '@/components/desktop/TileContainer';
-import type { WorkspaceSidePanelRepo, WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
@@ -34,7 +33,6 @@ import {
   collectOpenTerminalRepoPaths,
   repoSlugFromRemote,
   sameWorkspaceLaneState,
-  sameWorkspaceSidePanelRepo,
 } from './utils';
 
 const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
@@ -79,10 +77,6 @@ export interface TileRegistryDeps {
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
   launchOrchestrationPacket: (packet: OrchestratorPacket) => Promise<OrchestratorLaneBinding | null>;
-  openWorkspaceSidePanel: (
-    view: WorkspaceSidePanelView,
-    repo?: WorkspaceSidePanelRepo | null,
-  ) => void;
   orchestratorWorkspaceTargets: OrchestratorWorkspaceTarget[];
   parsedAgents: PaletteAgentSummary[];
   registerContextualPanelHandle: (tileId: string, handle: ContextualPanelHandle | null) => void;
@@ -97,7 +91,6 @@ export interface TileRegistryDeps {
   setWorkspaceChatSessionByTileId: Dispatch<SetStateAction<Record<string, string | undefined>>>;
   setWorkspaceChatSessionsByTileId: Dispatch<SetStateAction<Record<string, MobileInboxSnapshot['sessions']>>>;
   setWorkspaceLaneByTileId: Dispatch<SetStateAction<Record<string, WorkspaceLaneState | null>>>;
-  setWorkspaceSidePanelRepoContext: Dispatch<SetStateAction<WorkspaceSidePanelRepo | null>>;
   sendAgentKill: ContextualPanelProps['sendAgentKill'];
   sendTerminalAttach: ContextualPanelProps['sendTerminalAttach'];
   sendTerminalCreate: ContextualPanelProps['sendTerminalCreate'];
@@ -136,7 +129,6 @@ export function createTileRegistry({
   handleSplitTile,
   handleThoughtsMissionStateChange,
   launchOrchestrationPacket,
-  openWorkspaceSidePanel,
   orchestratorWorkspaceTargets,
   parsedAgents,
   registerContextualPanelHandle,
@@ -151,7 +143,6 @@ export function createTileRegistry({
   setWorkspaceChatSessionByTileId,
   setWorkspaceChatSessionsByTileId,
   setWorkspaceLaneByTileId,
-  setWorkspaceSidePanelRepoContext,
   sendAgentKill,
   sendTerminalAttach,
   sendTerminalCreate,
@@ -327,10 +318,6 @@ export function createTileRegistry({
               ));
             }}
             onRepoScopeChange={(repoPath) => setTerminalTileRepoScope(tileId, repoPath)}
-            onActiveRepoContextChange={(repo) => {
-              if (activeTileId !== tileId) return;
-              setWorkspaceSidePanelRepoContext((current) => sameWorkspaceSidePanelRepo(current, repo) ? current : repo);
-            }}
             onSelectRepoScope={(repo) => {
               const currentRepoPath = tilePreferredRepo?.localPath ?? null;
               if (currentRepoPath === repo.localPath) {
@@ -363,13 +350,6 @@ export function createTileRegistry({
               const repoSlug = repoSlugFromRemote(repo.remoteUrl);
               if (repoSlug) handleOpenCI(repoSlug);
             }}
-            onOpenRepoDiff={(repo) => openWorkspaceSidePanel('diff', repo ? {
-              name: repo.name,
-              localPath: repo.localPath,
-              branch: repo.branch ?? null,
-              readiness: repo.readiness ?? null,
-              remoteUrl: repo.remoteUrl,
-            } : null)}
             onInjectChatContext={handleAgentPanelChatInjection}
             onSelectCommit={handleSelectCommit}
             onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
