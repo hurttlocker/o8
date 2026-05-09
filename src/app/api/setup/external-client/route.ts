@@ -1,0 +1,376 @@
+/**
+ * External MCP Client Auto-Register
+ *
+ * Lets users connect o8's MCP server to Hermes Agent and OpenClaw with a
+ * single click — same UX as the Claude Desktop / Claude Code preset, but
+ * different mechanism: both have first-class MCP CLIs we shell out to,
+ * instead of editing a JSON config file directly.
+ *
+ *   target=hermes    → hermes mcp add o8 --command <cmd> --args <args>
+ *   target=openclaw  → openclaw mcp set o8 '<json>'
+ *
+ * GET  — probes whether the binary is installed AND whether o8 is already
+ *        registered. Returns a status the MCPTab UI can render.
+ * POST — installs (or removes, when body.remove=true).
+ *
+ * Resolving the CLIs:
+ *   `command -v` inside a Finder-launched app misses ~/.local/bin and
+ *   ~/.npm-global/bin (login-shell-only paths). We resolve through the
+ *   user's login shell (`$SHELL -lc 'command -v <cli>'`) so nvm/pyenv/etc.
+ *   profile additions are honored. Same trick the Tauri sidecar uses for
+ *   `node`. Final fallback: well-known install locations.
+ */
+
+export const dynamic = 'force-dynamic';
+
+import { NextResponse } from 'next/server';
+import { existsSync } from 'node:fs';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { join } from 'node:path';
+import { getApiBase } from '@/lib/panel/api-port';
+
+const execFileAsync = promisify(execFile);
+
+// ── Target dispatch ──
+
+type Target = 'hermes' | 'openclaw';
+
+function normalizeTarget(value: unknown): Target | null {
+  if (value === 'hermes') return 'hermes';
+  if (value === 'openclaw') return 'openclaw';
+  return null;
+}
+
+// ── CLI resolution via login shell ──
+
+function resolveCli(name: string): string | null {
+  // Try the inherited PATH first — fast path that works in dev.
+  try {
+    const direct = execFileSync('command', ['-v', name], {
+      encoding: 'utf-8',
+      shell: '/bin/sh',
+    } as never).trim();
+    if (direct && existsSync(direct)) return direct;
+  } catch {
+    // fall through to login-shell probe
+  }
+
+  // Login-shell probe — picks up ~/.zshrc / ~/.profile additions that
+  // Finder-launched apps don't inherit.
+  try {
+    const shell = process.env.SHELL || '/bin/zsh';
+    const out = execFileSync(shell, ['-lc', `command -v ${name}`], {
+      encoding: 'utf-8',
+    }).trim();
+    if (out && existsSync(out)) return out;
+  } catch {
+    // not installed
+  }
+
+  // Final guess: well-known install locations.
+  const home = process.env.HOME || '';
+  const candidates = name === 'hermes'
+    ? [
+      join(home, '.local', 'bin', 'hermes'),
+      '/opt/homebrew/bin/hermes',
+      '/usr/local/bin/hermes',
+    ]
+    : [
+      join(home, '.npm-global', 'bin', 'openclaw'),
+      '/opt/homebrew/bin/openclaw',
+      '/usr/local/bin/openclaw',
+    ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+// ── o8 MCP server config (mirrors /api/setup/claude-desktop) ──
+
+function findCommand(name: string): string | null {
+  try {
+    const which = execFileSync('command', ['-v', name], {
+      encoding: 'utf-8',
+      shell: '/bin/sh',
+    } as never).trim();
+    return which || null;
+  } catch {
+    return null;
+  }
+}
+
+interface McpServerConfig {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+function buildServerConfig(): McpServerConfig {
+  const bundled = process.env.O8_BUNDLED_MCP_PATH;
+  if (bundled && existsSync(bundled)) {
+    const nodeBin = process.env.O8_NODE_BIN || findCommand('node') || 'node';
+    return {
+      command: nodeBin,
+      args: [bundled],
+      env: { O8_API_BASE: getApiBase() },
+    };
+  }
+
+  const repoRoot = process.cwd();
+  const tsSource = join(repoRoot, 'src', 'lib', 'mcp', 'operator-mcp-server.ts');
+  const tsxBin = findCommand('tsx');
+
+  if (existsSync(tsSource) && tsxBin) {
+    return {
+      command: tsxBin,
+      args: [tsSource],
+      env: { O8_API_BASE: getApiBase() },
+    };
+  }
+
+  return {
+    command: 'npx',
+    args: ['tsx', tsSource],
+    env: { O8_API_BASE: getApiBase() },
+  };
+}
+
+// ── Hermes ──
+
+async function hermesStatus(cliPath: string): Promise<{ registered: boolean; raw: string }> {
+  try {
+    const { stdout } = await execFileAsync(cliPath, ['mcp', 'ls'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    // The list prints server names — match `o8` as a standalone token.
+    const registered = /(^|\s)o8(\s|:|$)/m.test(stdout);
+    return { registered, raw: stdout };
+  } catch {
+    return { registered: false, raw: '' };
+  }
+}
+
+async function hermesInstall(cliPath: string, server: McpServerConfig): Promise<void> {
+  // Wipe any prior entry first so re-install always lands the current shape.
+  try {
+    await execFileAsync(cliPath, ['mcp', 'remove', 'o8'], { timeout: 5000 });
+  } catch {
+    // remove fails when it doesn't exist — that's fine
+  }
+
+  // `hermes mcp add` connects to the server, lists its tools, and then prompts
+  // `Enable all N tools? [Y/n/select]:` interactively. We write `Y\n` to stdin
+  // so the install runs unattended.
+  const args = ['mcp', 'add', 'o8', '--command', server.command];
+  if (server.args.length > 0) {
+    args.push('--args', ...server.args);
+  }
+  for (const [k, v] of Object.entries(server.env)) {
+    args.push('--env', `${k}=${v}`);
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(cliPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error('hermes mcp add timed out after 30s'));
+    }, 30_000);
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf-8'); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf-8'); });
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve();
+      } else {
+        const detail = (stderr.trim() || stdout.trim() || `exited with code ${code}`).slice(-1200);
+        reject(new Error(detail));
+      }
+    });
+    child.stdin.write('Y\n');
+    child.stdin.end();
+  });
+}
+
+async function hermesRemove(cliPath: string): Promise<void> {
+  // `hermes mcp remove` prompts `Remove server 'o8'? [Y/n]:` interactively.
+  // Same stdin-Y trick as install.
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(cliPath, ['mcp', 'remove', 'o8'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error('hermes mcp remove timed out after 15s'));
+    }, 15_000);
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf-8'); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf-8'); });
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve();
+      } else {
+        const detail = (stderr.trim() || stdout.trim() || `exited with code ${code}`).slice(-1200);
+        reject(new Error(detail));
+      }
+    });
+    child.stdin.write('Y\n');
+    child.stdin.end();
+  });
+}
+
+// ── OpenClaw ──
+
+async function openclawStatus(cliPath: string): Promise<{ registered: boolean; raw: string }> {
+  try {
+    await execFileAsync(cliPath, ['mcp', 'show', 'o8'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    return { registered: true, raw: '' };
+  } catch (error) {
+    return {
+      registered: false,
+      raw: error instanceof Error ? error.message : '',
+    };
+  }
+}
+
+async function openclawInstall(cliPath: string, server: McpServerConfig): Promise<void> {
+  const payload = JSON.stringify({
+    command: server.command,
+    args: server.args,
+    env: server.env,
+  });
+  await execFileAsync(cliPath, ['mcp', 'set', 'o8', payload], {
+    timeout: 30000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+}
+
+async function openclawRemove(cliPath: string): Promise<void> {
+  await execFileAsync(cliPath, ['mcp', 'unset', 'o8'], {
+    timeout: 30000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+}
+
+// ── Routes ──
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const target = normalizeTarget(url.searchParams.get('target'));
+  if (!target) {
+    return NextResponse.json(
+      { error: 'target must be "hermes" or "openclaw"' },
+      { status: 400 },
+    );
+  }
+
+  const cliPath = resolveCli(target);
+  const proposed = buildServerConfig();
+
+  if (!cliPath) {
+    return NextResponse.json({
+      target,
+      installed: false,
+      cliPath: null,
+      registered: false,
+      proposed,
+      hint: target === 'hermes'
+        ? 'Install Hermes Agent: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash'
+        : 'Install OpenClaw: npm install -g openclaw@latest',
+    });
+  }
+
+  const status = target === 'hermes'
+    ? await hermesStatus(cliPath)
+    : await openclawStatus(cliPath);
+
+  return NextResponse.json({
+    target,
+    installed: true,
+    cliPath,
+    registered: status.registered,
+    proposed,
+  });
+}
+
+export async function POST(request: Request) {
+  const body = await request.json().catch(() => ({})) as {
+    target?: unknown;
+    remove?: unknown;
+  };
+  const target = normalizeTarget(body.target);
+  if (!target) {
+    return NextResponse.json(
+      { ok: false, error: 'target must be "hermes" or "openclaw"' },
+      { status: 400 },
+    );
+  }
+
+  const cliPath = resolveCli(target);
+  if (!cliPath) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `${target} CLI not found on PATH`,
+        detail: target === 'hermes'
+          ? 'Install Hermes Agent first, then try again.'
+          : 'Install OpenClaw first, then try again.',
+      },
+      { status: 404 },
+    );
+  }
+
+  const remove = body.remove === true;
+
+  try {
+    if (remove) {
+      if (target === 'hermes') await hermesRemove(cliPath);
+      else await openclawRemove(cliPath);
+      return NextResponse.json({
+        ok: true,
+        action: 'removed',
+        target,
+        detail: target === 'hermes'
+          ? 'Run /reload-mcp inside hermes to drop the o8 tools from your active session.'
+          : 'Run `openclaw doctor` if you want to verify the change.',
+      });
+    }
+
+    const server = buildServerConfig();
+    if (target === 'hermes') await hermesInstall(cliPath, server);
+    else await openclawInstall(cliPath, server);
+
+    return NextResponse.json({
+      ok: true,
+      action: 'installed',
+      target,
+      detail: target === 'hermes'
+        ? 'Run /reload-mcp inside hermes (or restart) to load the o8 tools.'
+        : 'Restart your OpenClaw gateway / agent session to pick up the new server.',
+    });
+  } catch (error) {
+    const stderr = (error as { stderr?: string | Buffer })?.stderr;
+    const stdout = (error as { stdout?: string | Buffer })?.stdout;
+    const stderrText = stderr ? (typeof stderr === 'string' ? stderr : stderr.toString('utf-8')) : '';
+    const stdoutText = stdout ? (typeof stdout === 'string' ? stdout : stdout.toString('utf-8')) : '';
+    const baseMessage = error instanceof Error ? error.message : String(error);
+    const detail = (stderrText.trim() || stdoutText.trim() || baseMessage).slice(-1500);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Failed to ${remove ? 'remove' : 'install'} via ${target} CLI`,
+        detail,
+      },
+      { status: 500 },
+    );
+  }
+}
