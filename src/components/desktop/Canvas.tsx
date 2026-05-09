@@ -33,6 +33,7 @@ import {
 const AuditLogPanel = lazy(() => import('@/components/desktop/AuditLogPanel').then(m => ({ default: m.AuditLogPanel })));
 const CommitViewer = lazy(() => import('@/components/desktop/CommitViewer').then(m => ({ default: m.CommitViewer })));
 const FileViewer = lazy(() => import('@/components/desktop/FileViewer').then(m => ({ default: m.FileViewer })));
+const HtmlPreview = lazy(() => import('@/components/desktop/canvas/HtmlPreview').then(m => ({ default: m.HtmlPreview })));
 const InlineDiffViewer = lazy(() => import('@/components/desktop/InlineDiffViewer').then(m => ({ default: m.InlineDiffViewer })));
 const IssueCreator = lazy(() => import('@/components/desktop/IssueCreator').then(m => ({ default: m.IssueCreator })));
 const IssueViewer = lazy(() => import('@/components/desktop/IssueViewer').then(m => ({ default: m.IssueViewer })));
@@ -392,8 +393,16 @@ const TabContent = memo(function TabContent({
             );
           case 'transcript':
             return <TranscriptViewer sessionKey={tab.resourceId} />;
-          case 'file':
+          case 'file': {
+            // Issue #989 — `.html` / `.htm` files render live in a sandboxed
+            // iframe via HtmlPreview (with Preview/Source toggle). All other
+            // extensions go through the standard Monaco-backed FileViewer.
+            const ext = (tab.resourceId.split('.').pop() ?? '').toLowerCase();
+            if (ext === 'html' || ext === 'htm') {
+              return <HtmlPreview filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
+            }
             return <FileViewer filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
+          }
           case 'diff': {
             // #659 — when the diff tab carries packet/session metadata
             // (sessionKey / worktreePath / packetId), open the new inline
