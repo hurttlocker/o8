@@ -80,7 +80,20 @@ import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 const execFileAsync = promisify(execFile);
 const GH_MAX_BUFFER = 10 * 1024 * 1024;
 const LOG_PREFIX = '[mcp-operator]';
-const API_BASE = resolveApiBase();
+
+// Re-resolve API base on every call (with a 1s cache to avoid file-stat
+// hammering inside hot fetch loops). The constant-at-boot pattern was a
+// trap: when the prod app rewrites api-port AFTER the MCP server boots
+// (e.g. dev-bridge launching, prod app port-probing past 3001), the
+// cached value is stale and every fetch hits a dead port.
+let _cachedApiBase: { value: string; ts: number } | null = null;
+function getApiBaseLive(): string {
+  const now = Date.now();
+  if (_cachedApiBase && now - _cachedApiBase.ts < 1000) return _cachedApiBase.value;
+  const value = resolveApiBase();
+  _cachedApiBase = { value, ts: now };
+  return value;
+}
 
 interface CreateMissionInput {
   issues: string[];
@@ -284,7 +297,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
       const panelToken = readPanelToken();
       const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       if (panelToken) baseHeaders.Authorization = `Bearer ${panelToken}`;
-      response = await fetch(`${API_BASE}${path}`, {
+      response = await fetch(`${getApiBaseLive()}${path}`, {
         ...init,
         signal: controller.signal,
         headers: {
@@ -306,7 +319,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response) {
     throw new Error(
       `o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. ` +
-      `Expected the o8 backend at ${API_BASE}. ` +
+      `Expected the o8 backend at ${getApiBaseLive()}. ` +
       `Open the o8 desktop app or run \`npm run desktop:dev\` from the cortex-ide repo.`,
     );
   }
