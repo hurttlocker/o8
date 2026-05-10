@@ -47,9 +47,17 @@ import { AnalyticsPage } from './AnalyticsPage';
 
 export type { SettingsTab } from './settings/shared';
 
+function CloseSettingsIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M208.49,191.51a12,12,0,0,1-17,17L128,145,64.49,208.49a12,12,0,0,1-17-17L111,128,47.51,64.49a12,12,0,0,1,17-17L128,111l63.51-63.52a12,12,0,0,1,17,17L145,128Z" />
+    </svg>
+  );
+}
+
 // ── Main Settings Page ──
 
-export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: SettingsTab }) {
+export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTab?: SettingsTab; onClose?: () => void }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<GitHubAccount[]>([]);
@@ -239,7 +247,6 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
 
   return (
     <div
-      className="hide-scrollbar"
       style={{
         height: '100%',
         overflow: 'auto',
@@ -252,11 +259,52 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         display: 'flex',
         gap: 28,
         fontFamily: APP_FONT_STACK,
+        position: 'relative',
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
         WebkitOverflowScrolling: 'touch',
       } as CSSProperties}
     >
+      {onClose ? (
+        <button
+          type="button"
+          aria-label="Close settings"
+          title="Close settings"
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: 16,
+            right: 16,
+            zIndex: 2,
+            width: 34,
+            height: 34,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 0,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider-subtle)',
+            background: 'var(--t-bg-card)',
+            color: 'var(--t-text-muted)',
+            cursor: 'pointer',
+            transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms, border-color 120ms',
+          }}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.background = 'var(--t-panel-hover)';
+            event.currentTarget.style.borderColor = 'var(--t-panel-border)';
+            event.currentTarget.style.color = 'var(--t-text)';
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.background = 'var(--t-bg-card)';
+            event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+            event.currentTarget.style.color = 'var(--t-text-muted)';
+          }}
+        >
+          <CloseSettingsIcon />
+        </button>
+      ) : null}
       {/* Left sidebar — tab navigation */}
       <div style={{
         width: 200,
