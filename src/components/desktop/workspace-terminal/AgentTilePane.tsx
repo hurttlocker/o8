@@ -76,6 +76,11 @@ function entryContent(entry: MobileTranscriptEntry): string {
 // Spring curve matches Apple HIG (stiffness 400, damping 30) — used for the
 // composer reveal animation when a lane flips to running/awaiting_input.
 const COMPOSER_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
+const TRANSCRIPT_STEER_LOADING_TIMEOUT_MS = 10_000;
+
+function canSteerAgent(agent: FleetAgent | null): boolean {
+  return (agent?.status ?? '').toLowerCase() === 'running';
+}
 
 function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: AgentTilePaneProps) {
   const slice = useTranscript(sessionKey);
@@ -88,12 +93,13 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
   const [sending, setSending] = useState(false);
   // Fix #4: synchronous guard so held-Enter can't double-fire before setState flushes
   const sendingRef = useRef(false);
+  const loadingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const name = useMemo(() => displayName(agent, sessionKey), [agent, sessionKey]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
   const runtimeTone = useMemo(() => orchestratorRuntimeTone(runtime), [runtime]);
   const status = useMemo(() => classifyStatus(agent?.status), [agent?.status]);
-  const canSteer = status === 'running' || status === 'waiting';
+  const canSteer = canSteerAgent(agent);
   const trimmedDraft = draft.trim();
   const canSend = canSteer && !sending && trimmedDraft.length > 0;
   const lastEntryKey = entries.length > 0 ? `${entries[entries.length - 1]?.id}:${entryContent(entries[entries.length - 1]!)}` : '';
@@ -103,16 +109,22 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
   const agentRef = useRef(agent);
   useEffect(() => { agentRef.current = agent; }, [agent]);
 
+  const clearTranscriptLoadingFallback = useCallback(() => {
+    if (!loadingFallbackRef.current) return;
+    clearTimeout(loadingFallbackRef.current);
+    loadingFallbackRef.current = null;
+  }, []);
+
   const submitSteer = useCallback(async () => {
     const message = trimmedDraft;
     // Fix #1: re-derive canSteer from the latest agent ref to avoid stale closure
-    const currentStatus = classifyStatus(agentRef.current?.status);
-    const canSteerNow = currentStatus === 'running' || currentStatus === 'waiting';
+    const canSteerNow = canSteerAgent(agentRef.current);
     // Fix #4: check sendingRef synchronously before any setState to prevent held-Enter race
     if (!message || !canSteerNow || sendingRef.current) return;
     sendingRef.current = true;
     setSending(true);
     setSendError(null);
+    setDraft('');
     try {
       const response = await fetch('/api/runtime/action', {
         method: 'POST',
@@ -126,18 +138,19 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
       const payload = await response
         .json()
         .catch(() => null) as { ok?: boolean; note?: string; error?: string } | null;
-      // Fix #2: always clear draft after a send-attempt to prevent double-send on retry after error
-      setDraft('');
       if (!response.ok || payload?.ok === false) {
         const note = payload?.error ?? payload?.note ?? response.statusText ?? 'Unable to send steer.';
         setSendError(note);
         return;
       }
       // Fix #5: set transcript to loading but fall back to idle after 10s if WS push never arrives
+      clearTranscriptLoadingFallback();
       transcriptStore.setStatus(sessionKey, 'loading');
-      setTimeout(() => {
+      loadingFallbackRef.current = setTimeout(() => {
+        loadingFallbackRef.current = null;
+        if (transcriptStore.getSlice(sessionKey).status !== 'loading') return;
         transcriptStore.setStatus(sessionKey, 'idle');
-      }, 10_000);
+      }, TRANSCRIPT_STEER_LOADING_TIMEOUT_MS);
     } catch (err) {
       // Draft already cleared above; just surface the error
       setSendError(err instanceof Error ? err.message : 'Unable to send steer.');
@@ -146,7 +159,7 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
       setSending(false);
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
-  }, [sessionKey, trimmedDraft]);
+  }, [clearTranscriptLoadingFallback, sessionKey, trimmedDraft]);
 
   const handleTextareaKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -172,6 +185,16 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
   useEffect(() => {
     if (!canSteer) setSendError(null);
   }, [canSteer]);
+
+  useEffect(() => {
+    if (slice.status !== 'fresh') return;
+    if (transcriptStore.getSlice(sessionKey).status !== 'fresh') return;
+    clearTranscriptLoadingFallback();
+  }, [clearTranscriptLoadingFallback, sessionKey, slice.status]);
+
+  useEffect(() => () => {
+    clearTranscriptLoadingFallback();
+  }, [clearTranscriptLoadingFallback, sessionKey]);
 
   // One-shot seed for agents not in the workspace bootstrap list. After this,
   // WS pushes via transcriptStore keep the slice live — no per-agent polling.
