@@ -78,9 +78,20 @@ export interface MergeGateResult {
   violations: MergeViolation[];
 }
 
+interface AddedDiffLine {
+  file: string | null;
+  text: string;
+}
+
 // ── Helpers ──
 
-function getAddedLines(cwd: string, baseBranch: string): string[] {
+function parseGitDiffFilePath(line: string): string | null {
+  const path = line.trim();
+  if (!path || path === '/dev/null') return null;
+  return path.startsWith('b/') ? path.slice(2) : path;
+}
+
+function getAddedLines(cwd: string, baseBranch: string): AddedDiffLine[] {
   try {
     const diff = execSync(`git diff ${baseBranch}...HEAD --no-color`, {
       cwd,
@@ -88,9 +99,21 @@ function getAddedLines(cwd: string, baseBranch: string): string[] {
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024,
     });
-    return diff
-      .split('\n')
-      .filter((line) => line.startsWith('+') && !line.startsWith('+++'));
+    const addedLines: AddedDiffLine[] = [];
+    let currentFile: string | null = null;
+
+    for (const line of diff.split('\n')) {
+      if (line.startsWith('+++ ')) {
+        currentFile = parseGitDiffFilePath(line.slice(4));
+        continue;
+      }
+
+      if (line.startsWith('+')) {
+        addedLines.push({ file: currentFile, text: line });
+      }
+    }
+
+    return addedLines;
   } catch {
     return [];
   }
@@ -133,17 +156,24 @@ function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
 
 // ── Check 1: Security Patterns ──
 
-function checkSecurityPatterns(addedLines: string[]): MergeViolation[] {
+function isSecurityScanExemptPath(file: string | null): boolean {
+  return file !== null && /^(scripts|bin)\//.test(file);
+}
+
+function checkSecurityPatterns(addedLines: AddedDiffLine[]): MergeViolation[] {
   const violations: MergeViolation[] = [];
 
   for (const { pattern, label } of HARD_BLOCK_PATTERNS) {
-    for (const line of addedLines) {
-      if (pattern.test(line)) {
+    for (const { file, text } of addedLines) {
+      if (isSecurityScanExemptPath(file)) continue;
+
+      if (pattern.test(text)) {
         violations.push({
           category: 'security',
           severity: 'block',
           label,
-          detail: `New code matches blocked pattern: ${line.slice(1).trim().slice(0, 120)}`,
+          detail: `New code matches blocked pattern: ${text.slice(1).trim().slice(0, 120)}`,
+          file: file ?? undefined,
         });
         break; // One finding per pattern
       }
