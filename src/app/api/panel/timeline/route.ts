@@ -36,18 +36,27 @@ interface TimelineMilestone {
   url?: string;
 }
 
-function execQuiet(cmd: string, opts?: { timeout?: number }): string {
+function execQuiet(cmd: string, opts?: { timeout?: number; maxBuffer?: number }): string {
   try {
     return execSync(cmd, {
       encoding: 'utf-8',
       timeout: opts?.timeout ?? 8000,
-      maxBuffer: 2 * 1024 * 1024,
+      maxBuffer: opts?.maxBuffer ?? 2 * 1024 * 1024,
       env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` },
     }).trim();
   } catch {
     return '';
   }
 }
+
+// How many trailing lines to read per session file. Each line is one JSONL
+// event (tool call, message, response). Heavy 14h orchestrator sessions
+// can hit 35k+ lines; 500 was clipping ~99% of the day's history off the
+// left side of the strip. 15k covers ~6h of a continuous heavy session
+// while staying inside the 15s + 32MB exec budget.
+const SESSION_TAIL_LINES = 15000;
+const SESSION_TAIL_TIMEOUT_MS = 15000;
+const SESSION_TAIL_MAX_BUFFER = 32 * 1024 * 1024;
 
 type SegmentKind = 'thinking' | 'coding' | 'testing' | 'error' | 'idle';
 
@@ -499,7 +508,10 @@ export async function GET(req: NextRequest) {
       const projName = projEncoded.split('-').filter(Boolean).pop() || 'claude-code';
       const agent = `cc:${projName}`;
 
-      const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
+      const lines = execQuiet(`tail -${SESSION_TAIL_LINES} "${file}" 2>/dev/null`, {
+        timeout: SESSION_TAIL_TIMEOUT_MS,
+        maxBuffer: SESSION_TAIL_MAX_BUFFER,
+      });
       if (!lines) continue;
 
       allSegments.push(...accumulateSegments(lines, todayStart, agent, classifyClaudeCode, (e) => e.timestamp));
@@ -522,7 +534,10 @@ export async function GET(req: NextRequest) {
       // Extract a short label from the filename
       const agent = 'codex';
 
-      const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
+      const lines = execQuiet(`tail -${SESSION_TAIL_LINES} "${file}" 2>/dev/null`, {
+        timeout: SESSION_TAIL_TIMEOUT_MS,
+        maxBuffer: SESSION_TAIL_MAX_BUFFER,
+      });
       if (!lines) continue;
 
       allSegments.push(...accumulateSegments(lines, todayStart, agent, classifyCodex, (e) => e.timestamp));
