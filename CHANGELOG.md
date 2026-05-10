@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-10
+
+- `ff8e885f` feat: render chat tool calls as chips [via-o8]
+
 ## 2026-05-09
 
 - `3364a166` feat: vocabulary cleanup
