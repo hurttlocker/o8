@@ -18,10 +18,28 @@ import 'server-only';
 
 import { basename, resolve } from 'node:path';
 
+import {
+  getActiveProjectScopeForRepo,
+  type ActiveProjectScope,
+} from '@/lib/repos/projects';
 import { listRepos } from '@/lib/repos/registry';
 import { listProjectsByRepoId } from '@/lib/projects/store';
 
 import type { ParsedDirective } from './parse';
+
+export interface DirectiveProjectScope {
+  projectIds: Set<string>;
+  projectSlugs: Set<string>;
+  repoInActiveProject: boolean;
+}
+
+function activeProjectScopeToDirectiveScope(scope: ActiveProjectScope): DirectiveProjectScope {
+  return {
+    projectIds: new Set([scope.projectId.toLowerCase()]),
+    projectSlugs: new Set([scope.projectSlug.toLowerCase()]),
+    repoInActiveProject: scope.repoInActiveProject,
+  };
+}
 
 /**
  * Resolve the set of project slugs that include the given repo path.
@@ -71,6 +89,25 @@ export async function resolveRepoProjectSlugs(repoPath: string): Promise<Set<str
   return out;
 }
 
+export async function resolveActiveDirectiveProjectScope(repoPath: string): Promise<DirectiveProjectScope> {
+  try {
+    return activeProjectScopeToDirectiveScope(await getActiveProjectScopeForRepo(repoPath));
+  } catch {
+    return {
+      projectIds: new Set(),
+      projectSlugs: new Set(),
+      repoInActiveProject: false,
+    };
+  }
+}
+
+function intersects(values: string[], candidates: Set<string>): boolean {
+  for (const value of values) {
+    if (candidates.has(value.toLowerCase())) return true;
+  }
+  return false;
+}
+
 /**
  * Pure predicate — does the directive apply to this target repo, given the
  * pre-resolved project slug set? Caller resolves slugs once with
@@ -79,18 +116,20 @@ export async function resolveRepoProjectSlugs(repoPath: string): Promise<Set<str
 export function directiveAppliesToRepo(
   directive: ParsedDirective,
   repoPath: string,
-  projectSlugsForRepo: Set<string>,
+  projectScope: Set<string> | DirectiveProjectScope,
 ): boolean {
   const repoName = basename(repoPath).toLowerCase();
   const scope = directive.scope.toLowerCase();
   if (scope === 'global' || scope === '') return true;
+  if (!(projectScope instanceof Set) && !projectScope.repoInActiveProject) return false;
 
   if (scope === 'project') {
-    if (directive.projects.length === 0) return false;
-    for (const slug of directive.projects) {
-      if (projectSlugsForRepo.has(slug)) return true;
+    if (projectScope instanceof Set) {
+      return directive.projects.length > 0 && intersects(directive.projects, projectScope);
     }
-    return false;
+    if (!projectScope.repoInActiveProject) return false;
+    return intersects(directive.projectIds, projectScope.projectIds)
+      || intersects(directive.projects, projectScope.projectSlugs);
   }
 
   // Repo tier — match either explicit repoName field or `scope: <repoName>`.
@@ -110,6 +149,6 @@ export async function filterDirectivesByRepo(
   directives: ParsedDirective[],
   repoPath: string,
 ): Promise<ParsedDirective[]> {
-  const projectSlugsForRepo = await resolveRepoProjectSlugs(repoPath);
-  return directives.filter((d) => directiveAppliesToRepo(d, repoPath, projectSlugsForRepo));
+  const projectScope = await resolveActiveDirectiveProjectScope(repoPath);
+  return directives.filter((d) => directiveAppliesToRepo(d, repoPath, projectScope));
 }

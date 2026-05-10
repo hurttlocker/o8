@@ -13,6 +13,7 @@ import type { PacketContext } from '@/lib/orchestrator/types';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime } from '@/lib/runtimes/registry';
 import type { RuntimeId, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
+import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { truncateText } from '@/lib/util/text';
 
 const TRANSCRIPT_CAPTURE_LIMIT = 80;
@@ -379,9 +380,12 @@ export async function recordPacketReviewContext(
   const conflictZones = buildConflictZonesFromFindings(reviewContext.findings);
   const existing = await readPacketCompletionContext(normalizedPacketId);
   const lane = existing ? null : findLaneByPacket(normalizedPacketId);
+  const projectId = existing?.projectId
+    ?? getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
   const nextContext: PacketContext = existing
     ? {
         ...existing,
+        projectId,
         review: reviewContext,
         reviewFindings: reviewContext.findings,
         patterns,
@@ -389,6 +393,7 @@ export async function recordPacketReviewContext(
       }
     : {
         packetId: normalizedPacketId,
+        projectId,
         sessionKey: lane?.sessionKey || (lane ? `lane:${lane.id}` : `packet:${normalizedPacketId}`),
         summary: 'Review recorded before packet completion context was captured.',
         changedFiles: [],
@@ -411,6 +416,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   const runtimeId = inferRuntimeId(normalizedSessionKey);
   const runtime = runtimeId ? getRuntime(runtimeId) : undefined;
   const lane = findLaneByPacket(normalizedPacketId);
+  const projectId = getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
 
   const [transcriptResult, changedFilesResult, agentResult, telemetryResult] = await Promise.allSettled([
     runtime?.readTranscript(normalizedSessionKey, undefined, TRANSCRIPT_CAPTURE_LIMIT) ?? Promise.resolve([]),
@@ -439,6 +445,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   );
   const context: PacketContext = {
     packetId: normalizedPacketId,
+    projectId,
     sessionKey: normalizedSessionKey,
     summary: buildPacketSummary({
       lifecycleSummary: normalizeSummaryText(agent?.runtimeSurface?.lifecycle?.summary ?? '', SUMMARY_LIMIT),

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +9,7 @@ import { readRepoPathRegistry } from './repo-path-registry';
 
 const PROJECTS_DIR = path.join(os.homedir(), '.o8');
 const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
-const DEFAULT_PROJECT_ID = 'default';
+export const DEFAULT_PROJECT_ID = 'default';
 const DEFAULT_PROJECT_NAME = 'o8';
 
 /**
@@ -56,6 +56,31 @@ function normalizeRepoPath(inputPath: string) {
   return path.resolve(expanded);
 }
 
+function projectNameToSlug(name: string): string {
+  return name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || DEFAULT_PROJECT_ID;
+}
+
+function repoPathBelongsToProject(project: ProjectRecord, repoPath: string): boolean {
+  const normalized = normalizeRepoPath(repoPath);
+  return project.repoPaths.some((candidate) => normalizeRepoPath(candidate) === normalized);
+}
+
+function normalizeProjectRecord(entry: ProjectRecord): ProjectRecord {
+  return {
+    id: entry.id,
+    name: entry.name,
+    repoPaths: entry.repoPaths.map(normalizeRepoPath),
+    createdAt: entry.createdAt ?? nowIso(),
+    color: PROJECT_COLOR_PALETTE.includes(entry.color as ProjectColor) ? entry.color : undefined,
+  };
+}
+
 function ensureDir() {
   if (!existsSync(PROJECTS_DIR)) {
     mkdirSync(PROJECTS_DIR, { recursive: true });
@@ -75,13 +100,7 @@ async function readRawLedger(): Promise<ProjectsLedger | null> {
         && typeof (entry as ProjectRecord).name === 'string'
         && Array.isArray((entry as ProjectRecord).repoPaths)
       ))
-      .map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        repoPaths: entry.repoPaths.map(normalizeRepoPath),
-        createdAt: entry.createdAt ?? nowIso(),
-        color: PROJECT_COLOR_PALETTE.includes(entry.color as ProjectColor) ? entry.color : undefined,
-      }));
+      .map(normalizeProjectRecord);
     if (projects.length === 0) return null;
     const activeProjectId = typeof parsed.activeProjectId === 'string'
       && projects.some((p) => p.id === parsed.activeProjectId)
@@ -119,6 +138,76 @@ export async function getProjectsLedger(): Promise<ProjectsLedger> {
   const existing = await readRawLedger();
   if (existing) return existing;
   return bootstrapDefaultLedger();
+}
+
+export function getProjectsLedgerSync(): ProjectsLedger {
+  try {
+    const raw = readFileSync(PROJECTS_PATH, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<ProjectsLedger> | null;
+    if (!parsed || !Array.isArray(parsed.projects)) throw new Error('Invalid projects ledger');
+    const projects = parsed.projects
+      .filter((entry): entry is ProjectRecord => (
+        Boolean(entry)
+        && typeof entry === 'object'
+        && typeof (entry as ProjectRecord).id === 'string'
+        && typeof (entry as ProjectRecord).name === 'string'
+        && Array.isArray((entry as ProjectRecord).repoPaths)
+      ))
+      .map(normalizeProjectRecord);
+    if (projects.length === 0) throw new Error('Empty projects ledger');
+    const activeProjectId = typeof parsed.activeProjectId === 'string'
+      && projects.some((p) => p.id === parsed.activeProjectId)
+      ? parsed.activeProjectId
+      : projects[0]!.id;
+    return { projects, activeProjectId };
+  } catch {
+    return {
+      projects: [{
+        id: DEFAULT_PROJECT_ID,
+        name: DEFAULT_PROJECT_NAME,
+        repoPaths: [],
+        createdAt: nowIso(),
+        color: PROJECT_COLOR_PALETTE[0],
+      }],
+      activeProjectId: DEFAULT_PROJECT_ID,
+    };
+  }
+}
+
+export interface ActiveProjectScope {
+  project: ProjectRecord;
+  projectId: string;
+  projectSlug: string;
+  repoPaths: string[];
+  repoInActiveProject: boolean;
+}
+
+export function getActiveProjectScopeForRepoSync(repoPath?: string | null): ActiveProjectScope {
+  const ledger = getProjectsLedgerSync();
+  const project = ledger.projects.find((candidate) => candidate.id === ledger.activeProjectId)
+    ?? ledger.projects[0]!;
+  const repoInActiveProject = repoPath ? repoPathBelongsToProject(project, repoPath) : false;
+  return {
+    project,
+    projectId: project.id,
+    projectSlug: projectNameToSlug(project.name),
+    repoPaths: project.repoPaths.map(normalizeRepoPath),
+    repoInActiveProject,
+  };
+}
+
+export async function getActiveProjectScopeForRepo(repoPath?: string | null): Promise<ActiveProjectScope> {
+  const ledger = await getProjectsLedger();
+  const project = ledger.projects.find((candidate) => candidate.id === ledger.activeProjectId)
+    ?? ledger.projects[0]!;
+  const repoInActiveProject = repoPath ? repoPathBelongsToProject(project, repoPath) : false;
+  return {
+    project,
+    projectId: project.id,
+    projectSlug: projectNameToSlug(project.name),
+    repoPaths: project.repoPaths.map(normalizeRepoPath),
+    repoInActiveProject,
+  };
 }
 
 export async function setActiveProject(projectId: string): Promise<ProjectsLedger> {
