@@ -190,11 +190,18 @@ export function useWorkspaceChatPane({
   // bootstrap so the first paint isn't empty.
   useEffect(() => {
     if (!normalizedSessionKey) return undefined;
-    if (transcriptStore.getSlice(normalizedSessionKey).status !== 'idle') return undefined;
+    // Always re-bootstrap on mount/key-change. We can't trust the slice's
+    // 'fresh' status here: the WS bridge marks the slice 'fresh' on the first
+    // partial event (e.g. a single delta arriving before the chat-pane mounts),
+    // which would otherwise short-circuit this bootstrap and leave the operator
+    // staring at an empty transcript with the full canonical history sitting
+    // unfetched on /api/mobile/history. refetchFresh: true bypasses the fresh-
+    // skip and merges the canonical fetch with whatever the WS already delivered.
     const controller = new AbortController();
     void bootstrapTranscripts([normalizedSessionKey], {
       merge: mergeTranscriptEntries,
       signal: controller.signal,
+      refetchFresh: true,
     });
     return () => controller.abort();
   }, [normalizedSessionKey]);
