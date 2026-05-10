@@ -105,7 +105,6 @@ export function EmptyStateCard({
             <>
               <div>Messages stay scoped to the selected CLI lane.</div>
               <div>Use the picker below to redirect the conversation to another live session.</div>
-              <div>Mission Control now slides out beside chat, so planning stays visible without replacing this lane.</div>
             </>
           ) : (
             <>

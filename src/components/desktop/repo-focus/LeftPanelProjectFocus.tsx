@@ -24,14 +24,14 @@ interface LeftPanelProjectFocusProps extends RepoFocusDataProps {
 }
 
 const PROJECTWIDE_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
-  { id: 'agents', label: 'Agents' },
+  { id: 'agents', label: 'Packets' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
   { id: 'files', label: 'Files' },
 ];
 
 const REPO_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
-  { id: 'agents', label: 'Agents' },
+  { id: 'agents', label: 'Packets' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
   { id: 'spec', label: 'o8.md' },

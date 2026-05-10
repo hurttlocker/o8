@@ -243,7 +243,7 @@ export function useWorkspaceChatPane({
           continueLatest: tab.chatContinueLatest !== false,
         };
       } else if (chatRuntime === 'codex' || chatRuntime === 'gemini' || chatRuntime === 'opencode') {
-        // Owned CLI sessions (dispatched via Mission Control) steer through
+        // Owned CLI sessions (dispatched via the orchestrator) steer through
         // the generic /api/runtime/action verb — the owned-session-store
         // injects the message into the live CLI process. Same pattern for
         // codex, gemini, and opencode since they share the primitive.
@@ -282,7 +282,7 @@ export function useWorkspaceChatPane({
         // is a follow-up since neither CLI has a stable scratch-session UX
         // yet).
         if (chatRuntime !== 'codex') {
-          throw new Error(`Discovered ${chatRuntime} sessions don't support send yet — dispatch a packet via Mission Control instead.`);
+          throw new Error(`Discovered ${chatRuntime} sessions don't support send yet — dispatch a packet via the orchestrator instead.`);
         }
         endpoint = '/api/codex/send';
         body = {
