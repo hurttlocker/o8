@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-10
 
+- `74d44dcf` feat: timeline reads 24h of session history (tail 500 → 15000) + finer cells
 - `15e189f3` feat: add mcp__o8__rerun_with_feedback tool
 - `a7e1dee8` feat: scope orchestrator memory by project [via-o8]
 - `ff8e885f` feat: render chat tool calls as chips [via-o8]
