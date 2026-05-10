@@ -7,8 +7,15 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-09
+
+- `3364a166` feat: vocabulary cleanup
+- `a611d67d` feat: live HTML rendering — .html viewer + richer o8.md renderer
+- `50d5c396` feat: one-click install of o8 MCP into Hermes Agent + agent runtime
+
 ## 2026-05-08
 
+- `e8e75310` feat: symon-style push-to-talk dictation
 - `920e629d` feat: competing product-style PR panel + segmented context popover
 - `033f580e` feat: add macOS APFS workspace isolation
 - `4bb987a4` feat: agents archive drawer shows every concluded packet
