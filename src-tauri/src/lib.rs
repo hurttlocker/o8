@@ -1,4 +1,5 @@
 mod dev_frontend;
+mod sidecar_lifecycle;
 
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
@@ -518,8 +519,7 @@ fn write_port_file(name: &str, port: u16) -> std::io::Result<()> {
 //
 // We now classify the listener before deciding:
 //   1. Free      → spawn bundled as normal.
-//   2. Legit dev → defer (parent is NOT launchd, or binary is not the
-//      bundled server).
+//   2. Active o8 → defer (a dev server or another live sidecar owns it).
 //   3. Orphan    → SIGKILL, wait for port release, spawn bundled fresh.
 //
 // On macOS we shell out to `lsof` / `ps` / `kill` because they're part of
@@ -532,8 +532,12 @@ fn write_port_file(name: &str, port: u16) -> std::io::Result<()> {
 enum PortListener {
     /// Nothing listening on the port.
     Free,
-    /// Legitimate listener — defer to it (dev server, etc.).
-    Legit { pid: u32, command: String },
+    /// Legitimate listener. Defer only when it looks o8-owned.
+    Legit {
+        pid: u32,
+        command: String,
+        o8_owned: bool,
+    },
     /// Orphan reparented to launchd that still owns the bundled server.
     Orphan { pid: u32, command: String },
 }
@@ -573,6 +577,7 @@ fn classify_port_listener(port: u16) -> PortListener {
         return PortListener::Legit {
             pid: 0,
             command: "<unknown>".to_string(),
+            o8_owned: false,
         };
     };
 
@@ -594,9 +599,10 @@ fn classify_port_listener(port: u16) -> PortListener {
         _ => (0, String::new()),
     };
 
+    let cwd = process_cwd(pid);
     log::info!(
-        "[orphan-check] :{} bound by pid={} ppid={} cmd={:?}",
-        port, pid, ppid, command
+        "[orphan-check] :{} bound by pid={} ppid={} cwd={:?} cmd={:?}",
+        port, pid, ppid, cwd, command
     );
 
     // Orphan signature: parent is launchd (pid 1) AND the binary path
@@ -607,12 +613,17 @@ fn classify_port_listener(port: u16) -> PortListener {
     let looks_bundled =
         command.contains(".app/Contents/Resources/server")
         || command.contains("/Resources/server/server.js")
-        || command.ends_with("server.js");
+        || cwd.contains(".app/Contents/Resources/server")
+        || (command.ends_with("server.js") && cwd_looks_o8_owned(&cwd));
 
     if ppid == 1 && looks_bundled {
         PortListener::Orphan { pid, command }
     } else {
-        PortListener::Legit { pid, command }
+        PortListener::Legit {
+            pid,
+            command,
+            o8_owned: cwd_looks_o8_owned(&cwd),
+        }
     }
 }
 
@@ -620,12 +631,13 @@ fn classify_port_listener(port: u16) -> PortListener {
 #[allow(dead_code)]
 fn classify_port_listener(port: u16) -> PortListener {
     // TODO(#548): implement Windows/Linux orphan detection. Until then we
-    // fall back to the original naive behavior: anything listening is
-    // treated as a legitimate dev server.
+    // fall back to dynamic bundled-port allocation instead of killing or
+    // deferring to an unclassified listener.
     if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok() {
         PortListener::Legit {
             pid: 0,
             command: "<unsupported-platform>".to_string(),
+            o8_owned: false,
         }
     } else {
         PortListener::Free
@@ -672,154 +684,9 @@ fn kill_orphan_and_wait(pid: u32, port: u16) -> bool {
     false
 }
 
-// ── Child PID registry + probe-kill (issue #719) ──
-//
-// The Tauri parent spawns Node children (Next.js + ws-server) but doesn't
-// own their lifecycle on quit. When the user Cmd-Q's, force-quits via
-// osascript, or the parent panics, the children get reparented to launchd
-// and survive — holding ports 3001/3002 indefinitely. The next launch then
-// spawns a new Next on a different port (3003+), but the webview keeps
-// hitting whatever served on 3001 — the old orphan with stale code.
-//
-// Fix is two layers:
-//   1. On launch, force-kill anything bound to 3001 / 3002 BEFORE spawning.
-//   2. On quit (RunEvent::Exit, panic, SIGTERM/SIGINT), TERM then KILL every
-//      tracked child PID.
-//
-// `CHILD_PIDS` is a global registry written when each child is spawned and
-// drained on every exit path. We use `OnceLock<Mutex<Vec<u32>>>` rather than
-// a static `Mutex::new(...)` because const-init for `Mutex` is gated and
-// `OnceLock` is the std-stable path.
-
-fn child_pids() -> &'static Mutex<Vec<u32>> {
-    static CHILD_PIDS: OnceLock<Mutex<Vec<u32>>> = OnceLock::new();
-    CHILD_PIDS.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-/// Track a freshly-spawned child so we can kill it on quit.
-fn register_child(pid: u32) {
-    if let Ok(mut guard) = child_pids().lock() {
-        guard.push(pid);
-    }
-}
-
-/// Probe-kill any process holding `port`. Used at launch — if a previous
-/// install crashed and left an orphan Next/ws-server bound to 3001 or 3002,
-/// or if the user is launching a second copy of o8 over a still-live first
-/// copy, we kill the holder so the new sidecar can bind cleanly. Sends TERM
-/// first, polls 200ms, escalates to KILL if the port is still held.
-///
-/// Safe because:
-///   - A legit user-visible o8 instance that's still running means the user
-///     is launching a SECOND copy → killing the first child cleanly is what
-///     Finder does anyway.
-///   - An orphan from a prior crash → exactly what we want to kill.
-///   - A user-running `npm run desktop:dev` → the bundled-spawn path is
-///     never reached (we defer to the dev server upstream of this).
-fn probe_kill_port(port: u16) {
-    // Cheap probe: if nothing answers, return early.
-    if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_err() {
-        return;
-    }
-
-    // lsof -ti :PORT returns one PID per line listening on the port. -sTCP:LISTEN
-    // narrows to listeners (skips clients connected to the port).
-    let pids = match Command::new("lsof")
-        .args(["-ti", &format!(":{}", port), "-sTCP:LISTEN"])
-        .output()
-    {
-        Ok(out) if out.status.success() => {
-            let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            raw.lines()
-                .filter_map(|s| s.trim().parse::<u32>().ok())
-                .collect::<Vec<_>>()
-        }
-        _ => Vec::new(),
-    };
-
-    if pids.is_empty() {
-        log::warn!(
-            "[probe-kill] :{} appears bound but lsof returned no PIDs — skipping",
-            port
-        );
-        return;
-    }
-
-    log::info!("[probe-kill] :{} held by PIDs {:?} — killing", port, pids);
-    for pid in &pids {
-        let _ = Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status();
-    }
-
-    // Poll up to ~3s for the port to release (TIME_WAIT can hold even after
-    // the process is gone). If a TERM didn't take, escalate to KILL.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(3000);
-    let mut escalated = false;
-    while std::time::Instant::now() < deadline {
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            log::info!("[probe-kill] :{} released", port);
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        if !escalated && std::time::Instant::now() + std::time::Duration::from_millis(1000) < deadline {
-            // After ~1s of TERM not working, send KILL alongside.
-            for pid in &pids {
-                let _ = Command::new("kill")
-                    .args(["-KILL", &pid.to_string()])
-                    .status();
-            }
-            escalated = true;
-        }
-    }
-    log::warn!(
-        "[probe-kill] :{} still held after 3s — sidecar will probe higher port",
-        port
-    );
-}
-
-/// TERM + (after 1s) KILL every tracked child PID. Idempotent — once a PID
-/// is reaped, kill() with a stale PID is a harmless ESRCH. Drained on call
-/// so a re-entry (panic during exit, repeat exit event) is a no-op.
-fn kill_tracked_children() {
-    let pids = match child_pids().lock() {
-        Ok(mut guard) => std::mem::take(&mut *guard),
-        Err(_) => return, // poisoned mutex — best-effort cleanup, skip
-    };
-    if pids.is_empty() {
-        return;
-    }
-    log::info!("[shutdown] terminating {} tracked child PIDs: {:?}", pids.len(), pids);
-
-    for pid in &pids {
-        let _ = Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status();
-    }
-
-    // Give children a beat to flush + exit gracefully.
-    std::thread::sleep(std::time::Duration::from_millis(1000));
-
-    // Anything still alive gets KILL. `kill -0 <pid>` is the standard
-    // "is this process alive" probe — exits 0 if alive, non-zero otherwise.
-    for pid in &pids {
-        let alive = Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if alive {
-            log::info!("[shutdown] PID {} survived TERM — sending KILL", pid);
-            let _ = Command::new("kill")
-                .args(["-KILL", &pid.to_string()])
-                .status();
-        }
-    }
-}
-
 // ── Boot-time orphan reaper (issue #776) ──
 //
-// `probe_kill_port(3001/3002)` from #719/#728 only clears specific ports.
+// `kill_o8_orphans_on_port(3001/3002)` from #719/#728 only clears specific ports.
 // But orphans from prior crashes can squat on ANY port in our 3001-3050
 // range — and once they're listening on, say, 3003, our new sidecar quietly
 // picks 3004 and the user spends an hour debugging "why didn't my fix take
@@ -871,7 +738,7 @@ fn pgrep_pids(pattern: &str) -> Vec<u32> {
 /// most distros. If lsof is missing we treat cwd as unknown and the candidate
 /// is rejected by the ownership filter (safer than a false-positive kill).
 #[cfg(unix)]
-fn process_cwd(pid: u32) -> String {
+pub(crate) fn process_cwd(pid: u32) -> String {
     let out = match Command::new("lsof")
         .args(["-p", &pid.to_string(), "-a", "-d", "cwd", "-F", "n"])
         .output()
@@ -890,7 +757,7 @@ fn process_cwd(pid: u32) -> String {
 /// Parent PID via `ps -o ppid=`. Returns 0 on failure (treat as "unknown
 /// parent" — unsafe to assume orphan, so caller skips).
 #[cfg(unix)]
-fn process_ppid(pid: u32) -> u32 {
+pub(crate) fn process_ppid(pid: u32) -> u32 {
     Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "ppid="])
         .output()
@@ -913,7 +780,7 @@ fn process_ppid(pid: u32) -> u32 {
 /// We deliberately do NOT match the bare token "o8" anywhere — too broad
 /// (matches user dirs like ~/projects/o8-experiment).
 #[cfg(unix)]
-fn cwd_looks_o8_owned(cwd: &str) -> bool {
+pub(crate) fn cwd_looks_o8_owned(cwd: &str) -> bool {
     if cwd.is_empty() {
         return false;
     }
@@ -926,7 +793,7 @@ fn cwd_looks_o8_owned(cwd: &str) -> bool {
 /// Send SIGTERM, wait up to 2s for the process to exit, then SIGKILL if
 /// still alive. `kill -0` is the standard "is this process alive" probe.
 #[cfg(unix)]
-fn term_then_kill(pid: u32) {
+pub(crate) fn term_then_kill(pid: u32) {
     let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
     while std::time::Instant::now() < deadline {
@@ -1128,7 +995,7 @@ fn spawn_bundled_ws_server(
             Ok(child) => {
                 let pid = child.id();
                 log::info!("WS server started (pid: {})", pid);
-                register_child(pid);
+                sidecar_lifecycle::register_child(pid);
             }
             Err(e) => {
                 log::error!("Failed to start WS server: {}", e);
@@ -2410,14 +2277,14 @@ pub fn run() {
     // The normal Cmd-Q / app.exit() / CloseRequested paths are handled in
     // the RunEvent callback below; this is the belt-and-suspenders layer
     // for ungraceful exits.
-    install_shutdown_handlers();
+    sidecar_lifecycle::install_shutdown_handlers();
 
     // ── Boot-time orphan reaper (issue #776) ──
     // Reap stale `next-server` / `ws-server` processes from prior crashes
     // (reparented to launchd) and remove a stale `/tmp/tauri-mcp-o8-<user>.sock`
     // BEFORE the Tauri builder is constructed — the `tauri-plugin-mcp` plugin
     // binds the socket during builder setup and throws if the file lingers.
-    // Wider net than `probe_kill_port` from #719: hits orphans on any port,
+    // Wider net than default-port cleanup from #719: hits orphans on any port,
     // not just 3001/3002.
     reap_o8_orphans();
 
@@ -2672,12 +2539,24 @@ pub fn run() {
             } else {
                 match classify_port_listener(3001) {
                     PortListener::Free => false,
-                    PortListener::Legit { pid, command } => {
-                        log::info!(
-                            "[orphan-check] :3001 looks legitimate (pid={}, cmd={:?}) — deferring",
-                            pid, command
-                        );
-                        true
+                    PortListener::Legit {
+                        pid,
+                        command,
+                        o8_owned,
+                    } => {
+                        if !o8_owned {
+                            log::info!(
+                                "[orphan-check] :3001 is owned by non-o8 listener (pid={}, cmd={:?}) — bundled server will allocate another port",
+                                pid, command
+                            );
+                            false
+                        } else {
+                            log::info!(
+                                "[orphan-check] :3001 looks like an active o8 listener (pid={}, cmd={:?}) — deferring",
+                                pid, command
+                            );
+                            true
+                        }
                     }
                     PortListener::Orphan { pid, command } => {
                         log::info!(
@@ -2704,7 +2583,7 @@ pub fn run() {
                 if api_port != 3002 {
                     // Keep the WS orphan cleanup, but never kill the explicit
                     // dev frontend if an operator intentionally points at 3002.
-                    probe_kill_port(3002);
+                    sidecar_lifecycle::kill_o8_orphans_on_port(3002);
                 }
                 ws_port = find_free_port(WS_PORT_RANGE, Some(api_port)).unwrap_or(3002);
                 log::info!(
@@ -2761,16 +2640,17 @@ pub fn run() {
                 // Persist for child processes (MCP server, ws-server, etc.)
                 std::env::set_var("O8_NODE_BIN", &node_bin);
 
-                // ── Probe-kill orphans on default ports (issue #719) ──
+                // ── Reap o8 orphans on default ports (issue #719) ──
                 // If a previous install crashed or was killed in a way that
                 // left its Node children reparented to launchd, they're
                 // still serving on 3001/3002 right now. The naive
                 // find_free_port() below would step around them and pick
                 // 3003+ — but the webview keeps loading from 3001 and gets
-                // the stale orphan. Force-clear the default ports first so
-                // the new sidecar binds them cleanly.
-                probe_kill_port(3001);
-                probe_kill_port(3002);
+                // the stale orphan. Force-clear only o8-owned launchd orphans
+                // first so the new sidecar binds cleanly without killing
+                // unrelated local services.
+                sidecar_lifecycle::kill_o8_orphans_on_port(3001);
+                sidecar_lifecycle::kill_o8_orphans_on_port(3002);
 
                 // ── Port allocation ──
                 // Probe for free ports starting at the legacy defaults. If the
@@ -2862,7 +2742,7 @@ pub fn run() {
                     Ok(child) => {
                         let pid = child.id();
                         log::info!("Next.js server started (pid: {})", pid);
-                        register_child(pid);
+                        sidecar_lifecycle::register_child(pid);
                     }
                     Err(e) => {
                         log::error!("Failed to start server: {}", e);
@@ -2912,64 +2792,14 @@ pub fn run() {
             // exits, but the explicit kill is what catches detached/launchd
             // reparenting.
             RunEvent::ExitRequested { .. } => {
-                kill_tracked_children();
+                sidecar_lifecycle::kill_tracked_children();
             }
             // Final event before the loop terminates. Idempotent with the
             // ExitRequested handler — kill_tracked_children() drains the
             // registry on first call.
             RunEvent::Exit => {
-                kill_tracked_children();
+                sidecar_lifecycle::kill_tracked_children();
             }
             _ => {}
         });
-}
-
-// ── Shutdown handler installation ──
-//
-// Called once from `run()` before the Tauri builder is constructed. Installs
-// three layers that all converge on `kill_tracked_children()`:
-//   1. Panic hook  — preserves any prior hook (e.g. tauri-plugin-log) and
-//      runs cleanup AFTER the original. Catches startup panics.
-//   2. SIGTERM/SIGINT (Unix) — `signal-hook` registers a clean handler that
-//      runs in a dedicated thread; we kill children then re-raise the
-//      default disposition so the process actually exits.
-//   3. Tauri RunEvent::Exit — wired in `run()` itself, the normal path.
-fn install_shutdown_handlers() {
-    // Panic hook: chain after the existing hook so default backtraces still
-    // print, then drain children so they don't outlive a panicking parent.
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        prev(info);
-        kill_tracked_children();
-    }));
-
-    // Unix-only signal handler. signal-hook is already in our transitive
-    // dep graph; promoting it to a direct dep adds zero binary cost.
-    #[cfg(unix)]
-    {
-        use signal_hook::consts::{SIGINT, SIGTERM};
-        use signal_hook::iterator::Signals;
-        match Signals::new([SIGTERM, SIGINT]) {
-            Ok(mut signals) => {
-                std::thread::spawn(move || {
-                    if let Some(sig) = signals.forever().next() {
-                        log::info!("[shutdown] received signal {} — killing children", sig);
-                        kill_tracked_children();
-                        // Re-raise the default disposition so the process
-                        // actually exits with the signal's exit code. Using
-                        // exit() here would lose the signal-vs-clean-exit
-                        // distinction; raise() puts us back on the standard
-                        // "killed by signal N" path.
-                        unsafe {
-                            libc::signal(sig, libc::SIG_DFL);
-                            libc::raise(sig);
-                        }
-                    }
-                });
-            }
-            Err(e) => {
-                log::warn!("[shutdown] could not install signal handler: {}", e);
-            }
-        }
-    }
 }
