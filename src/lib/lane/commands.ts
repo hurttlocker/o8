@@ -707,7 +707,12 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       // ── Merge gate enforcement ──
       // Runs security, budget, and integrity checks. Block-level violations
       // force human approval regardless of auto-review status.
-      const gateResult = runMergeGate(lane);
+      //
+      // When the orchestrator has already approved the review, pass that
+      // through — the gate downgrades budget violations to warn so a
+      // human-in-the-loop refactor with intentional large deletions can
+      // land. Security + integrity always stay block-level. See F25 / #1001.
+      const gateResult = runMergeGate(lane, undefined, command.orchestratorReviewed === true);
       if (!gateResult.passed && actor !== 'user') {
         const blockCount = gateResult.violations.filter((v) => v.severity === 'block').length;
         return createLaneActionApproval(lane, actor, {
