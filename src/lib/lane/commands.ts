@@ -102,12 +102,22 @@ function buildLanePolicyContext(
   lane: Pick<Lane, 'id' | 'repoPath'>,
   verb: 'create_pr' | 'merge',
   actor: LaneEventActor,
-  opts?: { orchestratorReviewed?: boolean; fileSizeLimitExceeded?: boolean },
+  opts?: { orchestratorReviewed?: boolean; fileSizeLimitExceeded?: boolean; gatePassed?: boolean },
 ) {
-  // Auto-approve when: (a) headless auto-review is active, or
-  // (b) the orchestrator already reviewed and approved the packet.
+  // Auto-approve when:
+  //   (a) headless auto-review is active, OR
+  //   (b) the orchestrator already reviewed and approved the packet, OR
+  //   (c) the merge gate fully passed (no security / budget / integrity
+  //       violations) AND the caller is the orchestrator. F18 (#994):
+  //       previously every clean orchestrator-driven merge still asked
+  //       for an operator click; this lets the gate's pass verdict
+  //       carry the trust forward.
   const autoReview = actor === 'orchestrator'
-    && (isLaneAutoReviewInProgress(lane.id) || opts?.orchestratorReviewed === true);
+    && (
+      isLaneAutoReviewInProgress(lane.id)
+      || opts?.orchestratorReviewed === true
+      || opts?.gatePassed === true
+    );
   return buildPolicyContext('lane_command', {
     verb,
     laneId: lane.id,
@@ -717,6 +727,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       // Policy gate — require approval for merge
       const mergePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor, {
         orchestratorReviewed: command.orchestratorReviewed,
+        gatePassed: gateResult.passed,
       }));
       if (mergePolicy.requiresApproval && actor !== 'user') {
         return createLaneActionApproval(lane, actor, {
