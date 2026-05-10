@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
       fresh: result.ok,
     });
     return NextResponse.json(result, {
-      status: result.status === 'unavailable' ? 501 : 200,
+      status: result.ok ? 200 : 400,
       headers: {
         'Cache-Control': 'no-store, max-age=0',
       },

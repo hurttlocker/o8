@@ -409,13 +409,35 @@ function findRuntimeAgent(snapshot: Awaited<ReturnType<typeof getRuntimeInventor
   );
 }
 
-function unavailable(agent: AgentSummary, action: RuntimeActionKind, note: string): RuntimeActionResult {
+function unavailable(
+  agent: AgentSummary,
+  action: RuntimeActionKind,
+  note: string,
+  clientMutationId?: string,
+): RuntimeActionResult {
   return {
     ok: false,
     action,
     surfaceId: agent.runtimeSurface?.id ?? agent.sessionKey,
     runtime: agent.runtime,
-    clientMutationId: undefined,
+    clientMutationId,
+    status: 'unavailable',
+    note,
+  };
+}
+
+function actionUnavailable(
+  payload: RuntimeActionRequest,
+  surfaceId: string,
+  runtime: string,
+  note: string,
+): RuntimeActionResult {
+  return {
+    ok: false,
+    action: payload.action,
+    surfaceId,
+    runtime,
+    clientMutationId: payload.clientMutationId,
     status: 'unavailable',
     note,
   };
@@ -425,15 +447,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
   const surfaceId = payload.surfaceId?.trim();
   // Fix #3: return structured error instead of throwing across the API boundary (CLAUDE.md rule)
   if (!surfaceId) {
-    return {
-      ok: false,
-      action: payload.action,
-      surfaceId: '',
-      runtime: '',
-      clientMutationId: payload.clientMutationId,
-      status: 'unavailable',
-      note: 'surfaceId is required',
-    };
+    return actionUnavailable(payload, '', '', 'surfaceId is required');
   }
 
   // Try cached snapshot first to avoid expensive full re-discovery on every action.
@@ -446,20 +460,12 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
   }
   if (!agent) {
     // Fix #3: return structured error instead of throwing across the API boundary
-    return {
-      ok: false,
-      action: payload.action,
-      surfaceId,
-      runtime: '',
-      clientMutationId: payload.clientMutationId,
-      status: 'unavailable',
-      note: 'Runtime surface not found.',
-    };
+    return actionUnavailable(payload, surfaceId, '', 'Runtime surface not found.');
   }
 
   const runtimeSurface = agent.runtimeSurface;
   if (!runtimeSurface) {
-    throw new Error('Runtime surface metadata is unavailable.');
+    return actionUnavailable(payload, agent.sessionKey, agent.runtime, 'Runtime surface metadata is unavailable.');
   }
 
   switch (agent.runtime) {
@@ -473,7 +479,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
         if (payload.action === 'steer' || payload.action === 'send_input') {
           const message = payload.message?.trim();
           if (!message) {
-            throw new Error('message is required to steer a Codex session');
+            return unavailable(agent, payload.action, 'message is required to steer a Codex session', payload.clientMutationId);
           }
           const result = await runtime.resume(agent.sessionKey, message);
           return {
@@ -518,7 +524,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
       if (payload.action === 'steer' || payload.action === 'send_input') {
         const message = payload.message?.trim();
         if (!message) {
-          throw new Error('message is required to resume an owned Codex session');
+          return unavailable(agent, payload.action, 'message is required to resume an owned Codex session', payload.clientMutationId);
         }
         if (!runtimeSurface.capabilities.sendInput) {
           return unavailable(
@@ -591,7 +597,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
 
       if (payload.action === 'steer' || payload.action === 'send_input') {
         const message = payload.message?.trim();
-        if (!message) throw new Error('message is required');
+        if (!message) return unavailable(agent, payload.action, 'message is required', payload.clientMutationId);
         if (!runtime.capabilities.resume) {
           return unavailable(agent, payload.action, `${agent.runtime} does not support resume/steer.`);
         }
