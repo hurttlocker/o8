@@ -10,6 +10,9 @@
  *   CORTEX_IDE_DATA_DIR=$(mktemp -d) npx tsx scripts/smoke-projects-followups.ts
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { parseDirectiveFile } from '../src/lib/cortex/directives/parse';
 import { directiveAppliesToRepo } from '../src/lib/cortex/directives/filter';
 
@@ -102,6 +105,31 @@ body
   assert(!directiveAppliesToRepo(directive!, '/tmp/repo-foo', new Set()), 'project rejects when repo not in any project');
   assert(!directiveAppliesToRepo(directive!, '/tmp/repo-foo', new Set(['atlas'])), 'project rejects when repo in different project');
   assert(directiveAppliesToRepo(directive!, '/tmp/repo-foo', new Set(['o8'])), 'project accepts when repo in matching project');
+}
+
+console.log('Test: bundled project seed gives audit section D a real fixture');
+{
+  const raw = readFileSync(join(process.cwd(), 'examples/directives/seed-project-o8-recall-filter.md'), 'utf8');
+  const directive = parseDirectiveFile(raw, 'seed-project-o8-recall-filter');
+  assert(directive !== null, 'project seed parses');
+  assert(directive?.scope === 'project', 'project seed is scope: project');
+  assert(JSON.stringify(directive?.projects) === JSON.stringify(['o8']), `project seed projects=${JSON.stringify(directive?.projects)}`);
+  assert(JSON.stringify(directive?.projectIds) === JSON.stringify(['default']), `project seed projectIds=${JSON.stringify(directive?.projectIds)}`);
+  assert(directiveAppliesToRepo(directive!, '/tmp/cortex-ide', {
+    projectIds: new Set(['default']),
+    projectSlugs: new Set(['o8']),
+    repoInActiveProject: true,
+  }), 'project seed applies inside active default/o8 project');
+  assert(!directiveAppliesToRepo(directive!, '/tmp/cortex-ide', {
+    projectIds: new Set(['other']),
+    projectSlugs: new Set(['other']),
+    repoInActiveProject: true,
+  }), 'project seed rejects a different active project');
+  assert(!directiveAppliesToRepo(directive!, '/tmp/cortex-ide', {
+    projectIds: new Set(['default']),
+    projectSlugs: new Set(['o8']),
+    repoInActiveProject: false,
+  }), 'project seed rejects repos outside the active project');
 }
 
 console.log('Test: directiveAppliesToRepo — repo tier matches by basename or repoName');
