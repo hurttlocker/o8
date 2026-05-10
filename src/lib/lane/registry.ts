@@ -183,12 +183,19 @@ async function captureReviewBoundaryScreenshot(
 ) {
   try {
     const screenshot = await getReviewScreenshotClient().screenshot();
-    if (screenshot.mimeType !== 'image/png') {
-      throw new Error(`Expected image/png from o8 screenshot capture, received ${screenshot.mimeType}`);
+    // Accept any image/* — the webview MCP returns image/jpeg by default.
+    // The on-disk extension follows the mime so the operator's review pane
+    // can open it in any viewer.
+    if (!screenshot.mimeType || !screenshot.mimeType.startsWith('image/')) {
+      throw new Error(`Expected an image mime from o8 screenshot capture, received ${screenshot.mimeType ?? '(none)'}`);
     }
+    const fileExt = screenshot.mimeType === 'image/jpeg' ? 'jpg'
+      : screenshot.mimeType === 'image/webp' ? 'webp'
+      : screenshot.mimeType === 'image/gif' ? 'gif'
+      : 'png';
 
     const capturedAt = nowIso();
-    const screenshotPath = join(REVIEW_SCREENSHOT_DIR, `${laneId}.png`);
+    const screenshotPath = join(REVIEW_SCREENSHOT_DIR, `${laneId}.${fileExt}`);
     const screenshotBuffer = Buffer.from(screenshot.imageBase64, 'base64');
     const payload: Record<string, unknown> = {
       reviewScreenshotMimeType: screenshot.mimeType,
