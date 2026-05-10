@@ -10,8 +10,10 @@ Front-matter fields:
 | --------- | -------- | ---------------------------------------------------------- |
 | `id`      | yes      | Stable, deterministic. Used for dedupe on re-seed.         |
 | `title`   | yes      | One-line summary surfaced in the Recall Card chip.         |
-| `scope`   | yes      | `global` or a repo name (e.g. `repo` + `repoName: foo`).   |
+| `scope`   | yes      | `global`, `project`, `repo`, or a repo name.               |
 | `repoName`| no       | Required when `scope` is repo-specific.                    |
+| `projects`| no       | Project slugs for `scope: project`, e.g. `[o8]`.           |
+| `projectIds`| no     | Project ids for `scope: project`, e.g. `[default]`.        |
 | `priority`| no       | Higher = more important. Recall Card sorts desc.           |
 | `created` | yes      | ISO timestamp.                                             |
 | `updated` | yes      | ISO timestamp.                                             |
