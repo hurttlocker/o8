@@ -29,10 +29,18 @@ export const PRESERVATION_ADD_BUDGET_RATIO = 0.2;
 export const PRESERVATION_MIN_DELETE_BUDGET = 5;
 
 // Budget multiplier before a violation escalates from warning to hard-block.
-// 1.5x = agent exceeded budget by 50% — likely scope creep or a rewrite.
-// The agent was told its budget in the dispatch prompt. Exceeding 1.5x
-// means it ignored instructions.
-const BUDGET_BLOCK_MULTIPLIER = 1.5;
+// 3x = agent exceeded budget by 200% — true scope creep or a rewrite.
+//
+// Why 3x and not 1.5x: dogfood found the 1.5x bar blocked legitimate
+// refactors. Examples (F22 #998, F23 #999, dogfood loop v3):
+// - #712 UpdateBanner.tsx: deleted 50 / budget 25 = 2x — that's the fix
+//   the issue asked for (replace polling with event subscription).
+// - #986 directives/filter.ts: added 46 / budget 24 = 1.92x — that's
+//   the per-project filtering feature the issue specified.
+// Both got hard-blocked at 1.5x even after operator approval. Operators
+// then had to cherry-pick manually. Treating 1.5–3x as warning lets
+// these legitimate diffs pass while still blocking >3x rewrites.
+const BUDGET_BLOCK_MULTIPLIER = 3;
 
 // ── Security Patterns (hard-block tier) ──
 // These are a subset of auto-review's patterns, elevated to enforcement.
