@@ -131,6 +131,7 @@ async function getWaveMergeOrder(
 function withGateVerdict(
   packetId: string,
   result: MergePacketResult,
+  orchestratorApproved = false,
 ): MergePacketResult {
   if (result.merged) return result;
   // Preserve prior decoration if merge.ts already populated the fields.
@@ -141,7 +142,7 @@ function withGateVerdict(
 
   let preview: MergePreviewResult;
   try {
-    preview = buildPreviewForLane(lane, packetId);
+    preview = buildPreviewForLane(lane, packetId, { orchestratorApproved });
   } catch (error) {
     console.warn(`${'[mcp-operator]'} gate verdict decoration failed for packet ${packetId}:`, error);
     return result;
@@ -279,7 +280,7 @@ async function dispatchPacketMerge(
     merged: result.ok,
     note: result.note,
     ...(result.approvalId ? { approvalId: result.approvalId } : {}),
-  });
+  }, packet.review?.approved === true);
 }
 
 async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise<MergePacketResult> {
@@ -322,7 +323,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
         ? 'Merge gate enforcement: human review required.'
         : `Approval required: ${latestMergeApproval.title}`,
       approvalId: latestMergeApproval.id,
-    });
+    }, packet.review?.approved === true);
   }
   if (latestMergeApproval?.status === 'approved' && (lane.status === 'completed' || lane.status === 'archived')) {
     await syncOrchestratorControlPlaneState();
