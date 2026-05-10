@@ -46,21 +46,30 @@ function renderInlineText(text: string, keyPrefix: string) {
   });
 }
 
-const CITATION_MARKER = /\[CITATION:([a-zA-Z0-9_\-#.]+)\]/g;
+const CITATION_MARKER_SOURCE = '\\[CITATION:([a-zA-Z0-9_\\-#.]+)\\]';
 
 const KIND_SHORT: Record<string, string> = {
   directive: 'D',
   outcome: 'O',
   pr: 'PR',
   issue: 'I',
+  comment: 'CMT',
+  doc: 'DOC',
+  fact: 'FACT',
   symbol: 'S',
+  project: 'PROJ',
+  project_repo: 'PRJREPO',
 };
 
 function citationLabel(kind: string, rowId: string): string {
   const short = KIND_SHORT[kind] ?? kind.slice(0, 2).toUpperCase();
+  const canonicalPrefix = `${kind}-`;
+  const displayId = rowId.toLowerCase().startsWith(canonicalPrefix)
+    ? rowId.slice(canonicalPrefix.length)
+    : rowId;
   const prefix = `${short}-`;
-  if (rowId.toUpperCase().startsWith(prefix)) return `[${rowId.toUpperCase()}]`;
-  return `[${short}-${rowId}]`;
+  if (displayId.toUpperCase().startsWith(prefix)) return `[${displayId.toUpperCase()}]`;
+  return `[${short}-${displayId}]`;
 }
 
 function BrainAnswerBlock({
@@ -79,9 +88,9 @@ function BrainAnswerBlock({
   const nodes: React.ReactNode[] = [];
   let cursor = 0;
   let key = 0;
-  CITATION_MARKER.lastIndex = 0;
+  const citationMarker = new RegExp(CITATION_MARKER_SOURCE, 'g');
   let match: RegExpExecArray | null = null;
-  while ((match = CITATION_MARKER.exec(tokens)) !== null) {
+  while ((match = citationMarker.exec(tokens)) !== null) {
     const start = match.index;
     if (start > cursor) {
       nodes.push(<Fragment key={`t-${key++}`}>{tokens.slice(cursor, start)}</Fragment>);

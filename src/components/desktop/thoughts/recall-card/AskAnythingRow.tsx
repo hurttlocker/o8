@@ -72,14 +72,21 @@ function parseSseFrames(buffer: string): { frames: SseEvent[]; rest: string } {
 }
 
 function isCitationKind(value: unknown): value is CitationKind {
-  return (
-    value === 'directive' ||
-    value === 'outcome' ||
-    value === 'pr' ||
-    value === 'issue' ||
-    value === 'symbol'
-  );
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(CITATION_KINDS, value);
 }
+
+const CITATION_KINDS: Record<CitationKind, true> = {
+  directive: true,
+  outcome: true,
+  pr: true,
+  issue: true,
+  comment: true,
+  doc: true,
+  fact: true,
+  symbol: true,
+  project: true,
+  project_repo: true,
+};
 
 function coerceCitation(payload: unknown): Citation | null {
   if (!payload || typeof payload !== 'object') return null;
