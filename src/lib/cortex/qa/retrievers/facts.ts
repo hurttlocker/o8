@@ -24,6 +24,8 @@
 
 import 'server-only';
 
+import path from 'node:path';
+
 import type { RetrieverInput, RetrieverResult, TypedRow } from '@/lib/cortex/qa/types';
 import { getSqlite } from '@/lib/db';
 import { isFts5Available } from '@/lib/db/v14-fts5-migration';
@@ -33,6 +35,7 @@ import {
   embedText,
   isAvailable as embeddingsAvailable,
 } from '@/lib/cortex/embeddings';
+import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 
 const DEFAULT_LIMIT = 8;
 const CONFIDENCE_FLOOR = 0.6;
@@ -75,6 +78,25 @@ interface FactRow {
   source_authority: number;
   /** 1536-dim float32 embedding BLOB (#962). NULL for un-embedded rows. */
   embedding: Buffer | null;
+}
+
+function buildScopedRepoPaths(input: RetrieverInput): Set<string> {
+  const active = getActiveProjectScopeForRepoSync(input.repoPath);
+  const explicitRepoPath = input.repoPath?.trim();
+  const repoPaths = explicitRepoPath
+    ? (active.repoInActiveProject ? [explicitRepoPath] : [])
+    : active.repoPaths;
+  return new Set(repoPaths.map((repoPath) => path.resolve(repoPath)));
+}
+
+function factRepoInScope(repoPath: string | null, scopedRepoPaths: Set<string>): boolean {
+  if (scopedRepoPaths.size === 0) return false;
+  if (!repoPath?.trim()) return false;
+  try {
+    return scopedRepoPaths.has(path.resolve(repoPath));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -134,6 +156,7 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
 
   try {
     const sqlite = getSqlite();
+    const scopedRepoPaths = buildScopedRepoPaths(input);
     if (!isFts5Available(sqlite)) {
       // FTS5 missing — facts_fts wasn't created. Worker writes still go to
       // `facts`, but we have no BM25 index to search. Return empty.
@@ -245,6 +268,7 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
       if (rows.length >= limit) break;
       const record = byId.get(id);
       if (!record) continue;
+      if (!factRepoInScope(record.repo_path, scopedRepoPaths)) continue;
       if (record.confidence < CONFIDENCE_FLOOR) continue;
 
       const hit = hits.get(id)!;

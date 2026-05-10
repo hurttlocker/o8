@@ -30,6 +30,7 @@ import { runAskPipeline } from '@/lib/cortex/qa/ask';
 interface AskBody {
   question?: unknown;
   repoPath?: unknown;
+  projectId?: unknown;
   mode?: unknown;
 }
 
@@ -49,6 +50,8 @@ export async function POST(request: NextRequest) {
 
   const repoPath =
     typeof body?.repoPath === 'string' && body.repoPath.trim() ? body.repoPath.trim() : undefined;
+  const projectId =
+    typeof body?.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : undefined;
 
   const force = request.nextUrl.searchParams.get('force') === '1';
 
@@ -70,7 +73,7 @@ export async function POST(request: NextRequest) {
 
       try {
         emit('open', { ok: true });
-        await runAskPipeline(question, repoPath, emit, force);
+        await runAskPipeline(question, repoPath, emit, force, projectId);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'pipeline error';
         console.error('[qa][ask-route] pipeline error:', message);

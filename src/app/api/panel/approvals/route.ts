@@ -71,6 +71,7 @@ export async function POST(request: NextRequest) {
 
     try {
       const approval = createApproval({
+        projectId: typeof approvalBody.projectId === 'string' ? approvalBody.projectId : undefined,
         source: approvalBody.source === 'llm-chat' || approvalBody.source === 'test' ? approvalBody.source : 'runtime',
         runtime: typeof approvalBody.runtime === 'string' ? approvalBody.runtime : 'claude-code',
         agent: typeof approvalBody.agent === 'string' ? approvalBody.agent : 'Runtime Hook',

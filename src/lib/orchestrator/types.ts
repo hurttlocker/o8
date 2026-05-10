@@ -202,6 +202,7 @@ export interface PacketSelfReview {
 
 export interface PacketContext {
   packetId: string;
+  projectId?: string | null;
   sessionKey: string;
   summary: string;
   changedFiles: string[];
