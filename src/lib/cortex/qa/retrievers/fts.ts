@@ -19,9 +19,19 @@
 
 import 'server-only';
 
+import { existsSync, readFileSync } from 'node:fs';
+import path, { basename, join } from 'node:path';
+
+import { parseDirectiveFile, type ParsedDirective } from '@/lib/cortex/directives/parse';
+import {
+  type DirectiveProjectScope,
+  directiveAppliesToRepo,
+} from '@/lib/cortex/directives/filter';
 import type { RetrieverInput, RetrieverResult, TypedRow } from '@/lib/cortex/qa/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { getSqlite } from '@/lib/db';
 import { isFts5Available } from '@/lib/db/v14-fts5-migration';
+import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 
 const PER_INDEX_LIMIT = 20;
 // Comments compete with the rest of the indexes inside the FTS retriever's
@@ -151,12 +161,74 @@ interface DocRow {
   title: string;
 }
 
+function buildScope(input: RetrieverInput) {
+  const active = getActiveProjectScopeForRepoSync(input.repoPath);
+  const explicitRepoPath = input.repoPath?.trim();
+  const repoPaths = explicitRepoPath
+    ? (active.repoInActiveProject ? [path.resolve(explicitRepoPath)] : [])
+    : active.repoPaths.map((repoPath) => path.resolve(repoPath));
+  const repoNames = new Set(repoPaths.map((repoPath) => basename(repoPath).toLowerCase()));
+  const directiveScope: DirectiveProjectScope = {
+    projectIds: new Set([active.projectId.toLowerCase()]),
+    projectSlugs: new Set([active.projectSlug.toLowerCase()]),
+    repoInActiveProject: active.repoInActiveProject,
+  };
+  return { repoPaths: new Set(repoPaths), repoNames, directiveScope };
+}
+
+function pathInScope(repoPath: string | null | undefined, scopedPaths: Set<string>): boolean {
+  if (scopedPaths.size === 0) return false;
+  if (!repoPath?.trim()) return false;
+  try {
+    return scopedPaths.has(path.resolve(repoPath));
+  } catch {
+    return false;
+  }
+}
+
+function repoFullNameInScope(fullName: string | null | undefined, repoNames: Set<string>): boolean {
+  if (repoNames.size === 0) return false;
+  const normalized = fullName?.trim().toLowerCase();
+  if (!normalized) return false;
+  const name = normalized.split('/').pop() ?? normalized;
+  return repoNames.has(name);
+}
+
+function readDirective(id: string): ParsedDirective | null {
+  try {
+    const filePath = join(getDataDir(), 'directives', `${id}.md`);
+    if (!existsSync(filePath)) return null;
+    return parseDirectiveFile(readFileSync(filePath, 'utf-8'), id);
+  } catch {
+    return null;
+  }
+}
+
+function directiveInScope(id: string, input: RetrieverInput, projectScope: DirectiveProjectScope): boolean {
+  const parsed = readDirective(id);
+  if (!parsed) return false;
+  if (input.repoPath?.trim()) {
+    return directiveAppliesToRepo(parsed, input.repoPath, projectScope);
+  }
+  const scope = parsed.scope.toLowerCase();
+  if (scope === 'global' || scope === '') return true;
+  if (scope !== 'project') return false;
+  for (const projectId of parsed.projectIds) {
+    if (projectScope.projectIds.has(projectId.toLowerCase())) return true;
+  }
+  for (const projectSlug of parsed.projects) {
+    if (projectScope.projectSlugs.has(projectSlug.toLowerCase())) return true;
+  }
+  return false;
+}
+
 export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResult> {
   const start = Date.now();
   const rows: TypedRow[] = [];
 
   try {
     const sqlite = getSqlite();
+    const scope = buildScope(input);
     if (!isFts5Available(sqlite)) {
       // FTS5 unavailable — return empty rows so the orchestrator can still
       // serve SQL + graph hits. No throw.
@@ -244,7 +316,9 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
            WHERE id IN (${sortedIds.map(() => '?').join(',')})`,
         )
         .all(...sortedIds) as OutcomeRow[];
-      const byId = new Map(records.map((r) => [r.id, r]));
+      const byId = new Map(records
+        .filter((record) => pathInScope(record.repo_path, scope.repoPaths))
+        .map((r) => [r.id, r]));
       sortedIds.forEach((id, idx) => {
         const record = byId.get(id);
         if (!record) return;
@@ -283,7 +357,9 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
              WHERE pull_request_id IN (${intIds.map(() => '?').join(',')})`,
           )
           .all(...intIds) as PrRow[];
-        const byId = new Map(records.map((r) => [String(r.pull_request_id), r]));
+        const byId = new Map(records
+          .filter((record) => repoFullNameInScope(record.repo_full_name, scope.repoNames))
+          .map((r) => [String(r.pull_request_id), r]));
         sortedIds.forEach((id, idx) => {
           const record = byId.get(id);
           if (!record) return;
@@ -324,7 +400,9 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
              WHERE issue_id IN (${intIds.map(() => '?').join(',')})`,
           )
           .all(...intIds) as IssueRow[];
-        const byId = new Map(records.map((r) => [String(r.issue_id), r]));
+        const byId = new Map(records
+          .filter((record) => repoFullNameInScope(record.repo_full_name, scope.repoNames))
+          .map((r) => [String(r.issue_id), r]));
         sortedIds.forEach((id, idx) => {
           const record = byId.get(id);
           if (!record) return;
@@ -365,7 +443,9 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
            WHERE id IN (${sortedIds.map(() => '?').join(',')})`,
         )
         .all(...sortedIds) as DocRow[];
-      const byId = new Map(records.map((r) => [r.id, r]));
+      const byId = new Map(records
+        .filter((record) => scope.repoNames.has(record.repo_name.toLowerCase()))
+        .map((r) => [r.id, r]));
       sortedIds.forEach((id, idx) => {
         const record = byId.get(id);
         if (!record) return;
@@ -402,7 +482,9 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
            WHERE directive_id IN (${sortedIds.map(() => '?').join(',')})`,
         )
         .all(...sortedIds) as DirectiveRow[];
-      const byId = new Map(records.map((r) => [r.directive_id, r]));
+      const byId = new Map(records
+        .filter((record) => directiveInScope(record.directive_id, input, scope.directiveScope))
+        .map((r) => [r.directive_id, r]));
       sortedIds.forEach((id, idx) => {
         const record = byId.get(id);
         if (!record) return;
@@ -442,7 +524,9 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
              WHERE id IN (${sortedIds.map(() => '?').join(',')})`,
           )
           .all(...sortedIds) as CommentRow[];
-        const byId = new Map(records.map((r) => [r.id, r]));
+        const byId = new Map(records
+          .filter((record) => repoFullNameInScope(record.repo_full_name, scope.repoNames))
+          .map((r) => [r.id, r]));
         sortedIds.forEach((id, idx) => {
           const record = byId.get(id);
           if (!record) return;

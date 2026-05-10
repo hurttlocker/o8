@@ -148,6 +148,7 @@ export type ApprovalContinuation =
 
 export interface ApprovalRecord {
   id: string;
+  projectId: string | null;
   source: ApprovalSource;
   runtime: string;
   agent: string;
@@ -181,6 +182,7 @@ export interface ApprovalRecord {
 }
 
 export interface CreateApprovalInput {
+  projectId?: string | null;
   source: ApprovalSource;
   runtime: string;
   agent: string;

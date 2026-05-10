@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
 import { probeBranchMerged } from '@/lib/orchestrator/branch-merge-probe';
 import { markRepoOriginConfigured } from '@/lib/repos/origin-readiness';
+import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 import { enqueueInboxItem, runRetentionSweep, selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
 
 const execFileAsync = promisify(execFile);
@@ -156,6 +157,7 @@ function ensureSupervisorInboxSchema(sqlite: Database.Database): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS supervisor_inbox (
       id TEXT PRIMARY KEY,
+      project_id TEXT,
       repo_path TEXT NOT NULL,
       packet_id TEXT,
       kind TEXT NOT NULL,
@@ -173,6 +175,16 @@ function ensureSupervisorInboxSchema(sqlite: Database.Database): void {
       ON supervisor_inbox(repo_path, created_at);
   `);
 
+  ensureColumn(
+    sqlite,
+    'supervisor_inbox',
+    'project_id',
+    `ALTER TABLE supervisor_inbox ADD COLUMN project_id TEXT`,
+  );
+  sqlite.prepare(
+    "UPDATE supervisor_inbox SET project_id = ? WHERE project_id IS NULL OR project_id = ''",
+  ).run(DEFAULT_PROJECT_ID);
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_project_status_created ON supervisor_inbox(project_id, status, created_at)');
   ensureColumn(
     sqlite,
     'supervisor_inbox',

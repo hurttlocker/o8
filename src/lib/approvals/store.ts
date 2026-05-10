@@ -15,7 +15,8 @@ import {
 } from '@/lib/approvals/orchestrator-review';
 import { approvals as approvalsTable, approvalEvents as approvalEventsTable, getDb, getSqlite } from '@/lib/db';
 import type { EventSeverity } from '@/lib/fleet/types';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { findLaneByPacket, getLane } from '@/lib/lane/registry';
+import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import type {
   ApprovalActor,
   ApprovalAuditEvent,
@@ -64,6 +65,7 @@ function mapApprovalRow(row: ApprovalRow | undefined): ApprovalRecord | null {
 
   return {
     id: row.id,
+    projectId: row.projectId ?? null,
     source: row.source,
     runtime: row.runtime,
     agent: row.agent,
@@ -97,6 +99,7 @@ function toApprovalValues(approval: ApprovalRecord): ApprovalInsert {
 
   return {
     id: approval.id,
+    projectId: approval.projectId,
     source: approval.source,
     runtime: approval.runtime,
     agent: approval.agent,
@@ -164,7 +167,9 @@ function stableJson(value: unknown) {
 }
 
 function fingerprintForApproval(input: CreateApprovalInput) {
+  const projectId = inferApprovalProjectId(input);
   return [
+    projectId ?? '',
     input.source,
     input.runtime,
     input.sessionKey,
@@ -174,10 +179,31 @@ function fingerprintForApproval(input: CreateApprovalInput) {
   ].join('::');
 }
 
+function inferApprovalRepoPath(input: Pick<CreateApprovalInput, 'continuation' | 'metadata'>): string | null {
+  const continuation = input.continuation;
+  if (continuation?.kind === 'plan') return continuation.repoPath;
+  if (continuation?.kind === 'llm-chat') return continuation.repoPath ?? null;
+  if (continuation?.kind === 'runtime') return continuation.cwd ?? null;
+  if (continuation?.kind === 'lane') return getLane(continuation.laneId)?.repoPath ?? null;
+  const metadata = input.metadata;
+  return metadata?.RepoPath
+    ?? metadata?.repoPath
+    ?? metadata?.Workspace
+    ?? null;
+}
+
+function inferApprovalProjectId(input: Pick<CreateApprovalInput, 'projectId' | 'continuation' | 'metadata'>): string | null {
+  const explicit = input.projectId?.trim();
+  if (explicit) return explicit;
+  const repoPath = inferApprovalRepoPath(input);
+  return getActiveProjectScopeForRepoSync(repoPath).projectId;
+}
+
 function createApprovalRecord(input: CreateApprovalInput): ApprovalRecord {
   const createdAt = Date.now();
   return {
     id: `approval-${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
+    projectId: inferApprovalProjectId(input),
     source: input.source,
     runtime: input.runtime,
     agent: input.agent,
@@ -279,8 +305,11 @@ export function expireStaleApprovals() {
   return changes;
 }
 
-export function listApprovals(options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string } = {}) {
+export function listApprovals(options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string; projectId?: string | null } = {}) {
   const { status = 'pending', sessionKey } = options;
+  const projectId = options.projectId === undefined
+    ? getActiveProjectScopeForRepoSync().projectId
+    : options.projectId?.trim() || null;
 
   // Auto-expire stale pending approvals before querying
   if (status === 'pending' || status === 'all') {
@@ -294,10 +323,12 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
   const db = getApprovalDb();
 
   if (status === 'all' && sessionKey) {
+    const conditions = [eq(approvalsTable.sessionKey, sessionKey)];
+    if (projectId) conditions.push(eq(approvalsTable.projectId, projectId));
     return db
       .select()
       .from(approvalsTable)
-      .where(eq(approvalsTable.sessionKey, sessionKey))
+      .where(and(...conditions))
       .orderBy(desc(approvalsTable.createdAt))
       .all()
       .map((row) => mapApprovalRow(row)!)
@@ -305,13 +336,15 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
   }
 
   if (status !== 'all' && sessionKey) {
+    const conditions = [
+      eq(approvalsTable.status, status),
+      eq(approvalsTable.sessionKey, sessionKey),
+    ];
+    if (projectId) conditions.push(eq(approvalsTable.projectId, projectId));
     return db
       .select()
       .from(approvalsTable)
-      .where(and(
-        eq(approvalsTable.status, status),
-        eq(approvalsTable.sessionKey, sessionKey),
-      ))
+      .where(and(...conditions))
       .orderBy(desc(approvalsTable.createdAt))
       .all()
       .map((row) => mapApprovalRow(row)!)
@@ -319,21 +352,32 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
   }
 
   if (status !== 'all') {
+    const conditions = [eq(approvalsTable.status, status)];
+    if (projectId) conditions.push(eq(approvalsTable.projectId, projectId));
     return db
       .select()
       .from(approvalsTable)
-      .where(eq(approvalsTable.status, status))
+      .where(and(...conditions))
       .orderBy(desc(approvalsTable.createdAt))
       .all()
       .map((row) => mapApprovalRow(row)!)
       .filter((approval): approval is ApprovalRecord => approval !== null);
   }
 
-  return db
-    .select()
-    .from(approvalsTable)
-    .orderBy(desc(approvalsTable.createdAt))
-    .all()
+  const rows = projectId
+    ? db
+      .select()
+      .from(approvalsTable)
+      .where(eq(approvalsTable.projectId, projectId))
+      .orderBy(desc(approvalsTable.createdAt))
+      .all()
+    : db
+      .select()
+      .from(approvalsTable)
+      .orderBy(desc(approvalsTable.createdAt))
+      .all();
+
+  return rows
     .map((row) => mapApprovalRow(row)!)
     .filter((approval): approval is ApprovalRecord => approval !== null);
 }
@@ -369,28 +413,36 @@ function listApprovalCandidatesForContext(options: {
   packetId?: string;
   laneId?: string;
   sessionKey?: string;
+  projectId?: string | null;
 }) {
   const packetId = normalizeApprovalLookupValue(options.packetId);
   const laneId = normalizeApprovalLookupValue(options.laneId);
   const sessionKey = normalizeApprovalLookupValue(options.sessionKey);
+  const projectId = options.projectId === undefined
+    ? getActiveProjectScopeForRepoSync().projectId
+    : options.projectId?.trim() || null;
   const createdAfter = Date.now() - APPROVAL_CONTEXT_LOOKBACK_MS;
   const rowsById = new Map<string, ApprovalRecord>();
 
   if (sessionKey) {
-    for (const approval of queryApprovals(and(
+    const conditions = [
       eq(approvalsTable.sessionKey, sessionKey),
       gte(approvalsTable.createdAt, createdAfter),
-    )!)) {
+    ];
+    if (projectId) conditions.push(eq(approvalsTable.projectId, projectId));
+    for (const approval of queryApprovals(and(...conditions)!)) {
       rowsById.set(approval.id, approval);
     }
   }
 
   const additionalPredicate = buildApprovalContextMatchPredicate({ packetId, laneId });
   if (additionalPredicate) {
-    for (const approval of queryApprovals(and(
+    const conditions = [
       gte(approvalsTable.createdAt, createdAfter),
       additionalPredicate,
-    )!)) {
+    ];
+    if (projectId) conditions.push(eq(approvalsTable.projectId, projectId));
+    for (const approval of queryApprovals(and(...conditions)!)) {
       rowsById.set(approval.id, approval);
     }
   }
@@ -399,7 +451,7 @@ function listApprovalCandidatesForContext(options: {
     .sort((left, right) => right.createdAt - left.createdAt);
 }
 
-export function listApprovalsForContext(options: { packetId?: string; laneId?: string; sessionKey?: string }) {
+export function listApprovalsForContext(options: { packetId?: string; laneId?: string; sessionKey?: string; projectId?: string | null }) {
   return listApprovalCandidatesForContext(options)
     .map((approval) => ({
       approval,

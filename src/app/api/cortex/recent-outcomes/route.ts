@@ -30,6 +30,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { getDb, sessionOutcomes } from '@/lib/db';
 import { liveOutcomeFilter } from '@/lib/cortex/decay';
 import { withTiming } from '@/lib/cortex/diagnostics';
+import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
@@ -39,6 +40,8 @@ export async function GET(request: NextRequest) {
   }
   const limitRaw = Number.parseInt(params.get('limit') ?? '3', 10);
   const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(10, limitRaw)) : 3;
+  const projectId = params.get('projectId')?.trim()
+    || (await getActiveProjectScopeForRepo(repoPath)).projectId;
 
   const db = getDb();
   if (!db) {
@@ -61,7 +64,11 @@ export async function GET(request: NextRequest) {
         durationMs: sessionOutcomes.durationMs,
       })
       .from(sessionOutcomes)
-      .where(and(eq(sessionOutcomes.repoPath, repoPath), liveOutcomeFilter()))
+      .where(and(
+        eq(sessionOutcomes.repoPath, repoPath),
+        eq(sessionOutcomes.projectId, projectId),
+        liveOutcomeFilter(),
+      ))
       .orderBy(desc(sessionOutcomes.completedAt))
       .limit(limit));
 

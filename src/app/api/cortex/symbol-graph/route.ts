@@ -26,6 +26,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { extractSymbols, traceSymbols, type SymbolEdge } from '@/lib/codebase-memory/client';
+import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 interface PostBody {
   repoPath?: string;
@@ -45,6 +46,13 @@ export async function POST(request: NextRequest) {
   const repoPath = typeof body.repoPath === 'string' ? body.repoPath.trim() : '';
   if (!repoPath) {
     return NextResponse.json({ ok: false, error: 'repoPath is required.' }, { status: 400 });
+  }
+  const activeProject = await getActiveProjectScopeForRepo(repoPath);
+  if (!activeProject.repoInActiveProject) {
+    return NextResponse.json(
+      { ok: true, symbols: [], edges: [] },
+      { headers: { 'Cache-Control': 'no-store, max-age=0' } },
+    );
   }
 
   const limit = typeof body.limit === 'number' ? Math.max(1, Math.min(10, body.limit)) : 3;
