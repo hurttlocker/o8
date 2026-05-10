@@ -1,4 +1,4 @@
-import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+export { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 // ── Types ──
@@ -233,69 +233,4 @@ export function parseIssueList(value: unknown) {
   }
 
   return issues;
-}
-
-function normalizeFindingSeverity(value: unknown): OrchestratorReviewFinding['severity'] {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (normalized === 'bug' || normalized === 'high' || normalized === 'critical' || normalized === 'error') {
-    return 'bug';
-  }
-  if (
-    normalized === 'rule_violation'
-    || normalized === 'medium'
-    || normalized === 'warning'
-    || normalized === 'policy'
-  ) {
-    return 'rule_violation';
-  }
-  if (normalized === 'note' || normalized === 'low' || normalized === 'info') {
-    return 'note';
-  }
-  throw new Error(`Unsupported finding severity: ${String(value)}`);
-}
-
-function normalizeFindingResolution(value: unknown): OrchestratorReviewFinding['resolution'] {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (normalized === 'fixed' || normalized === 'resolved') {
-    return 'fixed';
-  }
-  if (normalized === 'accepted' || normalized === 'waived' || normalized === 'intentional') {
-    return 'accepted';
-  }
-  if (normalized === 'deferred' || normalized === 'todo' || normalized === 'followup' || normalized === 'follow-up') {
-    return 'deferred';
-  }
-  throw new Error(`Unsupported finding resolution: ${String(value)}`);
-}
-
-export function parseReviewFindings(value: unknown): OrchestratorReviewFinding[] {
-  if (!Array.isArray(value)) {
-    throw new Error('findings must be an array');
-  }
-
-  return value.map((finding, index) => {
-    if (!finding || typeof finding !== 'object') {
-      throw new Error(`findings[${index}] must be an object`);
-    }
-
-    const candidate = finding as Record<string, unknown>;
-    const file = typeof candidate.file === 'string' ? candidate.file.trim() : '';
-    const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
-    if (!file || !description) {
-      throw new Error(`findings[${index}] must include file and description`);
-    }
-
-    const line = candidate.line;
-    if (line !== undefined && (typeof line !== 'number' || !Number.isFinite(line) || line < 1)) {
-      throw new Error(`findings[${index}].line must be a positive number`);
-    }
-
-    return {
-      file,
-      line: typeof line === 'number' ? Math.floor(line) : undefined,
-      severity: normalizeFindingSeverity(candidate.severity),
-      description,
-      resolution: normalizeFindingResolution(candidate.resolution),
-    };
-  });
 }

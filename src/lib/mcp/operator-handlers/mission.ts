@@ -132,7 +132,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'submit_review',
     description:
-      'Record review findings for a completed packet. Findings are relayed to downstream dependent packets. Example: submit_review({packetId: "pkt-abc", approved: true, findings: [{file: "src/foo.ts", severity: "warning", description: "CSS shorthand used", resolution: "Use paddingTop/paddingLeft"}]})',
+      'Record review findings for a completed packet. Findings are relayed to downstream dependent packets. Use status for the finding enum (fixed, accepted, deferred); put free-text fix details in description or fixSuggestion. Example: submit_review({packetId: "pkt-abc", approved: false, findings: [{file: "src/foo.ts", severity: "warning", description: "CSS shorthand used", status: "fixed", fixSuggestion: "Use paddingTop and paddingLeft instead."}]})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -150,9 +150,26 @@ export const MISSION_TOOLS: McpTool[] = [
               line: { type: 'number' },
               severity: { type: 'string' },
               description: { type: 'string' },
-              resolution: { type: 'string' },
+              status: {
+                type: 'string',
+                enum: ['fixed', 'accepted', 'deferred'],
+                description: 'Finding status enum. Use fixSuggestion or description for free-text fix details.',
+              },
+              resolution: {
+                type: 'string',
+                enum: ['fixed', 'accepted', 'deferred'],
+                description: 'Deprecated alias for status. Do not use for free-text fix details.',
+              },
+              fixSuggestion: {
+                type: 'string',
+                description: 'Optional free-text fix narrative.',
+              },
             },
-            required: ['file', 'severity', 'description', 'resolution'],
+            required: ['file', 'severity', 'description'],
+            anyOf: [
+              { required: ['status'] },
+              { required: ['resolution'] },
+            ],
           },
         },
         approved: {

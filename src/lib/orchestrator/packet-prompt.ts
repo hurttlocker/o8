@@ -39,7 +39,8 @@ function formatPacketReviewFallback(packet: OrchestratorPacket): string[] {
 
   const findings = review.findings.map((finding) => {
     const location = typeof finding.line === 'number' ? `${finding.file}:${finding.line}` : finding.file;
-    return `${location} [${finding.severity}] ${finding.description} -> ${finding.resolution}`;
+    const fixSuggestion = finding.fixSuggestion ? ` Fix suggestion: ${finding.fixSuggestion}` : '';
+    return `${location} [${finding.severity}] ${finding.description}${fixSuggestion} -> ${finding.resolution}`;
   });
 
   return [
@@ -60,7 +61,8 @@ function formatContextReviewFindings(reviewFindings: PacketContext['reviewFindin
         ? (typeof finding.line === 'number' ? `${finding.file}:${finding.line}` : finding.file)
         : null;
       const description = truncateText(finding.description, 180);
-      return location ? `${location} ${description}` : description;
+      const fixSuggestion = finding.fixSuggestion ? ` Fix: ${truncateText(finding.fixSuggestion, 120)}` : '';
+      return location ? `${location} ${description}${fixSuggestion}` : `${description}${fixSuggestion}`;
     }),
     3,
   );

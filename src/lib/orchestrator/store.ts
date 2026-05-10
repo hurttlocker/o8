@@ -153,9 +153,9 @@ function normalizeReviewFinding(value: unknown): OrchestratorPacketReviewFinding
     severity,
     description,
     resolution,
+    ...(typeof finding.fixSuggestion === 'string' && finding.fixSuggestion.trim() ? { fixSuggestion: finding.fixSuggestion.trim() } : {}),
   };
 }
-
 function normalizePacketReview(value: unknown): OrchestratorPacketReview | null {
   if (!value || typeof value !== 'object') {
     return null;
