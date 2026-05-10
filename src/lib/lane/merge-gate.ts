@@ -154,8 +154,19 @@ function checkSecurityPatterns(addedLines: string[]): MergeViolation[] {
 }
 
 // ── Check 2: Diff Budget Validation ──
+//
+// When `orchestratorApproved` is true, budget violations are downgraded
+// from `block` to `warn` — the orchestrator has reviewed the diff and
+// signed off, which carries more weight than the heuristic budget cap.
+// Security + integrity violations stay block-level regardless (those
+// catch genuine risks the orchestrator can't waive). See F25 / #1001.
 
-function checkDiffBudgets(cwd: string, baseBranch: string, repoPath: string): MergeViolation[] {
+function checkDiffBudgets(
+  cwd: string,
+  baseBranch: string,
+  repoPath: string,
+  orchestratorApproved: boolean,
+): MergeViolation[] {
   const numstat = getDiffNumstat(cwd, baseBranch);
   if (numstat.length === 0) return [];
 
@@ -175,21 +186,25 @@ function checkDiffBudgets(cwd: string, baseBranch: string, repoPath: string): Me
     );
 
     if (deletions > deleteBudget) {
+      const wouldBlock = deletions > deleteBudget * BUDGET_BLOCK_MULTIPLIER;
+      const severity: 'block' | 'warn' = wouldBlock && !orchestratorApproved ? 'block' : 'warn';
       violations.push({
         category: 'budget',
-        severity: deletions > deleteBudget * BUDGET_BLOCK_MULTIPLIER ? 'block' : 'warn',
+        severity,
         label: 'Delete budget exceeded',
-        detail: `${file}: deleted ${deletions} lines (budget: ${deleteBudget}, original: ${skelFile.lineCount} lines)`,
+        detail: `${file}: deleted ${deletions} lines (budget: ${deleteBudget}, original: ${skelFile.lineCount} lines)${wouldBlock && orchestratorApproved ? ' — orchestrator-approved override' : ''}`,
         file,
       });
     }
 
     if (insertions > addBudget) {
+      const wouldBlock = insertions > addBudget * BUDGET_BLOCK_MULTIPLIER;
+      const severity: 'block' | 'warn' = wouldBlock && !orchestratorApproved ? 'block' : 'warn';
       violations.push({
         category: 'budget',
-        severity: insertions > addBudget * BUDGET_BLOCK_MULTIPLIER ? 'block' : 'warn',
+        severity,
         label: 'Add budget exceeded',
-        detail: `${file}: added ${insertions} lines (budget: ${addBudget}, original: ${skelFile.lineCount} lines)`,
+        detail: `${file}: added ${insertions} lines (budget: ${addBudget}, original: ${skelFile.lineCount} lines)${wouldBlock && orchestratorApproved ? ' — orchestrator-approved override' : ''}`,
         file,
       });
     }
@@ -253,14 +268,22 @@ function checkSelfReviewIntegrity(
  *
  * - `block` severity violations prevent merge (force human approval)
  * - `warn` severity violations are informational (shown in approval card)
+ *
+ * `orchestratorApproved`: when true, budget violations are downgraded to
+ * `warn` (the orchestrator has signed off on the diff). Security and
+ * integrity violations stay block-level regardless. See F25 / #1001.
  */
-export function runMergeGate(lane: Lane, selfReview?: PacketSelfReview): MergeGateResult {
+export function runMergeGate(
+  lane: Lane,
+  selfReview?: PacketSelfReview,
+  orchestratorApproved = false,
+): MergeGateResult {
   const cwd = lane.worktreePath || lane.repoPath;
   const baseBranch = lane.baseBranch || 'main';
 
   const addedLines = getAddedLines(cwd, baseBranch);
   const securityViolations = checkSecurityPatterns(addedLines);
-  const budgetViolations = checkDiffBudgets(cwd, baseBranch, lane.repoPath);
+  const budgetViolations = checkDiffBudgets(cwd, baseBranch, lane.repoPath, orchestratorApproved);
   const importViolations = checkUntrackedImportViolations(cwd, baseBranch);
   const integrityViolations = checkSelfReviewIntegrity(
     selfReview,
