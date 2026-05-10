@@ -2,7 +2,7 @@ import { listApprovalsForContext } from '@/lib/approvals/store';
 import { appendDirectiveTrailer } from '@/lib/cortex/directive-merges';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
-import { archiveLane, findLaneByPacket } from '@/lib/lane/registry';
+import { archiveLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
@@ -41,6 +41,36 @@ function isPacketAwaitingMerge(packet: OrchestratorPacket) {
   return packet.status === 'awaiting_review'
     && packet.releaseState !== 'released'
     && packet.review?.approved !== false;
+}
+
+function isTerminalReleaseLane(packetId: string) {
+  return listLanes().some((lane) =>
+    lane.packetId === packetId && (lane.status === 'completed' || lane.status === 'archived')
+  );
+}
+
+function buildAlreadyReleasedResult(): MergePacketResult {
+  return {
+    merged: true,
+    note: 'Already released (via auto-merge)',
+    alreadyReleased: true,
+  };
+}
+
+function isAlreadyReleasedPacket(packet: OrchestratorPacket | null | undefined) {
+  return packet?.releaseState === 'released' || packet?.status === 'released';
+}
+
+function alreadyReleasedResultForPacket(packet: OrchestratorPacket | null | undefined) {
+  if (isAlreadyReleasedPacket(packet)) {
+    return buildAlreadyReleasedResult();
+  }
+  return null;
+}
+
+function alreadyReleasedResultForPacketId(packetId: string, packets: OrchestratorPacket[]) {
+  return alreadyReleasedResultForPacket(packets.find((candidate) => candidate.id === packetId))
+    ?? (isTerminalReleaseLane(packetId) ? buildAlreadyReleasedResult() : null);
 }
 
 async function getWaveMergeOrder(
@@ -171,6 +201,11 @@ async function dispatchPacketMerge(
   input: ApproveAndMergeInput,
   actor: 'orchestrator' | 'user',
 ): Promise<MergePacketResult> {
+  const alreadyReleased = alreadyReleasedResultForPacketId(packet.id, currentMissionState().packets);
+  if (alreadyReleased) {
+    return alreadyReleased;
+  }
+
   const lane = findLaneByPacket(packet.id);
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
@@ -252,6 +287,11 @@ async function dispatchPacketMerge(
   // /api/orchestrator/state GET poll and other concurrent writers.
   const synced = await syncOrchestratorControlPlaneState();
 
+  const releasedAfterDispatch = alreadyReleasedResultForPacketId(input.packetId, synced.packets);
+  if (!result.ok && releasedAfterDispatch) {
+    return releasedAfterDispatch;
+  }
+
   if (result.ok) {
     for (const packetState of synced.packets) {
       if (packetState.id === input.packetId) {
@@ -286,7 +326,16 @@ async function dispatchPacketMerge(
 async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise<MergePacketResult> {
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
+  const alreadyReleased = alreadyReleasedResultForPacket(packet);
+  if (alreadyReleased) {
+    return alreadyReleased;
+  }
+
   if (!packet) {
+    if (isTerminalReleaseLane(input.packetId)) {
+      return buildAlreadyReleasedResult();
+    }
+
     // #557 — Fall through to lane-only merge when the mission packet is missing.
     // #622 — wrapper captures lane pre-merge and runs synchronous cleanup on
     // success, making the bash-merge fallback atomic with the merge commit.
@@ -295,6 +344,10 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
       input.packetId,
       () => mergeOrphanLaneByPacket(input.packetId, input.commitMessage),
     );
+    const releasedAfterOrphanDispatch = alreadyReleasedResultForPacketId(input.packetId, currentMissionState().packets);
+    if (!orphanResult.merged && releasedAfterOrphanDispatch) {
+      return releasedAfterOrphanDispatch;
+    }
     return withGateVerdict(input.packetId, orphanResult);
   }
 
@@ -302,12 +355,6 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     return {
       merged: false,
       note: 'Packet review is not approved. Resolve findings before merging.',
-    };
-  }
-  if (packet.releaseState === 'released' || packet.status === 'released') {
-    return {
-      merged: true,
-      note: `Packet ${packet.referenceLabel} is already released.`,
     };
   }
 
