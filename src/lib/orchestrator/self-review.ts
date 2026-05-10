@@ -93,9 +93,10 @@ export function buildPacketSelfReviewInstructions(baseBranch = 'main'): string[]
   return [
     'Self-review gate before completion:',
     `1. Before reporting completion, review your own diff against the original task by running \`git diff ${baseBranch}...HEAD\`.`,
-    '2. Evaluate the actual patch, not just filenames. If you find issues, fix them autonomously, rerun the diff, and repeat until the self-review passes.',
-    `3. Only after the self-review passes, end your final response with a machine-readable block in this exact format: ${PACKET_SELF_REVIEW_TAG_START} {"passed":true,"confidence":"high|medium|low","summary":"one sentence","issuesFound":["issue you found and fixed"]} ${PACKET_SELF_REVIEW_TAG_END}`,
-    '4. Use `confidence: "high"` only when the diff cleanly matches the task and your verification passed; use `medium` for moderate residual risk; use `low` when notable uncertainty remains.',
-    '5. Do not report completion without the self-review block.',
+    '2. Evaluate the actual patch, not just filenames. If you find issues that would BREAK the task (typecheck failure, runtime crash, scope creep, security risk), fix them and rerun the diff. Cap fix attempts at TWO per issue — if a fix attempt does not resolve the finding, accept the current state, mention it in the self-review block as `confidence: "medium"`, and commit. Do NOT loop indefinitely.',
+    '3. Lint warnings (especially `react-hooks/exhaustive-deps` and other style-only rules) are ADVISORY, not blocking. Do not gate self-review on a clean lint pass — note any warnings in the issuesFound array and ship.',
+    `4. Only after the self-review passes, end your final response with a machine-readable block in this exact format: ${PACKET_SELF_REVIEW_TAG_START} {"passed":true,"confidence":"high|medium|low","summary":"one sentence","issuesFound":["issue you found and fixed"]} ${PACKET_SELF_REVIEW_TAG_END}`,
+    '5. Use `confidence: "high"` only when the diff cleanly matches the task and your verification passed; use `medium` for moderate residual risk OR an unfixable lint warning OR an exhausted retry; use `low` when notable uncertainty remains.',
+    '6. Do not report completion without the self-review block.',
   ];
 }
