@@ -72,5 +72,5 @@ async function run() {
 
 run().catch((error) => {
   console.error('screenshot fallback smoke failed:', error);
-  process.exit(1);
+  process.exitCode = 1;
 });
