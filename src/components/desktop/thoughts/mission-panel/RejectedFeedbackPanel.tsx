@@ -8,6 +8,7 @@ interface RejectedFeedbackPanelProps {
 }
 
 const MAX_FEEDBACK_LENGTH = 4000;
+const SPINNER_ANIMATION = 'spin 0.9s linear infinite';
 
 /**
  * #662 — One-click rerun-with-feedback.
@@ -78,7 +79,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
         background: 'var(--t-panel)',
         borderWidth: 1,
         borderStyle: 'solid',
-        borderColor: 'rgba(239, 68, 68, 0.24)',
+        borderColor: 'var(--red-soft)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -86,7 +87,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
           width={14}
           height={14}
           viewBox="0 0 256 256"
-          fill="#b91c1c"
+          fill="var(--red)"
           aria-hidden="true"
           style={{ flexShrink: 0 }}
         >
@@ -99,7 +100,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
             fontWeight: 800,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
-            color: '#b91c1c',
+            color: 'var(--red)',
           }}
         >
           Rejected
@@ -135,7 +136,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
           borderRadius: 12,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: overLimit ? 'rgba(239, 68, 68, 0.4)' : 'var(--t-panel-border)',
+          borderColor: overLimit ? 'var(--red)' : 'var(--t-panel-border)',
           background: 'var(--t-input-bg)',
           color: 'var(--t-text)',
           fontSize: 12,
@@ -166,8 +167,8 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
             paddingRight: 14,
             borderRadius: 14,
             borderWidth: 0,
-            background: canSubmit ? '#2563eb' : 'var(--t-divider)',
-            color: canSubmit ? '#fff' : 'var(--t-text-faint)',
+            background: canSubmit ? 'var(--t-accent)' : 'var(--t-divider)',
+            color: canSubmit ? 'var(--t-terminal-cursor-accent)' : 'var(--t-text-faint)',
             fontSize: 12,
             fontWeight: 700,
             letterSpacing: '-0.01em',
@@ -194,7 +195,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
                 viewBox="0 0 256 256"
                 fill="currentColor"
                 aria-hidden="true"
-                style={{ animation: 'spin 0.9s linear infinite' }}
+                style={{ animation: SPINNER_ANIMATION }}
               >
                 {/* Phosphor: circle-notch */}
                 <path d="M232,128a104,104,0,0,1-208,0c0-41,23.81-78.36,60.66-95.27a8,8,0,0,1,6.68,14.54C60.15,61.59,40,93.27,40,128a88,88,0,0,0,176,0c0-34.73-20.15-66.41-51.34-80.73a8,8,0,0,1,6.68-14.54C208.19,49.64,232,87,232,128Z" />
@@ -220,7 +221,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
         <span
           style={{
             fontSize: 10,
-            color: overLimit ? '#b91c1c' : 'var(--t-text-faint)',
+            color: overLimit ? 'var(--red)' : 'var(--t-text-faint)',
             fontWeight: 600,
             fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
           }}
@@ -240,16 +241,16 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
           style={{
             fontSize: 11,
             fontWeight: 600,
-            color: '#b91c1c',
+            color: 'var(--red)',
             paddingTop: 6,
             paddingRight: 9,
             paddingBottom: 6,
             paddingLeft: 9,
             borderRadius: 8,
-            background: 'rgba(239, 68, 68, 0.06)',
+            background: 'var(--red-soft)',
             borderWidth: 1,
             borderStyle: 'solid',
-            borderColor: 'rgba(239, 68, 68, 0.16)',
+            borderColor: 'var(--red-soft)',
           }}
         >
           {error}
@@ -261,16 +262,16 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
           style={{
             fontSize: 11,
             fontWeight: 600,
-            color: '#15803d',
+            color: 'var(--green)',
             paddingTop: 6,
             paddingRight: 9,
             paddingBottom: 6,
             paddingLeft: 9,
             borderRadius: 8,
-            background: 'rgba(34, 197, 94, 0.08)',
+            background: 'var(--green-soft)',
             borderWidth: 1,
             borderStyle: 'solid',
-            borderColor: 'rgba(34, 197, 94, 0.18)',
+            borderColor: 'var(--green-soft)',
           }}
         >
           {note}

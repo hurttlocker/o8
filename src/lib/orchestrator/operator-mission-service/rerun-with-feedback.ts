@@ -148,10 +148,11 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
     packet.prompt = appendFeedback(originalPrompt, feedback);
 
     // Step 4 — run a dispatch tick so the packet relaunches with the
-    // updated prompt. Return afterDispatch so withLockedState uses it as
-    // the basis for reconcile + write (prevents the pre-dispatch snapshot
-    // from clobbering the dispatch result — #820 CRITICAL fix).
-    return await runDispatchTick(current);
+    // updated prompt. Copy the post-dispatch snapshot back onto the locked
+    // `current` object so withLockedState reconciles and writes the launch
+    // result instead of the pre-dispatch snapshot.
+    const afterDispatch = await runDispatchTick(current);
+    Object.assign(current, afterDispatch);
   });
 
   const dispatchedPacket = finalState.packets.find((candidate) => candidate.id === packetId) ?? null;
