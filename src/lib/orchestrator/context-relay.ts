@@ -93,6 +93,7 @@ function pushUniqueFinding(
     severity: finding.severity,
     description,
     resolution: finding.resolution,
+    fixSuggestion: finding.fixSuggestion?.trim() || undefined,
   });
 }
 
@@ -215,7 +216,8 @@ function isReviewFinding(value: unknown): value is OrchestratorReviewFinding {
     && typeof candidate.description === 'string'
     && (candidate.line === undefined || (typeof candidate.line === 'number' && Number.isFinite(candidate.line)))
     && (candidate.severity === 'bug' || candidate.severity === 'rule_violation' || candidate.severity === 'note')
-    && (candidate.resolution === 'fixed' || candidate.resolution === 'accepted' || candidate.resolution === 'deferred');
+    && (candidate.resolution === 'fixed' || candidate.resolution === 'accepted' || candidate.resolution === 'deferred')
+    && (candidate.fixSuggestion === undefined || typeof candidate.fixSuggestion === 'string');
 }
 
 function isPacketReviewContext(value: unknown): value is PacketReviewContext {
@@ -252,6 +254,7 @@ function toPacketReviewContext(review: {
       severity: finding.severity,
       description: finding.description.trim(),
       resolution: finding.resolution,
+      fixSuggestion: finding.fixSuggestion?.trim() || undefined,
     })),
     reviewedAt: new Date().toISOString(),
   };
