@@ -1,76 +1,11 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { submitPacketReview } from '@/lib/orchestrator/operator-mission-service';
-import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function normalizeFindingSeverity(value: unknown): OrchestratorReviewFinding['severity'] {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (normalized === 'bug' || normalized === 'high' || normalized === 'critical' || normalized === 'error') {
-    return 'bug';
-  }
-  if (
-    normalized === 'rule_violation'
-    || normalized === 'medium'
-    || normalized === 'warning'
-    || normalized === 'policy'
-  ) {
-    return 'rule_violation';
-  }
-  if (normalized === 'note' || normalized === 'low' || normalized === 'info') {
-    return 'note';
-  }
-  throw new Error(`Unsupported finding severity: ${String(value)}`);
-}
-
-function normalizeFindingResolution(value: unknown): OrchestratorReviewFinding['resolution'] {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (normalized === 'fixed' || normalized === 'resolved') {
-    return 'fixed';
-  }
-  if (normalized === 'accepted' || normalized === 'waived' || normalized === 'intentional') {
-    return 'accepted';
-  }
-  if (normalized === 'deferred' || normalized === 'todo' || normalized === 'followup' || normalized === 'follow-up') {
-    return 'deferred';
-  }
-  throw new Error(`Unsupported finding resolution: ${String(value)}`);
-}
-
-function parseReviewFindings(value: unknown): OrchestratorReviewFinding[] {
-  if (!Array.isArray(value)) {
-    throw new Error('findings must be an array.');
-  }
-
-  return value.map((finding, index) => {
-    const candidate = asRecord(finding);
-    if (!candidate) {
-      throw new Error(`findings[${index}] must be an object.`);
-    }
-
-    const file = typeof candidate.file === 'string' ? candidate.file.trim() : '';
-    const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
-    if (!file || !description) {
-      throw new Error(`findings[${index}] must include file and description.`);
-    }
-
-    const line = candidate.line;
-    if (line !== undefined && (typeof line !== 'number' || !Number.isFinite(line) || line < 1)) {
-      throw new Error(`findings[${index}].line must be a positive number.`);
-    }
-
-    return {
-      file,
-      line: typeof line === 'number' ? Math.floor(line) : undefined,
-      severity: normalizeFindingSeverity(candidate.severity),
-      description,
-      resolution: normalizeFindingResolution(candidate.resolution),
-    };
-  });
-}
 
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);

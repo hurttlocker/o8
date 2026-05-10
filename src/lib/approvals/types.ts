@@ -64,6 +64,7 @@ export interface OrchestratorReviewFinding {
   severity: 'bug' | 'rule_violation' | 'note';
   description: string;
   resolution: 'fixed' | 'accepted' | 'deferred';
+  fixSuggestion?: string;
 }
 
 export interface ApprovalAuditEvent {
