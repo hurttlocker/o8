@@ -250,10 +250,16 @@ export class WorktreeManager {
         return false;
       }
     };
+    // When the caller pinned a branchName (lane dispatch passes lane.branch),
+    // the branch IS the lane's identity — we can't recompute it to a free
+    // value, and adding it to the collision check would spin forever (the
+    // branch always exists after the first iteration). Only check branch
+    // collisions when the caller didn't pin one.
+    const branchPinned = !!opts.branchName?.trim();
     let attemptBranch = desiredBranch;
     let collided = existingMeta[taskId]
       || (await dirExists(probeWorktreeDir(taskId)))
-      || (await branchExists(attemptBranch));
+      || (!branchPinned && (await branchExists(attemptBranch)));
     while (collided) {
       const suffix = Math.random().toString(36).slice(2, 6);
       taskId = `${baseTaskId}-${suffix}`;
@@ -263,7 +269,7 @@ export class WorktreeManager {
       attemptBranch = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
       collided = existingMeta[taskId]
         || (await dirExists(probeWorktreeDir(taskId)))
-        || (await branchExists(attemptBranch));
+        || (!branchPinned && (await branchExists(attemptBranch)));
     }
     const branchName = attemptBranch;
 
