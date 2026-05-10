@@ -7,14 +7,14 @@
  * streaming answer between tokens. Click opens the source row (URL or
  * local navigate target). Hover shows the excerpt as a native tooltip.
  *
- * The Citation type is defined here in the scaffold; once Sub-issue 1
- * lands `src/lib/cortex/qa/types.ts`, this file will re-export the
- * canonical type instead.
+ * The renderer keeps a minimal frontend citation shape while reusing the
+ * canonical Cortex Q&A citation kind union.
  */
 
+import type { CitationKind as CanonicalCitationKind } from '@/lib/cortex/qa/types';
 import { MONO_FAMILY } from './shared';
 
-export type CitationKind = 'directive' | 'outcome' | 'pr' | 'issue' | 'symbol';
+export type CitationKind = CanonicalCitationKind;
 
 export interface Citation {
   kind: CitationKind;
@@ -34,18 +34,27 @@ const KIND_LABEL: Record<CitationKind, string> = {
   outcome: 'O',
   pr: 'PR',
   issue: 'I',
+  comment: 'CMT',
+  doc: 'DOC',
+  fact: 'FACT',
   symbol: 'S',
+  project: 'PROJ',
+  project_repo: 'PRJREPO',
 };
 
 export function citationLabel(citation: Citation): string {
   // Row IDs may already contain the kind prefix (e.g. "D-014") — keep
   // them as-is so the bracketed chip reads `[D-014]` not `[D-D-014]`.
   const id = citation.rowId.trim();
+  const canonicalPrefix = `${citation.kind}-`;
+  const displayId = id.toLowerCase().startsWith(canonicalPrefix)
+    ? id.slice(canonicalPrefix.length)
+    : id;
   const kindPrefix = `${KIND_LABEL[citation.kind]}-`;
-  if (id.toUpperCase().startsWith(kindPrefix)) {
-    return `[${id.toUpperCase()}]`;
+  if (displayId.toUpperCase().startsWith(kindPrefix)) {
+    return `[${displayId.toUpperCase()}]`;
   }
-  return `[${KIND_LABEL[citation.kind]}-${id}]`;
+  return `[${KIND_LABEL[citation.kind]}-${displayId}]`;
 }
 
 export function CitationPill({ citation, onClick }: CitationPillProps) {
@@ -59,7 +68,6 @@ export function CitationPill({ citation, onClick }: CitationPillProps) {
       return;
     }
     // Wave B wires real navigation — log for now so demo flow is observable.
-    // eslint-disable-next-line no-console
     console.log('[ask-anything] citation click', citation);
   };
 
