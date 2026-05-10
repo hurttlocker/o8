@@ -28,6 +28,7 @@ import { ensureV17FactsFtsSchema } from '@/lib/db/v17-facts-fts-migration';
 import { ensureV18FactsSourceAuthoritySchema } from '@/lib/db/v18-facts-source-authority-migration';
 import { ensureV19DocDistillStateSchema } from '@/lib/db/v19-doc-distill-state-migration';
 import { ensureV20FactsEmbeddingSchema } from '@/lib/db/v20-facts-embedding-migration';
+import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 
 // ── Data directory ──
 
@@ -280,6 +281,7 @@ function ensureTables(sqlite: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS session_outcomes (
       id TEXT PRIMARY KEY,
+      project_id TEXT,
       repo_path TEXT NOT NULL,
       branch TEXT,
       runtime TEXT NOT NULL,
@@ -414,6 +416,7 @@ function ensureTables(sqlite: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS approvals (
       id TEXT PRIMARY KEY,
+      project_id TEXT,
       source TEXT NOT NULL,
       runtime TEXT NOT NULL,
       agent TEXT NOT NULL,
@@ -443,6 +446,7 @@ function ensureTables(sqlite: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS lanes (
       id TEXT PRIMARY KEY,
+      project_id TEXT,
       label TEXT NOT NULL,
       repo_path TEXT NOT NULL,
       worktree_path TEXT,
@@ -655,6 +659,7 @@ function ensureTables(sqlite: Database.Database): void {
   ensureApprovalContextIndexes(sqlite);
   ensureUsageLogIndexes(sqlite);
   migrateLegacyLaneStoreIfNeeded(sqlite, { lanesTablePreviouslyMissing });
+  ensureProjectScopeColumns(sqlite);
 }
 
 /**
@@ -998,6 +1003,15 @@ function ensureProjectScopeColumns(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_approvals_project_id ON approvals(project_id);
     CREATE INDEX IF NOT EXISTS idx_lanes_project_id ON lanes(project_id);
   `);
+  sqlite.prepare(
+    "UPDATE session_outcomes SET project_id = ? WHERE project_id IS NULL OR project_id = ''",
+  ).run(DEFAULT_PROJECT_ID);
+  sqlite.prepare(
+    "UPDATE approvals SET project_id = ? WHERE project_id IS NULL OR project_id = ''",
+  ).run(DEFAULT_PROJECT_ID);
+  sqlite.prepare(
+    "UPDATE lanes SET project_id = ? WHERE project_id IS NULL OR project_id = ''",
+  ).run(DEFAULT_PROJECT_ID);
 }
 
 /**

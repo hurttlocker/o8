@@ -31,7 +31,9 @@ import 'server-only';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
+import { parseProjectsList } from '@/lib/cortex/directives/parse';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { publishCortexChange } from '@/lib/realtime/publisher';
 
 const MAX_TRAILER_ENTRIES = 10;
@@ -55,6 +57,8 @@ export interface DirectiveMeta {
   title: string | null;
   scope: string;
   repoName: string | null;
+  projects?: string[];
+  projectIds?: string[];
   history: boolean;
 }
 
@@ -73,6 +77,8 @@ function parseFrontMatter(text: string, fallbackId: string): DirectiveMeta {
     title: null,
     scope: 'global',
     repoName: null,
+    projects: [],
+    projectIds: [],
     history: true,
   };
 
@@ -93,6 +99,8 @@ function parseFrontMatter(text: string, fallbackId: string): DirectiveMeta {
     else if (key === 'title') result.title = value || null;
     else if (key === 'scope') result.scope = value || 'global';
     else if (key === 'repoName') result.repoName = value || null;
+    else if (key === 'projects') result.projects = parseProjectsList(value);
+    else if (key === 'projectIds' || key === 'projectId') result.projectIds = parseProjectsList(value);
     else if (key === 'history') {
       // Treat unquoted `false` / `no` / `0` as opt-out. Default = true.
       const normalized = value.toLowerCase().replace(/['"`]/g, '');
@@ -295,6 +303,14 @@ function matchesRepoScope(meta: DirectiveMeta, repoPath: string): boolean {
   const repoName = basename(repoPath).toLowerCase();
   const scope = meta.scope.toLowerCase();
   if (scope === 'global' || scope === '') return true;
+  if (scope === 'project') {
+    const active = getActiveProjectScopeForRepoSync(repoPath);
+    if (!active.repoInActiveProject) return false;
+    const activeProjectId = active.projectId.toLowerCase();
+    const activeProjectSlug = active.projectSlug.toLowerCase();
+    return (meta.projectIds ?? []).some((id) => id.toLowerCase() === activeProjectId)
+      || (meta.projects ?? []).some((slug) => slug.toLowerCase() === activeProjectSlug);
+  }
   const declared = (meta.repoName ?? '').toLowerCase();
   if (declared && declared === repoName) return true;
   if (scope === repoName) return true;

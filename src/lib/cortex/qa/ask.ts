@@ -23,6 +23,7 @@ import { classifyQuestion } from '@/lib/cortex/qa/classifier';
 import { composeClassA, composeClassB, type SseEmit } from '@/lib/cortex/qa/composer';
 import { retrieveAll, unionMerge } from '@/lib/cortex/qa/retrieve';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
+import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 // ── In-process cache ──────────────────────────────────────────────────────────
 
@@ -36,9 +37,9 @@ interface CacheEntry {
 
 const answerCache = new Map<string, CacheEntry>();
 
-function cacheKey(question: string, repoPath: string | undefined): string {
+function cacheKey(question: string, repoPath: string | undefined, projectId: string | undefined): string {
   return createHash('sha256')
-    .update(`${question}\x00${repoPath ?? ''}`)
+    .update(`${question}\x00${repoPath ?? ''}\x00${projectId ?? ''}`)
     .digest('hex');
 }
 
@@ -84,10 +85,12 @@ export interface AskCortexResult {
 export async function askCortex(
   question: string,
   repoPath: string | undefined,
-  options: { bypassCache?: boolean } = {},
+  options: { bypassCache?: boolean; projectId?: string | null } = {},
 ): Promise<AskCortexResult> {
   const { bypassCache = false } = options;
-  const key = cacheKey(question, repoPath);
+  const projectId = options.projectId?.trim()
+    || (await getActiveProjectScopeForRepo(repoPath)).projectId;
+  const key = cacheKey(question, repoPath, projectId);
   if (!bypassCache) {
     const cached = getCached(key);
     if (cached) {
@@ -111,6 +114,7 @@ export async function askCortex(
   const results = await retrieveAll({
     question,
     repoPath,
+    projectId,
     bm25Variants: classification.bm25Variants,
   });
   const topRows = unionMerge(results);
@@ -189,8 +193,11 @@ export async function runAskPipeline(
   repoPath: string | undefined,
   emit: SseEmit,
   force = false,
+  requestedProjectId?: string | null,
 ): Promise<void> {
-  const key = cacheKey(question, repoPath);
+  const projectId = requestedProjectId?.trim()
+    || (await getActiveProjectScopeForRepo(repoPath)).projectId;
+  const key = cacheKey(question, repoPath, projectId);
 
   if (!force) {
     const cached = getCached(key);
@@ -220,6 +227,7 @@ export async function runAskPipeline(
     const results = await retrieveAll({
       question,
       repoPath,
+      projectId,
       bm25Variants: classification.bm25Variants,
     });
     topRows = unionMerge(results);

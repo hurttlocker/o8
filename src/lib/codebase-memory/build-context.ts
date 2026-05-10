@@ -48,8 +48,9 @@ import { readRepoPathRegistry } from '@/lib/repos/repo-path-registry';
 import { parseDirectiveFile, type ParsedDirective } from '@/lib/cortex/directives/parse';
 import {
   directiveAppliesToRepo,
-  resolveRepoProjectSlugs,
+  resolveActiveDirectiveProjectScope,
 } from '@/lib/cortex/directives/filter';
+import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 import { extractGraphResolvedSymbols, type SymbolEdge } from './client';
 
@@ -77,6 +78,8 @@ interface BuildContextBlockInput {
   repoPath: string;
   /** The packet body / summary we'll mine for symbols. */
   packetBody: string;
+  /** Active project id. Falls back to ~/.o8/projects.json when omitted. */
+  projectId?: string | null;
 }
 
 function readDirectives(): DirectiveEntry[] {
@@ -143,12 +146,10 @@ async function filterDirectivesForRepo(
   directives: DirectiveEntry[],
   repoPath: string,
 ): Promise<DirectiveEntry[]> {
-  // Resolve project memberships once per call. Empty Set when the repo isn't
-  // registered, isn't in any Project, or the projects DB is unavailable.
-  const projectSlugsForRepo = await resolveRepoProjectSlugs(repoPath);
+  const projectScope = await resolveActiveDirectiveProjectScope(repoPath);
 
   return directives
-    .filter((d) => directiveAppliesToRepo(d, repoPath, projectSlugsForRepo))
+    .filter((d) => directiveAppliesToRepo(d, repoPath, projectScope))
     .sort((a, b) => {
       const ap = a.priority ?? 0;
       const bp = b.priority ?? 0;
@@ -158,10 +159,11 @@ async function filterDirectivesForRepo(
     .slice(0, MAX_DIRECTIVES);
 }
 
-async function readRecentOutcomes(repoPath: string): Promise<OutcomeRow[]> {
+async function readRecentOutcomes(repoPath: string, projectId: string | null): Promise<OutcomeRow[]> {
   try {
     const db = getDb();
     if (!db) return [];
+    if (!projectId) return [];
     const rows = await db
       .select({
         outcome: sessionOutcomes.outcome,
@@ -172,7 +174,11 @@ async function readRecentOutcomes(repoPath: string): Promise<OutcomeRow[]> {
         reviewApproved: sessionOutcomes.reviewApproved,
       })
       .from(sessionOutcomes)
-      .where(and(eq(sessionOutcomes.repoPath, repoPath), liveOutcomeFilter()))
+      .where(and(
+        eq(sessionOutcomes.repoPath, repoPath),
+        eq(sessionOutcomes.projectId, projectId),
+        liveOutcomeFilter(),
+      ))
       .orderBy(desc(sessionOutcomes.completedAt))
       .limit(MAX_OUTCOMES);
     return rows;
@@ -305,8 +311,11 @@ function fitWithinBudget(sections: { heading: 'directives' | 'outcomes' | 'symbo
 export async function buildContextBlock({
   repoPath,
   packetBody,
+  projectId,
 }: BuildContextBlockInput): Promise<string> {
   if (!repoPath?.trim()) return '';
+  const activeScope = await getActiveProjectScopeForRepo(repoPath);
+  const activeProjectId = projectId?.trim() || activeScope.projectId;
 
   // #849 — when the path doesn't match a registered repo (and isn't our own
   // checkout), drop the directives leg. Global directives are intentionally
@@ -317,7 +326,7 @@ export async function buildContextBlock({
   const directives = repoIsKnown
     ? await filterDirectivesForRepo(readDirectives(), repoPath)
     : [];
-  const outcomes = await readRecentOutcomes(repoPath);
+  const outcomes = await readRecentOutcomes(repoPath, activeProjectId);
 
   // Symbol graph is best-effort — `extractGraphResolvedSymbols` traces a
   // wider candidate set and keeps only the symbols that actually have a
@@ -327,7 +336,9 @@ export async function buildContextBlock({
   try {
     const resolved = await withTiming(
       'recall.symbol-graph',
-      () => extractGraphResolvedSymbols(packetBody, repoPath, MAX_SYMBOLS),
+      () => activeScope.repoInActiveProject
+        ? extractGraphResolvedSymbols(packetBody, repoPath, MAX_SYMBOLS)
+        : Promise.resolve({ symbols: [], edges: [], unavailable: false }),
     );
     if (!resolved.unavailable) edges = resolved.edges;
   } catch {

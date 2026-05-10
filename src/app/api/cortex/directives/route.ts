@@ -32,9 +32,11 @@ import { readAllDirectiveTrailers } from '@/lib/cortex/directive-merges';
 import { withTimingSync } from '@/lib/cortex/diagnostics';
 import { parseDirectiveFile, type ParsedDirective } from '@/lib/cortex/directives/parse';
 import {
+  type DirectiveProjectScope,
   directiveAppliesToRepo,
-  resolveRepoProjectSlugs,
+  resolveActiveDirectiveProjectScope,
 } from '@/lib/cortex/directives/filter';
+import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -63,6 +65,19 @@ function toSummary(parsed: ParsedDirective): DirectiveSummary {
     projects: parsed.projects,
     recentMerges: [],
   };
+}
+
+function directiveAppliesToActiveProject(parsed: ParsedDirective, projectScope: DirectiveProjectScope): boolean {
+  const scope = parsed.scope.toLowerCase();
+  if (scope === 'global' || scope === '') return true;
+  if (scope !== 'project') return false;
+  for (const id of parsed.projectIds) {
+    if (projectScope.projectIds.has(id.toLowerCase())) return true;
+  }
+  for (const slug of parsed.projects) {
+    if (projectScope.projectSlugs.has(slug.toLowerCase())) return true;
+  }
+  return false;
 }
 
 export async function GET(req: NextRequest) {
@@ -94,12 +109,21 @@ export async function GET(req: NextRequest) {
       return out;
     });
 
-    // #899 — when a repoPath is supplied, apply the same scope-tier filter
-    // that dispatch context uses. Resolves project memberships once.
+    // #899/#986 — apply active-project scope from ~/.o8/projects.json.
+    // With a repoPath, use the same repo + active-project rules as dispatch.
+    // Without a repoPath, expose only global + active-project directives.
     let parsed: ParsedDirective[] = parsedAll;
     if (repoPath) {
-      const projectSlugsForRepo = await resolveRepoProjectSlugs(repoPath);
-      parsed = parsedAll.filter((d) => directiveAppliesToRepo(d, repoPath, projectSlugsForRepo));
+      const projectScope = await resolveActiveDirectiveProjectScope(repoPath);
+      parsed = parsedAll.filter((d) => directiveAppliesToRepo(d, repoPath, projectScope));
+    } else {
+      const active = await getActiveProjectScopeForRepo();
+      const projectScope: DirectiveProjectScope = {
+        projectIds: new Set([active.projectId.toLowerCase()]),
+        projectSlugs: new Set([active.projectSlug.toLowerCase()]),
+        repoInActiveProject: false,
+      };
+      parsed = parsedAll.filter((d) => directiveAppliesToActiveProject(d, projectScope));
     }
 
     const directives = parsed.map(toSummary);
