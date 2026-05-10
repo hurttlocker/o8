@@ -62,6 +62,14 @@ export interface WorktreeLaunchOptions {
   agentType: AgentType;
   /** Human-readable task name */
   taskName: string;
+  /**
+   * Pre-assigned lane branch to bind the worktree to. When set, the manager
+   * checks out this branch inside the worktree before the agent spawns so
+   * codex/claude-code lands on the correct branch from turn 0 instead of
+   * the legacy `worktree/<agent>/<slug>` placeholder. Required for packet
+   * dispatch — without it the lane merge would observe an empty diff.
+   */
+  branchName?: string;
   /** Base branch (default: current HEAD) */
   baseBranch?: string;
   /** Force isolation on/off. If undefined, auto-decides based on active agents. */
@@ -74,6 +82,12 @@ export interface WorktreeLaunchOptions {
   envFiles?: string[];
   /** Preferred workspace isolation implementation */
   isolationPreference?: WorkspaceIsolationPreference;
+  /**
+   * Packet id this launch is bound to. When set, the worktree directory is
+   * named `packet-<id>` so two packets dispatched in parallel each get their
+   * own clone instead of colliding on a taskName-derived slot.
+   */
+  packetId?: string;
 }
 
 /**
@@ -121,11 +135,13 @@ export async function prepareLaunchWorktree(
   const worktree = await mgr.create({
     agentType: opts.agentType,
     taskName: opts.taskName,
+    branchName: opts.branchName,
     baseBranch: opts.baseBranch,
     skipSetup: opts.skipSetup,
     envMode: opts.envMode,
     envFiles: opts.envFiles,
     isolationPreference: opts.isolationPreference,
+    packetId: opts.packetId,
     managed: opts.agentType === 'claude-code' ? true : undefined,
   });
 

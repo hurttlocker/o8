@@ -89,6 +89,14 @@ export interface CreateWorktreeOptions {
   envFiles?: string[];
   /** Preferred workspace isolation implementation */
   isolationPreference?: WorkspaceIsolationPreference;
+  /**
+   * Packet id this worktree is bound to. When set, the manager derives the
+   * worktree directory as `packet-<id>` so parallel packets each get their
+   * own isolated clone instead of colliding on a taskName-derived slot.
+   * Matches the regex in `src/lib/runtimes/claude-code.ts` so orchestrator
+   * session detection stays in sync.
+   */
+  packetId?: string;
 }
 
 /**

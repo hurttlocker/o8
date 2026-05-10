@@ -325,6 +325,12 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           runtime: lane.runtime,
           prompt: command.prompt,
           repoPath: lane.worktreePath ?? lane.repoPath,
+          // Bind the worktree to the lane's branch so the agent lands on
+          // the correct branch from turn 0. Without this the manager fell
+          // back to `worktree/<agent>/<slug>` and the agent had to self-
+          // correct via `git checkout -b <lane.branch>` — weaker models
+          // missed the hint and silently committed to the wrong branch.
+          branchName: lane.branch,
           baseBranch: lane.baseBranch,
           model: command.model,
           isolate: !lane.worktreePath,

@@ -50,6 +50,15 @@ export interface RuntimeLaunchRequest {
   cwd?: string;
   repoPath?: string;
   taskName?: string;
+  /**
+   * Pre-assigned lane branch the worktree must check out before the agent
+   * spawns. Without this, prepareLaunchWorktree falls back to the legacy
+   * `worktree/<agent>/<slug>` placeholder branch and the agent has to
+   * self-correct via `git checkout -b <lane.branch>`. Weaker models miss
+   * the prompt hint and silently commit on the wrong branch — the lane
+   * merge then sees an empty diff. Dispatch passes `lane.branch` here.
+   */
+  branchName?: string;
   baseBranch?: string;
   isolate?: boolean;
   isolation?: 'main' | 'branch';
@@ -61,7 +70,8 @@ export interface RuntimeLaunchRequest {
   // When the launch is bound to a packet, include its id so supervisor inbox
   // items surfaced during pre-launch (eg. rebase conflicts) can deep-link
   // back to the packet card. Leave undefined for scratch runs that aren't
-  // tied to a packet.
+  // tied to a packet. Also drives the worktree directory naming (one slot
+  // per packet, instead of a shared taskName-derived slot).
   packetId?: string;
 }
 
@@ -168,12 +178,14 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         repoRoot: repoPath,
         agentType: runtimeId,
         taskName: payload.taskName?.trim() || summarizeTaskName(prompt),
+        branchName: payload.branchName?.trim() || undefined,
         baseBranch: payload.baseBranch?.trim() || undefined,
         isolate: payload.isolate,
         skipSetup: payload.skipSetup,
         envMode: repoEntry?.setup.envMode,
         envFiles: repoEntry?.setup.envFiles,
         isolationPreference: repoEntry?.setup.workspaceIsolationPreference,
+        packetId: payload.packetId,
       });
       if (launchWorktree?.worktree) {
         clearFetchUnreachable(repoPath);
