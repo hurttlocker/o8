@@ -141,6 +141,7 @@ export const sessions = sqliteTable('sessions', {
 
 export const sessionOutcomes = sqliteTable('session_outcomes', {
   id: text('id').primaryKey(),
+  projectId: text('project_id'),
   repoPath: text('repo_path').notNull(),
   branch: text('branch'),
   runtime: text('runtime', { enum: ['codex', 'claude-code', 'gemini', 'opencode'] }).notNull(),
@@ -190,6 +191,7 @@ export const sessionOutcomes = sqliteTable('session_outcomes', {
 }, (table) => ({
   repoRuntimeIdx: index('idx_so_repo_runtime').on(table.repoPath, table.runtime, table.completedAt),
   repoCompletedIdx: index('idx_so_repo_completed').on(table.repoPath, table.completedAt),
+  projectIdIdx: index('idx_session_outcomes_project_id').on(table.projectId),
   laneIdIdx: index('idx_so_lane_id').on(table.laneId),
   packetIdIdx: index('idx_so_packet_id').on(table.packetId),
   validToIdx: index('idx_so_valid_to').on(table.validTo),
@@ -341,6 +343,7 @@ export const githubPullRequests = sqliteTable('github_pull_requests', {
 
 export const approvals = sqliteTable('approvals', {
   id: text('id').primaryKey(),
+  projectId: text('project_id'),
   source: text('source', { enum: ['llm-chat', 'runtime', 'test'] }).notNull(),
   runtime: text('runtime').notNull(),
   agent: text('agent').notNull(),
@@ -370,6 +373,7 @@ export const approvals = sqliteTable('approvals', {
   continuationJson: text('continuation_json'),
 }, (table) => ({
   statusCreatedIdx: index('idx_approvals_status_created').on(table.status, table.createdAt),
+  projectIdIdx: index('idx_approvals_project_id').on(table.projectId),
   sessionKeyCreatedIdx: index('idx_approvals_session_key_created').on(table.sessionKey, table.createdAt),
   packetIdIdx: index('idx_approvals_packet_id').on(table.packetId),
   laneIdIdx: index('idx_approvals_lane_id').on(table.laneId),
@@ -383,6 +387,7 @@ export const approvals = sqliteTable('approvals', {
 
 export const lanes = sqliteTable('lanes', {
   id: text('id').primaryKey(),
+  projectId: text('project_id'),
   label: text('label').notNull(),
   repoPath: text('repo_path').notNull(),
   worktreePath: text('worktree_path'),
@@ -402,6 +407,7 @@ export const lanes = sqliteTable('lanes', {
   lastEventLabel: text('last_event_label'),
 }, (table) => ({
   sessionKeyIdx: index('idx_lanes_session_key').on(table.sessionKey),
+  projectIdIdx: index('idx_lanes_project_id').on(table.projectId),
   packetIdIdx: index('idx_lanes_packet_id').on(table.packetId),
   repoBranchStatusIdx: index('idx_lanes_repo_branch_status').on(table.repoPath, table.branch, table.status),
   statusIdx: index('idx_lanes_status').on(table.status),

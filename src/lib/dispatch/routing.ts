@@ -18,6 +18,7 @@ import { getDb, sessionOutcomes } from '@/lib/db';
 import { liveOutcomeFilter } from '@/lib/cortex/decay';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 /**
  * Minimum number of live outcomes a (repo, runtime) pair needs before its
@@ -64,6 +65,7 @@ export async function scoreRuntimesForRepo(
   if (!trimmed) return [];
   const db = getDb();
   if (!db) return [];
+  const projectId = (await getActiveProjectScopeForRepo(trimmed)).projectId;
 
   try {
     // Drizzle's COUNT/SUM helpers can be flaky against the boolean column on
@@ -76,7 +78,11 @@ export async function scoreRuntimesForRepo(
         mergedClean: sessionOutcomes.mergedClean,
       })
       .from(sessionOutcomes)
-      .where(and(eq(sessionOutcomes.repoPath, trimmed), liveOutcomeFilter()));
+      .where(and(
+        eq(sessionOutcomes.repoPath, trimmed),
+        eq(sessionOutcomes.projectId, projectId),
+        liveOutcomeFilter(),
+      ));
 
     if (rows.length === 0) return [];
 

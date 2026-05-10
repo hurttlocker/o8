@@ -19,6 +19,7 @@
  *   repoName: cortex-ide  # optional
  *   priority: 10          # optional
  *   projects: [o8, atlas] # optional — only meaningful when scope: project
+ *   projectIds: [default] # optional — active project ids from ~/.o8/projects.json
  *   ---
  *   <body>
  *
@@ -40,6 +41,8 @@ export interface ParsedDirective {
    * lowercased and de-duplicated to keep membership checks predictable.
    */
   projects: string[];
+  /** Active project ids from ~/.o8/projects.json. */
+  projectIds: string[];
   priority: number | null;
   /** Body with the `## Recent Merges` trailer (#769) stripped. */
   body: string;
@@ -83,6 +86,7 @@ export function parseDirectiveFile(raw: string, fallbackId: string): ParsedDirec
     scope: meta.scope?.trim() || 'global',
     repoName: meta.repoName?.trim() || null,
     projects: parseProjectsList(meta.projects),
+    projectIds: parseProjectsList(meta.projectIds ?? meta.projectId),
     priority: Number.isFinite(priorityNum) ? priorityNum : null,
     body,
   };

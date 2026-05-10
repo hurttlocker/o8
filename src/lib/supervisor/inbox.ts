@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
 import { listLanes } from '@/lib/lane/registry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import {
+  DEFAULT_PROJECT_ID,
+  getActiveProjectScopeForRepoSync,
+} from '@/lib/repos/projects';
 
 export type SupervisorInboxKind =
   | 'verification_failed'
@@ -38,6 +42,7 @@ export interface EnqueueInboxItemInput {
 
 interface SupervisorInboxRow {
   id: string;
+  project_id: string | null;
   repo_path: string;
   packet_id: string | null;
   kind: SupervisorInboxKind;
@@ -89,6 +94,7 @@ function ensureSupervisorInboxTable() {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS supervisor_inbox (
       id TEXT PRIMARY KEY,
+      project_id TEXT,
       repo_path TEXT NOT NULL,
       packet_id TEXT,
       kind TEXT NOT NULL,
@@ -104,6 +110,18 @@ function ensureSupervisorInboxTable() {
       ON supervisor_inbox(repo_path, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_packet_id
       ON supervisor_inbox(packet_id);
+  `);
+
+  const columns = sqlite.prepare('PRAGMA table_info(supervisor_inbox)').all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'project_id')) {
+    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN project_id TEXT');
+  }
+  sqlite.prepare(
+    "UPDATE supervisor_inbox SET project_id = ? WHERE project_id IS NULL OR project_id = ''",
+  ).run(DEFAULT_PROJECT_ID);
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_project_status_created
+      ON supervisor_inbox(project_id, status, created_at DESC);
   `);
 
   supervisorInboxReady = true;
@@ -163,17 +181,19 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
   const createdAt = new Date().toISOString();
   const status = input.status ?? RETENTION_POLICY[input.kind]?.defaultStatus ?? 'human_required';
   const packetId = input.packetId ?? null;
+  const projectId = getActiveProjectScopeForRepoSync(input.repoPath).projectId;
   const existing = sqlite.prepare(`
-    SELECT id, repo_path, packet_id, kind, payload, created_at, status, resolved_at
+    SELECT id, project_id, repo_path, packet_id, kind, payload, created_at, status, resolved_at
     FROM supervisor_inbox
     WHERE kind = ?
+      AND project_id = ?
       AND repo_path = ?
       AND ((packet_id IS NULL AND ? IS NULL) OR packet_id = ?)
       AND status IN ('pending', 'healing', 'human_required')
       AND datetime(created_at) >= datetime(?)
     ORDER BY created_at DESC
     LIMIT 1
-  `).get(input.kind, input.repoPath, packetId, packetId, new Date(Date.now() - 30 * 60_000).toISOString()) as SupervisorInboxRow | undefined;
+  `).get(input.kind, projectId, input.repoPath, packetId, packetId, new Date(Date.now() - 30 * 60_000).toISOString()) as SupervisorInboxRow | undefined;
 
   if (existing) {
     return {
@@ -191,6 +211,7 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
   sqlite.prepare(`
     INSERT INTO supervisor_inbox (
       id,
+      project_id,
       repo_path,
       packet_id,
       kind,
@@ -198,9 +219,10 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
       created_at,
       status,
       resolved_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
   `).run(
     id,
+    projectId,
     input.repoPath,
     packetId,
     input.kind,
@@ -223,10 +245,11 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
 
 export function countInboxItems(status: SupervisorInboxStatus = 'human_required'): number {
   ensureSupervisorInboxTable();
+  const projectId = getActiveProjectScopeForRepoSync().projectId;
 
   const row = getSqlite()
-    .prepare('SELECT COUNT(*) AS count FROM supervisor_inbox WHERE status = ?')
-    .get(status) as { count?: number } | undefined;
+    .prepare('SELECT COUNT(*) AS count FROM supervisor_inbox WHERE status = ? AND project_id = ?')
+    .get(status, projectId) as { count?: number } | undefined;
 
   return row?.count ?? 0;
 }
@@ -243,11 +266,13 @@ export function dismissInboxItem(id: string) {
 
 export function bulkDismissInboxItems(): number {
   ensureSupervisorInboxTable();
+  const projectId = getActiveProjectScopeForRepoSync().projectId;
   const result = getSqlite().prepare(`
     UPDATE supervisor_inbox
     SET status = ?, resolved_at = ?
     WHERE status IN ('pending', 'healing', 'human_required')
-  `).run('dismissed', new Date().toISOString());
+      AND project_id = ?
+  `).run('dismissed', new Date().toISOString(), projectId);
   return result.changes;
 }
 
@@ -284,13 +309,15 @@ export function runRetentionSweep(nowMs = Date.now()): number {
 
 export function listInboxItems(options: { includeDismissed?: boolean } = {}): SupervisorInboxItem[] {
   ensureSupervisorInboxTable();
+  const projectId = getActiveProjectScopeForRepoSync().projectId;
 
   const rows = getSqlite().prepare(`
-    SELECT id, repo_path, packet_id, kind, payload, created_at, status, resolved_at
+    SELECT id, project_id, repo_path, packet_id, kind, payload, created_at, status, resolved_at
     FROM supervisor_inbox
-    ${options.includeDismissed ? '' : `WHERE status != 'dismissed'`}
+    WHERE project_id = ?
+      ${options.includeDismissed ? '' : `AND status != 'dismissed'`}
     ORDER BY created_at DESC
-  `).all() as SupervisorInboxRow[];
+  `).all(projectId) as SupervisorInboxRow[];
 
   const lanes = listLanes();
   const laneByPacketId = new Map(lanes.flatMap((lane) => (
