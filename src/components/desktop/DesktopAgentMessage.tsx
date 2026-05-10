@@ -9,11 +9,11 @@ import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
-import { DesktopToolCallStack } from '@/components/desktop/DesktopToolCallStack';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
+import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import { useOrchestratorEntryEvicted } from '@/components/desktop/orchestrator/context-residency';
 import {
   hydrateOrchestratorTurnPinEntry,
@@ -436,7 +436,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       ) : null}
 
       {hasMedia ? <MediaGrid media={entry.media ?? []} tint="assistant" /> : null}
-      {hasToolCalls ? <DesktopToolCallStack toolCalls={entry.toolCalls ?? []} /> : null}
+      {hasToolCalls ? <ToolCallChipCluster toolCalls={entry.toolCalls ?? []} /> : null}
 
       {entry.role === 'assistant' && hasText ? (
         <div style={{ width: '100%' }}>
