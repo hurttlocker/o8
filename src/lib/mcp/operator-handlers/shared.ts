@@ -72,11 +72,13 @@ export function setApiBase(base: string): void {
   _apiBase = base;
 }
 
-// Re-resolves API base every call (1s cache) by re-reading the api-port
-// file. The boot-time setApiBase() value becomes a fallback. Without this,
-// the MCP locks onto whatever port the file said when the server booted —
-// breaks across dev-bridge swaps and prod-app port-probes.
 let _apiBaseCache: { value: string; ts: number } | null = null;
+/**
+ * Re-reads the api-port file each call because dev-bridge swaps and prod-app
+ * boots can move the backend port. Caches the result for 1s to avoid file-stat
+ * thrash; fallback order is api-port file, _apiBase from setApiBase(), then
+ * the default _apiBase.
+ */
 function resolveApiBaseLive(): string {
   const now = Date.now();
   if (_apiBaseCache && now - _apiBaseCache.ts < 1000) return _apiBaseCache.value;
