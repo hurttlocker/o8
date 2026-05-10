@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-10
 
+- `a7e1dee8` feat: scope orchestrator memory by project [via-o8]
 - `ff8e885f` feat: render chat tool calls as chips [via-o8]
 
 ## 2026-05-09
