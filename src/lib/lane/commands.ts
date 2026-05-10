@@ -849,27 +849,65 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
 
           const conflictMessage = mergeErr instanceof Error ? mergeErr.message : 'Merge failed.';
+          // When `git diff --diff-filter=U` returned zero files, the merge
+          // failed for a non-conflict reason (dirty working tree, invalid
+          // branch ref, refusing unrelated histories, etc). Calling that a
+          // "conflict" with "0 conflicting files" reads as a UI bug; classify
+          // it so the operator sees what actually broke.
+          const isRealConflict = conflictFiles.length > 0;
+          const lowerMsg = conflictMessage.toLowerCase();
+          const failureCategory = isRealConflict
+            ? 'conflict'
+            : lowerMsg.includes('would be overwritten') || lowerMsg.includes('local changes')
+              ? 'dirty-working-tree'
+              : lowerMsg.includes('refusing to merge unrelated histories')
+                ? 'unrelated-histories'
+                : lowerMsg.includes('not a valid object name') || lowerMsg.includes('unknown revision')
+                  ? 'invalid-branch'
+                  : 'merge-failed';
           const conflictDetail = rebaseFailed
             ? `Rebase failed, merge also failed: ${conflictMessage}`
             : `Merge failed after rebase: ${conflictMessage}`;
-          const conflictFileList = conflictFiles.length > 0
+          const conflictFileList = isRealConflict
             ? `\n\nConflicting files:\n${conflictFiles.map((f) => `- ${f}`).join('\n')}`
             : '';
+          const cardTitle = isRealConflict
+            ? `Merge conflict: ${lane.label}`
+            : failureCategory === 'dirty-working-tree'
+              ? `Merge blocked: ${lane.label} (main has uncommitted changes)`
+              : failureCategory === 'unrelated-histories'
+                ? `Merge blocked: ${lane.label} (unrelated histories)`
+                : failureCategory === 'invalid-branch'
+                  ? `Merge blocked: ${lane.label} (invalid branch ref)`
+                  : `Merge failed: ${lane.label}`;
+          const cardSummary = isRealConflict
+            ? `Merge conflict on ${lane.branch} → ${lane.baseBranch}. ${conflictFiles.length} file${conflictFiles.length === 1 ? '' : 's'} conflicting.`
+            : failureCategory === 'dirty-working-tree'
+              ? `Cannot merge ${lane.branch} → ${lane.baseBranch}: working tree on ${lane.baseBranch} has uncommitted changes. Commit or stash, then retry.`
+              : failureCategory === 'unrelated-histories'
+                ? `Cannot merge ${lane.branch} → ${lane.baseBranch}: branches share no common history.`
+                : failureCategory === 'invalid-branch'
+                  ? `Cannot merge ${lane.branch} → ${lane.baseBranch}: branch ref is missing or invalid.`
+                  : `Merge of ${lane.branch} → ${lane.baseBranch} failed: ${conflictMessage}`;
+          const cardNote = isRealConflict
+            ? `Merge conflict escalated to operator. ${conflictFiles.length} conflicting file${conflictFiles.length === 1 ? '' : 's'}.`
+            : `Merge escalated to operator (${failureCategory}): ${conflictMessage}`;
 
-          // Create an approval card so the operator sees the conflict instead of silent stall
+          // Create an approval card so the operator sees the failure instead of silent stall
           return createLaneActionApproval(lane, actor, {
             verb: 'merge',
             commitMessage: command.commitMessage,
             reviewSummary: command.reviewSummary,
-            title: `Merge conflict: ${lane.label}`,
+            title: cardTitle,
             description: `${conflictDetail}${conflictFileList}\n\nPick a resolution strategy: Ours (keep base), Theirs (keep branch), or Manual (park for terminal fix).`,
-            summary: `Merge conflict on ${lane.branch} → ${lane.baseBranch}. ${conflictFiles.length} file${conflictFiles.length === 1 ? '' : 's'} conflicting.`,
+            summary: cardSummary,
             risk: 'high' as ApprovalRisk,
-            policyRuleId: 'merge_conflict_escalation',
+            policyRuleId: isRealConflict ? 'merge_conflict_escalation' : 'merge_failure_escalation',
             metadata: {
-              ConflictFiles: conflictFiles.join(', ') || 'unknown',
+              ConflictFiles: conflictFiles.join(', ') || (isRealConflict ? 'unknown' : 'n/a'),
+              FailureCategory: failureCategory,
             },
-            note: `Merge conflict escalated to operator. ${conflictFiles.length} conflicting file${conflictFiles.length === 1 ? '' : 's'}.`,
+            note: cardNote,
             gateResult: { passed: gateResult.passed, violations: gateResult.violations },
             conflictReport: {
               files: conflictFiles,
