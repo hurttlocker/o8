@@ -69,9 +69,10 @@ const TIMELINE_BLOCK_HEIGHT = TIMELINE_BAR_HEIGHT;
 // Pinned 24h rolling window — the strip always represents the last day
 // regardless of when the API anchors its segments.
 const TIMELINE_WINDOW_MINUTES = 24 * 60;
-// 240 cells across the 24h window — each cell = 6 min. Strip stays full
-// + symmetric regardless of how quiet the day is.
-const TIMELINE_CELL_COUNT = 240;
+// 360 cells across the 24h window — each cell = 4 min. Smaller bubbles
+// + finer fidelity so two parallel agents in the same hour register as
+// distinct slivers instead of collapsing into one 6-min bucket.
+const TIMELINE_CELL_COUNT = 360;
 
 // Strip the `cc:` / `codex` / `gemini` agent prefix into a clean
 // runtime kind + display name. The route emits `cc:<projectName>` for
