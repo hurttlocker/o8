@@ -94,12 +94,14 @@ import { useGlobalRepoState } from './hooks/useGlobalRepoState';
 import { useLaneArchivedView } from './hooks/useLaneArchivedSet';
 import { useOrchestratorMission } from './hooks/useOrchestratorMission';
 import { useSessionState } from './hooks/useSessionState';
+import { useSettingsOverlayDismiss } from './hooks/useSettingsOverlayDismiss';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
 import { useDesignMode } from '@/hooks/useDesignMode';
 import { createTileRegistry } from './tileRegistry';
+import { SettingsOverlay } from './SettingsOverlay';
 import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
 
 // Mark the dashboard module load as early as possible. Runs once when the
@@ -244,6 +246,7 @@ function DashboardInner() {
 
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
+  const settingsPanelRef = useRef<HTMLDivElement>(null);
   const [workspaceLifecycleRecords, setWorkspaceLifecycleRecords] = useState<WorkspaceLifecycleRecordView[]>([]);
   const [workspaceLifecycleSummary, setWorkspaceLifecycleSummary] = useState<WorkspaceLifecycleSummaryView>({
     unreadCount: 0,
@@ -2363,6 +2366,15 @@ function DashboardInner() {
     });
   }
 
+  const {
+    closeSettingsOverlay,
+    toggleSettingsOverlay,
+  } = useSettingsOverlayDismiss({
+    activeNavSection,
+    panelRef: settingsPanelRef,
+    setActiveNavSection,
+  });
+
   return (
     <DictationHost>
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
@@ -2781,14 +2793,6 @@ function DashboardInner() {
             },
           ] : []}
         />
-        {activeNavSection === 'settings' && (
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings...</div>}>
-            <LazySettingsPage initialTab={settingsInitialTab} />
-            </Suspense>
-          </div>
-        )}
-
         {activeNavSection === 'analytics' && (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading analytics...</div>}>
@@ -2797,7 +2801,7 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
+        {activeNavSection !== 'analytics' && (
           <OrchestratorDataProvider
             agents={parsedAgents}
             missionState={thoughtsMissionState}
@@ -2823,6 +2827,14 @@ function DashboardInner() {
               onSplitTile={handleSplitTile}
             />
           </OrchestratorDataProvider>
+        )}
+
+        {activeNavSection === 'settings' && (
+          <SettingsOverlay panelRef={settingsPanelRef}>
+            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings...</div>}>
+            <LazySettingsPage initialTab={settingsInitialTab} onClose={closeSettingsOverlay} />
+            </Suspense>
+          </SettingsOverlay>
         )}
       </div>
 
@@ -2996,7 +3008,7 @@ function DashboardInner() {
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
         leftColumnWidth={sidebarVisible ? (leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
         rightColumnWidth={chatVisible ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
-        onOpenSettings={() => setActiveNavSection('settings')}
+        onOpenSettings={toggleSettingsOverlay}
         onAddRepo={() => {
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent(REQUEST_ADD_REPO_EVENT));
