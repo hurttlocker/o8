@@ -825,6 +825,27 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           }
         } catch { /* best-effort — merge continues regardless */ }
 
+        // F19 — Fetch the lane branch from the clone into main repo before merge.
+        // After F2/F8 (912d65a7), each codex packet runs in an APFS-CoW clone with
+        // its OWN .git directory. The branch only exists as a ref inside the clone
+        // — main never sees it. The merge step below runs in lane.repoPath (main),
+        // so without this fetch, `git merge <branch>` fails with "not something we
+        // can merge". We use +ref:ref to force-update so a stale prior attempt
+        // doesn't block.
+        if (worktreePath !== lane.repoPath) {
+          try {
+            await execFileAsync('git', ['fetch', worktreePath, `+${actualBranch}:${actualBranch}`], { cwd: lane.repoPath });
+            console.log(`[lane-merge] Fetched ${actualBranch} from clone ${worktreePath} into ${lane.repoPath}`);
+          } catch (fetchErr) {
+            console.error(`[lane-merge] Failed to fetch ${actualBranch} from clone:`, fetchErr instanceof Error ? fetchErr.message : String(fetchErr));
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: `Failed to fetch ${actualBranch} from worktree clone before merge: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`,
+            };
+          }
+        }
+
         // F10 — Auto-stash unrelated dirty work on the main repo's working tree
         // before checkout, so an operator with uncommitted edits in unrelated
         // files doesn't have to manually stash before approve_and_merge can
