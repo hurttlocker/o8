@@ -171,6 +171,60 @@ function buildLearnedRuleSection(
   }
 }
 
+const UI_PACKET_PATH_PATTERNS = [
+  /^src\/app\//,
+  /^src\/components\//,
+  /^src\/lib\/desktop\//,
+  /^src\/lib\/mobile\//,
+  /^src\/lib\/panel\//,
+  /^src-tauri\//,
+];
+
+const UI_PACKET_TEXT_PATTERN = /\b(?:ui|ux|desktop|mobile|dashboard|panel|modal|popover|settings|button|tab|layout|component|render|visual|dismiss|open\/close|browser|webview|tauri|safari)\b/i;
+
+function normalizePromptPath(value: string): string {
+  return value.trim().replace(/^\.\//, '').split(':')[0] ?? '';
+}
+
+function collectPacketPaths(packet: OrchestratorPacket): string[] {
+  return [
+    ...(packet.predictedFiles ?? []),
+    ...(packet.allowedFiles ?? []),
+    ...(packet.readBudget?.requiredReads ?? []),
+    ...(packet.edgeCaseSites?.map((site) => site.location) ?? []),
+  ].map(normalizePromptPath).filter(Boolean);
+}
+
+function packetLooksUiShaped(packet: OrchestratorPacket): boolean {
+  const packetPaths = collectPacketPaths(packet);
+  if (packetPaths.some((filePath) => UI_PACKET_PATH_PATTERNS.some((pattern) => pattern.test(filePath)))) {
+    return true;
+  }
+
+  const scopeText = [
+    packet.title,
+    packet.summary,
+    packet.issue?.body,
+    ...packetPaths,
+  ].filter((value): value is string => Boolean(value)).join('\n');
+
+  return UI_PACKET_TEXT_PATTERN.test(scopeText);
+}
+
+function buildSandboxVerificationSections(packet: OrchestratorPacket): string[] {
+  if (!packetLooksUiShaped(packet)) {
+    return [];
+  }
+
+  return [
+    'Sandbox-aware UI verification:',
+    '- This packet is UI-shaped. Do not start Next.js/Tauri dev servers, attach to a browser, load `/dashboard`, or wait on click-through smoke tests from inside the packet sandbox.',
+    '- Verify with `npm run typecheck`, targeted lint on changed files when practical, and diff/static review. Lint warnings remain advisory unless they reveal real breakage.',
+    '- If a real DOM/browser smoke is still needed, list it as an operator follow-up instead of keeping the lane running.',
+    '- Do not claim a smoke test was performed unless an actual command or browser interaction completed in the transcript.',
+  ];
+}
+
 async function buildDependencyContextSections(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
@@ -244,6 +298,7 @@ export async function buildPacketPrompt(
   // `packet.edgeCaseSites`, render them as a grouped "Watch for these"
   // block so weaker models see adjacent risk surfaces up-front.
   const edgeCaseSections = renderEdgeCaseSections(packet.edgeCaseSites);
+  const sandboxVerificationSections = buildSandboxVerificationSections(packet);
   // #743 — Cortex context block. Pull directives + recent outcomes +
   // symbol-graph for this repo and prepend a `<context>` envelope so the
   // runtime sees the same recall data the operator sees on the packet
@@ -290,6 +345,9 @@ export async function buildPacketPrompt(
   if (edgeCaseSections.length > 0) {
     console.log(`[edge-case-surfacer] Injected ${packet.edgeCaseSites?.length ?? 0} edge-case sites for packet ${packet.id}`);
   }
+  if (sandboxVerificationSections.length > 0) {
+    console.log(`[dispatch] Injected sandbox-aware UI verification guidance for packet ${packet.id}`);
+  }
 
   return [
     contextBlock || null,
@@ -306,6 +364,7 @@ export async function buildPacketPrompt(
     ...preservationSections,
     ...readBudgetSections,
     ...edgeCaseSections,
+    ...sandboxVerificationSections,
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     learnedRuleSection,
     ...buildPacketSelfReviewInstructions(baseBranch),
