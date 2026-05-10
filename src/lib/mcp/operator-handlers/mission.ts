@@ -43,7 +43,7 @@ export const MISSION_TOOLS: McpTool[] = [
             },
             required: ['title'],
           },
-          description: 'Ad-hoc inline tasks — no GitHub issue required. Each becomes its own agent packet.',
+          description: 'Ad-hoc inline tasks — no GitHub issue required. Each becomes its own packet.',
         },
         repoPath: {
           type: 'string',
