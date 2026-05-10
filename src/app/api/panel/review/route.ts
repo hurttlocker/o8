@@ -7,6 +7,7 @@ import {
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { recordPacketReviewContext } from '@/lib/orchestrator/context-relay';
+import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import type { OrchestratorMissionState, OrchestratorPacketReview } from '@/lib/orchestrator/types';
 
 export const runtime = 'nodejs';
@@ -33,41 +34,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function parseFinding(value: unknown): OrchestratorReviewFinding | null {
-  const record = asRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  const file = typeof record.file === 'string' ? record.file.trim() : '';
-  const description = typeof record.description === 'string' ? record.description.trim() : '';
-  const line = typeof record.line === 'number' && Number.isFinite(record.line) && record.line > 0
-    ? Math.floor(record.line)
-    : undefined;
-  const severity = record.severity;
-  const resolution = record.resolution;
-
-  if (!file || !description) {
-    return null;
-  }
-
-  if (severity !== 'bug' && severity !== 'rule_violation' && severity !== 'note') {
-    return null;
-  }
-
-  if (resolution !== 'fixed' && resolution !== 'accepted' && resolution !== 'deferred') {
-    return null;
-  }
-
-  return {
-    file,
-    line,
-    severity,
-    description,
-    resolution,
-  };
-}
-
 function parseReviewPayload(body: unknown): { ok: true; value: ParsedReviewPayload } | { ok: false; error: string } {
   const record = asRecord(body);
   if (!record) {
@@ -83,12 +49,13 @@ function parseReviewPayload(body: unknown): { ok: true; value: ParsedReviewPaylo
     return { ok: false, error: 'approved (boolean) is required' };
   }
 
-  const findings = Array.isArray(record.findings)
-    ? record.findings.map((finding) => parseFinding(finding)).filter((finding): finding is OrchestratorReviewFinding => finding !== null)
-    : [];
-
-  if (Array.isArray(record.findings) && findings.length !== record.findings.length) {
-    return { ok: false, error: 'findings must contain valid review finding objects' };
+  let findings: OrchestratorReviewFinding[] = [];
+  if (record.findings !== undefined) {
+    try {
+      findings = parseReviewFindings(record.findings);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'findings must contain valid review finding objects' };
+    }
   }
 
   const reviewer = typeof record.reviewer === 'string' && record.reviewer.trim()
@@ -143,6 +110,7 @@ function buildPacketReview(
       severity: mapPacketReviewSeverity(finding.severity),
       description: finding.description,
       resolution: finding.resolution,
+      fixSuggestion: finding.fixSuggestion ?? null,
     })),
     recordedAt: new Date().toISOString(),
     summary: buildPacketReviewSummary(review),
