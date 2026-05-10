@@ -152,6 +152,25 @@ function sanitizeTaskName(name: string): string {
     .slice(0, 60);
 }
 
+/**
+ * Derive the worktree directory id from create options.
+ *
+ * When a `packetId` is provided we always use `packet-<sanitized>` so two
+ * packets dispatched in parallel never collide on the same dir slot — the
+ * old behaviour collapsed every codex packet whose prompt summarised to
+ * "context" into `.cortex-worktrees/context`. The `packet-` prefix also
+ * matches the regex in `src/lib/runtimes/claude-code.ts` (`\.cortex-worktrees[\/\\]packet-/`)
+ * so orchestrator session detection picks them up uniformly across runtimes.
+ *
+ * Without a packetId (scratch launches, diff-apply, etc.) we fall back to
+ * the taskName-derived slug.
+ */
+function deriveWorktreeId(opts: CreateWorktreeOptions): string {
+  const packetSlug = opts.packetId ? sanitizeTaskName(opts.packetId) : '';
+  if (packetSlug) return `packet-${packetSlug}`;
+  return sanitizeTaskName(opts.taskName);
+}
+
 function sanitizeBranchName(name: string) {
   return name
     .trim()
@@ -197,7 +216,8 @@ export class WorktreeManager {
       this.prune().catch(() => {});
     }
 
-    let taskId = sanitizeTaskName(opts.taskName);
+    const baseTaskId = deriveWorktreeId(opts);
+    let taskId = baseTaskId;
     const baseBranch = opts.baseBranch ?? await this.getCurrentBranch();
     const now = Date.now();
 
@@ -236,7 +256,10 @@ export class WorktreeManager {
       || (await branchExists(attemptBranch));
     while (collided) {
       const suffix = Math.random().toString(36).slice(2, 6);
-      taskId = `${sanitizeTaskName(opts.taskName)}-${suffix}`;
+      taskId = `${baseTaskId}-${suffix}`;
+      // Only re-suffix the branch when the caller didn't pin one. With a pinned
+      // lane.branch we let the collision retry recompute the dir id only — the
+      // branch name is the lane's identity and must survive the loop.
       attemptBranch = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
       collided = existingMeta[taskId]
         || (await dirExists(probeWorktreeDir(taskId)))
