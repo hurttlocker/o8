@@ -73,6 +73,7 @@ import type {
   LoadedIssue,
   MissionStatusInput,
   ResetPacketInput,
+  RerunWithFeedbackInput,
   SubmitReviewInput,
 } from '@/lib/orchestrator/operator-mission-service';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -490,6 +491,23 @@ export async function resetPacket(input: ResetPacketInput) {
     );
   } catch (error) {
     return missionToolError('resetPacket', error, 'Failed to reset packet.');
+  }
+}
+
+export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
+  try {
+    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').rerunWithFeedback>>>(
+      '/api/orchestrator/rerun-with-feedback',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          packetId: input.packetId,
+          feedback: input.feedback,
+        } satisfies RerunWithFeedbackInput),
+      },
+    );
+  } catch (error) {
+    return missionToolError('rerunWithFeedback', error, 'Failed to rerun packet with feedback.');
   }
 }
 

@@ -3,6 +3,7 @@ import {
   createMissionInline,
   dispatchMission,
   getMissionStatus,
+  rerunWithFeedback,
   resetPacket,
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
@@ -221,6 +222,25 @@ export const MISSION_TOOLS: McpTool[] = [
         },
       },
       required: ['packetId'],
+    },
+  },
+  {
+    name: 'rerun_with_feedback',
+    description:
+      'Re-dispatch a rejected packet with appended feedback. Use after submit_review with approved:false records findings — this tool feeds those findings back into the packet body and re-queues for dispatch. The packet keeps its lane history; Codex picks up where it left off with the corrections in scope. Example: rerun_with_feedback({packetId: "pkt-abc", feedback: "Replace webview.eval with app.emit() — security gate blocks eval."})',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'The packet ID to rerun with feedback.',
+        },
+        feedback: {
+          type: 'string',
+          description: 'Free-text feedback to append to the packet body for the next dispatch.',
+        },
+      },
+      required: ['packetId', 'feedback'],
     },
   },
 ];
@@ -448,6 +468,19 @@ export async function handleResetPacket(args: Record<string, unknown>): Promise<
   } catch (error) {
     console.error(`${'[mcp-operator]'} reset_packet failed: ${errorText(error)}`);
     return textResult(`Failed to reset packet: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleRerunWithFeedback(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const result = await rerunWithFeedback({
+      packetId: requiredString(args, 'packetId'),
+      feedback: requiredString(args, 'feedback'),
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} rerun_with_feedback failed: ${errorText(error)}`);
+    return textResult(`Failed to rerun with feedback: ${errorText(error)}`, true);
   }
 }
 
