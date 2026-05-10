@@ -825,9 +825,64 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           }
         } catch { /* best-effort — merge continues regardless */ }
 
+        // F10 — Auto-stash unrelated dirty work on the main repo's working tree
+        // before checkout, so an operator with uncommitted edits in unrelated
+        // files doesn't have to manually stash before approve_and_merge can
+        // succeed. Restored in the finally below regardless of merge outcome.
+        let stashKey: string | null = null;
+        try {
+          const { stdout: porcelain } = await execFileAsync(
+            'git',
+            ['status', '--porcelain'],
+            { cwd: lane.repoPath },
+          );
+          if (porcelain.trim().length > 0) {
+            stashKey = `o8-lane-merge-${lane.id}-${Date.now()}`;
+            try {
+              await execFileAsync(
+                'git',
+                ['stash', 'push', '--include-untracked', '-m', stashKey],
+                { cwd: lane.repoPath },
+              );
+              console.log(`[lane-merge] Auto-stashed dirty working tree on ${lane.repoPath} as "${stashKey}"`);
+            } catch (stashErr) {
+              // Stash itself failed — clear the key so finally doesn't try to pop
+              // a stash that doesn't exist. Continue with merge attempt; if the WT
+              // is truly dirty, the existing F3 dirty-working-tree classification
+              // will surface a clean error to the operator.
+              stashKey = null;
+              console.warn(
+                `[lane-merge] Auto-stash failed on ${lane.repoPath} (continuing): ${stashErr instanceof Error ? stashErr.message : String(stashErr)}`,
+              );
+            }
+          }
+        } catch { /* status probe failed — skip stash, fall through */ }
+
         // Perform merge using the actual branch ref
         const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: lane.repoPath })).stdout.trim();
-        await execFileAsync('git', ['checkout', lane.baseBranch], { cwd: lane.repoPath });
+
+        // Track whether stash needs popping on the way out. Set false once the
+        // finally has run so we don't double-pop on the outer catch.
+        let stashPendingPop = stashKey !== null;
+        let stashPopFailed = false;
+        let stashPopError: string | undefined;
+        const popStashIfNeeded = async () => {
+          if (!stashPendingPop || !stashKey) return;
+          stashPendingPop = false;
+          try {
+            await execFileAsync('git', ['stash', 'pop'], { cwd: lane.repoPath });
+            console.log(`[lane-merge] Popped auto-stash "${stashKey}" on ${lane.repoPath}`);
+          } catch (popErr) {
+            stashPopFailed = true;
+            stashPopError = popErr instanceof Error ? popErr.message : String(popErr);
+            console.warn(
+              `[lane-merge] Auto-stash pop conflict on ${lane.repoPath} — operator's work parked under stash "${stashKey}". Recover with: git stash list | grep "${stashKey}" then git stash pop <ref>. Error: ${stashPopError}`,
+            );
+          }
+        };
+
+        try {
+          await execFileAsync('git', ['checkout', lane.baseBranch], { cwd: lane.repoPath });
 
         try {
           const mergeArgs = ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${actualBranch})`];
@@ -847,6 +902,9 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
           try { await execFileAsync('git', ['merge', '--abort'], { cwd: lane.repoPath }); } catch { /* already clean */ }
           await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
+          // Pop the auto-stash now that we're back on the operator's branch so
+          // their dirty work is restored before we surface the approval card.
+          await popStashIfNeeded();
 
           const conflictMessage = mergeErr instanceof Error ? mergeErr.message : 'Merge failed.';
           // When `git diff --diff-filter=U` returned zero files, the merge
@@ -917,6 +975,47 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         }
 
         await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
+        } finally {
+          // F10 — Always restore the operator's auto-stashed work, whether the
+          // merge succeeded, escalated, or threw. The early-return paths above
+          // call popStashIfNeeded() explicitly; this finally is the safety net
+          // for the success path and any thrown error.
+          await popStashIfNeeded();
+        }
+
+        // F10 — If the auto-stash pop conflicted with the merged result (rare:
+        // operator's stashed work touched files the lane also touched), the
+        // merge has already committed on baseBranch. We surface a non-blocking
+        // advisory so they can recover their parked stash by name. Use a
+        // standalone approval (not createLaneActionApproval) so it doesn't flip
+        // the lane back to awaiting_input — the merge itself succeeded.
+        if (stashPopFailed && stashKey) {
+          try {
+            createApproval({
+              source: 'runtime',
+              runtime: lane.runtime,
+              agent: lane.label || lane.branch,
+              sessionKey: lane.sessionKey || `lane:${lane.id}`,
+              title: `Auto-stash pop conflict: ${lane.label}`,
+              description: `The lane merge succeeded, but restoring your auto-stashed working-tree changes on ${lane.repoPath} hit a conflict. Your work is safe — it's parked under stash "${stashKey}".\n\nRecover with:\n\n    cd ${lane.repoPath}\n    git stash list | grep "${stashKey}"\n    git stash pop <stash-ref>\n\nGit error: ${stashPopError ?? 'unknown'}`,
+              summary: `Stash pop conflicted after merging ${lane.branch} — your work is parked under stash "${stashKey}".`,
+              risk: 'medium' as ApprovalRisk,
+              policyRuleId: 'auto_stash_pop_conflict',
+              metadata: {
+                Lane: lane.id,
+                Branch: lane.branch,
+                Base: lane.baseBranch,
+                Runtime: lane.runtime,
+                StashKey: stashKey,
+                StashError: stashPopError ?? 'unknown',
+              },
+            });
+          } catch (advisoryErr) {
+            console.warn(
+              `[lane-merge] Failed to surface stash-pop-conflict advisory for "${stashKey}": ${advisoryErr instanceof Error ? advisoryErr.message : String(advisoryErr)}`,
+            );
+          }
+        }
 
         // #534 — push the merge to origin. Failure here must NOT revert the merge:
         // the base branch already has the commit locally, and we want the operator
