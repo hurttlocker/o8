@@ -3337,23 +3337,47 @@ function parseGitWorktreeList(raw: string): GitWorktreeRecord[] {
 }
 
 async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<number> {
-  await execFileAsync('git', ['worktree', 'prune'], {
-    cwd: repoPath,
-    encoding: 'utf-8',
-    timeout: 10_000,
-  });
+  // `git worktree prune` only removes admin entries for deleted git-worktree
+  // dirs. APFS clones in .cortex-worktrees/ aren't git worktrees of repoPath
+  // (each clone has its own .git), so prune ignores them — and occasionally
+  // fails for unrelated reasons (lock contention, transient git state). Don't
+  // let a prune failure block the branch cleanup; that's the actually useful
+  // work in this function.
+  try {
+    await execFileAsync('git', ['worktree', 'prune'], {
+      cwd: repoPath,
+      encoding: 'utf-8',
+      timeout: 10_000,
+    });
+  } catch (error) {
+    console.warn(
+      `[cleanup] git worktree prune failed (continuing with branch cleanup): ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
-  const [{ stdout: worktreeStdout }, { stdout: branchStdout }] = await Promise.all([
+  // Match BOTH legacy worktree branches (from pre-F2/F8 dispatches) AND the
+  // current `inline/*` branches that lane dispatch creates inside APFS clones.
+  // Anything not bound to a live worktree is fair game — the lane-side branch
+  // is owned by its clone's .git, not by repoPath, so deleting it from
+  // repoPath only removes the repo-side ref (clones keep their own).
+  const [{ stdout: worktreeStdout }, branchOuts] = await Promise.all([
     execFileAsync('git', ['worktree', 'list', '--porcelain'], {
       cwd: repoPath,
       encoding: 'utf-8',
       timeout: 10_000,
     }),
-    execFileAsync('git', ['branch', '--list', 'worktree/codex/*', '--format=%(refname:short)'], {
-      cwd: repoPath,
-      encoding: 'utf-8',
-      timeout: 10_000,
-    }),
+    Promise.all([
+      execFileAsync('git', ['branch', '--list', 'worktree/codex/*', '--format=%(refname:short)'], {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        timeout: 10_000,
+      }).catch(() => ({ stdout: '' })),
+      execFileAsync('git', ['branch', '--list', 'worktree/*/*', '--format=%(refname:short)'], {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        timeout: 10_000,
+      }).catch(() => ({ stdout: '' })),
+    ]),
   ]);
 
   const activeBranches = new Set(
@@ -3362,17 +3386,23 @@ async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<num
       .map((worktree) => worktree.branch as string),
   );
 
-  const orphanedBranches = branchStdout
-    .split('\n')
-    .map((branch) => branch.trim())
-    .filter(Boolean)
-    .filter((branch) => !activeBranches.has(branch));
+  const orphanedBranches = Array.from(new Set(
+    branchOuts
+      .flatMap((out) => out.stdout.split('\n'))
+      .map((branch) => branch.trim())
+      .filter(Boolean)
+      .filter((branch) => !activeBranches.has(branch)),
+  ));
 
   for (const branch of orphanedBranches) {
     await execFileAsync('git', ['branch', '-D', branch], {
       cwd: repoPath,
       encoding: 'utf-8',
       timeout: 10_000,
+    }).catch((error) => {
+      console.warn(
+        `[cleanup] failed to delete branch ${branch}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     });
   }
 
