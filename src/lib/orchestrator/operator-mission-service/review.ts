@@ -56,6 +56,7 @@ function buildPacketReview(
           : 'info',
       description: finding.description,
       resolution: finding.resolution,
+      fixSuggestion: finding.fixSuggestion ?? null,
     })),
     recordedAt: new Date().toISOString(),
     summary,
