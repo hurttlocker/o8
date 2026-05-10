@@ -14,6 +14,7 @@
 
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
+import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
 
 // ── Public Types ──
@@ -45,6 +46,10 @@ export interface MergePreviewResult {
   branch: string | null;
   /** Populated when no lane is bound so the gate could not run. */
   unwired?: boolean;
+}
+
+interface MergePreviewOptions {
+  orchestratorApproved?: boolean;
 }
 
 // ── Check-name mapping ──
@@ -115,13 +120,23 @@ export function buildBlockerList(result: MergeGateResult): string[] {
 
 // ── Preview runner ──
 
+function hasApprovedOrchestratorReview(packetId: string): boolean {
+  const mission = readOrchestratorControlPlaneState();
+  return mission.packets.find((packet) => packet.id === packetId)?.review?.approved === true;
+}
+
 /**
  * Run the merge gate against a lane and return the structured preview shape.
  * Callers already holding a `Lane` reference should use this path — it
  * avoids the extra `findLaneByPacket` lookup.
  */
-export function buildPreviewForLane(lane: Lane, packetId: string): MergePreviewResult {
-  const gateResult = runMergeGate(lane);
+export function buildPreviewForLane(
+  lane: Lane,
+  packetId: string,
+  options: MergePreviewOptions = {},
+): MergePreviewResult {
+  const orchestratorApproved = options.orchestratorApproved ?? hasApprovedOrchestratorReview(packetId);
+  const gateResult = runMergeGate(lane, undefined, orchestratorApproved);
   const checks = buildCheckList(gateResult);
   const blockers = buildBlockerList(gateResult);
   return {
