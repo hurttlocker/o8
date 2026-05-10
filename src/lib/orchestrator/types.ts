@@ -56,6 +56,7 @@ export interface OrchestratorPacketReviewFinding {
   severity: OrchestratorPacketReviewSeverity;
   description: string;
   resolution: 'fixed' | 'accepted' | 'deferred';
+  fixSuggestion?: string | null;
 }
 
 export interface OrchestratorPacketReview {

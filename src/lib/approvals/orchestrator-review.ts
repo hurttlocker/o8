@@ -28,6 +28,7 @@ function normalizeReviewFinding(finding: OrchestratorReviewFinding): Orchestrato
     severity: finding.severity,
     description: finding.description.trim(),
     resolution: finding.resolution,
+    fixSuggestion: trimOptional(finding.fixSuggestion),
   };
 }
 
