@@ -52,6 +52,8 @@ export interface ResetPacketInput {
 export interface MergePacketResult {
   merged: boolean;
   note: string;
+  /** True when the requested packet had already reached a released/closed state before this call. */
+  alreadyReleased?: boolean;
   approvalId?: string;
   /**
    * Structured gate verdict (#623). Populated when the merge path ran the
