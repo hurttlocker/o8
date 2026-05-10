@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import * as os from 'node:os';
 
+import { sendScreenshotWithFallback } from '@/lib/mcp/o8-screenshot-fallback';
+
 const DEFAULT_WINDOW_LABEL = 'main';
 const REQUEST_TIMEOUT_MS = 30_000;
 const UNAVAILABLE_MESSAGE = 'o8 webview tools unavailable — launch o8 with --features dev-mcp-plugin or use the signed build';
@@ -350,11 +352,11 @@ export class O8WebviewClient {
   }
 
   async screenshot(): Promise<{ imageBase64: string; mimeType: string; width: number; height: number }> {
-    const result = await this.sendCommand('take_screenshot', {
-      window_label: DEFAULT_WINDOW_LABEL,
-      save_to_disk: false,
-      thumbnail: false,
-    });
+    const result = await sendScreenshotWithFallback(
+      (command, payload) => this.sendCommand(command, payload),
+      () => this.dispose(),
+      DEFAULT_WINDOW_LABEL,
+    );
     const { base64, mimeType } = extractDataUrlPayload(result);
     const resolvedMimeType = detectImageMimeType(base64, mimeType);
     const { width, height } = getImageDimensions(base64);
@@ -422,7 +424,7 @@ export class O8WebviewClient {
     let parsed: { ok: boolean; err?: string; tag?: string } = { ok: false };
     try {
       parsed = JSON.parse(result);
-    } catch (_err) {
+    } catch {
       throw new Error(`click eval returned unparseable result: ${result.slice(0, 200)}`);
     }
     if (!parsed.ok) {
