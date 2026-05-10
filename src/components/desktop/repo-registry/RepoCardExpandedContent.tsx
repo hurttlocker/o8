@@ -103,7 +103,7 @@ function RepoCardExpandedContentBase({
   // branch.additions/deletions reflect divergence-from-main, not active work,
   // so completed-but-unmerged branches still have +N -M and would qualify
   // wrongly. Branch rail shows: current branch + branches with a live agent
-  // task. Mission Control owns packet visibility separately.
+  // task. The Packets tab owns packet visibility separately.
   // The "active" filter: current branch + branches with a live agent task.
   // The hidden ones are idle branches the user can opt-in to via the
   // "+ N idle" button at the bottom of the rail.

@@ -269,6 +269,8 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 
 ## Critical Rules
 
+> **Vocabulary** — see [`docs/vocabulary.md`](./docs/vocabulary.md) for the canonical glossary of `runtime` / `agent` / `session` / `packet` / `lane` / `mission` / `review` / `approval`. MCP tool names and DB columns are frozen for stability; UI labels may diverge from them — divergences are documented in that file.
+
 ### NEVER
 - **Never spread `...statusResult` AFTER session data in `runStatusSnapshot()`** — the `status` RPC response has its own `sessions` key that will clobber real session data from `sessions.list`. Always spread it BEFORE so our keys win.
 - **Never use CSS classes** — inline styles only (`style={{ }}` props). iOS Safari reliability issue. This is permanent.

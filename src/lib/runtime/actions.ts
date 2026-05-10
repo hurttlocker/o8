@@ -60,8 +60,8 @@ export interface RuntimeLaunchRequest {
   existingLaneId?: string;
   // When the launch is bound to a packet, include its id so supervisor inbox
   // items surfaced during pre-launch (eg. rebase conflicts) can deep-link
-  // back to the packet card in Mission Control. Leave undefined for scratch
-  // runs that aren't tied to a packet.
+  // back to the packet card. Leave undefined for scratch runs that aren't
+  // tied to a packet.
   packetId?: string;
 }
 

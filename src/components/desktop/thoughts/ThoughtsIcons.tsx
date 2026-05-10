@@ -51,20 +51,6 @@ export function SparklesIcon() {
   );
 }
 
-export function MissionControlIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <rect x="3.5" y="4" width="17" height="16" rx="3" />
-      <path d="M14 4v16" />
-      <path d="M7.5 8h2" />
-      <path d="M7.5 12h2" />
-      <path d="M7.5 16h2" />
-      <path d="M17 9.5h0.01" />
-      <path d="M17 13.5h0.01" />
-    </svg>
-  );
-}
-
 export function HistoryIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>

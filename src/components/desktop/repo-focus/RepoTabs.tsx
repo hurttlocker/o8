@@ -4,7 +4,7 @@ import type { RepoFocusTabId } from './types';
 import { REPO_FOCUS_FONT } from './utils';
 
 const DEFAULT_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
-  { id: 'agents', label: 'Agents' },
+  { id: 'agents', label: 'Packets' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
   { id: 'spec', label: 'o8.md' },

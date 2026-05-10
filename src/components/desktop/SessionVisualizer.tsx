@@ -510,7 +510,7 @@ function SessionVisualizerBase({
               flexShrink: 0,
             }}
           />
-          No active sessions. Type a prompt below to spawn one, or dispatch from Mission Control.
+          No active sessions. Type a prompt below to spawn one, or dispatch a packet from the orchestrator.
         </div>
       ) : (
         <div
