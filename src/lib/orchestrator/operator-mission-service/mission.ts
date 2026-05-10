@@ -4,6 +4,10 @@ import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
+import {
+  latestTranscriptEventAt,
+  readSessionTranscriptEvents,
+} from '@/lib/orchestrator/packet-transcript';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { recommendRuntime } from '@/lib/dispatch/routing';
@@ -227,6 +231,58 @@ export async function dispatchMission(input: DispatchMissionInput) {
   };
 }
 
+interface MissionTranscriptActivity {
+  lastTranscriptAt: string | null;
+  transcriptUnsupportedReason: string | null;
+}
+
+function latestIsoTimestamp(...timestamps: Array<string | null | undefined>): string | null {
+  let latestMs = 0;
+  let latestIso: string | null = null;
+
+  for (const timestamp of timestamps) {
+    if (!timestamp) continue;
+    const parsed = new Date(timestamp).getTime();
+    if (!Number.isFinite(parsed) || parsed <= latestMs) continue;
+    latestMs = parsed;
+    latestIso = new Date(parsed).toISOString();
+  }
+
+  return latestIso;
+}
+
+function activityLabel(
+  lastActivityAt: string | null,
+  lastTranscriptAt: string | null,
+  lastEventLabel: string | null | undefined,
+) {
+  return lastActivityAt && lastTranscriptAt && lastActivityAt === lastTranscriptAt
+    ? 'transcript_activity'
+    : lastEventLabel ?? null;
+}
+
+async function readTranscriptActivityBySession(
+  sessionKeys: string[],
+): Promise<Map<string, MissionTranscriptActivity>> {
+  const uniqueKeys = [...new Set(sessionKeys.map((key) => key.trim()).filter(Boolean))];
+  const pairs = await Promise.all(uniqueKeys.map(async (sessionKey) => {
+    try {
+      const readback = await readSessionTranscriptEvents(sessionKey);
+      return [sessionKey, {
+        lastTranscriptAt: latestTranscriptEventAt(readback.events),
+        transcriptUnsupportedReason: readback.unsupportedReason ?? null,
+      }] as const;
+    } catch {
+      return [sessionKey, {
+        lastTranscriptAt: null,
+        transcriptUnsupportedReason: null,
+      }] as const;
+    }
+  }));
+
+  return new Map(pairs);
+}
+
 export async function getMissionStatus(input: MissionStatusInput) {
   const state = currentMissionState();
   normalizeMissionSelection(state, input.missionId);
@@ -234,12 +290,24 @@ export async function getMissionStatus(input: MissionStatusInput) {
   const graph = buildDependencyGraph(state.packets);
   const dag = buildDagMetadata(state.packets);
   const packetById = new Map(state.packets.map((packet) => [packet.id, packet] as const));
+  const laneByPacketId = new Map(state.packets.map((packet) => [packet.id, findLaneByPacket(packet.id)] as const));
+  const sessionKeys = state.packets.flatMap((packet) => {
+    const lane = laneByPacketId.get(packet.id);
+    const sessionKey = lane?.sessionKey ?? packet.lane?.sessionKey ?? null;
+    return sessionKey ? [sessionKey] : [];
+  });
+  const transcriptActivityBySession = await readTranscriptActivityBySession(sessionKeys);
+
   const agents = state.packets
     .map((packet) => {
-      const lane = findLaneByPacket(packet.id);
+      const lane = laneByPacketId.get(packet.id);
       if (!lane) {
         return null;
       }
+      const activity = lane.sessionKey ? transcriptActivityBySession.get(lane.sessionKey) : undefined;
+      const lastTranscriptAt = activity?.lastTranscriptAt ?? null;
+      const lastLifecycleEventAt = lane.lastEventAt;
+      const lastActivityAt = latestIsoTimestamp(lastLifecycleEventAt, lastTranscriptAt);
 
       return {
         packetId: packet.id,
@@ -250,7 +318,12 @@ export async function getMissionStatus(input: MissionStatusInput) {
         status: lane.status,
         branch: lane.branch,
         repoPath: lane.worktreePath ?? lane.repoPath,
-        lastEventAt: lane.lastEventAt,
+        lastEventAt: lastActivityAt ?? lastLifecycleEventAt,
+        lastLifecycleEventAt,
+        lastTranscriptAt,
+        lastActivityAt,
+        lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, lane.lastEventLabel),
+        transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
         lastEventLabel: lane.lastEventLabel,
       };
     })
@@ -280,7 +353,12 @@ export async function getMissionStatus(input: MissionStatusInput) {
     totalWaves: dag.totalWaves,
     packets: graph.map((node) => {
       const packet = packetById.get(node.packetId)!;
-      const lane = findLaneByPacket(node.packetId);
+      const lane = laneByPacketId.get(node.packetId);
+      const laneSessionKey = lane?.sessionKey ?? packet.lane?.sessionKey ?? null;
+      const activity = laneSessionKey ? transcriptActivityBySession.get(laneSessionKey) : undefined;
+      const lastTranscriptAt = activity?.lastTranscriptAt ?? null;
+      const laneLastEventAt = lane?.lastEventAt ?? packet.lane?.lastEventAt ?? null;
+      const lastActivityAt = latestIsoTimestamp(laneLastEventAt, lastTranscriptAt);
       return {
         id: packet.id,
         referenceLabel: packet.referenceLabel,
@@ -298,9 +376,22 @@ export async function getMissionStatus(input: MissionStatusInput) {
           status: lane.status,
           branch: lane.branch,
           repoPath: lane.worktreePath ?? lane.repoPath,
-          lastEventAt: lane.lastEventAt,
+          lastEventAt: lastActivityAt ?? lane.lastEventAt,
+          lastLifecycleEventAt: lane.lastEventAt,
+          lastTranscriptAt,
+          lastActivityAt,
+          lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, lane.lastEventLabel),
+          transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
           lastEventLabel: lane.lastEventLabel,
-        } : packet.lane ?? null,
+        } : packet.lane ? {
+          ...packet.lane,
+          lastEventAt: lastActivityAt ?? packet.lane.lastEventAt ?? null,
+          lastLifecycleEventAt: packet.lane.lastEventAt ?? null,
+          lastTranscriptAt,
+          lastActivityAt,
+          lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, packet.lane.lastEventLabel),
+          transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
+        } : null,
         review: packet.review ? {
           approved: packet.review.approved,
           findingsCount: packet.review.findings.length,
