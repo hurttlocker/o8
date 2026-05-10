@@ -72,8 +72,38 @@ export function setApiBase(base: string): void {
   _apiBase = base;
 }
 
-export function getApiBase(): string {
+// Re-resolves API base every call (1s cache) by re-reading the api-port
+// file. The boot-time setApiBase() value becomes a fallback. Without this,
+// the MCP locks onto whatever port the file said when the server booted —
+// breaks across dev-bridge swaps and prod-app port-probes.
+let _apiBaseCache: { value: string; ts: number } | null = null;
+function resolveApiBaseLive(): string {
+  const now = Date.now();
+  if (_apiBaseCache && now - _apiBaseCache.ts < 1000) return _apiBaseCache.value;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { join } = require('node:path') as typeof import('node:path');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { homedir } = require('node:os') as typeof import('node:os');
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const portFile = join(dataDir, 'api-port');
+    if (existsSync(portFile)) {
+      const n = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
+      if (Number.isInteger(n) && n > 0 && n < 65536) {
+        const value = `http://127.0.0.1:${n}`;
+        _apiBaseCache = { value, ts: now };
+        return value;
+      }
+    }
+  } catch { /* fall through */ }
+  _apiBaseCache = { value: _apiBase, ts: now };
   return _apiBase;
+}
+
+export function getApiBase(): string {
+  return resolveApiBaseLive();
 }
 
 export async function checkApiHealth(): Promise<boolean> {
