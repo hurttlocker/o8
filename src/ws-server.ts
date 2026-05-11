@@ -74,10 +74,17 @@ import {
   startSupervisorLoop,
   stopSupervisorLoop,
   registerWatchedAgent,
+  unregisterWatchedAgent,
   getWatchedAgents,
   type SupervisorCallbacks,
   type AgentUpdateEvent,
 } from './lib/supervisor/agent-supervisor';
+import type { Lane } from './lib/lane/types';
+import {
+  probeSelfReviewStall,
+  resetSelfReviewStallGuard,
+  type SelfReviewStallDecision,
+} from './lib/supervisor/self-review-stall-guard';
 import {
   enqueueSupervisorInboxItem,
   startHealBot,
@@ -437,6 +444,181 @@ async function enqueueVerificationFailureInboxItem(input: {
   });
   console.log(`[supervisor] Enqueued inbox item ${inboxId} for ${input.repoPath} (${input.kind})`);
   return inboxId;
+}
+
+async function handleCodexSelfReviewProgress(surfaceId: string, lastMessage: string): Promise<void> {
+  const watched = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
+  const { findLaneBySession, updateLane } = await import('@/lib/lane/registry');
+  const lane = findLaneBySession(surfaceId);
+  if (!lane || lane.runtime !== 'codex' || lane.status !== 'running' || !lane.packetId) {
+    resetSelfReviewStallGuard(surfaceId);
+    return;
+  }
+
+  const transcript = await fetchRuntimeTranscript(surfaceId, 80).catch(() => [{
+    id: `progress-${Date.now()}`,
+    role: 'assistant',
+    text: lastMessage,
+    timestamp: Date.now(),
+    timestampLabel: new Date().toLocaleTimeString(),
+  } satisfies RuntimeTranscriptApiEntry]);
+
+  const decision = await probeSelfReviewStall({
+    surfaceId,
+    lane,
+    transcript,
+    startedAt: watched?.registeredAt ?? null,
+  });
+
+  if (decision.kind === 'signal-stall') {
+    updateLane(lane.id, {
+      lastEventAt: new Date().toISOString(),
+      lastEventLabel: 'self_review_stall_detected',
+    }, 'system');
+    broadcastSelfReviewStallSignal(surfaceId, lane, decision);
+    return;
+  }
+
+  if (decision.kind === 'force-review') {
+    await forceCodexSelfReviewToReview(surfaceId, lane, decision);
+  }
+}
+
+function broadcastSelfReviewStallSignal(
+  surfaceId: string,
+  lane: Lane,
+  decision: Extract<SelfReviewStallDecision, { kind: 'signal-stall' }>,
+): void {
+  const minutes = Math.round(decision.runningMs / 60_000);
+  const detail = `Agent appears stalled on self-review after ${minutes}m with no commit.`;
+  console.warn(`[supervisor] ${detail} lane=${lane.id} session=${surfaceId}`);
+  broadcast({
+    channel: 'supervisor',
+    event: 'agent-update',
+    data: {
+      surfaceId,
+      name: lane.label,
+      status: 'stuck',
+      detail,
+      repoPath: lane.repoPath,
+    } satisfies AgentUpdateEvent,
+  });
+  queueOrchestratorEscalation(
+    lane.repoPath,
+    [
+      `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) appears stalled on self-review.`,
+      `Lane: ${lane.id}`,
+      `Reason: ${decision.reason}`,
+      `Running for: ${minutes}m`,
+      '',
+      'No automatic failure was triggered yet. If the worktree already verifies, the self-review guard will force a review transition after its deadline.',
+    ].join('\n'),
+  );
+}
+
+async function forceCodexSelfReviewToReview(
+  surfaceId: string,
+  lane: Lane,
+  decision: Extract<SelfReviewStallDecision, { kind: 'force-review' }>,
+): Promise<void> {
+  const cwd = decision.cwd || lane.worktreePath || lane.repoPath;
+  console.warn(`[supervisor] Forcing Codex self-review stall to review lane=${lane.id} session=${surfaceId}: ${decision.reason}`);
+
+  const {
+    autoCommitCompletionWorktree,
+    hasReviewableCompletionDiff,
+    runCompletionVerification,
+  } = await import('@/lib/supervisor/completion-verification');
+  const verification = await runCompletionVerification(cwd, lane.baseBranch);
+  if (!verification.ok) {
+    console.warn(`[supervisor] Self-review stall force blocked by ${verification.kind} failure for ${cwd}`);
+    broadcast({
+      channel: 'supervisor',
+      event: 'agent-update',
+      data: {
+        surfaceId,
+        name: lane.label,
+        status: 'stuck',
+        detail: `Self-review force blocked: ${verification.kind} failed.`,
+        repoPath: lane.repoPath,
+      } satisfies AgentUpdateEvent,
+    });
+    return;
+  }
+
+  let committed = false;
+  try {
+    committed = await autoCommitCompletionWorktree(cwd);
+  } catch (error) {
+    console.warn(`[supervisor] Self-review stall auto-commit failed for ${cwd}:`, error);
+    broadcast({
+      channel: 'supervisor',
+      event: 'agent-update',
+      data: {
+        surfaceId,
+        name: lane.label,
+        status: 'stuck',
+        detail: 'Self-review force blocked: auto-commit failed.',
+        repoPath: lane.repoPath,
+      } satisfies AgentUpdateEvent,
+    });
+    return;
+  }
+
+  const hasDiff = await hasReviewableCompletionDiff(cwd, lane.baseBranch);
+  if (!hasDiff) {
+    console.warn(`[supervisor] Self-review stall force skipped for ${cwd}: no reviewable diff.`);
+    resetSelfReviewStallGuard(surfaceId);
+    return;
+  }
+
+  if (lane.packetId) {
+    try {
+      const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+      await capturePacketCompletionContext(lane.packetId, surfaceId);
+    } catch (error) {
+      console.error(`[context-relay] Failed to capture self-review stall context for packet ${lane.packetId}:`, error);
+    }
+  }
+
+  try {
+    await fetchWithRetry(buildNextUrl('/api/runtime/action'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'interrupt', surfaceId }),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (error) {
+    console.warn(`[supervisor] Failed to interrupt self-review stalled agent ${surfaceId}:`, error);
+  }
+
+  unregisterWatchedAgent(surfaceId);
+  const { updateLane } = await import('@/lib/lane/registry');
+  const updated = updateLane(lane.id, {
+    status: 'reviewing',
+    sessionKey: null,
+    lastEventAt: new Date().toISOString(),
+    lastEventLabel: 'self_review_stall_forced',
+  }, 'system');
+  if (updated) {
+    await enqueueAutoReview(updated.id);
+    await triggerHeadlessSprintTick(updated.packetId ? [updated.packetId] : undefined);
+  }
+
+  resetSelfReviewStallGuard(surfaceId);
+  broadcast({
+    channel: 'supervisor',
+    event: 'agent-update',
+    data: {
+      surfaceId,
+      name: lane.label,
+      status: 'completed',
+      detail: committed
+        ? 'Self-review stalled after verification; worktree was committed and moved to review.'
+        : 'Self-review stalled after verification; existing commit was moved to review.',
+      repoPath: lane.repoPath,
+    } satisfies AgentUpdateEvent,
+  });
 }
 
 function normalizeOrchestratorRepoPath(repoPath: string | null): string | null {
@@ -3777,6 +3959,9 @@ async function bootstrapWsServer() {
         console.log(`[supervisor] Agent ${surfaceId} progress heartbeat (suppressing transcript preview of ${lastMessage.length}ch)`);
 
         broadcast({ channel: 'supervisor', event: 'agent-update', data: update });
+        void handleCodexSelfReviewProgress(surfaceId, lastMessage).catch((error) => {
+          console.warn(`[supervisor] Self-review stall probe failed for ${surfaceId}:`, error);
+        });
       },
       async onAgentCompletion(surfaceId, outcome) {
         try {

@@ -124,11 +124,36 @@ export async function autoCommitCompletionWorktree(cwd: string): Promise<boolean
     ],
     { cwd, maxBuffer: COMMAND_MAX_BUFFER },
   );
-  await execFileAsync('git', ['commit', '-m', 'auto-commit: agent work before review'], {
+  await execFileAsync('git', ['commit', '--no-verify', '-m', 'auto-commit: agent work before review'], {
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
   });
   return true;
+}
+
+export async function hasReviewableCompletionDiff(cwd: string, baseRef = 'main'): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['diff', '--quiet', `${baseRef}...HEAD`], {
+      cwd,
+      maxBuffer: COMMAND_MAX_BUFFER,
+    });
+    return false;
+  } catch (error) {
+    const status = (error as { status?: number | null }).status;
+    if (status === 1) {
+      return true;
+    }
+  }
+
+  try {
+    await execFileAsync('git', ['diff', '--quiet', 'HEAD~1..HEAD'], {
+      cwd,
+      maxBuffer: COMMAND_MAX_BUFFER,
+    });
+    return false;
+  } catch (error) {
+    return (error as { status?: number | null }).status === 1;
+  }
 }
 
 export function buildTypecheckFailureSteerMessage(output: string): string {
