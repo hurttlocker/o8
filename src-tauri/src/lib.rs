@@ -1,4 +1,5 @@
 mod dev_frontend;
+mod launch_updater;
 mod sidecar_lifecycle;
 
 use rusqlite::{Connection, OpenFlags};
@@ -2114,6 +2115,7 @@ pub fn run() {
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
+            launch_updater::start_launch_update_check(webview.app_handle().clone());
             if let Err(err) = webview.eval(CONSOLE_ERROR_HOOK_JS) {
                 log::warn!("[console-error-hook] inject failed: {}", err);
             }
