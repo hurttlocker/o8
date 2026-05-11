@@ -2,6 +2,7 @@ export type {
   ApproveAndMergeInput,
   CreateMissionInput,
   DispatchMissionInput,
+  ExistingBranchPolicy,
   LoadedIssue,
   MergePacketResult,
   MissionStatusInput,

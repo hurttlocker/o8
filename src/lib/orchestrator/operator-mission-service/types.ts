@@ -9,6 +9,8 @@ export interface LoadedIssue {
   url: string;
 }
 
+export type ExistingBranchPolicy = 'auto' | 'reset' | 'continue' | 'error';
+
 export interface CreateMissionInput {
   issues: LoadedIssue[];
   repoPath: string;
@@ -16,6 +18,8 @@ export interface CreateMissionInput {
   constraints: string;
   /** When true, packets are chained sequentially (P2 after P1, etc.). Default: false (parallel). */
   sequential?: boolean;
+  /** How create_mission handles an existing issue/inline dispatch branch. Default: auto. */
+  existingBranchPolicy?: ExistingBranchPolicy;
 }
 
 export interface DispatchMissionInput {
