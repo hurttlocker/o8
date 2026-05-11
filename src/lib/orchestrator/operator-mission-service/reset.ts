@@ -1,4 +1,4 @@
-import { getWorktreeManager } from '@/lib/worktree/launch';
+import { cleanupIssueBranch } from './branch-cleanup';
 import { currentMissionState, log } from './shared';
 import type { ResetPacketInput } from './types';
 
@@ -20,6 +20,7 @@ export async function resetPacket(input: ResetPacketInput) {
   // packet.lane because store.reconcileOrchestratorMissionState() can
   // null packet.lane while leaving the SQLite row in a non-terminal status.
   let worktreePath: string | null = null;
+  const branchCleanupExpected = input.clearWorktree && Boolean(packet.branchTarget && state.repoPath);
   try {
     const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
     const bound = listLanes().filter(
@@ -39,6 +40,10 @@ export async function resetPacket(input: ResetPacketInput) {
       try {
         // Clear packetId first so reconciler can't re-bind this lane.
         updateLane(lane.id, { packetId: '' });
+        if (branchCleanupExpected) {
+          console.log(`[reset-packet] Deferred lane ${lane.id} cleanup to branch cleanup for packet ${packet.referenceLabel}`);
+          continue;
+        }
         archiveLane(lane.id, 'user');
         console.log(`[reset-packet] Archived stale lane ${lane.id} for packet ${packet.referenceLabel}`);
       } catch (error) {
@@ -53,20 +58,21 @@ export async function resetPacket(input: ResetPacketInput) {
     );
   }
 
-  // If clearWorktree requested, prune the old worktree directory
+  // If clearWorktree requested, prune the old worktree directory and delete
+  // the packet branch so the next dispatch starts from the base branch.
   let worktreePruned = false;
-  if (input.clearWorktree && worktreePath && state.repoPath) {
+  let branchDeleted = false;
+  if (input.clearWorktree && packet.branchTarget && state.repoPath) {
     try {
-      const manager = await getWorktreeManager(state.repoPath);
-      const worktrees = await manager.list();
-      const match = worktrees.find((wt) => worktreePath!.includes(wt.id));
-      if (match) {
-        await manager.cleanup(match.id, { force: true, deleteBranch: true });
-        worktreePruned = true;
-        log(`[lane-reset] Pruned worktree ${match.id} for packet ${packet.referenceLabel}`);
-      }
-    } catch {
-      log(`[lane-reset] Could not prune worktree at ${worktreePath} — may already be gone`);
+      const cleanup = await cleanupIssueBranch(state.repoPath, packet.branchTarget);
+      worktreePruned = cleanup.worktreePruned;
+      branchDeleted = cleanup.branchDeleted;
+      log(`[lane-reset] Cleared branch ${packet.branchTarget} for packet ${packet.referenceLabel}`, cleanup);
+    } catch (error) {
+      log(
+        `[lane-reset] Could not clear branch ${packet.branchTarget}${worktreePath ? ` at ${worktreePath}` : ''} — may already be gone`,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 
@@ -96,6 +102,7 @@ export async function resetPacket(input: ResetPacketInput) {
     packetId: input.packetId,
     referenceLabel: packet.referenceLabel,
     worktreePruned,
-    note: `Packet ${packet.referenceLabel} reset to queued/draft. Old lane archived.${worktreePruned ? ' Worktree pruned.' : ''} Ready for re-dispatch.`,
+    branchDeleted,
+    note: `Packet ${packet.referenceLabel} reset to queued/draft. Old lane archived.${worktreePruned ? ' Worktree pruned.' : ''}${branchDeleted ? ' Branch deleted.' : ''} Ready for re-dispatch.`,
   };
 }
