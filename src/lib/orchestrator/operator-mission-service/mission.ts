@@ -11,6 +11,7 @@ import {
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { recommendRuntime } from '@/lib/dispatch/routing';
+import { prepareMissionBranches, type MissionBranchDecision } from './branch-cleanup';
 import {
   buildMissionId,
   buildMissionPrompt,
@@ -30,8 +31,15 @@ import {
 import type {
   CreateMissionInput,
   DispatchMissionInput,
+  LoadedIssue,
   MissionStatusInput,
 } from './types';
+
+function branchTargetForIssue(issue: LoadedIssue) {
+  return isInlineIssue(issue)
+    ? `inline/${slugify(issue.title)}`
+    : `issue/${issue.number}-${slugify(issue.title)}`;
+}
 
 export async function createMission(input: CreateMissionInput) {
   const repoPath = ensureRepoPath(input.repoPath);
@@ -62,6 +70,17 @@ export async function createMission(input: CreateMissionInput) {
   );
   const packetIdByIssueNumber = new Map(loadedIssues.map((issue, index) => [issue.number, packetIds[index] as string]));
   const referenceLabelByIssueNumber = new Map(loadedIssues.map((issue, index) => [issue.number, referenceLabels[index] as string]));
+  const branchTargets = loadedIssues.map((issue) => branchTargetForIssue(issue));
+  const priorState = currentMissionState();
+  const branchPreparation = await prepareMissionBranches({
+    repoPath,
+    candidates: loadedIssues.map((issue, index) => ({
+      issue,
+      branchTarget: branchTargets[index]!,
+    })),
+    previousPackets: priorState.packets,
+    existingBranchPolicy: input.existingBranchPolicy,
+  });
 
   const packets = loadedIssues.map((issue, index) => {
     const dependencyNumbers = explicitDependencies[index].length > 0
@@ -71,9 +90,7 @@ export async function createMission(input: CreateMissionInput) {
         : [];
 
     // #453 — Inline tasks get "inline/{slug}" branches, not "issue/{number}-{slug}"
-    const branchTarget = isInlineIssue(issue)
-      ? `inline/${slugify(issue.title)}`
-      : `issue/${issue.number}-${slugify(issue.title)}`;
+    const branchTarget = branchTargets[index]!;
     const inlineLabel = hasInlineIssues ? referenceLabels[index] : undefined;
     const packetSummary = buildPacketSummary(issue, input.constraints, repoPath, inlineLabel);
 
@@ -149,6 +166,7 @@ export async function createMission(input: CreateMissionInput) {
   const waves = new Map(buildDependencyGraph(persisted.packets).map((node) => [node.packetId, node.wave] as const));
 
   log(`Created mission ${missionId} with ${persisted.packets.length} packets.`);
+  logBranchPreparation(branchPreparation, missionId);
 
   // #747 — Per-packet routing recommendation snapshot. Logs the runtime the
   // recommender would have picked next to the operator's actual choice. We
@@ -168,7 +186,24 @@ export async function createMission(input: CreateMissionInput) {
       title: packet.title,
       wave: waves.get(packet.id) ?? 1,
     })),
+    branchPreparation: branchPreparation.filter((decision) => decision.action !== 'none'),
   };
+}
+
+function logBranchPreparation(decisions: MissionBranchDecision[], missionId: string) {
+  const prepared = decisions.filter((decision) => decision.action !== 'none');
+  if (prepared.length === 0) return;
+  log(`Prepared ${prepared.length} existing branch${prepared.length === 1 ? '' : 'es'} for mission ${missionId}.`, {
+    branches: prepared.map((decision) => ({
+      issue: decision.issueNumber,
+      branch: decision.branchTarget,
+      action: decision.action,
+      reason: decision.reason,
+      lanesArchived: decision.lanesArchived,
+      worktreePruned: decision.worktreePruned,
+      branchDeleted: decision.branchDeleted,
+    })),
+  });
 }
 
 async function logDispatchRoutingRecommendations(

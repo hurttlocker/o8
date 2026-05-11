@@ -70,6 +70,7 @@ import type {
   ApproveAndMergeInput as ApproveAndMergeRequest,
   CreateMissionInput as CreateMissionRequest,
   DispatchMissionInput,
+  ExistingBranchPolicy,
   LoadedIssue,
   MissionStatusInput,
   ResetPacketInput,
@@ -102,6 +103,7 @@ interface CreateMissionInput {
   runtime: OrchestratorRuntime;
   constraints: string;
   sequential?: boolean;
+  existingBranchPolicy?: ExistingBranchPolicy;
 }
 
 interface InlineIssue {
@@ -116,6 +118,7 @@ interface CreateMissionInlineInput {
   runtime: OrchestratorRuntime;
   constraints: string;
   sequential?: boolean;
+  existingBranchPolicy?: ExistingBranchPolicy;
 }
 
 interface ApiSuccessResponse<T> {
@@ -363,6 +366,7 @@ export async function createMission(input: CreateMissionInput) {
           runtime: input.runtime,
           constraints: input.constraints,
           sequential: input.sequential,
+          existingBranchPolicy: input.existingBranchPolicy,
         } satisfies CreateMissionRequest),
       },
     );
@@ -398,6 +402,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           runtime: input.runtime,
           constraints: input.constraints,
           sequential: input.sequential,
+          existingBranchPolicy: input.existingBranchPolicy,
         } satisfies CreateMissionRequest),
       },
     );

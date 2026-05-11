@@ -7,6 +7,7 @@ import {
   resetPacket,
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
+import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
 import {
   apiFetch,
   type McpTool,
@@ -62,6 +63,11 @@ export const MISSION_TOOLS: McpTool[] = [
         sequential: {
           type: 'boolean',
           description: 'When true, packets run sequentially (P2 after P1, etc.). Default: false (all packets run in parallel).',
+        },
+        existingBranchPolicy: {
+          type: 'string',
+          enum: ['auto', 'reset', 'continue', 'error'],
+          description: 'How to handle an existing issue/inline branch. Default auto resets stale or spec-changed attempts, and asks on ambiguous active attempts. Use reset to force fresh-from-main, continue to resume an active same-spec lane.',
         },
         dispatch: {
           type: 'boolean',
@@ -262,6 +268,14 @@ export const MISSION_TOOLS: McpTool[] = [
   },
 ];
 
+function parseExistingBranchPolicy(value: unknown): ExistingBranchPolicy | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value === 'auto' || value === 'reset' || value === 'continue' || value === 'error') {
+    return value;
+  }
+  throw new Error('existingBranchPolicy must be one of: auto, reset, continue, error.');
+}
+
 export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const repoPath = requiredString(args, 'repoPath');
@@ -278,6 +292,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
 
     const shouldDispatch = args.dispatch !== false;
     const sequential = args.sequential === true;
+    const existingBranchPolicy = parseExistingBranchPolicy(args.existingBranchPolicy);
 
     if (inlineIssues) {
       // #453 — Auto-assign synthetic numbers starting at 90001 when not provided
@@ -295,6 +310,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         runtime,
         constraints,
         sequential,
+        existingBranchPolicy,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
@@ -320,6 +336,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       runtime,
       constraints,
       sequential,
+      existingBranchPolicy,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {
