@@ -17,7 +17,7 @@
  * - commands.ts: final hard gate before merge execution
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { checkUntrackedImports } from './check-untracked-imports';
 import type { Lane } from './types';
@@ -85,6 +85,28 @@ interface AddedDiffLine {
 
 const WEBVIEW_LATCH_FILE = 'src-tauri/src/webview_latch.rs';
 const WEBVIEW_LATCH_BRIDGE_CALL = 'webview.' + 'ev' + 'al(js.as_ref())';
+const MERGE_GATE_FILE = 'src/lib/lane/merge-gate.ts';
+const BRANCH_GATE_ACTIVE_ENV = 'O8_BRANCH_MERGE_GATE_ACTIVE';
+const BRANCH_GATE_LANE_ENV = 'O8_BRANCH_MERGE_GATE_LANE';
+const BRANCH_GATE_SELF_REVIEW_ENV = 'O8_BRANCH_MERGE_GATE_SELF_REVIEW';
+const BRANCH_GATE_ORCHESTRATOR_APPROVED_ENV = 'O8_BRANCH_MERGE_GATE_ORCHESTRATOR_APPROVED';
+const BRANCH_GATE_JSON_MARKER = '__O8_BRANCH_MERGE_GATE_RESULT__';
+const BRANCH_GATE_SCRIPT = `
+(async () => {
+  console.log = (...args) => process.stderr.write(args.map(String).join(' ') + '\\n');
+  const loaded = await import('./src/lib/lane/merge-gate.ts');
+  const api = loaded.runMergeGate ? loaded : (loaded.default ?? loaded['module.exports']);
+  const lane = JSON.parse(process.env.${BRANCH_GATE_LANE_ENV} ?? '{}');
+  const rawSelfReview = process.env.${BRANCH_GATE_SELF_REVIEW_ENV};
+  const selfReview = rawSelfReview ? JSON.parse(rawSelfReview) : undefined;
+  const orchestratorApproved = process.env.${BRANCH_GATE_ORCHESTRATOR_APPROVED_ENV} === '1';
+  const result = api.runMergeGate(lane, selfReview, orchestratorApproved);
+  process.stdout.write('${BRANCH_GATE_JSON_MARKER}' + JSON.stringify(result));
+})().catch((error) => {
+  console.error(error && error.stack ? error.stack : String(error));
+  process.exitCode = 1;
+});
+`;
 
 // ── Helpers ──
 
@@ -154,6 +176,123 @@ function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
       .filter((entry): entry is DiffNumstat => entry !== null);
   } catch {
     return [];
+  }
+}
+
+function getChangedFiles(cwd: string, baseBranch: string): string[] {
+  try {
+    const output = execFileSync('git', ['diff', '--name-only', `${baseBranch}...HEAD`], {
+      cwd,
+      timeout: 10_000,
+      encoding: 'utf-8',
+      maxBuffer: 1024 * 1024,
+    }).trim();
+
+    return output.split('\n').map((line) => line.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function shouldUseBranchMergeGate(cwd: string, baseBranch: string): boolean {
+  if (process.env[BRANCH_GATE_ACTIVE_ENV] === '1') return false;
+  return getChangedFiles(cwd, baseBranch).includes(MERGE_GATE_FILE);
+}
+
+function normalizeMergeViolation(value: unknown): MergeViolation | null {
+  if (!value || typeof value !== 'object') return null;
+  const entry = value as Partial<Record<keyof MergeViolation, unknown>>;
+  if (entry.category !== 'security' && entry.category !== 'budget' && entry.category !== 'integrity') return null;
+  if (entry.severity !== 'block' && entry.severity !== 'warn') return null;
+  if (typeof entry.label !== 'string' || typeof entry.detail !== 'string') return null;
+
+  return {
+    category: entry.category,
+    severity: entry.severity,
+    label: entry.label,
+    detail: entry.detail,
+    file: typeof entry.file === 'string' ? entry.file : undefined,
+  };
+}
+
+function normalizeMergeGateResult(value: unknown): MergeGateResult | null {
+  if (!value || typeof value !== 'object') return null;
+  const result = value as { passed?: unknown; violations?: unknown };
+  if (typeof result.passed !== 'boolean' || !Array.isArray(result.violations)) return null;
+
+  const violations = result.violations.map(normalizeMergeViolation);
+  if (violations.some((violation) => violation === null)) return null;
+
+  return {
+    passed: result.passed,
+    violations: violations as MergeViolation[],
+  };
+}
+
+function formatBranchGateError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const execError = error as Error & { stderr?: Buffer | string; stdout?: Buffer | string };
+  const stderr = execError.stderr ? String(execError.stderr).trim() : '';
+  const stdout = execError.stdout ? String(execError.stdout).trim() : '';
+  const detail = stderr || stdout;
+  return detail ? `${error.message}: ${detail.slice(0, 500)}` : error.message;
+}
+
+function branchMergeGateFailure(error: unknown): MergeGateResult {
+  return {
+    passed: false,
+    violations: [{
+      category: 'integrity',
+      severity: 'block',
+      label: 'Branch merge gate failed',
+      detail: `The packet updates ${MERGE_GATE_FILE}, but the worktree's merge gate could not execute: ${formatBranchGateError(error)}`,
+      file: MERGE_GATE_FILE,
+    }],
+  };
+}
+
+function runBranchMergeGate(
+  lane: Lane,
+  selfReview: PacketSelfReview | undefined,
+  orchestratorApproved: boolean,
+  cwd: string,
+): MergeGateResult {
+  try {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      [BRANCH_GATE_ACTIVE_ENV]: '1',
+      [BRANCH_GATE_LANE_ENV]: JSON.stringify(lane),
+      [BRANCH_GATE_ORCHESTRATOR_APPROVED_ENV]: orchestratorApproved ? '1' : '0',
+    };
+
+    if (selfReview) {
+      env[BRANCH_GATE_SELF_REVIEW_ENV] = JSON.stringify(selfReview);
+    } else {
+      delete env[BRANCH_GATE_SELF_REVIEW_ENV];
+    }
+
+    const output = execFileSync('npx', ['--no-install', 'tsx', '--eval', BRANCH_GATE_SCRIPT], {
+      cwd,
+      env,
+      timeout: 30_000,
+      encoding: 'utf-8',
+      maxBuffer: 2 * 1024 * 1024,
+    });
+
+    const markerIndex = output.lastIndexOf(BRANCH_GATE_JSON_MARKER);
+    if (markerIndex === -1) {
+      throw new Error('Branch merge gate did not emit a result marker.');
+    }
+
+    const json = output.slice(markerIndex + BRANCH_GATE_JSON_MARKER.length);
+    const result = normalizeMergeGateResult(JSON.parse(json));
+    if (!result) {
+      throw new Error('Branch merge gate emitted an invalid result shape.');
+    }
+
+    return result;
+  } catch (error) {
+    return branchMergeGateFailure(error);
   }
 }
 
@@ -319,6 +458,10 @@ export function runMergeGate(
 ): MergeGateResult {
   const cwd = lane.worktreePath || lane.repoPath;
   const baseBranch = lane.baseBranch || 'main';
+
+  if (shouldUseBranchMergeGate(cwd, baseBranch)) {
+    return runBranchMergeGate(lane, selfReview, orchestratorApproved, cwd);
+  }
 
   const addedLines = getAddedLines(cwd, baseBranch);
   const securityViolations = checkSecurityPatterns(addedLines);
