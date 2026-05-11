@@ -18,7 +18,6 @@
 import { memo } from 'react';
 import { FolderPlus, GearSix } from '@phosphor-icons/react';
 import { ChromeButton } from './chrome/ChromeButton';
-import { UpdateBanner } from './UpdateBanner';
 import { MergeActionCluster } from './MergeActionCluster';
 import { FooterPorts } from './desktop-status-bar/footer-ports';
 import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
@@ -129,7 +128,6 @@ function DesktopStatusBarBase({
           gap: 6,
         }}
       >
-        <UpdateBanner />
       </div>
     </div>
   );
