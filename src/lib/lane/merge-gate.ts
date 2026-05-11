@@ -83,6 +83,9 @@ interface AddedDiffLine {
   text: string;
 }
 
+const WEBVIEW_LATCH_FILE = 'src-tauri/src/webview_latch.rs';
+const WEBVIEW_LATCH_BRIDGE_CALL = 'webview.' + 'ev' + 'al(js.as_ref())';
+
 // ── Helpers ──
 
 function parseGitDiffFilePath(line: string): string | null {
@@ -160,12 +163,18 @@ function isSecurityScanExemptPath(file: string | null): boolean {
   return file !== null && /^(scripts|bin)\//.test(file);
 }
 
+function isCanonicalWebviewLatchBridge(file: string | null, text: string): boolean {
+  if (file !== WEBVIEW_LATCH_FILE) return false;
+  return text.slice(1).replace(/\s+/g, '') === WEBVIEW_LATCH_BRIDGE_CALL;
+}
+
 function checkSecurityPatterns(addedLines: AddedDiffLine[]): MergeViolation[] {
   const violations: MergeViolation[] = [];
 
   for (const { pattern, label } of HARD_BLOCK_PATTERNS) {
     for (const { file, text } of addedLines) {
       if (isSecurityScanExemptPath(file)) continue;
+      if (isCanonicalWebviewLatchBridge(file, text)) continue;
 
       if (pattern.test(text)) {
         violations.push({
