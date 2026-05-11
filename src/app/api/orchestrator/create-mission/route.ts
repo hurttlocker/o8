@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { createMission, type LoadedIssue } from '@/lib/orchestrator/operator-mission-service';
+import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/lib/orchestrator/operator-mission-service';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic';
 // sub-agents inline via the Agent tool when that's the right fit; we don't
 // need to wrap claude-code as a dispatched fleet worker.
 const VALID_DISPATCH_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'gemini', 'opencode']);
+const VALID_EXISTING_BRANCH_POLICIES = new Set<ExistingBranchPolicy>(['auto', 'reset', 'continue', 'error']);
 
 function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
   if (typeof value === 'string' && VALID_DISPATCH_RUNTIMES.has(value as OrchestratorRuntime)) {
@@ -35,6 +36,13 @@ function normalizeIssues(value: unknown): LoadedIssue[] | null {
       url: typeof record?.url === 'string' ? record.url : '',
     };
   });
+}
+
+function normalizeExistingBranchPolicy(value: unknown): ExistingBranchPolicy | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  return VALID_EXISTING_BRANCH_POLICIES.has(value as ExistingBranchPolicy)
+    ? value as ExistingBranchPolicy
+    : undefined;
 }
 
 export async function POST(request: NextRequest) {
@@ -72,6 +80,10 @@ export async function POST(request: NextRequest) {
     }
     return operatorError('invalid_request', 'runtime must be one of: "codex", "gemini", "opencode".', 400);
   }
+  const existingBranchPolicy = normalizeExistingBranchPolicy(record.existingBranchPolicy);
+  if (record.existingBranchPolicy !== undefined && !existingBranchPolicy) {
+    return operatorError('invalid_request', 'existingBranchPolicy must be one of: "auto", "reset", "continue", "error".', 400);
+  }
 
   try {
     const result = await createMission({
@@ -80,6 +92,7 @@ export async function POST(request: NextRequest) {
       runtime: runtimeValue,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
       sequential: record.sequential === true,
+      existingBranchPolicy,
     });
     return operatorSuccess(result, 201);
   } catch (error) {
