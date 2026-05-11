@@ -257,7 +257,15 @@ function panelGateMiddleware(req: NextRequest): NextResponse {
   );
 }
 
-export default clerkMiddleware((_auth, req) => panelGateMiddleware(req), {
-  publishableKey: optionalEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY') ?? optionalEnv('CLERK_PUBLISHABLE_KEY'),
-  secretKey: optionalEnv('CLERK_SECRET_KEY'),
-});
+const clerkPublishableKey =
+  optionalEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY') ?? optionalEnv('CLERK_PUBLISHABLE_KEY');
+
+// When no Clerk key is configured (fresh install, no .env), bypass Clerk entirely
+// and run the loopback gate directly. Clerk-protected routes like /api/v2/chat still
+// fail closed inside their handlers, but the local-only API surface stays reachable.
+export default clerkPublishableKey
+  ? clerkMiddleware((_auth, req) => panelGateMiddleware(req), {
+      publishableKey: clerkPublishableKey,
+      secretKey: optionalEnv('CLERK_SECRET_KEY'),
+    })
+  : (req: NextRequest) => panelGateMiddleware(req);
