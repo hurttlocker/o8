@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-11
+
+- `ab8cd18b` feat: add typed webview latch
+
 ## 2026-05-10
 
 - `d5996773` feat(projects): seed scope:project directive + projects field doc [via-o8]
