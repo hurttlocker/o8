@@ -15,7 +15,6 @@ import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
-// UpdateBanner is now rendered inside DesktopStatusBar.
 import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
 import { ThemeProvider } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
@@ -2389,8 +2388,7 @@ function DashboardInner() {
       overflow: 'hidden',
       position: 'relative',
     }}>
-      {/* UpdateBanner now lives inside DesktopStatusBar as a footer pill —
-          see src/components/desktop/UpdateBanner.tsx. */}
+      {/* UpdateBanner is mounted from the root layout as a center-top portal. */}
 
       {/* ── Connection Banner (#634) — surfaces dropped WebSocket so users
           know why agent statuses, transcripts, and approvals appear frozen.
