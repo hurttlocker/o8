@@ -1,31 +1,49 @@
-import { listApprovalsForContext } from '@/lib/approvals/store';
-import { appendDirectiveTrailer } from '@/lib/cortex/directive-merges';
-import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
-import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
-import { archiveLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
-import { withLockedState } from '@/lib/orchestrator/control-plane';
-import { buildDependencyGraph } from '@/lib/orchestrator/dag';
-import { runDispatchTick } from '@/lib/orchestrator/dispatch';
-import {
-  syncOrchestratorControlPlaneState,
-  writeOrchestratorControlPlaneState,
-} from '@/lib/orchestrator/control-plane';
+import type { MergePreviewResult } from '@/lib/lane/preview-merge';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
-import { removeMergedWorktree, withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
-import { detectFileOverlaps, recommendMergeOrder } from '@/lib/worktree/conflicts';
 import type { MergeOrderRecommendation } from '@/lib/worktree/conflicts';
-import { getWorktreeManager } from '@/lib/worktree/launch';
 import type { WorktreeInfo } from '@/lib/worktree/types';
-import { capturePostMergeCleanupTarget, postMergeCleanup } from './post-merge-cleanup';
-import { mapReviewSummary } from './review';
-import { currentMissionState, log } from './shared';
 import type {
   ApproveAndMergeInput,
   MergePacketResult,
   PickComparisonWinnerInput,
 } from './types';
 
-type ActivePacketLane = NonNullable<ReturnType<typeof findLaneByPacket>>;
+type LaneRegistryModule = typeof import('@/lib/lane/registry');
+type ActivePacketLane = NonNullable<ReturnType<LaneRegistryModule['findLaneByPacket']>>;
+
+const loadApprovalsStore = () => import('@/lib/approvals/store');
+const loadDirectiveMerges = () => import('@/lib/cortex/directive-merges');
+const loadLaneCommands = () => import('@/lib/lane/commands');
+const loadPreviewMerge = () => import('@/lib/lane/preview-merge');
+const loadLaneRegistry = () => import('@/lib/lane/registry');
+const loadControlPlane = () => import('@/lib/orchestrator/control-plane');
+const loadDag = () => import('@/lib/orchestrator/dag');
+const loadDispatch = () => import('@/lib/orchestrator/dispatch');
+const loadWorktreeCleanup = () => import('@/lib/orchestrator/worktree-cleanup');
+const loadWorktreeConflicts = () => import('@/lib/worktree/conflicts');
+const loadWorktreeLaunch = () => import('@/lib/worktree/launch');
+const loadPostMergeCleanup = () => import('./post-merge-cleanup');
+const loadReview = () => import('./review');
+const loadShared = () => import('./shared');
+
+export async function warmMergePath() {
+  await Promise.all([
+    loadApprovalsStore(),
+    loadDirectiveMerges(),
+    loadLaneCommands(),
+    loadPreviewMerge(),
+    loadLaneRegistry(),
+    loadControlPlane(),
+    loadDag(),
+    loadDispatch(),
+    loadWorktreeCleanup(),
+    loadWorktreeConflicts(),
+    loadWorktreeLaunch(),
+    loadPostMergeCleanup(),
+    loadReview(),
+    loadShared(),
+  ]);
+}
 
 interface MergeOrderCandidate {
   packet: OrchestratorPacket;
@@ -43,7 +61,8 @@ function isPacketAwaitingMerge(packet: OrchestratorPacket) {
     && packet.review?.approved !== false;
 }
 
-function isTerminalReleaseLane(packetId: string) {
+async function isTerminalReleaseLane(packetId: string) {
+  const { listLanes } = await loadLaneRegistry();
   return listLanes().some((lane) =>
     lane.packetId === packetId && (lane.status === 'completed' || lane.status === 'archived')
   );
@@ -68,15 +87,26 @@ function alreadyReleasedResultForPacket(packet: OrchestratorPacket | null | unde
   return null;
 }
 
-function alreadyReleasedResultForPacketId(packetId: string, packets: OrchestratorPacket[]) {
+async function alreadyReleasedResultForPacketId(packetId: string, packets: OrchestratorPacket[]) {
   return alreadyReleasedResultForPacket(packets.find((candidate) => candidate.id === packetId))
-    ?? (isTerminalReleaseLane(packetId) ? buildAlreadyReleasedResult() : null);
+    ?? (await isTerminalReleaseLane(packetId) ? buildAlreadyReleasedResult() : null);
 }
 
 async function getWaveMergeOrder(
   state: OrchestratorMissionState,
   packetId: string,
 ): Promise<OrderedMergeCandidate[] | null> {
+  const [
+    { buildDependencyGraph },
+    { findLaneByPacket },
+    { getWorktreeManager },
+    { detectFileOverlaps, recommendMergeOrder },
+  ] = await Promise.all([
+    loadDag(),
+    loadLaneRegistry(),
+    loadWorktreeLaunch(),
+    loadWorktreeConflicts(),
+  ]);
   const graph = buildDependencyGraph(state.packets);
   const packetById = new Map(state.packets.map((packet) => [packet.id, packet] as const));
   const targetNode = graph.find((node) => node.packetId === packetId);
@@ -158,15 +188,19 @@ async function getWaveMergeOrder(
  * callers see the same structured shape the preview tool returns.
  * No-op on success results.
  */
-function withGateVerdict(
+async function withGateVerdict(
   packetId: string,
   result: MergePacketResult,
   orchestratorApproved = false,
-): MergePacketResult {
+): Promise<MergePacketResult> {
   if (result.merged) return result;
   // Preserve prior decoration if merge.ts already populated the fields.
   if (result.checks && result.blockers) return result;
 
+  const [{ findLaneByPacket }, { buildPreviewForLane }] = await Promise.all([
+    loadLaneRegistry(),
+    loadPreviewMerge(),
+  ]);
   const lane = findLaneByPacket(packetId);
   if (!lane) return result;
 
@@ -188,7 +222,8 @@ function withGateVerdict(
   };
 }
 
-function findLatestMergeApproval(packetId: string, laneId: string, sessionKey?: string | null) {
+async function findLatestMergeApproval(packetId: string, laneId: string, sessionKey?: string | null) {
+  const { listApprovalsForContext } = await loadApprovalsStore();
   return listApprovalsForContext({
     packetId,
     laneId,
@@ -201,7 +236,20 @@ async function dispatchPacketMerge(
   input: ApproveAndMergeInput,
   actor: 'orchestrator' | 'user',
 ): Promise<MergePacketResult> {
-  const alreadyReleased = alreadyReleasedResultForPacketId(packet.id, currentMissionState().packets);
+  const [
+    { findLaneByPacket },
+    { capturePostMergeCleanupTarget, postMergeCleanup },
+    { dispatch: dispatchLaneCommand },
+    { mapReviewSummary },
+    { currentMissionState, log },
+  ] = await Promise.all([
+    loadLaneRegistry(),
+    loadPostMergeCleanup(),
+    loadLaneCommands(),
+    loadReview(),
+    loadShared(),
+  ]);
+  const alreadyReleased = await alreadyReleasedResultForPacketId(packet.id, currentMissionState().packets);
   if (alreadyReleased) {
     return alreadyReleased;
   }
@@ -229,6 +277,10 @@ async function dispatchPacketMerge(
   // directory. The helper is idempotent — if commands.ts already removed
   // the worktree, this call reports `already-removed` and exits quickly.
   if (result.ok) {
+    const [{ removeMergedWorktree }, { appendDirectiveTrailer }] = await Promise.all([
+      loadWorktreeCleanup(),
+      loadDirectiveMerges(),
+    ]);
     const cleanup = await removeMergedWorktree(lane);
     if (!cleanup.removed) {
       console.log(
@@ -285,9 +337,16 @@ async function dispatchPacketMerge(
   // This prevents reconciliation from resetting the packet status after we set it.
   // Pass undefined so sync re-reads inside the mutex — otherwise we race the
   // /api/orchestrator/state GET poll and other concurrent writers.
+  const [
+    { syncOrchestratorControlPlaneState, writeOrchestratorControlPlaneState },
+    { runDispatchTick },
+  ] = await Promise.all([
+    loadControlPlane(),
+    loadDispatch(),
+  ]);
   const synced = await syncOrchestratorControlPlaneState();
 
-  const releasedAfterDispatch = alreadyReleasedResultForPacketId(input.packetId, synced.packets);
+  const releasedAfterDispatch = await alreadyReleasedResultForPacketId(input.packetId, synced.packets);
   if (!result.ok && releasedAfterDispatch) {
     return releasedAfterDispatch;
   }
@@ -324,6 +383,7 @@ async function dispatchPacketMerge(
 }
 
 async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise<MergePacketResult> {
+  const { currentMissionState } = await loadShared();
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
   const alreadyReleased = alreadyReleasedResultForPacket(packet);
@@ -332,7 +392,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
   }
 
   if (!packet) {
-    if (isTerminalReleaseLane(input.packetId)) {
+    if (await isTerminalReleaseLane(input.packetId)) {
       return buildAlreadyReleasedResult();
     }
 
@@ -340,11 +400,12 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     // #622 — wrapper captures lane pre-merge and runs synchronous cleanup on
     // success, making the bash-merge fallback atomic with the merge commit.
     const { mergeOrphanLaneByPacket } = await import('../orphan-lane-merge');
+    const { withSynchronousWorktreeCleanup } = await loadWorktreeCleanup();
     const orphanResult = await withSynchronousWorktreeCleanup(
       input.packetId,
       () => mergeOrphanLaneByPacket(input.packetId, input.commitMessage),
     );
-    const releasedAfterOrphanDispatch = alreadyReleasedResultForPacketId(input.packetId, currentMissionState().packets);
+    const releasedAfterOrphanDispatch = await alreadyReleasedResultForPacketId(input.packetId, currentMissionState().packets);
     if (!orphanResult.merged && releasedAfterOrphanDispatch) {
       return releasedAfterOrphanDispatch;
     }
@@ -358,11 +419,12 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     };
   }
 
+  const { findLaneByPacket } = await loadLaneRegistry();
   const lane = findLaneByPacket(packet.id);
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
   }
-  const latestMergeApproval = findLatestMergeApproval(packet.id, lane.id, lane.sessionKey);
+  const latestMergeApproval = await findLatestMergeApproval(packet.id, lane.id, lane.sessionKey);
   if (latestMergeApproval?.status === 'pending') {
     return withGateVerdict(packet.id, {
       merged: false,
@@ -373,6 +435,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     }, packet.review?.approved === true);
   }
   if (latestMergeApproval?.status === 'approved' && (lane.status === 'completed' || lane.status === 'archived')) {
+    const { syncOrchestratorControlPlaneState } = await loadControlPlane();
     await syncOrchestratorControlPlaneState();
     return {
       merged: true,
@@ -385,6 +448,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
 }
 
 export async function approveAndMergePacket(input: ApproveAndMergeInput) {
+  const { currentMissionState } = await loadShared();
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
   // #557 — Missing packet falls through to single-packet merge (lane fallback).
@@ -446,6 +510,15 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
 }
 
 export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
+  const [
+    { currentMissionState },
+    { withLockedState },
+    { archiveLane },
+  ] = await Promise.all([
+    loadShared(),
+    loadControlPlane(),
+    loadLaneRegistry(),
+  ]);
   const state = currentMissionState();
   const winner = state.packets.find((candidate) => candidate.id === input.packetId);
   if (!winner) {
