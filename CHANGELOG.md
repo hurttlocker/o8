@@ -7,6 +7,11 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-12
+
+- `7c7bf11d` feat: default to light theme + solid chrome on fresh install [via-o8]
+- `08640c96` feat: default to light theme + solid chrome on fresh install
+
 ## 2026-05-11
 
 - `ab8cd18b` feat: add typed webview latch
