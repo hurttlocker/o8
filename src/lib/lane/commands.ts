@@ -720,8 +720,19 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
         if (command.commitMessage) {
           try {
+            // F32 fix (#1024): only commit if there are actual uncommitted
+            // changes. Previously this used --allow-empty, which created a
+            // duplicate feat commit every merge call — even when Codex had
+            // already committed the work. Result: 3-4 commits per packet on
+            // main with the same message + a final merge commit.
             await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
-            await execFileAsync('git', ['commit', '-m', command.commitMessage, '--allow-empty'], { cwd: worktreePath });
+            const { stdout: porcelain } = await execFileAsync(
+              'git', ['status', '--porcelain'],
+              { cwd: worktreePath, timeout: 5000 },
+            );
+            if (porcelain.trim()) {
+              await execFileAsync('git', ['commit', '-m', command.commitMessage], { cwd: worktreePath });
+            }
           } catch { /* nothing to commit */ }
         }
 
