@@ -162,6 +162,7 @@ jobs:
           done >> /tmp/CHANGELOG.md
 
       - name: Validate — blocklist check
+        if: steps.signal.outputs.has_signal == 'true'
         run: |
           # ── Blocklist: terms that must NEVER appear in the public changelog ──
           # Add new internal codenames here when they're introduced.
@@ -216,6 +217,7 @@ jobs:
           echo "Blocklist check passed — changelog is clean."
 
       - name: Generate stats
+        if: steps.signal.outputs.has_signal == 'true'
         run: |
           echo "# Development Stats" > /tmp/STATS.md
           echo "" >> /tmp/STATS.md
@@ -229,6 +231,7 @@ jobs:
           echo "| Today | $(git log --since='1 day ago' --format='%s' --no-merges | grep -cE '^(feat|perf|design)(\(.*\))?:' || echo 0) features |" >> /tmp/STATS.md
 
       - name: Push to public repo
+        if: steps.signal.outputs.has_signal == 'true'
         env:
           TOKEN: ${{ secrets.PUBLIC_CHANGELOG_TOKEN }}
         run: |
