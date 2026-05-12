@@ -35,7 +35,7 @@ import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared
 
 // ── Types ──
 
-type LaneStatus = 'idle' | 'launching' | 'running' | 'paused' | 'awaiting_input' | 'reviewing' | 'merging' | 'completed' | 'archived';
+type LaneStatus = 'idle' | 'launching' | 'running' | 'paused' | 'awaiting_input' | 'reviewing' | 'merging' | 'failed' | 'completed' | 'archived';
 type LaneRuntime = 'codex' | 'claude-code';
 type LaneOwnership = 'managed' | 'attached';
 

@@ -80,6 +80,7 @@ export function buildDomainLaneSummaries(): DomainLaneSummary[] {
       packetId: lane.packetId!,
       status: lane.status,
       sessionKey: lane.sessionKey,
+      lastEventLabel: lane.lastEventLabel,
     }));
 }
 

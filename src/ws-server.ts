@@ -80,6 +80,7 @@ import {
   type AgentUpdateEvent,
 } from './lib/supervisor/agent-supervisor';
 import type { Lane } from './lib/lane/types';
+import { probeNoChangesProduced } from './lib/lane/no-changes-produced';
 import {
   probeSelfReviewStall,
   resetSelfReviewStallGuard,
@@ -3984,6 +3985,50 @@ async function bootstrapWsServer() {
           }
 
           if (outcome === 'completed') {
+            try {
+              const probe = await probeNoChangesProduced(completionCwd, lane.baseBranch);
+              if (probe.noChangesProduced) {
+                const packetId = lane.packetId?.trim();
+                const now = new Date().toISOString();
+                const failedLane = setLaneStatus(lane.id, 'failed', 'system', 'zero_diff_failed');
+
+                if (packetId) {
+                  try {
+                    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+                    await withLockedState((state) => {
+                      const packet = state.packets.find((candidate) => candidate.id === packetId);
+                      if (!packet) return;
+                      packet.status = 'failed';
+                      packet.blockedReason = 'no_changes_produced';
+                      packet.lastEventAt = now;
+                      packet.lastEventLabel = 'zero_diff_failed';
+                      if (packet.lane) {
+                        packet.lane = {
+                          ...packet.lane,
+                          laneId: failedLane?.id ?? lane.id,
+                          sessionKey: failedLane?.sessionKey ?? lane.sessionKey ?? surfaceId,
+                          lastEventAt: now,
+                          lastEventLabel: 'zero_diff_failed',
+                        };
+                      }
+                    });
+                  } catch (error) {
+                    console.error(`[supervisor] Failed to persist no_changes_produced for packet ${packetId}:`, error);
+                  }
+                }
+
+                const label = packetId ? `Packet ${packetId}` : `Lane ${lane.id}`;
+                const detail = `${label} completed with no changes - needs redispatch with clearer guidance.`;
+                console.warn(`[supervisor] ${detail}`);
+                return {
+                  block: true,
+                  detail,
+                };
+              }
+            } catch (error) {
+              console.warn(`[supervisor] No-changes completion probe failed for ${completionCwd}:`, error);
+            }
+
             const {
               autoCommitCompletionWorktree,
               runCompletionVerification,
