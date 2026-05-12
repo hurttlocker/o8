@@ -541,15 +541,13 @@ export class WorktreeManager {
     } catch (fetchErr) {
       const fetchErrorMessage = gitCommandErrorMessage(fetchErr);
       if (await shouldClassifyFetchAsOriginMissing(worktreePath, fetchErrorMessage)) {
+        // Local-only repo with no origin: keep dispatching. The worktree branch
+        // already came off local main at checkout time; there's nothing to
+        // rebase onto upstream. The operator pushes manually after merge.
         console.warn(
-          `[worktree-rebase] fetch origin ${baseBranch} failed because origin is not configured — classifying as repo_misconfigured.`,
+          `[worktree-rebase] origin not configured for ${baseBranch} — skipping rebase (local-only repo).`,
         );
-        throw new WorktreeOriginMissingError({
-          baseBranch,
-          worktreePath,
-          branch: branchName,
-          fetchErrorMessage,
-        });
+        return;
       }
       const localRefAgeMs = await this.localBaseRefAgeMs(worktreePath, baseBranch);
       if (localRefAgeMs == null || localRefAgeMs > LOCAL_BASE_REF_FRESHNESS_MS) {
