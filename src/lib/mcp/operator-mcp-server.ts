@@ -36,6 +36,13 @@ import {
   handleWaitForMissionReady,
 } from '@/lib/mcp/operator-handlers/mission';
 import {
+  REPO_MGMT_TOOLS,
+  handleCreateProject,
+  handleInitRepo,
+  handleRegisterRepo,
+  handleScaffold,
+} from '@/lib/mcp/operator-handlers/repo-management';
+import {
   type McpTool,
   type McpToolResult,
   checkApiHealth,
@@ -112,10 +119,13 @@ function expandHomePath(value: string): string {
 }
 
 function isPathArg(key: string): boolean {
-  return key === 'repoPath'
+  return key === 'path'
+    || key === 'repoPath'
+    || key === 'repoPaths'
     || key === 'cwd'
     || key === 'dataDir'
     || key.endsWith('Path')
+    || key.endsWith('Paths')
     || key.endsWith('Dir');
 }
 
@@ -339,6 +349,7 @@ const TOOLS: McpTool[] = [
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_send'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_status'),
   ...USER_CONTEXT_TOOLS,
+  ...REPO_MGMT_TOOLS,
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_approve'),
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_reject'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_history'),
@@ -366,6 +377,10 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_history: handleHistory,
   o8_lane_events: handleLaneEvents,
   o8_packet_transcript: handleTranscript,
+  o8_register_repo: handleRegisterRepo,
+  o8_init_repo: handleInitRepo,
+  o8_create_project: handleCreateProject,
+  o8_scaffold: handleScaffold,
   ...createO8WebviewToolHandlers(getO8WebviewClient),
   o8_view_console_errors: handleConsoleErrors,
   o8_view_active_route: handleActiveRoute,
