@@ -53,14 +53,14 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  paletteId: 'dark',
+  paletteId: 'light',
   setPalette: () => {},
   palettes: PALETTES,
-  surface: 'glass',
-  reduceTransparency: 'system',
+  surface: 'solid',
+  reduceTransparency: 'on',
   setReduceTransparency: () => {},
   systemReduceTransparency: false,
-  themeId: 'dark-glass',
+  themeId: 'light-solid',
   setTheme: () => {},
   themes: [],
 });
@@ -72,6 +72,8 @@ export function useTheme() {
 const PALETTE_STORAGE_KEY = 'cortex-theme-palette';
 const TRANSPARENCY_STORAGE_KEY = 'cortex-reduce-transparency';
 const LEGACY_THEME_KEY = 'cortex-theme';
+const FRESH_INSTALL_PALETTE: PaletteId = 'light';
+const FRESH_INSTALL_REDUCE_TRANSPARENCY: ReduceTransparency = 'on';
 
 // Legacy theme ids → palette ids. 'midnight' was the only dark variant; it
 // gets renamed to 'dark' here to align with macOS naming conventions.
@@ -82,29 +84,39 @@ const LEGACY_PALETTE_REMAP: Record<string, PaletteId> = {
   chocolate: 'dark',
 };
 
+function hasStoredThemePreference() {
+  return (
+    localStorage.getItem(PALETTE_STORAGE_KEY) !== null ||
+    localStorage.getItem(TRANSPARENCY_STORAGE_KEY) !== null ||
+    localStorage.getItem(LEGACY_THEME_KEY) !== null
+  );
+}
+
 function readPaletteId(): PaletteId {
-  if (typeof window === 'undefined') return 'dark';
+  if (typeof window === 'undefined') return FRESH_INSTALL_PALETTE;
   try {
     const stored = localStorage.getItem(PALETTE_STORAGE_KEY);
     if (stored === 'light' || stored === 'dark') return stored;
     // Migration: read legacy key
     const legacy = localStorage.getItem(LEGACY_THEME_KEY);
     if (legacy && LEGACY_PALETTE_REMAP[legacy]) return LEGACY_PALETTE_REMAP[legacy];
+    if (hasStoredThemePreference()) return 'dark';
   } catch {
     // localStorage unavailable
   }
-  return 'dark';
+  return FRESH_INSTALL_PALETTE;
 }
 
 function readReduceTransparency(): ReduceTransparency {
-  if (typeof window === 'undefined') return 'system';
+  if (typeof window === 'undefined') return FRESH_INSTALL_REDUCE_TRANSPARENCY;
   try {
     const stored = localStorage.getItem(TRANSPARENCY_STORAGE_KEY);
     if (stored === 'on' || stored === 'off' || stored === 'system') return stored;
+    if (hasStoredThemePreference()) return 'system';
   } catch {
     // localStorage unavailable
   }
-  return 'system';
+  return FRESH_INSTALL_REDUCE_TRANSPARENCY;
 }
 
 /**
