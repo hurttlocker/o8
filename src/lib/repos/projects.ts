@@ -10,7 +10,7 @@ import { readRepoPathRegistry } from './repo-path-registry';
 const PROJECTS_DIR = path.join(os.homedir(), '.o8');
 const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
 export const DEFAULT_PROJECT_ID = 'default';
-const DEFAULT_PROJECT_NAME = 'o8';
+const DEFAULT_PROJECT_NAME = 'Workspace';
 
 /**
  * Curated palette for project dots. Hex strings rather than tailwind tokens
