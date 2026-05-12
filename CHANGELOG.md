@@ -9,6 +9,8 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-12
 
+- `1938fba8` feat: add MCP repo+project bootstrap tools — wedge unlock
+- `89e5ce91` feat: add MCP repo+project bootstrap tools — wedge unlock
 - `d9c98abc` feat: add MCP repo+project bootstrap tools — wedge unlock [via-o8]
 - `b883fa94` feat: add MCP repo+project bootstrap tools — wedge unlock
 - `1a12fa75` feat: add MCP repo bootstrap tools
