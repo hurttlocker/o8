@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { approveAndMergePacket } from '@/lib/orchestrator/operator-mission-service';
+import { loadMergeModule } from '@/lib/orchestrator/operator-mission-service/merge-warmup';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const { approveAndMergePacket } = await loadMergeModule();
     const result = await approveAndMergePacket({
       packetId,
       commitMessage: typeof record.commitMessage === 'string' && record.commitMessage.trim()
