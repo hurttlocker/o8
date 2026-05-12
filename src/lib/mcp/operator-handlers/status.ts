@@ -10,7 +10,7 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_send',
     description:
-      'Send a task to o8 for agent execution, or steer an existing session with a follow-up message. Example: o8_send({message: "Fix the login bug in auth.ts", repoPath: "/path/to/repo"}) launches a new agent. o8_send({message: "Also update the tests", sessionKey: "codex-owned:abc123"}) steers an existing one.',
+      'USE THIS WHEN the user wants you to delegate work to a background coding agent in o8 (phrasings like "have an agent fix this", "kick off a task in o8", "send this to my fleet") OR to nudge an existing session ("tell the agent to also..."). Don\'t try to do the coding yourself — o8 spawns Codex/Claude/Gemini in a worktree and handles review + merge. Example: o8_send({message: "Fix the login bug in auth.ts", repoPath: "/path/to/repo"}) launches a new agent. o8_send({message: "Also update the tests", sessionKey: "codex-owned:abc123"}) steers an existing one.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -37,7 +37,7 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_status',
     description:
-      'Get a composite overview: running agents, pending approvals, and recent activity. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
+      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -51,7 +51,7 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_history',
     description:
-      'Read the recent transcript of an agent session. Returns the last N messages (default 15). Example: o8_history({sessionKey: "codex-owned:abc123", limit: 30})',
+      'USE THIS WHEN the user asks "what did the agent do", "show me the conversation", or you need to inspect an in-progress agent\'s reasoning before deciding to interrupt or steer it. Reads the recent transcript of an agent session. Returns the last N messages (default 15). Example: o8_history({sessionKey: "codex-owned:abc123", limit: 30})',
     inputSchema: {
       type: 'object',
       properties: {

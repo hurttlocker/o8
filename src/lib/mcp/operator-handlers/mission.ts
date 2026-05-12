@@ -26,7 +26,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'create_mission',
     description:
-      'Create a sprint mission from GitHub issues or ad-hoc inline tasks, then dispatch agents. By default, all packets run in parallel and dispatch immediately. Use `issues` with GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.',
+      'USE THIS WHEN the user wants to delegate one or more coding tasks to autonomous agents — phrasings like "fix issues #X, #Y", "dispatch this bug", "have an agent work on...", "build me a feature for...". Don\'t code it yourself — o8 spawns Codex/Gemini/Claude in isolated worktrees, runs governance checks, and ships a clean PR. By default packets run in parallel and dispatch immediately. Use `issues` for GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -80,7 +80,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'dispatch_mission',
     description:
-      'Run the mission dispatch loop. Usually not needed since create_mission auto-dispatches by default. Use this to re-dispatch after resetting failed packets. Example: dispatch_mission() dispatches current mission. dispatch_mission({missionId: "mission-abc123"}) dispatches a specific one.',
+      'USE THIS RARELY — create_mission already dispatches by default. Only call this after reset_packet to relaunch a packet, or if the user explicitly says "redispatch". Example: dispatch_mission() dispatches current mission. dispatch_mission({missionId: "mission-abc123"}) dispatches a specific one.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -94,7 +94,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'get_mission_status',
     description:
-      'Read sprint-level mission status: waves, packet state, active agents, blockers, and optional cost. Example: get_mission_status() returns current mission. get_mission_status({includeCost: true}) adds cost breakdown.',
+      'USE THIS WHEN the user asks "how\'s the mission going", "what\'s the status of my dispatch", or right before each tick of an automated review loop to see which packets are awaiting_review / running / blocked. Returns waves, packet state, active agents, blockers, optional cost. Example: get_mission_status() returns current mission. get_mission_status({includeCost: true}) adds cost breakdown.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -138,7 +138,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'submit_review',
     description:
-      'Record review findings for a completed packet. Findings are relayed to downstream dependent packets. Use status for the finding enum (fixed, accepted, deferred); put free-text fix details in description or fixSuggestion. Example: submit_review({packetId: "pkt-abc", approved: false, findings: [{file: "src/foo.ts", severity: "warning", description: "CSS shorthand used", status: "fixed", fixSuggestion: "Use paddingTop and paddingLeft instead."}]})',
+      'USE THIS WHEN a packet is awaiting_review and you\'ve inspected the diff (via o8_merge_preview or by reading the worktree). approved:true unlocks the F18 auto-merge path; approved:false sends the packet back to the agent with findings as feedback. Findings are relayed to downstream dependent packets. Use status for the finding enum (fixed, accepted, deferred); put free-text fix details in description or fixSuggestion. Example: submit_review({packetId: "pkt-abc", approved: false, findings: [{file: "src/foo.ts", severity: "warning", description: "CSS shorthand used", status: "fixed", fixSuggestion: "Use paddingTop and paddingLeft instead."}]})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -189,7 +189,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'reset_packet',
     description:
-      'Reset a stuck or failed packet back to queued state so it can be re-dispatched. Archives the old lane and session. Call dispatch_mission() after to re-launch. Example: reset_packet({packetId: "pkt-abc", reason: "agent timed out"})',
+      'USE THIS WHEN a packet is stuck (lane status stuck in launching, session_lost, failed, recovering) or the agent produced bad output you want to wipe and try again. Archives the old lane + session. Pass clearWorktree:true to also remove the worktree dir. Call dispatch_mission() after to re-launch. Example: reset_packet({packetId: "pkt-abc", reason: "agent timed out"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -212,7 +212,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'retry_packet',
     description:
-      'Alias for reset_packet. Reset a stuck or failed packet back to queued state so it can be re-dispatched. Use when a lane is stuck in session_lost, failed, or recovering. Call dispatch_mission() after to re-launch. Example: retry_packet({packetId: "pkt-abc", reason: "session_lost"})',
+      'USE THIS — alias for reset_packet — WHEN a packet is in session_lost / failed / recovering. Same as reset_packet: archives old lane + optionally wipes worktree, then needs dispatch_mission() to relaunch. Example: retry_packet({packetId: "pkt-abc", reason: "session_lost"})',
     inputSchema: {
       type: 'object',
       properties: {
