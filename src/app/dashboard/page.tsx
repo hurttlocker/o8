@@ -2079,12 +2079,12 @@ function DashboardInner() {
   ]);
 
   // ── Domain lanes — reactive query, invalidated by WS lane-lifecycle events ──
-  const { data: domainLanesRaw } = useReactiveQuery<{ lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null }> }>({
+  const { data: domainLanesRaw } = useReactiveQuery<{ lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null; lastEventLabel: string | null }> }>({
     queryKey: ['lanes', 'active'],
     queryFn: async () => {
       const res = await fetchOnce('/api/lanes?active=true');
       if (!res.ok) return { lanes: [] };
-      return await res.json() as { lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null }> };
+      return await res.json() as { lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null; lastEventLabel: string | null }> };
     },
     wsEvents: ['lane-lifecycle', 'agent-lifecycle'],
     staleTime: 10_000,
@@ -2092,7 +2092,7 @@ function DashboardInner() {
   const domainLanes = useMemo<DomainLaneSummary[]>(() => {
     return (domainLanesRaw?.lanes ?? [])
       .filter((l): l is typeof l & { packetId: string } => Boolean(l.packetId))
-      .map((l) => ({ laneId: l.id, packetId: l.packetId, status: l.status, sessionKey: l.sessionKey }));
+      .map((l) => ({ laneId: l.id, packetId: l.packetId, status: l.status, sessionKey: l.sessionKey, lastEventLabel: l.lastEventLabel }));
   }, [domainLanesRaw]);
 
   useEffect(() => {

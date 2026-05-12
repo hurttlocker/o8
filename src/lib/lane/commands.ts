@@ -31,6 +31,7 @@ import { cleanupRemoteMergeWorktree, fetchWorkerBranch } from '@/lib/lane/remote
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/dispatch';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
+import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -497,23 +498,15 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       // opening an empty review packet. (Observed with Gemini 3.1 Pro: emitted
       // a clean <self-review> block but never actually landed a commit.)
       try {
-        const { execFile } = await import('node:child_process');
-        const { promisify } = await import('node:util');
-        const execFileAsync = promisify(execFile);
         const baseBranch = lane.baseBranch || 'main';
-        const { stdout: countStdout } = await execFileAsync(
-          'git',
-          ['rev-list', '--count', `${baseBranch}..HEAD`],
-          { cwd: reviewCwd, maxBuffer: 10 * 1024 * 1024 },
-        );
-        const commitsAhead = Number.parseInt(countStdout.trim(), 10);
-        if (Number.isFinite(commitsAhead) && commitsAhead === 0) {
+        const probe = await probeNoChangesProduced(reviewCwd, baseBranch);
+        if (probe.noChangesProduced) {
           console.warn(`[lane] request_review: ${command.laneId} has 0 commits ahead of ${baseBranch} — runtime reported success but produced no diff. Marking failed.`);
-          const failed = setLaneStatus(command.laneId, 'paused', 'system', 'empty_diff');
+          const failed = setLaneStatus(command.laneId, 'failed', 'system', 'zero_diff_failed');
           return {
             ok: false,
             laneId: command.laneId,
-            note: `Runtime reported completion but the worktree has zero commits ahead of ${baseBranch}. No review packet opened.`,
+            note: 'no_changes_produced',
             lane: failed ?? undefined,
           };
         }
