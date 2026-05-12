@@ -13,7 +13,8 @@
 import { createInterface } from 'node:readline';
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homedir, userInfo } from 'node:os';
+import { join, resolve } from 'node:path';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webview-tools';
 import {
@@ -38,6 +39,7 @@ import {
   type McpTool,
   type McpToolResult,
   checkApiHealth,
+  jsonResult,
   setApiBase,
   textResult,
 } from '@/lib/mcp/operator-handlers/shared';
@@ -98,6 +100,77 @@ interface JsonRpcResponse {
 
 // ── Config ──
 
+function getDataDir(): string {
+  return process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+}
+
+function expandHomePath(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === '~') return homedir();
+  if (trimmed.startsWith('~/')) return join(homedir(), trimmed.slice(2));
+  return value;
+}
+
+function isPathArg(key: string): boolean {
+  return key === 'repoPath'
+    || key === 'cwd'
+    || key === 'dataDir'
+    || key.endsWith('Path')
+    || key.endsWith('Dir');
+}
+
+function expandToolPathArgs(value: unknown, key = ''): unknown {
+  if (typeof value === 'string') {
+    return isPathArg(key) ? expandHomePath(value) : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => expandToolPathArgs(entry, key));
+  }
+  if (value && typeof value === 'object') {
+    const expanded: Record<string, unknown> = {};
+    for (const [entryKey, entryValue] of Object.entries(value as Record<string, unknown>)) {
+      expanded[entryKey] = expandToolPathArgs(entryValue, entryKey);
+    }
+    return expanded;
+  }
+  return value;
+}
+
+function extractRepoEntries(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (
+    parsed
+    && typeof parsed === 'object'
+    && Array.isArray((parsed as { repos?: unknown }).repos)
+  ) {
+    return (parsed as { repos: unknown[] }).repos;
+  }
+  return [];
+}
+
+function readKnownRepos(): string[] {
+  const registryPath = join(getDataDir(), 'repos.json');
+  if (!existsSync(registryPath)) return [];
+
+  try {
+    const parsed = JSON.parse(readFileSync(registryPath, 'utf-8')) as unknown;
+    return extractRepoEntries(parsed)
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return '';
+        const record = entry as Record<string, unknown>;
+        const rawPath = typeof record.path === 'string'
+          ? record.path
+          : typeof record.localPath === 'string'
+            ? record.localPath
+            : '';
+        return rawPath.trim() ? resolve(expandHomePath(rawPath)) : '';
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Resolve the backend base URL. Priority:
  *   1. ~/.o8/api-port file (always reflects the running app — survives port
@@ -115,9 +188,7 @@ interface JsonRpcResponse {
  */
 function resolveApiBase(): string {
   try {
-    const dataDir = process.env.CORTEX_IDE_DATA_DIR
-      || join(process.env.HOME || '', '.o8');
-    const portFile = join(dataDir, 'api-port');
+    const portFile = join(getDataDir(), 'api-port');
     if (existsSync(portFile)) {
       const raw = readFileSync(portFile, 'utf-8').trim();
       const n = parseInt(raw, 10);
@@ -171,6 +242,17 @@ const LOOP_OBSERVABILITY_TOOLS: McpTool[] = [
   },
 ];
 
+const USER_CONTEXT_TOOLS: McpTool[] = [
+  {
+    name: 'o8_user_context',
+    description: 'Return local o8 user context for resolving shorthand paths without asking the user. Includes username, homedir, cwd, dataDir, and knownRepos.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+];
+
 async function invokeTauriCommandFromWebview<T>(command: string): Promise<T> {
   // Small JS shim that hands the read off to a Rust Tauri command and wraps
   // the response in a sentinel envelope. The shim does not depend on any
@@ -190,7 +272,6 @@ async function invokeTauriCommandFromWebview<T>(command: string): Promise<T> {
   // The webview eval bridge wraps Promises by awaiting them, so we get the
   // resolved JSON string here. Parse twice — once for the sentinel, once
   // for the inner data if it came back as a stringified JSON value.
-  let envelope: { ok: boolean; data?: unknown; err?: string };
   let parsed: unknown = result;
   try {
     parsed = JSON.parse(result);
@@ -201,7 +282,7 @@ async function invokeTauriCommandFromWebview<T>(command: string): Promise<T> {
     // Some bridge implementations double-encode — peel one more layer.
     try { parsed = JSON.parse(parsed); } catch { /* leave as is */ }
   }
-  envelope = parsed as { ok: boolean; data?: unknown; err?: string };
+  const envelope = parsed as { ok: boolean; data?: unknown; err?: string };
   if (!envelope || envelope.ok !== true) {
     throw new Error(envelope?.err || `tauri invoke '${command}' failed`);
   }
@@ -237,11 +318,27 @@ async function handleActiveRoute(): Promise<McpToolResult> {
   }
 }
 
+async function handleUserContext(): Promise<McpToolResult> {
+  let username = process.env.USER || '';
+  try {
+    username = userInfo().username || username;
+  } catch { /* keep env fallback */ }
+
+  return jsonResult({
+    username,
+    homedir: homedir(),
+    cwd: process.cwd(),
+    dataDir: getDataDir(),
+    knownRepos: readKnownRepos(),
+  });
+}
+
 // ── Tool Definitions ──
 
 const TOOLS: McpTool[] = [
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_send'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_status'),
+  ...USER_CONTEXT_TOOLS,
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_approve'),
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_reject'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_history'),
@@ -272,6 +369,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   ...createO8WebviewToolHandlers(getO8WebviewClient),
   o8_view_console_errors: handleConsoleErrors,
   o8_view_active_route: handleActiveRoute,
+  o8_user_context: handleUserContext,
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,
   get_mission_status: handleGetMissionStatus,
@@ -323,7 +421,9 @@ async function handleMessage(msg: JsonRpcRequest): Promise<void> {
 
     case 'tools/call': {
       const toolName = (params as Record<string, unknown>)?.name as string;
-      const toolArgs = ((params as Record<string, unknown>)?.arguments ?? {}) as Record<string, unknown>;
+      const toolArgs = expandToolPathArgs(
+        ((params as Record<string, unknown>)?.arguments ?? {}) as Record<string, unknown>,
+      ) as Record<string, unknown>;
       const handler = TOOL_HANDLERS[toolName];
       if (!handler) {
         send({ jsonrpc: '2.0', id, result: textResult(`Unknown tool: ${toolName}`, true) });
