@@ -9,6 +9,9 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-12
 
+- `d9c98abc` feat: add MCP repo+project bootstrap tools — wedge unlock [via-o8]
+- `b883fa94` feat: add MCP repo+project bootstrap tools — wedge unlock
+- `1a12fa75` feat: add MCP repo bootstrap tools
 - `7c7bf11d` feat: default to light theme + solid chrome on fresh install [via-o8]
 - `08640c96` feat: default to light theme + solid chrome on fresh install
 
