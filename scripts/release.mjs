@@ -29,6 +29,18 @@ const REPO = 'hurttlocker/cortex-ide';
 const PUBLIC_MIRROR = 'hurttlocker/o8';
 const root = process.cwd();
 
+// Node ABI guard: better-sqlite3 is compiled against the build-machine's Node
+// ABI (NODE_MODULE_VERSION). A v0.1.119 ship built on Node 25 produced an
+// ABI 141 binary that crashed on Node 22 users with "NODE_MODULE_VERSION 141
+// vs 127" — see #1015. The runtime app requires Node ≥22, so the build must
+// also be on Node 22 to keep ABIs aligned.
+const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+if (nodeMajor !== 22) {
+  console.error(`[release] FATAL: builds must run on Node 22 LTS (current: ${process.version})`);
+  console.error(`[release] Run \`nvm use\` (reads .nvmrc) then retry npm run ship.`);
+  process.exit(1);
+}
+
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
 const tag = `v${version}`;
