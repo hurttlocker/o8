@@ -74,6 +74,32 @@ export async function resetPacket(input: ResetPacketInput) {
         error instanceof Error ? error.message : String(error),
       );
     }
+
+    // F33 fallback (#1025): cleanupIssueBranch can miss orphan worktree dirs
+    // when their meta is gone and git doesn't list them against the target
+    // branch (e.g. a -<suffix> dir left on `main` after a prior bad reset).
+    // Sweep `<repo>/.cortex-worktrees/packet-pkt-<id>*` on disk and remove
+    // anything that survived. Otherwise the next create() retry loop bumps
+    // the suffix and the slow node_modules clone runs again from scratch.
+    try {
+      const { readdir, rm } = await import('node:fs/promises');
+      const path = await import('node:path');
+      const baseDir = path.join(state.repoPath, '.cortex-worktrees');
+      const dirs = await readdir(baseDir).catch(() => [] as string[]);
+      const prefix = `packet-${packet.id}`;
+      const orphans = dirs.filter((name) => name === prefix || name.startsWith(`${prefix}-`));
+      for (const name of orphans) {
+        const full = path.join(baseDir, name);
+        await rm(full, { recursive: true, force: true }).catch(() => {});
+        worktreePruned = true;
+        log(`[lane-reset] Removed orphan worktree dir ${full} for packet ${packet.referenceLabel}`);
+      }
+    } catch (error) {
+      log(
+        `[lane-reset] Orphan worktree sweep failed for packet ${packet.referenceLabel}`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   // Reset packet to dispatchable state
