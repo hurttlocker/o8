@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-12
 
+- `370b9b8e` perf: symlink node_modules into worktrees instead of cp -cR
 - `1938fba8` feat: add MCP repo+project bootstrap tools — wedge unlock
 - `89e5ce91` feat: add MCP repo+project bootstrap tools — wedge unlock
 - `d9c98abc` feat: add MCP repo+project bootstrap tools — wedge unlock [via-o8]
