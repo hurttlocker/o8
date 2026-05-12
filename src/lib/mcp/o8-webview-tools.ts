@@ -327,7 +327,7 @@ async function withStructuredErrors(
 export const O8_WEBVIEW_TOOLS: McpTool[] = [
   {
     name: 'o8_view_screenshot',
-    description: 'Capture a screenshot of the o8 desktop app window as base64 PNG. Use when you need to see the current UI state.',
+    description: 'USE THIS WHEN the user asks what their o8 screen looks like, wants you to debug a visual bug, or says "look at o8 / take a screenshot / what do you see". Returns base64 PNG of the running o8 desktop app window. The Rust-side capture works even when the JS thread is busy.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -335,7 +335,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_snapshot',
-    description: 'Get a numbered accessibility tree of the current o8 view. Use to discover clickable elements by their ref.',
+    description: 'USE THIS BEFORE o8_view_click when you need to find a button or element by its label rather than guessing coordinates. Returns a numbered accessibility tree of the current o8 view. Each clickable element gets a ref number you pass to o8_view_click.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -343,7 +343,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_click',
-    description: 'Click an element in the o8 window. Pass ref from a snapshot, or {x, y} coordinates.',
+    description: 'USE THIS WHEN the user asks you to click something in o8, dismiss a dialog, or drive the UI to a specific state. Pass ref from o8_view_snapshot for label-based targeting, or {x, y} coordinates when you already know the position from a screenshot.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -364,7 +364,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_type',
-    description: 'Type text into the currently focused element in the o8 window.',
+    description: 'USE THIS AFTER o8_view_click on a text input — types text into the currently focused element in the o8 window. For chat messages, prefer o8_send instead since it routes through the orchestrator properly.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -378,7 +378,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_read',
-    description: 'Get all visible text from the current o8 view.',
+    description: 'USE THIS WHEN you need to know what text is currently displayed in o8 without taking a screenshot — eg. to confirm a banner message, read a packet card title, or verify an empty-state appeared. Faster + cheaper than screenshot for text-based checks.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -400,7 +400,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_navigate',
-    description: 'Navigate the o8 app to a new route via Next.js App Router (router.push). Performs a true SPA transition — does NOT trigger a full Tauri webview reload, so subsequent o8_view_eval / o8_view_click calls remain responsive immediately. Use for deep-linking into specific tabs.',
+    description: 'USE THIS WHEN you need to deep-link the o8 UI to a specific route or tab (settings, mobile preview, /text specimen) without taking a screenshot to find a nav element first. router.push under the hood — true SPA transition, no full Tauri webview reload, so subsequent o8_view_eval / o8_view_click calls remain responsive immediately.',
     inputSchema: {
       type: 'object',
       properties: {

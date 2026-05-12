@@ -17,7 +17,7 @@ export const APPROVE_TOOLS: McpTool[] = [
   {
     name: 'o8_approve',
     description:
-      'Approve a pending agent action. Call o8_status() first to see pending approvals and get the approval ID. Example: o8_approve({id: "appr-abc123"})',
+      'USE THIS WHEN o8_status shows pending approvals and the user says "approve it", "go ahead", "looks good — merge", or you\'ve previewed a merge that\'s blocked by a file-size approval gate. Call o8_status() first to see pending approvals and get the approval ID. Example: o8_approve({id: "appr-abc123"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -32,7 +32,7 @@ export const APPROVE_TOOLS: McpTool[] = [
   {
     name: 'o8_reject',
     description:
-      'Reject a pending agent action with an optional reason. Example: o8_reject({id: "appr-abc123", reason: "Needs error handling"})',
+      'USE THIS WHEN the user wants to reject a pending agent action ("no", "deny", "that\'s wrong"). Reject with an optional reason so the agent gets useful feedback. Example: o8_reject({id: "appr-abc123", reason: "Needs error handling"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -51,7 +51,7 @@ export const APPROVE_TOOLS: McpTool[] = [
   {
     name: 'approve_and_merge',
     description:
-      'Merge a reviewed packet to main through the lane merge pipeline. Runs the governance policy engine before merging. On failure returns {merged:false, checks[], blockers[]} so callers can reason about which gate rejected it. Pass an optional idempotencyKey to safely retry within a 5-minute window. Example: approve_and_merge({packetId: "pkt-abc"}) or approve_and_merge({packetId: "pkt-abc", commitMessage: "feat: add login flow (#100)", idempotencyKey: "merge-pkt-abc-2026-04-18"})',
+      'USE THIS WHEN a packet is awaiting_review (per get_mission_status) and you\'ve already reviewed the diff via o8_merge_preview. This is the final step of the dispatch loop — runs the governance policy engine + merges to main. On failure returns {merged:false, checks[], blockers[]} so you know which gate rejected it (file-size? security pattern?). Pass an optional idempotencyKey to safely retry. Example: approve_and_merge({packetId: "pkt-abc"}) or approve_and_merge({packetId: "pkt-abc", commitMessage: "feat: add login flow (#100)", idempotencyKey: "merge-pkt-abc-2026-04-18"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -74,7 +74,7 @@ export const APPROVE_TOOLS: McpTool[] = [
   {
     name: 'o8_merge_preview',
     description:
-      'Dry-run the merge gate for a packet WITHOUT merging. Returns {packetId, wouldMerge, checks[], blockers[], branch}. Use this to check whether a packet would pass the governance checks (security patterns, diff budget, untracked imports, self-review integrity) before calling approve_and_merge. Example: o8_merge_preview({packetId: "pkt-abc"}).',
+      'USE THIS BEFORE approve_and_merge — dry-runs the merge gate so you know which governance check (security patterns, diff budget, untracked imports, self-review integrity) might block and can address it cleanly. Returns {packetId, wouldMerge, checks[], blockers[], branch}. Example: o8_merge_preview({packetId: "pkt-abc"}).',
     inputSchema: {
       type: 'object',
       properties: {
