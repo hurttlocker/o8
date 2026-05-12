@@ -841,6 +841,25 @@ export class WorktreeManager {
         continue;
       }
 
+      // F36 fast path (#1028): cp -cR of node_modules is O(file count) even
+      // under APFS clone-on-write — 50k+ files take 5-10 min. Dispatch packets
+      // edit source only and never mutate node_modules, so a symlink to the
+      // host's node_modules is functionally equivalent and ~5000x faster.
+      // Restricted to node_modules — other candidates (.next/cache, target/,
+      // etc.) may legitimately diverge and still want the CoW copy.
+      if (relativePath === 'node_modules') {
+        try {
+          await mkdir(path.dirname(targetPath), { recursive: true });
+          await symlink(sourcePath, targetPath);
+          hydrated.push(`${relativePath} (symlink)`);
+          continue;
+        } catch (err) {
+          console.warn(
+            `[worktree] node_modules symlink failed, falling back to cp -cR: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       try {
         await mkdir(path.dirname(targetPath), { recursive: true });
         await execFileAsync('cp', ['-cR', sourcePath, targetPath], {
