@@ -379,7 +379,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
   return (
     <div
       data-vibrancy-passthrough=""
-      style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'flex', flexDirection: 'column', background: 'var(--t-bg-gradient)' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg)' }}
     >
       {/* Drag region */}
       <div data-tauri-drag-region="" style={{ height: 44, flexShrink: 0, WebkitAppRegion: 'drag' as unknown as string } as React.CSSProperties} />
