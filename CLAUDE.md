@@ -344,6 +344,11 @@ The user daily-drives the **installed** production app at `/Applications/o8.app`
 ### The loop
 
 ```bash
+nvm use                        # reads .nvmrc → Node 22 LTS. REQUIRED for ABI
+                               # alignment (see #1015): better-sqlite3 is
+                               # compiled against the build-machine's NODE_MODULE_VERSION,
+                               # and the runtime app requires Node ≥22.
+                               # release.mjs hard-fails if node !== 22.x.
 npm version patch              # 0.1.X → 0.1.X+1 — sync-version.mjs hook updates
                                # package.json + src-tauri/tauri.conf.json +
                                # src-tauri/Cargo.toml in a single commit, then

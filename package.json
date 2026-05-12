@@ -5,6 +5,9 @@
   "productName": "o8",
   "private": true,
   "main": "src/app/layout.tsx",
+  "engines": {
+    "node": ">=22.0.0 <23.0.0"
+  },
   "scripts": {
     "predev:cleanup": "sh -c 'lsof -ti :${PORT:-3001} -sTCP:LISTEN | xargs kill -9 2>/dev/null; lsof -ti :${WS_PORT:-3002} -sTCP:LISTEN | xargs kill -9 2>/dev/null; true'",
     "dev": "npm run predev:cleanup && concurrently -k -s first \"npm run dev:next\" \"npm run dev:ws\"",
