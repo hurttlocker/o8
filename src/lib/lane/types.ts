@@ -27,6 +27,7 @@ export type LaneStatus =
   | 'awaiting_input'  // agent needs a human decision
   | 'reviewing'       // work done, review needed
   | 'merging'         // merge in progress
+  | 'failed'          // terminal failure, operator must redispatch or archive
   | 'completed'       // done and merged
   | 'archived';       // no longer active
 

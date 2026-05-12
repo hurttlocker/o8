@@ -69,8 +69,7 @@ function pickLatestTimestamp(candidates: Array<string | null | undefined>): stri
  *
  *   1. `merged`          — packet release flipped to `released`, OR the
  *                          packet's status is already `released`.
- *   2. `failed`          — lane is in its `archived` bucket after a failed
- *                          run, OR the packet status is `failed`.
+ *   2. `failed`          — lane or packet status is `failed`.
  *   3. `needs-revision`  — orchestrator rejected the diff OR the merge gate
  *                          flagged any blocking violation.
  *   4. `ready-to-merge`  — orchestrator approved AND the merge gate is
@@ -95,11 +94,9 @@ export function derivePacketReviewState(input: DeriveReviewStateInput): DeriveRe
   }
 
   // 2. failed
-  // Lanes do not have a literal 'failed' status — failed runs get archived.
-  // Packet status === 'failed' is the canonical signal. An archived lane on a
-  // non-failed packet usually means success + cleanup, so don't treat that as
-  // a failure on its own.
-  if (packet.status === 'failed') {
+  // An archived lane on a non-failed packet usually means success + cleanup,
+  // so don't treat archive as failure on its own.
+  if (packet.status === 'failed' || lane?.status === 'failed') {
     const ts = pickLatestTimestamp([
       lane?.lastEventAt ?? null,
       packet.lastEventAt ?? null,

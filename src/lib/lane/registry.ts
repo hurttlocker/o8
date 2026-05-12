@@ -319,6 +319,7 @@ export function listActiveLanesWithSessions(): Lane[] {
   return getFilteredLaneList(and(
     ne(lanes.status, 'archived'),
     ne(lanes.status, 'completed'),
+    ne(lanes.status, 'failed'),
     isNotNull(lanes.sessionKey),
   ));
 }
@@ -329,7 +330,7 @@ export function findLaneBySession(sessionKey: string): Lane | null {
     .from(lanes)
     .where(and(
       eq(lanes.sessionKey, sessionKey),
-      notInArray(lanes.status, ['archived', 'completed']),
+      notInArray(lanes.status, ['archived', 'completed', 'failed']),
     ))
     .get();
   return mapLaneRow(row);
@@ -341,7 +342,7 @@ export function findLaneByPacket(packetId: string): Lane | null {
     .from(lanes)
     .where(and(
       eq(lanes.packetId, packetId),
-      notInArray(lanes.status, ['archived', 'completed']),
+      notInArray(lanes.status, ['archived', 'completed', 'failed']),
     ))
     .get();
   return mapLaneRow(row);
@@ -354,7 +355,7 @@ export function findLaneByRepoAndBranch(repoPath: string, branch: string): Lane 
     .where(and(
       eq(lanes.repoPath, repoPath),
       eq(lanes.branch, branch),
-      notInArray(lanes.status, ['archived', 'completed']),
+      notInArray(lanes.status, ['archived', 'completed', 'failed']),
     ))
     .get();
   return mapLaneRow(row);
@@ -452,7 +453,7 @@ export function updateLane(
 // after the codex PTY exited (#531). Defense in depth — the supervisor
 // already avoids the double-fire at source, this stops any future caller
 // from accidentally re-opening a closed lane.
-const TERMINAL_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set(['completed', 'archived']);
+const TERMINAL_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set(['failed', 'completed', 'archived']);
 
 export function derivePacketType(lane: Pick<Lane, 'label'>) {
   return lane.label.trim().split(/\s+/)[0]?.toLowerCase() || 'unknown';
@@ -611,7 +612,7 @@ export function reconcileLanesWithSessions(
     );
 
     for (const lane of currentLanes) {
-      if (lane.status === 'archived' || lane.status === 'completed') continue;
+      if (lane.status === 'archived' || lane.status === 'completed' || lane.status === 'failed') continue;
 
       if (lane.sessionKey) {
         const session = sessionByKey.get(lane.sessionKey);

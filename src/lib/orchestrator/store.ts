@@ -664,6 +664,7 @@ export interface DomainLaneSummary {
   packetId: string;
   status: string;
   sessionKey: string | null;
+  lastEventLabel: string | null;
 }
 
 export function reconcileOrchestratorMissionState(
@@ -682,9 +683,9 @@ export function reconcileOrchestratorMissionState(
   const runtimeTruthBySession = new Map(inputs.runtimeTruth.map((truth) => [truth.sessionKey, truth] as const));
 
   // ── Lane domain model (passed from server-side caller) ──
-  const domainLaneByPacketId: Map<string, { status: string; sessionKey: string | null; laneId: string }> | null =
+  const domainLaneByPacketId: Map<string, { status: string; sessionKey: string | null; laneId: string; lastEventLabel: string | null }> | null =
     inputs.domainLanes && inputs.domainLanes.length > 0
-      ? new Map(inputs.domainLanes.map((dl) => [dl.packetId, { status: dl.status, sessionKey: dl.sessionKey, laneId: dl.laneId }]))
+      ? new Map(inputs.domainLanes.map((dl) => [dl.packetId, { status: dl.status, sessionKey: dl.sessionKey, laneId: dl.laneId, lastEventLabel: dl.lastEventLabel }]))
       : null;
 
   const reconciledPackets = packets.map((packet) => {
@@ -734,6 +735,12 @@ export function reconcileOrchestratorMissionState(
       };
     }
 
+    if (packet.status === 'failed') {
+      next.status = 'failed';
+      next.blockedReason = packet.blockedReason ?? null;
+      return next;
+    }
+
     if (packet.queueState === 'held') {
       next.status = 'blocked';
       next.blockedReason = 'Held by operator';
@@ -753,6 +760,11 @@ export function reconcileOrchestratorMissionState(
       if (ds === 'merging') { next.status = 'awaiting_review'; next.blockedReason = 'Merge in progress'; return next; }
       if (ds === 'completed') { next.status = 'released'; next.releaseState = 'released'; return next; }
       if (ds === 'archived') { next.status = 'archived'; return next; }
+      if (ds === 'failed') {
+        next.status = 'failed';
+        next.blockedReason = packet.blockedReason ?? (domainLane.lastEventLabel === 'zero_diff_failed' ? 'no_changes_produced' : domainLane.lastEventLabel);
+        return next;
+      }
       if (ds === 'running') { next.status = 'running'; return next; }
       if (ds === 'launching') { next.status = 'launching'; return next; }
       if (ds === 'awaiting_input') { next.status = 'blocked'; next.blockedReason = 'Awaiting operator input'; return next; }
