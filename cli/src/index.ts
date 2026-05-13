@@ -17,6 +17,7 @@
  */
 
 import { runDoctor } from './commands/doctor.js';
+import { runLaneTouches } from './commands/lane.js';
 import { runStatus } from './commands/status.js';
 import { runVersion } from './commands/version.js';
 import { runPacketInfo } from './commands/packet/info.js';
@@ -63,6 +64,7 @@ commands:
   version              CLI version + connected server version
   doctor               verify port + token resolution, ping server
   status               snapshot: running packets, lanes, merges, approvals
+  lane touches         active lanes touching a path or packet diff
   packet info          info about the packet bound to the current worktree
   packet scope <id>    one-call worker context for a packet or lane
   packet report        append an agent_report event for this packet
@@ -101,6 +103,11 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runDoctor(args.mode);
     case 'status':
       return runStatus(args.mode);
+    case 'lane': {
+      if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
+      process.stderr.write(`unknown lane subcommand: ${secondary ?? '(none)'}\n`);
+      return 1;
+    }
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode);
       if (secondary === 'scope') return runPacketScope(args.mode, args.rest);
