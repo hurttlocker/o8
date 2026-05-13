@@ -556,6 +556,8 @@ export function sessionStatusTone(status?: string | null) {
     case 'reviewing':
       return { label: 'Reviewing', color: '#34c759', glow: 'rgba(52, 199, 89, 0.22)' };
     case 'waiting':
+    case 'awaiting_input':
+    case 'awaiting_orchestrator':
       return { label: 'Waiting', color: '#ff9f0a', glow: 'rgba(255, 159, 10, 0.22)' };
     case 'blocked':
     case 'failed':
@@ -638,6 +640,8 @@ export function sessionSortValue(status?: string | null) {
     case 'reviewing':
       return 1;
     case 'waiting':
+    case 'awaiting_input':
+    case 'awaiting_orchestrator':
       return 2;
     case 'blocked':
     case 'failed':
