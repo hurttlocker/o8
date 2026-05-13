@@ -22,6 +22,7 @@ import type {
   AutoDirectiveProposal,
   CrossRepoDirectiveProposal,
   DirectiveProposalCandidate,
+  ObservationDirectiveProposal,
 } from '../directive-proposal-types';
 
 interface UseDirectiveProposalsArgs {
@@ -48,6 +49,7 @@ interface UseDirectiveProposalsReturn {
 // fetch boundary so the row component can branch on `proposal.source`
 // safely even if the cache predates the field.
 type RawAutoProposal = Omit<AutoDirectiveProposal, 'source'> & { source?: 'auto' };
+type RawObservationProposal = Omit<ObservationDirectiveProposal, 'source'> & { source: 'observation' };
 type RawCrossRepoProposal = Omit<CrossRepoDirectiveProposal, 'source'> & { source?: 'cross-repo' };
 
 export function useDirectiveProposals({
@@ -74,10 +76,14 @@ export function useDirectiveProposals({
 
         if (autoRes.status === 'fulfilled' && autoRes.value.ok) {
           try {
-            const data = (await autoRes.value.json()) as { ok?: boolean; proposals?: RawAutoProposal[] };
+            const data = (await autoRes.value.json()) as { ok?: boolean; proposals?: Array<RawAutoProposal | RawObservationProposal> };
             if (!cancelled && data?.ok && Array.isArray(data.proposals)) {
               for (const p of data.proposals) {
-                merged.push({ ...p, source: 'auto' } as AutoDirectiveProposal);
+                merged.push(
+                  p.source === 'observation'
+                    ? p as ObservationDirectiveProposal
+                    : { ...p, source: 'auto' } as AutoDirectiveProposal,
+                );
               }
             }
           } catch (err) {
@@ -136,6 +142,14 @@ export function useDirectiveProposals({
       }).catch((err) => {
         console.warn('[proposer] origin stamp failed:', err instanceof Error ? err.message : err);
       });
+    } else if (proposal.source === 'observation') {
+      void fetch('/api/cortex/proposals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'dismiss_observation', id: proposal.id }),
+      }).catch((err) => {
+        console.warn('[proposer] observation consume failed:', err instanceof Error ? err.message : err);
+      });
     }
     // Hide the row locally — once a directive is created, the next tick
     // will (eventually) shift the file/fix patterns enough that the
@@ -156,6 +170,12 @@ export function useDirectiveProposals({
             targetRepoId: proposal.targetRepoId,
             directiveId: proposal.directiveId,
           }),
+        });
+      } else if (proposal.source === 'observation') {
+        res = await fetch('/api/cortex/proposals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'dismiss_observation', id: proposal.id }),
         });
       } else {
         res = await fetch('/api/cortex/proposals', {

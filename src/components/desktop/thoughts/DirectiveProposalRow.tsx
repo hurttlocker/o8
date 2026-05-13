@@ -35,6 +35,12 @@ const YELLOW_TEXT_DARK = '#b45309';
 const FONT_FAMILY = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
 const MONO_FAMILY = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
+function formatObservationProvenance(proposal: Extract<DirectiveProposalCandidate, { source: 'observation' }>) {
+  return proposal.laneId && proposal.laneId !== proposal.proposed_by
+    ? `${proposal.proposed_by} / ${proposal.laneId}`
+    : proposal.proposed_by;
+}
+
 export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: DirectiveProposalRowProps) {
   const [hovered, setHovered] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -107,6 +113,8 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
       >
       {proposal.source === 'cross-repo' ? (
         <CrossRepoBody proposal={proposal} />
+      ) : proposal.source === 'observation' ? (
+        <ObservationBody proposal={proposal} />
       ) : (
         <AutoBody proposal={proposal} />
       )}
@@ -199,6 +207,24 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
                 Imported from {proposal.sourceRepoName} · {Math.round(proposal.similarity * 100)}% stack overlap with {proposal.targetRepoName}
               </div>
             </>
+          ) : proposal.source === 'observation' ? (
+            <>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
+                Worker observation:
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--t-text-secondary)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+                {proposal.text}
+              </div>
+              <div style={{ fontSize: 10, color: YELLOW_TEXT_DARK, marginTop: 2 }}>
+                Proposed by {formatObservationProvenance(proposal)} · {proposal.scope} · {proposal.kind}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 6 }}>
+                Draft directive:
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--t-text-secondary)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+                {proposal.draftDirective}
+              </div>
+            </>
           ) : (
             <>
               <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
@@ -218,6 +244,52 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
         </div>
       ) : null}
     </div>
+  );
+}
+
+// ── worker observation body (#1036) ───────────────────────────────────────
+
+function ObservationBody({ proposal }: { proposal: Extract<DirectiveProposalCandidate, { source: 'observation' }> }) {
+  return (
+    <>
+      <span
+        title={`Observation scope: ${proposal.scope}`}
+        style={{
+          width: 42,
+          flexShrink: 0,
+          fontSize: 10,
+          fontWeight: 700,
+          color: YELLOW_TEXT_DARK,
+          fontFamily: MONO_FAMILY,
+          letterSpacing: '-0.01em',
+          textTransform: 'uppercase',
+        }}
+      >
+        {proposal.kind.slice(0, 3)}
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontSize: 12,
+          color: 'var(--t-text)',
+          letterSpacing: '-0.01em',
+        }}
+      >
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>observation: </span>
+        <span style={{ fontFamily: MONO_FAMILY, fontSize: 11, color: 'var(--t-text)' }}>
+          {proposal.scope}
+        </span>
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}> · proposed by </span>
+        <span style={{ fontFamily: MONO_FAMILY, fontSize: 11, color: 'var(--t-text)' }}>
+          {formatObservationProvenance(proposal)}
+        </span>
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>?</span>
+      </span>
+    </>
   );
 }
 

@@ -25,6 +25,10 @@ import {
   handleReject,
 } from '@/lib/mcp/operator-handlers/approve';
 import {
+  CORTEX_TOOLS,
+  handleProposeObservation,
+} from '@/lib/mcp/operator-handlers/cortex';
+import {
   MISSION_TOOLS,
   handleCreateMission,
   handleDispatchMission,
@@ -358,6 +362,7 @@ const TOOLS: McpTool[] = [
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_history'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_lane_events'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_packet_transcript'),
+  ...CORTEX_TOOLS,
   ...O8_WEBVIEW_TOOLS,
   ...LOOP_OBSERVABILITY_TOOLS,
   ...MISSION_TOOLS.filter((t) => t.name === 'create_mission'),
@@ -382,6 +387,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_history: handleHistory,
   o8_lane_events: handleLaneEvents,
   o8_packet_transcript: handleTranscript,
+  cortex_propose_observation: handleProposeObservation,
   o8_register_repo: handleRegisterRepo,
   o8_init_repo: handleInitRepo,
   o8_create_project: handleCreateProject,
