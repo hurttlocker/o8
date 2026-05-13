@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-13
 
+- `77d7f21d` feat: add packet mission tail stream [via-o8]
 - `9e81c74c` feat: add o8 observation proposals [via-o8]
 - `ac752fce` feat: add lane touch lookup
 - `56cb0236` feat: add packet agent report events [via-o8]

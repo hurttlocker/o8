@@ -4,7 +4,7 @@ Last updated: 2026-05-13
 
 | Metric | Value |
 |---|---|
-| Features shipped (180d) | 950 |
+| Features shipped (180d) | 951 |
 | Days active | 60 |
-| This week | 44 features |
-| Today | 14 features |
+| This week | 43 features |
+| Today | 13 features |
