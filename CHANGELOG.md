@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-13
 
+- `04fd4e64` feat: branch details launcher + modernized connection banner + chrome polish
 - `77d7f21d` feat: add packet mission tail stream [via-o8]
 - `9e81c74c` feat: add o8 observation proposals [via-o8]
 - `ac752fce` feat: add lane touch lookup
