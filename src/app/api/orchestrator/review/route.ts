@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
       packetId,
       findings: parseReviewFindings(record.findings),
       approved: record.approved,
+      reviewedHeadSha: typeof record.reviewedHeadSha === 'string' && record.reviewedHeadSha.trim()
+        ? record.reviewedHeadSha.trim()
+        : undefined,
     });
     return operatorSuccess(result);
   } catch (error) {

@@ -399,6 +399,7 @@ export async function POST(request: NextRequest) {
             verb: continuation.verb,
             laneId: continuation.laneId,
             commitMessage: continuation.commitMessage,
+            expectedHeadSha: continuation.expectedHeadSha,
             actor: 'user',
           } as Parameters<typeof dispatch>[0]);
           decisionNote = result.note;

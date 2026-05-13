@@ -67,6 +67,10 @@ export const APPROVE_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Optional client-supplied key. Repeat calls with the same key inside a 5-minute window return the cached result without re-running the merge.',
         },
+        expectedHeadSha: {
+          type: 'string',
+          description: 'Optional worktree HEAD SHA expected at merge time. If omitted, o8 uses the reviewed HEAD from submit_review when present.',
+        },
       },
       required: ['packetId'],
     },
@@ -157,7 +161,11 @@ export async function handleApproveAndMerge(args: Record<string, unknown>): Prom
 
   try {
     // #622 — wrapper guarantees synchronous worktree cleanup before return.
-    const result = await withSynchronousWorktreeCleanup(packetId, () => approveAndMergePacket({ packetId, commitMessage: optionalString(args, 'commitMessage') || undefined }));
+    const result = await withSynchronousWorktreeCleanup(packetId, () => approveAndMergePacket({
+      packetId,
+      commitMessage: optionalString(args, 'commitMessage') || undefined,
+      expectedHeadSha: optionalString(args, 'expectedHeadSha') || undefined,
+    }));
     if (cacheKey) {
       setIdempotent(cacheKey, result as unknown as Record<string, unknown>);
     }

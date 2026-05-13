@@ -55,6 +55,28 @@ interface OrderedMergeCandidate extends MergeOrderCandidate {
   recommendation: MergeOrderRecommendation;
 }
 
+export class HeadShaMismatchError extends Error {
+  readonly packetId: string;
+  readonly expectedHeadSha: string;
+  readonly currentHeadSha: string;
+
+  constructor(packetId: string, expectedHeadSha: string, currentHeadSha: string) {
+    super(`Worktree HEAD changed since review for packet ${packetId}: expected ${expectedHeadSha}, current ${currentHeadSha}. Re-review before merging.`);
+    this.name = 'HeadShaMismatchError';
+    this.packetId = packetId;
+    this.expectedHeadSha = expectedHeadSha;
+    this.currentHeadSha = currentHeadSha;
+  }
+}
+
+export function isHeadShaMismatchError(error: unknown): error is HeadShaMismatchError {
+  return error instanceof HeadShaMismatchError;
+}
+
+function resolveExpectedHeadSha(input: ApproveAndMergeInput, packet: OrchestratorPacket) {
+  return input.expectedHeadSha?.trim() || packet.review?.reviewedHeadSha?.trim() || undefined;
+}
+
 function isPacketAwaitingMerge(packet: OrchestratorPacket) {
   return packet.status === 'awaiting_review'
     && packet.releaseState !== 'released'
@@ -266,8 +288,13 @@ async function dispatchPacketMerge(
     commitMessage: input.commitMessage?.trim() || undefined,
     reviewSummary: mapReviewSummary(packet),
     orchestratorReviewed: packet.review?.approved === true,
+    expectedHeadSha: resolveExpectedHeadSha(input, packet),
     actor,
   });
+
+  if (!result.ok && result.expectedHeadSha && result.currentHeadSha) {
+    throw new HeadShaMismatchError(packet.id, result.expectedHeadSha, result.currentHeadSha);
+  }
 
   // #622 — Synchronous worktree cleanup guarantee.
   // The verb=merge path in lane/commands.ts already removes the worktree on
@@ -403,11 +430,14 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     const { withSynchronousWorktreeCleanup } = await loadWorktreeCleanup();
     const orphanResult = await withSynchronousWorktreeCleanup(
       input.packetId,
-      () => mergeOrphanLaneByPacket(input.packetId, input.commitMessage),
+      () => mergeOrphanLaneByPacket(input.packetId, input.commitMessage, input.expectedHeadSha),
     );
     const releasedAfterOrphanDispatch = await alreadyReleasedResultForPacketId(input.packetId, currentMissionState().packets);
     if (!orphanResult.merged && releasedAfterOrphanDispatch) {
       return releasedAfterOrphanDispatch;
+    }
+    if (!orphanResult.merged && orphanResult.expectedHeadSha && orphanResult.currentHeadSha) {
+      throw new HeadShaMismatchError(input.packetId, orphanResult.expectedHeadSha, orphanResult.currentHeadSha);
     }
     return withGateVerdict(input.packetId, orphanResult);
   }
@@ -472,6 +502,7 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
     const result = await approveAndMergeSinglePacket({
       packetId: candidate.packet.id,
       commitMessage: candidate.packet.id === packet.id ? input.commitMessage : undefined,
+      expectedHeadSha: candidate.packet.id === packet.id ? input.expectedHeadSha : undefined,
     });
 
     if (!result.merged) {
