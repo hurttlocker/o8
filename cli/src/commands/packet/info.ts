@@ -19,6 +19,7 @@ import {
   printJson,
   type OutputMode,
 } from '../../output.js';
+import { warnRuntimeDriftIfNeeded } from './runtime-drift.js';
 
 interface Lane {
   id: string;
@@ -48,6 +49,13 @@ interface WorktreeMatch {
   worktreePath: string;
   packetSlug: string;
   layout: 'cortex-worktrees' | 'claude-worktrees';
+}
+
+interface PacketScopeRuntime {
+  laneId: string;
+  runtime: string;
+  actualRuntime: string | null;
+  worktreePath: string | null;
 }
 
 function detectWorktree(cwd: string): WorktreeMatch | null {
@@ -111,6 +119,12 @@ export async function runPacketInfo(mode: OutputMode): Promise<number> {
     { query: { events: 20 } },
   );
   const events = eventsRes.data?.events ?? [];
+  const scopeRes = await apiFetch<PacketScopeRuntime>(
+    cfg,
+    `/api/lanes/${encodeURIComponent(slugMatch.id)}/scope`,
+    { allowNotFound: true },
+  ).catch(() => null);
+  const actualRuntime = scopeRes?.data?.actualRuntime ?? null;
 
   const payload = {
     schema: 'o8/cli/packet.info/v1',
@@ -120,6 +134,7 @@ export async function runPacketInfo(mode: OutputMode): Promise<number> {
       label: slugMatch.label,
       status: slugMatch.status,
       runtime: slugMatch.runtime,
+      actualRuntime,
       branch: slugMatch.branch,
       baseBranch: slugMatch.baseBranch,
       repoPath: slugMatch.repoPath,
@@ -139,6 +154,13 @@ export async function runPacketInfo(mode: OutputMode): Promise<number> {
     },
   };
 
+  warnRuntimeDriftIfNeeded({
+    laneId: slugMatch.id,
+    runtime: slugMatch.runtime,
+    actualRuntime,
+    worktreePath: slugMatch.worktreePath,
+  }, mode);
+
   if (mode.human) {
     printHumanHeading('packet');
     printHumanKv([
@@ -146,6 +168,7 @@ export async function runPacketInfo(mode: OutputMode): Promise<number> {
       ['packet', slugMatch.packetId ?? '(none)'],
       ['status', slugMatch.status],
       ['runtime', slugMatch.runtime],
+      ['actual runtime', actualRuntime ?? '(pending)'],
       ['branch', slugMatch.branch],
       ['base', slugMatch.baseBranch],
       ['repo', slugMatch.repoPath],
