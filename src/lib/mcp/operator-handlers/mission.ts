@@ -189,7 +189,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'reset_packet',
     description:
-      'USE THIS WHEN a packet is stuck (lane status stuck in launching, session_lost, failed, recovering) or the agent produced bad output you want to wipe and try again. Archives the old lane + session. Pass clearWorktree:true to also remove the worktree dir. Call dispatch_mission() after to re-launch. Example: reset_packet({packetId: "pkt-abc", reason: "agent timed out"})',
+      'USE THIS WHEN a packet is stuck (lane status stuck in launching, session_lost, failed, recovering) or the agent produced bad output you want to wipe and try again. Archives the old lane + session AND removes the worktree dir by default. Pass clearWorktree:false to keep the worktree (rare — use retry_packet instead if you want to preserve work). Call dispatch_mission() after to re-launch. Example: reset_packet({packetId: "pkt-abc", reason: "agent timed out"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -212,7 +212,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'retry_packet',
     description:
-      'USE THIS — alias for reset_packet — WHEN a packet is in session_lost / failed / recovering. Same as reset_packet: archives old lane + optionally wipes worktree, then needs dispatch_mission() to relaunch. Example: retry_packet({packetId: "pkt-abc", reason: "session_lost"})',
+      'USE THIS WHEN a packet is in session_lost / failed / recovering and you want to RESUME the existing worktree. Archives the old lane + session, KEEPS the worktree dir, then needs dispatch_mission() to relaunch. Pass clearWorktree:true to wipe (or use reset_packet instead). Example: retry_packet({packetId: "pkt-abc", reason: "session_lost"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -491,18 +491,38 @@ export async function handleSubmitReview(args: Record<string, unknown>): Promise
   }
 }
 
-export async function handleResetPacket(args: Record<string, unknown>): Promise<McpToolResult> {
+// F33 (#1025): reset_packet and retry_packet share an implementation but
+// differ in semantics — reset implies "wipe and try again," retry implies
+// "preserve and resume." When clearWorktree was uniformly defaulted to false,
+// reset_packet without the explicit flag left orphan worktree dirs that
+// collided with the next dispatch and produced -<suffix> duplicates on the
+// same branch. Splitting the defaults keeps the two verbs honest.
+async function doResetPacket(
+  args: Record<string, unknown>,
+  defaultClearWorktree: boolean,
+): Promise<McpToolResult> {
   try {
+    const clearWorktree = args.clearWorktree === undefined
+      ? defaultClearWorktree
+      : args.clearWorktree === true;
     const result = await resetPacket({
       packetId: requiredString(args, 'packetId'),
       reason: optionalString(args, 'reason') || undefined,
-      clearWorktree: args.clearWorktree === true,
+      clearWorktree,
     });
     return jsonResult(result);
   } catch (error) {
-    console.error(`${'[mcp-operator]'} reset_packet failed: ${errorText(error)}`);
+    console.error(`${'[mcp-operator]'} reset/retry failed: ${errorText(error)}`);
     return textResult(`Failed to reset packet: ${errorText(error)}`, true);
   }
+}
+
+export async function handleResetPacket(args: Record<string, unknown>): Promise<McpToolResult> {
+  return doResetPacket(args, /* default clearWorktree */ true);
+}
+
+export async function handleRetryPacket(args: Record<string, unknown>): Promise<McpToolResult> {
+  return doResetPacket(args, /* default clearWorktree */ false);
 }
 
 export async function handleRerunWithFeedback(args: Record<string, unknown>): Promise<McpToolResult> {
