@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-13
 
+- `ac752fce` feat: add lane touch lookup
 - `56cb0236` feat: add packet agent report events [via-o8]
 - `e72dead6` feat: add packet scope surface [via-o8]
 - `eaff9cf2` feat: /api/panel/status returns server version for o8 CLI
