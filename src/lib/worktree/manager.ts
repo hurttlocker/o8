@@ -1052,6 +1052,15 @@ export class WorktreeManager {
         const msg = err instanceof Error ? err.message : '';
         if (!msg.includes('is not a working tree')) throw err;
       }
+
+      // F39 (#1031): even when `git worktree remove` succeeds OR bails with
+      // "is not a working tree" (orphan case — dev-bridge restart wiped git's
+      // .git/worktrees registration), the directory itself can still be left
+      // on disk. Without this rm, every merge under those conditions leaks the
+      // whole packet worktree (~1-3 GB) and disk fills within days.
+      if (await this.pathExists(worktreePath)) {
+        await rm(worktreePath, { recursive: true, force: true });
+      }
     }
 
     // Optionally delete the branch
@@ -1090,7 +1099,9 @@ export class WorktreeManager {
       // Lane registry not available — skip guard
     }
 
+    const handledIds = new Set<string>();
     for (const wt of worktrees) {
+      handledIds.add(wt.id);
       if (now - wt.lastActivityAt > maxAgeMs && wt.status !== 'active') {
         // Check if this worktree backs an active lane
         const wtPath = path.join(this.worktreeBase, wt.id);
@@ -1101,6 +1112,30 @@ export class WorktreeManager {
         await this.cleanup(wt.id, { force: true, deleteBranch: true });
         pruned.push(wt.id);
       }
+    }
+
+    // F39 (#1031): scan the worktree base dir for orphan packet dirs that
+    // aren't in meta and aren't in `git worktree list`. These accumulate after
+    // dev-bridge restarts or aborted dispatch cycles and don't get reaped by
+    // the loop above because list() can't see them. Without this sweep, the
+    // disk fills within a few dispatch days (we hit 100% in May 2026).
+    try {
+      const { readdir } = await import('node:fs/promises');
+      const entries = await readdir(this.worktreeBase, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (handledIds.has(entry.name)) continue;
+        if (!entry.name.startsWith('packet-')) continue;
+        const orphanPath = path.join(this.worktreeBase, entry.name);
+        if (activeLanePaths?.has(orphanPath)) continue;
+        const lastActivity = await this.getLastModified(orphanPath).catch(() => 0);
+        if (lastActivity > 0 && now - lastActivity <= maxAgeMs) continue;
+        await rm(orphanPath, { recursive: true, force: true });
+        console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - lastActivity) / 3_600_000)}h)`);
+        pruned.push(entry.name);
+      }
+    } catch (err) {
+      console.warn(`[worktree-prune] Orphan scan failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Also run git's built-in prune for any orphaned worktrees
