@@ -760,6 +760,7 @@ export function reconcileOrchestratorMissionState(
       if (ds === 'merging') { next.status = 'awaiting_review'; next.blockedReason = 'Merge in progress'; return next; }
       if (ds === 'completed') { next.status = 'released'; next.releaseState = 'released'; return next; }
       if (ds === 'archived') { next.status = 'archived'; return next; }
+      if (ds === 'recovering') { next.status = 'recovering'; next.blockedReason = domainLane.lastEventLabel ?? 'Lane recovering'; return next; }
       if (ds === 'failed') {
         next.status = 'failed';
         next.blockedReason = packet.blockedReason ?? (domainLane.lastEventLabel === 'zero_diff_failed' ? 'no_changes_produced' : domainLane.lastEventLabel);

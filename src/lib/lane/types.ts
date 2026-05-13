@@ -26,6 +26,7 @@ export type LaneStatus =
   | 'paused'          // agent idle, can resume
   | 'awaiting_input'  // agent needs a human decision
   | 'awaiting_orchestrator' // agent reported a blocker/question for o8
+  | 'recovering'      // agent/session died; operator can retry the packet
   | 'reviewing'       // work done, review needed
   | 'merging'         // merge in progress
   | 'failed'          // terminal failure, operator must redispatch or archive
@@ -58,6 +59,7 @@ export interface Lane {
   status: LaneStatus;
   ownership: LaneOwnership;
   writerToken: string | null;
+  lastHeartbeatAt: number | null;
   createdAt: string;
   updatedAt: string;
   lastEventAt: string | null;
@@ -172,7 +174,8 @@ export type LaneEventVerb =
   | 'detach_session'
   | 'auto_archive'
   | 'merge_cleanup'
-  | 'agent_report';
+  | 'agent_report'
+  | 'zombie_reap';
 
 export type AgentReportReason =
   | 'needs_clarification'

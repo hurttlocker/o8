@@ -22,6 +22,7 @@ import { runLaneTouches } from './commands/lane.js';
 import { runStatus } from './commands/status.js';
 import { runVersion } from './commands/version.js';
 import { runPacketInfo } from './commands/packet/info.js';
+import { runPacketHeartbeat } from './commands/packet/heartbeat.js';
 import { runPacketLog } from './commands/packet/log.js';
 import { runPacketReport } from './commands/packet/report.js';
 import { runPacketScope } from './commands/packet/scope.js';
@@ -69,6 +70,7 @@ commands:
   lane touches         active lanes touching a path or packet diff
   packet info          info about the packet bound to the current worktree
   packet scope <id>    one-call worker context for a packet or lane
+  packet heartbeat     update the current packet lane heartbeat
   packet report        append an agent_report event for this packet
   packet log <event>   append a structured event to the lane history
 
@@ -102,7 +104,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'version':
       return runVersion(args.mode);
     case 'doctor':
-      return runDoctor(args.mode);
+      return runDoctor(args.mode, args.rest);
     case 'status':
       return runStatus(args.mode);
     case 'cortex': {
@@ -118,6 +120,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode);
       if (secondary === 'scope') return runPacketScope(args.mode, args.rest);
+      if (secondary === 'heartbeat') return runPacketHeartbeat(args.mode, args.rest);
       if (secondary === 'report') return runPacketReport(args.mode, args.rest);
       if (secondary === 'log') return runPacketLog(args.mode, args.rest);
       process.stderr.write(`unknown packet subcommand: ${secondary ?? '(none)'}\n`);
