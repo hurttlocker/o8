@@ -74,7 +74,7 @@ commands:
   packet heartbeat     update the current packet lane heartbeat
   packet review        approve + merge a reviewed packet
   packet report        append an agent_report event for this packet
-  packet log <event>   append a structured event to the lane history
+  packet log <id>      read or follow packet lane events (--follow, --since)
 
 flags:
   --json (default)     JSON output for agents

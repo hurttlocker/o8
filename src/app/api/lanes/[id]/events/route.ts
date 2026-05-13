@@ -7,6 +7,7 @@ import {
   normalizeAgentReportMetadata,
   reportAgentEvent,
 } from '@/lib/lane/agent-report';
+import { getPacketTailBatch, resolvePacketTailPacketId } from '@/lib/lane/packet-tail';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,6 +27,74 @@ function requireLoopbackBearer(req: NextRequest): NextResponse | null {
   }
 
   return null;
+}
+
+function parseSince(raw: string | null): number {
+  if (!raw) return 0;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.floor(parsed);
+}
+
+function parseLimit(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.floor(parsed);
+}
+
+function parseTimeoutMs(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined;
+  return Math.floor(parsed);
+}
+
+function parseFollow(raw: string | null): boolean {
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const denied = requireLoopbackBearer(req);
+  if (denied) return denied;
+
+  const { id } = await params;
+  const packetId = resolvePacketTailPacketId(id);
+  if (!packetId) {
+    return NextResponse.json({ ok: false, note: 'packetId or lane id is required.' }, { status: 400 });
+  }
+
+  const query = req.nextUrl.searchParams;
+  const follow = parseFollow(query.get('follow'));
+  const since = parseSince(query.get('since'));
+  const timeoutMs = follow ? parseTimeoutMs(query.get('timeoutMs')) ?? 25_000 : 0;
+
+  try {
+    const result = await getPacketTailBatch({
+      packetId,
+      since,
+      timeoutMs,
+      limit: parseLimit(query.get('limit')),
+    });
+    return NextResponse.json({
+      schema: 'o8/packet.tail.batch/v1',
+      packetId,
+      events: result.events,
+      nextSince: result.nextSince,
+    }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to read packet events.';
+    console.error(`[packet-tail] read failed: ${message}`);
+    return NextResponse.json(
+      { ok: false, error: { code: 'packet_tail_failed', message } },
+      { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+    );
+  }
 }
 
 export async function POST(
