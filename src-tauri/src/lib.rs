@@ -755,6 +755,60 @@ fn spawn_bundled_ws_server(
 // would see. If nothing works, returns None and the caller shows a dialog.
 
 const MIN_NODE_MAJOR: u32 = 22;
+// F40 (#1032): better-sqlite3 native binding is compiled against Node 22's
+// ABI (NODE_MODULE_VERSION 127). Newer Node majors load the binding and
+// throw NODE_MODULE_VERSION mismatch — next-server dies on first DB import,
+// the HTTP listener never binds, the user sees "app up but not working."
+// We prefer Node 22.x specifically when available, even if the user's
+// login-shell default is a newer Node.
+const PREFERRED_NODE_MAJOR: u32 = 22;
+
+/// Look in well-known places for a Node 22.x install regardless of the user's
+/// nvm/fnm/volta default. Order matches the rough population of users on each.
+fn find_preferred_node_22() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let glob_dirs: [(String, &str); 5] = [
+        (format!("{}/.nvm/versions/node", home), "v22"),
+        (format!("{}/.fnm/node-versions", home), "v22"),
+        (format!("{}/.volta/tools/image/node", home), "22"),
+        ("/opt/homebrew/opt/node@22".to_string(), ""),
+        ("/usr/local/opt/node@22".to_string(), ""),
+    ];
+    for (dir, prefix) in glob_dirs {
+        // Homebrew's node@22 keg has node directly at <keg>/bin/node — no
+        // version-dir traversal needed.
+        if prefix.is_empty() {
+            let candidate = format!("{}/bin/node", dir);
+            if let Some((22, _)) = check_node_version(&candidate) {
+                return Some(candidate);
+            }
+            continue;
+        }
+        // nvm / fnm / volta lay out as <root>/<version>/bin/node or
+        // <root>/<version>/installation/bin/node (fnm). Scan the version dirs.
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if !name_str.starts_with(prefix) {
+                    continue;
+                }
+                let bases = [
+                    entry.path().join("bin").join("node"),
+                    entry.path().join("installation").join("bin").join("node"),
+                ];
+                for base in bases {
+                    if let Some(p) = base.to_str() {
+                        if let Some((22, _)) = check_node_version(p) {
+                            return Some(p.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
 
 fn resolve_node_via_login_shell() -> Option<String> {
     let shells: [(&str, &[&str]); 3] = [
@@ -860,12 +914,39 @@ enum NodePreflightError {
 /// Full pre-flight: returns the resolved node path on success, or an error
 /// describing what to tell the user.
 fn run_node_preflight() -> Result<String, NodePreflightError> {
+    // F40 (#1032): prefer Node 22.x specifically when available. Avoids
+    // silent better-sqlite3 ABI failures when the user's login-shell default
+    // is Node 23+. Sydney's MacBook hit this with nvm default = 25.
+    if let Some(node22) = find_preferred_node_22() {
+        if let Some((22, raw)) = check_node_version(&node22) {
+            log::info!(
+                "Node.js pre-flight OK: {} ({}) — preferred {} for native module ABI",
+                raw,
+                node22,
+                PREFERRED_NODE_MAJOR
+            );
+            return Ok(node22);
+        }
+    }
+
     let node_bin = resolve_node_via_login_shell().ok_or(NodePreflightError::Missing)?;
     let (major, raw) = check_node_version(&node_bin).ok_or(NodePreflightError::Missing)?;
     if major < MIN_NODE_MAJOR {
         return Err(NodePreflightError::TooOld { raw });
     }
-    log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
+    if major != PREFERRED_NODE_MAJOR {
+        log::warn!(
+            "Node.js pre-flight: using {} at {} — Node {}.x preferred for native module ABI; \
+             install via `nvm install {} && nvm alias default {}` if you hit a NODE_MODULE_VERSION error",
+            raw,
+            node_bin,
+            PREFERRED_NODE_MAJOR,
+            PREFERRED_NODE_MAJOR,
+            PREFERRED_NODE_MAJOR
+        );
+    } else {
+        log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
+    }
     Ok(node_bin)
 }
 
