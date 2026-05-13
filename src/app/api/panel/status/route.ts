@@ -1,10 +1,29 @@
 import { NextResponse } from 'next/server';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ensureCodebaseMemoryBootIndex } from '@/lib/codebase-memory/indexer';
 import { ensureDecayBootHook } from '@/lib/cortex/decay';
 import { ensureProposerBootTick } from '@/lib/cortex/proposer';
 import { ensureStackSignatureBoot } from '@/lib/cortex/stack-signature';
 import { ensureCrossRepoProposerBootTick } from '@/lib/cortex/cross-repo-proposer';
 import { ensureExternalMergeBootHook } from '@/lib/cortex/external-merge-watcher';
+
+// #926 / F40 follow-up: the CLI and other agents need a stable way to read
+// the running server's version. sync-version.mjs keeps package.json#version
+// in lockstep with Cargo.toml + tauri.conf.json, so reading it once at module
+// load is authoritative. Cached so the liveness probe stays fast.
+let cachedVersion: string | null = null;
+function readServerVersion(): string | null {
+  if (cachedVersion !== null) return cachedVersion;
+  try {
+    const raw = readFileSync(join(process.cwd(), 'package.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { version?: string };
+    cachedVersion = typeof parsed.version === 'string' ? parsed.version : '';
+  } catch {
+    cachedVersion = '';
+  }
+  return cachedVersion || null;
+}
 
 export async function GET() {
   // Tauri shell hits /api/panel/status as a liveness probe right after the
@@ -33,7 +52,7 @@ export async function GET() {
   return NextResponse.json({
     connected: false,
     gatewayUrl: null,
-    version: null,
+    version: readServerVersion(),
     platform: process.platform,
     nodeVersion: process.version,
     mode: 'local-cli',
