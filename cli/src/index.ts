@@ -21,6 +21,7 @@ import { runStatus } from './commands/status.js';
 import { runVersion } from './commands/version.js';
 import { runPacketInfo } from './commands/packet/info.js';
 import { runPacketLog } from './commands/packet/log.js';
+import { runPacketReport } from './commands/packet/report.js';
 import { runPacketScope } from './commands/packet/scope.js';
 import { printError, type OutputMode } from './output.js';
 
@@ -64,6 +65,7 @@ commands:
   status               snapshot: running packets, lanes, merges, approvals
   packet info          info about the packet bound to the current worktree
   packet scope <id>    one-call worker context for a packet or lane
+  packet report        append an agent_report event for this packet
   packet log <event>   append a structured event to the lane history
 
 flags:
@@ -102,6 +104,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode);
       if (secondary === 'scope') return runPacketScope(args.mode, args.rest);
+      if (secondary === 'report') return runPacketReport(args.mode, args.rest);
       if (secondary === 'log') return runPacketLog(args.mode, args.rest);
       process.stderr.write(`unknown packet subcommand: ${secondary ?? '(none)'}\n`);
       return 1;

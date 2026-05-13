@@ -348,6 +348,27 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     });
   }
 
+  const reportItems = fleet.events
+    .filter((event) => event.track === 'Agent reports' && (event.subLabel === 'blocked' || event.subLabel === 'question'))
+    .slice(0, 3)
+    .map((event): MobileInboxItem => {
+      const linkedSession = orderedSessions.find((session) => session.sessionKey === event.agentId);
+      const actions: MobileControlAction[] = linkedSession
+        ? sessionActions(linkedSession)
+        : [{ kind: 'open_desktop', label: 'Desktop ↗', href: '/', available: true }];
+      return {
+        id: `agent-report:${event.id}`,
+        kind: 'alert',
+        severity: event.severity,
+        title: `${event.title} • ${event.subLabel === 'question' ? 'Question' : 'Blocked'}`,
+        detail: event.detail,
+        sessionKey: linkedSession?.sessionKey ?? event.agentId,
+        timestampLabel: relativeMobileAge(event.timestamp),
+        actions,
+      };
+    });
+  items.push(...reportItems);
+
   for (const agent of orderedSessions.filter((session) => session.sessionKey !== primarySession?.sessionKey)) {
     if (!['running', 'reviewing', 'blocked', 'failed'].includes(agent.status) && agent.alerts === 0) {
       continue;
