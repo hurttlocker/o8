@@ -2814,6 +2814,7 @@ function DashboardInner() {
             selectedPacketId={selectedPacketId}
             onSelectedPacketChange={setSelectedPacketId}
             onOpenO8Panel={handleOpenO8Panel}
+            o8PanelVisible={chatVisible && rightPanelKind === 'o8'}
           >
             <TileContainer
               layout={tileLayout}

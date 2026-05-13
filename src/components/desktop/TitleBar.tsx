@@ -163,14 +163,6 @@ export function TitleBar({
           />
         ) : null}
 
-        {/* Terminal toggle — lives next to Agents on the left so the whole
-            "workspace shortcut" cluster is grouped together. */}
-        <TitleBarButton
-          icon={<IconTerminal />}
-          label="Toggle terminal"
-          onClick={onToggleBottomPanel}
-          active={bottomPanelVisible}
-        />
       </div>
 
       {/* ── Center — Search trigger ── */}
@@ -282,6 +274,12 @@ export function TitleBar({
             onClick={onOpenBrowser}
           />
         ) : null}
+        <TitleBarButton
+          icon={<IconTerminal />}
+          label="Toggle terminal"
+          onClick={onToggleBottomPanel}
+          active={bottomPanelVisible}
+        />
         <RightPanelMorphButton
           workspacePanelVisible={workspacePanelVisible}
           o8PanelVisible={o8PanelVisible}
