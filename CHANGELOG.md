@@ -7,6 +7,11 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-13
+
+- `eaff9cf2` feat: /api/panel/status returns server version for o8 CLI
+- `93f951e8` feat(cli): scaffold Phase 1 of the o8 CLI (epic)
+
 ## 2026-05-12
 
 - `370b9b8e` perf: symlink node_modules into worktrees instead of cp -cR
