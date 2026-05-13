@@ -432,6 +432,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
           findingsCount: packet.review.findings.length,
           summary: packet.review.summary,
           recordedAt: packet.review.recordedAt,
+          reviewedHeadSha: packet.review.reviewedHeadSha ?? null,
           auditApprovalId: packet.review.auditApprovalId ?? null,
         } : null,
       };

@@ -152,6 +152,8 @@ export type LaneCommand =
       orchestratorReviewed?: boolean;
       /** Conflict resolution strategy from operator approval */
       strategy?: 'ours' | 'theirs' | 'manual';
+      /** Reviewed worktree HEAD expected by the operator at merge time */
+      expectedHeadSha?: string;
       actor?: LaneEventActor;
     }
   | {
@@ -175,7 +177,8 @@ export type LaneEventVerb =
   | 'auto_archive'
   | 'merge_cleanup'
   | 'agent_report'
-  | 'zombie_reap';
+  | 'zombie_reap'
+  | 'merge_head_drift';
 
 export type AgentReportReason =
   | 'needs_clarification'
@@ -208,6 +211,10 @@ export interface LaneCommandResult {
   pushedToOrigin?: boolean;
   /** Merge-specific — captured when the push failed so the caller can surface it */
   pushError?: string;
+  /** Merge-specific — expected worktree HEAD when optimistic locking rejects drift */
+  expectedHeadSha?: string;
+  /** Merge-specific — actual worktree HEAD when optimistic locking rejects drift */
+  currentHeadSha?: string;
 }
 
 // ── Persisted State ──

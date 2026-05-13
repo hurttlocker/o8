@@ -172,6 +172,7 @@ function normalizePacketReview(value: unknown): OrchestratorPacketReview | null 
     approved: Boolean(review.approved),
     findings,
     recordedAt: typeof review.recordedAt === 'string' ? review.recordedAt : nowIso(),
+    reviewedHeadSha: typeof review.reviewedHeadSha === 'string' ? review.reviewedHeadSha : null,
     summary: typeof review.summary === 'string' ? review.summary : '',
     auditApprovalId: typeof review.auditApprovalId === 'string' ? review.auditApprovalId : null,
   };
