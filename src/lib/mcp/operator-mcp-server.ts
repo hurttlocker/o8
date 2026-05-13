@@ -30,6 +30,7 @@ import {
   handleDispatchMission,
   handleGetMissionStatus,
   handleGetPacketScope,
+  handleReportPacketEvent,
   handleRerunWithFeedback,
   handleResetPacket,
   handleRetryPacket,
@@ -370,6 +371,7 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((t) => t.name === 'reset_packet'),
   ...MISSION_TOOLS.filter((t) => t.name === 'retry_packet'),
   ...MISSION_TOOLS.filter((t) => t.name === 'o8_review_state'),
+  ...MISSION_TOOLS.filter((t) => t.name === 'report_packet_event'),
 ];
 
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
@@ -400,6 +402,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   retry_packet: handleRetryPacket,
   rerun_with_feedback: handleRerunWithFeedback,
   o8_review_state: handleReviewState,
+  report_packet_event: handleReportPacketEvent,
 };
 
 // ── JSON-RPC Server ──

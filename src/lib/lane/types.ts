@@ -25,6 +25,7 @@ export type LaneStatus =
   | 'running'         // agent actively working
   | 'paused'          // agent idle, can resume
   | 'awaiting_input'  // agent needs a human decision
+  | 'awaiting_orchestrator' // agent reported a blocker/question for o8
   | 'reviewing'       // work done, review needed
   | 'merging'         // merge in progress
   | 'failed'          // terminal failure, operator must redispatch or archive
@@ -168,9 +169,20 @@ export type LaneEventVerb =
   | 'status_change'
   | 'update'
   | 'session_lost'
+  | 'detach_session'
   | 'auto_archive'
   | 'merge_cleanup'
-  | (string & {});
+  | 'agent_report';
+
+export type AgentReportReason =
+  | 'needs_clarification'
+  | 'missing_context'
+  | 'out_of_scope'
+  | 'dependency_blocked'
+  | 'context_full'
+  | 'nondeterministic_test'
+  | 'external_api_down'
+  | 'unknown';
 
 // ── Lane Policy ──
 
