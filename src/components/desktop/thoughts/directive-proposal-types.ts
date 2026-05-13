@@ -4,6 +4,8 @@
  * Two proposal sources share the same `DirectiveProposalRow` chrome:
  *   - `auto` — surfaced by the in-repo auto-proposer (#746). Mirrors
  *     `DirectiveProposalCandidate` in `src/lib/cortex/proposer.ts`.
+ *   - `observation` — worker-proposed observations awaiting orchestrator
+ *     promotion into a directive / memory entry.
  *   - `cross-repo` — surfaced by the cross-repo learner (#748). When a
  *     directive lands in repo A and ≥ 2 stack-similar repos exist, those
  *     repos see a yellow row offering to import the rule. Mirrors
@@ -13,7 +15,7 @@
  * the browser. Keep them in sync.
  */
 
-export type DirectiveProposalSource = 'auto' | 'cross-repo';
+export type DirectiveProposalSource = 'auto' | 'observation' | 'cross-repo';
 
 export interface AutoDirectiveProposal {
   source: 'auto';
@@ -46,6 +48,20 @@ export interface CrossRepoDirectiveProposal {
   draftDirective: string;
 }
 
+export interface ObservationDirectiveProposal {
+  source: 'observation';
+  id: string;
+  packetId: string;
+  laneId: string | null;
+  kind: 'regression' | 'pattern' | 'gotcha' | 'preference';
+  text: string;
+  scope: 'packet' | 'repo' | 'global';
+  proposed_by: string;
+  createdAt: string;
+  draftDirective: string;
+}
+
 export type DirectiveProposalCandidate =
   | AutoDirectiveProposal
+  | ObservationDirectiveProposal
   | CrossRepoDirectiveProposal;

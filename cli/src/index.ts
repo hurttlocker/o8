@@ -17,6 +17,7 @@
  */
 
 import { runDoctor } from './commands/doctor.js';
+import { runCortexObserve } from './commands/cortex.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runStatus } from './commands/status.js';
 import { runVersion } from './commands/version.js';
@@ -64,6 +65,7 @@ commands:
   version              CLI version + connected server version
   doctor               verify port + token resolution, ping server
   status               snapshot: running packets, lanes, merges, approvals
+  cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   packet info          info about the packet bound to the current worktree
   packet scope <id>    one-call worker context for a packet or lane
@@ -103,6 +105,11 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runDoctor(args.mode);
     case 'status':
       return runStatus(args.mode);
+    case 'cortex': {
+      if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
+      process.stderr.write(`unknown cortex subcommand: ${secondary ?? '(none)'}\n`);
+      return 1;
+    }
     case 'lane': {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
       process.stderr.write(`unknown lane subcommand: ${secondary ?? '(none)'}\n`);
