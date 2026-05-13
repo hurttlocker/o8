@@ -21,6 +21,7 @@ import { runStatus } from './commands/status.js';
 import { runVersion } from './commands/version.js';
 import { runPacketInfo } from './commands/packet/info.js';
 import { runPacketLog } from './commands/packet/log.js';
+import { runPacketScope } from './commands/packet/scope.js';
 import { printError, type OutputMode } from './output.js';
 
 interface ParsedArgs {
@@ -62,6 +63,7 @@ commands:
   doctor               verify port + token resolution, ping server
   status               snapshot: running packets, lanes, merges, approvals
   packet info          info about the packet bound to the current worktree
+  packet scope <id>    one-call worker context for a packet or lane
   packet log <event>   append a structured event to the lane history
 
 flags:
@@ -99,6 +101,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runStatus(args.mode);
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode);
+      if (secondary === 'scope') return runPacketScope(args.mode, args.rest);
       if (secondary === 'log') return runPacketLog(args.mode, args.rest);
       process.stderr.write(`unknown packet subcommand: ${secondary ?? '(none)'}\n`);
       return 1;
