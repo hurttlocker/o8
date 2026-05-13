@@ -245,8 +245,11 @@ export interface EventItem {
   squadId?: string;
   severity: EventSeverity;
   title: string;
+  track?: string;
+  subLabel?: string;
   detail: string;
   timestamp: string;
+  repo?: string;
 }
 
 export interface FleetMeta {

@@ -53,8 +53,11 @@ export interface EventEntry {
   squadId: string;
   severity: string;
   title: string;
+  track?: string;
+  subLabel?: string;
   detail: string;
   timestamp: string;
+  repo?: string;
 }
 
 export interface GHIssue {

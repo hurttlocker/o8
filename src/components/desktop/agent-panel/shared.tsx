@@ -43,6 +43,7 @@ export const severityColor: Record<string, string> = {
   info: '#3b82f6',
   warning: '#f59e0b',
   error: '#ef4444',
+  critical: '#ef4444',
 };
 
 export function deriveRepo(workspace: string): string {

@@ -147,8 +147,8 @@ export const ActivityFeed = memo(function ActivityFeed({
   );
   const visibleAgentEvents = useMemo(() => {
     return events.filter((event) => {
-      const eventRepo = agentRepoById.get(event.agentId) ?? null;
-      if (!eventRepo) return false;
+      const eventRepo = agentRepoById.get(event.agentId) ?? event.repo ?? null;
+      if (!eventRepo) return !repo || isAllRepos;
       if (!repo || isAllRepos) return true;
       return eventRepo === repo;
     });

@@ -768,6 +768,7 @@ export function reconcileOrchestratorMissionState(
       if (ds === 'running') { next.status = 'running'; return next; }
       if (ds === 'launching') { next.status = 'launching'; return next; }
       if (ds === 'awaiting_input') { next.status = 'blocked'; next.blockedReason = 'Awaiting operator input'; return next; }
+      if (ds === 'awaiting_orchestrator') { next.status = 'blocked'; next.blockedReason = domainLane.lastEventLabel ?? 'Awaiting orchestrator'; return next; }
       if (ds === 'paused' && domainLane.sessionKey) { next.status = 'idle'; return next; }
       if (ds === 'paused' && !domainLane.sessionKey) {
         if ((packet.recoveryCount ?? 0) >= MAX_RECOVERY_ATTEMPTS) {

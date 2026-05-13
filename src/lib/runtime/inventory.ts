@@ -10,6 +10,8 @@ import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
 import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import { getAllEvents, listLanes } from '@/lib/lane/registry';
+import type { Lane, LaneEvent } from '@/lib/lane/types';
 
 const RUNTIME_INVENTORY_TTL_MS = 15_000;
 const RUNTIME_INVENTORY_FRESH_COALESCE_MS = 2_000;
@@ -67,6 +69,51 @@ function decorateRuntimeDisplayName(runtime: AgentRuntime['id'], displayName: st
   }
   const repoLabel = repoLabelFromSession(session, workspace);
   return repoLabel ? `${repoLabel} · ${runtimeName}` : runtimeName;
+}
+
+function eventPayloadString(event: LaneEvent, key: string): string | null {
+  const value = event.payload[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function laneRepoLabel(lane: Lane | undefined): string | undefined {
+  const repoPath = lane?.repoPath.trim().replace(/\/+$/, '');
+  if (!repoPath) return undefined;
+  return repoPath.split('/').filter(Boolean).pop();
+}
+
+function readAgentReportEvents(): EventItem[] {
+  try {
+    const lanesById = new Map(listLanes().map((lane) => [lane.id, lane]));
+    return getAllEvents(80)
+      .filter((event) => event.verb === 'agent_report')
+      .slice(-8)
+      .map((event) => {
+        const lane = lanesById.get(event.laneId);
+        const reportEvent = eventPayloadString(event, 'event') ?? 'progress';
+        const reason = eventPayloadString(event, 'reason');
+        const message = eventPayloadString(event, 'message');
+        const packetId = eventPayloadString(event, 'packetId') ?? lane?.packetId ?? null;
+        return {
+          id: event.id,
+          agentId: lane?.sessionKey ?? lane?.id ?? event.laneId,
+          squadId: lane ? `squad-${lane.runtime}` : undefined,
+          severity: reportEvent === 'blocked'
+            ? 'critical'
+            : reportEvent === 'question'
+              ? 'warning'
+              : 'info',
+          title: lane?.label ?? packetId ?? event.laneId,
+          track: 'Agent reports',
+          subLabel: reportEvent,
+          detail: message ?? reason ?? packetId ?? 'Packet agent reported progress.',
+          timestamp: event.timestamp,
+          repo: laneRepoLabel(lane),
+        } satisfies EventItem;
+      });
+  } catch {
+    return [];
+  }
 }
 
 function runtimeSourceLabel(runtime: AgentRuntime, session: RuntimeSession) {
@@ -363,10 +410,13 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     });
   }
 
-  const events: EventItem[] = agents
+  const agentReportEvents = readAgentReportEvents();
+  const events: EventItem[] = [
+    ...agentReportEvents,
+    ...agents
     .filter((agent) => ['running', 'reviewing', 'failed', 'blocked', 'waiting'].includes(agent.status))
     .slice(0, 8)
-    .map((agent) => ({
+    .map((agent): EventItem => ({
       id: `evt-${agent.id}`,
       agentId: agent.id,
       squadId: agent.squadId,
@@ -378,7 +428,8 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       title: `${agent.name} • ${ORCHESTRATOR_RUNTIMES[agent.runtime as keyof typeof ORCHESTRATOR_RUNTIMES]?.label ?? agent.runtime}`,
       detail: [agent.currentTask, agent.workspace, agent.lastEventAt].filter(Boolean).join(' • '),
       timestamp: agent.lastEventAt,
-    }));
+    })),
+  ];
 
   const primarySessionKey = agents.find((agent) => agent.isCurrentSession)?.sessionKey
     ?? agents.find((agent) => agent.status === 'running')?.sessionKey

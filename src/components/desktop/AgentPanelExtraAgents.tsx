@@ -35,7 +35,7 @@ import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared
 
 // ── Types ──
 
-type LaneStatus = 'idle' | 'launching' | 'running' | 'paused' | 'awaiting_input' | 'reviewing' | 'merging' | 'failed' | 'completed' | 'archived';
+type LaneStatus = 'idle' | 'launching' | 'running' | 'paused' | 'awaiting_input' | 'awaiting_orchestrator' | 'reviewing' | 'merging' | 'failed' | 'completed' | 'archived';
 type LaneRuntime = 'codex' | 'claude-code';
 type LaneOwnership = 'managed' | 'attached';
 
@@ -124,7 +124,7 @@ function classifyStatus(status: string | undefined): VisualStatus {
   const s = (status ?? '').toLowerCase();
   if (s === 'archived') return 'archived';
   if (s.includes('running') || s.includes('active') || s.includes('working') || s === 'merging') return 'running';
-  if (s.includes('wait') || s.includes('approval') || s.includes('pending') || s === 'reviewing' || s === 'awaiting_input') return 'waiting';
+  if (s.includes('wait') || s.includes('approval') || s.includes('pending') || s === 'reviewing' || s === 'awaiting_input' || s === 'awaiting_orchestrator') return 'waiting';
   if (s.includes('error') || s.includes('fail')) return 'error';
   return 'idle';
 }
