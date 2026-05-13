@@ -35,11 +35,13 @@ export interface SubmitReviewInput {
   packetId: string;
   findings: OrchestratorReviewFinding[];
   approved: boolean;
+  reviewedHeadSha?: string;
 }
 
 export interface ApproveAndMergeInput {
   packetId: string;
   commitMessage?: string;
+  expectedHeadSha?: string;
 }
 
 export interface PickComparisonWinnerInput {
@@ -74,4 +76,8 @@ export interface MergePacketResult {
    * should prefer `blockers` / `checks`.
    */
   reason?: string;
+  /** Expected worktree HEAD when optimistic locking rejects drift. */
+  expectedHeadSha?: string;
+  /** Actual worktree HEAD when optimistic locking rejects drift. */
+  currentHeadSha?: string;
 }

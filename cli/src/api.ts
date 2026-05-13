@@ -107,8 +107,9 @@ export async function apiFetch<T = unknown>(
   if (res.status === 409 || res.status === 422) {
     let detail = '';
     try {
-      const json = await res.json() as { error?: string; note?: string; message?: string };
-      detail = json.note || json.message || json.error || '';
+      const json = await res.json() as { error?: string | { message?: string }; note?: string; message?: string };
+      const errorText = typeof json.error === 'string' ? json.error : json.error?.message;
+      detail = json.note || json.message || errorText || '';
     } catch {
       /* ignore */
     }

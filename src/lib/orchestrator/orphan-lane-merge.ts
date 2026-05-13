@@ -12,6 +12,7 @@ import type { MergePacketResult } from './operator-mission-service';
 export async function mergeOrphanLaneByPacket(
   packetId: string,
   commitMessage: string | undefined,
+  expectedHeadSha?: string,
 ): Promise<MergePacketResult> {
   const orphanLane = findLaneByPacket(packetId);
   if (!orphanLane) {
@@ -26,6 +27,7 @@ export async function mergeOrphanLaneByPacket(
     laneId: orphanLane.id,
     commitMessage: commitMessage?.trim() || undefined,
     orchestratorReviewed: true,
+    expectedHeadSha: expectedHeadSha?.trim() || undefined,
     actor: 'orchestrator',
   });
   return {
@@ -34,5 +36,7 @@ export async function mergeOrphanLaneByPacket(
       ? `${result.note} (merged via lane fallback — packet ${packetId} was not in mission state)`
       : result.note,
     ...(result.approvalId ? { approvalId: result.approvalId } : {}),
+    ...(result.expectedHeadSha ? { expectedHeadSha: result.expectedHeadSha } : {}),
+    ...(result.currentHeadSha ? { currentHeadSha: result.currentHeadSha } : {}),
   };
 }
