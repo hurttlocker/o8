@@ -55,6 +55,12 @@ export interface OrchestratorDataValue {
    * the workspace tab AND auto-pops the diff view for that worktree.
    */
   onOpenO8Panel?: (options: { repoPath?: string | null; tab?: 'workspace' | 'pulse' | 'prs' | 'inbox' | 'activity' | 'spec' | 'browser' }) => void;
+  /**
+   * Whether the wide O8 right panel is currently visible. Surfaced so the
+   * OrchestratorTab can render a Codex-style Branch details launcher in the
+   * empty right gutter when (and only when) the wide panel is collapsed.
+   */
+  o8PanelVisible?: boolean;
 }
 
 const OrchestratorDataContext = createContext<OrchestratorDataValue | null>(null);
