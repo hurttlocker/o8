@@ -14,6 +14,7 @@ import type {
   Lane,
   LaneEvent,
   LaneEventActor,
+  LaneEventVerb,
   LaneOwnership,
   LaneRuntime,
   LaneStatus,
@@ -103,16 +104,16 @@ function mapLaneEventRow(row: LaneEventRow): LaneEvent {
   return {
     id: row.id,
     laneId: row.laneId,
-    verb: row.verb,
+    verb: row.verb as LaneEventVerb,
     actor: row.actor as LaneEventActor,
     payload: parseEventPayload(row.payloadJson),
     timestamp: row.timestamp,
   };
 }
 
-function appendEvent(
+export function appendEvent(
   laneId: string,
-  verb: string,
+  verb: LaneEventVerb,
   actor: LaneEventActor,
   payload: Record<string, unknown> = {},
 ): LaneEvent {
@@ -664,6 +665,9 @@ export function reconcileLanesWithSessions(
 
         // Session came back (or never went missing) — clear any pending grace timer.
         sessionMissingSince.delete(lane.sessionKey);
+        if (lane.status === 'awaiting_orchestrator') {
+          continue;
+        }
 
         const nextValues: Partial<typeof lanes.$inferInsert> = {};
         let lifecycleTimestamp: string | null = null;

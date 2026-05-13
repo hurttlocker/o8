@@ -73,6 +73,7 @@ function activityItemEyebrow(item: ActivityItem) {
   if (item.kind === 'ci') return 'CI Run';
   if (item.kind === 'issue') return 'Issue';
   if (item.kind === 'packet') return 'Packet';
+  if (item.kind === 'event' && item.data.track) return item.data.track;
   return 'Activity';
 }
 
@@ -322,7 +323,15 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                         <span>{item.age}</span>
                       </>
                     ) : item.kind === 'event' ? (
-                      <span>{item.data.timestamp}</span>
+                      <>
+                        {item.data.subLabel ? (
+                          <>
+                            <span>{item.data.subLabel}</span>
+                            <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                          </>
+                        ) : null}
+                        <span>{item.data.timestamp}</span>
+                      </>
                     ) : (
                       <span>{item.packet.runtime}</span>
                     )}
