@@ -47,7 +47,8 @@
     "tauri:prebuild": "npm run build && node scripts/tauri-export.mjs",
     "version": "node scripts/sync-version.mjs",
     "tauri:build:nonotary": "sh -c 'unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD= cargo tauri build -- --features dev-mcp-plugin'",
-    "sign-and-notarize": "node scripts/sign-and-notarize.mjs"
+    "sign-and-notarize": "node scripts/sign-and-notarize.mjs",
+    "build:cli": "node cli/esbuild.config.mjs"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.109",
