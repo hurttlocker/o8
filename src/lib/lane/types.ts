@@ -178,7 +178,8 @@ export type LaneEventVerb =
   | 'merge_cleanup'
   | 'agent_report'
   | 'zombie_reap'
-  | 'merge_head_drift';
+  | 'merge_head_drift'
+  | 'runtime_drift';
 
 export type AgentReportReason =
   | 'needs_clarification'
