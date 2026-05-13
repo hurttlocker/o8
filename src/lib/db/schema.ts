@@ -397,10 +397,11 @@ export const lanes = sqliteTable('lanes', {
   sessionKey: text('session_key'),
   packetId: text('packet_id'),
   status: text('status', {
-    enum: ['idle', 'launching', 'running', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'reviewing', 'merging', 'failed', 'completed', 'archived'],
+    enum: ['idle', 'launching', 'running', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'recovering', 'reviewing', 'merging', 'failed', 'completed', 'archived'],
   }).notNull(),
   ownership: text('ownership', { enum: ['managed', 'attached'] }).notNull(),
   writerToken: text('writer_token'),
+  lastHeartbeatAt: integer('last_heartbeat_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   lastEventAt: text('last_event_at'),
