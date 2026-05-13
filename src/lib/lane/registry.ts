@@ -21,6 +21,14 @@ import type {
 } from './types';
 import { cleanupLaneWorktree } from './worktree-cleanup';
 
+export {
+  findLanesTouching,
+  findLanesTouchingPacketDiff,
+  type FindLanesTouchingOptions,
+  type LaneTouch,
+  type PacketDiffLaneTouches,
+} from './touches';
+
 type LaneRow = typeof lanes.$inferSelect;
 type LaneEventRow = typeof laneEvents.$inferSelect;
 
