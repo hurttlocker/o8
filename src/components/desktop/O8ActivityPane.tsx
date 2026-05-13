@@ -111,7 +111,9 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   // orchestrator chat composer pre-fills with the proposed directive.
   const handleAcceptDirectiveProposal = useCallback((proposal: DirectiveProposalCandidate) => {
     const draftText = [
-      'Please save the following directive after I review it:',
+      proposal.source === 'observation'
+        ? 'Please review and promote the following worker observation if it is worth keeping:'
+        : 'Please save the following directive after I review it:',
       '',
       proposal.draftDirective,
     ].join('\n');

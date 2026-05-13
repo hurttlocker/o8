@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { readCachedProposals, snoozeProposal } from '@/lib/cortex/proposer';
+import { dismissObservationProposal, proposeObservation, readObservationProposals } from '@/lib/cortex/proposals';
 
 export function GET(request: NextRequest) {
   try {
@@ -26,7 +27,7 @@ export function GET(request: NextRequest) {
     const force = forceParam === '1' || forceParam === 'true';
     const { candidates, computedAt } = readCachedProposals({ force });
     return NextResponse.json(
-      { ok: true, proposals: candidates, computedAt },
+      { ok: true, proposals: [...readObservationProposals(), ...candidates], computedAt },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   } catch (error) {
@@ -50,6 +51,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON body.' }, { status: 400 });
   }
 
+  if (body?.action === 'propose_observation') {
+    try {
+      const proposal = proposeObservation(body);
+      return NextResponse.json({ ok: true, proposal }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to propose observation.';
+      return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    }
+  }
+  if (body?.action === 'dismiss_observation') {
+    const id = typeof body.id === 'string' ? body.id.trim() : '';
+    if (!id) return NextResponse.json({ ok: false, error: 'id is required.' }, { status: 400 });
+    return NextResponse.json({ ok: true, dismissed: dismissObservationProposal(id) }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+  }
   if (!body || body.action !== 'dismiss') {
     return NextResponse.json({ ok: false, error: 'Unsupported action.' }, { status: 400 });
   }
