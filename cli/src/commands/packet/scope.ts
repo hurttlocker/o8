@@ -10,6 +10,7 @@ import {
   printJson,
   type OutputMode,
 } from '../../output.js';
+import { warnRuntimeDriftIfNeeded } from './runtime-drift.js';
 
 interface PacketScopeDirective {
   id: string;
@@ -114,6 +115,7 @@ export async function runPacketScope(mode: OutputMode, rest: string[]): Promise<
     throw new CliError('invalid_response', 'Server returned an empty packet scope.', EXIT.INVALID_ARGS);
   }
 
+  warnRuntimeDriftIfNeeded(res.data, mode);
   if (mode.human) {
     printHumanScope(res.data);
   } else {
