@@ -6,6 +6,9 @@
  * #4 not found, #5 conflict). Every other error bubbles as exit 1.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import WebSocket, { type RawData } from 'ws';
 import type { ResolvedConfig } from './config.js';
 
 export const EXIT = {
@@ -44,6 +47,20 @@ export interface ApiResponse<T> {
   data: T;
 }
 
+export interface PacketTailEvent {
+  schema: 'o8/lane.event/v1';
+  id: string;
+  packetId: string;
+  laneId: string;
+  verb: string;
+  actor: string;
+  event?: string;
+  status?: string;
+  timestamp: string;
+  timestampMs: number;
+  payload: Record<string, unknown>;
+}
+
 function buildUrl(base: string, path: string, query?: ApiRequestOptions['query']): string {
   const url = new URL(path.startsWith('/') ? path : `/${path}`, base);
   if (query) {
@@ -53,6 +70,103 @@ function buildUrl(base: string, path: string, query?: ApiRequestOptions['query']
     }
   }
   return url.toString();
+}
+
+function readPortFile(dir: string | null, name: string): number | null {
+  if (!dir) return null;
+  const path = join(dir, name);
+  if (!existsSync(path)) return null;
+  try {
+    const raw = readFileSync(path, 'utf-8').trim();
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isInteger(parsed) && parsed > 0 && parsed < 65536 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveWsBase(cfg: ResolvedConfig): string {
+  const envPort = (process.env.O8_WS_PORT && Number.parseInt(process.env.O8_WS_PORT, 10))
+    || (process.env.WS_PORT && Number.parseInt(process.env.WS_PORT, 10))
+    || null;
+  const wsPort = envPort && Number.isInteger(envPort) && envPort > 0 && envPort < 65536
+    ? envPort
+    : readPortFile(cfg.dataDir, 'ws-port') ?? 3002;
+  return `ws://127.0.0.1:${wsPort}`;
+}
+
+function isPacketTailEvent(value: unknown): value is PacketTailEvent {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return record.schema === 'o8/lane.event/v1'
+    && typeof record.id === 'string'
+    && typeof record.packetId === 'string'
+    && typeof record.laneId === 'string'
+    && typeof record.verb === 'string'
+    && typeof record.timestamp === 'string'
+    && typeof record.timestampMs === 'number';
+}
+
+export function openPacketTailSocket(
+  cfg: ResolvedConfig,
+  packetId: string,
+  options: {
+    since?: number;
+    connectTimeoutMs?: number;
+    onEvent: (event: PacketTailEvent) => void;
+  },
+): Promise<WebSocket> {
+  const url = new URL('/ws', resolveWsBase(cfg));
+  if (cfg.token) url.searchParams.set('token', cfg.token);
+  const connectTimeoutMs = options.connectTimeoutMs ?? 3_000;
+
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      ws.close();
+      reject(new Error(`WebSocket connection timed out at ${url.toString()}`));
+    }, connectTimeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off('open', handleOpen);
+      ws.off('error', handleError);
+    };
+    const handleError = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const handleOpen = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      ws.on('message', (raw: RawData) => {
+        let parsed: unknown = null;
+        try {
+          parsed = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+        if (isPacketTailEvent(parsed) && parsed.packetId === packetId) {
+          options.onEvent(parsed);
+        }
+      });
+      ws.send(JSON.stringify({
+        type: 'packet-tail-subscribe',
+        packetId,
+        since: options.since,
+      }));
+      resolve(ws);
+    };
+
+    ws.once('open', handleOpen);
+    ws.once('error', handleError);
+  });
 }
 
 export async function apiFetch<T = unknown>(

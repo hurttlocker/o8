@@ -117,6 +117,29 @@ export const MISSION_TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'mission_tail',
+    description:
+      'Return a batch of lane events for one packet with a nextSince unix-ms cursor. Poll this instead of get_mission_status when the orchestrator needs progress events for a packet. Example: mission_tail({packetId: "pkt-abc", since: 1710000000000})',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'Packet id to tail.',
+        },
+        since: {
+          type: 'number',
+          description: 'Unix-ms cursor from the previous response. Omit for the first batch.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Optional long-poll timeout in ms. Default 0; max 25000.',
+        },
+      },
+      required: ['packetId'],
+    },
+  },
+  {
     name: 'get_packet_scope',
     description:
       'Return one-call worker context for a packet or lane: branch, base, head SHA, worktree, file ceiling, allowed/blocked paths, repo-filtered directives, and active related packets with overlapping files. Provide packetId or laneId.',
@@ -451,6 +474,47 @@ export async function handleGetMissionStatus(args: Record<string, unknown>): Pro
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_mission_status failed: ${errorText(error)}`);
     return textResult(`Failed to read mission status: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleMissionTail(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const packetId = requiredString(args, 'packetId');
+    const sinceRaw = args.since;
+    const since = typeof sinceRaw === 'number' && Number.isFinite(sinceRaw) && sinceRaw >= 0
+      ? Math.floor(sinceRaw)
+      : 0;
+    const timeoutRaw = args.timeoutMs;
+    const timeoutMs = typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw) && timeoutRaw > 0
+      ? Math.floor(timeoutRaw)
+      : 0;
+
+    const qs = new URLSearchParams();
+    qs.set('since', String(since));
+    if (timeoutMs > 0) {
+      qs.set('follow', 'true');
+      qs.set('timeoutMs', String(timeoutMs));
+    }
+
+    const data = await apiFetch(`/api/lanes/${encodeURIComponent(packetId)}/events?${qs.toString()}`) as Record<string, unknown>;
+    const events = Array.isArray(data.events) ? data.events as Array<Record<string, unknown>> : [];
+    const nextSinceRaw = data.nextSince;
+    const nextSince = typeof nextSinceRaw === 'number' && Number.isFinite(nextSinceRaw)
+      ? nextSinceRaw
+      : since;
+    return jsonResult({
+      summary: events.length === 0
+        ? `No packet events (nextSince: ${nextSince})`
+        : `${events.length} packet events (nextSince: ${nextSince})`,
+      data: {
+        packetId,
+        events,
+        nextSince,
+      },
+    });
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} mission_tail failed: ${errorText(error)}`);
+    return textResult(`Failed to read mission tail: ${errorText(error)}`, true);
   }
 }
 

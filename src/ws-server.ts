@@ -80,6 +80,7 @@ import {
   type AgentUpdateEvent,
 } from './lib/supervisor/agent-supervisor';
 import type { Lane } from './lib/lane/types';
+import { getPacketTailBatch, type PacketTailEvent } from './lib/lane/packet-tail';
 import { probeNoChangesProduced } from './lib/lane/no-changes-produced';
 import {
   probeSelfReviewStall,
@@ -656,6 +657,7 @@ interface ClientState {
   alive: boolean;
   terminalSessions: Set<string>;
   realtimeSubscriptions: RealtimeSubscription[];
+  packetTailSubscriptions: Set<string>;
   /** Queued durable messages waiting for backpressure to clear */
   backpressureQueue: string[];
   /** Timer that periodically flushes the backpressure queue */
@@ -1217,6 +1219,63 @@ function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => bo
   for (const client of clients.values()) {
     if (filter && !filter(client)) continue;
     sendRaw(client, json);
+  }
+}
+
+function packetTailChannel(packetId: string) {
+  return `packet-tail:${packetId}`;
+}
+
+function sendPacketTailEvent(client: ClientState, event: PacketTailEvent) {
+  send(client, {
+    channel: packetTailChannel(event.packetId),
+    type: 'lane-event',
+    ...event,
+  });
+}
+
+function broadcastPacketTailEvent(event: PacketTailEvent) {
+  broadcast({
+    channel: packetTailChannel(event.packetId),
+    type: 'lane-event',
+    ...event,
+  }, (client) => client.packetTailSubscriptions.has(event.packetId));
+}
+
+function isPacketTailEvent(value: unknown): value is PacketTailEvent {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return record.schema === 'o8/lane.event/v1'
+    && typeof record.packetId === 'string'
+    && typeof record.laneId === 'string'
+    && typeof record.verb === 'string'
+    && typeof record.timestamp === 'string'
+    && typeof record.timestampMs === 'number';
+}
+
+function parsePacketTailSince(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined;
+  return Math.floor(parsed);
+}
+
+async function sendPacketTailHistory(client: ClientState, packetId: string, since?: number) {
+  try {
+    const result = await getPacketTailBatch({
+      packetId,
+      since,
+      timeoutMs: 0,
+    });
+    for (const event of result.events) {
+      sendPacketTailEvent(client, event);
+    }
+  } catch (error) {
+    send(client, {
+      channel: packetTailChannel(packetId),
+      type: 'error',
+      error: error instanceof Error ? error.message : 'Failed to read packet tail history.',
+    });
   }
 }
 
@@ -1953,6 +2012,22 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'ping':
       send(client, { channel: 'pong', ts: Date.now() });
       break;
+    case 'packet-tail-subscribe': {
+      const packetId = typeof msg.packetId === 'string' ? msg.packetId.trim() : '';
+      if (!packetId) {
+        send(client, { channel: 'packet-tail', type: 'error', error: 'packetId is required' });
+        break;
+      }
+      client.packetTailSubscriptions.add(packetId);
+      send(client, { channel: packetTailChannel(packetId), type: 'subscribed', packetId });
+      void sendPacketTailHistory(client, packetId, parsePacketTailSince(msg.since));
+      break;
+    }
+    case 'packet-tail-unsubscribe': {
+      const packetId = typeof msg.packetId === 'string' ? msg.packetId.trim() : '';
+      if (packetId) client.packetTailSubscriptions.delete(packetId);
+      break;
+    }
 
     // ── Terminal commands ──
     case 'terminal-create':
@@ -3272,6 +3347,38 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.url === '/internal/packet-tail' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+      } catch {
+        res.writeHead(400);
+        res.end('invalid json');
+        return;
+      }
+
+      if (!isPacketTailEvent(payload)) {
+        res.writeHead(400);
+        res.end('invalid packet tail event');
+        return;
+      }
+
+      broadcastPacketTailEvent(payload);
+      res.writeHead(202);
+      res.end('accepted');
+    });
+    return;
+  }
+
   // ── #840 — Cortex memory change broadcast ──
   // Invoked by `publishCortexChange()` after a directive trailer is appended
   // (or any other Cortex memory write). Fans out a `cortex-changes` channel
@@ -3420,6 +3527,7 @@ wss.on('connection', (ws) => {
     alive: true,
     terminalSessions: new Set(),
     realtimeSubscriptions: [],
+    packetTailSubscriptions: new Set(),
     backpressureQueue: [],
     flushTimer: null,
   };
