@@ -31,6 +31,7 @@ import {
   handleGetMissionStatus,
   handleRerunWithFeedback,
   handleResetPacket,
+  handleRetryPacket,
   handleReviewState,
   handleSubmitReview,
   handleWaitForMissionReady,
@@ -393,7 +394,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   approve_and_merge: handleApproveAndMerge,
   o8_merge_preview: handleMergePreview,
   reset_packet: handleResetPacket,
-  retry_packet: handleResetPacket,
+  retry_packet: handleRetryPacket,
   rerun_with_feedback: handleRerunWithFeedback,
   o8_review_state: handleReviewState,
 };
