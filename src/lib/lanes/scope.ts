@@ -7,11 +7,12 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { readAllDirectiveTrailers } from '@/lib/cortex/directive-merges';
 import { directiveAppliesToRepo, resolveActiveDirectiveProjectScope } from '@/lib/cortex/directives/filter';
 import { parseDirectiveFile, type ParsedDirective } from '@/lib/cortex/directives/parse';
-import { getLane, listLanes } from '@/lib/lane/registry';
-import type { Lane, LaneStatus } from '@/lib/lane/types';
+import { appendEvent, getLane, getLaneEvents, listLanes } from '@/lib/lane/registry';
+import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/preservation-envelope';
 import { currentMissionState } from '@/lib/orchestrator/operator-mission-service/shared';
 import type { OrchestratorPacket, OrchestratorPacketStatus } from '@/lib/orchestrator/types';
+import { getRuntimeProcessForWorktree, type RuntimeProcessOwner } from '@/lib/runtime/registry';
 
 const execFileAsync = promisify(execFile);
 const PACKET_SCOPE_SCHEMA = 'o8/packet.scope/v1';
@@ -46,7 +47,7 @@ export interface PacketScope {
   packetId: string | null;
   laneId: string;
   runtime: string;
-  actualRuntime: null;
+  actualRuntime: LaneRuntime | null;
   branch: string;
   baseBranch: string;
   headSha: string | null;
@@ -159,6 +160,25 @@ async function readHeadSha(cwd: string): Promise<string | null> {
   }
 }
 
+function recordRuntimeDriftOnce(
+  lane: Lane,
+  declaredRuntime: string,
+  actualRuntime: LaneRuntime | null,
+  processInfo: RuntimeProcessOwner | null,
+) {
+  if (!actualRuntime || declaredRuntime === actualRuntime) return;
+  const alreadyLogged = getLaneEvents(lane.id, 1000).some((event) => event.verb === 'runtime_drift');
+  if (alreadyLogged) return;
+
+  appendEvent(lane.id, 'runtime_drift', 'system', {
+    declaredRuntime,
+    actualRuntime,
+    worktreePath: lane.worktreePath ?? lane.repoPath,
+    pid: processInfo?.pid ?? null,
+    binaryPath: processInfo?.binaryPath ?? null,
+  });
+}
+
 function relatedPacketsFor(
   targetPacketId: string | null,
   targetPaths: string[],
@@ -199,17 +219,22 @@ export async function getPacketScope(input: GetPacketScopeInput): Promise<Packet
   const packet = packetId ? mission.packets.find((candidate) => candidate.id === packetId) ?? null : null;
   const repoPath = lane.worktreePath || lane.repoPath;
   const allowedPaths = packetPaths(packet);
-  const [directives, headSha] = await Promise.all([
+  const [directives, headSha, runtimeProcess] = await Promise.all([
     readDirectivesForRepo(lane.repoPath),
     readHeadSha(repoPath),
+    getRuntimeProcessForWorktree(repoPath),
   ]);
+  const declaredRuntime = packet?.runtime ?? lane.runtime;
+  const actualRuntime = runtimeProcess?.runtime ?? null;
+
+  recordRuntimeDriftOnce(lane, declaredRuntime, actualRuntime, runtimeProcess);
 
   return {
     schema: PACKET_SCOPE_SCHEMA,
     packetId,
     laneId: lane.id,
-    runtime: packet?.runtime ?? lane.runtime,
-    actualRuntime: null,
+    runtime: declaredRuntime,
+    actualRuntime,
     branch: lane.branch,
     baseBranch: lane.baseBranch,
     headSha,
