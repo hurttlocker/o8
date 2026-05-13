@@ -161,6 +161,28 @@ const TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'lane_touches',
+    description:
+      'Read active lanes touching one or more repo-relative files. Pass `path` for direct lookup or `packet` to find sibling lanes touching any file in that packet diff.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Repo-relative path or comma-separated paths to check.',
+        },
+        packet: {
+          type: 'string',
+          description: 'Packet ID whose diff files should be checked against sibling lanes.',
+        },
+        repo: {
+          type: 'string',
+          description: 'Optional repo slug or local repo path to narrow the lookup.',
+        },
+      },
+    },
+  },
+  {
     name: 'cortex_update_packet',
     description:
       'Update a single work packet by ID. Can change status, queue state, title, summary, or branch target.',
@@ -638,6 +660,26 @@ async function handleReadPackets(): Promise<McpToolResult> {
     });
   } catch (err) {
     return textResult(`Failed to read packets: ${err}`, true);
+  }
+}
+
+async function handleLaneTouches(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const path = typeof args.path === 'string' ? args.path.trim() : '';
+    const packet = typeof args.packet === 'string' ? args.packet.trim() : '';
+    const repo = typeof args.repo === 'string' ? args.repo.trim() : '';
+    if (!path && !packet) {
+      return textResult('path or packet is required', true);
+    }
+
+    const qs = new URLSearchParams();
+    if (path) qs.set('path', path);
+    if (packet) qs.set('packet', packet);
+    if (repo) qs.set('repo', repo);
+    const data = await apiFetch(`/api/lanes/touches?${qs.toString()}`) as Record<string, unknown>;
+    return jsonResult(data);
+  } catch (err) {
+    return textResult(`Failed to read lane touches: ${err}`, true);
   }
 }
 
@@ -1250,6 +1292,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_list_approvals: handleListApprovals,
   cortex_resolve_approval: handleResolveApproval,
   cortex_propose_spec: handleProposeSpec,
+  lane_touches: handleLaneTouches,
   cortex_launch_agent: handleLaunchAgent,
   cortex_steer_agent: handleSteerAgent,
   cortex_read_transcript: handleReadTranscript,
