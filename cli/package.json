@@ -1,0 +1,17 @@
+{
+  "name": "o8-cli",
+  "version": "0.0.0",
+  "description": "Agent-first CLI wrapper over the local o8 HTTP API.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "o8": "./dist/o8.mjs"
+  },
+  "engines": {
+    "node": ">=22.0.0 <23.0.0"
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

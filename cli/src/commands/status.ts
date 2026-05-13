@@ -1,0 +1,145 @@
+/**
+ * `o8 status` — top-level snapshot: running packets, active lanes, recent
+ * merges, pending approvals.
+ *
+ * Strict no-new-endpoints: pulls from /api/lanes (active=true + active=false)
+ * and /api/panel/approvals. Recent merges are completed lanes ordered by
+ * updatedAt desc.
+ */
+
+import { apiFetch } from '../api.js';
+import { resolveConfig } from '../config.js';
+import {
+  color,
+  printHumanHeading,
+  printJson,
+  type OutputMode,
+} from '../output.js';
+
+interface Lane {
+  id: string;
+  label: string;
+  status: string;
+  runtime: string;
+  branch: string;
+  baseBranch: string;
+  repoPath: string;
+  worktreePath: string | null;
+  packetId: string | null;
+  updatedAt: string;
+  lastEventAt: string | null;
+  lastEventLabel: string | null;
+}
+
+interface Approval {
+  id: string;
+  status: string;
+  kind?: string;
+  summary?: string;
+  packetId?: string | null;
+  laneId?: string | null;
+  createdAt?: string;
+}
+
+const RUNNING_STATUSES = new Set([
+  'running',
+  'launching',
+  'reviewing',
+  'awaiting_input',
+  'merging',
+]);
+
+export async function runStatus(mode: OutputMode): Promise<number> {
+  const cfg = resolveConfig();
+
+  const [activeRes, allRes, approvalsRes] = await Promise.all([
+    apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'true' } }),
+    apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } }),
+    apiFetch<{ approvals: Approval[] }>(cfg, '/api/panel/approvals', { query: { status: 'pending' } }),
+  ]);
+
+  const activeLanes = activeRes.data?.lanes ?? [];
+  const allLanes = allRes.data?.lanes ?? [];
+  const approvals = approvalsRes.data?.approvals ?? [];
+
+  const running = activeLanes.filter((l) => RUNNING_STATUSES.has(l.status));
+  const recentMerges = allLanes
+    .filter((l) => l.status === 'completed')
+    .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
+    .slice(0, 10);
+
+  const payload = {
+    schema: 'o8/cli/status/v1',
+    counts: {
+      runningPackets: running.length,
+      activeLanes: activeLanes.length,
+      recentMerges: recentMerges.length,
+      pendingApprovals: approvals.length,
+    },
+    runningPackets: running.map(summarizeLane),
+    activeLanes: activeLanes.map(summarizeLane),
+    recentMerges: recentMerges.map(summarizeLane),
+    pendingApprovals: approvals.map((a) => ({
+      id: a.id,
+      status: a.status,
+      kind: a.kind ?? null,
+      summary: a.summary ?? null,
+      packetId: a.packetId ?? null,
+      laneId: a.laneId ?? null,
+      createdAt: a.createdAt ?? null,
+    })),
+  };
+
+  if (mode.human) {
+    printHumanHeading(`o8 status (${cfg.apiBase})`);
+    process.stdout.write(
+      `  running ${color(String(running.length), 'green')}` +
+        `   active ${activeLanes.length}` +
+        `   merges ${recentMerges.length}` +
+        `   approvals ${color(String(approvals.length), 'yellow')}\n`,
+    );
+    if (running.length > 0) {
+      printHumanHeading('running');
+      for (const l of running) process.stdout.write(formatLaneLine(l));
+    }
+    if (recentMerges.length > 0) {
+      printHumanHeading('recent merges');
+      for (const l of recentMerges) process.stdout.write(formatLaneLine(l));
+    }
+    if (approvals.length > 0) {
+      printHumanHeading('pending approvals');
+      for (const a of approvals) {
+        process.stdout.write(
+          `  ${a.id.padEnd(28)} ${a.kind ?? '?'}  ${a.summary ?? ''}\n`,
+        );
+      }
+    }
+  } else {
+    printJson(payload);
+  }
+
+  return 0;
+}
+
+function summarizeLane(l: Lane) {
+  return {
+    id: l.id,
+    packetId: l.packetId,
+    status: l.status,
+    runtime: l.runtime,
+    label: l.label,
+    branch: l.branch,
+    baseBranch: l.baseBranch,
+    repoPath: l.repoPath,
+    worktreePath: l.worktreePath,
+    updatedAt: l.updatedAt,
+    lastEventAt: l.lastEventAt,
+    lastEventLabel: l.lastEventLabel,
+  };
+}
+
+function formatLaneLine(l: Lane): string {
+  const status = l.status.padEnd(15);
+  const id = (l.packetId ?? l.id).padEnd(28);
+  return `  ${status} ${id} ${l.label}\n`;
+}
