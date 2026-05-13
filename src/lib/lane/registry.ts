@@ -84,6 +84,7 @@ function mapLaneRow(row: LaneRow | undefined): Lane | null {
     status: row.status as LaneStatus,
     ownership: row.ownership as LaneOwnership,
     writerToken: row.writerToken,
+    lastHeartbeatAt: row.lastHeartbeatAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     lastEventAt: row.lastEventAt,
@@ -287,6 +288,7 @@ export function createLane(opts: {
     status: 'idle',
     ownership: opts.ownership ?? 'managed',
     writerToken: null,
+    lastHeartbeatAt: null,
     createdAt: now,
     updatedAt: now,
     lastEventAt: null,
@@ -372,7 +374,7 @@ export function findLaneByRepoAndBranch(repoPath: string, branch: string): Lane 
 
 export function updateLane(
   laneId: string,
-  updates: Partial<Pick<Lane, 'status' | 'sessionKey' | 'worktreePath' | 'writerToken' | 'label' | 'lastEventAt' | 'lastEventLabel' | 'packetId'>>,
+  updates: Partial<Pick<Lane, 'status' | 'sessionKey' | 'worktreePath' | 'writerToken' | 'label' | 'lastHeartbeatAt' | 'lastEventAt' | 'lastEventLabel' | 'packetId'>>,
   actor: LaneEventActor = 'system',
 ): Lane | null {
   const db = getSqlite();
@@ -399,6 +401,7 @@ export function updateLane(
       'worktreePath',
       'writerToken',
       'label',
+      'lastHeartbeatAt',
       'lastEventAt',
       'lastEventLabel',
       'packetId',

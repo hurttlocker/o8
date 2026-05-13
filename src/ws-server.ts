@@ -101,6 +101,7 @@ import {
   resolveSupervisorAutoEscalateSync,
 } from './lib/operator/defaults';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
+import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import type {
   LaneLifecycleEventPayload,
@@ -4252,6 +4253,7 @@ async function bootstrapWsServer() {
     startSupervisorLoop(supervisorCallbacks);
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
     startWorktreeReaper();
+    startLaneZombieReaper();
     if (resolveHealBotEnabledSync()) {
       stopHealBotLoop = startHealBot();
     } else {
@@ -4301,6 +4303,7 @@ function shutdown(signal: string) {
   stopDocWatcherLoop?.();
   stopDocWatcherLoop = null;
   stopWorktreeReaper();
+  stopLaneZombieReaper();
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
   if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);
