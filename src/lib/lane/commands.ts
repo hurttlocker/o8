@@ -22,6 +22,7 @@ import {
   setLaneStatus,
   attachSession,
   archiveLane,
+  appendEvent,
 } from '@/lib/lane/registry';
 import { getLanePolicy, isProtectedBranch } from '@/lib/lane/policy';
 import { getSqlite } from '@/lib/db';
@@ -30,6 +31,7 @@ import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
 import { cleanupRemoteMergeWorktree, fetchWorkerBranch } from '@/lib/lane/remote-fetch';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/dispatch';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
+import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
@@ -168,6 +170,7 @@ async function createLaneActionApproval(
   input: {
     verb: 'merge' | 'create_pr';
     commitMessage?: string;
+    expectedHeadSha?: string;
     reviewSummary?: string;
     title: string;
     description: string;
@@ -206,6 +209,7 @@ async function createLaneActionApproval(
       Base: lane.baseBranch,
       Runtime: lane.runtime,
       ...(lane.packetId ? { Packet: lane.packetId } : {}),
+      ...(input.expectedHeadSha ? { 'Expected HEAD': input.expectedHeadSha } : {}),
       ...input.metadata,
     },
     continuation: {
@@ -213,6 +217,7 @@ async function createLaneActionApproval(
       laneId: lane.id,
       verb: input.verb,
       commitMessage: input.commitMessage,
+      expectedHeadSha: input.expectedHeadSha,
       strategy: input.strategy,
     },
   });
@@ -646,6 +651,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           return createLaneActionApproval(lane, actor, {
             verb: 'merge',
             commitMessage: command.commitMessage,
+            expectedHeadSha: command.expectedHeadSha,
             reviewSummary: command.reviewSummary,
             title: 'Override file size limit',
             description: `Merge blocked by file size governance. Oversized changed file${oversizedFiles.length === 1 ? '' : 's'}: ${formatOversizedFiles(oversizedFiles)}. Operator approval is required to override.`,
@@ -680,6 +686,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         return createLaneActionApproval(lane, actor, {
           verb: 'merge',
           commitMessage: command.commitMessage,
+          expectedHeadSha: command.expectedHeadSha,
           reviewSummary: command.reviewSummary,
           title: `Merge gate: ${blockCount} violation${blockCount === 1 ? '' : 's'}`,
           description: formatMergeGateViolations(gateResult.violations),
@@ -700,6 +707,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         return createLaneActionApproval(lane, actor, {
           verb: 'merge',
           commitMessage: command.commitMessage,
+          expectedHeadSha: command.expectedHeadSha,
           reviewSummary: command.reviewSummary,
           title: 'Merge lane',
           description: command.reviewSummary || `Merge lane "${lane.label}" (${lane.branch} → ${lane.baseBranch})`,
@@ -747,6 +755,25 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         const { execFile } = await import('node:child_process');
         const { promisify } = await import('node:util');
         const execFileAsync = promisify(execFile);
+
+        const headLock = await checkExpectedHeadSha(worktreePath, command.expectedHeadSha);
+        if (!headLock.ok) {
+          setLaneStatus(command.laneId, 'reviewing', 'system', 'head_sha_drift');
+          appendEvent(command.laneId, 'merge_head_drift', actor, {
+            expectedHeadSha: headLock.expectedHeadSha,
+            currentHeadSha: headLock.currentHeadSha,
+            branch: lane.branch,
+            baseBranch: lane.baseBranch,
+            packetId: lane.packetId,
+          });
+          return {
+            ok: false,
+            laneId: command.laneId,
+            note: formatHeadShaMismatchNote(headLock),
+            expectedHeadSha: headLock.expectedHeadSha,
+            currentHeadSha: headLock.currentHeadSha,
+          };
+        }
 
         if (command.commitMessage) {
           try {
@@ -973,6 +1000,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           return createLaneActionApproval(lane, actor, {
             verb: 'merge',
             commitMessage: command.commitMessage,
+            expectedHeadSha: command.expectedHeadSha,
             reviewSummary: command.reviewSummary,
             title: cardTitle,
             description: `${conflictDetail}${conflictFileList}\n\nPick a resolution strategy: Ours (keep base), Theirs (keep branch), or Manual (park for terminal fix).`,

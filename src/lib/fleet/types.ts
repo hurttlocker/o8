@@ -225,6 +225,7 @@ export interface WorkflowReviewSnapshot {
   repoSlug: string;
   repoPath: string;
   branch: string;
+  headSha?: string;
   upstream?: string;
   ahead: number;
   behind: number;

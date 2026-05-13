@@ -607,6 +607,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     untrackedRaw,
     diffStatRaw,
     recentCommitsRaw,
+    headShaRaw,
     worktreesRaw,
     branchPrsRaw,
     fallbackPrsRaw,
@@ -616,6 +617,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     tryRunInContext('git', ['ls-files', '--others', '--exclude-standard']),
     tryRunInContext('git', ['diff', '--stat=120', '--relative', 'HEAD']),
     tryRunInContext('git', ['log', '--format=%H%x09%h%x09%s', '-8']),
+    tryRunInContext('git', ['rev-parse', 'HEAD']),
     tryRunInContext('git', ['worktree', 'list', '--porcelain']),
     repoSlug
       ? tryRunInContext('gh', [
@@ -731,6 +733,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     repoSlug,
     repoPath: shortenPath(repoRoot),
     branch,
+    headSha: headShaRaw || undefined,
     upstream,
     ahead,
     behind,

@@ -456,6 +456,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
           packetId: input.packetId,
           findings: input.findings,
           approved: input.approved,
+          reviewedHeadSha: input.reviewedHeadSha,
         } satisfies SubmitReviewInput),
       },
     );
@@ -473,6 +474,7 @@ export async function approveAndMergePacket(input: ApproveAndMergeRequest) {
         body: JSON.stringify({
           packetId: input.packetId,
           commitMessage: input.commitMessage,
+          expectedHeadSha: input.expectedHeadSha,
         } satisfies ApproveAndMergeRequest),
       },
     );

@@ -111,6 +111,8 @@ export interface LaneApprovalContinuation {
   laneId: string;
   verb: 'resume' | 'merge' | 'create_pr';
   commitMessage?: string;
+  /** Reviewed worktree HEAD expected when approving a lane merge. */
+  expectedHeadSha?: string;
   /** Conflict resolution strategy — set by operator on conflict approval cards */
   strategy?: MergeStrategy;
 }

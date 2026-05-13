@@ -211,6 +211,10 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Whether the review approved the packet for merge.',
         },
+        reviewedHeadSha: {
+          type: 'string',
+          description: 'Optional worktree HEAD SHA that was reviewed. If omitted, o8 captures the lane worktree HEAD at review time.',
+        },
       },
       required: ['packetId', 'findings', 'approved'],
     },
@@ -572,6 +576,7 @@ export async function handleSubmitReview(args: Record<string, unknown>): Promise
       packetId: requiredString(args, 'packetId'),
       findings: parseReviewFindings(args.findings),
       approved: args.approved,
+      reviewedHeadSha: optionalString(args, 'reviewedHeadSha') || undefined,
     });
     return jsonResult(result);
   } catch (error) {

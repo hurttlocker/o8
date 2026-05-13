@@ -18,6 +18,7 @@ interface ParsedReviewPayload {
   reviewer?: string;
   approved: boolean;
   diffSha?: string;
+  reviewedHeadSha?: string;
   findings: OrchestratorReviewFinding[];
 }
 
@@ -64,6 +65,9 @@ function parseReviewPayload(body: unknown): { ok: true; value: ParsedReviewPaylo
   const diffSha = typeof record.diffSha === 'string' && record.diffSha.trim()
     ? record.diffSha.trim()
     : undefined;
+  const reviewedHeadSha = typeof record.reviewedHeadSha === 'string' && record.reviewedHeadSha.trim()
+    ? record.reviewedHeadSha.trim()
+    : undefined;
 
   return {
     ok: true,
@@ -72,6 +76,7 @@ function parseReviewPayload(body: unknown): { ok: true; value: ParsedReviewPaylo
       reviewer,
       approved: record.approved,
       diffSha,
+      reviewedHeadSha,
       findings,
     },
   };
@@ -113,6 +118,7 @@ function buildPacketReview(
       fixSuggestion: finding.fixSuggestion ?? null,
     })),
     recordedAt: new Date().toISOString(),
+    reviewedHeadSha: review.reviewedHeadSha ?? null,
     summary: buildPacketReviewSummary(review),
     auditApprovalId: auditApprovalId ?? null,
   };
