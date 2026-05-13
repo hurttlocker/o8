@@ -1,5 +1,6 @@
 import { createApproval, recordApprovalAudit, resolveApproval } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
@@ -42,6 +43,7 @@ function buildPacketReview(
   findings: OrchestratorReviewFinding[],
   approved: boolean,
   summary: string,
+  reviewedHeadSha?: string,
   auditApprovalId?: string | null,
 ): OrchestratorPacketReview {
   return {
@@ -59,6 +61,7 @@ function buildPacketReview(
       fixSuggestion: finding.fixSuggestion ?? null,
     })),
     recordedAt: new Date().toISOString(),
+    reviewedHeadSha: normalizeHeadSha(reviewedHeadSha) ?? null,
     summary,
     auditApprovalId: auditApprovalId?.trim() || null,
   };
@@ -86,7 +89,7 @@ function deriveApprovalRisk(findings: OrchestratorReviewFinding[], approved: boo
   return 'low' as const;
 }
 
-function recordPacketReviewAudit(packet: OrchestratorPacket, findings: OrchestratorReviewFinding[], approved: boolean, summary: string) {
+function recordPacketReviewAudit(packet: OrchestratorPacket, findings: OrchestratorReviewFinding[], approved: boolean, summary: string, reviewedHeadSha?: string) {
   const lane = findLaneByPacket(packet.id);
   const approval = createApproval({
     source: 'runtime',
@@ -101,16 +104,38 @@ function recordPacketReviewAudit(packet: OrchestratorPacket, findings: Orchestra
       packetId: packet.id,
       approved,
       findings,
+      reviewedHeadSha,
     },
     risk: deriveApprovalRisk(findings, approved),
     metadata: {
       Packet: packet.id,
       ...(lane ? { Lane: lane.id, Branch: lane.branch, Base: lane.baseBranch } : {}),
+      ...(reviewedHeadSha ? { 'Reviewed HEAD': reviewedHeadSha } : {}),
     },
   });
   recordApprovalAudit(approval.id, 'orchestrator_review', 'system', summary);
   const resolved = resolveApproval(approval.id, approved ? 'approve' : 'reject', 'system', summary);
   return resolved?.id ?? approval.id;
+}
+
+async function captureReviewedHeadSha(packetId: string, explicitHeadSha?: string) {
+  const explicit = normalizeHeadSha(explicitHeadSha);
+  if (explicit) {
+    return explicit;
+  }
+
+  const lane = findLaneByPacket(packetId);
+  const worktreePath = lane?.worktreePath?.trim();
+  if (!worktreePath) {
+    return undefined;
+  }
+
+  try {
+    return await readHeadSha(worktreePath);
+  } catch (error) {
+    console.warn(`[review] Failed to capture reviewed HEAD for packet ${packetId}:`, error);
+    return undefined;
+  }
 }
 
 export async function submitPacketReview(input: SubmitReviewInput) {
@@ -120,15 +145,16 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     throw new Error(`Packet ${input.packetId} not found.`);
   }
 
+  const reviewedHeadSha = await captureReviewedHeadSha(packet.id, input.reviewedHeadSha);
   const summary = buildReviewSummary(input.findings, input.approved);
-  const auditApprovalId = recordPacketReviewAudit(packet, input.findings, input.approved, summary);
+  const auditApprovalId = recordPacketReviewAudit(packet, input.findings, input.approved, summary, reviewedHeadSha);
 
   const finalState = writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({
     ...state,
     packets: state.packets.map((candidate) => candidate.id === packet.id
       ? {
           ...candidate,
-          review: buildPacketReview(input.findings, input.approved, summary, auditApprovalId),
+          review: buildPacketReview(input.findings, input.approved, summary, reviewedHeadSha, auditApprovalId),
         }
       : candidate),
   }));
@@ -136,12 +162,14 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   log(`Recorded review for packet ${packet.id}.`, {
     approved: input.approved,
     findings: input.findings.length,
+    reviewedHeadSha: reviewedHeadSha ?? null,
     reviewEventType: 'orchestrator_review',
   });
 
   return {
     recorded: true,
     findingsCount: input.findings.length,
+    reviewedHeadSha: reviewedHeadSha ?? null,
     auditEventType: 'orchestrator_review',
     auditApprovalId: finalState.packets.find((candidate) => candidate.id === packet.id)?.review?.auditApprovalId ?? null,
   };

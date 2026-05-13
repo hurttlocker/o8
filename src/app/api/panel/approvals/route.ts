@@ -257,6 +257,7 @@ export async function POST(request: NextRequest) {
         verb: continuation.verb,
         laneId: continuation.laneId,
         commitMessage: continuation.commitMessage,
+        expectedHeadSha: continuation.expectedHeadSha,
         strategy,
         actor: 'user',
       } as Parameters<typeof dispatch>[0]);
