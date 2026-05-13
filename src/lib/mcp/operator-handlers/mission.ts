@@ -7,6 +7,7 @@ import {
   resetPacket,
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
+import { getPacketScope } from '@/lib/lanes/scope';
 import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
 import {
   apiFetch,
@@ -107,6 +108,28 @@ export const MISSION_TOOLS: McpTool[] = [
           description: 'Include aggregated runtime cost for the mission.',
         },
       },
+    },
+  },
+  {
+    name: 'get_packet_scope',
+    description:
+      'Return one-call worker context for a packet or lane: branch, base, head SHA, worktree, file ceiling, allowed/blocked paths, repo-filtered directives, and active related packets with overlapping files. Provide packetId or laneId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'Packet id, for example pkt-abc.',
+        },
+        laneId: {
+          type: 'string',
+          description: 'Lane id, for example lane-xyz.',
+        },
+      },
+      anyOf: [
+        { required: ['packetId'] },
+        { required: ['laneId'] },
+      ],
     },
   },
   {
@@ -377,6 +400,25 @@ export async function handleGetMissionStatus(args: Record<string, unknown>): Pro
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_mission_status failed: ${errorText(error)}`);
     return textResult(`Failed to read mission status: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleGetPacketScope(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const packetId = optionalString(args, 'packetId') || undefined;
+    const laneId = optionalString(args, 'laneId') || undefined;
+    if (!packetId && !laneId) {
+      return textResult('packetId or laneId is required', true);
+    }
+
+    const result = await getPacketScope({ packetId, laneId });
+    if (!result) {
+      return textResult('Packet scope not found', true);
+    }
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} get_packet_scope failed: ${errorText(error)}`);
+    return textResult(`Failed to read packet scope: ${errorText(error)}`, true);
   }
 }
 
