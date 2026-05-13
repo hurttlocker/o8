@@ -57,17 +57,21 @@ export function useGlobalRepoState({
     return entries;
   }, [allRepoWorktrees, globalRepoEntries]);
   const orchestratorWorkspaceTargets = useMemo<OrchestratorWorkspaceTarget[]>(
-    () => workspaceScopeEntries.map((entry) => ({
-      id: entry.localPath,
-      label: entry.isWorktree
-        ? `${entry.name} · ${entry.branch ?? 'worktree'}`
-        : entry.name,
-      repoName: entry.name,
-      localPath: entry.localPath,
-      branch: entry.branch ?? null,
-      isWorktree: entry.isWorktree ?? false,
-      worktreeStatus: entry.worktreeStatus ?? null,
-    })),
+    // Orchestrator packets dispatch against each repo's main checkout — never
+    // against a worktree — so the picker only surfaces base-repo entries. Agent
+    // worktrees (.claude/worktrees/*) and any branch-worktrees would otherwise
+    // appear as duplicate "main" rows here.
+    () => workspaceScopeEntries
+      .filter((entry) => !entry.isWorktree)
+      .map((entry) => ({
+        id: entry.localPath,
+        label: entry.name,
+        repoName: entry.name,
+        localPath: entry.localPath,
+        branch: entry.branch ?? null,
+        isWorktree: false,
+        worktreeStatus: entry.worktreeStatus ?? null,
+      })),
     [workspaceScopeEntries],
   );
   const workspaceTerminalPreferredRepo = useMemo(() => {

@@ -35,6 +35,7 @@ import type { QuickAction } from '@/lib/orchestrator/quick-actions';
 import { OrchestratorContextResidencyProvider } from '@/components/desktop/orchestrator/context-residency';
 import { ThreadsDropdown } from '@/components/desktop/orchestrator/ThreadsDropdown';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
+import { BranchDetailsLauncher } from '@/components/desktop/BranchDetailsLauncher';
 import {
   ThoughtsChatPanel,
   type ThoughtsChatPanelChromeState,
@@ -738,6 +739,10 @@ function OrchestratorTabInner({
             />
           ) : thoughtsChatPanel}
         </div>
+
+        {/* Right: Branch details launcher (Codex pattern). Self-hides when
+            the wide O8 right panel is open and when no packet is selected. */}
+        <BranchDetailsLauncher />
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
       <QuickActionPalette
