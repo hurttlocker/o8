@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { getDb, laneEvents } from '@/lib/db';
 import type { LaneEvent, LaneEventActor, LaneEventVerb } from './types';
+import { publishPacketTailEvent } from './packet-tail';
 
 function nowIso() {
   return new Date().toISOString();
@@ -43,6 +44,7 @@ export function recordLaneEvent(
     timestamp: event.timestamp,
   }).run();
 
+  publishPacketTailEvent(event);
   return event;
 }
 

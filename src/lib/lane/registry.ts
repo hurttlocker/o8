@@ -8,6 +8,7 @@ import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
 import { recordDispatchRule } from '@/lib/dispatch/rules-store';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
+import { publishPacketTailEvent } from './packet-tail';
 import { publishLaneLifecycleEvent } from './lifecycle';
 import { extractLaneReviewScreenshot } from './review-screenshot';
 import type {
@@ -144,6 +145,7 @@ export function appendEvent(
     timestamp: event.timestamp,
   }).run();
 
+  publishPacketTailEvent(event);
   return event;
 }
 
