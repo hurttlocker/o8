@@ -41,6 +41,27 @@ import { parseGitDiff } from '@/lib/worktree/diff-parser';
 
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
 
+// F38 (#1030): the merge handler previously trusted WorktreeManager's in-memory
+// list. Dev-bridge restarts wiped that state mid-packet, leaving the lane row
+// pointing at a worktree the manager no longer knew about — even though the
+// directory and its .git were sitting right there on disk. Bail behavior:
+// "Worktree not found on disk" was wrong because nothing actually checked disk.
+//
+// This helper restores disk truth: it accepts a path and confirms it's a real
+// worktree by checking for the directory + an inner .git entry (file pointer
+// for linked worktrees, dir for standalone repos). No in-memory state involved.
+async function worktreeExistsOnDisk(worktreePath: string): Promise<boolean> {
+  try {
+    const { stat } = await import('node:fs/promises');
+    const dirStat = await stat(worktreePath);
+    if (!dirStat.isDirectory()) return false;
+    const gitStat = await stat(`${worktreePath}/.git`);
+    return gitStat.isFile() || gitStat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>) {
   const cwd = lane.worktreePath || lane.repoPath;
   const { execFile } = await import('node:child_process');
@@ -547,14 +568,13 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       setLaneStatus(command.laneId, 'merging', actor, 'creating_pr');
 
       try {
-        // Resolve worktree ID from the worktree manager
-        const { getWorktreeManager } = await import('@/lib/worktree/launch');
-        const mgr = getWorktreeManager(lane.repoPath);
-        const worktrees = await mgr.list();
-        const worktree = worktrees.find((wt) => wt.path === lane.worktreePath);
-        if (!worktree) {
+        if (!lane.worktreePath || !(await worktreeExistsOnDisk(lane.worktreePath))) {
           setLaneStatus(command.laneId, 'reviewing', 'system', 'worktree_not_found');
-          return { ok: false, laneId: command.laneId, note: 'Worktree not found on disk.' };
+          return {
+            ok: false,
+            laneId: command.laneId,
+            note: `Worktree not found on disk: ${lane.worktreePath ?? '<unset>'}`,
+          };
         }
 
         // Commit any uncommitted changes first
@@ -697,14 +717,22 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       }
 
       try {
+        if (!(await worktreeExistsOnDisk(worktreePath))) {
+          setLaneStatus(command.laneId, 'reviewing', 'system', 'worktree_not_found');
+          return {
+            ok: false,
+            laneId: command.laneId,
+            note: `Worktree not found on disk: ${worktreePath}`,
+          };
+        }
+
+        // F38 (#1030): keep the manager handle + worktreeId derived from the
+        // path so the post-merge cleanup at the end of this block still works.
+        // The lookup-by-find from the in-memory list is gone, but cleanup() is
+        // keyed by worktreeId (basename of the path).
         const { getWorktreeManager } = await import('@/lib/worktree/launch');
         const mgr = getWorktreeManager(lane.repoPath);
-        const worktrees = await mgr.list();
-        const worktree = worktrees.find((wt) => wt.path === worktreePath);
-        if (!worktree) {
-          setLaneStatus(command.laneId, 'reviewing', 'system', 'worktree_not_found');
-          return { ok: false, laneId: command.laneId, note: 'Worktree not found on disk.' };
-        }
+        const worktreeId = worktreePath.split('/').filter(Boolean).pop()!;
 
         // Commit any uncommitted changes
         const { execFile } = await import('node:child_process');
@@ -1016,7 +1044,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         }
 
         // Cleanup worktree + prune any other stale worktrees in the background
-        await mgr.cleanup(worktree.id, { force: true, deleteBranch: true });
+        await mgr.cleanup(worktreeId, { force: true, deleteBranch: true });
         void mgr.prune().catch(() => {});
         updateLane(command.laneId, { worktreePath: null }, 'system');
         setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
