@@ -138,7 +138,7 @@ export function packetStatusFromLaneStatus(status?: string | null): Orchestrator
   if (normalized === 'reviewing') return 'awaiting_review';
   if (normalized === 'completed') return 'released';
   if (normalized === 'archived') return 'archived';
-  if (normalized === 'awaiting_input' || normalized === 'failed' || normalized === 'stuck' || normalized === 'interrupted') return 'blocked';
+  if (normalized === 'awaiting_input' || normalized === 'awaiting_orchestrator' || normalized === 'failed' || normalized === 'stuck' || normalized === 'interrupted') return 'blocked';
   return 'launching';
 }
 

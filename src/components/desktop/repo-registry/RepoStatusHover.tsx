@@ -270,7 +270,7 @@ function computeAgentSnapshot(agents: BranchAgent[]): AgentSnapshot {
   for (const agent of agents) {
     const status = agent.status;
     if (status === 'running' || status === 'reviewing') working += 1;
-    else if (status === 'blocked' || status === 'failed' || status === 'awaiting_input') blocked += 1;
+    else if (status === 'blocked' || status === 'failed' || status === 'awaiting_input' || status === 'awaiting_orchestrator') blocked += 1;
   }
   return { working, blocked, total: agents.length };
 }

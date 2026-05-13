@@ -1,4 +1,10 @@
 import {
+  isAgentReportReason,
+  normalizeAgentReportEvent,
+  normalizeAgentReportMessage,
+  normalizeAgentReportMetadata,
+} from '@/lib/lane/agent-report';
+import {
   createMission,
   createMissionInline,
   dispatchMission,
@@ -268,6 +274,47 @@ export const MISSION_TOOLS: McpTool[] = [
         },
       },
       required: ['packetId'],
+    },
+  },
+  {
+    name: 'report_packet_event',
+    description:
+      'Report structured packet progress, blockers, or questions from a worker agent. Use event:"blocked" or event:"question" to move the lane to awaiting_orchestrator; event:"progress" appends history only. Example: report_packet_event({packetId: "pkt-abc", event: "blocked", reason: "needs_clarification", message: "Which auth provider should this target?"})',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'Packet ID whose active lane should receive the report.',
+        },
+        event: {
+          type: 'string',
+          description: 'Free-form report event. blocked/question update lane status; progress only records an event.',
+        },
+        reason: {
+          type: 'string',
+          enum: [
+            'needs_clarification',
+            'missing_context',
+            'out_of_scope',
+            'dependency_blocked',
+            'context_full',
+            'nondeterministic_test',
+            'external_api_down',
+            'unknown',
+          ],
+          description: 'Optional codified reason for the report.',
+        },
+        message: {
+          type: 'string',
+          description: 'Optional human-readable detail.',
+        },
+        metadata: {
+          type: 'object',
+          description: 'Optional structured metadata to attach to the report.',
+        },
+      },
+      required: ['packetId', 'event'],
     },
   },
   {
@@ -577,6 +624,62 @@ export async function handleRerunWithFeedback(args: Record<string, unknown>): Pr
   } catch (error) {
     console.error(`${'[mcp-operator]'} rerun_with_feedback failed: ${errorText(error)}`);
     return textResult(`Failed to rerun with feedback: ${errorText(error)}`, true);
+  }
+}
+
+interface ReportLane {
+  id: string;
+  packetId: string | null;
+}
+
+export async function handleReportPacketEvent(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const packetId = requiredString(args, 'packetId');
+    const event = normalizeAgentReportEvent(args.event);
+    if (!event) {
+      throw new Error('event is required');
+    }
+
+    const reason = optionalString(args, 'reason') || undefined;
+    if (reason !== undefined && !isAgentReportReason(reason)) {
+      throw new Error('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
+    }
+
+    const lanesResult = await apiFetch('/api/lanes?active=false') as { lanes?: ReportLane[] };
+    const lane = (lanesResult.lanes ?? []).find((candidate) => candidate.packetId === packetId);
+    if (!lane) {
+      return textResult(`No lane found for packet ${packetId}.`, true);
+    }
+
+    const metadata = args.metadata === undefined || args.metadata === null
+      ? undefined
+      : normalizeAgentReportMetadata(args.metadata);
+    if (args.metadata !== undefined && args.metadata !== null && !metadata) {
+      throw new Error('metadata must be an object');
+    }
+
+    const result = await apiFetch(`/api/lanes/${encodeURIComponent(lane.id)}/events`, {
+      method: 'POST',
+      body: JSON.stringify({
+        verb: 'agent_report',
+        event,
+        reason,
+        message: normalizeAgentReportMessage(args.message),
+        metadata,
+      }),
+    }) as Record<string, unknown>;
+
+    if (result.ok === false) {
+      return textResult(String(result.note ?? `Failed to report event for ${packetId}.`), true);
+    }
+
+    return jsonResult({
+      summary: `Reported ${event} for ${packetId}.`,
+      data: result,
+    });
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} report_packet_event failed: ${errorText(error)}`);
+    return textResult(`Failed to report packet event: ${errorText(error)}`, true);
   }
 }
 
