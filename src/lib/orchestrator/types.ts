@@ -63,6 +63,7 @@ export interface OrchestratorPacketReview {
   approved: boolean;
   findings: OrchestratorPacketReviewFinding[];
   recordedAt: string;
+  reviewedHeadSha?: string | null;
   summary: string;
   auditApprovalId?: string | null;
 }
