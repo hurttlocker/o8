@@ -577,14 +577,23 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           };
         }
 
-        // Commit any uncommitted changes first
+        // Commit any uncommitted changes first.
+        // F32 (#1024): match the merge-path fix — only commit when there are
+        // real uncommitted changes. --allow-empty here created duplicate
+        // commits on every create_pr call when Codex had already committed.
         if (command.commitMessage) {
           try {
             const { execFile } = await import('node:child_process');
             const { promisify } = await import('node:util');
             const execFileAsync = promisify(execFile);
             await execFileAsync('git', ['add', '-A'], { cwd: lane.worktreePath });
-            await execFileAsync('git', ['commit', '-m', command.commitMessage, '--allow-empty'], { cwd: lane.worktreePath });
+            const { stdout: porcelain } = await execFileAsync(
+              'git', ['status', '--porcelain'],
+              { cwd: lane.worktreePath, timeout: 5000 },
+            );
+            if (porcelain.trim()) {
+              await execFileAsync('git', ['commit', '-m', command.commitMessage], { cwd: lane.worktreePath });
+            }
           } catch {
             // May fail if nothing to commit — that's fine
           }
@@ -1162,10 +1171,19 @@ async function performRemoteCustomerMerge(
 
     if (command.commitMessage) {
       try {
+        // F32 (#1024): same fix as the local-merge path. --allow-empty here
+        // created duplicate commits when the remote worker had already
+        // committed. Porcelain check first, commit only when dirty.
         await execFileAsync('git', ['add', '-A'], { cwd: fetched.tempWorktreePath });
-        await execFileAsync('git', ['commit', '-m', command.commitMessage, '--allow-empty'], {
-          cwd: fetched.tempWorktreePath,
-        });
+        const { stdout: porcelain } = await execFileAsync(
+          'git', ['status', '--porcelain'],
+          { cwd: fetched.tempWorktreePath, timeout: 5000 },
+        );
+        if (porcelain.trim()) {
+          await execFileAsync('git', ['commit', '-m', command.commitMessage], {
+            cwd: fetched.tempWorktreePath,
+          });
+        }
       } catch { /* nothing to commit */ }
     }
 
