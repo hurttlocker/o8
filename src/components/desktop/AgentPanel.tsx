@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- AgentPanel keeps a stable prop surface during the refactor */
 
 import { memo, useCallback, useMemo, type CSSProperties } from 'react';
-import { Clock } from './lucide-shims';
+import { motion } from 'framer-motion';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
 import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
@@ -226,46 +226,63 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             of this panel, so it renders flush without a labelled header. */}
         <section style={{ display: 'flex', flexDirection: 'column' }}>
           {fleetMeta?.mode === 'stale' ? (
-            <div
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 32, mass: 0.6 }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
-                padding: '10px 12px',
-                borderRadius: 16,
-                background: 'rgba(245, 158, 11, 0.08)',
-                border: '1px solid rgba(245, 158, 11, 0.15)',
-                fontSize: 11,
-                color: '#d97706',
-                fontWeight: 600,
+                gap: 10,
+                paddingTop: 10,
+                paddingRight: 12,
+                paddingBottom: 10,
+                paddingLeft: 12,
+                borderRadius: 14,
+                background: 'var(--t-panel)',
+                backdropFilter: 'saturate(180%) blur(20px)',
+                WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+                border: '0.5px solid rgba(249, 115, 22, 0.22)',
+                fontSize: 11.5,
+                color: 'var(--t-text)',
+                fontWeight: 500,
+                letterSpacing: '-0.005em',
+                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
               }}
             >
-              <Clock size={13} strokeWidth={2} style={{ flexShrink: 0 }} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                Showing cached session state while the gateway reconnects. Live updates resume automatically.
+              <StaleStatusDot />
+              <span style={{ flex: 1, minWidth: 0, lineHeight: 1.35 }}>
+                <strong style={{ fontWeight: 600 }}>Showing cached state</strong>
+                <span style={{ color: 'var(--t-text-muted)', fontWeight: 400 }}> · gateway reconnecting</span>
               </span>
-              <button
+              <motion.button
                 type="button"
                 onClick={() => window.location.reload()}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                transition={{ type: 'spring', stiffness: 480, damping: 22, mass: 0.5 }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 4,
-                  border: 'none',
-                  borderRadius: 999,
-                  background: 'rgba(217, 119, 6, 0.12)',
-                  color: '#b45309',
-                  padding: '4px 8px',
+                  border: '0.5px solid rgba(249, 115, 22, 0.32)',
+                  borderRadius: 9,
+                  background: 'rgba(249, 115, 22, 0.10)',
+                  color: '#f97316',
+                  paddingTop: 4,
+                  paddingRight: 10,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
                   cursor: 'pointer',
-                  fontSize: 10,
-                  fontWeight: 700,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '-0.005em',
                   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   flexShrink: 0,
                 }}
               >
                 Reload
-              </button>
-            </div>
+              </motion.button>
+            </motion.div>
           ) : gatewayReachable && gatewayWarming ? (
             <div
               style={{
@@ -362,3 +379,30 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     </div>
   );
 });
+
+function StaleStatusDot() {
+  return (
+    <span style={{ position: 'relative', width: 10, height: 10, flexShrink: 0 }}>
+      <motion.span
+        aria-hidden
+        animate={{ scale: [1, 1.9, 1], opacity: [0.45, 0, 0.45] }}
+        transition={{ duration: 1.6, ease: 'easeOut', repeat: Infinity }}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 999,
+          background: '#f97316',
+        }}
+      />
+      <span
+        style={{
+          position: 'absolute',
+          inset: 1,
+          borderRadius: 999,
+          background: '#f97316',
+          boxShadow: '0 0 0 0.5px rgba(249, 115, 22, 0.55) inset',
+        }}
+      />
+    </span>
+  );
+}
