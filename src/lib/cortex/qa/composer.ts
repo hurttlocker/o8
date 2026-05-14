@@ -379,22 +379,38 @@ export async function composeClassA(
     }
   }
 
-  // Tier 1: Haiku CLI. Skipped in eval mode (CLI bootstrap exceeds smoke budget)
-  // or when the user picked sonnet-cli mode (#971).
+  // Tier ordering depends on the in-app orchestrator toggle (epic #1044):
+  //   - toggle OFF (default) → Codex is effective tier 1, Haiku is skipped
+  //     (the adapter throws when gated; no point burning the call).
+  //   - toggle ON              → Haiku tier 1, Codex tier 2 (legacy order).
+  let inAppOrchestratorOn = false;
   if (!evalMode && !sonnetCliFirst) {
+    try {
+      const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
+      inAppOrchestratorOn = resolveInAppOrchestratorEnabledSync();
+    } catch {
+      inAppOrchestratorOn = false;
+    }
+  }
+
+  // Tier 1 (toggle ON): Haiku CLI. Skipped in eval mode, sonnet-cli mode, or
+  // when the toggle is OFF (default).
+  if (!evalMode && !sonnetCliFirst && inAppOrchestratorOn) {
     const haikuAnswer = await tryComposeHaiku(composePrompt);
     if (haikuAnswer) {
-      console.info('[qa][composer-A] resolved via haiku-cli');
+      console.info('[qa][composer-A] resolved via haiku-cli (tier 1)');
       emitClassAAnswer(haikuAnswer, lookup, emit);
       return;
     }
   }
 
-  // Tier 2: Codex CLI. Skipped in eval mode or sonnet-cli mode.
+  // Tier 1 (toggle OFF — default) / Tier 2 (toggle ON): Codex CLI.
   if (!evalMode && !sonnetCliFirst) {
     const codexAnswer = await tryComposeCodex(composePrompt);
     if (codexAnswer) {
-      console.info(`[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
+      console.info(
+        `[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (${inAppOrchestratorOn ? 'tier 2' : 'tier 1 default'})`,
+      );
       emitClassAAnswer(codexAnswer, lookup, emit);
       return;
     }
