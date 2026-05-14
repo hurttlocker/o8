@@ -38,6 +38,7 @@ interface OperatorDefaults {
   defaultDispatchRuntime: DispatchRuntime;
   experimentalOpencode: boolean;
   classAComposer: ClassAComposer;
+  inAppOrchestratorEnabled: boolean;
 }
 
 interface OperatorDefaultsResponse {
@@ -744,9 +745,48 @@ export function OperatorDefaultsTab() {
         />
       </section>
 
-      {/* 07 — SAFETY */}
+      {/* 07 — IN-APP ORCHESTRATOR CHAT */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="07">IN-APP ORCHESTRATOR CHAT</SectionLabel>
+        <p style={{
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          maxWidth: 580,
+          margin: 0,
+          marginBottom: 4,
+        }}>
+          The chat panel inside o8 spawns{' '}
+          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>claude -p</span>{' '}
+          per turn. After Anthropic&apos;s June 15 2026 pricing change, that bills against
+          your $20–$200/mo Agent SDK credit pool. Default OFF — drive o8 from Claude Code
+          or Claude Desktop via the operator MCP server to stay on the unlimited
+          interactive pool. Env{' '}
+          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>O8_IN_APP_ORCHESTRATOR_ENABLED</span>{' '}
+          overrides.
+        </p>
+        <Row
+          label="Enable in-app orchestrator chat"
+          description={values.inAppOrchestratorEnabled
+            ? 'On — every turn draws from your Anthropic SDK credit pool. Watch your monthly cap.'
+            : 'Off — the chat composer is locked. Talk to Claude in Claude Code / Desktop instead.'}
+          source={sources.inAppOrchestratorEnabled}
+          disabledReason={sources?.inAppOrchestratorEnabled === 'env' ? envDisabledReason : undefined}
+          right={
+            <SettingsToggleButton
+              checked={values.inAppOrchestratorEnabled}
+              disabled={sources?.inAppOrchestratorEnabled === 'env' || busyField === 'inAppOrchestratorEnabled'}
+              onChange={(next) => {
+                void updateField('inAppOrchestratorEnabled', next);
+              }}
+            />
+          }
+        />
+      </section>
+
+      {/* 08 — SAFETY */}
       <section>
-        <SectionLabel number="07">SAFETY</SectionLabel>
+        <SectionLabel number="08">SAFETY</SectionLabel>
         <p style={{
           fontSize: 13,
           color: 'var(--t-text-secondary)',

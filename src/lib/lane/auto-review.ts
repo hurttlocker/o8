@@ -509,6 +509,17 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     reviewScreenshot,
   );
 
+  // June 15 2026 — auto-review spawns `claude -p` per merge, which after
+  // Anthropic's pricing change bills against the operator's Agent SDK
+  // credit pool. Gated behind the in-app orchestrator toggle; when off the
+  // merge still completes but auto-review is skipped (operator can review
+  // manually or re-enable the toggle to opt in to SDK billing).
+  const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
+  if (!resolveInAppOrchestratorEnabledSync()) {
+    console.log(`[auto-review] Skipped for lane ${lane.id} — inAppOrchestratorEnabled is off (avoids SDK credit usage)`);
+    return;
+  }
+
   const { ensureOrchestratorSession, sendToOrchestrator } = await import('./orchestrator-session');
   const session = ensureOrchestratorSession(lane.repoPath);
 

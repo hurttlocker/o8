@@ -76,21 +76,31 @@ async function resolveClaudeBinForQa(): Promise<string | null> {
 async function detectTier(): Promise<TierResult> {
   if (cachedTier) return cachedTier;
 
+  // June 15 2026 — `claude --print` bills against the user's Agent SDK credit
+  // pool. Gated behind the same toggle as the in-app orchestrator chat. When
+  // off, skip the CLI tier and fall through to API key (their own pay-per-
+  // token, unaffected) or Flash. Dynamic import keeps the dependency graph
+  // one-way at compile time.
+  const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
+  const cliAllowed = resolveInAppOrchestratorEnabledSync();
+
   // Test 1: Claude Code CLI available?
-  const claudeBin = await resolveClaudeBinForQa();
-  if (claudeBin) {
-    // Quick sanity-check: `claude --version` must succeed.
-    try {
-      await execFileAsync(claudeBin, ['--version'], {
-        timeout: 5_000,
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-      });
-      cachedTier = { tier: 'cli', claudeBin };
-      console.log(`[qa] Sonnet provider: CLI (${claudeBin})`);
-      return cachedTier;
-    } catch {
-      // Binary found but can't be executed — fall through.
-      console.warn(`[qa] Claude CLI found at ${claudeBin} but --version failed — skipping.`);
+  if (cliAllowed) {
+    const claudeBin = await resolveClaudeBinForQa();
+    if (claudeBin) {
+      // Quick sanity-check: `claude --version` must succeed.
+      try {
+        await execFileAsync(claudeBin, ['--version'], {
+          timeout: 5_000,
+          env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        });
+        cachedTier = { tier: 'cli', claudeBin };
+        console.log(`[qa] Sonnet provider: CLI (${claudeBin})`);
+        return cachedTier;
+      } catch {
+        // Binary found but can't be executed — fall through.
+        console.warn(`[qa] Claude CLI found at ${claudeBin} but --version failed — skipping.`);
+      }
     }
   }
 

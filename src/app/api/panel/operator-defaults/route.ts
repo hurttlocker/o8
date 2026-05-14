@@ -105,6 +105,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.classAComposer = raw;
   }
 
+  if (body.inAppOrchestratorEnabled !== undefined) {
+    if (typeof body.inAppOrchestratorEnabled !== 'boolean') {
+      throw new Error('inAppOrchestratorEnabled must be boolean.');
+    }
+    update.inAppOrchestratorEnabled = body.inAppOrchestratorEnabled;
+  }
+
   return update;
 }
 
