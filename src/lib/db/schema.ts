@@ -66,7 +66,7 @@ export const apiKeys = sqliteTable('api_keys', {
 export const usageLogs = sqliteTable('usage_logs', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
-  /** Model used (e.g. claude-opus-4-6, gpt-5.4) */
+  /** Model used (e.g. claude-opus-4-6, gpt-5.5) */
   model: text('model').notNull(),
   /** LLM provider */
   provider: text('provider', { enum: ['anthropic', 'openai', 'google'] }).notNull(),

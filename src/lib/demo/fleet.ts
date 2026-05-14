@@ -36,7 +36,7 @@ export const demoFleet: FleetSnapshot = {
       name: 'Assistant',
       squadId: 'squad-platform',
       runtime: 'codex',
-      model: 'gpt-5.4',
+      model: 'gpt-5.5',
       status: 'running',
       currentTask: 'Bootstrapping shell + fleet contract',
       workspace: 'repos/cortex-ide',

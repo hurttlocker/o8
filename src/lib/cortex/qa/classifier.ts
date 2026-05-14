@@ -4,7 +4,7 @@
  *
  * Five-tier provider chain — all return the same { class, bm25Variants } shape:
  *   1. Claude Haiku CLI       (free for Claude Max users — primary)
- *   2. Codex CLI (gpt-5.4)    (free for ChatGPT Plus / Codex sub users)
+ *   2. Codex CLI (gpt-5.5)    (free for ChatGPT Plus / Codex sub users)
  *   3. OpenRouter (grok-4.1-fast + flash-lite + gpt-5.4-nano fallback) — paid HTTP
  *   4. Gemini Flash JSON-mode (last LLM tier; demoted because of recent 503s)
  *   5. Heuristic fallback     (lexical "why/how/explain" → Class B)
@@ -43,7 +43,7 @@ bm25_variants: 3-5 alternate phrasings using synonyms and rephrasings of the que
 /**
  * Classify the question with a 5-tier provider chain:
  *   1. Claude Haiku CLI (Claude Max subscription — no per-token cost, primary)
- *   2. Codex CLI gpt-5.4 (ChatGPT Plus / Codex subscription — also free)
+ *   2. Codex CLI gpt-5.5 (ChatGPT Plus / Codex subscription — also free)
  *   3. OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5.4-nano fallback) — paid HTTP
  *   4. Gemini Flash (JSON-mode; demoted because of recent 503s)
  *   5. Heuristic fallback (lexical "why/how/explain" → Class B)
@@ -132,7 +132,7 @@ async function tryHaiku(prompt: string, question: string): Promise<ClassifierRes
 /** Tier 2: Codex CLI. Free for ChatGPT Plus / Codex sub users. */
 async function tryCodex(prompt: string, question: string): Promise<ClassifierResult | null> {
   try {
-    // 30s — Codex bootstrap is ~15s for trivial prompts (verified live with gpt-5.4).
+    // 30s — Codex bootstrap is ~15s for trivial prompts (verified live with gpt-5.5).
     // Larger ceiling than Haiku because the model takes longer to reason.
     const text = await callCodex(prompt, { timeoutMs: 30_000 });
     return parseClassifierJson(text, question);
