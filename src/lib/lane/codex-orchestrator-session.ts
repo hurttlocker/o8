@@ -292,6 +292,55 @@ export async function sendToCodexOrchestrator(
             continue;
           }
 
+          // Codex-cli 0.130.0 emits the assistant's reply as `item.completed`
+          // with `item.type='agent_message'` and the body on `item.text`.
+          // Older codex builds use the `event_msg` shape above; we accept both.
+          const item = safeObject(parsed.item);
+          if (type === 'item.completed' && item?.type === 'agent_message') {
+            const text = typeof item.text === 'string' ? item.text : '';
+            if (text) onEvent({ type: 'text', text });
+            continue;
+          }
+
+          if (type === 'item.completed' && item?.type === 'tool_use') {
+            const name = typeof item.name === 'string' ? item.name : 'tool';
+            let input: unknown = {};
+            if (typeof item.arguments === 'string') {
+              try {
+                input = JSON.parse(item.arguments);
+              } catch {
+                input = item.arguments;
+              }
+            } else if (item.arguments && typeof item.arguments === 'object') {
+              input = item.arguments;
+            }
+            onEvent({
+              type: 'tool_use',
+              id: typeof item.id === 'string' ? item.id : null,
+              name,
+              input,
+            });
+            continue;
+          }
+
+          if (type === 'item.completed' && item?.type === 'command_execution') {
+            const cmd =
+              typeof item.command === 'string'
+                ? item.command
+                : Array.isArray(item.command)
+                  ? (item.command as string[]).join(' ')
+                  : '';
+            const output = typeof item.output === 'string' ? item.output : '';
+            // Emit as a tool_use + tool_result pair so the UI renders the shell
+            // call exactly like the legacy exec_command_begin/end pair would.
+            const callId = typeof item.id === 'string' ? item.id : null;
+            onEvent({ type: 'tool_use', id: callId, name: 'shell', input: { command: cmd } });
+            if (output) {
+              onEvent({ type: 'tool_result', id: callId, name: 'shell', output: output.slice(0, 4_000) });
+            }
+            continue;
+          }
+
           if (type === 'event_msg' && payload?.type === 'exec_command_begin') {
             const command =
               typeof payload.command === 'string'
