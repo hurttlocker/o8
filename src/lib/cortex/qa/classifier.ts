@@ -75,20 +75,38 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
     }
   }
 
-  // Tier 1: Haiku CLI (free for Claude Max users). Skipped in eval mode.
+  // Tier ordering depends on the in-app orchestrator toggle (epic #1044):
+  //   - toggle OFF (default) → Codex is effective tier 1, Haiku is skipped
+  //     (it would throw anyway, no point burning the fast-throw cycle).
+  //   - toggle ON              → Haiku tier 1, Codex tier 2 (legacy order).
+  let inAppOrchestratorOn = false;
   if (!evalMode) {
+    try {
+      const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
+      inAppOrchestratorOn = resolveInAppOrchestratorEnabledSync();
+    } catch {
+      inAppOrchestratorOn = false;
+    }
+  }
+
+  // Tier 1 (when toggle ON): Haiku CLI — free for Claude Max users. Skipped in
+  // eval mode or when the toggle is OFF (Codex takes the lead slot instead).
+  if (!evalMode && inAppOrchestratorOn) {
     const haikuResult = await tryHaiku(prompt, question);
     if (haikuResult) {
-      console.info('[qa][classifier] resolved via haiku-cli');
+      console.info('[qa][classifier] resolved via haiku-cli (tier 1)');
       return haikuResult;
     }
   }
 
-  // Tier 2: Codex CLI (free for ChatGPT Plus / Codex sub users). Skipped in eval mode.
+  // Tier 1 (when toggle OFF — default) / Tier 2 (when toggle ON): Codex CLI
+  // — free for ChatGPT Plus / Codex sub users. Always tried when not eval-mode.
   if (!evalMode) {
     const codexResult = await tryCodex(prompt, question);
     if (codexResult) {
-      console.info(`[qa][classifier] resolved via codex-cli:${CODEX_DEFAULT_MODEL}`);
+      console.info(
+        `[qa][classifier] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (${inAppOrchestratorOn ? 'tier 2' : 'tier 1 default'})`,
+      );
       return codexResult;
     }
   }
