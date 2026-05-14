@@ -104,8 +104,12 @@ export function buildNewChatTab(
 ): TerminalTab {
   const tabId = createWorkspaceTabId('chat');
   const now = Date.now();
+  // claude-code chat runtime disabled in v0.1.140 (#1047). The list is
+  // empty, so we fall back to the codex default model — if anyone managed
+  // to construct a `claude-code` chat tab via legacy localStorage, the
+  // 410 from /api/claude-code/send surfaces a clear error in chat.
   const defaultModel = runtime === 'claude-code'
-    ? CLAUDE_CLI_MODELS[0].id
+    ? (CLAUDE_CLI_MODELS[0]?.id ?? CODEX_CLI_MODELS[0].id)
     : runtime === 'gemini'
       ? GEMINI_CLI_MODELS[0].id
       : runtime === 'opencode'
