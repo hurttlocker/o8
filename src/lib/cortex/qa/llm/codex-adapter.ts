@@ -97,14 +97,14 @@ export function resetCodexProviderCache(): void {
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export interface CallCodexOptions {
-  /** Model to pass to `codex exec -m`. Default: gpt-5.4 (verified live). */
+  /** Model to pass to `codex exec -m`. Default: gpt-5.5 (post-SDK-pricing pivot, epic #1044). */
   model?: string;
   /** CLI invocation timeout. Default 30s — Codex bootstrap is ~15s. */
   timeoutMs?: number;
 }
 
-/** Default Codex model. Verified live ~15.5s for trivial prompts. */
-export const CODEX_DEFAULT_MODEL = 'gpt-5.4';
+/** Default Codex model. gpt-5.5 replaces gpt-5.4 as the orchestrator-class default (epic #1044). */
+export const CODEX_DEFAULT_MODEL = 'gpt-5.5';
 
 /**
  * Call Codex via the CLI with `prompt` on stdin and read the final answer

@@ -101,6 +101,16 @@ function detectPricingModel(rawModel: string | null | undefined): CodexPricingMo
     return null;
   }
 
+  if (normalizedModel.includes('gpt-5.5')) {
+    return {
+      canonicalModel: 'gpt-5.5',
+      inputUsdPerMillion: 2.5,
+      cachedInputUsdPerMillion: 0.25,
+      outputUsdPerMillion: 15,
+      longContextEligible: true,
+    };
+  }
+
   if (normalizedModel.includes('gpt-5.4-mini')) {
     return {
       canonicalModel: 'gpt-5.4-mini',

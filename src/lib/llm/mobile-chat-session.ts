@@ -7,8 +7,8 @@ import {
 import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
 
 const DEFAULT_MOBILE_GEMINI_MODEL = 'gemini-2.5-flash';
-const DEFAULT_MOBILE_OPENAI_MODEL = 'gpt-5.4';
-const DEFAULT_MOBILE_CLI_MODEL = 'cli:claude-code:sonnet';
+const DEFAULT_MOBILE_OPENAI_MODEL = 'gpt-5.5';
+const DEFAULT_MOBILE_CLI_MODEL = 'cli:codex:gpt-5.5';
 const DEFAULT_MOBILE_CHAT_TITLE = 'Assistant';
 
 export function createMobileLlmTabId() {
@@ -25,7 +25,7 @@ export function providerForLlmModel(model?: string): 'openai' | 'anthropic' | 'g
   if (!normalized) {
     return process.env.GOOGLE_AI_API_KEY?.trim() ? 'google' : 'openai';
   }
-  // CLI model IDs: cli:claude-code:opus, cli:codex:gpt-5.4, cli:gemini:gemini-3.1-pro
+  // CLI model IDs: cli:codex:gpt-5.5, cli:gemini:gemini-3.1-pro (claude-code rows removed June 2026)
   if (normalized.startsWith('cli:claude-code:')) return 'anthropic';
   if (normalized.startsWith('cli:codex:')) return 'openai';
   if (normalized.startsWith('cli:gemini:')) return 'google';

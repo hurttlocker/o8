@@ -466,7 +466,7 @@ async function tryComposeHaiku(prompt: string): Promise<string | null> {
 /** Tier 2: Codex CLI. Free for ChatGPT Plus / Codex sub users. */
 async function tryComposeCodex(prompt: string): Promise<string | null> {
   try {
-    // 30s — Codex bootstrap is ~15s for trivial prompts (verified live with gpt-5.4).
+    // 30s — Codex bootstrap is ~15s for trivial prompts (verified live with gpt-5.5).
     // The larger ceiling matches the slower bootstrap path; OpenRouter (~1s)
     // is the fast-path fallback below.
     const text = await callCodex(prompt, { timeoutMs: 30_000 });

@@ -33,6 +33,7 @@ const MODEL_COLORS: Record<string, string> = {
   'claude-haiku-4-5-20251001': '#30d158',
   'gpt-5.3-codex': '#64d2ff',
   'gpt-5.4': '#64d2ff',
+  'gpt-5.5': '#64d2ff',
 };
 
 function shortModel(model: string): string {
