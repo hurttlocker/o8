@@ -27,7 +27,18 @@ import { runPacketLog } from './commands/packet/log.js';
 import { runPacketReport } from './commands/packet/report.js';
 import { runPacketReview } from './commands/packet/review.js';
 import { runPacketScope } from './commands/packet/scope.js';
+import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
 import { printError, type OutputMode } from './output.js';
+import { CliError, EXIT } from './api.js';
+
+function unknownSubcommandError(group: string, sub: string | undefined): CliError {
+  return new CliError(
+    `unknown_${group}_subcommand`,
+    `Unknown ${group} subcommand: ${sub ?? '(none)'}`,
+    EXIT.INVALID_ARGS,
+    `Run \`o8 ${group} --help\` to list available subcommands.`,
+  );
+}
 
 interface ParsedArgs {
   command: string[];
@@ -70,11 +81,12 @@ commands:
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   packet info          info about the packet bound to the current worktree
-  packet scope <id>    one-call worker context for a packet or lane
+  packet scope [id]    one-call worker context (auto-resolves from cwd)
   packet heartbeat     update the current packet lane heartbeat
   packet review        approve + merge a reviewed packet
   packet report        append an agent_report event for this packet
-  packet log <id>      read or follow packet lane events (--follow, --since)
+  packet log [id]      read or follow packet lane events (--follow, --since)
+  packet runtime-drift detect and warn when a lane's bound runtime drifted
 
 flags:
   --json (default)     JSON output for agents
@@ -111,13 +123,11 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runStatus(args.mode);
     case 'cortex': {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
-      process.stderr.write(`unknown cortex subcommand: ${secondary ?? '(none)'}\n`);
-      return 1;
+      throw unknownSubcommandError('cortex', secondary);
     }
     case 'lane': {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
-      process.stderr.write(`unknown lane subcommand: ${secondary ?? '(none)'}\n`);
-      return 1;
+      throw unknownSubcommandError('lane', secondary);
     }
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode);
@@ -126,12 +136,16 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'review') return runPacketReview(args.mode, args.rest);
       if (secondary === 'report') return runPacketReport(args.mode, args.rest);
       if (secondary === 'log') return runPacketLog(args.mode, args.rest);
-      process.stderr.write(`unknown packet subcommand: ${secondary ?? '(none)'}\n`);
-      return 1;
+      if (secondary === 'runtime-drift') return runPacketRuntimeDrift(args.mode);
+      throw unknownSubcommandError('packet', secondary);
     }
     default:
-      process.stderr.write(`unknown command: ${primary}\n${USAGE}`);
-      return 1;
+      throw new CliError(
+        'unknown_command',
+        `Unknown command: ${primary}`,
+        EXIT.INVALID_ARGS,
+        'Run `o8 --help` for the full command surface.',
+      );
   }
 }
 

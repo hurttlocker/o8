@@ -6,6 +6,7 @@ mod webview_latch;
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::collections::VecDeque;
+use std::path::Path;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use tauri::{
@@ -1997,6 +1998,97 @@ fn sanitize_window_state() {
     }
 }
 
+/// Ensure `o8` is on PATH by symlinking the bundled CLI into the first writable
+/// well-known bin directory. Best-effort — logs and returns on any error so a
+/// permission failure never blocks app startup.
+///
+/// Priority: /usr/local/bin (Homebrew-style, most common) → ~/.local/bin.
+/// We refuse to clobber a non-symlink at the target. If an existing symlink
+/// points at any /Applications/o8.app path, we replace it (assume stale o8
+/// from a previous install).
+#[cfg(target_os = "macos")]
+fn ensure_cli_on_path(cli_source: &Path) {
+    if !cli_source.exists() {
+        eprintln!("[cli-symlink] bundled CLI missing at {}", cli_source.display());
+        return;
+    }
+
+    let home = match std::env::var_os("HOME") {
+        Some(h) => std::path::PathBuf::from(h),
+        None => {
+            eprintln!("[cli-symlink] $HOME unset — skipping");
+            return;
+        }
+    };
+
+    let candidates: [std::path::PathBuf; 2] = [
+        std::path::PathBuf::from("/usr/local/bin/o8"),
+        home.join(".local").join("bin").join("o8"),
+    ];
+
+    for target in &candidates {
+        if let Some(parent) = target.parent() {
+            if !parent.exists() {
+                if std::fs::create_dir_all(parent).is_err() {
+                    continue;
+                }
+            }
+        }
+
+        match std::fs::symlink_metadata(target) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    match std::fs::read_link(target) {
+                        Ok(existing) if existing == cli_source => {
+                            // Already pointing where we want — nothing to do.
+                            return;
+                        }
+                        Ok(existing) if existing.to_string_lossy().contains("/Applications/o8.app/") => {
+                            // Stale symlink from a previous install — replace.
+                            let _ = std::fs::remove_file(target);
+                        }
+                        Ok(_) => {
+                            // User-owned symlink to something else — leave alone.
+                            return;
+                        }
+                        Err(_) => {
+                            let _ = std::fs::remove_file(target);
+                        }
+                    }
+                } else {
+                    // Regular file or directory — never clobber.
+                    eprintln!("[cli-symlink] {} exists and is not a symlink — leaving alone", target.display());
+                    return;
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                // No existing entry — fall through to create.
+            }
+            Err(err) => {
+                eprintln!("[cli-symlink] stat {} failed: {}", target.display(), err);
+                continue;
+            }
+        }
+
+        match std::os::unix::fs::symlink(cli_source, target) {
+            Ok(()) => {
+                eprintln!("[cli-symlink] linked {} -> {}", target.display(), cli_source.display());
+                return;
+            }
+            Err(err) => {
+                eprintln!("[cli-symlink] {} failed: {}", target.display(), err);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_cli_on_path(_cli_source: &Path) {
+    // Windows + Linux symlink semantics differ enough to warrant a separate
+    // pass when those platforms come online. For now, the macOS .app is the
+    // only shipping surface that needs the symlink.
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     sanitize_window_state();
@@ -2252,6 +2344,12 @@ pub fn run() {
             let resource_dir = app.path().resource_dir().expect("failed to resolve resource dir");
             let server_dir = resource_dir.join("server");
             let server_js = server_dir.join("server.js");
+
+            // First-launch CLI symlink. The o8 CLI ships inside the .app at
+            // Contents/Resources/server/bin/o8; symlink it onto PATH so the
+            // operator + dispatched workers can just type `o8 <command>`.
+            // Skip on failure — no permission, no /usr/local/bin, no problem.
+            ensure_cli_on_path(&server_dir.join("bin").join("o8"));
 
             // If a dev server is already running on the default port (e.g. the
             // user is running `npm run desktop:dev` in a terminal), defer to it

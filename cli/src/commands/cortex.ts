@@ -1,4 +1,3 @@
-import { sep } from 'node:path';
 import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
 import {
@@ -7,6 +6,7 @@ import {
   printJson,
   type OutputMode,
 } from '../output.js';
+import { detectWorktree } from './packet/worktree-resolve.js';
 
 const OBSERVATION_KINDS = new Set(['regression', 'pattern', 'gotcha', 'preference']);
 const OBSERVATION_SCOPES = new Set(['packet', 'repo', 'global']);
@@ -23,37 +23,10 @@ interface Lane {
   packetId: string | null;
 }
 
-interface WorktreeMatch {
-  worktreePath: string;
-  packetSlug: string;
-}
-
 interface ObserveArgs {
   kind: string | null;
   text: string | null;
   scope: string;
-}
-
-function detectWorktree(cwd: string): WorktreeMatch | null {
-  const parts = cwd.split(sep);
-  for (let i = parts.length - 1; i >= 1; i--) {
-    const prev = parts[i - 1];
-    const cur = parts[i];
-    if (!cur || !cur.startsWith('packet-')) continue;
-    if (prev === '.cortex-worktrees') {
-      return {
-        worktreePath: parts.slice(0, i + 1).join(sep),
-        packetSlug: cur.slice('packet-'.length),
-      };
-    }
-    if (prev === 'worktrees' && parts[i - 2] === '.claude') {
-      return {
-        worktreePath: parts.slice(0, i + 1).join(sep),
-        packetSlug: cur.slice('packet-'.length),
-      };
-    }
-  }
-  return null;
 }
 
 function parseObserveArgs(rest: string[]): ObserveArgs {
@@ -87,7 +60,7 @@ function parseObserveArgs(rest: string[]): ObserveArgs {
   };
 }
 
-function resolveLane(lanes: Lane[], match: WorktreeMatch): Lane | null {
+function resolveLane(lanes: Lane[], match: { worktreePath: string; packetSlug: string }): Lane | null {
   return lanes.find((lane) => lane.worktreePath === match.worktreePath)
     ?? lanes.find((lane) => lane.packetId && match.packetSlug.includes(lane.packetId))
     ?? lanes.find((lane) => lane.worktreePath && lane.worktreePath.endsWith(`packet-${match.packetSlug}`))
@@ -163,6 +136,7 @@ export async function runCortexObserve(mode: OutputMode, rest: string[]): Promis
       proposedBy: proposal.proposed_by ?? packetId,
       kind: args.kind,
       scope: args.scope,
+      text: args.text,
     },
   };
 
@@ -175,6 +149,7 @@ export async function runCortexObserve(mode: OutputMode, rest: string[]): Promis
       ['kind', args.kind],
       ['scope', args.scope],
     ]);
+    process.stdout.write(`\n  ${args.text}\n`);
   } else {
     printJson(payload);
   }
