@@ -4,7 +4,7 @@
  * The worker distills facts from raw substrate via a CLI call. Two providers
  * are supported:
  *   - claude (default, Sonnet quality > Codex on extraction per round-3 lock)
- *   - codex  (override via O8_INDEXER_CLI=codex; uses gpt-5.4)
+ *   - codex  (override via O8_INDEXER_CLI=codex; uses gpt-5.5)
  *
  * If neither binary is on PATH (or login-shell PATH), the worker disables
  * itself gracefully — free-tier users keep raw retrieval. We do NOT fall

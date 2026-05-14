@@ -45,7 +45,7 @@ export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
 ];
 
 export const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
-  { id: 'gpt-5.4', label: 'GPT-5.4', color: '#10b981' },
+  { id: 'gpt-5.5', label: 'GPT-5.5', color: '#10b981' },
   { id: 'gpt-4o', label: 'GPT-4o', color: '#10b981' },
 ];
 
