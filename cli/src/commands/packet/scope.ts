@@ -11,6 +11,7 @@ import {
   type OutputMode,
 } from '../../output.js';
 import { warnRuntimeDriftIfNeeded } from './runtime-drift.js';
+import { resolveLaneFromCwd } from './worktree-resolve.js';
 
 interface PacketScopeDirective {
   id: string;
@@ -51,17 +52,20 @@ interface PacketScope {
   relatedPackets: RelatedPacketScope[];
 }
 
-function parseScopeId(rest: string[]): string {
-  const id = rest.find((entry) => entry && !entry.startsWith('-'))?.trim() ?? '';
-  if (!id) {
-    throw new CliError(
-      'invalid_args',
-      'o8 packet scope <id> requires a packet id or lane id.',
-      EXIT.INVALID_ARGS,
-      'Example: o8 packet scope pkt-abc',
-    );
-  }
-  return id;
+async function resolveScopeId(rest: string[]): Promise<string> {
+  const explicit = rest.find((entry) => entry && !entry.startsWith('-'))?.trim();
+  if (explicit) return explicit;
+
+  // Mirror packet/info.ts: when no id is passed, auto-resolve from cwd.
+  const resolved = await resolveLaneFromCwd();
+  if (resolved) return resolved.laneId;
+
+  throw new CliError(
+    'invalid_args',
+    'o8 packet scope [id] needs a packet/lane id (or run from inside a packet worktree).',
+    EXIT.INVALID_ARGS,
+    'Example: o8 packet scope pkt-abc — or just `o8 packet scope` from `.cortex-worktrees/packet-<id>`.',
+  );
 }
 
 function printHumanScope(scope: PacketScope): void {
@@ -108,7 +112,7 @@ function printHumanScope(scope: PacketScope): void {
 }
 
 export async function runPacketScope(mode: OutputMode, rest: string[]): Promise<number> {
-  const id = parseScopeId(rest);
+  const id = await resolveScopeId(rest);
   const cfg = resolveConfig();
   const res = await apiFetch<PacketScope>(cfg, `/api/lanes/${encodeURIComponent(id)}/scope`);
   if (!res.data) {

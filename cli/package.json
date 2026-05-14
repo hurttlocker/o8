@@ -1,17 +1,42 @@
 {
   "name": "o8-cli",
-  "version": "0.0.0",
-  "description": "Agent-first CLI wrapper over the local o8 HTTP API.",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Agent-first CLI wrapper over the local o8 control plane (companion to /Applications/o8.app).",
   "type": "module",
   "bin": {
     "o8": "./dist/o8.mjs"
   },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "engines": {
-    "node": ">=22.0.0 <23.0.0"
+    "node": ">=22.0.0"
+  },
+  "keywords": [
+    "o8",
+    "cli",
+    "ai-agents",
+    "codex",
+    "orchestrator"
+  ],
+  "homepage": "https://github.com/hurttlocker/o8#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hurttlocker/cortex-ide.git",
+    "directory": "cli"
+  },
+  "bugs": {
+    "url": "https://github.com/hurttlocker/o8/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Marquise Hurtt",
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "node esbuild.config.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   }
 }

@@ -391,6 +391,28 @@ if (existsSync(DECOMPOSE_PROMPT_SRC)) {
   console.warn('⚠️  Missing decompose.md at', DECOMPOSE_PROMPT_SRC, '— pipeline will use inline fallback');
 }
 
+// ── Build + bundle the agent-facing CLI ──
+// Builds cli/dist/o8.mjs via the package's own esbuild config, then copies it
+// into out/server/bin/o8. The Tauri sidecar symlinks /usr/local/bin/o8 → that
+// path on first launch so the user (and dispatched workers) have `o8` on PATH.
+const CLI_BUILD = join(root, 'cli', 'esbuild.config.mjs');
+const CLI_OUTPUT = join(root, 'cli', 'dist', 'o8.mjs');
+const CLI_BIN_DIR = join(server, 'bin');
+const CLI_BIN_DST = join(CLI_BIN_DIR, 'o8');
+if (existsSync(CLI_BUILD)) {
+  console.log('   building cli bundle…');
+  execSync(`node "${CLI_BUILD}"`, { stdio: 'inherit', cwd: join(root, 'cli') });
+  if (!existsSync(CLI_OUTPUT)) {
+    console.error(`❌ CLI build did not produce ${CLI_OUTPUT}`);
+    process.exit(1);
+  }
+  mkdirSync(CLI_BIN_DIR, { recursive: true });
+  cpSync(CLI_OUTPUT, CLI_BIN_DST);
+  execSync(`chmod +x "${CLI_BIN_DST}"`);
+} else {
+  console.warn('⚠️  CLI build config missing — skipping `o8` cli bundle');
+}
+
 // ── Sanity check: every expected standalone bundle must exist ──
 // Belt-and-braces guard against future compile failures slipping through.
 const REQUIRED_BUNDLES = ['ws-server.mjs', 'operator-mcp-server.mjs', 'cortex-mcp-server.mjs'];

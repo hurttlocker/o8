@@ -9,7 +9,6 @@
  * If no match, fall back to packet-id extraction from the dir name.
  */
 
-import { sep } from 'node:path';
 import { apiFetch } from '../../api.js';
 import { CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
@@ -20,6 +19,7 @@ import {
   type OutputMode,
 } from '../../output.js';
 import { warnRuntimeDriftIfNeeded } from './runtime-drift.js';
+import { detectWorktree } from './worktree-resolve.js';
 
 interface Lane {
   id: string;
@@ -45,41 +45,11 @@ interface LaneEvent {
   timestamp: string;
 }
 
-interface WorktreeMatch {
-  worktreePath: string;
-  packetSlug: string;
-  layout: 'cortex-worktrees' | 'claude-worktrees';
-}
-
 interface PacketScopeRuntime {
   laneId: string;
   runtime: string;
   actualRuntime: string | null;
   worktreePath: string | null;
-}
-
-function detectWorktree(cwd: string): WorktreeMatch | null {
-  const parts = cwd.split(sep);
-  for (let i = parts.length - 1; i >= 1; i--) {
-    const prev = parts[i - 1];
-    const cur = parts[i];
-    if (!cur || !cur.startsWith('packet-')) continue;
-    if (prev === '.cortex-worktrees') {
-      return {
-        worktreePath: parts.slice(0, i + 1).join(sep),
-        packetSlug: cur.slice('packet-'.length),
-        layout: 'cortex-worktrees',
-      };
-    }
-    if (prev === 'worktrees' && parts[i - 2] === '.claude') {
-      return {
-        worktreePath: parts.slice(0, i + 1).join(sep),
-        packetSlug: cur.slice('packet-'.length),
-        layout: 'claude-worktrees',
-      };
-    }
-  }
-  return null;
 }
 
 export async function runPacketInfo(mode: OutputMode): Promise<number> {

@@ -33,7 +33,6 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({
         schema: 'o8/lane.touches/v1',
-        path: result.paths.join(','),
         paths: result.paths,
         packetId: result.packetId,
         laneId: result.laneId,
@@ -50,7 +49,6 @@ export async function GET(req: NextRequest) {
     const lanes = findLanesTouching(paths, { repo });
     return NextResponse.json({
       schema: 'o8/lane.touches/v1',
-      path: paths.join(','),
       paths,
       lanes,
     }, {
