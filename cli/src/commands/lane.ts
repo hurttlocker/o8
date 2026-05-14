@@ -22,8 +22,7 @@ interface LaneTouch {
 
 interface LaneTouchesResponse {
   schema: 'o8/lane.touches/v1';
-  path: string;
-  paths?: string[];
+  paths: string[];
   packetId?: string;
   laneId?: string;
   lanes: LaneTouch[];
@@ -107,7 +106,7 @@ export async function runLaneTouches(mode: OutputMode, rest: string[]): Promise<
   if (mode.human) {
     printHumanHeading(args.packet ? `lane touches for packet ${args.packet}` : 'lane touches');
     const lanes = payload.lanes ?? [];
-    const paths = payload.paths?.length ? payload.paths.join(', ') : payload.path;
+    const paths = payload.paths?.length ? payload.paths.join(', ') : '';
     process.stdout.write(`paths: ${paths || '(none)'}\n`);
     process.stdout.write(`matches: ${lanes.length}\n`);
     for (const lane of lanes) {

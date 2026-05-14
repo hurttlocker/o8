@@ -11,6 +11,7 @@ import {
   printJson,
   type OutputMode,
 } from '../../output.js';
+import { resolveLaneFromCwd } from './worktree-resolve.js';
 
 interface PacketTailBatch {
   schema: 'o8/packet.tail.batch/v1';
@@ -37,8 +38,8 @@ function parseSince(raw: string | null): number {
   return Math.floor(parsed);
 }
 
-function parseLogArgs(rest: string[]): PacketLogArgs {
-  let packetId = '';
+function parseLogArgs(rest: string[]): Omit<PacketLogArgs, 'packetId'> & { packetId: string | null } {
+  let packetId: string | null = null;
   let follow = false;
   let ndjson = false;
   let since = 0;
@@ -62,16 +63,24 @@ function parseLogArgs(rest: string[]): PacketLogArgs {
     }
   }
 
-  if (!packetId) {
-    throw new CliError(
-      'invalid_args',
-      'o8 packet log <id> requires a packet id.',
-      EXIT.INVALID_ARGS,
-      'Example: o8 packet log pkt-abc --follow --since 1710000000000',
-    );
-  }
-
   return { packetId, follow, ndjson, since };
+}
+
+async function resolvePacketIdForLog(rest: string[]): Promise<PacketLogArgs> {
+  const parsed = parseLogArgs(rest);
+  if (parsed.packetId) {
+    return { ...parsed, packetId: parsed.packetId };
+  }
+  const resolved = await resolveLaneFromCwd();
+  if (resolved) {
+    return { ...parsed, packetId: resolved.laneId };
+  }
+  throw new CliError(
+    'invalid_args',
+    'o8 packet log [id] needs a packet/lane id (or run from inside a packet worktree).',
+    EXIT.INVALID_ARGS,
+    'Example: o8 packet log pkt-abc --follow — or just `o8 packet log` from `.cortex-worktrees/packet-<id>`.',
+  );
 }
 
 async function fetchBatch(
@@ -143,7 +152,7 @@ async function followByWs(packetId: string, cursor: number, mode: OutputMode): P
 }
 
 export async function runPacketLog(mode: OutputMode, rest: string[]): Promise<number> {
-  const args = parseLogArgs(rest);
+  const args = await resolvePacketIdForLog(rest);
   const initial = await fetchBatch(args.packetId, args.since, false);
 
   if (!args.follow) {
