@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-14
 
+- `d1d2f042` feat: gate AI provider-billed paths behind in-app orchestrator toggle
 - `7c417f02` feat(cli): phase 3 polish + native shell bundling + npm-publish prep
 
 ## 2026-05-13
