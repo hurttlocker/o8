@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-13
 
+- `a717af60` feat: modernize workspace runtime reconnect banner
 - `98b54fce` feat: modernize stale-gateway alert in AgentPanel
 - `04fd4e64` feat: branch details launcher + modernized connection banner + chrome polish
 - `77d7f21d` feat: add packet mission tail stream [via-o8]
