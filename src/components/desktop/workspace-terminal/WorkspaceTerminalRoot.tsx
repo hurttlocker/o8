@@ -1,6 +1,7 @@
 'use client';
 
 import { forwardRef, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { RotateCcw } from '../lucide-shims';
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
 import { TabBar } from '@/components/desktop/workspace-terminal/TabBar';
@@ -83,7 +84,10 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         ) : null}
 
         {!controller.termWsConnected ? (
-          <div
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 32, mass: 0.6 }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -93,75 +97,82 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
               paddingBottom: 8,
               paddingLeft: 12,
               paddingRight: 12,
-              borderBottomWidth: 1,
-              borderBottomStyle: 'solid',
-              borderBottomColor: 'rgba(245, 158, 11, 0.16)',
-              background: 'rgba(245, 158, 11, 0.08)',
-              color: '#b45309',
+              borderBottom: '0.5px solid rgba(249, 115, 22, 0.22)',
+              background: 'var(--t-panel)',
+              backdropFilter: 'saturate(180%) blur(20px)',
+              WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+              color: 'var(--t-text)',
               fontSize: 12,
-              lineHeight: 1.45,
+              lineHeight: 1.4,
+              letterSpacing: '-0.005em',
               flexShrink: 0,
+              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
             }}
           >
+            <WorkspaceReconnectDot />
             <span style={{ flex: 1, minWidth: 0 }}>
-              Reconnecting to the workspace runtime. Saved tabs stay in place and sessions reattach automatically when the bridge returns.
+              <strong style={{ fontWeight: 600, color: 'var(--t-text)' }}>Reconnecting to workspace runtime</strong>
+              <span style={{ color: 'var(--t-text-muted)', fontWeight: 400 }}> · saved tabs stay in place, sessions reattach when the bridge returns</span>
             </span>
             {controller.activeTab?.kind === 'chat' && controller.activeCheckpoint ? (
-              <button
+              <motion.button
                 type="button"
                 onClick={() => controller.handleRestoreLatestCheckpoint(controller.activeTab!.id)}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                transition={{ type: 'spring', stiffness: 480, damping: 22, mass: 0.5 }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 4,
-                  borderWidth: 0,
-                  borderStyle: 'solid',
-                  borderColor: 'transparent',
-                  borderRadius: 999,
-                  background: 'rgba(37, 99, 235, 0.12)',
-                  color: '#1d4ed8',
+                  gap: 5,
+                  border: '0.5px solid rgba(37, 99, 235, 0.32)',
+                  borderRadius: 9,
+                  background: 'rgba(37, 99, 235, 0.10)',
+                  color: '#2563eb',
                   paddingTop: 4,
                   paddingBottom: 4,
-                  paddingLeft: 8,
-                  paddingRight: 8,
+                  paddingLeft: 10,
+                  paddingRight: 10,
                   cursor: 'pointer',
                   fontSize: 11,
-                  fontWeight: 700,
+                  fontWeight: 600,
+                  letterSpacing: '-0.005em',
                   fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                   flexShrink: 0,
                 }}
               >
                 <RotateCcw size={11} />
-                Restore latest checkpoint
-              </button>
+                Restore checkpoint
+              </motion.button>
             ) : null}
-            <button
+            <motion.button
               type="button"
               onClick={() => window.location.reload()}
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              transition={{ type: 'spring', stiffness: 480, damping: 22, mass: 0.5 }}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 4,
-                borderWidth: 0,
-                borderStyle: 'solid',
-                borderColor: 'transparent',
-                borderRadius: 999,
-                background: 'rgba(180, 83, 9, 0.12)',
-                color: '#92400e',
+                border: '0.5px solid rgba(249, 115, 22, 0.32)',
+                borderRadius: 9,
+                background: 'rgba(249, 115, 22, 0.10)',
+                color: '#f97316',
                 paddingTop: 4,
                 paddingBottom: 4,
-                paddingLeft: 8,
-                paddingRight: 8,
+                paddingLeft: 10,
+                paddingRight: 10,
                 cursor: 'pointer',
                 fontSize: 11,
-                fontWeight: 700,
+                fontWeight: 600,
+                letterSpacing: '-0.005em',
                 fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
                 flexShrink: 0,
               }}
             >
               Reload workspace
-            </button>
-          </div>
+            </motion.button>
+          </motion.div>
         ) : null}
 
         <TabBar
@@ -212,3 +223,30 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     );
   },
 );
+
+function WorkspaceReconnectDot() {
+  return (
+    <span style={{ position: 'relative', width: 10, height: 10, flexShrink: 0 }}>
+      <motion.span
+        aria-hidden
+        animate={{ scale: [1, 1.9, 1], opacity: [0.45, 0, 0.45] }}
+        transition={{ duration: 1.6, ease: 'easeOut', repeat: Infinity }}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 999,
+          background: '#f97316',
+        }}
+      />
+      <span
+        style={{
+          position: 'absolute',
+          inset: 1,
+          borderRadius: 999,
+          background: '#f97316',
+          boxShadow: '0 0 0 0.5px rgba(249, 115, 22, 0.55) inset',
+        }}
+      />
+    </span>
+  );
+}
