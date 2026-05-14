@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-14
 
+- `d3feecf1` feat: github intake dual-path
 - `d875c80a` feat: promote agent runtime CLI to effective tier 1 in Q&A cascade when in-app orchestrator is off (epic child 4)
 - `38f242db` feat: add agent runtime-orchestrator-session + wire auto-review dual-path (epic child 2)
 - `d1d2f042` feat: gate AI provider-billed paths behind in-app orchestrator toggle
