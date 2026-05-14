@@ -22,6 +22,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -29,6 +30,28 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+
+// ── Operator defaults gate (#1049, epic #1044) ────────────────────────────────
+//
+// Background hook spawns are gated on `inAppOrchestratorEnabled` to match the
+// in-app surfaces. The script runs outside Next.js so it can't
+// `import '@/lib/operator/defaults'` — we read the JSON file directly.
+
+function readInAppOrchestratorEnabled(): boolean {
+  const dataDir =
+    process.env.O8_DATA_DIR ||
+    process.env.CORTEX_IDE_DATA_DIR ||
+    path.join(os.homedir(), '.cortex-ide');
+  const defaultsPath = path.join(dataDir, 'operator-defaults.json');
+  try {
+    const raw = readFileSync(defaultsPath, 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed.inAppOrchestratorEnabled === true;
+  } catch {
+    // Missing or unreadable defaults file → treat as off (safe default).
+    return false;
+  }
+}
 
 // ── DB bootstrap (mirrors compact-facts.ts: direct better-sqlite3, no Drizzle) ─
 
@@ -40,23 +63,23 @@ function getDbPath(): string {
   return path.join(dataDir, 'cortex-ide.db');
 }
 
-// ── Claude Haiku CLI invocation ───────────────────────────────────────────────
+// ── Codex CLI invocation (#1049 — replaces claude --print haiku) ──────────────
 
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+const CODEX_MODEL = 'gpt-5.5';
 const CLI_TIMEOUT_MS = 30_000;
 
 /**
- * Resolve the `claude` binary via env override → which → login-shell probe.
+ * Resolve the `codex` binary via env override → which → login-shell probe.
  * Returns null if not found.
  */
-async function resolveClaudeBin(): Promise<string | null> {
-  for (const envKey of ['O8_CLAUDE_CODE_BIN', 'CLAUDE_BIN']) {
+async function resolveCodexBin(): Promise<string | null> {
+  for (const envKey of ['O8_CODEX_BIN', 'CODEX_BIN']) {
     const val = process.env[envKey];
     if (val) return val;
   }
 
   try {
-    const { stdout } = await execFileAsync('which', ['claude'], { timeout: 3_000 });
+    const { stdout } = await execFileAsync('which', ['codex'], { timeout: 3_000 });
     const found = stdout.trim();
     if (found) return found;
   } catch {
@@ -66,7 +89,7 @@ async function resolveClaudeBin(): Promise<string | null> {
   const userShell = process.env.SHELL ?? 'zsh';
   for (const sh of [userShell, 'zsh', 'bash', 'sh']) {
     try {
-      const { stdout } = await execFileAsync(sh, ['-l', '-c', 'command -v claude'], {
+      const { stdout } = await execFileAsync(sh, ['-l', '-c', 'command -v codex'], {
         timeout: 10_000,
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       });
@@ -79,63 +102,51 @@ async function resolveClaudeBin(): Promise<string | null> {
   return null;
 }
 
+/**
+ * Extract the final assistant text from a codex `exec --json` stream. Codex
+ * emits the reply as either `item.completed` with `item.type='agent_message'`
+ * and `item.text` (codex-cli 0.130.0+), or `event_msg` with
+ * `payload.type='agent_message'` and `payload.message` (legacy). Both shapes
+ * accepted — mirrors the parser in src/lib/lane/codex-orchestrator-session.ts.
+ */
 function extractResultText(output: string): string {
   const lines = output.split('\n').filter(Boolean);
+  let last = '';
   for (const line of lines) {
     try {
       const evt = JSON.parse(line) as Record<string, unknown>;
-      if (evt['type'] === 'result' && typeof evt['result'] === 'string') {
-        return evt['result'];
+      const item = evt.item as Record<string, unknown> | undefined;
+      if (evt.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') {
+        last = item.text;
+        continue;
+      }
+      const payload = evt.payload as Record<string, unknown> | undefined;
+      if (evt.type === 'event_msg' && payload?.type === 'agent_message' && typeof payload.message === 'string') {
+        last = payload.message;
+        continue;
       }
     } catch {
-      // not JSON
+      // not JSON / partial line
     }
   }
-  // Fallback: stitch assistant text blocks.
-  const parts: string[] = [];
-  for (const line of lines) {
-    try {
-      const evt = JSON.parse(line) as Record<string, unknown>;
-      if (
-        evt['type'] === 'assistant' &&
-        typeof evt['message'] === 'object' &&
-        evt['message'] !== null
-      ) {
-        const content = (evt['message'] as Record<string, unknown>)['content'];
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (
-              typeof block === 'object' &&
-              block !== null &&
-              (block as Record<string, unknown>)['type'] === 'text' &&
-              typeof (block as Record<string, unknown>)['text'] === 'string'
-            ) {
-              parts.push((block as Record<string, unknown>)['text'] as string);
-            }
-          }
-        }
-      }
-    } catch {
-      // not JSON
-    }
-  }
-  return parts.join('');
+  return last;
 }
 
-async function callHaikuCli(claudeBin: string, prompt: string): Promise<string> {
+async function callCodexCli(codexBin: string, prompt: string): Promise<string> {
   const cliArgs = [
-    '--print',
-    '--verbose',
-    '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--model', HAIKU_MODEL,
+    'exec',
+    '--json',
+    '--skip-git-repo-check',
+    '-s', 'read-only',
+    '-c', `model=${CODEX_MODEL}`,
+    '-c', 'model_reasoning_effort=medium',
   ];
 
   const cwd = os.tmpdir();
   const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' };
 
   return new Promise<string>((resolve, reject) => {
-    const child = spawn(claudeBin, cliArgs, {
+    const child = spawn(codexBin, cliArgs, {
       cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -311,9 +322,17 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // ── 1. Check if claude CLI is available ──────────────────────────────────
-  const claudeBin = await resolveClaudeBin();
-  if (!claudeBin) {
+  // ── 0. Operator-defaults gate (#1049, epic #1044) ─────────────────────────
+  // Even though this hook now uses Codex (free for Codex sub users) instead
+  // of Anthropic-billing Haiku, we still gate on `inAppOrchestratorEnabled`
+  // so users with NO subs at all don't spawn an LLM on every commit.
+  if (!readInAppOrchestratorEnabled()) {
+    process.exit(0);
+  }
+
+  // ── 1. Check if codex CLI is available ───────────────────────────────────
+  const codexBin = await resolveCodexBin();
+  if (!codexBin) {
     // Silent exit — hook must not block or error if no CLI installed.
     process.exit(0);
   }
@@ -350,11 +369,11 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // ── 3. Call Haiku CLI ────────────────────────────────────────────────────
+  // ── 3. Call Codex CLI ────────────────────────────────────────────────────
   const prompt = buildPrompt(sha, message, files);
   let rawOutput: string;
   try {
-    rawOutput = await callHaikuCli(claudeBin, prompt);
+    rawOutput = await callCodexCli(codexBin, prompt);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[commit-distill] CLI call failed:', msg.slice(0, 300));
