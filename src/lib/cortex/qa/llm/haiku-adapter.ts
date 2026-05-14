@@ -164,6 +164,19 @@ export interface CallHaikuOptions {
 export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 8_000;
 
+  // June 15 2026 — Haiku CLI invokes `claude --print` which bills against the
+  // user's Agent SDK credit pool. Gated behind the same toggle as the in-app
+  // orchestrator chat (Settings → Operator Defaults → 07). When off, throw
+  // so the classifier/composer cascade falls through to Codex CLI →
+  // OpenRouter → Flash → heuristic. Importing dynamically because this
+  // adapter is loaded under `import 'server-only'` and the operator defaults
+  // module is also server-only — the dynamic import keeps the dependency
+  // graph one-way at compile time.
+  const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
+  if (!resolveInAppOrchestratorEnabledSync()) {
+    throw new Error('[qa][haiku] disabled by operator setting (inAppOrchestratorEnabled=false)');
+  }
+
   const claudeBin = await resolveClaudeBin();
   if (!claudeBin) {
     throw new Error('[qa][haiku] claude CLI not found on PATH or login shell');

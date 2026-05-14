@@ -59,6 +59,16 @@ export interface OperatorDefaults {
    * its OpenRouter Sonnet 4.6 path either way.
    */
   classAComposer: ClassAComposer;
+  /**
+   * In-app orchestrator chat (the assistant panel that spawns `claude -p`).
+   * Off by default — after Anthropic's June 15 2026 pricing change, every
+   * turn bills against the user's Agent SDK credit pool ($20-$200/mo cap by
+   * plan). The recommended path is to talk to Claude in Claude Code TUI or
+   * Claude Desktop and let it operate o8 via the operator MCP server, which
+   * keeps everything on the unlimited interactive pool. When this toggle is
+   * on the chat works as before with a banner warning about SDK billing.
+   */
+  inAppOrchestratorEnabled: boolean;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -79,6 +89,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   defaultDispatchRuntime: 'codex',
   experimentalOpencode: false,
   classAComposer: 'auto',
+  inAppOrchestratorEnabled: false,
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -184,6 +195,13 @@ function envClassAComposer(): ClassAComposer | null {
   return null;
 }
 
+function envInAppOrchestratorEnabled(): boolean | null {
+  const raw = process.env.O8_IN_APP_ORCHESTRATOR_ENABLED;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 // ── File helpers ──
 
 interface StoredOperatorDefaults {
@@ -197,6 +215,7 @@ interface StoredOperatorDefaults {
   defaultDispatchRuntime?: OrchestratorRuntime;
   experimentalOpencode?: boolean;
   classAComposer?: ClassAComposer;
+  inAppOrchestratorEnabled?: boolean;
 }
 
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
@@ -247,6 +266,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (isClassAComposer(stored.classAComposer)) {
     result.classAComposer = stored.classAComposer;
   }
+  if (typeof stored.inAppOrchestratorEnabled === 'boolean') {
+    result.inAppOrchestratorEnabled = stored.inAppOrchestratorEnabled;
+  }
   return result;
 }
 
@@ -263,6 +285,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envRuntime = envDefaultDispatchRuntime();
   const envOpencode = envExperimentalOpencode();
   const envComposer = envClassAComposer();
+  const envInApp = envInAppOrchestratorEnabled();
 
   const resolved: OperatorDefaults = {
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
@@ -277,6 +300,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     defaultDispatchRuntime: envRuntime ?? fileValues.defaultDispatchRuntime ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchRuntime,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
+    inAppOrchestratorEnabled:
+      envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -292,6 +317,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntime !== undefined ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
+    inAppOrchestratorEnabled:
+      envInApp !== null ? 'env' : fileValues.inAppOrchestratorEnabled !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -385,6 +412,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.classAComposer = update.classAComposer;
   }
+  if (update.inAppOrchestratorEnabled !== undefined) {
+    stored.inAppOrchestratorEnabled = Boolean(update.inAppOrchestratorEnabled);
+  }
 
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
@@ -422,4 +452,8 @@ export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime {
 
 export function resolveExperimentalOpencodeSync(): boolean {
   return getOperatorDefaultsSync().values.experimentalOpencode;
+}
+
+export function resolveInAppOrchestratorEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.inAppOrchestratorEnabled;
 }

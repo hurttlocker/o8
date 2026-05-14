@@ -104,14 +104,14 @@ export async function POST(request: Request) {
 
     switch (runtime) {
       case 'claude-code': {
-        const cliModel = CLAUDE_MODEL_MAP[modelKey] ?? 'sonnet';
-        cmd = 'claude';
-        args = ['--print', '--output-format', 'stream-json', '--verbose', '--model', cliModel];
-        if (effort && VALID_EFFORTS.has(effort)) {
-          args.push('--effort', effort);
-        }
-        args.push(prompt);
-        break;
+        // Removed June 2026 — Anthropic's pricing change billed every
+        // `claude --print` against the user's Agent SDK credit pool. We don't
+        // want operators to accidentally route chat through the metered pool.
+        // Operators who want Claude reach it directly via Claude Code TUI or
+        // Claude Desktop, which stays on the unlimited interactive pool.
+        return NextResponse.json({
+          error: 'claude-code CLI is disabled. Use the LLM proxy with your ANTHROPIC_API_KEY, or talk to Claude in Claude Code / Desktop directly.',
+        }, { status: 410 });
       }
       case 'codex': {
         const cliModel = CODEX_MODEL_MAP[modelKey] ?? 'gpt-5.4';

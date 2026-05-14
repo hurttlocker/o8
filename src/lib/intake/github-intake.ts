@@ -95,6 +95,17 @@ export async function processAssignedIssue(
     return { ok: true, note: 'Already has a packet.' };
   }
 
+  // June 15 2026 — GitHub intake planning spawns `claude -p`, which bills
+  // against the operator's Agent SDK credit pool. Gated behind the in-app
+  // orchestrator toggle. When off, return a soft skip so the caller can
+  // surface a clear "intake skipped — enable in-app orchestrator to plan
+  // automatically" message instead of failing.
+  const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
+  if (!resolveInAppOrchestratorEnabledSync()) {
+    console.log(`${LOG_PREFIX} Skipped intake for #${issue.number} — inAppOrchestratorEnabled is off (avoids SDK credit usage)`);
+    return { ok: false, note: 'In-app orchestrator is off — enable it in Settings → Operator Defaults to auto-plan from GitHub issues.' };
+  }
+
   // Send to orchestrator (Claude Code) for planning
   const { ensureOrchestratorSession, sendToOrchestrator } = await import('@/lib/lane/orchestrator-session');
   const session = ensureOrchestratorSession(repoPath);

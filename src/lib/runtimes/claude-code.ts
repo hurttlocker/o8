@@ -1233,204 +1233,30 @@ export const claudeCodeRuntime: AgentRuntime = {
     return result.slice(-limit);
   },
 
-  async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
-    try {
-      const startedAtMs = Date.now();
-      const claudeBin = await resolveClaudeBin();
-      const launchId = `launched-${Date.now()}`;
-      const projectPaths = Array.from(new Set(
-        [opts.worktreePath, opts.cwd]
-          .filter((value): value is string => Boolean(value))
-          .map((value) => path.resolve(value)),
-      ));
-      const knownSessionIds = new Map(
-        await Promise.all(
-          projectPaths.map(async (projectPath) => [projectPath, await listProjectSessionIds(projectPath)] as const),
-        ),
-      );
-      const captureDir = await mkdtemp(path.join(os.tmpdir(), 'cortex-claude-launch-'));
-      const stdoutPath = path.join(captureDir, 'stdout.jsonl');
-      const stderrPath = path.join(captureDir, 'stderr.log');
-      // #608 — claude-code now runs inside an o8-managed worktree (same path
-      // as Codex) so the pre-launch rebase happens before the agent spawns.
-      // The CLI treats `cwd` as its working directory, so we no longer forward
-      // `--worktree`. `opts.worktreeFlag` is intentionally ignored: legacy
-      // in-flight lanes at deploy time may still have it set on their payload,
-      // but the managed worktree path in `opts.cwd` is authoritative.
-      const cliArgs = [
-        '-p', '--print',
-        '--dangerously-skip-permissions',
-        '--output-format', 'stream-json',
-        '--verbose',
-        opts.prompt,
-      ];
-      const bridgeSessionName = tmuxSessionName('cc', launchId);
-      const shellCmd = `${quoteShellArg(claudeBin)} ${cliArgs.map(quoteShellArg).join(' ')} | tee ${quoteShellArg(stdoutPath)} 2>${quoteShellArg(stderrPath)}`;
-
-      try {
-        await spawnBridgeTerminalSession({
-          sessionName: bridgeSessionName,
-          shellCommand: shellCmd,
-          cwd: opts.cwd,
-          env: { FORCE_COLOR: '0', NO_COLOR: '1' },
-        });
-        const sessionId = await waitForLaunchSessionId(stdoutPath, projectPaths, knownSessionIds);
-        if (sessionId) {
-          registerRuntimeTerminalSession(`claude-code:${sessionId}`, {
-            sessionName: bridgeSessionName,
-            runtime: 'claude-code',
-            cwd: opts.cwd,
-          });
-          monitorUsageDispatch({
-            dispatchKey: `claude-code:${sessionId}:${startedAtMs}`,
-            runtime: 'claude-code',
-            laneId: opts.laneId,
-            sessionKey: `claude-code:${sessionId}`,
-            model: opts.model,
-            startedAtMs,
-            awaitCompletion: async () => waitForClaudeRunToFinish(sessionId, startedAtMs),
-          });
-          return {
-            ok: true,
-            note: `Claude Code session launched in terminal:${bridgeSessionName} at ${shortenPath(opts.cwd)}`,
-            sessionKey: `claude-code:${sessionId}`,
-          };
-        }
-        return {
-          ok: false,
-          note: `Claude Code launched in terminal:${bridgeSessionName}, but Cortex could not resolve the persistent session id.`,
-        };
-      } catch {
-        // bridge spawn failed — fall through to detached spawn
-      }
-
-      // Fallback: detached spawn using resolved binary path
-      const stdoutFd = openSync(stdoutPath, 'a');
-      const stderrFd = openSync(stderrPath, 'a');
-      try {
-        const child = spawn(claudeBin, cliArgs, {
-          cwd: opts.cwd,
-          stdio: ['ignore', stdoutFd, stderrFd],
-          detached: true,
-          env: { ...process.env, FORCE_COLOR: '0', O8_MANAGED_SESSION: '1' },
-        });
-        child.unref();
-      } finally {
-        closeSync(stdoutFd);
-        closeSync(stderrFd);
-      }
-
-      const sessionId = await waitForLaunchSessionId(stdoutPath, projectPaths, knownSessionIds);
-      if (!sessionId) {
-        return {
-          ok: false,
-          note: `Claude Code launched in ${shortenPath(opts.cwd)}, but Cortex could not resolve the persistent session id.`,
-        };
-      }
-
-      monitorUsageDispatch({
-        dispatchKey: `claude-code:${sessionId}:${startedAtMs}`,
-        runtime: 'claude-code',
-        laneId: opts.laneId,
-        sessionKey: `claude-code:${sessionId}`,
-        model: opts.model,
-        startedAtMs,
-        awaitCompletion: async () => waitForClaudeRunToFinish(sessionId, startedAtMs),
-      });
-
-      return {
-        ok: true,
-        note: `Claude Code session launched in ${shortenPath(opts.cwd)}`,
-        sessionKey: `claude-code:${sessionId}`,
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        note: `Failed to launch Claude Code: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
+  async launch(_opts: LaunchOptions): Promise<RuntimeActionResult> {
+    // Claude Code dispatch is retired (memory: o8_no_claude_dispatch).
+    // Anthropic's June 15 2026 pricing change makes every `claude -p` turn
+    // bill against the user's Agent SDK credit pool ($20-$200/mo cap) — and
+    // we never wanted Claude in the workhorse seat anyway. The adapter still
+    // ships for read-only discovery of user-launched Claude Code sessions
+    // (their interactive subscription pool, unaffected). Dispatch packets
+    // route through Codex / Gemini / opencode instead.
+    return {
+      ok: false,
+      note: 'Claude Code dispatch is disabled. Use Codex, Gemini, or opencode for packet dispatch — Claude orchestrates from your own Claude Code or Desktop client via the operator MCP server.',
+    };
   },
 
-  /**
-   * TODO(turn-dispatcher): migrate via Wave 2b.
-   * Claude Code uses mode=['thread-resume'] — resolveThreadId() will resolve the
-   * session JSONL project path and return the session id (used for --continue or
-   * --resume fallback). The --continue vs --resume flag logic currently embedded
-   * here will move into the DispatchExecutor.spawn() implementation.
-   * Until then this method remains the authoritative resume path for Claude Code.
-   */
-  async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
-    const startedAtMs = Date.now();
-    const claudeBin = await resolveClaudeBin();
-    let sessionId = sessionKey.replace('claude-code:', '');
-
-    // If sessionId is a synthetic live-PID key, try to resolve to a real session ID
-    // by finding the most recent JSONL in the project dir that matches the PID's CWD
-    if (sessionId.startsWith('live-')) {
-      const pid = Number(sessionId.replace('live-', ''));
-      const resolvedSessionId = await resolveLiveSessionIdFromPid(pid);
-      if (resolvedSessionId) {
-        sessionId = resolvedSessionId;
-      }
-    }
-
-    // Resolve the CWD for this session so we can use --continue (which is more
-    // reliable than --resume <id> — the latter requires the session to be in
-    // Claude's internal conversation store, which has different retention)
-    const sessionProject = await resolveSessionProjectPath(sessionId);
-    const sessionCwd = sessionProject?.cwd ?? sessionProject?.projectPath;
-    const baseline: UsageSnapshot | null = sessionProject?.jsonlPath
-      ? await readClaudeUsageSnapshot(sessionProject.jsonlPath).catch(() => null)
-      : null;
-
-    // Use --continue with the correct CWD (picks up most recent conversation
-    // in that directory). Falls back to --resume <id> if CWD unknown.
-    const cliArgs = sessionCwd
-      ? [
-          '-p', '--print',
-          '--continue',
-          '--dangerously-skip-permissions',
-          '--output-format', 'stream-json',
-          '--verbose',
-          message,
-        ]
-      : [
-          '-p', '--print',
-          '--resume', sessionId,
-          '--dangerously-skip-permissions',
-          '--output-format', 'stream-json',
-          '--verbose',
-          message,
-        ];
-
-    const spawnCwd = sessionCwd ?? process.env.HOME ?? '/tmp';
-
-    try {
-      // Resume must start a fresh Claude CLI turn every time. Reusing a dead
-      // tmux session name can silently no-op on later sends, so resume runs
-      // detached instead of through the tmux session helper.
-      await spawnDetached(claudeBin, cliArgs, spawnCwd);
-      monitorUsageDispatch({
-        dispatchKey: `claude-code:${sessionId}:${startedAtMs}`,
-        runtime: 'claude-code',
-        sessionKey: `claude-code:${sessionId}`,
-        model: baseline?.model ?? null,
-        startedAtMs,
-        baseline,
-        awaitCompletion: async () => waitForClaudeRunToFinish(sessionId, startedAtMs),
-      });
-
-      return {
-        ok: true,
-        note: `Message sent to Claude Code session${sessionCwd ? ` in ${shortenPath(sessionCwd)}` : ''}.`,
-        sessionKey,
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        note: `Failed to resume Claude Code session: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
+  async resume(_sessionKey: string, _message: string): Promise<RuntimeActionResult> {
+    // Same rationale as launch — `claude -p`/`claude --continue` bills the
+    // Agent SDK pool after Anthropic's June 15 2026 change, and the runtime
+    // is retired from the dispatch picker. Discovery + transcript reads
+    // remain so the operator can still see in-flight user-driven Claude
+    // Code sessions on the desktop SessionVisualizer.
+    return {
+      ok: false,
+      note: 'Claude Code resume is disabled. Continue the conversation in your own Claude Code client; o8 will pick up the updated transcript via JSONL discovery.',
+    };
   },
 
   async interrupt(sessionKey: string): Promise<RuntimeActionResult> {
