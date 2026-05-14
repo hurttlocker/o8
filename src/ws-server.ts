@@ -99,6 +99,7 @@ import {
 } from './lib/supervisor/silent-exit-detector';
 import {
   resolveHealBotEnabledSync,
+  resolveInAppOrchestratorEnabledSync,
   resolveSupervisorAutoEscalateSync,
 } from './lib/operator/defaults';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
@@ -2106,6 +2107,30 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
+
+  // June 15 2026 — Anthropic split paid plans into an interactive pool and a
+  // metered Agent SDK credit pool. `claude -p` (what this handler spawns)
+  // bills against the SDK pool. Off by default — operators talk to Claude in
+  // Claude Code / Claude Desktop and let it drive o8 via the operator MCP
+  // server, which keeps everything on the unlimited interactive pool. Toggle
+  // lives in Settings → Operator Defaults.
+  if (!resolveInAppOrchestratorEnabledSync()) {
+    sendRaw(client, JSON.stringify({
+      channel: 'orchestrator',
+      event: 'output',
+      data: {
+        repoPath,
+        thinking: false,
+        text: 'In-app orchestrator chat is off. After Anthropic\'s June 15 pricing change, each turn here would draw from your $20–$200/mo Agent SDK credit pool. Enable it in Settings → Operator Defaults (uses SDK billing) — or drive o8 from Claude Code / Claude Desktop via the operator MCP server, which stays on the unlimited interactive pool.',
+      },
+    }));
+    sendRaw(client, JSON.stringify({
+      channel: 'orchestrator',
+      event: 'status',
+      data: { status: 'idle', repoPath },
+    }));
+    return;
+  }
 
   // Permission mode travels with the user message. Defaults to 'full' to
   // match legacy behavior for clients that haven't been updated yet.

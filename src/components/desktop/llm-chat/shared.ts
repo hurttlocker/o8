@@ -179,11 +179,11 @@ export interface SlashCommandOption {
 
 /** Models available per CLI runtime — the actual models each CLI supports */
 export const CLI_RUNTIME_MODELS: Record<string, ModelOption[]> = {
-  'claude-code': [
-    { id: 'cli:claude-code:opus', label: 'Opus 4.6', provider: 'anthropic', color: '#e07a3a', description: 'Most capable', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: true, defaultEffort: 'max' },
-    { id: 'cli:claude-code:sonnet', label: 'Sonnet 4.6', provider: 'anthropic', color: '#e07a3a', description: 'Fast + smart', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: true, defaultEffort: 'high' },
-    { id: 'cli:claude-code:haiku', label: 'Haiku 4.5', provider: 'anthropic', color: '#e07a3a', description: 'Instant', backend: 'cli', cliRuntime: 'claude-code', supportsThinking: false },
-  ],
+  // claude-code CLI rows removed June 2026. Anthropic's pricing change bills
+  // every `claude --print` against the user's Agent SDK credit pool — we
+  // route Claude through the LLM proxy (user's ANTHROPIC_API_KEY) or the
+  // operator MCP server (user's own Claude Code / Desktop session) instead.
+  'claude-code': [],
   codex: [
     { id: 'cli:codex:gpt-5.4', label: 'GPT-5.4', provider: 'openai', color: '#10a37f', description: 'Latest flagship', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
     { id: 'cli:codex:o4-mini', label: 'o4-mini', provider: 'openai', color: '#10a37f', description: 'Fast reasoning', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },

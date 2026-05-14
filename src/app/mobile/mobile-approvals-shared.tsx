@@ -171,11 +171,9 @@ export const RISK_COLORS: Record<string, string> = {
   low: '#22c55e',
 };
 
-/** CLI-backed models — use installed runtimes, no API key needed */
+/** CLI-backed models — use installed runtimes, no API key needed.
+ *  claude-code rows removed June 2026 (Anthropic Agent SDK credit pool change). */
 export const CLI_MODELS: ModelOption[] = [
-  { id: 'cli:claude-code:opus', label: 'Opus 4.6', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code', defaultEffort: 'max' },
-  { id: 'cli:claude-code:sonnet', label: 'Sonnet 4.6', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code', defaultEffort: 'high' },
-  { id: 'cli:claude-code:haiku', label: 'Haiku 4.5', provider: 'anthropic', description: 'Claude Code', backend: 'cli', cliRuntime: 'claude-code' },
   { id: 'cli:codex:gpt-5.4', label: 'GPT-5.4', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
   { id: 'cli:codex:o4-mini', label: 'o4-mini', provider: 'openai', description: 'Codex', backend: 'cli', cliRuntime: 'codex' },
   { id: 'cli:gemini:gemini-3.1-pro', label: 'Gemini 3.1 Pro', provider: 'google', description: 'Gemini CLI', backend: 'cli', cliRuntime: 'gemini' },
@@ -191,7 +189,7 @@ export const API_MODELS: ModelOption[] = [
 
 export const AVAILABLE_MODELS: ModelOption[] = [...CLI_MODELS, ...API_MODELS];
 
-export const DEFAULT_MOBILE_CHAT_MODEL = 'cli:claude-code:sonnet';
+export const DEFAULT_MOBILE_CHAT_MODEL = 'cli:codex:gpt-5.4';
 export const MOBILE_CHAT_STORAGE_KEY = 'o8-mobile-chat-tab';
 export const MOBILE_CHAT_MODEL_STORAGE_KEY = 'o8-mobile-chat-model';
 export const MOBILE_EFFORT_STORAGE_KEY = 'o8-mobile-effort';
