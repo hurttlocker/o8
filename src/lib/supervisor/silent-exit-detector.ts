@@ -140,6 +140,16 @@ async function isOwnedSessionAlive(
 ): Promise<boolean | undefined> {
   const run = await readOwnedActiveRun(surfaceId, marker, root);
   if (!run) return false;
+  // F44 — when session.json exists but `activeRun` is cleared (the runtime
+  // store does this when the recorded pid dies, see owned-session/store.ts
+  // line 253), readOwnedActiveRun returns `{}`. That's not "I can't tell" —
+  // it's "session was definitively cleared." Promote to false so the
+  // silent-exit triage runs and a clean-exit-with-diff lane graduates to
+  // `reviewing`. Without this, F44 lanes stayed `running` for 45+ min after
+  // Codex finished.
+  if (run.tmuxSession === undefined && run.pid === undefined) {
+    return false;
+  }
   // Trust the tmux/bridge session first — it survives `zsh -l -c CMD` exec-ing
   // into the CLI, where the wrapper pid is replaced by the child pid and our
   // stored pid goes stale. If tmux exists AND is dead, we know the session is
@@ -149,8 +159,9 @@ async function isOwnedSessionAlive(
   }
   // No tmux session recorded (e.g. bridge failed to spawn) — fall back to pid.
   if (isPidAlive(run.pid)) return true;
-  // pid is gone AND no tmux to confirm — can't tell. Return undefined so the
-  // caller conservatively bails rather than archiving a running session.
+  // pid was set but is now dead, with no tmux to confirm — bail rather than
+  // miscategorize. The store will clear activeRun on its next pass and the
+  // case above will then trigger the silent-exit triage.
   return undefined;
 }
 
