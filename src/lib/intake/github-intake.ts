@@ -95,29 +95,44 @@ export async function processAssignedIssue(
     return { ok: true, note: 'Already has a packet.' };
   }
 
-  // June 15 2026 — GitHub intake planning spawns `claude -p`, which bills
-  // against the operator's Agent SDK credit pool. Gated behind the in-app
-  // orchestrator toggle. When off, return a soft skip so the caller can
-  // surface a clear "intake skipped — enable in-app orchestrator to plan
-  // automatically" message instead of failing.
+  // Dual-path routing (epic #1044 child 5): the in-app orchestrator toggle
+  // selects which CLI does the planning.
+  //   - toggle OFF (default) → Codex GPT-5.5 xhigh plans (no SDK draw, free
+  //     for ChatGPT Plus / Codex sub users).
+  //   - toggle ON              → Claude Opus 4.7 plans (existing behavior;
+  //     bills against the user's Agent SDK credit pool).
+  // Intake only needs a text response that contains a JSON code block — no
+  // MCP tools are called by the orchestrator in this flow, so Codex has full
+  // feature parity with Claude here (unlike auto-review, which still needs
+  // MCP for approval-card creation per #1045).
   const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-  if (!resolveInAppOrchestratorEnabledSync()) {
-    console.log(`${LOG_PREFIX} Skipped intake for #${issue.number} — inAppOrchestratorEnabled is off (avoids SDK credit usage)`);
-    return { ok: false, note: 'In-app orchestrator is off — enable it in Settings → Operator Defaults to auto-plan from GitHub issues.' };
-  }
+  const useClaudeOrchestrator = resolveInAppOrchestratorEnabledSync();
 
-  // Send to orchestrator (Claude Code) for planning
-  const { ensureOrchestratorSession, sendToOrchestrator } = await import('@/lib/lane/orchestrator-session');
-  const session = ensureOrchestratorSession(repoPath);
   const prompt = buildPlanningPrompt(issue, repoFullName);
-
   let fullText = '';
+
+  console.log(
+    `${LOG_PREFIX} Planning issue #${issue.number} via ${useClaudeOrchestrator ? 'Claude (toggle on, SDK billing)' : 'Codex GPT-5.5 xhigh (default)'}`,
+  );
+
   try {
-    await sendToOrchestrator(session, prompt, (event) => {
-      if (event.type === 'text') {
-        fullText += event.text;
-      }
-    });
+    if (useClaudeOrchestrator) {
+      const { ensureOrchestratorSession, sendToOrchestrator } = await import('@/lib/lane/orchestrator-session');
+      const session = ensureOrchestratorSession(repoPath);
+      await sendToOrchestrator(session, prompt, (event) => {
+        if (event.type === 'text') {
+          fullText += event.text;
+        }
+      });
+    } else {
+      const { ensureCodexOrchestratorSession, sendToCodexOrchestrator } = await import('@/lib/lane/codex-orchestrator-session');
+      const session = ensureCodexOrchestratorSession(repoPath);
+      await sendToCodexOrchestrator(session, prompt, (event) => {
+        if (event.type === 'text') {
+          fullText += event.text;
+        }
+      });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Orchestrator failed';
     console.error(`${LOG_PREFIX} Orchestrator planning failed for #${issue.number}: ${message}`);
