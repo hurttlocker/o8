@@ -4387,8 +4387,18 @@ async function bootstrapWsServer() {
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
     startWorktreeReaper();
     startLaneZombieReaper();
-    if (resolveHealBotEnabledSync()) {
+    // Heal-bot AND-gates two toggles (epic #1044 / follow-up #1048):
+    //   1. `healBotEnabled` — existing toggle, "do you want auto-fix at all"
+    //   2. `inAppOrchestratorEnabled` — added in v0.1.138, "do you have any
+    //      LLM sub at all". Heal-bot used to spawn `claude -p` regardless of
+    //      the SDK toggle, silently draining Anthropic credits on every
+    //      failed lane. Even after the v0.1.138 swap to Codex, we keep the
+    //      gate so users with NO subs don't trigger background LLM calls.
+    const inAppOrchestratorOn = resolveInAppOrchestratorEnabledSync();
+    if (resolveHealBotEnabledSync() && inAppOrchestratorOn) {
       stopHealBotLoop = startHealBot();
+    } else if (!inAppOrchestratorOn) {
+      console.log('[heal-bot] Start skipped — inAppOrchestratorEnabled is off');
     } else {
       console.log('[heal-bot] Start skipped — disabled via operator defaults');
     }

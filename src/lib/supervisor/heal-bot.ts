@@ -284,54 +284,78 @@ function buildHealPrompt(
   ].filter(Boolean).join('\n');
 }
 
-async function runHealBotClaude(cwd: string, prompt: string) {
-  try {
-    const { stdout, stderr } = await execFileAsync('claude', [
-      '-p',
-      '--print',
-      '--dangerously-skip-permissions',
-      '--append-system-prompt',
-      HEAL_BOT_SYSTEM_PROMPT,
-      prompt,
-    ], {
-      cwd,
-      timeout: HEAL_BOT_TIMEOUT_MS,
-      maxBuffer: COMMAND_MAX_BUFFER,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-    });
-    return {
-      ok: true,
-      stdout: stdout.trim(),
-      stderr: stderr.trim(),
-      timedOut: false,
-      exitReason: null as string | null,
-    };
-  } catch (error) {
-    const execError = error as {
-      stdout?: string | Buffer;
-      stderr?: string | Buffer;
-      message?: string;
-      signal?: NodeJS.Signals | null;
-      killed?: boolean;
-      code?: string | number | null;
-    };
-    const timedOut = execError.signal === 'SIGTERM' && /timed out/i.test(execError.message ?? '');
-    return {
-      ok: false,
-      stdout: bufferToString(execError.stdout).trim(),
-      stderr: bufferToString(execError.stderr).trim(),
-      timedOut,
-      exitReason: timedOut
-        ? `heal-bot timed out after ${Math.floor(HEAL_BOT_TIMEOUT_MS / 60_000)} minutes`
-        : execError.message?.trim() || (execError.code ? `claude exited with ${String(execError.code)}` : 'claude exited unsuccessfully'),
-    };
-  }
-}
+/**
+ * Spawn Codex GPT-5.5 high to attempt the heal. Replaces the previous
+ * `claude -p --print` path (epic #1044, follow-up #1048). The shape of the
+ * return value is preserved so the caller (`healInboxItem`) keeps working
+ * unchanged — the orchestrator-side verdict still gets detected via HEAD
+ * diff + `parseGiveUpReason(stdout)` + typecheck.
+ *
+ * Codex doesn't expose `--append-system-prompt`, so we prepend the system
+ * prompt to the user prompt. The 5-minute heal budget is enforced via an
+ * AbortController fed into `sendToCodexOrchestrator`'s built-in abort path.
+ * Each call gets a fresh threadId — heal attempts must NOT resume across
+ * each other.
+ */
+async function runHealBotCodex(cwd: string, prompt: string) {
+  const { ensureCodexOrchestratorSession, sendToCodexOrchestrator } = await import('@/lib/lane/codex-orchestrator-session');
+  const session = ensureCodexOrchestratorSession(cwd);
+  // Each heal attempt starts a fresh codex thread — no resume. The session
+  // cache keys by cwd hash, so we explicitly null the threadId to defeat
+  // accidental resumption across consecutive attempts on the same worktree.
+  session.threadId = null;
 
-function bufferToString(value?: string | Buffer): string {
-  if (typeof value === 'string') return value;
-  if (value instanceof Buffer) return value.toString('utf-8');
-  return '';
+  const fullPrompt = `${HEAL_BOT_SYSTEM_PROMPT}\n\n${prompt}`;
+  let stdout = '';
+  let stderr = '';
+  let errorMessage: string | null = null;
+
+  const abortController = new AbortController();
+  const abortTimer = setTimeout(() => abortController.abort(), HEAL_BOT_TIMEOUT_MS);
+  let aborted = false;
+  abortController.signal.addEventListener('abort', () => {
+    aborted = true;
+  });
+
+  try {
+    await sendToCodexOrchestrator(
+      session,
+      fullPrompt,
+      (event) => {
+        if (event.type === 'text') {
+          stdout += event.text;
+        } else if (event.type === 'tool_result' && event.output) {
+          // Codex shell calls during the heal — appended to stdout so the
+          // GIVE_UP detector + future debug forensics see what actually ran.
+          stdout += `\n${event.output}\n`;
+        } else if (event.type === 'error') {
+          errorMessage = event.error;
+          stderr += event.error;
+        }
+      },
+      {
+        permissionMode: 'full',
+        thinkingEffort: 'high',
+        signal: abortController.signal,
+      },
+    );
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error);
+  } finally {
+    clearTimeout(abortTimer);
+  }
+
+  const timedOut = aborted;
+  const ok = !errorMessage && !timedOut;
+  return {
+    ok,
+    stdout: stdout.trim().slice(0, COMMAND_MAX_BUFFER),
+    stderr: stderr.trim(),
+    timedOut,
+    exitReason: timedOut
+      ? `heal-bot timed out after ${Math.floor(HEAL_BOT_TIMEOUT_MS / 60_000)} minutes`
+      : (errorMessage ?? (ok ? null : 'codex exited unsuccessfully')),
+  };
 }
 
 function updateInboxItem(
@@ -469,7 +493,7 @@ async function healInboxItem(item: SupervisorInboxItem): Promise<void> {
 
   const beforeHead = await readHeadSha(cwd);
   const prompt = buildHealPrompt(item, payload);
-  const healRun = await runHealBotClaude(cwd, prompt);
+  const healRun = await runHealBotCodex(cwd, prompt);
   const stdoutSnippet = truncate(healRun.stdout);
   const stderrSnippet = truncate(healRun.stderr);
   const giveUpReason = parseGiveUpReason(healRun.stdout, healRun.stderr);
