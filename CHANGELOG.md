@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-14
+
+- `7c417f02` feat(cli): phase 3 polish + native shell bundling + npm-publish prep
+
 ## 2026-05-13
 
 - `a717af60` feat: modernize workspace runtime reconnect banner
