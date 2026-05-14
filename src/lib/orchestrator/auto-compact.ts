@@ -5,7 +5,6 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-const CLAUDE_BIN = process.env.CLAUDE_BIN || path.join(homedir(), '.local', 'bin', 'claude');
 const HISTORY_DIR = path.join(homedir(), '.o8', 'chat-history');
 const ARCHIVE_DIR = path.join(homedir(), '.o8', 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
@@ -94,13 +93,49 @@ function splitCompactionWindow(transcript: MobileTranscriptEntry[], compactedCou
     retainedTurns: [...pinnedTurns, ...liveTurns],
   };
 }
-async function summarizeWithHaiku(repoPath: string, prompt: string) {
+/**
+ * Summarize a thread segment via Codex GPT-5.5 (medium reasoning effort).
+ * Replaces the previous `claude --print haiku` spawn — same role (cheap fast
+ * summarization), but Codex is free for ChatGPT Plus / Codex sub users and
+ * doesn't bill against the Anthropic Agent SDK pool (#1046, epic #1044).
+ *
+ * Compaction is summarization, not orchestrator-class reasoning, so we use
+ * `model_reasoning_effort=medium` — xhigh wastes wall time here. Passes
+ * `--skip-git-repo-check` so codex doesn't refuse on untrusted repos (the
+ * summary doesn't need git context at all).
+ */
+async function summarizeWithCodex(repoPath: string, prompt: string) {
+  const { resolveCli } = await import('@/lib/runtimes/shared/cli-resolver');
+  const codexBin = (await resolveCli({
+    runtimeId: 'codex',
+    binaryName: 'codex',
+    envOverride: 'O8_CODEX_BIN',
+    extraEnvOverrides: ['CODEX_HOME'],
+  })).path;
+
   return await new Promise<string>((resolve, reject) => {
-    const child = spawn(CLAUDE_BIN, ['--print', '--output-format', 'stream-json', '--verbose', '--model', 'haiku', prompt], {
-      cwd: repoPath,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
-    });
+    const child = spawn(
+      codexBin,
+      [
+        'exec',
+        '--json',
+        '--skip-git-repo-check',
+        '-s',
+        'read-only',
+        '-c',
+        'model=gpt-5.5',
+        '-c',
+        'model_reasoning_effort=medium',
+        '-C',
+        repoPath,
+        prompt,
+      ],
+      {
+        cwd: repoPath,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
+      },
+    );
     let buffer = '';
     let stderr = '';
     let result = '';
@@ -112,9 +147,21 @@ async function summarizeWithHaiku(repoPath: string, prompt: string) {
         if (!line.trim()) continue;
         try {
           const parsed = JSON.parse(line) as Record<string, unknown>;
-          if (parsed.type === 'result' && typeof parsed.result === 'string') result = parsed.result;
+          // codex-cli 0.130.0 emits the final reply as item.completed with
+          // item.type='agent_message' and the body on item.text. Older builds
+          // use event_msg/agent_message — both accepted, same way codex-
+          // orchestrator-session.ts handles them.
+          const item = parsed.item as Record<string, unknown> | undefined;
+          if (parsed.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') {
+            result = item.text;
+          } else if (parsed.type === 'event_msg') {
+            const payload = parsed.payload as Record<string, unknown> | undefined;
+            if (payload?.type === 'agent_message' && typeof payload.message === 'string') {
+              result = payload.message;
+            }
+          }
         } catch {
-          // ignore partial lines
+          // ignore partial lines / non-JSON banner output
         }
       }
     });
@@ -123,7 +170,7 @@ async function summarizeWithHaiku(repoPath: string, prompt: string) {
     child.once('close', (code) => {
       const text = result.trim();
       if (code === 0 && text) resolve(text);
-      else reject(new Error(stderr.trim() || `Haiku compaction failed (${code ?? 'unknown'})`));
+      else reject(new Error(stderr.trim() || `Codex compaction failed (${code ?? 'unknown'})`));
     });
   });
 }
@@ -137,6 +184,15 @@ export async function autoCompactOrchestratorThread(input: {
   const repoPath = input.repoPath.trim();
   const snapshot = Array.isArray(input.liveMessages) ? input.liveMessages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[] : [];
   if (!repoPath) return { applied: false, transcript: snapshot, resumePrelude: null, tokensAfter: 0 };
+
+  // Gate background LLM work on the in-app orchestrator toggle (#1046, epic
+  // #1044). Toggle ON means user has at least one sub (Codex) and wants the
+  // background performance features. Toggle OFF means we silently skip
+  // compaction — the thread keeps growing but no LLM calls happen.
+  const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
+  if (!resolveInAppOrchestratorEnabledSync()) {
+    return { applied: false, transcript: snapshot, resumePrelude: null, tokensAfter: 0 };
+  }
   const existing = inFlight.get(repoPath);
   if (existing) return existing;
   const job = (async () => {
@@ -158,7 +214,7 @@ export async function autoCompactOrchestratorThread(input: {
     }
     const compactedAt = new Date();
     const compactedStamp = fmtStamp(compactedAt);
-    const summary = await summarizeWithHaiku(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
+    const summary = await summarizeWithCodex(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
     const displaySummary = `<compacted_context turns="${compactedTurns.length}" at="${compactedStamp}">\n${summary}\n</compacted_context>`;
     const compactionEntry: MobileTranscriptEntry = {
       id: `orch-compaction-${compactedAt.getTime()}`,
