@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-15
+
+- `a87bfaa7` feat: restore AI provider-code as interactive chat-tab runtime
+
 ## 2026-05-14
 
 - `d3feecf1` feat: github intake dual-path
