@@ -426,15 +426,25 @@ Alternative path: swap the vibrancy material to something lighter (`NSVisualEffe
 
 ## Orchestrator Model
 
-**Claude is the orchestrator. Codex is the workhorse.** This is the core product decision.
+**Claude OR Codex orchestrates. Codex is the workhorse either way.** Updated semantics as of v0.1.135 (epic #1044):
 
-- Claude plans, reviews, routes, and maintains rhythm. It does NOT execute coding tasks in worktrees.
-- Codex (xhigh reasoning) executes scoped tasks in isolated worktrees, never touching main.
-- The orchestrator spawns and manages Codex sessions via the Codex CLI adapter, not Claude Code sessions.
-- Before any agent merge, the orchestrator reviews the diff — a trust layer before GitHub bots.
-- Advanced users can override routing, but the default is opinionated: Claude thinks, Codex builds.
+- The `inAppOrchestratorEnabled` operator toggle (Settings → Operator Defaults → 07) is **OFF by default**. Off = Codex GPT-5.5 xhigh is the orchestrator backend (free for ChatGPT Plus / Codex sub users, no Anthropic SDK draw). On = Claude Opus 4.7 (bills the user's Agent SDK pool).
+- Same dual-path applies to: auto-review (`lane/auto-review.ts`), GitHub intake (`intake/github-intake.ts`), Q&A cascade (`cortex/qa/classifier.ts` + `composer.ts`), heal-bot (`supervisor/heal-bot.ts`), auto-compact (`orchestrator/auto-compact.ts`), and the post-commit distill hook (`scripts/distill-commit.ts`).
+- The orchestrator (whichever LLM) spawns Codex / Gemini agents in isolated worktrees via the `mcp__o8__*` mission/dispatch tools — never executes coding work directly.
+- Before any agent merge, the orchestrator reviews the diff (`mcp__o8__o8_merge_preview` → `submit_review` → `approve_and_merge`).
+- Codex orchestrator session uses `src/lib/lane/codex-orchestrator-session.ts` (shipped v0.1.135). Spawns `codex exec --json -c model=gpt-5.5 -c model_reasoning_effort=xhigh` and maps the JSON stream (`thread.started` / `item.completed` / `turn.completed`) into the same `OrchestratorEvent` contract the Claude path emits.
 
-This lets users get more compute across both plans simultaneously instead of burning through one.
+**Known regression while #1045 is open:** Codex auto-review writes verdicts to the log but cannot call `lane_command` MCP to create approval cards. Until #1045 (Codex MCP plumbing) lands, the operator either toggles ON for Claude orchestrator OR merges manually from the worktree.
+
+### Agent-side CLI (the `o8` binary)
+
+Dispatched agents inside packet worktrees have the `o8` CLI on `$PATH` (symlinked to `/usr/local/bin/o8` after first o8.app run). See [`AGENTS.md`](./AGENTS.md) for the full command list — `packet info`, `packet scope`, `packet heartbeat`, `packet report --event progress`, `lane touches`, `cortex observe`. Orchestrator instructions in `src/lib/lane/orchestrator.md` reference these so the orchestrator doesn't duplicate the agent's lookups.
+
+### MCP surface for orchestrators
+
+The `mcp__o8__*` tool family is the orchestrator's primary interface. Mission/dispatch (`create_mission`, `dispatch_mission`, `get_mission_status`, `wait_for_mission_ready`, `submit_review`, `approve_and_merge`, `reset_packet`, `retry_packet`), webview control (`o8_view_*`), and inbox/approvals (`o8_status`, `o8_send`, `o8_approve`, `o8_reject`, `o8_history`) all flow through the operator MCP server bundled in the Tauri app.
+
+**OpenAI strict-mode caveat (v0.1.142 fix):** every tool's `inputSchema` top-level MUST be a plain `{ type: 'object', properties, required }` — no `oneOf` / `anyOf` / `allOf` / `not` siblings. OpenAI's strict function-calling spec rejects them and the whole turn 400s when any OpenAI-backed MCP client (Codex CLI, Cursor strict mode) loads the tool list. Validate inputs in the handler, not in the schema.
 
 ## Development Workflow
 

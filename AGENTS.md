@@ -26,3 +26,22 @@ No automated test runner is configured yet. For every change, run `npm run lint`
 
 ## Commit & Pull Request Guidelines
 Recent history follows Conventional Commit prefixes such as `feat:` and `fix:`. Keep commits focused and imperative, for example `fix: prevent stale mobile transcript replay`. PRs should include a short problem/solution summary, linked issue or design doc when relevant, and manual verification steps. Include screenshots or recordings for desktop/mobile UI changes and note any required env vars in `.env.local` such as `WS_TOKEN`, `GEMINI_API_KEY`, or `VERCEL_TOKEN`.
+
+## o8 CLI (available inside packet worktrees)
+
+When you're an agent dispatched into an o8 packet worktree, the `o8` CLI is on `$PATH` (symlinked to `/usr/local/bin/o8` once o8.app has run at least once). Use it instead of curling the local HTTP API — it knows your packet context and resolves cwd automatically.
+
+```
+o8 status                              # global fleet snapshot
+o8 version
+o8 packet info                         # current packet metadata (id, branch, base, scope, runtime)
+o8 packet scope <packet-id>            # file ceiling, allowed/blocked paths, related-packet overlap
+o8 packet heartbeat                    # lifecycle ping; safe no-op outside a packet
+o8 packet report --event progress      # surface a progress event to the operator
+o8 lane touches --path <file>          # other lanes touching the same file
+o8 cortex observe --kind gotcha --text "..."   # write a fact to Cortex memory
+```
+
+Errors come back as JSON. Most commands accept `--json` for machine-readable output. Calls are gated by the loopback + ws-token guard that protects the o8 API — they only work locally, no auth needed.
+
+If a command exits 127 (`command not found`), o8.app probably hasn't run yet on this machine, or the symlink was removed; fall back to typecheck + commit and the heal-bot will pick up signals from there.
