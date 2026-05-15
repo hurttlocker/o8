@@ -50,7 +50,9 @@ export async function handleClaudeCodeSend(req: Request) {
       ? 'plan'
       : 'acceptEdits';
   let session: ReturnType<typeof ensureSession>;
-  const resumeId = (resumeSessionId || sessionId || '').trim() || undefined;
+  // Only resume from an actual captured Claude session_id — never from
+  // sessionId, which is a tab/transport routing key, not a Claude session.
+  const resumeId = resumeSessionId?.trim() || undefined;
   try {
     session = ensureSession(sessionKey, workingDir, model, permissionMode, resumeId);
   } catch (error) {

@@ -263,7 +263,7 @@ export function useWorkspaceChatPane({
           sessionId: transportSessionId,
           cwd: tab.repo?.localPath,
           model: selectedModel?.id,
-          resumeSessionId: tab.claudeSessionId ?? transportSessionId,
+          resumeSessionId: tab.claudeSessionId,
           planMode: effectiveClaudePlanMode,
           bypassPermissions: effectiveClaudeBypassPermissions,
         };

@@ -404,7 +404,6 @@ export function ensureSession(
   const normalizedModel = normalizeModel(model);
   const normalizedPermissionMode = normalizePermissionMode(permissionMode);
   const existing = sessions.get(tabId);
-  const shouldResume = !existing || existing.status === 'dead';
 
   // Permission mode is process-scoped, so a mode change must get a fresh process.
   if (
@@ -417,6 +416,12 @@ export function ensureSession(
     return existing;
   }
 
+  // Resume target: prefer the captured session_id of the session being
+  // replaced — this carries live conversation context across a
+  // mode/model/cwd change — and fall back to the caller-supplied id for a
+  // true cold start (no in-memory session at all).
+  const effectiveResumeSessionId = existing?.sessionId ?? resumeSessionId ?? null;
+
   if (existing) {
     killClaudeCodeInteractiveSession(tabId);
   }
@@ -426,7 +431,7 @@ export function ensureSession(
     normalizedCwd,
     normalizedModel,
     normalizedPermissionMode,
-    shouldResume ? resumeSessionId : null,
+    effectiveResumeSessionId,
   );
 }
 
