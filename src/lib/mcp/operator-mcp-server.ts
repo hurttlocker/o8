@@ -87,6 +87,7 @@ function listProcessRows(): ProcessRow[] {
   const output = execFileSync('ps', ['-e', '-o', 'pid=,ppid=,etime=,command='], {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 3000,
   });
   const rows: ProcessRow[] = [];
   for (const line of output.split('\n')) {
