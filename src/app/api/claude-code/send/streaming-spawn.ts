@@ -8,7 +8,7 @@ interface SendRequest {
   sessionId?: string;
   tabId?: string;
   model?: string;
-  continueLatest?: boolean;
+  resumeSessionId?: string;
   planMode?: boolean;
   bypassPermissions?: boolean;
 }
@@ -31,7 +31,7 @@ export async function handleClaudeCodeSend(req: Request) {
   } catch {
     return jsonError('Invalid JSON request body', 400);
   }
-  const { message, cwd, sessionId, tabId, model, planMode, bypassPermissions } = body;
+  const { message, cwd, sessionId, tabId, model, resumeSessionId, planMode, bypassPermissions } = body;
 
   if (!message?.trim()) {
     return jsonError('Message is required', 400);
@@ -50,8 +50,11 @@ export async function handleClaudeCodeSend(req: Request) {
       ? 'plan'
       : 'acceptEdits';
   let session: ReturnType<typeof ensureSession>;
+  // Only resume from an actual captured Claude session_id — never from
+  // sessionId, which is a tab/transport routing key, not a Claude session.
+  const resumeId = resumeSessionId?.trim() || undefined;
   try {
-    session = ensureSession(sessionKey, workingDir, model, permissionMode);
+    session = ensureSession(sessionKey, workingDir, model, permissionMode, resumeId);
   } catch (error) {
     return jsonError(errorText(error), 500);
   }
@@ -66,7 +69,7 @@ export async function handleClaudeCodeSend(req: Request) {
       if (req.signal.aborted) abortController.abort();
       else req.signal.addEventListener('abort', () => abortController?.abort(), { once: true });
       let closeText = '';
-      let closeSessionId = session.sessionId ?? sessionId ?? null;
+      let closeSessionId = session.sessionId ?? null;
       const enqueueEvent = (event: unknown) => {
         if (streamClosed) return;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
@@ -84,11 +87,12 @@ export async function handleClaudeCodeSend(req: Request) {
         }
         enqueueEvent(event);
       }, { planMode, signal: abortController.signal }).then(() => {
+        const settledSessionId = closeSessionId || session.sessionId || undefined;
         enqueueEvent({
           type: 'close',
           exitCode: 0,
           text: closeText,
-          sessionId: closeSessionId || undefined,
+          sessionId: settledSessionId,
         });
         closeStream();
       }).catch((error: unknown) => {

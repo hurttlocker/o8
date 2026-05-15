@@ -144,6 +144,7 @@ export async function computeRestoredTabs(
       // Unwrap the leading codex:/claude-code: if an inner owned prefix is
       // visible, then reclassify based on the unwrapped key.
       const rawSessionKey = savedTab.chatSessionKey?.trim() ?? '';
+      const rawClaudeSessionId = savedTab.claudeSessionId?.trim() ?? '';
       let unwrappedSessionKey = rawSessionKey;
       for (const stalePrefix of ['codex:', 'claude-code:']) {
         if (unwrappedSessionKey.startsWith(stalePrefix)) {
@@ -161,7 +162,7 @@ export async function computeRestoredTabs(
       }
       let effectiveRuntime = savedTab.chatRuntime;
       let effectiveModel = savedTab.chatModel;
-      let effectiveSessionKey = unwrappedSessionKey;
+      const effectiveSessionKey = unwrappedSessionKey;
       if (unwrappedSessionKey.startsWith('gemini-owned:') && effectiveRuntime !== 'gemini') {
         effectiveRuntime = 'gemini';
         effectiveModel = 'gemini-3.1-pro-preview';
@@ -180,7 +181,9 @@ export async function computeRestoredTabs(
         effectiveRuntime = 'claude-code';
       }
       // Persist the unwrapped key so downstream endpoints route correctly.
-      const savedChatSessionKey = effectiveSessionKey || savedTab.chatSessionKey;
+      const savedChatSessionKey = effectiveSessionKey
+        || savedTab.chatSessionKey
+        || (effectiveRuntime === 'claude-code' ? rawClaudeSessionId : undefined);
       const prefixedSessionKey = formatPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey);
       if (prefixedSessionKey && seenRuntimeChats.has(`${prefixedSessionKey}:${savedTab.repoPath ?? ''}`)) {
         continue;
@@ -193,6 +196,9 @@ export async function computeRestoredTabs(
         : (effectiveSessionKey.startsWith('gemini-owned:') || effectiveSessionKey.startsWith('opencode-owned:'))
           ? effectiveSessionKey
           : undefined;
+      const restoredClaudeSessionId = effectiveRuntime === 'claude-code'
+        ? (rawClaudeSessionId || stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey))
+        : undefined;
       const tabId = claimWorkspaceTabId('chat', seenTabIds, savedTab.id);
       restoredTabs.push({
         id: tabId,
@@ -201,6 +207,7 @@ export async function computeRestoredTabs(
         tmuxSession: null,
         chatRuntime: effectiveRuntime,
         chatSessionKey: liveSessionKey,
+        claudeSessionId: restoredClaudeSessionId || undefined,
         chatModel: effectiveModel,
         chatContinueLatest: liveSessionKey ? savedTab.chatContinueLatest : false,
         chatCheckpoints: savedTab.chatCheckpoints ?? [],
