@@ -69,6 +69,8 @@ export function useWorkspaceChatPane({
   }>({});
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [issuePickerOpen, setIssuePickerOpen] = useState(false);
+  const [claudePlanMode, setClaudePlanMode] = useState(false);
+  const [claudeBypassPermissions, setClaudeBypassPermissions] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const composeRef = useRef<HTMLTextAreaElement>(null);
@@ -110,6 +112,20 @@ export function useWorkspaceChatPane({
   const selectedModelLabel = selectedModel?.label;
   const isAgentTab = isAgentRuntimeTab(tab);
   const isRuntimeBound = Boolean(normalizedSessionKey && isAgentTab);
+
+  const toggleClaudePlanMode = useCallback(() => {
+    setClaudePlanMode((current) => {
+      const next = !current;
+      if (next) setClaudeBypassPermissions(false);
+      return next;
+    });
+  }, []);
+
+  const enableClaudeBypassPermissions = useCallback(() => {
+    setClaudePlanMode(false);
+    setClaudeBypassPermissions(true);
+  }, []);
+  const disableClaudeBypassPermissions = useCallback(() => setClaudeBypassPermissions(false), []);
 
   // Packet B: reads go through the transcript store. When the slice is still
   // `idle` (no bootstrap yet) or we don't have a sessionKey yet, we fall back
@@ -248,6 +264,8 @@ export function useWorkspaceChatPane({
           cwd: tab.repo?.localPath,
           model: selectedModel?.id,
           continueLatest: tab.chatContinueLatest !== false,
+          planMode: claudePlanMode,
+          bypassPermissions: claudeBypassPermissions,
         };
       } else if (chatRuntime === 'codex' || chatRuntime === 'gemini' || chatRuntime === 'opencode') {
         // Owned CLI sessions (dispatched via the orchestrator) steer through
@@ -621,7 +639,7 @@ export function useWorkspaceChatPane({
         transcriptStore.setStatus(normalizedSessionKey, 'loading');
       }
     }
-  }, [chatRuntime, commitMessages, linkedIssue, normalizedSessionKey, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.chatContinueLatest, tab.repo?.localPath, tabId, transportSessionId]);
+  }, [chatRuntime, claudeBypassPermissions, claudePlanMode, commitMessages, linkedIssue, normalizedSessionKey, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.chatContinueLatest, tab.repo?.localPath, tabId, transportSessionId]);
 
   const handleSend = useCallback(async () => {
     const baseDraft = draft.trim();
@@ -740,8 +758,12 @@ export function useWorkspaceChatPane({
     availableModels,
     canSend: draft.trim().length > 0 || queuedContextCards.length > 0,
     chatRuntime,
+    claudeBypassPermissions,
+    claudePlanMode,
     composeRef,
+    disableClaudeBypassPermissions,
     draft,
+    enableClaudeBypassPermissions,
     handleDelete,
     handleEdit,
     handleRemoveQueuedContext,
@@ -768,6 +790,7 @@ export function useWorkspaceChatPane({
     streamingText,
     supervisorActive,
     tabId,
+    toggleClaudePlanMode,
     visibleMessages,
     onSelectModel,
   };
