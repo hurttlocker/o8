@@ -756,20 +756,13 @@ export function OperatorDefaultsTab() {
           margin: 0,
           marginBottom: 4,
         }}>
-          The chat panel inside o8 spawns{' '}
-          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>claude -p</span>{' '}
-          per turn. After Anthropic&apos;s June 15 2026 pricing change, that bills against
-          your $20–$200/mo Agent SDK credit pool. Default OFF — drive o8 from Claude Code
-          or Claude Desktop via the operator MCP server to stay on the unlimited
-          interactive pool. Env{' '}
+          In-app chat uses Codex GPT-5.5 xhigh by default — free for ChatGPT Plus / Codex subscribers, no Anthropic SDK draw. Toggle ON to use Claude Opus 4.7 instead, which bills against your $20–$200/mo Agent SDK credit pool. Background features (auto-review, intake, distill) follow the same default — Codex when off, Claude when on. Env{' '}
           <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>O8_IN_APP_ORCHESTRATOR_ENABLED</span>{' '}
           overrides.
         </p>
         <Row
-          label="Enable in-app orchestrator chat"
-          description={values.inAppOrchestratorEnabled
-            ? 'On — every turn draws from your Anthropic SDK credit pool. Watch your monthly cap.'
-            : 'Off — the chat composer is locked. Talk to Claude in Claude Code / Desktop instead.'}
+          label="In-app orchestrator runtime"
+          description={values.inAppOrchestratorEnabled ? 'On — chat + background features use Claude Opus 4.7. Bills against your Anthropic SDK credit pool.' : 'Off (default) — chat + background features use Codex GPT-5.5 xhigh (free with Codex sub). Auto-review writes verdicts to log but does not create approval cards yet (#1045).'}
           source={sources.inAppOrchestratorEnabled}
           disabledReason={sources?.inAppOrchestratorEnabled === 'env' ? envDisabledReason : undefined}
           right={
