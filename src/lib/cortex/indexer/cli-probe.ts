@@ -18,6 +18,7 @@ import 'server-only';
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { resolveInAppOrchestratorEnabledSync } from '@/lib/operator/defaults';
 
 const execFileAsync = promisify(execFile);
 
@@ -87,11 +88,32 @@ async function verifyBin(bin: string): Promise<boolean> {
  * Detect which indexer CLI is available, honoring O8_INDEXER_CLI override.
  * Returns 'claude' | 'codex' | null. Cached after first call.
  *
- * Preference order when no override is set: claude first (Sonnet extraction
- * quality > Codex on this task per round-3 lock), then codex.
+ * Preference order when no override is set and the in-app orchestrator is
+ * enabled: claude first (Sonnet extraction quality > Codex on this task per
+ * round-3 lock), then codex. When the in-app orchestrator is disabled, skip
+ * claude entirely because the downstream Sonnet adapter is gate-protected.
  */
 export async function probeIndexerCli(): Promise<IndexerCli | null> {
-  if (cachedCli !== undefined) return cachedCli;
+  const inAppOrchestratorEnabled = resolveInAppOrchestratorEnabledSync();
+  if (cachedCli !== undefined) {
+    if (inAppOrchestratorEnabled || cachedCli !== 'claude') return cachedCli;
+    cachedCli = undefined;
+  }
+
+  if (!inAppOrchestratorEnabled) {
+    const codexBin = await resolveBin('codex', ['O8_CODEX_BIN', 'CODEX_BIN']);
+    if (codexBin && await verifyBin(codexBin)) {
+      cachedCli = 'codex';
+      console.log(`[indexer] CLI: codex (${codexBin})`);
+      return cachedCli;
+    }
+
+    console.warn(
+      '[indexer] disabled — in-app orchestrator is off and Codex CLI is unavailable.',
+    );
+    cachedCli = null;
+    return cachedCli;
+  }
 
   const override = process.env.O8_INDEXER_CLI?.trim();
   if (override === 'claude' || override === 'codex') {
