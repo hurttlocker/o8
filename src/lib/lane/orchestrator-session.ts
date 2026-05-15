@@ -9,11 +9,11 @@
  */
 
 import { createHash } from 'node:crypto';
-import { spawn, execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
 import {
@@ -21,10 +21,9 @@ import {
   processStreamEvent,
   type OrchestratorEvent,
 } from '@/lib/lane/orchestrator-stream-events';
-import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
-import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { getMcpServersConfig } from './orchestrator-mcp-config';
 
 // ── Types ──
 
@@ -46,44 +45,6 @@ const ORCHESTRATOR_STATE_DIR = join(
   process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
   'orchestrator',
 );
-
-/**
- * Resolve the Cortex MCP server entry point.
- *
- * In a packaged Tauri app the TS source isn't shipped — only the esbuild
- * output in `resource_dir/server/cortex-mcp-server.mjs`. The Rust sidecar
- * sets `O8_BUNDLED_MCP_DIR` to the resource/server directory before spawning
- * Next, so we prefer the bundled .mjs when it exists.
- *
- * Dev checkout falls back to the TS source run under `tsx`.
- */
-function resolveCortexMcpServerPath(): { command: string; path: string } {
-  const bundledDir = process.env.O8_BUNDLED_MCP_DIR;
-  if (bundledDir) {
-    const bundled = join(bundledDir, 'cortex-mcp-server.mjs');
-    if (existsSync(bundled)) {
-      // Prefer the node path the Tauri sidecar resolved via login shell
-      // (handles nvm/fnm/volta that Finder's minimal PATH misses).
-      const nodeBin = process.env.O8_NODE_BIN || 'node';
-      return { command: nodeBin, path: bundled };
-    }
-  }
-  const devSource = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/cortex-mcp-server.ts');
-  return { command: 'npx', path: devSource };
-}
-
-function resolveOperatorMcpServerPath(): { command: string; path: string } {
-  const bundledDir = process.env.O8_BUNDLED_MCP_DIR;
-  if (bundledDir) {
-    const bundled = join(bundledDir, 'operator-mcp-server.mjs');
-    if (existsSync(bundled)) {
-      const nodeBin = process.env.O8_NODE_BIN || 'node';
-      return { command: nodeBin, path: bundled };
-    }
-  }
-  const devSource = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/operator-mcp-server.ts');
-  return { command: 'npx', path: devSource };
-}
 
 const MCP_CONFIG_DIR = join(homedir(), '.o8', 'mcp');
 const LOG_PREFIX = '[orchestrator-rehydrate]';
@@ -265,72 +226,13 @@ export async function rehydrateOrchestratorSessions(): Promise<void> {
   return startupRehydrationPromise;
 }
 
-/** Resolve repo slug from git remote, cached per session. */
-function detectRepoSlug(repoPath: string): string {
-  try {
-    const remote = execSync('git remote get-url origin', { cwd: repoPath, timeout: 3000, encoding: 'utf-8' }).trim();
-    const match = remote.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
-    return match?.[1] ?? '';
-  } catch { return ''; }
-}
-
 /** Generate a temporary MCP config file for orchestrator context sources. */
 function ensureMcpConfig(repoPath: string): string {
   if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
 
   const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}.json`);
-  const repoSlug = detectRepoSlug(repoPath);
-  // Use the shared port resolver so MCP children agree with the live backend
-  // (which may be on 3001 in dev but 3002+ in a packaged install with a port
-  // collision — see src/lib/panel/api-port.ts).
-  const { getApiBase } = require('@/lib/panel/api-port') as typeof import('@/lib/panel/api-port');
-  const apiBase = getApiBase();
-
-  const cortexServer = resolveCortexMcpServerPath();
-  const cortexArgs = cortexServer.command === 'npx'
-    ? ['tsx', cortexServer.path]
-    : [cortexServer.path];
-
-  const operatorServer = resolveOperatorMcpServerPath();
-  const operatorArgs = operatorServer.command === 'npx'
-    ? ['tsx', operatorServer.path]
-    : [operatorServer.path];
-
-  const externalServers: Record<string, ReturnType<typeof externalServerToMcpConfig>> = {};
-  try {
-    for (const server of listEnabledExternalMcpServers()) {
-      externalServers[server.name] = externalServerToMcpConfig(server);
-    }
-  } catch (error) {
-    console.warn(
-      `[orchestrator-session] Failed to load external MCP servers: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
   const config = {
-    mcpServers: {
-      ...externalServers,
-      operator: {
-        type: 'stdio' as const,
-        command: operatorServer.command,
-        args: operatorArgs,
-        env: {
-          O8_API_BASE: apiBase,
-        },
-      },
-      cortex: {
-        type: 'stdio' as const,
-        command: cortexServer.command,
-        args: cortexArgs,
-        env: {
-          CORTEX_API_BASE: apiBase,
-          CORTEX_REPO_PATH: repoPath,
-          CORTEX_REPO_SLUG: repoSlug,
-          WS_PORT: String(process.env.WS_PORT || '3002'),
-          WS_TOKEN: getOrCreateWsToken(),
-        },
-      },
-    },
+    mcpServers: getMcpServersConfig(repoPath),
   };
 
   writeFileSync(configPath, JSON.stringify(config, null, 2));
