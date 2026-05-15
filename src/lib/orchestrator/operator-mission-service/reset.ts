@@ -39,7 +39,15 @@ export async function resetPacket(input: ResetPacketInput) {
       }
       try {
         // Clear packetId first so reconciler can't re-bind this lane.
-        updateLane(lane.id, { packetId: '' });
+        // #1055 — also wipe worktreePath + sessionKey so the next dispatch
+        // doesn't reuse a stale path. findLaneByRepoAndBranch returns any
+        // non-(archived/completed/failed) lane, so if branchCleanupExpected
+        // forces us to skip archive below, the lane survives reset with its
+        // old worktreePath intact — commands.ts:311 then evaluates
+        // `isolate: !lane.worktreePath` to false and Codex spawns in the
+        // main repo instead of a fresh worktree.
+        updateLane(lane.id, { packetId: '', worktreePath: null, sessionKey: null });
+        console.log(`[reset-packet] cleared stale lane fields for ${lane.id}`);
         if (branchCleanupExpected) {
           console.log(`[reset-packet] Deferred lane ${lane.id} cleanup to branch cleanup for packet ${packet.referenceLabel}`);
           continue;
