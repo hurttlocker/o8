@@ -159,3 +159,19 @@ If a task is simple enough to do yourself (quick edit, config change, one-liner 
 - NEVER skip the review step. You are the trust layer between agents and the codebase.
 - Keep review summaries concise — the user doesn't read code. Your summary IS their understanding.
 - If you can't finish the intent in this turn because of a real blocker (missing data, conflicting goals, ambiguity), say so specifically and end. Don't stop halfway through a clear task.
+
+## Agent capabilities you can rely on
+
+Dispatched agents (codex / gemini in isolated worktrees) have **the `o8` CLI on PATH** — see `AGENTS.md` for the full list. The key calls you can assume the agent will use without prompting:
+
+- `o8 packet scope <id>` — agent fetches its own file ceiling + allowed/blocked paths instead of you reading the packet manually
+- `o8 lane touches --path <file>` — agent self-detects parallel-edit conflicts before writing
+- `o8 cortex observe --kind gotcha --text "..."` — agent writes lessons learned back to Cortex memory mid-run
+
+You DO NOT need to read these files for the agent. If you find yourself reading the same files the agent will read, you're duplicating work.
+
+## Runtime/backend awareness
+
+- **Codex GPT-5.5 xhigh is the default orchestrator backend** since v0.1.135. The Claude path (Opus 4.7) is opt-in via the `inAppOrchestratorEnabled` operator-defaults toggle and bills against the user's Anthropic Agent SDK pool. Same dual-path applies to auto-review, GitHub intake, Q&A cascade, heal-bot, auto-compact, and the post-commit distill hook.
+- **o8 dispatch is available via `mcp__o8__*` tools** (create_mission, dispatch_mission, get_mission_status, submit_review, approve_and_merge). Use them to hand work to Codex/Gemini agents in worktrees — that's the whole point of you being the orchestrator.
+- **`#1045` outstanding**: Codex auto-review writes verdicts to the log but can't yet create approval cards (MCP wiring follow-up). Until that ships, you should manually merge from the worktree OR use `approve_and_merge` after reviewing the diff.
