@@ -2108,30 +2108,6 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
 
-  // June 15 2026 — Anthropic split paid plans into an interactive pool and a
-  // metered Agent SDK credit pool. `claude -p` (what this handler spawns)
-  // bills against the SDK pool. Off by default — operators talk to Claude in
-  // Claude Code / Claude Desktop and let it drive o8 via the operator MCP
-  // server, which keeps everything on the unlimited interactive pool. Toggle
-  // lives in Settings → Operator Defaults.
-  if (!resolveInAppOrchestratorEnabledSync()) {
-    sendRaw(client, JSON.stringify({
-      channel: 'orchestrator',
-      event: 'output',
-      data: {
-        repoPath,
-        thinking: false,
-        text: 'In-app orchestrator chat is off. After Anthropic\'s June 15 pricing change, each turn here would draw from your $20–$200/mo Agent SDK credit pool. Enable it in Settings → Operator Defaults (uses SDK billing) — or drive o8 from Claude Code / Claude Desktop via the operator MCP server, which stays on the unlimited interactive pool.',
-      },
-    }));
-    sendRaw(client, JSON.stringify({
-      channel: 'orchestrator',
-      event: 'status',
-      data: { status: 'idle', repoPath },
-    }));
-    return;
-  }
-
   // Permission mode travels with the user message. Defaults to 'full' to
   // match legacy behavior for clients that haven't been updated yet.
   const permissionMode: 'full' | 'plan' =
@@ -2147,17 +2123,63 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   let turnController: AbortController | null = null;
 
   try {
-    let session = getOrchestratorSession(repoPath);
-    if (!session || session.status === 'dead') {
-      session = ensureOrchestratorSession(repoPath);
+    type OrchestratorStreamEvent = Parameters<typeof sendToOrchestrator>[2] extends (event: infer Event) => void
+      ? Event
+      : never;
+    const useClaudeOrchestrator = resolveInAppOrchestratorEnabledSync();
+
+    console.log(
+      `[ws-server][orchestrator] Routing chat via ${useClaudeOrchestrator ? 'Claude (toggle on)' : 'Codex GPT-5.5 xhigh (default)'}`,
+    );
+
+    let sessionName: string;
+    let sendTurn: (
+      onEvent: (event: OrchestratorStreamEvent) => void,
+      signal: AbortSignal,
+    ) => Promise<void>;
+
+    if (useClaudeOrchestrator) {
+      let session = getOrchestratorSession(repoPath);
+      if (!session || session.status === 'dead') {
+        session = ensureOrchestratorSession(repoPath);
+      }
+      sessionName = session.sessionName;
+      sendTurn = (onEvent, signal) => sendToOrchestrator(
+        session,
+        message,
+        onEvent,
+        { permissionMode, thinkingEffort, model, signal },
+      );
+    } else {
+      const {
+        ensureCodexOrchestratorSession,
+        getCodexOrchestratorSession,
+        sendToCodexOrchestrator,
+      } = await import('./lib/lane/codex-orchestrator-session');
+      let session = getCodexOrchestratorSession(repoPath);
+      if (!session || session.status === 'dead') {
+        session = ensureCodexOrchestratorSession(repoPath);
+      }
+      sessionName = session.sessionName;
+      sendTurn = (onEvent, signal) => sendToCodexOrchestrator(
+        session,
+        message,
+        onEvent,
+        { permissionMode, thinkingEffort, model, signal },
+      );
     }
 
-    // Ensure subscription exists
-    if (!orchestratorSubscriptions.has(client.id)) {
+    // Ensure subscription exists for the selected backend.
+    const existingSubscription = orchestratorSubscriptions.get(client.id);
+    if (
+      !existingSubscription
+      || existingSubscription.repoPath !== repoPath
+      || existingSubscription.sessionName !== sessionName
+    ) {
       orchestratorSubscriptions.set(client.id, {
         clientId: client.id,
         repoPath,
-        sessionName: session.sessionName,
+        sessionName,
       });
     }
 
@@ -2168,7 +2190,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       data: { status: 'busy', repoPath },
     });
     for (const [cid, sub] of orchestratorSubscriptions) {
-      if (sub.sessionName === session.sessionName) {
+      if (sub.sessionName === sessionName) {
         const c = clients.get(cid);
         if (c) sendRaw(c, busyMsg);
       }
@@ -2185,12 +2207,12 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     turnController = new AbortController();
     orchestratorInflightAborts.set(repoPath, turnController);
 
-    // Spawn claude process and stream structured JSON events to subscribers
-    await sendToOrchestrator(session, message, (event) => {
+    // Spawn selected orchestrator process and stream structured JSON events to subscribers.
+    await sendTurn((event) => {
       // Find all subscribed clients for this session
       const subscribedClients: string[] = [];
       for (const [cid, sub] of orchestratorSubscriptions) {
-        if (sub.sessionName === session!.sessionName) subscribedClients.push(cid);
+        if (sub.sessionName === sessionName) subscribedClients.push(cid);
       }
       if (subscribedClients.length === 0) return;
 
@@ -2258,7 +2280,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           if (c) sendRaw(c, wsMsg);
         }
       }
-    }, { permissionMode, thinkingEffort, model, signal: turnController.signal });
+    }, turnController.signal);
 
     // #624 — Release the in-flight controller. Keyed compare guards against a
     // newer turn having already replaced this entry.
