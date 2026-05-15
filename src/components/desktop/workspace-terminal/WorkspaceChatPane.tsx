@@ -27,6 +27,11 @@ import type { TerminalTab } from '@/components/desktop/workspace-terminal/types'
 import { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
 import { WorkspaceChatComposer } from '@/components/desktop/workspace-terminal/WorkspaceChatComposer';
 import { ChatPacketStatusBanner } from '@/components/desktop/workspace-terminal/ChatPacketStatusBanner';
+import { PacketHeaderCard } from '@/components/desktop/workspace-terminal/PacketHeaderCard';
+import {
+  WorkspaceRichChatEvents,
+  stripWorkspaceRichRendererFallback,
+} from '@/components/desktop/workspace-terminal/chat-renderers/WorkspaceRichChatEvents';
 
 const LazyMessageBubble = lazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.MessageBubble })));
 const LazyChainOfThought = lazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.ChainOfThought })));
@@ -49,184 +54,6 @@ function PromptGlyph({ icon }: { icon: string }) {
   if (icon === 'Search') return <Search size={16} />;
   if (icon === 'Test') return <AlertCircle size={16} />;
   return <FileText size={16} />;
-}
-
-// Compact dispatched-packet header — replaces the raw prompt user bubble at the
-// top of a packet-dispatch chat. Collapsed: title row + one-line summary + meta
-// chips. Expanded: full prompt body. Click anywhere on the header row to toggle.
-function PacketHeaderCard({
-  title,
-  branch,
-  runtime,
-  status,
-  prompt,
-}: {
-  title: string;
-  branch?: string | null;
-  runtime?: string | null;
-  status?: string | null;
-  prompt: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const previewLine = useMemo(() => {
-    // Pull out the summary line right after "Summary: <task>" or first non-empty line.
-    const summaryMatch = prompt.match(/Summary:\s*([^\n]+)/i);
-    if (summaryMatch?.[1]) return summaryMatch[1].trim();
-    const firstLine = prompt.split('\n').find((l) => l.trim());
-    return firstLine ? firstLine.trim() : '';
-  }, [prompt]);
-  const statusLabel = status ? status.replace(/_/g, ' ') : null;
-
-  return (
-    <div
-      style={{
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-panel-border)',
-        borderRadius: 12,
-        background: 'var(--t-panel-solid)',
-        boxShadow: 'var(--t-panel-shadow)',
-        overflow: 'hidden',
-        marginBottom: 4,
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => setExpanded((prev) => !prev)}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 6,
-          width: '100%',
-          padding: '12px 16px',
-          background: 'transparent',
-          borderWidth: 0,
-          cursor: 'pointer',
-          textAlign: 'left',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
-              color: 'var(--t-text-faint)',
-            }}
-          >
-            Packet
-          </span>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--t-text)',
-              letterSpacing: '-0.01em',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              flex: 1,
-              minWidth: 0,
-            }}
-          >
-            {title}
-          </span>
-          <svg
-            width={10}
-            height={10}
-            viewBox="0 0 10 10"
-            fill="none"
-            stroke="var(--t-text-faint)"
-            strokeWidth={1.6}
-            strokeLinecap="round"
-            style={{ flexShrink: 0, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1)' }}
-          >
-            <path d="M2.5 3.5 L5 6 L7.5 3.5" />
-          </svg>
-        </div>
-        {previewLine ? (
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--t-text-secondary)',
-              letterSpacing: '-0.005em',
-              lineHeight: 1.45,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {previewLine}
-          </div>
-        ) : null}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
-          {runtime ? <PacketMetaChip label="Runtime" value={runtime} /> : null}
-          {branch ? <PacketMetaChip label="Branch" value={branch} mono /> : null}
-          {statusLabel ? <PacketMetaChip label="Status" value={statusLabel} /> : null}
-        </div>
-      </button>
-      {expanded ? (
-        <div
-          style={{
-            padding: '10px 16px 14px',
-            borderTopWidth: 1,
-            borderTopStyle: 'solid',
-            borderTopColor: 'var(--t-divider-subtle)',
-            background: 'var(--t-panel-hover, transparent)',
-          }}
-        >
-          <pre
-            style={{
-              margin: 0,
-              fontSize: 11.5,
-              lineHeight: 1.5,
-              color: 'var(--t-text-secondary)',
-              fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              letterSpacing: '-0.002em',
-            }}
-          >
-            {prompt}
-          </pre>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PacketMetaChip({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
-      <span
-        style={{
-          fontSize: 9,
-          fontWeight: 700,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: 'var(--t-text-faint)',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: 11,
-          color: 'var(--t-text)',
-          fontFamily: mono ? '"SF Mono", ui-monospace, Menlo, monospace' : undefined,
-          letterSpacing: '-0.005em',
-          maxWidth: 220,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {value}
-      </span>
-    </span>
-  );
 }
 
 function WorkspaceChatPaneBase({
@@ -325,13 +152,14 @@ function WorkspaceChatPaneBase({
     costUsd: chat.streamMeta.costUsd,
     sources: chat.streamMeta.sources,
     recalledFacts: chat.streamMeta.recalledFacts,
+    claudeCodeEvents: chat.activeClaudeCodeEvents,
     toolCalls: chat.activeToolCalls.map((tool) => ({
       name: tool.name,
       status: tool.status ?? 'running',
       args: tool.args,
       preview: tool.preview,
     })),
-  }), [chat.tabId, chat.streamingText, chat.selectedModel.label, streamingTimestamp, chat.streamMeta, chat.activeToolCalls]);
+  }), [chat.tabId, chat.streamingText, chat.selectedModel.label, streamingTimestamp, chat.streamMeta, chat.activeClaudeCodeEvents, chat.activeToolCalls]);
 
   return (
     <div
@@ -570,16 +398,25 @@ function WorkspaceChatPaneBase({
                     />
                   );
                 }
+                const bubbleMessage = stripWorkspaceRichRendererFallback(message);
                 return (
-                  <LazyMessageBubble
-                    key={message.id}
-                    message={message}
-                    isLast={index === chat.visibleMessages.length - 1 && !chat.sending}
-                    onRetry={message.role === 'assistant' ? () => chat.handleRetry(message.id) : undefined}
-                    onEdit={message.role === 'user' ? (content) => chat.handleEdit(message.id, content) : undefined}
-                    onDelete={() => chat.handleDelete(message.id)}
-                    onRunInTerminal={onRunInTerminal}
-                  />
+                  <div key={message.id} style={{ display: 'flex', flexDirection: 'column', alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                    <LazyMessageBubble
+                      message={bubbleMessage}
+                      isLast={index === chat.visibleMessages.length - 1 && !chat.sending}
+                      onRetry={message.role === 'assistant' ? () => chat.handleRetry(message.id) : undefined}
+                      onEdit={message.role === 'user' ? (content) => chat.handleEdit(message.id, content) : undefined}
+                      onDelete={() => chat.handleDelete(message.id)}
+                      onRunInTerminal={onRunInTerminal}
+                    />
+                    {message.role === 'assistant' ? (
+                      <WorkspaceRichChatEvents
+                        message={message}
+                        repoPath={tab.repo?.localPath}
+                        onPermissionDecision={chat.handleClaudePermissionDecision}
+                      />
+                    ) : null}
+                  </div>
                 );
               })}
               {chat.agentRunning && chat.activeThinking && chat.activeThinking.steps.length > 0 ? (
@@ -591,11 +428,18 @@ function WorkspaceChatPaneBase({
                 />
               ) : null}
               {chat.agentRunning ? (
-                <LazyMessageBubble
-                  message={streamingMessage}
-                  isLast
-                  onRunInTerminal={onRunInTerminal}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <LazyMessageBubble
+                    message={stripWorkspaceRichRendererFallback(streamingMessage)}
+                    isLast
+                    onRunInTerminal={onRunInTerminal}
+                  />
+                  <WorkspaceRichChatEvents
+                    message={streamingMessage}
+                    repoPath={tab.repo?.localPath}
+                    onPermissionDecision={chat.handleClaudePermissionDecision}
+                  />
+                </div>
               ) : null}
               {!chat.agentRunning && chat.isRuntimeBound && chat.supervisorActive && chat.messages.length > 0 ? (
                 <div
