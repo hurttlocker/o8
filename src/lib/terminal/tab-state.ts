@@ -24,6 +24,7 @@ export interface PersistedTab {
   tmuxSession?: string; // last known tmux session name (may still be alive)
   chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'opencode'; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
+  claudeSessionId?: string; // persisted Claude Code session_id for --resume
   chatModel?: string;
   chatContinueLatest?: boolean;
   chatCheckpoints?: PersistedChatCheckpoint[];
@@ -133,7 +134,7 @@ function isClearlyDeadTab(tab: PersistedTab): boolean {
   // AND no live orchestration packet attached. Packets indicate a dispatched
   // mission — that's live work even if the runtime session has rolled over.
   if (kind === 'chat') {
-    const hasSessionKey = Boolean(tab.chatSessionKey?.trim());
+    const hasSessionKey = Boolean(tab.chatSessionKey?.trim() || tab.claudeSessionId?.trim());
     const hasCheckpoints = Boolean(tab.chatCheckpoints?.length);
     const hasPacket = Boolean(tab.orchestrationPacket);
     return !hasSessionKey && !hasCheckpoints && !hasPacket;

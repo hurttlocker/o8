@@ -263,7 +263,7 @@ export function useWorkspaceChatPane({
           sessionId: transportSessionId,
           cwd: tab.repo?.localPath,
           model: selectedModel?.id,
-          continueLatest: tab.chatContinueLatest !== false,
+          resumeSessionId: tab.claudeSessionId,
           planMode: effectiveClaudePlanMode,
           bypassPermissions: effectiveClaudeBypassPermissions,
         };
@@ -633,7 +633,7 @@ export function useWorkspaceChatPane({
         transcriptStore.setStatus(normalizedSessionKey, 'loading');
       }
     }
-  }, [chatRuntime, claudeBypassPermissions, claudePlanMode, commitMessages, linkedIssue, normalizedSessionKey, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.chatContinueLatest, tab.repo?.localPath, tabId, transportSessionId]);
+  }, [chatRuntime, claudeBypassPermissions, claudePlanMode, commitMessages, linkedIssue, normalizedSessionKey, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.claudeSessionId, tab.repo?.localPath, tabId, transportSessionId]);
 
   const handleSend = useCallback(async () => {
     const baseDraft = draft.trim();
