@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import os from 'os';
 import path from 'path';
 
-const CLAUDE_BIN = path.join(os.homedir(), '.local', 'bin', 'claude');
+const CLAUDE_BIN = process.env.O8_CLAUDE_CODE_BIN || process.env.CLAUDE_BIN || path.join(os.homedir(), '.local', 'bin', 'claude');
 
 interface SendRequest {
   message: string;
