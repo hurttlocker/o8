@@ -11,11 +11,14 @@ interface SendRequest {
   sessionId?: string;
   model?: string;
   continueLatest?: boolean;
+  planMode?: boolean;
+  bypassPermissions?: boolean;
 }
 
 export async function handleClaudeCodeSend(req: Request) {
   const body = (await req.json()) as SendRequest;
-  const { message, cwd, sessionId, model, continueLatest } = body;
+  const { message, cwd, sessionId, model, continueLatest, planMode } = body;
+  const bypassPermissions = body.bypassPermissions ?? true;
 
   if (!message?.trim()) {
     return new Response(JSON.stringify({ error: 'Message is required' }), {
@@ -28,8 +31,13 @@ export async function handleClaudeCodeSend(req: Request) {
     '-p', message,
     '--output-format', 'stream-json',
     '--verbose',
-    '--dangerously-skip-permissions',
   ];
+
+  if (planMode) {
+    args.push('--permission-mode', 'plan');
+  } else if (bypassPermissions) {
+    args.push('--dangerously-skip-permissions');
+  }
 
   if (sessionId) {
     args.push('--resume', sessionId);
