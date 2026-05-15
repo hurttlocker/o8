@@ -1,105 +1,98 @@
-import { spawn } from 'child_process';
 import os from 'os';
-import path from 'path';
-import { createClaudeCodeStreamJsonParser } from '@/lib/claude-code/stream-json-parser';
-
-const CLAUDE_BIN = process.env.O8_CLAUDE_CODE_BIN || process.env.CLAUDE_BIN || path.join(os.homedir(), '.local', 'bin', 'claude');
+import { ensureSession, sendMessage } from '@/lib/claude-code/interactive-session';
 
 interface SendRequest {
   message: string;
   cwd?: string;
   sessionId?: string;
+  tabId?: string;
   model?: string;
   continueLatest?: boolean;
   planMode?: boolean;
   bypassPermissions?: boolean;
 }
 
+function jsonError(error: string, status: number) {
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function handleClaudeCodeSend(req: Request) {
-  const body = (await req.json()) as SendRequest;
-  const { message, cwd, sessionId, model, continueLatest, planMode } = body;
-  const bypassPermissions = body.bypassPermissions ?? true;
+  let body: SendRequest;
+  try {
+    body = (await req.json()) as SendRequest;
+  } catch {
+    return jsonError('Invalid JSON request body', 400);
+  }
+  const { message, cwd, sessionId, tabId, model, planMode } = body;
 
   if (!message?.trim()) {
-    return new Response(JSON.stringify({ error: 'Message is required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return jsonError('Message is required', 400);
   }
 
-  const args = [
-    '-p', message,
-    '--output-format', 'stream-json',
-    '--verbose',
-  ];
-
-  if (planMode) {
-    args.push('--permission-mode', 'plan');
-  } else if (bypassPermissions) {
-    args.push('--dangerously-skip-permissions');
-  }
-
-  if (sessionId) {
-    args.push('--resume', sessionId);
-  } else if (cwd && continueLatest !== false) {
-    args.push('--continue');
-  }
-
-  if (model) {
-    args.push('--model', model);
+  const sessionKey = (tabId || sessionId || '').trim();
+  if (!sessionKey) {
+    return jsonError('A stable tabId or sessionId is required', 400);
   }
 
   const expandedCwd = cwd?.replace(/^~/, os.homedir());
   const workingDir = expandedCwd || process.cwd();
+  let session: ReturnType<typeof ensureSession>;
+  try {
+    session = ensureSession(sessionKey, workingDir, model);
+  } catch (error) {
+    return jsonError(errorText(error), 500);
+  }
 
   const encoder = new TextEncoder();
+  let abortController: AbortController | null = null;
+  let streamClosed = false;
 
   const stream = new ReadableStream({
     start(controller) {
-      const child = spawn(CLAUDE_BIN, args, {
-        cwd: workingDir,
-        env: { ...process.env, FORCE_COLOR: '0', O8_MANAGED_SESSION: '1' },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      const parser = createClaudeCodeStreamJsonParser({ planMode });
+      abortController = new AbortController();
+      if (req.signal.aborted) abortController.abort();
+      else req.signal.addEventListener('abort', () => abortController?.abort(), { once: true });
+      let closeText = '';
+      let closeSessionId = session.sessionId ?? sessionId ?? null;
       const enqueueEvent = (event: unknown) => {
+        if (streamClosed) return;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
       };
-
-      child.stdout.on('data', (chunk: Buffer) => {
-        for (const event of parser.pushChunk(chunk.toString('utf8'))) {
-          enqueueEvent(event);
+      const closeStream = () => {
+        if (streamClosed) return;
+        streamClosed = true;
+        controller.close();
+      };
+      void sendMessage(session, message, (event) => {
+        if (event.type === 'delta') closeText += event.text;
+        if (event.type === 'done') {
+          closeText = event.text;
+          closeSessionId = event.sessionId ?? closeSessionId;
         }
-      });
-
-      child.stderr.on('data', (chunk: Buffer) => {
-        const errText = chunk.toString().trim();
-        if (errText) {
-          enqueueEvent({ type: 'error', text: errText });
-        }
-      });
-
-      child.on('close', (code) => {
-        for (const event of parser.flush()) {
-          enqueueEvent(event);
-        }
-        const state = parser.getState();
+        enqueueEvent(event);
+      }, { planMode, signal: abortController.signal }).then(() => {
         enqueueEvent({
           type: 'close',
-          exitCode: code,
-          text: state.fullResponse,
-          sessionId: state.sessionId || undefined,
+          exitCode: 0,
+          text: closeText,
+          sessionId: closeSessionId || undefined,
         });
-        controller.close();
+        closeStream();
+      }).catch((error: unknown) => {
+        enqueueEvent({ type: 'error', text: errorText(error) });
+        closeStream();
       });
-
-      child.on('error', (err) => {
-        enqueueEvent({ type: 'error', text: err.message });
-        controller.close();
-      });
-
-      child.stdin.end();
+    },
+    cancel() {
+      streamClosed = true;
+      abortController?.abort();
     },
   });
 
