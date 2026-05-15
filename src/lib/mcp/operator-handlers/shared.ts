@@ -141,6 +141,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<unknow
     }
 
     try {
+      const baseUrl = resolveApiBaseLive();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       const panelToken = readPanelToken();
@@ -148,7 +149,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<unknow
       if (panelToken) {
         baseHeaders.Authorization = `Bearer ${panelToken}`;
       }
-      const res = await fetch(`${_apiBase}${path}`, {
+      const res = await fetch(`${baseUrl}${path}`, {
         ...init,
         signal: controller.signal,
         headers: { ...baseHeaders, ...init?.headers },
@@ -167,7 +168,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<unknow
 
   throw new Error(
     `o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. ` +
-    `Expected the o8 backend at ${_apiBase}. ` +
+    `Expected the o8 backend at ${resolveApiBaseLive()}. ` +
     `Open the o8 desktop app (it launches the backend automatically) or run \`npm run desktop:dev\` from the cortex-ide repo.`,
   );
 }
