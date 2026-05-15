@@ -259,6 +259,7 @@ export function useWorkspaceChatPane({
         endpoint = '/api/claude-code/send';
         body = {
           message: composedMessage,
+          tabId,
           sessionId: transportSessionId,
           cwd: tab.repo?.localPath,
           model: selectedModel?.id,
