@@ -11,7 +11,7 @@
  */
 
 import { createInterface } from 'node:readline';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -94,6 +94,106 @@ function runPreflightDiagnostics(): void {
       `Tools that depend on them will fail with a clear error. ` +
       `Install with: \`npm i -g @openai/codex-cli\` / \`brew install gh\`.`,
     );
+  }
+}
+
+type ProcessEntry = { pid: number; ppid: number; ageSeconds: number | null; command: string };
+
+const OPERATOR_MCP_SCRIPT_ARG = '(?:\\S*/)?src/lib/mcp/operator-mcp-server\\.ts';
+const OPERATOR_MCP_COMMAND_RE = new RegExp([
+  new RegExp(`^(?:\\S+/)?npm\\s+exec\\s+tsx\\s+${OPERATOR_MCP_SCRIPT_ARG}(?:\\s|$)`),
+  new RegExp(`^(?:\\S+/)?node\\s+\\S*node_modules/\\.bin/tsx\\s+${OPERATOR_MCP_SCRIPT_ARG}(?:\\s|$)`),
+  new RegExp(`^(?:\\S+/)?node\\s+.*(?:tsx/dist/preflight\\.cjs|tsx/dist/loader\\.mjs).*\\s+${OPERATOR_MCP_SCRIPT_ARG}(?:\\s|$)`),
+  new RegExp(`^(?:\\S+/)?tsx\\s+${OPERATOR_MCP_SCRIPT_ARG}(?:\\s|$)`),
+  new RegExp(`^(?:\\S+/)?node\\s+${OPERATOR_MCP_SCRIPT_ARG}(?:\\s|$)`),
+].map((pattern) => pattern.source).join('|'));
+
+function parseElapsedAge(value: string): number | null {
+  const [dayValue, timeValue] = value.includes('-') ? value.split('-', 2) : ['0', value];
+  const days = Number(dayValue);
+  const parts = timeValue.split(':').map((part) => Number(part));
+  if (!Number.isFinite(days) || parts.some((part) => !Number.isFinite(part))) return null;
+  const [hours, minutes, seconds] = parts.length === 3 ? parts : parts.length === 2 ? [0, parts[0], parts[1]] : [0, 0, parts[0]];
+  if (![hours, minutes, seconds].every((part) => Number.isFinite(part))) return null;
+  return days * 86400 + (hours ?? 0) * 3600 + (minutes ?? 0) * 60 + (seconds ?? 0);
+}
+
+function parseProcessTable(output: string, ageKind: 'seconds' | 'elapsed'): ProcessEntry[] {
+  return output.split('\n').flatMap((line) => {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
+    if (!match) return [];
+    const rawAge = ageKind === 'seconds' ? Number(match[3]) : parseElapsedAge(match[3]);
+    return [{ pid: Number(match[1]), ppid: Number(match[2]), ageSeconds: Number.isFinite(rawAge) ? rawAge : null, command: match[4] }];
+  });
+}
+
+function readProcessTable(): ProcessEntry[] {
+  const attempts: Array<{ args: string[]; ageKind: 'seconds' | 'elapsed' }> = [
+    { args: ['-e', '-o', 'pid=,ppid=,etimes=,command='], ageKind: 'seconds' },
+    { args: ['-e', '-o', 'pid=,ppid=,etime=,command='], ageKind: 'elapsed' },
+  ];
+  for (const attempt of attempts) {
+    try {
+      const output = execFileSync('ps', attempt.args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const entries = parseProcessTable(output, attempt.ageKind);
+      if (entries.length > 0) return entries;
+    } catch { /* try next ps shape */ }
+  }
+  return [];
+}
+
+function isOperatorMcpCommand(command: string): boolean {
+  return OPERATOR_MCP_COMMAND_RE.test(command.trim());
+}
+
+function collectAncestorPids(pid: number, processes: Map<number, ProcessEntry>): Set<number> {
+  const ancestors = new Set<number>();
+  let nextPid = processes.get(pid)?.ppid ?? 0;
+  for (let depth = 0; nextPid > 1 && depth < 64; depth += 1) {
+    if (ancestors.has(nextPid)) break;
+    ancestors.add(nextPid);
+    nextPid = processes.get(nextPid)?.ppid ?? 0;
+  }
+  return ancestors;
+}
+
+function findOperatorProcessRoot(entry: ProcessEntry, processes: Map<number, ProcessEntry>): ProcessEntry {
+  let root = entry;
+  let parent = processes.get(entry.ppid);
+  for (let depth = 0; parent && depth < 8 && isOperatorMcpCommand(parent.command); depth += 1) {
+    root = parent;
+    parent = processes.get(parent.ppid);
+  }
+  return root;
+}
+
+function describeNodeRuntime(command: string): string {
+  const match = command.match(/\/node(?:@\d+)?\/([^/\s]+)\/bin\/node\b/);
+  if (match) return match[1].replace(/_.*/, '');
+  return /^(?:\S+\/)?node\b/.test(command) ? 'node' : /^(?:\S+\/)?npm\b/.test(command) ? 'npm' : 'unknown';
+}
+
+function killOrphanInstances(): void {
+  if (process.env.O8_MCP_NO_ORPHAN_KILL === '1') return;
+  try {
+    const processes = new Map(readProcessTable().map((entry) => [entry.pid, entry]));
+    const myPid = process.pid;
+    const myParentPid = processes.get(myPid)?.ppid ?? 0;
+    const sharedShellPid = myParentPid > 1 ? processes.get(myParentPid)?.ppid ?? 0 : 0;
+    const myAncestors = collectAncestorPids(myPid, processes);
+    for (const entry of processes.values()) {
+      if (entry.pid === myPid || !isOperatorMcpCommand(entry.command) || myAncestors.has(entry.pid) || entry.ageSeconds === null || entry.ageSeconds < 30) continue;
+      const candidateAncestors = collectAncestorPids(entry.pid, processes);
+      if (sharedShellPid > 1 && (entry.ppid === sharedShellPid || candidateAncestors.has(sharedShellPid))) continue;
+      const root = findOperatorProcessRoot(entry, processes);
+      if (root.ppid !== 1) continue;
+      process.kill(entry.pid, 'SIGTERM');
+      console.error(`[mcp-operator] killed orphan PID ${entry.pid} (parent=${entry.ppid}, node=${describeNodeRuntime(entry.command)})`);
+      const timer = setTimeout(() => { try { process.kill(entry.pid, 0); process.kill(entry.pid, 'SIGKILL'); } catch { /* already exited */ } }, 2_000);
+      timer.unref();
+    }
+  } catch (err) {
+    console.error(`[mcp-operator] orphan cleanup failed: ${err}`);
   }
 }
 
@@ -490,6 +590,7 @@ process.on('unhandledRejection', (reason) => {
 
 // ── Main Loop ──
 
+killOrphanInstances();
 runPreflightDiagnostics();
 
 const rl = createInterface({ input: process.stdin, terminal: false });
