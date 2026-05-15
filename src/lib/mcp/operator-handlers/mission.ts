@@ -144,21 +144,20 @@ export const MISSION_TOOLS: McpTool[] = [
     description:
       'Return one-call worker context for a packet or lane: branch, base, head SHA, worktree, file ceiling, allowed/blocked paths, repo-filtered directives, and active related packets with overlapping files. Provide packetId or laneId.',
     inputSchema: {
+      // No top-level anyOf — OpenAI strict function-calling rejects oneOf /
+      // anyOf / allOf siblings to `type: 'object'`. Handler validates that
+      // either packetId or laneId is present and throws if neither is.
       type: 'object',
       properties: {
         packetId: {
           type: 'string',
-          description: 'Packet id, for example pkt-abc.',
+          description: 'Packet id, for example pkt-abc. Either packetId or laneId is required.',
         },
         laneId: {
           type: 'string',
-          description: 'Lane id, for example lane-xyz.',
+          description: 'Lane id, for example lane-xyz. Either packetId or laneId is required.',
         },
       },
-      anyOf: [
-        { required: ['packetId'] },
-        { required: ['laneId'] },
-      ],
     },
   },
   {
