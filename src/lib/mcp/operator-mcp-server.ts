@@ -11,7 +11,7 @@
  */
 
 import { createInterface } from 'node:readline';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -66,6 +66,107 @@ import {
   handleStatus,
   handleTranscript,
 } from '@/lib/mcp/operator-handlers/status';
+
+const ORPHAN_MIN_AGE_SECONDS = 30;
+const OPERATOR_COMMAND_RE = /^(?:\S+\/)?(?:npm|node|tsx)\b.*(?:^|\s)\S*operator-mcp-server\.ts(?:\s|$)/;
+type ProcessRow = { pid: number; ppid: number; ageSeconds: number; args: string };
+
+function parseElapsedSeconds(raw: string): number {
+  const [dayText, timeText] = raw.includes('-') ? raw.split('-', 2) : ['0', raw];
+  const days = Number(dayText);
+  const segments = timeText.split(':').map(Number);
+  if (!Number.isFinite(days) || segments.length > 3 || segments.some((part) => !Number.isFinite(part))) {
+    return -1;
+  }
+  while (segments.length < 3) segments.unshift(0);
+  const [hours = 0, minutes = 0, seconds = 0] = segments;
+  return (days * 24 * 60 * 60) + (hours * 60 * 60) + (minutes * 60) + seconds;
+}
+
+function listProcessRows(): ProcessRow[] {
+  const output = execFileSync('ps', ['-e', '-o', 'pid=,ppid=,etime=,command='], {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  const rows: ProcessRow[] = [];
+  for (const line of output.split('\n')) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/);
+    if (!match) continue;
+    rows.push({
+      pid: parseInt(match[1], 10),
+      ppid: parseInt(match[2], 10),
+      ageSeconds: parseElapsedSeconds(match[3]),
+      args: match[4] || '',
+    });
+  }
+  return rows;
+}
+
+function isOperatorMcpCommand(args: string): boolean { return OPERATOR_COMMAND_RE.test(args.trim()); }
+
+function isAncestorPid(pid: number, selfPid: number, rowsByPid: Map<number, ProcessRow>): boolean {
+  let currentPid = rowsByPid.get(selfPid)?.ppid ?? process.ppid;
+  const seen = new Set<number>();
+  while (currentPid > 1 && !seen.has(currentPid)) {
+    if (currentPid === pid) return true;
+    seen.add(currentPid);
+    currentPid = rowsByPid.get(currentPid)?.ppid ?? 0;
+  }
+  return false;
+}
+
+function isDetachedOperatorTree(row: ProcessRow, rowsByPid: Map<number, ProcessRow>): boolean {
+  let parentPid = row.ppid;
+  const seen = new Set<number>();
+  while (parentPid > 1 && !seen.has(parentPid)) {
+    seen.add(parentPid);
+    const parent = rowsByPid.get(parentPid);
+    if (!parent || !isOperatorMcpCommand(parent.args)) return false;
+    parentPid = parent.ppid;
+  }
+  return parentPid === 1;
+}
+
+function nodeLabelFromArgs(args: string): string {
+  const cellar = args.match(/\/node(?:@[\d.]+)?\/(\d+\.\d+\.\d+(?:_\d+)?)\/bin\/node/)?.[1];
+  const nodeAt = args.match(/node@(\d+(?:\.\d+)*)/)?.[1];
+  return cellar?.replace(/_/g, '.') ?? (nodeAt ? `node@${nodeAt}` : 'unknown');
+}
+
+function killOrphanInstances(): void {
+  if (process.env.O8_MCP_NO_ORPHAN_KILL === '1') return;
+  try {
+    const myPid = process.pid;
+    const myParentPid = process.ppid;
+    const rows = listProcessRows();
+    const rowsByPid = new Map(rows.map((row) => [row.pid, row]));
+    const myParentParentPid = rowsByPid.get(myParentPid)?.ppid ?? 0;
+
+    for (const row of rows) {
+      if (row.pid === myPid) continue;
+      if (!isOperatorMcpCommand(row.args)) continue;
+      if (row.ageSeconds < ORPHAN_MIN_AGE_SECONDS) continue;
+      if (isAncestorPid(row.pid, myPid, rowsByPid)) continue;
+      if (row.ppid === myParentPid) continue;
+      if (myParentParentPid > 1 && row.ppid === myParentParentPid) continue;
+      if (!isDetachedOperatorTree(row, rowsByPid)) continue;
+
+      try {
+        process.kill(row.pid, 'SIGTERM');
+        console.error(`[mcp-operator] killed orphan PID ${row.pid} (parent=${row.ppid}, node=${nodeLabelFromArgs(row.args)})`);
+        const killTimer = setTimeout(() => {
+          try {
+            process.kill(row.pid, 0);
+            process.kill(row.pid, 'SIGKILL');
+          } catch { /* already gone */ }
+        }, 2000) as ReturnType<typeof setTimeout> & { unref?: () => void };
+        killTimer.unref?.();
+      } catch { /* ignore per-process kill failures */ }
+    }
+  } catch (err) {
+    console.error(`[mcp-operator] orphan cleanup failed: ${err}`);
+  }
+}
 
 // ── Pre-flight diagnostics (run once at startup) ──
 // Verifies that the binaries the MCP tools depend on are actually
@@ -490,6 +591,7 @@ process.on('unhandledRejection', (reason) => {
 
 // ── Main Loop ──
 
+killOrphanInstances();
 runPreflightDiagnostics();
 
 const rl = createInterface({ input: process.stdin, terminal: false });
