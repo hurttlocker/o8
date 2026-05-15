@@ -38,13 +38,11 @@ export const GEMINI_FALLBACK_CASCADE: ReadonlyArray<string> = [
   'gemini-2.5-flash',
 ];
 
-// claude-code chat runtime disabled June 2026 (#1047, epic #1044). The
-// /api/claude-code/send route now 410s. The list is intentionally empty so
-// the WorkspaceTerminal chat picker doesn't surface a claude-code option.
-// Discovered/read-only claude-code sessions still appear (transcripts can be
-// inspected) but new chat sends route through Codex / Gemini / opencode
-// instead.
-export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [];
+export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
+  { id: 'claude-opus-4-7', label: 'Opus 4.7', color: '#8b5cf6' },
+  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', color: '#8b5cf6' },
+  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', color: '#8b5cf6' },
+];
 
 export const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
   { id: 'gpt-5.5', label: 'GPT-5.5', color: '#10b981' },
