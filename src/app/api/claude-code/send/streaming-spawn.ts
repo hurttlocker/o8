@@ -62,7 +62,7 @@ export async function handleClaudeCodeSend(req: Request) {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      const parser = createClaudeCodeStreamJsonParser();
+      const parser = createClaudeCodeStreamJsonParser({ planMode });
       const enqueueEvent = (event: unknown) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
       };
