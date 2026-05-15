@@ -1,5 +1,6 @@
 import os from 'os';
 import { ensureSession, sendMessage } from '@/lib/claude-code/interactive-session';
+import type { ClaudeCodePermissionMode } from '@/lib/claude-code/interactive-session';
 
 interface SendRequest {
   message: string;
@@ -30,7 +31,7 @@ export async function handleClaudeCodeSend(req: Request) {
   } catch {
     return jsonError('Invalid JSON request body', 400);
   }
-  const { message, cwd, sessionId, tabId, model, planMode } = body;
+  const { message, cwd, sessionId, tabId, model, planMode, bypassPermissions } = body;
 
   if (!message?.trim()) {
     return jsonError('Message is required', 400);
@@ -43,9 +44,14 @@ export async function handleClaudeCodeSend(req: Request) {
 
   const expandedCwd = cwd?.replace(/^~/, os.homedir());
   const workingDir = expandedCwd || process.cwd();
+  const permissionMode: ClaudeCodePermissionMode = bypassPermissions
+    ? 'bypassPermissions'
+    : planMode
+      ? 'plan'
+      : 'acceptEdits';
   let session: ReturnType<typeof ensureSession>;
   try {
-    session = ensureSession(sessionKey, workingDir, model);
+    session = ensureSession(sessionKey, workingDir, model, permissionMode);
   } catch (error) {
     return jsonError(errorText(error), 500);
   }

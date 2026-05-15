@@ -14,11 +14,13 @@ import type {
 } from './stream-json-parser';
 
 export type ClaudeCodeInteractiveSessionStatus = 'ready' | 'busy' | 'dead';
+export type ClaudeCodePermissionMode = 'acceptEdits' | 'plan' | 'bypassPermissions';
 
 export interface ClaudeCodeInteractiveSession {
   tabId: string;
   cwd: string;
   model: string | null;
+  permissionMode: ClaudeCodePermissionMode;
   proc: ChildProcessWithoutNullStreams;
   sessionId: string | null;
   status: ClaudeCodeInteractiveSessionStatus;
@@ -53,6 +55,7 @@ interface InternalClaudeCodeInteractiveSession extends ClaudeCodeInteractiveSess
 const PROCESS_TIMEOUT_MS = 480_000;
 const IDLE_TIMEOUT_MS = 30 * 60_000;
 const sessions = new Map<string, InternalClaudeCodeInteractiveSession>();
+type PermissionRequestEvent = Extract<ClaudeCodeStreamJsonParserEvent, { type: 'permission_request' }>;
 
 function claudeCodeBin(): string {
   return process.env.O8_CLAUDE_CODE_BIN
@@ -69,10 +72,18 @@ function normalizeModel(model: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+function normalizePermissionMode(permissionMode?: ClaudeCodePermissionMode): ClaudeCodePermissionMode {
+  return permissionMode ?? 'acceptEdits';
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 function sessionIdFromEvent(event: Record<string, unknown>): string | null {
@@ -87,13 +98,36 @@ function sessionIdFromEvent(event: Record<string, unknown>): string | null {
     : null;
 }
 
-function buildClaudeArgs(model: string | null): string[] {
+function permissionRequestFromEvent(event: Record<string, unknown>): PermissionRequestEvent | null {
+  if (event.type !== 'can_use_tool') return null;
+
+  const args = asRecord(event.input) ?? asRecord(event.args) ?? undefined;
+  const name = asString(event.name) ?? asString(event.tool_name) ?? asString(event.tool);
+  const text = asString(event.text)
+    ?? asString(event.message)
+    ?? asString(event.reason)
+    ?? (name
+      ? `Claude is requesting permission to use ${name}.`
+      : 'Claude is requesting permission to use a tool.');
+
+  return {
+    type: 'permission_request',
+    id: asString(event.id) ?? asString(event.tool_use_id) ?? null,
+    name,
+    text,
+    ...(args ? { args } : {}),
+  };
+}
+
+function buildClaudeArgs(model: string | null, permissionMode: ClaudeCodePermissionMode): string[] {
   const args = [
     '--input-format',
     'stream-json',
     '--output-format',
     'stream-json',
     '--verbose',
+    '--permission-mode',
+    permissionMode,
     '--include-partial-messages',
   ];
 
@@ -103,6 +137,9 @@ function buildClaudeArgs(model: string | null): string[] {
 
   if (args.includes('-p') || args.includes('--print')) {
     throw new Error('Interactive Claude Code sessions must not use -p/--print');
+  }
+  if (args.includes('--dangerously-skip-permissions')) {
+    throw new Error('Interactive Claude Code sessions must not default to --dangerously-skip-permissions');
   }
 
   return args;
@@ -140,10 +177,14 @@ function scheduleIdleKill(session: InternalClaudeCodeInteractiveSession): void {
   }, IDLE_TIMEOUT_MS);
 }
 
-function captureSessionIds(session: InternalClaudeCodeInteractiveSession, chunk: string): void {
+function captureSessionMetadata(
+  session: InternalClaudeCodeInteractiveSession,
+  chunk: string,
+): PermissionRequestEvent[] {
   session.stdoutLineBuffer += chunk;
   const lines = session.stdoutLineBuffer.split('\n');
   session.stdoutLineBuffer = lines.pop() ?? '';
+  const permissionEvents: PermissionRequestEvent[] = [];
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -154,10 +195,13 @@ function captureSessionIds(session: InternalClaudeCodeInteractiveSession, chunk:
       if (sessionId) {
         session.sessionId = sessionId;
       }
+      const permissionEvent = parsed ? permissionRequestFromEvent(parsed) : null;
+      if (permissionEvent) permissionEvents.push(permissionEvent);
     } catch {
       // Ignore non-JSON banners; the stream-json parser applies the same rule.
     }
   }
+  return permissionEvents;
 }
 
 function settleTurn(
@@ -233,10 +277,11 @@ function attachProcessHandlers(session: InternalClaudeCodeInteractiveSession): v
 
   proc.stdout.on('data', (chunk: Buffer) => {
     const text = chunk.toString('utf8');
-    captureSessionIds(session, text);
+    const permissionEvents = captureSessionMetadata(session, text);
     const turn = session.activeTurn;
     if (turn) {
-      handleParserEvents(session, turn.parser.pushChunk(text));
+      const parserEvents = turn.parser.pushChunk(text);
+      handleParserEvents(session, permissionEvents.length ? [...permissionEvents, ...parserEvents] : parserEvents);
     }
   });
 
@@ -284,8 +329,9 @@ function spawnSession(
   tabId: string,
   cwd: string,
   model: string | null,
+  permissionMode: ClaudeCodePermissionMode,
 ): InternalClaudeCodeInteractiveSession {
-  const proc = spawn(claudeCodeBin(), buildClaudeArgs(model), {
+  const proc = spawn(claudeCodeBin(), buildClaudeArgs(model, permissionMode), {
     cwd,
     env: {
       ...process.env,
@@ -299,6 +345,7 @@ function spawnSession(
     tabId,
     cwd,
     model,
+    permissionMode,
     proc,
     sessionId: null,
     status: 'ready',
@@ -314,7 +361,7 @@ function spawnSession(
   attachProcessHandlers(session);
   scheduleIdleKill(session);
   sessions.set(tabId, session);
-  console.log(`[claude-code-interactive-session] Spawned ${tabId} in ${cwd}`);
+  console.log(`[claude-code-interactive-session] Spawned ${tabId} in ${cwd} (${permissionMode})`);
   return session;
 }
 
@@ -328,16 +375,20 @@ export function ensureSession(
   tabId: string,
   cwd: string,
   model?: string,
+  permissionMode?: ClaudeCodePermissionMode,
 ): ClaudeCodeInteractiveSession {
   const normalizedCwd = normalizeCwd(cwd);
   const normalizedModel = normalizeModel(model);
+  const normalizedPermissionMode = normalizePermissionMode(permissionMode);
   const existing = sessions.get(tabId);
 
+  // Permission mode is process-scoped, so a mode change must get a fresh process.
   if (
     existing
     && existing.status !== 'dead'
     && existing.cwd === normalizedCwd
     && existing.model === normalizedModel
+    && existing.permissionMode === normalizedPermissionMode
   ) {
     return existing;
   }
@@ -346,7 +397,7 @@ export function ensureSession(
     killClaudeCodeInteractiveSession(tabId);
   }
 
-  return spawnSession(tabId, normalizedCwd, normalizedModel);
+  return spawnSession(tabId, normalizedCwd, normalizedModel, normalizedPermissionMode);
 }
 
 export async function sendMessage(
