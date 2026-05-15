@@ -2322,18 +2322,38 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   // the turn resolves (the abort causes close to fire within 1-2s).
 }
 
-function handleOrchestratorStatus(client: ClientState, msg: Record<string, unknown>) {
+async function handleOrchestratorStatus(client: ClientState, msg: Record<string, unknown>) {
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
 
-  const session = getOrchestratorSession(repoPath);
+  // Mirror the dual-path from handleOrchestratorSendMsg (#1044 child 3.2):
+  // when `inAppOrchestratorEnabled` is off (default), the active chat backend
+  // is a CodexOrchestratorSession, not a (Claude) OrchestratorSession. If we
+  // only looked up the Claude session here, the mobile status indicator would
+  // always report `dead` in the default config.
+  const useClaudeOrchestrator = resolveInAppOrchestratorEnabledSync();
+
+  let status: 'ready' | 'busy' | 'dead' | string = 'dead';
+  let sessionName: string | null = null;
+
+  if (useClaudeOrchestrator) {
+    const session = getOrchestratorSession(repoPath);
+    status = session?.status ?? 'dead';
+    sessionName = session?.sessionName ?? null;
+  } else {
+    const { getCodexOrchestratorSession } = await import('./lib/lane/codex-orchestrator-session');
+    const session = getCodexOrchestratorSession(repoPath);
+    status = session?.status ?? 'dead';
+    sessionName = session?.sessionName ?? null;
+  }
+
   send(client, {
     channel: 'orchestrator',
     event: 'status',
     data: {
-      status: session?.status ?? 'dead',
+      status,
       repoPath,
-      sessionName: session?.sessionName ?? null,
+      sessionName,
     },
   });
 }
