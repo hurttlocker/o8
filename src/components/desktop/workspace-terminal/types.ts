@@ -52,6 +52,7 @@ export interface TerminalTab {
   lastActivity: number;
   chatRuntime?: 'codex' | 'claude-code' | 'gemini' | 'opencode';
   chatSessionKey?: string;
+  claudeSessionId?: string;
   chatModel?: string;
   chatContinueLatest?: boolean;
   chatDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string };
