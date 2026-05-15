@@ -182,11 +182,19 @@ export function computeUpdatedChatSessionKey(
   tab: TerminalTab,
   sessionKey: string,
 ): TerminalTab {
+  const normalizedSessionKey = tab.chatRuntime
+    ? (normalizeWorkspaceChatSessionKey(tab.chatRuntime, sessionKey) ?? sessionKey)
+    : sessionKey;
+  const claudeSessionId = tab.chatRuntime === 'claude-code'
+    ? (normalizedSessionKey.startsWith('claude-code:')
+      ? normalizedSessionKey.slice('claude-code:'.length)
+      : normalizedSessionKey)
+    : undefined;
   return {
     ...tab,
-    chatSessionKey: tab.chatRuntime
-      ? (normalizeWorkspaceChatSessionKey(tab.chatRuntime, sessionKey) ?? sessionKey)
-      : sessionKey,
+    chatSessionKey: normalizedSessionKey,
+    claudeSessionId: claudeSessionId
+      ?? (tab.chatRuntime === 'claude-code' ? tab.claudeSessionId : undefined),
   };
 }
 
@@ -337,6 +345,7 @@ export function serializeTabsForPersistence(currentTabs: TerminalTab[]) {
       tmuxSession: tab.tmuxSession ?? undefined,
       chatRuntime: tab.chatRuntime,
       chatSessionKey: tab.chatSessionKey,
+      claudeSessionId: tab.claudeSessionId,
       chatModel: tab.chatModel,
       chatContinueLatest: tab.chatContinueLatest,
       chatCheckpoints: tab.chatCheckpoints,
