@@ -68,7 +68,7 @@ import {
 } from '@/lib/mcp/operator-handlers/status';
 
 const ORPHAN_MIN_AGE_SECONDS = 30;
-const OPERATOR_COMMAND_RE = /^(?:\S+\/)?(?:npm|node|tsx)\b.*(?:^|\s)\S*operator-mcp-server\.ts(?:\s|$)/;
+const OPERATOR_COMMAND_RE = /^(?:\S+\/)?(?:npm|npx|node|tsx)\b.*(?:^|\s)\S*operator-mcp-server\.ts(?:\s|$)/;
 type ProcessRow = { pid: number; ppid: number; ageSeconds: number; args: string };
 
 function parseElapsedSeconds(raw: string): number {
