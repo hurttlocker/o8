@@ -9,6 +9,7 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-15
 
+- `450c15da` feat: add AI provider billing verification smoke
 - `bd8a9167` feat: add agent runtime interactive session [via-o8]
 - `8c8d6811` feat: render agent runtime chat events [via-o8]
 - `4d9eb0dc` feat: extract AI provider-code stream-json parser into a module
