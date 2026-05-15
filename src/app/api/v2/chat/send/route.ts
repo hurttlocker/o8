@@ -111,6 +111,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: body.message,
+        tabId: body.tabId ?? body.sessionKey,
         sessionId: body.sessionId ?? body.sessionKey,
         cwd: body.cwd,
       }),

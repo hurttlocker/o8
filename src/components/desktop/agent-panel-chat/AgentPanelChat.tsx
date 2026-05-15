@@ -551,7 +551,7 @@ export function AgentPanelChat({
     setTranscript(prev => [...prev, { id: assistantId, role: 'assistant' as const, text: '', timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
     setAgentRunning(true); liveToolCallsRef.current = []; setActiveToolCalls([]);
     try {
-      const res = await fetch('/api/claude-code/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, cwd, sessionId: claudeSessionIdRef.current }) });
+      const res = await fetch('/api/claude-code/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, cwd, tabId: selectedKey, sessionId: claudeSessionIdRef.current }) });
       if (!res.ok || !res.body) { setTranscript(prev => updateTranscriptEntry(prev, assistantId, { text: `Error: ${res.statusText}` })); return; }
       const reader = res.body.getReader(); const decoder = new TextDecoder(); let accumulated = ''; let buffer = '';
       while (true) {
