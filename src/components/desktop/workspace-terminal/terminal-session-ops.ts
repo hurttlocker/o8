@@ -147,8 +147,13 @@ export function computeCliChatSession(
     // Pick a model that matches the resolved runtime when the reused tab
     // previously spoke a different CLI (otherwise GPT-5.4 chip sticks on a
     // gemini tab). Falls back to the caller's explicit modelId.
+    // claude-code chat runtime disabled in v0.1.140 (#1047) — CLAUDE_CLI_MODELS
+    // is intentionally empty. Fall back to the Codex default model so legacy
+    // localStorage tabs with `chatRuntime: 'claude-code'` don't crash on
+    // restore; the 410 from /api/claude-code/send surfaces a clear error if
+    // the user actually tries to chat. Same pattern as terminal-tab-handlers.ts.
     const fallbackModelForRuntime = resolvedRuntime === 'claude-code'
-      ? CLAUDE_CLI_MODELS[0].id
+      ? (CLAUDE_CLI_MODELS[0]?.id ?? CODEX_CLI_MODELS[0].id)
       : resolvedRuntime === 'gemini' ? GEMINI_CLI_MODELS[0].id
       : resolvedRuntime === 'opencode' ? getOpenCodeModels([])[0].id
       : CODEX_CLI_MODELS[0].id;
@@ -182,7 +187,8 @@ export function computeCliChatSession(
     chatRuntime: resolvedRuntime,
     chatSessionKey: normalizedTargetSessionKey ?? undefined,
     chatModel: options.modelId ?? (
-      resolvedRuntime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id
+      // claude-code runtime guard — see comment above.
+      resolvedRuntime === 'claude-code' ? (CLAUDE_CLI_MODELS[0]?.id ?? CODEX_CLI_MODELS[0].id)
         : resolvedRuntime === 'gemini' ? GEMINI_CLI_MODELS[0].id
         : resolvedRuntime === 'opencode' ? getOpenCodeModels([])[0].id
         : CODEX_CLI_MODELS[0].id
