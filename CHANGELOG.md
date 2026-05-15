@@ -9,6 +9,8 @@ and internal chores live in the private engineering log.
 
 ## 2026-05-15
 
+- `4d9eb0dc` feat: extract AI provider-code stream-json parser into a module
+- `ebf444e7` feat: AI provider-code composer model pill + plan/bypass toggles
 - `a87bfaa7` feat: restore AI provider-code as interactive chat-tab runtime
 
 ## 2026-05-14
