@@ -1,5 +1,6 @@
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import type { LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
+import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 
 export interface ToolCallInfo {
   name: string;
@@ -37,6 +38,7 @@ export interface LLMMessage {
   thinking?: string;
   thinkingSteps?: ThinkingStep[];
   thinkingDurationMs?: number;
+  claudeCodeEvents?: ClaudeCodeStreamJsonChatEvent[];
   isError?: boolean;
   recalledFacts?: number;
   isCompaction?: boolean;

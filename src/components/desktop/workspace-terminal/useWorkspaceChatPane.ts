@@ -11,15 +11,21 @@ import {
 import type {
   TerminalTab,
   WorkspaceCliModelOption,
-  WorkspaceLlmMessage,
 } from '@/components/desktop/workspace-terminal/types';
+import { mapWorkspaceTranscriptMessages } from '@/components/desktop/workspace-terminal/workspace-chat-message-mapper';
+import {
+  buildClaudePermissionDecisionMessage,
+  coerceClaudeCodeChatEvent,
+  mergeClaudeCodeChatEvent,
+  type ClaudePermissionDecision,
+  type WorkspaceStreamEvent,
+} from '@/components/desktop/workspace-terminal/workspace-stream-events';
 import { getCachedOpenCodeProviders, loadOpenCodeProviders } from '@/lib/setup/detection-cache';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import {
   buildQueuedContextCard,
   buildWorkspaceThinkingStep,
   isAgentRuntimeTab,
-  isOwnedCodexRuntimeSession,
   isOwnedCliRuntimeSession,
   mergeTranscriptEntries,
   normalizeWorkspaceChatSessionKey,
@@ -35,6 +41,7 @@ import type {
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
+import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 
 interface UseWorkspaceChatPaneOptions {
   tab: TerminalTab;
@@ -59,6 +66,7 @@ export function useWorkspaceChatPane({
   const [liveAssistantId, setLiveAssistantId] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
   const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
+  const [activeClaudeCodeEvents, setActiveClaudeCodeEvents] = useState<ClaudeCodeStreamJsonChatEvent[]>([]);
   const [activeThinking, setActiveThinking] = useState<{ steps: MobileTranscriptThinkingStep[]; thinking: string } | null>(null);
   const [streamMeta, setStreamMeta] = useState<{
     tokens?: { input: number; output: number };
@@ -196,23 +204,8 @@ export function useWorkspaceChatPane({
     return status === 'running' || status === 'launched' || status === 'waiting';
   })();
 
-  // Packet B: previously, four useEffects polled `/api/mobile/history` per tab
-  // (active-flip, transcriptPollMs setInterval, first-load burst, post-send
-  // poke). These are gone — reads come from `useTranscript` above, the Packet
-  // A bootstrap in `page.tsx` hydrates initial state, and the WS bridge
-  // refills via `chat.done`. We keep one belt-and-suspenders one-shot: if we
-  // mount with a sessionKey whose slice is still `idle` (e.g. the tab opened
-  // before `page.tsx`'s bootstrap effect registered this key), fire a single
-  // bootstrap so the first paint isn't empty.
   useEffect(() => {
     if (!normalizedSessionKey) return undefined;
-    // Always re-bootstrap on mount/key-change. We can't trust the slice's
-    // 'fresh' status here: the WS bridge marks the slice 'fresh' on the first
-    // partial event (e.g. a single delta arriving before the chat-pane mounts),
-    // which would otherwise short-circuit this bootstrap and leave the operator
-    // staring at an empty transcript with the full canonical history sitting
-    // unfetched on /api/mobile/history. refetchFresh: true bypasses the fresh-
-    // skip and merges the canonical fetch with whatever the WS already delivered.
     const controller = new AbortController();
     void bootstrapTranscripts([normalizedSessionKey], {
       merge: mergeTranscriptEntries,
@@ -222,7 +215,10 @@ export function useWorkspaceChatPane({
     return () => controller.abort();
   }, [normalizedSessionKey]);
 
-  const sendText = useCallback(async (inputText: string, options?: { baseMessages?: MobileTranscriptEntry[] }) => {
+  const sendText = useCallback(async (inputText: string, options?: {
+    baseMessages?: MobileTranscriptEntry[];
+    claudeMode?: { planMode: boolean; bypassPermissions: boolean };
+  }) => {
     const text = inputText.trim();
     if (!text || sending) return;
 
@@ -233,6 +229,7 @@ export function useWorkspaceChatPane({
     setStreamingText('');
     liveToolCallsRef.current = [];
     setActiveToolCalls([]);
+    setActiveClaudeCodeEvents([]);
     setActiveThinking({
       steps: [{ type: 'thinking', label: 'Reasoning through the problem...', status: 'active' }],
       thinking: '',
@@ -257,6 +254,8 @@ export function useWorkspaceChatPane({
       let body: Record<string, unknown> = {};
 
       if (chatRuntime === 'claude-code') {
+        const effectiveClaudePlanMode = options?.claudeMode?.planMode ?? claudePlanMode;
+        const effectiveClaudeBypassPermissions = options?.claudeMode?.bypassPermissions ?? claudeBypassPermissions;
         endpoint = '/api/claude-code/send';
         body = {
           message: composedMessage,
@@ -264,8 +263,8 @@ export function useWorkspaceChatPane({
           cwd: tab.repo?.localPath,
           model: selectedModel?.id,
           continueLatest: tab.chatContinueLatest !== false,
-          planMode: claudePlanMode,
-          bypassPermissions: claudeBypassPermissions,
+          planMode: effectiveClaudePlanMode,
+          bypassPermissions: effectiveClaudeBypassPermissions,
         };
       } else if (chatRuntime === 'codex' || chatRuntime === 'gemini' || chatRuntime === 'opencode') {
         // Owned CLI sessions (dispatched via the orchestrator) steer through
@@ -354,6 +353,7 @@ export function useWorkspaceChatPane({
       let accumulated = '';
       let buffer = '';
       let thinkingText = '';
+      let claudeCodeEvents: ClaudeCodeStreamJsonChatEvent[] = [];
       const thinkingSteps: MobileTranscriptThinkingStep[] = [
         { type: 'thinking', label: 'Reasoning through the problem...', status: 'active' },
       ];
@@ -394,6 +394,7 @@ export function useWorkspaceChatPane({
           recalledFacts: recalledFacts > 0 ? recalledFacts : undefined,
           thinkingDurationMs,
         });
+        setActiveClaudeCodeEvents(claudeCodeEvents);
         nextTranscript = nextTranscript.map((entry) => (
           entry.id === assistantId
             ? {
@@ -410,6 +411,7 @@ export function useWorkspaceChatPane({
                   ? thinkingSteps.map((step) => ({ ...step, status: step.status === 'active' ? 'complete' : step.status }))
                   : undefined,
                 thinkingDurationMs,
+                claudeCodeEvents: claudeCodeEvents.length > 0 ? [...claudeCodeEvents] : undefined,
               }
             : entry
         ));
@@ -427,21 +429,12 @@ export function useWorkspaceChatPane({
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
-            const event = JSON.parse(line.slice(6)) as {
-              type: string;
-              text?: string;
-              name?: string;
-              status?: 'calling' | 'running' | 'done';
-              args?: Record<string, unknown>;
-              preview?: string;
-              sessionId?: string;
-              threadId?: string;
-              inputTokens?: number;
-              outputTokens?: number;
-              costUsd?: number;
-              factCount?: number;
-              sources?: MobileTranscriptSource[];
-            };
+            const event = JSON.parse(line.slice(6)) as WorkspaceStreamEvent;
+            const claudeCodeEvent = coerceClaudeCodeChatEvent(event);
+            if (claudeCodeEvent) {
+              claudeCodeEvents = mergeClaudeCodeChatEvent(claudeCodeEvents, claudeCodeEvent);
+              updateAssistantEntry();
+            }
 
             if ((event.type === 'delta' || event.type === 'content') && event.text) {
               if (isThinking) {
@@ -495,9 +488,12 @@ export function useWorkspaceChatPane({
             }
 
             if ((event.type === 'tool' || event.type === 'tool_call') && event.name) {
+              const toolStatus = event.status === 'calling' || event.status === 'running' || event.status === 'done'
+                ? event.status
+                : 'running';
               const nextTool: MobileTranscriptToolCall = {
                 name: event.name,
-                status: event.status ?? 'running',
+                status: toolStatus,
                 args: event.args,
               };
               const nextTools = upsertWorkspaceToolCall(liveToolCallsRef.current, nextTool);
@@ -524,6 +520,7 @@ export function useWorkspaceChatPane({
                   ...lastTool,
                   status: 'done',
                   preview: event.preview ?? lastTool.preview,
+                  result: event.output ?? lastTool.result,
                 });
                 liveToolCallsRef.current = nextTools;
                 setActiveToolCalls(nextTools);
@@ -629,12 +626,8 @@ export function useWorkspaceChatPane({
       setLiveAssistantId(null);
       setStreamingText('');
       setActiveThinking(null);
+      setActiveClaudeCodeEvents([]);
       setStreamMeta({});
-      // Packet B: no more post-send poll. Flag the slice as loading so any
-      // observer expecting a refresh can render a hint; the WS bridge
-      // (Packet A) will refill on `chat.done`. If a new sessionKey was
-      // assigned mid-stream, a separate effect below handles the first
-      // bootstrap.
       if (normalizedSessionKey) {
         transcriptStore.setStatus(normalizedSessionKey, 'loading');
       }
@@ -675,28 +668,25 @@ export function useWorkspaceChatPane({
     onConsumeDraftInjection(tabId, injection.id);
   }, [onConsumeDraftInjection, sendText, tab.chatDraftInjection, tabId]);
 
-  const llmMessages = useMemo<WorkspaceLlmMessage[]>(
-    () => messages.map((message) => ({
-      id: message.id,
-      role: message.role === 'system' || message.role === 'tool' ? 'assistant' : message.role,
-      content: message.text,
-      model: message.model ?? (message.role === 'assistant' ? selectedModelLabel : undefined),
-      timestamp: message.timestamp ?? Date.now(),
-      tokens: message.tokens,
-      costUsd: message.costUsd,
-      toolCalls: message.toolCalls?.map((tool) => ({
-        name: tool.name,
-        status: tool.status ?? 'done',
-        args: tool.args,
-        preview: tool.preview,
-      })),
-      sources: message.sources,
-      thinking: message.thinking,
-      thinkingSteps: message.thinkingSteps,
-      thinkingDurationMs: message.thinkingDurationMs,
-      recalledFacts: message.recalledFacts,
-      isError: /^error:/i.test(message.text.trim()),
-    })),
+  const handleClaudePermissionDecision = useCallback(async (
+    request: Extract<ClaudeCodeStreamJsonChatEvent, { type: 'permission_request' }>,
+    decision: ClaudePermissionDecision,
+  ) => {
+    const message = buildClaudePermissionDecisionMessage(request, decision);
+    if (sending) {
+      setDraft(message);
+      throw new Error('Current Claude turn is still streaming; decision loaded into the composer.');
+    }
+    const claudeMode = decision === 'approve'
+      ? { planMode: false, bypassPermissions: true }
+      : { planMode: true, bypassPermissions: false };
+    setClaudePlanMode(claudeMode.planMode);
+    setClaudeBypassPermissions(claudeMode.bypassPermissions);
+    await sendText(message, { claudeMode });
+  }, [sendText, sending]);
+
+  const llmMessages = useMemo(
+    () => mapWorkspaceTranscriptMessages(messages, selectedModelLabel),
     [messages, selectedModelLabel],
   );
 
@@ -753,6 +743,7 @@ export function useWorkspaceChatPane({
 
   return {
     activeToolCalls,
+    activeClaudeCodeEvents,
     activeThinking,
     agentRunning,
     availableModels,
@@ -768,6 +759,7 @@ export function useWorkspaceChatPane({
     handleEdit,
     handleRemoveQueuedContext,
     handleRetry,
+    handleClaudePermissionDecision,
     handleScroll,
     handleSend,
     isAgentTab,
