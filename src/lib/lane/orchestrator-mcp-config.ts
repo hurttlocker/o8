@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
@@ -72,6 +73,25 @@ function argsForMcpServer(server: { command: string; path: string }): string[] {
   return server.command === 'npx' ? ['tsx', server.path] : [server.path];
 }
 
+function parsePort(value: string | null | undefined): number | null {
+  if (!value?.trim()) return null;
+  const port = parseInt(value, 10);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
+}
+
+function resolveWsPort(): number {
+  try {
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const portFile = join(dataDir, 'ws-port');
+    if (existsSync(portFile)) {
+      const port = parsePort(readFileSync(portFile, 'utf-8'));
+      if (port) return port;
+    }
+  } catch { /* fall through */ }
+
+  return parsePort(process.env.O8_WS_PORT) ?? parsePort(process.env.WS_PORT) ?? 3002;
+}
+
 export function getMcpServersConfig(repoPath: string): OrchestratorMcpServersConfig {
   const repoSlug = detectRepoSlug(repoPath);
   const { getApiBase } = require('@/lib/panel/api-port') as typeof import('@/lib/panel/api-port');
@@ -109,7 +129,7 @@ export function getMcpServersConfig(repoPath: string): OrchestratorMcpServersCon
         CORTEX_API_BASE: apiBase,
         CORTEX_REPO_PATH: repoPath,
         CORTEX_REPO_SLUG: repoSlug,
-        WS_PORT: String(process.env.WS_PORT || '3002'),
+        WS_PORT: String(resolveWsPort()),
         WS_TOKEN: getOrCreateWsToken(),
       },
     },

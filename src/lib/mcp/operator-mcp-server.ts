@@ -67,6 +67,106 @@ import {
   handleTranscript,
 } from '@/lib/mcp/operator-handlers/status';
 
+interface ProcessRow {
+  pid: number;
+  ppid: number;
+  elapsedSeconds: number;
+  command: string;
+}
+
+function parseElapsedSeconds(raw: string): number | null {
+  if (/^\d+$/.test(raw)) return parseInt(raw, 10);
+  const dayParts = raw.split('-');
+  const days = dayParts.length === 2 ? parseInt(dayParts[0], 10) : 0;
+  const parts = (dayParts.length === 2 ? dayParts[1] : raw).split(':').map((part) => parseInt(part, 10));
+  if (parts.some((part) => !Number.isFinite(part))) return null;
+  if (parts.length === 3) return (days * 86_400) + (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+  if (days === 0 && parts.length === 2) return (parts[0] * 60) + parts[1];
+  return null;
+}
+
+function parseProcessRows(output: string): ProcessRow[] {
+  return output.split('\n').flatMap((line) => {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/);
+    if (!match) return [];
+    const elapsedSeconds = parseElapsedSeconds(match[3]);
+    if (elapsedSeconds == null) return [];
+    return [{
+      pid: parseInt(match[1], 10),
+      ppid: parseInt(match[2], 10),
+      elapsedSeconds,
+      command: match[4],
+    }];
+  });
+}
+
+function readProcessRows(): ProcessRow[] {
+  const commands = [
+    'ps -e -o pid=,ppid=,etimes=,command=',
+    'ps -e -o pid=,ppid=,etimes=,args=',
+    'ps -e -o pid=,ppid=,etime=,command=',
+    'ps -e -o pid=,ppid=,etime=,args=',
+  ];
+  for (const command of commands) {
+    try {
+      const rows = parseProcessRows(execSync(command, {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 1000,
+      }));
+      if (rows.length > 0) return rows;
+    } catch { /* try the next ps shape */ }
+  }
+  return [];
+}
+
+function isOperatorServerCommand(command: string): boolean {
+  return command.split(/\s+/).some((arg) => (
+    arg === 'operator-mcp-server.ts' || arg.endsWith('/operator-mcp-server.ts')
+  ));
+}
+
+function collectAncestorPids(parentByPid: Map<number, number>): Set<number> {
+  const ancestors = new Set<number>();
+  let pid = process.ppid;
+  while (pid > 1 && !ancestors.has(pid)) {
+    ancestors.add(pid);
+    pid = parentByPid.get(pid) ?? 0;
+  }
+  return ancestors;
+}
+
+function killOrphanInstances(): void {
+  if (process.env.O8_MCP_NO_ORPHAN_KILL === '1') return;
+  try {
+    const rows = readProcessRows();
+    const parentByPid = new Map(rows.map((row) => [row.pid, row.ppid]));
+    const ancestors = collectAncestorPids(parentByPid);
+    const myParentPpid = parentByPid.get(process.ppid);
+
+    for (const row of rows) {
+      if (row.pid === process.pid) continue;
+      if (!isOperatorServerCommand(row.command)) continue;
+      if (ancestors.has(row.pid)) continue;
+      if (row.elapsedSeconds < 30) continue;
+      if (myParentPpid !== undefined && row.ppid === myParentPpid) continue;
+
+      try {
+        process.kill(row.pid, 'SIGTERM');
+        console.error(`[mcp-operator] killed orphan PID ${row.pid}`);
+        const timer = setTimeout(() => {
+          try { process.kill(row.pid, 'SIGKILL'); } catch { /* already gone */ }
+        }, 2000);
+        (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+      } catch { /* ignore processes that exit before cleanup reaches them */ }
+    }
+  } catch (err) {
+    console.error(`[mcp-operator] orphan cleanup failed: ${err}`);
+  }
+}
+
+killOrphanInstances();
+
 // ── Pre-flight diagnostics (run once at startup) ──
 // Verifies that the binaries the MCP tools depend on are actually
 // installed. Missing binaries don't crash the server — users can still
