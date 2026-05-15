@@ -6,6 +6,7 @@ import type {
   ReviewPullRequestSummary,
 } from '@/lib/fleet/types';
 import type { MobileApprovalCard } from '@/lib/approvals/types';
+import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 import type { CompactionTrigger } from '@/lib/runtimes/compaction-detector';
 
 export type MobileInboxItemKind = 'alert' | 'approval' | 'review' | 'run_watch';
@@ -199,6 +200,7 @@ export interface MobileTranscriptEntry {
   thinking?: string;
   thinkingSteps?: MobileTranscriptThinkingStep[];
   thinkingDurationMs?: number;
+  claudeCodeEvents?: ClaudeCodeStreamJsonChatEvent[];
   recalledFacts?: number;
   command?: MobileTranscriptCommand;
   compaction?: {
