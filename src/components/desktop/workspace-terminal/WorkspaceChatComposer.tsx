@@ -495,7 +495,7 @@ function WorkspaceChatComposerBase({
 
       {showClaudeControls && bypassConfirmOpen ? (
         <div style={{ maxWidth: 720, marginLeft: 'auto', marginRight: 'auto', paddingTop: 6, paddingLeft: 2, paddingRight: 2 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 7, paddingRight: 8, paddingBottom: 7, paddingLeft: 10, borderRadius: 10, border: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)', color: 'var(--t-text-secondary)', fontSize: 11, fontFamily: PILL_FONT_FAMILY }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 7, paddingRight: 8, paddingBottom: 7, paddingLeft: 10, borderRadius: 10, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider-subtle)', background: 'var(--t-bg-card)', color: 'var(--t-text-secondary)', fontSize: 11, fontFamily: PILL_FONT_FAMILY }}>
             <span style={{ flex: 1, minWidth: 0 }}>Bypass lets Claude Code skip permission prompts for this tab.</span>
             <button
               type="button"
@@ -503,14 +503,14 @@ function WorkspaceChatComposerBase({
                 enableClaudeBypassPermissions();
                 setBypassConfirmOpen(false);
               }}
-              style={{ height: 24, paddingLeft: 9, paddingRight: 9, borderRadius: 7, border: '1px solid var(--t-danger, #ef4444)', background: 'transparent', color: 'var(--t-danger, #ef4444)', cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: PILL_FONT_FAMILY }}
+              style={{ height: 24, paddingLeft: 9, paddingRight: 9, borderRadius: 7, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-danger, #ef4444)', background: 'transparent', color: 'var(--t-danger, #ef4444)', cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: PILL_FONT_FAMILY }}
             >
               arm
             </button>
             <button
               type="button"
               onClick={() => setBypassConfirmOpen(false)}
-              style={{ height: 24, paddingLeft: 9, paddingRight: 9, borderRadius: 7, border: '1px solid var(--t-border)', background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: PILL_FONT_FAMILY }}
+              style={{ height: 24, paddingLeft: 9, paddingRight: 9, borderRadius: 7, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-border)', background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: PILL_FONT_FAMILY }}
             >
               cancel
             </button>
