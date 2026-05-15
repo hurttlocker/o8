@@ -4,18 +4,19 @@
  * Anthropic SDK pricing change (June 15 2026) so the default install doesn't
  * burn the operator's Agent SDK credit pool.
  *
- * Foundation only — MCP wiring (so Codex can call lane_command + cortex tools)
- * is tracked in a follow-up. Without MCP, auto-review writes its verdict to
- * the log but cannot create an approval card; in-app chat works but cortex_*
- * tools won't dispatch. The toggle keeps the Claude path available for users
- * who want the full MCP-backed orchestrator.
+ * Uses a per-repo sandbox CODEX_HOME with a merged config.toml so Codex can
+ * call the same operator + cortex MCP tools as the Claude orchestrator path.
  */
 
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { resolve } from 'node:path';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
+import { getMcpServersConfig } from './orchestrator-mcp-config';
+import type { OrchestratorMcpServersConfig } from './orchestrator-mcp-config';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -45,6 +46,12 @@ export interface SendToCodexOrchestratorOptions {
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';
 /** Mirror of orchestrator-session.ts PROCESS_TIMEOUT_MS (8 min). */
 const PROCESS_TIMEOUT_MS = 480_000;
+const USER_CODEX_HOME = join(homedir(), '.codex');
+const USER_CODEX_CONFIG_PATH = join(USER_CODEX_HOME, 'config.toml');
+const CODEX_ORCHESTRATOR_HOME_DIR = join(
+  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
+  'codex-orchestrator',
+);
 
 // gpt-5.5 pricing — matches the entry in codex-cost-parser.ts that we added in
 // v0.1.134. Duplicated here so we can report cost on `done` without a runtime
@@ -63,6 +70,136 @@ function normalizeRepoPath(repoPath: string): string {
 
 function repoHash(repoPath: string): string {
   return createHash('sha256').update(repoPath).digest('hex').slice(0, 8);
+}
+
+function tomlKey(key: string): string {
+  return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function tomlStringArray(values: string[]): string {
+  return `[${values.map((value) => tomlString(value)).join(', ')}]`;
+}
+
+function isManagedMcpSection(sectionName: string, serverNames: string[]): boolean {
+  return serverNames.some((name) => {
+    const bare = `mcp_servers.${name}`;
+    const quoted = `mcp_servers.${tomlKey(name)}`;
+    return sectionName === bare
+      || sectionName.startsWith(`${bare}.`)
+      || sectionName === quoted
+      || sectionName.startsWith(`${quoted}.`);
+  });
+}
+
+function stripManagedMcpSections(configToml: string, serverNames: string[]): string {
+  if (!configToml.trim()) {
+    return '';
+  }
+
+  const lines = configToml.replace(/\r\n/g, '\n').split('\n');
+  const nextLines: string[] = [];
+  let skippingManagedSection = false;
+
+  for (const line of lines) {
+    const sectionMatch = line.match(/^\s*\[([^\]]+)]\s*(?:#.*)?$/);
+    if (sectionMatch) {
+      skippingManagedSection = isManagedMcpSection(sectionMatch[1].trim(), serverNames);
+    }
+    if (!skippingManagedSection) {
+      nextLines.push(line);
+    }
+  }
+
+  return nextLines.join('\n').trimEnd();
+}
+
+function serializeStringMap(sectionName: string, values: Record<string, string> | undefined): string[] {
+  if (!values || Object.keys(values).length === 0) {
+    return [];
+  }
+
+  return [
+    `[${sectionName}]`,
+    ...Object.entries(values)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => `${tomlKey(key)} = ${tomlString(value)}`),
+  ];
+}
+
+function serializeCodexMcpServers(servers: OrchestratorMcpServersConfig): string {
+  const lines: string[] = [];
+
+  for (const [name, server] of Object.entries(servers)) {
+    if (lines.length > 0) {
+      lines.push('');
+    }
+
+    const serverSection = `mcp_servers.${tomlKey(name)}`;
+    lines.push(`[${serverSection}]`);
+    if (server.type === 'http') {
+      lines.push('type = "http"');
+      lines.push(`url = ${tomlString(server.url)}`);
+      const headerLines = serializeStringMap(`${serverSection}.headers`, server.headers);
+      if (headerLines.length > 0) {
+        lines.push('', ...headerLines);
+      }
+      continue;
+    }
+
+    lines.push(`command = ${tomlString(server.command)}`);
+    lines.push(`args = ${tomlStringArray(server.args)}`);
+    const envLines = serializeStringMap(`${serverSection}.env`, server.env);
+    if (envLines.length > 0) {
+      lines.push('', ...envLines);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function mergeCodexMcpConfig(baseConfigToml: string, servers: OrchestratorMcpServersConfig): string {
+  const serverNames = Object.keys(servers);
+  const retainedConfig = stripManagedMcpSections(baseConfigToml, serverNames);
+  const mcpConfig = serializeCodexMcpServers(servers);
+  return `${[retainedConfig, mcpConfig].filter(Boolean).join('\n\n')}\n`;
+}
+
+function syncCodexAuthFiles(codexHome: string): void {
+  for (const fileName of ['auth.json', 'installation_id', 'version.json']) {
+    const sourcePath = join(USER_CODEX_HOME, fileName);
+    if (!existsSync(sourcePath)) {
+      continue;
+    }
+
+    const destPath = join(codexHome, fileName);
+    copyFileSync(sourcePath, destPath);
+    if (fileName === 'auth.json') {
+      chmodSync(destPath, 0o600);
+    }
+  }
+}
+
+export function ensureCodexHome(repoPath: string): string {
+  const normalizedRepoPath = normalizeRepoPath(repoPath);
+  const codexHome = join(CODEX_ORCHESTRATOR_HOME_DIR, repoHash(normalizedRepoPath));
+  mkdirSync(codexHome, { recursive: true });
+
+  const userConfigToml = existsSync(USER_CODEX_CONFIG_PATH)
+    ? readFileSync(USER_CODEX_CONFIG_PATH, 'utf8')
+    : '';
+  const mergedConfig = mergeCodexMcpConfig(
+    userConfigToml,
+    getMcpServersConfig(normalizedRepoPath),
+  );
+  const configPath = join(codexHome, 'config.toml');
+  writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });
+  chmodSync(configPath, 0o600);
+  syncCodexAuthFiles(codexHome);
+  return codexHome;
 }
 
 export function codexOrchestratorSessionName(repoPath: string): string {
@@ -168,6 +305,16 @@ export async function sendToCodexOrchestrator(
   }
 
   session.status = 'busy';
+  let codexHome: string;
+  try {
+    codexHome = ensureCodexHome(session.repoPath);
+  } catch (err) {
+    session.status = 'dead';
+    const note = `Failed to prepare Codex MCP config: ${err instanceof Error ? err.message : String(err)}`;
+    onEvent({ type: 'error', error: note });
+    onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+    return;
+  }
 
   const { resolveCli, CliNotFoundError } = await import('@/lib/runtimes/shared/cli-resolver');
   let codexBin: string;
@@ -202,6 +349,7 @@ export async function sendToCodexOrchestrator(
         `model=${model}`,
         '-c',
         `model_reasoning_effort=${reasoningEffort}`,
+        '--',
         message,
       ]
     : [
@@ -214,6 +362,7 @@ export async function sendToCodexOrchestrator(
         `model_reasoning_effort=${reasoningEffort}`,
         '-C',
         session.repoPath,
+        '--',
         message,
       ];
 
@@ -225,6 +374,7 @@ export async function sendToCodexOrchestrator(
         FORCE_COLOR: '0',
         NO_COLOR: '1',
         O8_MANAGED_SESSION: '1',
+        CODEX_HOME: codexHome,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
