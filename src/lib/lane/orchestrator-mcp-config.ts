@@ -74,8 +74,9 @@ function argsForMcpServer(server: { command: string; path: string }): string[] {
 
 export function getMcpServersConfig(repoPath: string): OrchestratorMcpServersConfig {
   const repoSlug = detectRepoSlug(repoPath);
-  const { getApiBase } = require('@/lib/panel/api-port') as typeof import('@/lib/panel/api-port');
+  const { getApiBase, getWsBase } = require('@/lib/panel/api-port') as typeof import('@/lib/panel/api-port');
   const apiBase = getApiBase();
+  const wsPort = new URL(getWsBase()).port;
 
   const cortexServer = resolveCortexMcpServerPath();
   const operatorServer = resolveOperatorMcpServerPath();
@@ -109,7 +110,7 @@ export function getMcpServersConfig(repoPath: string): OrchestratorMcpServersCon
         CORTEX_API_BASE: apiBase,
         CORTEX_REPO_PATH: repoPath,
         CORTEX_REPO_SLUG: repoSlug,
-        WS_PORT: String(process.env.WS_PORT || '3002'),
+        WS_PORT: wsPort,
         WS_TOKEN: getOrCreateWsToken(),
       },
     },
