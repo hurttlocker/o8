@@ -24,18 +24,21 @@ export const REPO_MGMT_TOOLS: McpTool[] = [
     description:
       'USE THIS WHEN the user says "register this folder", "add /path/to/repo to o8", or "track this project in o8". Registers an existing local git repo in o8 so agents can dispatch into it without using the sidebar + button. Example: o8_register_repo({path: "/Users/me/Projects/app"})',
     inputSchema: {
+      // No top-level anyOf — OpenAI strict function-calling rejects oneOf /
+      // anyOf / allOf siblings to `type: 'object'`. The handler's
+      // requiredPath() validates that either `path` or `repoPath` is present
+      // and throws a clear message if not.
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'Absolute path, or ~/ path, to an existing local git repo.',
+          description: 'Absolute path, or ~/ path, to an existing local git repo. Either path or repoPath is required.',
         },
         repoPath: {
           type: 'string',
-          description: 'Alias for path.',
+          description: 'Alias for path. Either path or repoPath is required.',
         },
       },
-      anyOf: [{ required: ['path'] }, { required: ['repoPath'] }],
     },
   },
   {
@@ -43,22 +46,23 @@ export const REPO_MGMT_TOOLS: McpTool[] = [
     description:
       'USE THIS WHEN the user says "start a new project at /tmp/foo" or "initialize a repo here". Creates the folder if needed, runs git init on main, makes an initial commit, and registers the repo in o8. Example: o8_init_repo({path: "~/Projects/hello-world", name: "hello-world"})',
     inputSchema: {
+      // No top-level anyOf — see comment on o8_register_repo. Handler's
+      // requiredPath() enforces either-or.
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'Absolute path, or ~/ path, where the repo should exist.',
+          description: 'Absolute path, or ~/ path, where the repo should exist. Either path or repoPath is required.',
         },
         repoPath: {
           type: 'string',
-          description: 'Alias for path.',
+          description: 'Alias for path. Either path or repoPath is required.',
         },
         name: {
           type: 'string',
           description: 'Optional project name used for the initial README.',
         },
       },
-      anyOf: [{ required: ['path'] }, { required: ['repoPath'] }],
     },
   },
   {
@@ -90,15 +94,18 @@ export const REPO_MGMT_TOOLS: McpTool[] = [
     description:
       'USE THIS WHEN the user says "scaffold a nextjs app here", "set up a fresh Python project", or "help me start a hello-world web project". Creates/initializes the repo, writes a starter project, commits it, and registers it in o8. Example: o8_scaffold({repoPath: "~/Projects/hello-world", kind: "static-html"})',
     inputSchema: {
+      // No top-level anyOf — see comment on o8_register_repo. Handler's
+      // requiredPath() enforces either-or for path/repoPath. `kind` is the
+      // only schema-required field.
       type: 'object',
       properties: {
         repoPath: {
           type: 'string',
-          description: 'Absolute path, or ~/ path, where the repo should be scaffolded.',
+          description: 'Absolute path, or ~/ path, where the repo should be scaffolded. Either repoPath or path is required.',
         },
         path: {
           type: 'string',
-          description: 'Alias for repoPath.',
+          description: 'Alias for repoPath. Either repoPath or path is required.',
         },
         kind: {
           type: 'string',
@@ -111,7 +118,6 @@ export const REPO_MGMT_TOOLS: McpTool[] = [
         },
       },
       required: ['kind'],
-      anyOf: [{ required: ['repoPath'] }, { required: ['path'] }],
     },
   },
 ];
