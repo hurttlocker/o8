@@ -119,7 +119,20 @@ function permissionRequestFromEvent(event: Record<string, unknown>): PermissionR
   };
 }
 
-function buildClaudeArgs(model: string | null, permissionMode: ClaudeCodePermissionMode): string[] {
+function normalizeResumeSessionId(sessionId?: string | null): string | null {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return null;
+  const unprefixed = trimmed.startsWith('claude-code:')
+    ? trimmed.slice('claude-code:'.length)
+    : trimmed;
+  return unprefixed.trim() || null;
+}
+
+function buildClaudeArgs(
+  model: string | null,
+  permissionMode: ClaudeCodePermissionMode,
+  resumeSessionId?: string | null,
+): string[] {
   const args = [
     '--input-format',
     'stream-json',
@@ -133,6 +146,11 @@ function buildClaudeArgs(model: string | null, permissionMode: ClaudeCodePermiss
 
   if (model) {
     args.push('--model', model);
+  }
+
+  const normalizedResumeSessionId = normalizeResumeSessionId(resumeSessionId);
+  if (normalizedResumeSessionId) {
+    args.push('--resume', normalizedResumeSessionId);
   }
 
   if (args.includes('-p') || args.includes('--print')) {
@@ -330,8 +348,10 @@ function spawnSession(
   cwd: string,
   model: string | null,
   permissionMode: ClaudeCodePermissionMode,
+  resumeSessionId?: string | null,
 ): InternalClaudeCodeInteractiveSession {
-  const proc = spawn(claudeCodeBin(), buildClaudeArgs(model, permissionMode), {
+  const normalizedResumeSessionId = normalizeResumeSessionId(resumeSessionId);
+  const proc = spawn(claudeCodeBin(), buildClaudeArgs(model, permissionMode, normalizedResumeSessionId), {
     cwd,
     env: {
       ...process.env,
@@ -347,7 +367,7 @@ function spawnSession(
     model,
     permissionMode,
     proc,
-    sessionId: null,
+    sessionId: normalizedResumeSessionId,
     status: 'ready',
     stdinWritable: Boolean(proc.stdin.writable && !proc.stdin.destroyed),
     createdAt: Date.now(),
@@ -361,7 +381,9 @@ function spawnSession(
   attachProcessHandlers(session);
   scheduleIdleKill(session);
   sessions.set(tabId, session);
-  console.log(`[claude-code-interactive-session] Spawned ${tabId} in ${cwd} (${permissionMode})`);
+  console.log(
+    `[claude-code-interactive-session] Spawned ${tabId} in ${cwd} (${permissionMode})${normalizedResumeSessionId ? ' with resume' : ''}`,
+  );
   return session;
 }
 
@@ -376,11 +398,13 @@ export function ensureSession(
   cwd: string,
   model?: string,
   permissionMode?: ClaudeCodePermissionMode,
+  resumeSessionId?: string | null,
 ): ClaudeCodeInteractiveSession {
   const normalizedCwd = normalizeCwd(cwd);
   const normalizedModel = normalizeModel(model);
   const normalizedPermissionMode = normalizePermissionMode(permissionMode);
   const existing = sessions.get(tabId);
+  const shouldResume = !existing || existing.status === 'dead';
 
   // Permission mode is process-scoped, so a mode change must get a fresh process.
   if (
@@ -397,7 +421,13 @@ export function ensureSession(
     killClaudeCodeInteractiveSession(tabId);
   }
 
-  return spawnSession(tabId, normalizedCwd, normalizedModel, normalizedPermissionMode);
+  return spawnSession(
+    tabId,
+    normalizedCwd,
+    normalizedModel,
+    normalizedPermissionMode,
+    shouldResume ? resumeSessionId : null,
+  );
 }
 
 export async function sendMessage(
