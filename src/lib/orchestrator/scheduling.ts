@@ -6,6 +6,7 @@ import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
+import { getLane } from '@/lib/lane/registry';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
@@ -91,11 +92,18 @@ function fanOutComparisonPackets(state: OrchestratorMissionState): OrchestratorM
 }
 
 function createLaneBinding(packet: OrchestratorPacket, laneId: string, sessionKey?: string | null): OrchestratorLaneBinding {
+  // Read the SQLite lane row so the binding reflects what `updateLane` already
+  // persisted (most importantly `worktreePath`, written in commands.ts during
+  // `bind_worktree` / `launch_session`). Without this, MCP-dispatched packets
+  // saw `worktreePath: null` on the binding even though a real worktree
+  // existed, and the no_changes_produced check inspected the wrong tree.
+  // tileId/tabId do not live on the lane row — leave them empty here.
+  const laneRow = getLane(laneId);
   return {
     tileId: '',
     tabId: '',
     repoPath: packet.workspaceTargetPath,
-    worktreePath: null,
+    worktreePath: laneRow?.worktreePath ?? null,
     runtime: packet.runtime,
     laneId,
     sessionKey: sessionKey ?? null,
