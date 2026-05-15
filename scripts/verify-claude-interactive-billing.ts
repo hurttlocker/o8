@@ -6,9 +6,12 @@
  */
 
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
 
+const EXPECTED_API_KEY_SOURCE = 'none';
+const EXPECTED_RATE_LIMIT_TYPE = 'five_hour';
 const TIMEOUT_MS = Number(process.env.CLAUDE_BILLING_VERIFY_TIMEOUT_MS ?? 90_000);
 const USER_MESSAGE = JSON.stringify({
   type: 'user',
@@ -24,14 +27,11 @@ interface ParsedEvent {
   subtype: string | null;
 }
 
-interface RunResult {
-  binary: string;
-  exitCode: number | null;
-  signal: NodeJS.Signals | null;
-  timedOut: boolean;
-  stdout: string;
-  stderr: string;
-  events: ParsedEvent[];
+interface Observations {
+  initApiKeySources: string[];
+  rateLimitTypes: string[];
+  parsedStdoutEvents: number;
+  stderrTail: string;
 }
 
 function expandHome(input: string): string {
@@ -41,11 +41,13 @@ function expandHome(input: string): string {
 }
 
 function resolveClaudeBin(): string {
-  return expandHome(
-    process.env.O8_CLAUDE_CODE_BIN
-      || process.env.CLAUDE_BIN
-      || '~/.local/bin/claude',
-  );
+  const override = process.env.O8_CLAUDE_CODE_BIN?.trim()
+    || process.env.CLAUDE_BIN?.trim();
+  return expandHome(override || '~/.local/bin/claude');
+}
+
+function timeoutMs(): number {
+  return Number.isFinite(TIMEOUT_MS) && TIMEOUT_MS > 0 ? TIMEOUT_MS : 90_000;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -57,22 +59,18 @@ function stringField(value: Record<string, unknown>, key: string): string | null
   return typeof field === 'string' ? field : null;
 }
 
-function findStringField(value: unknown, key: string, depth = 0): string | null {
-  if (depth > 5) return null;
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findStringField(item, key, depth + 1);
-      if (found) return found;
-    }
-    return null;
+function stringAtPath(value: Record<string, unknown>, keys: string[]): string | null {
+  let cursor: unknown = value;
+  for (const key of keys) {
+    if (!isRecord(cursor)) return null;
+    cursor = cursor[key];
   }
-  if (!isRecord(value)) return null;
+  return typeof cursor === 'string' ? cursor : null;
+}
 
-  const direct = stringField(value, key);
-  if (direct) return direct;
-
-  for (const child of Object.values(value)) {
-    const found = findStringField(child, key, depth + 1);
+function firstStringAtPaths(value: Record<string, unknown>, paths: string[][]): string | null {
+  for (const keys of paths) {
+    const found = stringAtPath(value, keys);
     if (found) return found;
   }
   return null;
@@ -92,132 +90,178 @@ function parseEventLine(line: string): ParsedEvent | null {
   }
 }
 
-function tail(value: string, maxChars = 1_200): string {
-  if (value.length <= maxChars) return value.trim();
-  return value.slice(value.length - maxChars).trim();
+function isInitEvent(event: ParsedEvent): boolean {
+  return event.type === 'init'
+    || event.type === 'system/init'
+    || event.subtype === 'init'
+    || event.type === 'system';
 }
 
-async function runClaudeInteractive(): Promise<RunResult> {
-  const binary = resolveClaudeBin();
-  const events: ParsedEvent[] = [];
-  let stdout = '';
-  let stderr = '';
-  let stdoutRemainder = '';
-  let timedOut = false;
-  let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+function isRateLimitEvent(event: ParsedEvent): boolean {
+  return event.type === 'rate_limit_event'
+    || event.type === 'system/rate_limit_event'
+    || event.subtype === 'rate_limit_event'
+    || event.subtype === 'rate_limit'
+    || isRecord(event.raw.rate_limit_event)
+    || isRecord(event.raw.rateLimitEvent);
+}
 
-  return await new Promise<RunResult>((resolve, reject) => {
-    const child = spawn(binary, [
-      '--input-format',
-      'stream-json',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-    ], {
+function apiKeySourceFromEvent(event: ParsedEvent): string | null {
+  return firstStringAtPaths(event.raw, [
+    ['apiKeySource'],
+    ['api_key_source'],
+    ['data', 'apiKeySource'],
+    ['data', 'api_key_source'],
+  ]);
+}
+
+function rateLimitTypeFromEvent(event: ParsedEvent): string | null {
+  return firstStringAtPaths(event.raw, [
+    ['rateLimitType'],
+    ['rate_limit_type'],
+    ['rateLimitEvent', 'rateLimitType'],
+    ['rateLimitEvent', 'rate_limit_type'],
+    ['rate_limit_event', 'rateLimitType'],
+    ['rate_limit_event', 'rate_limit_type'],
+    ['data', 'rateLimitType'],
+    ['data', 'rate_limit_type'],
+  ]);
+}
+
+function observeEvent(event: ParsedEvent, observations: Observations): void {
+  observations.parsedStdoutEvents += 1;
+
+  if (isInitEvent(event)) {
+    const apiKeySource = apiKeySourceFromEvent(event);
+    if (apiKeySource) observations.initApiKeySources.push(apiKeySource);
+  }
+
+  if (isRateLimitEvent(event)) {
+    const rateLimitType = rateLimitTypeFromEvent(event);
+    if (rateLimitType) observations.rateLimitTypes.push(rateLimitType);
+  }
+}
+
+function hasPassingTelemetry(observations: Observations): boolean {
+  return observations.initApiKeySources.includes(EXPECTED_API_KEY_SOURCE)
+    && observations.rateLimitTypes.length > 0
+    && observations.rateLimitTypes.every((rateLimitType) => rateLimitType === EXPECTED_RATE_LIMIT_TYPE);
+}
+
+function formatValues(values: string[]): string {
+  return values.length > 0 ? values.join(', ') : '(none)';
+}
+
+function failureDetails(observations: Observations): string[] {
+  return [
+    `system/init apiKeySource values: ${formatValues(observations.initApiKeySources)}`,
+    `rate_limit_event rateLimitType values: ${formatValues(observations.rateLimitTypes)}`,
+    `parsed stdout events: ${observations.parsedStdoutEvents}`,
+    observations.stderrTail.trim() ? `stderr tail:\n${observations.stderrTail.trim()}` : '',
+  ].filter(Boolean);
+}
+
+function terminate(child: ReturnType<typeof spawn>): void {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill('SIGTERM');
+  setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+    }
+  }, 2_000).unref();
+}
+
+async function runClaudeInteractive(): Promise<Observations> {
+  const args = [
+    '--input-format',
+    'stream-json',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+  ];
+  const binary = resolveClaudeBin();
+  const observations: Observations = {
+    initApiKeySources: [],
+    rateLimitTypes: [],
+    parsedStdoutEvents: 0,
+    stderrTail: '',
+  };
+
+  return await new Promise<Observations>((resolve, reject) => {
+    const child = spawn(binary, args, {
       cwd: process.cwd(),
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    const stdout = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    const stderr = createInterface({ input: child.stderr, crlfDelay: Infinity });
+    let settled = false;
 
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-      forceKillTimer = setTimeout(() => child.kill('SIGKILL'), 5_000);
-    }, TIMEOUT_MS);
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-
-    child.stdout.on('data', (chunk: unknown) => {
-      const text = String(chunk);
-      stdout += text;
-      stdoutRemainder += text;
-
-      const lines = stdoutRemainder.split(/\r?\n/);
-      stdoutRemainder = lines.pop() ?? '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const event = parseEventLine(trimmed);
-        if (event) events.push(event);
+    const finish = (err: Error | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      stdout.close();
+      stderr.close();
+      terminate(child);
+      if (err) {
+        reject(err);
+      } else {
+        resolve(observations);
       }
-    });
+    };
 
-    child.stderr.on('data', (chunk: unknown) => {
-      stderr += String(chunk);
-    });
+    const timer = setTimeout(() => {
+      finish(new Error([
+        `timed out after ${timeoutMs()}ms`,
+        ...failureDetails(observations),
+      ].join('\n')));
+    }, timeoutMs());
 
     child.on('error', (err) => {
-      clearTimeout(timeout);
-      if (forceKillTimer) clearTimeout(forceKillTimer);
-      reject(err);
+      finish(err);
     });
 
     child.on('close', (exitCode, signal) => {
-      clearTimeout(timeout);
-      if (forceKillTimer) clearTimeout(forceKillTimer);
-
-      const trimmed = stdoutRemainder.trim();
-      if (trimmed) {
-        const event = parseEventLine(trimmed);
-        if (event) events.push(event);
+      if (hasPassingTelemetry(observations)) {
+        finish(null);
+        return;
       }
 
-      resolve({
-        binary,
-        exitCode,
-        signal,
-        timedOut,
-        stdout,
-        stderr,
-        events,
-      });
+      const reason = signal ? `signal ${signal}` : `exit code ${exitCode ?? 'unknown'}`;
+      finish(new Error([
+        `claude exited before billing telemetry passed (${reason})`,
+        ...failureDetails(observations),
+      ].join('\n')));
+    });
+
+    stdout.on('line', (line) => {
+      const event = parseEventLine(line);
+      if (!event) return;
+      observeEvent(event, observations);
+      if (hasPassingTelemetry(observations)) finish(null);
+    });
+
+    stderr.on('line', (line) => {
+      observations.stderrTail = `${observations.stderrTail}${line}\n`.slice(-4_000);
     });
 
     child.stdin.end(`${USER_MESSAGE}\n`);
   });
 }
 
-function summarizeAndExit(result: RunResult): never {
-  const initApiKeySources = result.events
-    .filter((event) => event.type === 'init' || event.type === 'system' || event.subtype === 'init')
-    .map((event) => findStringField(event.raw, 'apiKeySource'))
-    .filter((value): value is string => Boolean(value));
-
-  const rateLimitTypes = result.events
-    .filter((event) => event.type === 'rate_limit_event')
-    .map((event) => findStringField(event.raw, 'rateLimitType'))
-    .filter((value): value is string => Boolean(value));
-
-  const sawSubscriptionAuth = initApiKeySources.includes('none');
-  const sawFiveHourBucket = rateLimitTypes.length > 0
-    && rateLimitTypes.every((rateLimitType) => rateLimitType === 'five_hour');
-  const exitedCleanly = !result.timedOut && result.exitCode === 0;
-  const passed = exitedCleanly && sawSubscriptionAuth && sawFiveHourBucket;
-
-  if (passed) {
+runClaudeInteractive()
+  .then((observations) => {
     console.log(
-      `PASS interactive Claude Code billing smoke: apiKeySource=none; rate_limit_event=five_hour; events=${result.events.length}`,
+      `PASS interactive Claude Code billing smoke: apiKeySource=${EXPECTED_API_KEY_SOURCE}; rate_limit_event=${EXPECTED_RATE_LIMIT_TYPE}; events=${observations.parsedStdoutEvents}`,
     );
     process.exit(0);
-  }
-
-  console.error('FAIL interactive Claude Code billing smoke');
-  console.error(`  binary: ${result.binary}`);
-  console.error(`  exit: code=${result.exitCode ?? 'null'} signal=${result.signal ?? 'null'} timedOut=${result.timedOut}`);
-  console.error(`  system/init apiKeySource values: ${initApiKeySources.length ? initApiKeySources.join(', ') : '(none)'}`);
-  console.error(`  rate_limit_event rateLimitType values: ${rateLimitTypes.length ? rateLimitTypes.join(', ') : '(none)'}`);
-  console.error(`  parsed stdout events: ${result.events.length}`);
-  const stderrTail = tail(result.stderr);
-  if (stderrTail) console.error(`  stderr tail:\n${stderrTail}`);
-  process.exit(1);
-}
-
-runClaudeInteractive()
-  .then(summarizeAndExit)
+  })
   .catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     console.error('FAIL interactive Claude Code billing smoke');
     console.error(`  ${message}`);
+    console.error(`  binary: ${resolveClaudeBin()}`);
+
     process.exit(1);
   });
