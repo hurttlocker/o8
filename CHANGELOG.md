@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-16
+
+- `650ee259` feat: desktop QR pairing emitter for the o8 mobile app
+
 ## 2026-05-15
 
 - `450c15da` feat: add AI provider billing verification smoke
