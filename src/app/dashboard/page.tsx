@@ -14,6 +14,7 @@ import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
 import type { CanvasTab } from '@/components/desktop/Canvas';
+import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
 import { ThemeProvider } from '@/lib/theme/context';
@@ -26,7 +27,12 @@ import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalet
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { ApprovalBanner } from '@/components/desktop/ApprovalBanner';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
-import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
+import {
+  OPEN_MOBILE_PAIRING_EVENT,
+  OPEN_SETTINGS_TAB_EVENT,
+  REQUEST_ADD_REPO_EVENT,
+  type OpenSettingsTabDetail,
+} from '@/lib/desktop/events';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import type { WorkspaceSidePanelRepo } from '@/components/desktop/WorkspaceSidePanel';
@@ -2374,6 +2380,34 @@ function DashboardInner() {
     setActiveNavSection,
   });
 
+  // ── Mobile pairing — open the full-screen QR view as a canvas tab ──
+  // Always closes the settings overlay first so the tab is visible when this
+  // is triggered from the Connections settings tab (overlay covers the
+  // workspace); a no-op when fired from the status-bar phone button.
+  const openMobilePairing = useCallback(() => {
+    closeSettingsOverlay();
+    openCanvasTab({
+      id: 'mobile-pairing',
+      kind: 'mobile-pairing',
+      label: 'Pair Mobile',
+      resourceId: 'mobile-pairing',
+    });
+  }, [closeSettingsOverlay, openCanvasTab]);
+
+  useEffect(() => {
+    const handleOpenPairing = () => { openMobilePairing(); };
+    const handleOpenSettings = (event: Event) => {
+      const detail = (event as CustomEvent<OpenSettingsTabDetail>).detail;
+      if (detail?.tab) handleOpenSettingsTab(detail.tab as SettingsTab);
+    };
+    window.addEventListener(OPEN_MOBILE_PAIRING_EVENT, handleOpenPairing);
+    window.addEventListener(OPEN_SETTINGS_TAB_EVENT, handleOpenSettings);
+    return () => {
+      window.removeEventListener(OPEN_MOBILE_PAIRING_EVENT, handleOpenPairing);
+      window.removeEventListener(OPEN_SETTINGS_TAB_EVENT, handleOpenSettings);
+    };
+  }, [openMobilePairing, handleOpenSettingsTab]);
+
   return (
     <DictationHost>
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
@@ -3008,6 +3042,7 @@ function DashboardInner() {
         leftColumnWidth={sidebarVisible ? (leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
         rightColumnWidth={chatVisible ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
         onOpenSettings={toggleSettingsOverlay}
+        onOpenMobilePairing={openMobilePairing}
         onAddRepo={() => {
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent(REQUEST_ADD_REPO_EVENT));
