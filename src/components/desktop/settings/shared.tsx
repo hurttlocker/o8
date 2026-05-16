@@ -55,7 +55,7 @@ export interface GitHubDeviceFlowState {
 
 export type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'operator-defaults' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'diagnostics' | 'about';
+export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'diagnostics' | 'about';
 
 // ── Constants ──
 
@@ -224,6 +224,17 @@ export function LayersIcon() {
       <path d="M12 2 2 7l10 5 10-5z" />
       <path d="M2 12l10 5 10-5" />
       <path d="M2 17l10 5 10-5" />
+    </svg>
+  );
+}
+
+export function MobileIcon() {
+  // Smartphone glyph for Settings → Mobile (epic #1074). Hand-authored raw
+  // SVG so it renders inside the Tauri webview.
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+      <path d="M12 18h.01"/>
     </svg>
   );
 }
