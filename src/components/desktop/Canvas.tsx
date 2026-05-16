@@ -27,6 +27,7 @@ import {
   Globe,
   Hexagon,
   Plus,
+  Smartphone,
   Terminal,
   X,
 } from './lucide-shims';
@@ -37,6 +38,7 @@ const HtmlPreview = lazy(() => import('@/components/desktop/canvas/HtmlPreview')
 const InlineDiffViewer = lazy(() => import('@/components/desktop/InlineDiffViewer').then(m => ({ default: m.InlineDiffViewer })));
 const IssueCreator = lazy(() => import('@/components/desktop/IssueCreator').then(m => ({ default: m.IssueCreator })));
 const IssueViewer = lazy(() => import('@/components/desktop/IssueViewer').then(m => ({ default: m.IssueViewer })));
+const MobilePairingView = lazy(() => import('@/components/desktop/canvas/MobilePairingView').then(m => ({ default: m.MobilePairingView })));
 const PRViewer = lazy(() => import('@/components/desktop/PRViewer').then(m => ({ default: m.PRViewer })));
 import {
   CanvasEmpty,
@@ -73,7 +75,8 @@ export type CanvasTabKind =
   | 'timeline'
   | 'audit-log'
   | 'mermaid'
-  | 'preview';
+  | 'preview'
+  | 'mobile-pairing';
 
 export interface CanvasTab {
   id: string;
@@ -363,6 +366,8 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
       return <Hexagon size={size} />;
     case 'preview':
       return <Globe size={size} />;
+    case 'mobile-pairing':
+      return <Smartphone size={size} />;
   }
 }
 
@@ -453,6 +458,8 @@ const TabContent = memo(function TabContent({
             return <MermaidViewer code={tab.resourceId} />;
           case 'preview':
             return <PortPreview url={tab.resourceId} port={parseInt(tab.meta?.port ?? '0', 10)} repo={tab.meta?.repo} />;
+          case 'mobile-pairing':
+            return <MobilePairingView />;
           default:
             return <CanvasEmpty selectedRepo={selectedRepo} mode="idle" />;
         }

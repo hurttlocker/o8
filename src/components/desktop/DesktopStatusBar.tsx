@@ -17,6 +17,7 @@
 
 import { memo } from 'react';
 import { FolderPlus, GearSix } from '@phosphor-icons/react';
+import { Smartphone } from './lucide-shims';
 import { ChromeButton } from './chrome/ChromeButton';
 import { MergeActionCluster } from './MergeActionCluster';
 import { FooterPorts } from './desktop-status-bar/footer-ports';
@@ -34,6 +35,8 @@ interface DesktopStatusBarProps {
   rightColumnWidth?: number;
   onOpenSettings: () => void;
   onAddRepo: () => void;
+  /** Open the full-screen mobile-pairing QR view (a canvas tab). */
+  onOpenMobilePairing: () => void;
   onPortPreview?: (port: number, url: string, repo?: string) => void;
 }
 
@@ -45,6 +48,7 @@ function DesktopStatusBarBase({
   rightColumnWidth,
   onOpenSettings,
   onAddRepo,
+  onOpenMobilePairing,
   onPortPreview,
 }: DesktopStatusBarProps) {
   // Three-column footer that mirrors the dashboard layout above. Left section
@@ -86,6 +90,13 @@ function DesktopStatusBarBase({
           icon={<GearSix size={14} weight="bold" color="var(--t-text)" />}
           label="Settings"
           onClick={onOpenSettings}
+          size={22}
+          radius={6}
+        />
+        <ChromeButton
+          icon={<Smartphone size={14} />}
+          label="Pair mobile device"
+          onClick={onOpenMobilePairing}
           size={22}
           radius={6}
         />

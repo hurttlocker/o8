@@ -26,6 +26,7 @@ import {
   SettingsTabSectionHeader as SectionHeader,
   PlugIcon,
   KeyIcon,
+  MobileIcon,
   LayersIcon,
   UsersIcon,
   PaletteIcon,
@@ -36,6 +37,7 @@ import {
 import { GitHubTab } from './settings/GitHubTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
+import { ConnectionsTab } from './settings/ConnectionsTab';
 import { OperatorDefaultsTab } from './settings/OperatorDefaultsTab';
 import { ProjectsPanel } from './settings/ProjectsPanel';
 import { WorkersTab } from './settings/WorkersTab';
@@ -333,6 +335,7 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         <TabButton label="Connectors" icon={<PlugIcon />} active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} />
         <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
+        <TabButton label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} onClick={() => setActiveTab('connections')} />
 
         <SectionHeader>Work</SectionHeader>
         <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
@@ -378,6 +381,9 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         )}
         {activeTab === 'mcp' && (
           <MCPTab />
+        )}
+        {activeTab === 'connections' && (
+          <ConnectionsTab />
         )}
         {activeTab === 'operator-defaults' && (
           <OperatorDefaultsTab />

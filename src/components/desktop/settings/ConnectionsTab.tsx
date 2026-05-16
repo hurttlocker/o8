@@ -1,0 +1,77 @@
+'use client';
+
+/**
+ * ConnectionsTab — Settings → Mobile.
+ *
+ * Pairing entry point for the native o8 mobile app (epic #1074). The QR code
+ * itself lives in the full-screen MobilePairingView (a Canvas tab) — this tab
+ * links to it. The paired-device list, per-device revoke, and local-network
+ * discovery toggle are deferred until backend device-tracking ships.
+ */
+
+import { useCallback } from 'react';
+import { OPEN_MOBILE_PAIRING_EVENT } from '@/lib/desktop/events';
+import { Smartphone } from '../lucide-shims';
+import {
+  APP_FONT_STACK,
+  ComingSoonBanner,
+  HairlineRule,
+  RamsButton,
+  SectionLabel,
+  TabBreadcrumb,
+  TabHeading,
+} from './shared';
+
+export function ConnectionsTab() {
+  const showPairingQr = useCallback(() => {
+    window.dispatchEvent(new CustomEvent(OPEN_MOBILE_PAIRING_EVENT));
+  }, []);
+
+  return (
+    <div style={{
+      paddingTop: 8,
+      paddingLeft: 8,
+      paddingRight: 32,
+      paddingBottom: 40,
+      maxWidth: 780,
+      fontFamily: APP_FONT_STACK,
+    }}>
+      <TabBreadcrumb tab="mobile" />
+      <TabHeading
+        title="mobile"
+        subtitle="Pair the o8 mobile app to approve, monitor, and steer your fleet from your phone."
+      />
+
+      {/* 01 — PAIRING */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="01">PAIRING</SectionLabel>
+        <p style={{
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          maxWidth: 560,
+          margin: 0,
+          marginBottom: 16,
+        }}>
+          o8 mobile connects directly to this Mac over your local network. Open the pairing
+          code, then scan it with the o8 app — your phone and this Mac must be on the same
+          Wi-Fi network.
+        </p>
+        <RamsButton onClick={showPairingQr} icon={<Smartphone size={14} />}>
+          Show pairing QR
+        </RamsButton>
+      </section>
+
+      {/* 02 — PAIRED DEVICES */}
+      <section>
+        <SectionLabel number="02">PAIRED DEVICES</SectionLabel>
+        <div style={{ marginTop: 4 }}>
+          <ComingSoonBanner message="The list of paired phones, per-device revoke, and local-network discovery are coming soon. Pairing works today via the QR code above." />
+        </div>
+        <div style={{ marginTop: 20 }}>
+          <HairlineRule />
+        </div>
+      </section>
+    </div>
+  );
+}
