@@ -108,7 +108,7 @@ These are **completely separate codebases** by design. No shared components. Mob
 
 ### Database (`src/lib/db/`)
 
-SQLite via better-sqlite3 + Drizzle ORM. Data dir: `~/.cortex-ide/` (override: `CORTEX_IDE_DATA_DIR`). WAL mode, normal sync, FK constraints on. Schema auto-migrates on first `getDb()` call — markers at `~/.cortex-ide/.db-migrated-v*`.
+SQLite via better-sqlite3 + Drizzle ORM. Data dir: `~/.o8/` (override: `CORTEX_IDE_DATA_DIR`). WAL mode, normal sync, FK constraints on. Schema auto-migrates on first `getDb()` call — markers at `~/.o8/.db-migrated-v*`.
 
 Core tables: users, api_keys (AES-256-GCM encrypted), usage_logs, subscriptions, sessions, teams, team_members, waitlist, session_outcomes (Cortex v2 ledger), lanes, approvals, watched_agents, github_*.
 
@@ -120,11 +120,11 @@ CSS variable system with 60+ tokens per theme. Three themes: `light`, `dark`, `m
 
 ### Port resolution (`src/lib/panel/api-port.ts`)
 
-**Never hardcode port 3001/3002.** The Tauri sidecar probes `3001-3050` (API) and `3002-3100` (WS) for free ports at startup and writes the chosen values to `~/.cortex-ide/api-port` and `~/.cortex-ide/ws-port`. All consumers must resolve the port via:
+**Never hardcode port 3001/3002.** The Tauri sidecar probes `3001-3050` (API) and `3002-3100` (WS) for free ports at startup and writes the chosen values to `~/.o8/api-port` and `~/.o8/ws-port`. All consumers must resolve the port via:
 
 1. `process.env.O8_API_PORT` (set by sidecar)
 2. `process.env.PORT` (Next server runtime)
-3. `~/.cortex-ide/api-port` file (standalone MCP processes)
+3. `~/.o8/api-port` file (standalone MCP processes)
 4. Legacy default `3001` (dev workflow)
 
 Server-side TS: `import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port'`. MCP servers that run as standalone node processes duplicate a small `resolveApiBase()` helper because they can't import from `@/lib`.
@@ -134,7 +134,7 @@ Server-side TS: `import { getApiBase, resolvePortInfo } from '@/lib/panel/api-po
 Global Next middleware runs in Node runtime and gates these prefixes on loopback origin + bearer token: `/api/panel/`, `/api/orchestrator/`, `/api/directives`, `/api/cortex/`, `/api/runtime/`, `/api/lanes`, `/api/worktrees`, `/api/review/`, `/api/board/`, `/api/command-center/`, `/api/claude-code/`, `/api/codex/`, `/api/operator/`, `/api/setup/`.
 
 - Loopback (`127.0.0.1`, `localhost`, `tauri://localhost`, `same-origin`) passes automatically.
-- Cross-origin must present `Authorization: Bearer <ws-token>` matching `~/.cortex-ide/ws-token` exactly.
+- Cross-origin must present `Authorization: Bearer <ws-token>` matching `~/.o8/ws-token` exactly.
 - Allowlist: `/api/setup/*` GET only, `/api/v2/auth/*`, `/api/panel/github-device/*`, `/api/panel/status` — read-only allowlist so first-run and OAuth handshakes work.
 - **Never add a new route that touches agent/repo state without going through this gate.** If you need public access, put it under `/api/setup/*` as a GET-only endpoint.
 
@@ -169,7 +169,7 @@ MCP distribution: `/api/setup/claude-desktop` GET/POST writes to `~/Library/Appl
 
 The Rust shell runs pre-flight checks before spawning any Node process:
 1. **Node pre-flight**: resolves `node` via login shell (zsh → bash → sh → which) so Finder-launched apps find nvm/fnm/volta. Verifies version ≥ v22. Shows native dialog (osascript/mshta/zenity) + exits on failure.
-2. **Port allocation**: probes free ports, writes to `~/.cortex-ide/{api-port,ws-port}`, sets `O8_NODE_BIN`, `O8_API_PORT`, `O8_WS_PORT` env vars for children.
+2. **Port allocation**: probes free ports, writes to `~/.o8/{api-port,ws-port}`, sets `O8_NODE_BIN`, `O8_API_PORT`, `O8_WS_PORT` env vars for children.
 3. **Bundled server spawn**: `node out/server/server.js` on the picked port, plus `ws-server.mjs`, plus the optional `tauri-plugin-mcp` (gated behind `dev-mcp-plugin` Cargo feature).
 
 `tauri-plugin-mcp` is optional — build with `cargo tauri dev --features dev-mcp-plugin` only if you want the AI-agent-driven webview testing plugin. Default builds don't need it.
@@ -275,7 +275,7 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 - **Never spread `...statusResult` AFTER session data in `runStatusSnapshot()`** — the `status` RPC response has its own `sessions` key that will clobber real session data from `sessions.list`. Always spread it BEFORE so our keys win.
 - **Never use CSS classes** — inline styles only (`style={{ }}` props). iOS Safari reliability issue. This is permanent.
 - **Never hardcode rgba colors for surfaces** — use `var(--t-bg-card)`, `var(--t-panel)`, `var(--t-input-bg)`. Hardcoded `rgba(255,255,255,0.xx)` becomes a light-gray blob in midnight theme. See commit 929ffdf.
-- **Never hardcode port 3001 or 3002** — use `getApiBase()` from `@/lib/panel/api-port` (server-side TS) or `resolveApiBase()` helper (standalone MCP node processes). The Tauri sidecar picks ports dynamically and writes them to `~/.cortex-ide/{api-port,ws-port}`.
+- **Never hardcode port 3001 or 3002** — use `getApiBase()` from `@/lib/panel/api-port` (server-side TS) or `resolveApiBase()` helper (standalone MCP node processes). The Tauri sidecar picks ports dynamically and writes them to `~/.o8/{api-port,ws-port}`.
 - **Never hardcode `/Users/marquisehurtt/*` paths** — use `process.cwd()`, `os.homedir()`, `process.env.HOME`, or an explicit env var. The clone-readiness audit found 15+ leaks; they've been fixed but don't reintroduce.
 - **Never bypass the middleware in `src/middleware.ts`** — it gates all dangerous API routes on loopback + ws-token. If you add a new route prefix that touches state, add it to `GATED_PREFIXES`. If you need public GET access, add it to `ALLOWLIST_READ_ONLY`.
 - **Never use emoji** — Phosphor icons (raw SVG) across all surfaces
@@ -325,8 +325,8 @@ See `.env.example` at the repo root for the complete reference — 40+ documente
 
 Most are optional. Fresh clones boot with nothing set. Specific features gate on specific vars:
 - **LLM chat**: at least one of `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`
-- **GitHub App auth** (higher rate limits): `GITHUB_APP_ID` + `GITHUB_APP_INSTALLATION_ID` + `~/.cortex-ide/github-app.pem`
-- **Data dir override**: `CORTEX_IDE_DATA_DIR` (default: `~/.cortex-ide`)
+- **GitHub App auth** (higher rate limits): `GITHUB_APP_ID` + `GITHUB_APP_INSTALLATION_ID` + `~/.o8/github-app.pem`
+- **Data dir override**: `CORTEX_IDE_DATA_DIR` (default: `~/.o8`)
 - **Dev ports**: `PORT`, `WS_PORT` (overridden at runtime by Tauri sidecar port probing)
 
 `src/lib/github-app.ts` returns null when GitHub App env vars are missing — there are no hardcoded fallbacks. `src/lib/review/workspace.ts` skips the active-review feature entirely when `CORTEX_IDE_ACTIVE_REVIEW_ISSUE` is unset.
