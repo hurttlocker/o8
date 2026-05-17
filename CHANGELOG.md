@@ -7,6 +7,10 @@ and internal chores live in the private engineering log.
 
 ---
 
+## 2026-05-17
+
+- `c8262a79` feat: mobile activity feed + orchestrator packets API routes
+
 ## 2026-05-16
 
 - `650ee259` feat: desktop QR pairing emitter for the o8 mobile app
