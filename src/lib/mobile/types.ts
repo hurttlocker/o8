@@ -290,6 +290,57 @@ export interface MobileOrchestratorThread {
   repoBranch: string | null;
 }
 
+/**
+ * One dispatched agent / packet for the mobile orchestrator pill (the strip
+ * above the orchestrator chat listing what the orchestrator has dispatched).
+ * Projected by /api/mobile/orchestrator/packets from an OrchestratorPacket +
+ * its live lane.
+ */
+export interface MobileOrchestratorAgent {
+  /** Packet id. */
+  id: string;
+  /** What the agent was dispatched to do (packet title, falling back to summary). */
+  title: string;
+  runtime: MobileOrchestratorRuntime;
+  /** Collapsed packet lifecycle — see mapPacketStatus in the route. */
+  status: 'queued' | 'running' | 'awaiting_review' | 'merged' | 'failed';
+  /** Worktree branch the agent commits to. */
+  branch: string;
+  /** Diff stats for the agent's worktree (zeros for queued packets). */
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  /** Lane runtime session key when the lane is live, else null. */
+  sessionKey: string | null;
+}
+
+/**
+ * One entry in the mobile fleet activity feed. Projected by
+ * /api/mobile/activity from recent git commits across the repos in o8's
+ * registry, optionally folded together with orchestrator packet lifecycle
+ * events. Newest-first, capped at ~40 entries.
+ */
+export interface MobileActivityEvent {
+  /** Stable id — `commit:<sha>` for commits, `packet:<id>` for packet events. */
+  id: string;
+  /**
+   *   - `commit`          — a non-merge git commit.
+   *   - `merge`           — a git merge commit (>1 parent) or a released packet.
+   *   - `dispatched`      — a packet that is launching / running.
+   *   - `awaiting_review` — a packet whose work is done and awaiting review.
+   *   - `alert`           — a failed / blocked packet.
+   */
+  kind: 'dispatched' | 'awaiting_review' | 'merge' | 'commit' | 'alert';
+  /** Primary line — commit subject or packet title. */
+  title: string;
+  /** Secondary line, e.g. `"main · 9393504"` or `"agent/x → main"`. */
+  detail?: string;
+  /** Short repo name, e.g. `"cortex-ide"`. */
+  repo?: string;
+  /** Event time as epoch milliseconds. */
+  timestamp: number;
+}
+
 export type MobileOrchestratorTranscriptRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export interface MobileOrchestratorTranscriptEntry {
