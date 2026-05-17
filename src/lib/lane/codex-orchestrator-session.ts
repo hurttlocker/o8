@@ -235,14 +235,19 @@ export function ensureCodexOrchestratorSession(repoPath: string): CodexOrchestra
 // ── Permission mode mapping ──────────────────────────────────────────────────
 
 function sandboxFlagsForMode(mode: CodexOrchestratorPermissionMode): string[] {
+  // These flags go to both `codex exec` (first turn) and `codex exec resume`
+  // (every turn after). `resume` rejects the `-s` short flag — passing it broke
+  // every multi-turn conversation — so the read-only sandbox is set via a `-c`
+  // config override, which both subcommands honor.
   if (mode === 'plan') {
     // Read-only sandbox — codex can read repo state and call MCP read methods
     // but cannot edit files or run side-effecting shell commands.
-    return ['-s', 'read-only'];
+    return ['-c', 'sandbox_mode=read-only'];
   }
-  // 'full' — autonomous mode for auto-review + intake. Mirrors the codex
-  // dispatch path used elsewhere in the codebase (owned.ts:227).
-  return ['--dangerously-bypass-approvals-and-sandbox', '-s', 'danger-full-access'];
+  // 'full' — autonomous mode for auto-review + intake.
+  // `--dangerously-bypass-approvals-and-sandbox` bypasses approvals + the
+  // sandbox and is accepted by `codex exec resume` (unlike `-s`).
+  return ['--dangerously-bypass-approvals-and-sandbox'];
 }
 
 function reasoningEffortFromThinkingEffort(effort: ThinkingEffort | undefined): string {
