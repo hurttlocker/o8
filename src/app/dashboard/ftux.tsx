@@ -104,7 +104,7 @@ export function GuidedDiscoveryCoachmark({
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
-            fontFamily: 'system-ui',
+            fontFamily: 'var(--font-sans-system)',
             ...guidedDiscoveryPositionStyle(position),
           }}
         >
@@ -157,7 +157,7 @@ export function GuidedDiscoveryCoachmark({
                     ? 'color-mix(in srgb, var(--t-accent, #2563eb) 10%, transparent)'
                     : 'rgba(255,255,255,0.68)',
                   color: action.emphasized ? 'var(--t-text)' : 'var(--t-text-muted)',
-                  fontFamily: 'system-ui',
+                  fontFamily: 'var(--font-sans-system)',
                 };
 
                 return action.href ? (

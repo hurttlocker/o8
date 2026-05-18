@@ -192,7 +192,7 @@ export function BranchPickerPopover({
               background: 'var(--t-input-bg)',
               color: 'var(--t-text)',
               fontSize: 13,
-              fontFamily: 'system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               letterSpacing: '-0.01em',
               outline: 'none',
             }}
@@ -326,7 +326,7 @@ export function BranchPickerPopover({
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
                       letterSpacing: '-0.01em',
-                      fontFamily: 'system-ui, sans-serif',
+                      fontFamily: 'var(--font-sans-system)',
                     }}
                   >
                     {branch.name}
@@ -423,7 +423,7 @@ export function BranchPickerPopover({
                 background: 'var(--t-input-bg)',
                 color: 'var(--t-text)',
                 fontSize: 13,
-                fontFamily: 'system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 letterSpacing: '-0.01em',
                 outline: 'none',
               }}

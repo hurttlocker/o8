@@ -237,7 +237,7 @@ function AgentRow({ icon, label, value, title }: RowProps) {
           color: 'var(--t-text-faint)',
           width: 78,
           flexShrink: 0,
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         {label}
@@ -253,7 +253,7 @@ function AgentRow({ icon, label, value, title }: RowProps) {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         {value}
@@ -385,7 +385,7 @@ function AgentStatusHoverBase({
         boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
         color: 'var(--t-text)',
         pointerEvents: 'auto',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       {/* Stuck banner — only when the agent has gone quiet while "running". */}

@@ -39,7 +39,7 @@ export const cardStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  fontFamily: 'var(--font-sans-system)',
   letterSpacing: '-0.01em',
   color: 'var(--t-text)',
 };
@@ -84,7 +84,7 @@ export const clearButtonStyle: CSSProperties = {
 export const kbdStyle: CSSProperties = {
   fontSize: 10,
   fontWeight: 600,
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  fontFamily: 'var(--font-sans-system)',
   color: 'var(--t-kbd-color, var(--t-text-muted))',
   background: 'var(--t-kbd-bg, var(--t-bg-card))',
   border: '1px solid var(--t-kbd-border, var(--t-border))',

@@ -9,7 +9,7 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 const CONTEXT_LIMIT = 1_000_000;
 const MONO_STACK = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
-const JAKARTA_STACK = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const JAKARTA_STACK = 'var(--font-sans-system)';
 
 // Static baselines for o8's orchestrator surface. We don't have a live
 // token-meter for system prompt + tool definitions, so we approximate
@@ -225,7 +225,7 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
             paddingRight: 0,
             paddingBottom: 2,
             paddingLeft: 0,
-            fontFamily: 'system-ui, -apple-system, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           ×

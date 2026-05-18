@@ -33,7 +33,7 @@ import { useMobileUrlPushListener } from './url-push-listener';
 //   - 100dvh + safe-area-inset-* (no 100vh, no overscroll-behavior traps)
 //   - PWA topbar stays solid — we do NOT touch the topbar; the existing
 //     mobile shell paints it from inside `children`
-//   - Plus Jakarta Sans for chrome text
+//   - system UI for chrome text
 //   - Phosphor SVG drawn inline for the placeholder icon
 //   - File ceiling 800 lines (this file is well under)
 
@@ -42,7 +42,7 @@ const RATIO_MIN = 0.25;
 const RATIO_MAX = 0.75;
 const RATIO_DEFAULT = 0.5;
 const HANDLE_HOT_ZONE = 6; // px — visual is centered inside this zone
-const FONT_STACK = '"Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif';
+const FONT_STACK = 'var(--font-sans-system)';
 
 function clampRatio(value: number): number {
   if (!Number.isFinite(value)) return RATIO_DEFAULT;

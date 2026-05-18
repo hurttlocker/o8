@@ -30,12 +30,10 @@ import { ChainOfThought as CurrentChainOfThought } from '@/components/desktop/ll
 import type { ThinkingStep } from '@/components/desktop/llm-chat/shared';
 import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 
-const FONT_FAMILY = '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const FONT_FAMILY = 'var(--font-sans-system)';
 const MONO_FAMILY = '"SF Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace';
 
 const KEYFRAMES = `
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Instrument+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap");
-
 @keyframes o8-dash-travel {
   0%   { stroke-dashoffset: 0; }
   100% { stroke-dashoffset: -100; }
@@ -116,33 +114,15 @@ const TYPE_SAMPLES = [
 const FONT_CANDIDATES = [
   {
     label: 'Current',
-    name: 'Plus Jakarta Sans',
+    name: 'system UI',
     family: FONT_FAMILY,
     note: 'Current app default. Design doc calls this locked.',
   },
   {
     label: 'System',
     name: 'Apple system',
-    family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif',
-    note: 'Most native-feeling on macOS. Slightly quieter than Jakarta.',
-  },
-  {
-    label: 'Candidate',
-    name: 'Geist',
-    family: '"Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    note: 'Sharp technical UI voice. Strong for code-adjacent chat.',
-  },
-  {
-    label: 'Candidate',
-    name: 'Instrument Sans',
-    family: '"Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    note: 'Softer and editorial. Good readability, less app-like.',
-  },
-  {
-    label: 'Candidate',
-    name: 'Inter',
-    family: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    note: 'Very familiar product UI font. Clean, but less distinct.',
+    family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif',
+    note: 'Direct OS stack without a CSS variable wrapper.',
   },
 ];
 
@@ -201,7 +181,7 @@ const CHANGE_TARGETS: { icon: LucideIcon; label: string; value: string; color: s
 
 const THOUGHT_STEPS = [
   { icon: Search, title: 'Scan transcript shape', body: 'Matched the preview to current desktop chat pieces.', status: 'done' },
-  { icon: FileText, title: 'Read active styling', body: 'Kept Plus Jakarta body text and SF Mono status labels.', status: 'done' },
+  { icon: FileText, title: 'Read active styling', body: 'Kept system body text and SF Mono status labels.', status: 'done' },
   { icon: Zap, title: 'Select chat treatment', body: 'Compare strip, rail, and docked card before implementation.', status: 'active' },
 ];
 
@@ -1286,7 +1266,7 @@ function MockStepsBlock({ mode, sourceMode, scale }: { mode: string; sourceMode:
 }
 
 function CompositeChatPreview() {
-  const [fontName, setFontName] = useState('Plus Jakarta Sans');
+  const [fontName, setFontName] = useState('system UI');
   const [sizeName, setSizeName] = useState<keyof typeof CHAT_TEXT_SCALES>('small');
   const [workingMode, setWorkingMode] = useState('dots');
   const [reasoningMode, setReasoningMode] = useState('current');
@@ -1314,7 +1294,7 @@ function CompositeChatPreview() {
           label="Font"
           value={fontName}
           onChange={setFontName}
-          options={FONT_CANDIDATES.map((font) => ({ value: font.name, label: font.name === 'Plus Jakarta Sans' ? 'Jakarta' : font.name.replace(' Sans', '') }))}
+          options={FONT_CANDIDATES.map((font) => ({ value: font.name, label: font.name === 'system UI' ? 'System' : font.name.replace(' Sans', '') }))}
         />
         <SegmentControl
           label="Size"
@@ -1588,7 +1568,7 @@ export default function PreviewPage() {
         <SectionHeader
           label="Text Fonts"
           title="Type Scale"
-          detail="The chat examples below use Plus Jakarta Sans for conversation text and SF Mono for machine/status details."
+          detail="The chat examples below use system UI for conversation text and SF Mono for machine/status details."
         />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
           {TYPE_SAMPLES.map((sample) => (
@@ -1617,7 +1597,7 @@ export default function PreviewPage() {
             <div>
               <h3 style={{ margin: 0, color: '#0f172a', fontSize: 16, fontWeight: 850 }}>Font Switchboard</h3>
               <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: 12, lineHeight: 1.5 }}>
-                Preview-only font candidates for chat. The real app still uses Plus Jakarta Sans.
+                Preview-only font candidates for chat. The real app still uses system UI.
               </p>
             </div>
             <StatusPill color="#64748b">no app font change</StatusPill>

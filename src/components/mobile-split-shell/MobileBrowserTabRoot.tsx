@@ -22,7 +22,7 @@
  *
  * Hard rules honored:
  *   - inline styles only / palette tokens for surfaces
- *   - Plus Jakarta Sans for chrome; Phosphor SVG drawn inline
+ *   - system UI for chrome; Phosphor SVG drawn inline
  *   - 100dvh + safe-area-inset-* iOS-safe layout
  *   - File ceiling 800 lines (this file is well under)
  */
@@ -39,7 +39,7 @@ import { useLandscapeSplit } from './landscape-controller';
 import { DevHostFrame } from './DevHostFrame';
 import { useMobileUrlPushListener } from './url-push-listener';
 
-const FONT_STACK = '"Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif';
+const FONT_STACK = 'var(--font-sans-system)';
 const HINT_DISMISSED_KEY = 'o8:mobile-browser:landscape-hint-dismissed';
 
 // Shape of `screen.orientation` that we touch. The DOM lib types ship a

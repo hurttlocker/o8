@@ -330,7 +330,7 @@ function StatusRow({ icon, label, value, tone = 'neutral', title }: RowProps) {
           color: 'var(--t-text-faint)',
           width: 88,
           flexShrink: 0,
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         {label}
@@ -346,7 +346,7 @@ function StatusRow({ icon, label, value, tone = 'neutral', title }: RowProps) {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         {value}
@@ -513,7 +513,7 @@ function RepoStatusHoverBase({
         boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
         color: 'var(--t-text)',
         pointerEvents: 'auto',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       {/* Header — repo name + short path + branch. No pills. */}

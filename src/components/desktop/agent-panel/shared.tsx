@@ -243,7 +243,7 @@ export function SidebarSection({
             background: 'transparent',
             color: 'var(--t-text)',
             cursor: 'pointer',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           {Icon ? (
@@ -360,7 +360,7 @@ export function ActivityDock({
           background: 'transparent',
           cursor: 'pointer',
           color: 'var(--t-text)',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         <ChevronDown
@@ -451,7 +451,7 @@ export function AgentPanelEmptyState() {
         fontSize: 12,
         color: 'var(--t-text-faint)',
         letterSpacing: '-0.01em',
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       No active agents
@@ -501,7 +501,7 @@ export function ActivityFeedEmptyState({
                 lineHeight: 1.45,
                 color: 'var(--t-text)',
                 letterSpacing: '-0.02em',
-                fontFamily: 'system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               Commits, PRs, and CI runs stream here once agents are active.
@@ -512,7 +512,7 @@ export function ActivityFeedEmptyState({
                 lineHeight: 1.55,
                 color: 'var(--t-text-muted)',
                 letterSpacing: '-0.01em',
-                fontFamily: 'system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               {helperText}

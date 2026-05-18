@@ -927,7 +927,7 @@ export function RepoActionButton({
         fontWeight: 600,
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.45 : 1,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
         transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
@@ -971,7 +971,7 @@ export function SetupModeButton({
         fontWeight: 600,
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.48 : 1,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       {label}

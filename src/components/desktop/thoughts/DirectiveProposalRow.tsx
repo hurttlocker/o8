@@ -32,7 +32,7 @@ const YELLOW_BG_SOFT = 'rgba(245, 158, 11, 0.08)';
 const YELLOW_BG_HOVER = 'rgba(245, 158, 11, 0.14)';
 const YELLOW_BORDER = 'rgba(245, 158, 11, 0.28)';
 const YELLOW_TEXT_DARK = '#b45309';
-const FONT_FAMILY = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const FONT_FAMILY = 'var(--font-sans-system)';
 const MONO_FAMILY = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
 function formatObservationProvenance(proposal: Extract<DirectiveProposalCandidate, { source: 'observation' }>) {

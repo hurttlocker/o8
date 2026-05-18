@@ -56,7 +56,7 @@ function MermaidViewerBase({ code }: { code: string }) {
             edgeLabelBackground: 'var(--t-panel)',
             nodeTextColor: 'var(--t-text)',
             cScale0: '#ef4444',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             fontSize: '14px',
           },
           securityLevel: 'loose',
@@ -128,7 +128,7 @@ function MermaidViewerBase({ code }: { code: string }) {
             color: '#2563eb',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           Mermaid Diagram
@@ -480,7 +480,7 @@ export function DiffViewer() {
               background: 'var(--t-panel)',
               color: 'var(--t-text)',
               outline: 'none',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           />
           <button
@@ -502,7 +502,7 @@ export function DiffViewer() {
               fontSize: 11,
               fontWeight: 600,
               cursor: commitMsg.trim() ? 'pointer' : 'default',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             <Check size={12} />
@@ -577,7 +577,7 @@ export function DiffViewer() {
                       background: 'transparent',
                       cursor: 'pointer',
                       textAlign: 'left',
-                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                      fontFamily: 'var(--font-sans-system)',
                     }}
                   >
                     <DiffStatusIcon status={file.status} />

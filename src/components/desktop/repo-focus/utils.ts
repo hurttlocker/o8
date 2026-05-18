@@ -3,7 +3,7 @@
 import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { RepoFocusPacketState, RepoFocusRepo } from './types';
 
-export const REPO_FOCUS_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+export const REPO_FOCUS_FONT = 'var(--font-sans-system)';
 export const REPO_FOCUS_MONO = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
 export function normalizeRepoPath(value: string | null | undefined): string {

@@ -95,7 +95,7 @@ function BranchStatusRow({
           color: 'var(--t-text-faint)',
           width: 88,
           flexShrink: 0,
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         {label}
@@ -111,7 +111,7 @@ function BranchStatusRow({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontFamily: mono ? '"SF Mono", ui-monospace, Menlo, monospace' : '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: mono ? '"SF Mono", ui-monospace, Menlo, monospace' : 'var(--font-sans-system)',
         }}
       >
         {value}
@@ -375,7 +375,7 @@ function RepoBranchRowBase({
             background: isSelected ? 'var(--t-accent-soft)' : 'transparent',
             color: 'var(--t-text)',
             cursor: targetSessionKey && onSelectSession ? 'pointer' : 'default',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             textAlign: 'left',
             transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
@@ -427,7 +427,7 @@ function RepoBranchRowBase({
                 gap: 6,
                 fontSize: 10.5,
                 fontWeight: 440,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 letterSpacing: '-0.005em',
                 flexShrink: 0,
                 marginTop: 1,
@@ -453,7 +453,7 @@ function RepoBranchRowBase({
               boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
               color: 'var(--t-text)',
               pointerEvents: 'auto',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               ...resolveFloatingPanelPosition(branchHoverRect, 320),
             }}
           >
@@ -609,7 +609,7 @@ function RepoBranchRowBase({
               fontSize: 12,
               fontWeight: 440,
               color: 'var(--t-text)',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               minWidth: 0,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -672,7 +672,7 @@ function RepoBranchRowBase({
                 gap: 6,
                 fontSize: 10.5,
                 fontWeight: 440,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 letterSpacing: '-0.005em',
                 flexShrink: 0,
                 marginTop: 1,
@@ -852,7 +852,7 @@ function RepoBranchRowBase({
                       background: isSelectedPacket ? THEME_ACCENT_SOFT : 'transparent',
                       color: 'var(--t-text)',
                       cursor: packet.lane?.sessionKey && onSelectSession ? 'pointer' : 'default',
-                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                      fontFamily: 'var(--font-sans-system)',
                       textAlign: 'left',
                       transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                       opacity: packet.lane?.sessionKey && onSelectSession ? 1 : 0.82,
@@ -901,7 +901,7 @@ function RepoBranchRowBase({
                             color: 'var(--t-text)',
                             letterSpacing: '-0.005em',
                             lineHeight: 1.35,
-                            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                            fontFamily: 'var(--font-sans-system)',
                           }}
                         >
                           {packet.title}
@@ -991,7 +991,7 @@ function RepoBranchRowBase({
                           background: isSelectedSession ? 'var(--t-accent-soft)' : 'transparent',
                           color: 'var(--t-text)',
                           cursor: onSelectSession ? 'pointer' : 'default',
-                          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                          fontFamily: 'var(--font-sans-system)',
                           textAlign: 'left',
                           transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                         }}
@@ -1101,7 +1101,7 @@ function RepoBranchRowBase({
             boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
             color: 'var(--t-text)',
             pointerEvents: 'auto',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             ...resolveFloatingPanelPosition(branchHoverRect, 320),
           }}
         >

@@ -18,7 +18,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const FONT_FAMILY = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const FONT_FAMILY = 'var(--font-sans-system)';
 
 interface DirectiveStub {
   id: string;

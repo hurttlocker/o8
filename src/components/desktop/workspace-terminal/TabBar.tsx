@@ -346,7 +346,7 @@ export const TabBar = memo(function TabBar({
                   color: tabTextColor,
                   fontSize: 11,
                   fontWeight: isActive ? 560 : 500,
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   letterSpacing: '-0.01em',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',

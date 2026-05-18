@@ -133,7 +133,7 @@ function RepoCardBase(props: RepoCardBaseProps) {
             paddingLeft: 4,
             paddingRight: 4,
             zIndex: 60,
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             // Overlay chrome — always dark + light text regardless of theme.
             color: 'rgba(255, 255, 255, 0.94)',
           }}

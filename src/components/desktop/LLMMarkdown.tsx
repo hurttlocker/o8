@@ -265,7 +265,7 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
             color: copied ? '#10b981' : 'var(--t-text-muted)',
             fontSize: 11,
             cursor: 'pointer',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             transition: 'color 150ms, background 150ms',
           }}
           onMouseEnter={(e) => { if (!copied) { (e.currentTarget).style.background = THEME_BG_CARD; (e.currentTarget).style.color = 'var(--t-text-secondary)'; } }}
@@ -300,7 +300,7 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
               color: applied ? '#10b981' : 'var(--t-text-muted)',
               fontSize: 11,
               cursor: 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               transition: 'color 150ms, background 150ms',
             }}
             onMouseEnter={(e) => { if (!applied) { (e.currentTarget).style.background = THEME_BG_CARD; (e.currentTarget).style.color = THEME_ACCENT; } }}
@@ -330,7 +330,7 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
               color: 'var(--t-text-muted)',
               fontSize: 11,
               cursor: 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               transition: 'color 150ms, background 150ms',
             }}
             onMouseEnter={(e) => { (e.currentTarget).style.background = THEME_BG_CARD; (e.currentTarget).style.color = THEME_ACCENT; }}
@@ -366,7 +366,7 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
               color: ran ? '#10b981' : 'var(--t-text-muted)',
               fontSize: 11,
               cursor: 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               transition: 'color 150ms, background 150ms',
             }}
             onMouseEnter={(e) => { if (!ran) { (e.currentTarget).style.background = 'rgba(34, 197, 94, 0.12)'; (e.currentTarget).style.color = '#4ade80'; } }}
@@ -464,7 +464,7 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
           fontSize: 11,
           fontWeight: 600,
           cursor: 'pointer',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
@@ -487,7 +487,7 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
         >
           {error ? (
             <div>
-              <div style={{ color: '#ef4444', fontSize: 11, marginBottom: 8, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>⚠ Diagram syntax error — showing raw code</div>
+              <div style={{ color: '#ef4444', fontSize: 11, marginBottom: 8, fontFamily: 'var(--font-sans-system)' }}>⚠ Diagram syntax error — showing raw code</div>
               <pre style={{
                 margin: 0,
                 paddingTop: 12,
@@ -536,7 +536,7 @@ function renderTable(headerLine: string, alignLine: string, rows: string[]): Rea
         borderCollapse: 'collapse',
         fontSize: 13,
         width: '100%',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}>
         <thead>
           <tr>

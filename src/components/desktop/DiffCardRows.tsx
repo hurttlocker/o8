@@ -268,7 +268,7 @@ export function DiffCardFile({
               color: 'var(--t-text)',
               lineHeight: 1.4,
               wordBreak: 'break-word',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             {file.filePath || file.oldPath || 'untitled'}
@@ -278,7 +278,7 @@ export function DiffCardFile({
               fontSize: 10,
               color: 'var(--t-text-muted)',
               marginTop: 2,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             {STATUS_LABEL[file.status]} · {file.hunks.length} hunk{file.hunks.length === 1 ? '' : 's'}

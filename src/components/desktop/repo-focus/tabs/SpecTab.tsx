@@ -151,7 +151,7 @@ export function SpecTab({ repo, onOpenInWorkspace }: SpecTabProps) {
           borderBottom: '1px solid var(--t-divider)',
           fontSize: 11,
           color: 'var(--t-text-muted)',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           letterSpacing: '-0.005em',
         }}
       >

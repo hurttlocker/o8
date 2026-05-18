@@ -215,7 +215,7 @@ function SessionPillBase({
           color: 'inherit',
           cursor: 'pointer',
           textAlign: 'left',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         <div

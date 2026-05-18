@@ -102,7 +102,7 @@ export function O8InboxPane() {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <div

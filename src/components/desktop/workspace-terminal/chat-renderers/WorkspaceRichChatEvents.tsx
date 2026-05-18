@@ -17,7 +17,7 @@ type PlanStep = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'plan_step' }>;
 type ToolCallEvent = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'tool_call' }>;
 type ToolResultEvent = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'tool_result' }>;
 
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, Menlo, monospace';
 const WEB_TOOL_RE = /(?:web|search|fetch|browse|browser)/i;
 const URL_RE = /https?:\/\/[^\s)<>"']+/g;

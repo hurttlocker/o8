@@ -64,7 +64,7 @@ export const THEME_ACCENT_SOFT = 'var(--t-settings-accent-soft, rgba(124, 156, 2
 export const THEME_ACCENT_SOFT_STRONG = 'var(--t-settings-accent-soft-strong, rgba(124, 156, 255, 0.2))';
 export const THEME_ACCENT_BORDER = 'var(--t-settings-accent-border, rgba(124, 156, 255, 0.28))';
 export const THEME_ACCENT_RING = 'var(--t-settings-accent-ring, rgba(124, 156, 255, 0.18))';
-export const APP_FONT_STACK = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+export const APP_FONT_STACK = 'var(--font-sans-system)';
 export const MONO_FONT_STACK = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
 // Rams × o8-site editorial tokens — paper, ink, one orange. See o8_design_language.md.

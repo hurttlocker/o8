@@ -217,7 +217,7 @@ function ProjectsBottomBarBase({
                   paddingLeft: 8,
                   paddingRight: 8,
                   outline: 'none',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               />
             );
@@ -310,7 +310,7 @@ function ProjectsBottomBarBase({
               paddingLeft: 8,
               paddingRight: 8,
               outline: 'none',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           />
         ) : (
@@ -369,7 +369,7 @@ function ProjectsBottomBarBase({
             paddingLeft: 4,
             paddingRight: 4,
             zIndex: 60,
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             // Overlay chrome stays dark + light-text in every theme so the
             // popover never inherits the page's body text color (which is
             // dark in light theme and would render invisible here).

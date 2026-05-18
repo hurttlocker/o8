@@ -34,7 +34,7 @@ export function ThreadsDropdown({
         justifyContent: 'center',
         cursor: 'pointer',
         flexShrink: 0,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <HistoryIcon />

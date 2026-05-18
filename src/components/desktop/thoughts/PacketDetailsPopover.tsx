@@ -14,7 +14,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
-const FONT_BODY = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const FONT_BODY = 'var(--font-sans-system)';
 const FONT_MONO = "'SF Mono', Menlo, monospace";
 const POPOVER_WIDTH = 360;
 const POPOVER_MAX_HEIGHT = 480;

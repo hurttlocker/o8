@@ -97,7 +97,7 @@ export function IntentChips({
         paddingRight: 14,
         paddingBottom: 6,
         paddingLeft: 14,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
         position: 'relative',
       }}
     >
@@ -181,7 +181,7 @@ export function IntentChips({
                     color: isSelected ? 'var(--t-accent)' : 'var(--t-text)',
                     cursor: 'pointer',
                     textAlign: 'left',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                   }}
                   onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
                   onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}

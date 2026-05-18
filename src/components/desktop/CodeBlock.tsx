@@ -69,7 +69,7 @@ const MERMAID_THEME = {
     // Decision nodes (diamonds)
     cScale0: '#ef4444',
     // Typography
-    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+    fontFamily: 'var(--font-sans-system)',
     fontSize: '14px',
   },
 };
@@ -170,7 +170,7 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
             color: '#ef4444',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}>
             ◆ Mermaid Diagram
           </span>
@@ -273,7 +273,7 @@ const modalBtnStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: 13,
   fontWeight: 600,
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  fontFamily: 'var(--font-sans-system)',
   transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   paddingTop: 0,
   paddingRight: 0,
@@ -462,7 +462,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid
           border: 'none',
           backgroundColor: 'transparent',
           cursor: 'pointer',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           gap: 8,
         }}
       >

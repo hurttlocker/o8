@@ -149,7 +149,7 @@ export function ChromeButton({
             alignItems: 'center',
             justifyContent: 'center',
             lineHeight: 1,
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           {badge > 9 ? '9+' : badge}

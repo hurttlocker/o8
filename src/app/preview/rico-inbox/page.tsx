@@ -2,8 +2,7 @@
 
 import { useState, type CSSProperties } from 'react';
 
-const FONT_INTER =
-  '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+const FONT_INTER = 'var(--font-sans-system)';
 const LS = '-0.31px';
 
 const BG_PRIMARY = '#FFFFFF';

@@ -164,7 +164,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               fontWeight: 500,
               color: preview ? '#2563eb' : 'var(--t-text-secondary)',
               cursor: 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             {preview ? 'Edit' : 'Preview'}
@@ -191,7 +191,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               display: 'flex',
               alignItems: 'center',
               gap: 5,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
@@ -224,7 +224,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               display: 'flex',
               alignItems: 'center',
               gap: 5,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
@@ -312,7 +312,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
                   fontWeight: 500,
                   color: 'var(--t-text)',
                   outline: 'none',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   boxSizing: 'border-box',
                 }}
               />
@@ -414,7 +414,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
                     fontSize: 12,
                     color: 'var(--t-text)',
                     outline: 'none',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                   }}
                 />
               </div>

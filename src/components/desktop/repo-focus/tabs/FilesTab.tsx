@@ -80,7 +80,7 @@ export function FilesTab({ repo, onSelectFile }: FilesTabProps) {
           borderBottom: '1px solid var(--t-divider)',
           fontSize: 11,
           color: 'var(--t-text-muted)',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           letterSpacing: '-0.005em',
         }}
       >
@@ -109,7 +109,7 @@ export function FilesTab({ repo, onSelectFile }: FilesTabProps) {
               textAlign: 'center',
               fontSize: 12,
               color: 'var(--t-text-muted)',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             No uncommitted changes.
@@ -131,7 +131,7 @@ export function FilesTab({ repo, onSelectFile }: FilesTabProps) {
                   background: 'transparent',
                   cursor: 'pointer',
                   textAlign: 'left',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   letterSpacing: '-0.005em',
                   transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}

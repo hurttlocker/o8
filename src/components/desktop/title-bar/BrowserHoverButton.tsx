@@ -160,7 +160,7 @@ export function BrowserHoverButton({
             zIndex: 9200,
             display: 'flex',
             flexDirection: 'column',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           <div

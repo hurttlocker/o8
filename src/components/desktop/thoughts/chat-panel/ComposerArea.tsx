@@ -481,7 +481,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                   }}>
                     {image.name}
                   </div>
@@ -716,7 +716,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               color: 'var(--t-text)',
               resize: 'none',
               outline: 'none',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               lineHeight: 1.4,
               boxSizing: 'border-box',
               overflow: 'auto',
