@@ -161,6 +161,7 @@ export function LeftPanelProjectFocus({
             activeSessionKey={activeSessionKey}
             onSelectSession={onSelectSession}
             onOpenHistoryChat={onOpenHistoryChat}
+            packets={visiblePackets}
           />
         ) : null}
         {visibleActiveTab === 'agents' ? (
