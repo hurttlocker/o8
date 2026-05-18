@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
  * Returns: { threads: MobileOrchestratorThread[] } — at most 20 most-recent.
  */
 
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
@@ -39,7 +39,12 @@ function trimTitle(value: unknown, fallback: string): string {
   return trimmed.slice(0, 80);
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // ?backend=openclaw → only openclaw threads; otherwise → non-openclaw
+  // threads (the default Orchestrator surface; untagged/legacy threads count
+  // as non-openclaw). The two surfaces coexist — see docs/openclaw-integration.md.
+  const wantOpenclaw = request.nextUrl.searchParams.get('backend') === 'openclaw';
+
   try {
     const files = readdirSync(HISTORY_DIR).filter((file) => file.endsWith('.json'));
     const threads: MobileOrchestratorThread[] = [];
@@ -59,7 +64,18 @@ export async function GET() {
           repoPath?: string | null;
           repoName?: string | null;
           repoBranch?: string | null;
+          backend?: string;
         };
+
+        const threadBackend: MobileOrchestratorThread['backend'] =
+          data.backend === 'openclaw' || data.backend === 'codex' || data.backend === 'claude'
+            ? data.backend
+            : null;
+        // Two surfaces: ?backend=openclaw gets only openclaw threads; the
+        // default surface gets everything else (untagged/legacy included).
+        if (wantOpenclaw ? threadBackend !== 'openclaw' : threadBackend === 'openclaw') {
+          continue;
+        }
 
         const messages = Array.isArray(data.messages) ? data.messages : [];
         const firstUserMessage = messages.find((message) => message.role === 'user');
@@ -82,6 +98,7 @@ export async function GET() {
           repoPath: typeof data.repoPath === 'string' ? data.repoPath : null,
           repoName: typeof data.repoName === 'string' ? data.repoName : null,
           repoBranch: typeof data.repoBranch === 'string' ? data.repoBranch : null,
+          backend: threadBackend,
         });
       } catch {
         // skip unreadable files

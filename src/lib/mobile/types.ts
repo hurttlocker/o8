@@ -276,6 +276,9 @@ export interface MobileActionResponse {
 
 export type MobileOrchestratorRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode' | 'unknown';
 
+/** The orchestrator backend that ran a thread — distinct from the worker `runtime`. */
+export type MobileOrchestratorBackend = 'codex' | 'claude' | 'openclaw';
+
 export type MobileOrchestratorThreadStatus = 'idle' | 'ready' | 'busy';
 
 export interface MobileOrchestratorThread {
@@ -288,6 +291,8 @@ export interface MobileOrchestratorThread {
   repoPath: string | null;
   repoName: string | null;
   repoBranch: string | null;
+  /** Orchestrator backend, when the thread was tagged; null for legacy threads. */
+  backend: MobileOrchestratorBackend | null;
 }
 
 /**
