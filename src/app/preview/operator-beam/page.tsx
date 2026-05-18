@@ -2,7 +2,7 @@
 
 import { OperatorBeamActivity } from '@/components/desktop/orchestrator/operator-beam/OperatorBeamActivity';
 
-const FONT_FAMILY = '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const FONT_FAMILY = 'var(--font-sans-system)';
 
 function ChatBubble({
   role,

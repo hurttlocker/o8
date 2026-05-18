@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { X } from '../lucide-shims';
 import type { DictationSnapshot, DictationState } from './types';
 
-const JAKARTA_STACK = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const JAKARTA_STACK = 'var(--font-sans-system)';
 const MONO_STACK = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
 
 const BAR_COUNT = 18;

@@ -203,7 +203,7 @@ function scaffoldTemplates(repoPath: string, kind: ScaffoldKind, name?: string):
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>${displayName}</title>
     <style>
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: Inter, system-ui, sans-serif; background: #f6f7f2; color: #1d2433; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif; background: #f6f7f2; color: #1d2433; }
       main { text-align: center; padding: 48px; }
       h1 { margin: 0 0 12px; font-size: clamp(40px, 8vw, 88px); letter-spacing: 0; }
       p { margin: 0; font-size: 18px; color: #526071; }
@@ -336,7 +336,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       minHeight: '100vh',
       display: 'grid',
       placeItems: 'center',
-      fontFamily: 'Inter, system-ui, sans-serif',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif',
       background: '#f6f7f2',
       color: '#1d2433',
     }}>

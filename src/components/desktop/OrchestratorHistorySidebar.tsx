@@ -485,7 +485,7 @@ function OrchestratorHistorySidebarBase({
                     letterSpacing: '-0.005em',
                     cursor: 'pointer',
                     transition: 'background 120ms, border-color 120ms, color 120ms',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                   }}
                 >
                   {option.label}
@@ -557,7 +557,7 @@ function OrchestratorHistorySidebarBase({
                   color: 'var(--t-text)',
                   fontSize: 12,
                   fontWeight: 400,
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   letterSpacing: '-0.005em',
                 }}
               />
@@ -617,7 +617,7 @@ function OrchestratorHistorySidebarBase({
                             textAlign: 'left',
                             cursor: disabled ? 'default' : 'pointer',
                             opacity: disabled ? 0.55 : 1,
-                            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                            fontFamily: 'var(--font-sans-system)',
                             transition: 'background 120ms',
                           }}
                           onMouseEnter={(event) => {

@@ -418,7 +418,7 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
                   color: 'var(--t-text)',
                   fontSize: 12.5,
                   lineHeight: 1.5,
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   outline: 'none',
                   paddingTop: 6,
                   paddingRight: 0,

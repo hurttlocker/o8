@@ -4,7 +4,7 @@ import { memo } from 'react';
 import { Eye, XCircle } from '../lucide-shims';
 import type { PrTabId } from './types';
 
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 
 interface PrPanelTabsProps {
   activeTab: PrTabId;

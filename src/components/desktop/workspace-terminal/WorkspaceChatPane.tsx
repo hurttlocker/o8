@@ -194,7 +194,7 @@ function WorkspaceChatPaneBase({
             borderStyle: 'solid',
             borderColor: 'rgba(245, 158, 11, 0.35)',
             boxShadow: '0 4px 14px rgba(245, 158, 11, 0.18)',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             fontSize: 12,
             fontWeight: 500,
             letterSpacing: '-0.005em',
@@ -468,7 +468,7 @@ function WorkspaceChatPaneBase({
                       />
                     ))}
                   </div>
-                  <span style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', fontWeight: 500 }}>
+                  <span style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: 'var(--font-sans-system)', fontWeight: 500 }}>
                     Agent working...
                   </span>
                   <style>{'@keyframes o8ThinkPulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.1); } }'}</style>
@@ -530,7 +530,7 @@ function WorkspaceChatPaneBase({
               fontSize: 11,
               fontWeight: 500,
               letterSpacing: '0.01em',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
             } as CSSProperties}
             onMouseEnter={(e) => {

@@ -254,7 +254,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
         paddingBottom: 4,
         paddingLeft: 12,
         paddingRight: 12,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <span
@@ -361,7 +361,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
               fontSize: 11.5,
               fontWeight: 600,
               letterSpacing: '-0.005em',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
@@ -443,7 +443,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
                 paddingLeft: 4,
                 paddingRight: 4,
                 zIndex: 60,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 color: 'rgba(255, 255, 255, 0.94)',
               }}
             >

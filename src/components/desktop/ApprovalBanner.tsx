@@ -29,7 +29,7 @@ const bannerShell: CSSProperties = {
   borderBottomWidth: 1,
   borderBottomStyle: 'solid',
   borderBottomColor: CHROME_HAIRLINE,
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  fontFamily: 'var(--font-sans-system)',
 };
 
 const summaryBar: CSSProperties = {
@@ -99,7 +99,7 @@ const expandButton: CSSProperties = {
   letterSpacing: '-0.005em',
   cursor: 'pointer',
   flexShrink: 0,
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  fontFamily: 'var(--font-sans-system)',
   lineHeight: 1,
   display: 'inline-flex',
   alignItems: 'center',
@@ -126,7 +126,7 @@ const compactReject: CSSProperties = {
   letterSpacing: '-0.005em',
   cursor: 'pointer',
   flexShrink: 0,
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  fontFamily: 'var(--font-sans-system)',
   lineHeight: 1,
   display: 'inline-flex',
   alignItems: 'center',

@@ -29,11 +29,13 @@ interface ToastItem {
 
 interface AlertToastProps {
   alerts: Alert[];
+  compact?: boolean;
   onAction?: (alert: Alert) => void;
 }
 
 export const AlertToast = memo(function AlertToast({
   alerts,
+  compact = false,
   onAction,
 }: AlertToastProps) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -102,8 +104,8 @@ export const AlertToast = memo(function AlertToast({
       style={{
         position: 'fixed',
         // Nudged above the 28px DesktopStatusBar (16 base + 28 strip + 4 gap).
-        bottom: 48,
-        left: 72,
+        bottom: compact ? 72 : 48,
+        left: compact ? 16 : 72,
         zIndex: 10000,
         display: 'flex',
         flexDirection: 'column-reverse',

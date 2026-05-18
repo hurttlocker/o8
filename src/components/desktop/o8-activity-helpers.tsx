@@ -297,7 +297,7 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
         <span style={{ color: 'var(--t-text-faint)' }}>·</span>
         <span style={{
           color: item.conclusion === 'success' ? ACTIVITY_COLORS.success : item.conclusion === 'failure' ? ACTIVITY_COLORS.danger : ACTIVITY_COLORS.attention,
-          fontWeight: 600,
+          fontWeight: 400,
         }}>
           {item.conclusion || item.status}
         </span>
@@ -318,9 +318,9 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
               borderRadius: 4,
               background: `#${label.color}18`,
               color: `#${label.color}`,
-              fontSize: 9,
+              fontSize: 11,
               fontWeight: 600,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             {label.name}
@@ -399,8 +399,8 @@ export function useExpandDetails() {
 // ── Expanded row detail content ──
 
 const DETAIL_LABEL_STYLE: React.CSSProperties = {
-  fontSize: 9,
-  fontWeight: 700,
+  fontSize: 11,
+  fontWeight: 600,
   color: 'var(--t-text-faint)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
@@ -408,10 +408,10 @@ const DETAIL_LABEL_STYLE: React.CSSProperties = {
 };
 
 const DETAIL_ROW_STYLE: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: 12,
   color: 'var(--t-text-muted)',
-  lineHeight: 1.6,
-  fontFamily: '"SF Mono", ui-monospace, monospace',
+  lineHeight: '16px',
+  fontFamily: 'var(--font-sans-system)',
 };
 
 function DetailPill({ label, color }: { label: string; color: string }) {
@@ -419,7 +419,7 @@ function DetailPill({ label, color }: { label: string; color: string }) {
   return (
     <span style={{
       paddingTop: 1, paddingRight: 6, paddingBottom: 1, paddingLeft: 6,
-      borderRadius: 6, fontSize: 9, fontWeight: 700,
+      borderRadius: 6, fontSize: 11, fontWeight: 600,
       background,
       color,
     }}>
@@ -442,7 +442,7 @@ export function renderExpandedDetail(
           <span style={{ color: 'var(--t-text-secondary)', fontWeight: 600 }}>{item.hash}</span>
           <span style={{ color: 'var(--t-text-faint)' }}>{item.age}</span>
         </div>
-        <div style={{ color: 'var(--t-text)', fontSize: 12, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
+        <div style={{ color: 'var(--t-text)', fontSize: 14, lineHeight: '19px', fontWeight: 400, fontFamily: 'var(--font-sans-system)' }}>
           {item.message}
         </div>
       </div>
@@ -480,7 +480,7 @@ export function renderExpandedDetail(
         ) : detail === undefined ? (
           <div style={{ ...DETAIL_ROW_STYLE, color: 'var(--t-text-faint)' }}>Loading...</div>
         ) : null}
-        <div style={{ ...DETAIL_ROW_STYLE, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
+        <div style={{ ...DETAIL_ROW_STYLE, fontFamily: 'var(--font-sans-system)' }}>
           <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{item.author}</span>
           <span style={{ color: 'var(--t-text-faint)' }}> on </span>
           <span style={{ color: 'var(--t-text-secondary)' }}>{item.branch}</span>
@@ -514,7 +514,7 @@ export function renderExpandedDetail(
           <div style={{ ...DETAIL_ROW_STYLE, color: 'var(--t-text-faint)' }}>Loading...</div>
         ) : null}
         {detail?.summaryLine ? (
-          <div style={{ ...DETAIL_ROW_STYLE, color: ACTIVITY_COLORS.danger, fontWeight: 500 }}>
+          <div style={{ ...DETAIL_ROW_STYLE, color: ACTIVITY_COLORS.danger, fontWeight: 600 }}>
             {detail.summaryLine.slice(0, 200)}
           </div>
         ) : null}
@@ -532,11 +532,11 @@ export function renderExpandedDetail(
           ))}
         </div>
         {item.body ? (
-          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.6, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
+          <div style={{ fontSize: 14, color: 'var(--t-text-muted)', lineHeight: '19px', fontWeight: 400, fontFamily: 'var(--font-sans-system)' }}>
             {item.body.slice(0, 200)}{item.body.length > 200 ? '...' : ''}
           </div>
         ) : null}
-        <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8, fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
+        <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8, fontFamily: 'var(--font-sans-system)' }}>
           {item.author ? <span><span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{item.author}</span></span> : null}
           {item.assignees.length > 0 ? <span style={{ color: 'var(--t-text-faint)' }}>{item.assignees.join(', ')}</span> : null}
           {item.comments > 0 ? <span>{item.comments} comment{item.comments === 1 ? '' : 's'}</span> : null}
@@ -557,14 +557,14 @@ export function itemBadge(item: ActivityItem): React.ReactNode {
         paddingBottom: 1,
         paddingLeft: 6,
         borderRadius: 999,
-        fontSize: 9,
-        fontWeight: 700,
+        fontSize: 11,
+        fontWeight: 600,
         flexShrink: 0,
         marginTop: 4,
         background: item.state === 'merged' ? ACTIVITY_COLORS.mergeBg : item.state === 'open' ? ACTIVITY_COLORS.successBg : ACTIVITY_COLORS.dangerBg,
         color: item.state === 'merged' ? ACTIVITY_COLORS.merge : item.state === 'open' ? ACTIVITY_COLORS.success : ACTIVITY_COLORS.danger,
         textTransform: 'uppercase',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}>
         {item.state}
       </span>
@@ -578,14 +578,14 @@ export function itemBadge(item: ActivityItem): React.ReactNode {
         paddingBottom: 1,
         paddingLeft: 6,
         borderRadius: 999,
-        fontSize: 9,
-        fontWeight: 700,
+        fontSize: 11,
+        fontWeight: 600,
         flexShrink: 0,
         marginTop: 4,
         background: item.state === 'open' ? ACTIVITY_COLORS.successBg : ACTIVITY_COLORS.mergeBg,
         color: item.state === 'open' ? ACTIVITY_COLORS.success : ACTIVITY_COLORS.merge,
         textTransform: 'uppercase',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}>
         {item.state}
       </span>

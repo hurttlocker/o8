@@ -86,7 +86,7 @@ function PRListItem({ pr, onClick }: { pr: PRSummary; onClick: () => void }) {
         color: 'var(--t-text)',
         cursor: 'pointer',
         textAlign: 'left',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
         transition: 'background 80ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(e) => { e.currentTarget.style.background = ACCENT_BG; }}

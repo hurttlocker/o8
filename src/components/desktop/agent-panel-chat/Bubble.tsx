@@ -622,7 +622,7 @@ function CollapsibleToolCalls({ toolCalls, marginTop }: { toolCalls: MobileTrans
           color: 'var(--t-text-secondary)',
           fontSize: 11,
           fontWeight: 600,
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           cursor: 'pointer',
           letterSpacing: '-0.01em',
           transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',

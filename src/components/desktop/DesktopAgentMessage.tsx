@@ -206,7 +206,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         letterSpacing: '0.08em',
         textTransform: 'uppercase',
         color: 'var(--t-text-faint)',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       (evicted from context)
@@ -421,7 +421,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
           lineHeight: 1.55,
           letterSpacing: '-0.005em',
           wordBreak: 'break-word',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           paddingTop: entry.role === 'system' ? 10 : 8,
           paddingBottom: entry.role === 'system' ? 10 : 8,
           paddingLeft: entry.role === 'system' ? 12 : 0,

@@ -52,7 +52,7 @@ export interface HtmlStylePresetOptions {
   override?: string;
 }
 
-const UI_FONT = '"Inter", "Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
 export function getHtmlStylePreset(opts: HtmlStylePresetOptions = {}): string {

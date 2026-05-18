@@ -8,7 +8,7 @@ export type DiffDisplayMode = 'unified' | 'side';
 
 type FileDiffResponse = { diff?: string; stagedDiff?: string; error?: string };
 
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
 function formatLoadError(error: unknown) {

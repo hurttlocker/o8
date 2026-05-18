@@ -14,7 +14,7 @@ type ListMode = 'changes' | 'all';
 type ViewerMode = 'diff' | 'file';
 type WorkspaceRepoOption = Pick<RepoRegistryEntry, 'id' | 'name' | 'localPath' | 'defaultBranch' | 'readiness'>;
 
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const RAIL_WIDTH = 'clamp(224px, 30%, 292px)';
 // Workspace pane local token block. Originally hardcoded for dark vibrancy

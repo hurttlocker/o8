@@ -4,7 +4,7 @@ import { Fragment } from 'react';
 import { useState } from 'react';
 import type { BrainAnswerCitation, MobileTranscriptCommand, MobileTranscriptCommandChip } from '@/lib/mobile/types';
 
-const BODY_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const BODY_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, monospace';
 const INLINE_CODEISH_SOURCE = '(`[^`]+`|(?:~?/)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+|/[A-Za-z0-9._-]+|\\b\\d[\\d,.]*(?:\\s*(?:->|→)\\s*\\d[\\d,.]*)?\\b)';
 const INLINE_CODEISH_PATTERN = new RegExp(`(${INLINE_CODEISH_SOURCE})`, 'g');

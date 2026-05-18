@@ -178,7 +178,7 @@ function PRReviewThreadsSectionBase({
               fontSize: 12,
               fontWeight: 700,
               cursor: 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             <RotateCcw size={14} strokeWidth={2} />
@@ -317,7 +317,7 @@ function ReviewThreadCardBase({
           background: 'transparent',
           cursor: 'pointer',
           textAlign: 'left',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         <span style={{
@@ -557,7 +557,7 @@ function ReviewThreadCardBase({
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               >
                 {isViewed ? 'Mark unviewed' : 'Mark viewed'}
@@ -586,7 +586,7 @@ function ReviewThreadCardBase({
                     fontSize: 12,
                     fontWeight: 700,
                     cursor: threadLoadingState ? 'wait' : 'pointer',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                     opacity: threadLoadingState ? 0.74 : 1,
                   }}
                 >
@@ -633,7 +633,7 @@ function ReviewThreadCardBase({
                   background: 'rgba(248,250,252,0.92)',
                   color: 'var(--t-text)',
                   outline: 'none',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               />
               <div style={{
@@ -673,7 +673,7 @@ function ReviewThreadCardBase({
                     fontSize: 12,
                     fontWeight: 800,
                     cursor: !replyDrafts[thread.id]?.trim() ? 'default' : threadLoadingState === 'reply' ? 'wait' : 'pointer',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                   }}
                 >
                   <Send size={14} strokeWidth={2.2} />

@@ -367,7 +367,7 @@ export function SessionTimeline({
               fontWeight: 700,
               letterSpacing: '0.04em',
               textTransform: 'uppercase',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
             title={`${errorSegmentCount} error block${errorSegmentCount === 1 ? '' : 's'} in the last 24h`}
           >
@@ -488,7 +488,7 @@ interface HoverCardData {
   isIdle: boolean;
 }
 
-const HOVER_CARD_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const HOVER_CARD_FONT = 'var(--font-sans-system)';
 const HOVER_CARD_WIDTH = 320;
 
 function RuntimeGlyph({ kind, size = 14 }: { kind: 'codex' | 'claude' | 'gemini' | null; size?: number }) {

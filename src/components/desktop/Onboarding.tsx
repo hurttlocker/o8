@@ -26,7 +26,7 @@ type OnboardingStep = 'welcome' | 'repos' | 'runtimes' | 'dispatch' | 'import' |
 
 const STEP_ORDER: OnboardingStep[] = ['welcome', 'repos', 'runtimes', 'dispatch', 'import', 'ready'];
 
-const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif';
+const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, monospace';
 
 // ── Shared UI helpers ──

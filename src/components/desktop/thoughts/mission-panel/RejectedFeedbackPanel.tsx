@@ -141,7 +141,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
           color: 'var(--t-text)',
           fontSize: 12,
           lineHeight: 1.5,
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           letterSpacing: '-0.005em',
           outline: 'none',
           opacity: submitting ? 0.6 : 1,
@@ -175,7 +175,7 @@ export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
             cursor: canSubmit ? 'pointer' : 'not-allowed',
             opacity: submitting ? 0.7 : 1,
             transition: 'background 200ms cubic-bezier(0.34, 1.36, 0.64, 1), transform 150ms cubic-bezier(0.34, 1.36, 0.64, 1)',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
           onMouseDown={(event) => {
             if (canSubmit) event.currentTarget.style.transform = 'scale(0.97)';

@@ -223,7 +223,7 @@ export function PacketMetaRows({
                 borderColor: 'var(--t-accent-border)',
                 background: 'var(--t-input-bg)',
                 fontSize: 11.5,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 color: 'var(--t-text)',
                 resize: 'vertical',
                 outline: 'none',

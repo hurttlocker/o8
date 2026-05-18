@@ -39,7 +39,7 @@ function WaitingFooterBase({ count, onStop, noun = 'agent' }: WaitingFooterProps
         borderTopStyle: 'solid',
         borderTopColor: 'var(--t-divider-subtle)',
         background: 'var(--t-panel-hover)',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <span
@@ -91,7 +91,7 @@ function WaitingFooterBase({ count, onStop, noun = 'agent' }: WaitingFooterProps
           textTransform: 'uppercase',
           letterSpacing: '0.06em',
           cursor: 'pointer',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
         onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255, 90, 31, 0.08)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}

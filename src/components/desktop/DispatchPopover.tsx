@@ -266,7 +266,7 @@ export default function DispatchPopover() {
         borderColor: 'var(--t-divider-subtle)',
         boxShadow: '0 28px 56px -16px rgba(0, 0, 0, 0.42), 0 8px 16px -4px rgba(0, 0, 0, 0.18)',
         color: 'var(--t-text)',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
         overflow: 'hidden',
       }}
     >

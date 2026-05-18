@@ -312,7 +312,7 @@ export function PacketCard({
                 textAlign: 'left',
                 cursor: 'pointer',
                 transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
               onMouseEnter={(e) => { if (!detailsAnchor) e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
               onMouseLeave={(e) => { if (!detailsAnchor) e.currentTarget.style.background = 'transparent'; }}
@@ -655,7 +655,7 @@ function ChangesTabHint() {
         fontSize: 11,
         color: 'var(--t-text-muted)',
         lineHeight: 1.55,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       Changes for this packet are shown in the workspace panel on the right.
@@ -676,7 +676,7 @@ function FilesTabList({ files }: { files: string[] }) {
           fontSize: 11,
           color: 'var(--t-text-muted)',
           lineHeight: 1.55,
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         No predicted or changed files yet. Files appear here once the agent runs.

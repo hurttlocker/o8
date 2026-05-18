@@ -47,6 +47,7 @@ interface TitleBarProps {
   onOpenCommandPalette?: () => void;
   o8ActiveTab?: O8Tab;
   onO8TabChange?: (tab: O8Tab) => void;
+  compact?: boolean;
 }
 
 // ── Main Component ──
@@ -67,6 +68,7 @@ export function TitleBar({
   onOpenCommandPalette,
   o8ActiveTab = 'workspace',
   onO8TabChange,
+  compact = false,
 }: TitleBarProps) {
   const headerRef = useRef<HTMLElement>(null);
 
@@ -126,17 +128,19 @@ export function TitleBar({
 
 
         {/* Sidebar toggle */}
-        <TitleBarButton
-          icon={<IconPanelLeft />}
-          label="Toggle sidebar"
-          onClick={onToggleSidebar}
-          active={sidebarVisible}
-        />
+        {!compact ? (
+          <TitleBarButton
+            icon={<IconPanelLeft />}
+            label="Toggle sidebar"
+            onClick={onToggleSidebar}
+            active={sidebarVisible}
+          />
+        ) : null}
 
         {/* Agents — returns the center workspace to the main agents view.
             Lives here instead of the retired NavRail so users always have a
             one-click "home" back to the three-pane workspace from Settings. */}
-        {onOpenAgents ? (
+        {!compact && onOpenAgents ? (
           <TitleBarButton
             icon={
               <motion.span
@@ -242,7 +246,7 @@ export function TitleBar({
                 paddingBottom: 1,
                 paddingLeft: 5,
                 lineHeight: 1.2,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               ⌘K
@@ -264,10 +268,10 @@ export function TitleBar({
           paddingRight: 4,
         }}
       >
-        {o8PanelVisible && onO8TabChange ? (
+        {!compact && o8PanelVisible && onO8TabChange ? (
           <O8HeaderTabs activeTab={o8ActiveTab} onTabChange={onO8TabChange} />
         ) : null}
-        {onOpenBrowser ? (
+        {!compact && onOpenBrowser ? (
           <BrowserHoverButton
             active={browserActive}
             url={browserPreviewUrl ?? null}
@@ -280,11 +284,13 @@ export function TitleBar({
           onClick={onToggleBottomPanel}
           active={bottomPanelVisible}
         />
-        <RightPanelMorphButton
-          workspacePanelVisible={workspacePanelVisible}
-          o8PanelVisible={o8PanelVisible}
-          onToggleO8Panel={onToggleO8Panel}
-        />
+        {!compact ? (
+          <RightPanelMorphButton
+            workspacePanelVisible={workspacePanelVisible}
+            o8PanelVisible={o8PanelVisible}
+            onToggleO8Panel={onToggleO8Panel}
+          />
+        ) : null}
 
       </div>
     </header>

@@ -35,7 +35,7 @@ export function TimelineEmptyState({
         background: 'transparent',
         borderBottom: '1px solid var(--t-divider-subtle)',
         color: 'var(--t-text)',
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
         letterSpacing: '-0.01em',
       }}
     >
@@ -108,7 +108,7 @@ export function TimelineEmptyState({
               justifyContent: 'center',
               gap: 8,
               cursor: 'pointer',
-              fontFamily: 'system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               fontSize: 12,
               fontWeight: 600,
               letterSpacing: '-0.01em',

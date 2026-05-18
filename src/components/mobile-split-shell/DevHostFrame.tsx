@@ -61,7 +61,7 @@ export interface DevHostFrameProps {
 /* ── Internals ──────────────────────────────────────────────────────────── */
 
 const MONO_FAMILY = '"SF Mono", Menlo, ui-monospace, monospace';
-const SANS_FAMILY = '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif';
+const SANS_FAMILY = 'var(--font-sans-system)';
 const HOSTILE_TIMEOUT_MS = 4_000;
 
 interface PortsResponse {

@@ -142,7 +142,7 @@ export function ChatOpenRouterPicker({ selectedSlug, onSelect }: ChatOpenRouterP
           fontWeight: 500,
           letterSpacing: '-0.005em',
           flexShrink: 0,
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         <ModelIcon />
@@ -208,7 +208,7 @@ function ChatOpenRouterPopover({ anchorRect, selectedSlug, onPick }: PopoverProp
         display: 'flex',
         flexDirection: 'column',
         gap: 2,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <PopoverRow

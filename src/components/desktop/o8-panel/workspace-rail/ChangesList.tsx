@@ -15,7 +15,7 @@ import {
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
 
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
 interface WorkspaceReviewResponse {

@@ -585,7 +585,7 @@ export function CommitViewer({ commitHash, workspace }: { commitHash: string; wo
               background: selectedFile === null ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
               cursor: 'pointer',
               textAlign: 'left',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               fontSize: 13,
               fontWeight: selectedFile === null ? 600 : 400,
               color: 'var(--t-text-strong)',
@@ -618,7 +618,7 @@ export function CommitViewer({ commitHash, workspace }: { commitHash: string; wo
                   background: isActive ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
                   cursor: 'pointer',
                   textAlign: 'left',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   transition: 'all 100ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
               >

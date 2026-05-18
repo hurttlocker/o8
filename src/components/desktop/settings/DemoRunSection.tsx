@@ -14,7 +14,7 @@
  *
  * Design rules followed:
  *   - Inline styles only / palette tokens only / Phosphor SVG only
- *   - Plus Jakarta Sans for chrome / MONO for ms timing + paths
+ *   - system UI for chrome / MONO for ms timing + paths
  *   - Issues-style rows: dot + uppercase mono label + value + hint
  *   - 800-line ceiling
  */

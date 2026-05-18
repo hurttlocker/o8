@@ -39,7 +39,7 @@ export interface Concern {
 
 export const PANE_BORDER_COLOR = 'var(--t-divider-subtle)';
 export const LABEL_COLOR = 'var(--t-text-muted)';
-export const FONT_FAMILY = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+export const FONT_FAMILY = 'var(--font-sans-system)';
 export const MONO_FAMILY = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
 export function deriveVerdict(packet: OrchestratorPacket): Verdict {

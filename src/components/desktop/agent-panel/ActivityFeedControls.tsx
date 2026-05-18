@@ -80,7 +80,7 @@ function ActivityFeedControlsBase({
               border: '0.5px solid var(--t-divider-subtle)',
               background: 'var(--t-panel)',
               cursor: 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               fontSize: 11,
               fontWeight: 600,
               color: 'var(--t-text)',
@@ -177,7 +177,7 @@ function ActivityFeedControlsBase({
                 fontSize: 12,
                 fontWeight: 600,
                 cursor: 'pointer',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 textAlign: 'left',
               }}
             >
@@ -215,7 +215,7 @@ function ActivityFeedControlsBase({
                     fontSize: 12,
                     fontWeight: selected ? 600 : 400,
                     cursor: 'pointer',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                     textAlign: 'left',
                   }}
                 >
@@ -296,7 +296,7 @@ function ActivityFeedControlsBase({
                     background: active ? 'var(--t-hover)' : 'transparent',
                     color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
                     cursor: 'pointer',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                     transition: 'all 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   }}
                 >

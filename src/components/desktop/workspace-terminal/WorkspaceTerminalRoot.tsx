@@ -89,10 +89,10 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: 'spring', stiffness: 380, damping: 32, mass: 0.6 }}
             style={{
-              display: 'flex',
+              display: 'grid',
+              gridTemplateColumns: 'auto minmax(0, 1fr) auto',
               alignItems: 'center',
               gap: 10,
-              justifyContent: 'space-between',
               paddingTop: 8,
               paddingBottom: 8,
               paddingLeft: 12,
@@ -106,29 +106,73 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
               lineHeight: 1.4,
               letterSpacing: '-0.005em',
               flexShrink: 0,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             <WorkspaceReconnectDot />
-            <span style={{ flex: 1, minWidth: 0 }}>
+            <span
+              style={{
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
               <strong style={{ fontWeight: 600, color: 'var(--t-text)' }}>Reconnecting to workspace runtime</strong>
               <span style={{ color: 'var(--t-text-muted)', fontWeight: 400 }}> · saved tabs stay in place, sessions reattach when the bridge returns</span>
             </span>
-            {controller.activeTab?.kind === 'chat' && controller.activeCheckpoint ? (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                flexShrink: 0,
+              }}
+            >
+              {controller.activeTab?.kind === 'chat' && controller.activeCheckpoint ? (
+                <motion.button
+                  type="button"
+                  onClick={() => controller.handleRestoreLatestCheckpoint(controller.activeTab!.id)}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  transition={{ type: 'spring', stiffness: 480, damping: 22, mass: 0.5 }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    border: '0.5px solid rgba(37, 99, 235, 0.32)',
+                    borderRadius: 9,
+                    background: 'rgba(37, 99, 235, 0.10)',
+                    color: '#2563eb',
+                    paddingTop: 4,
+                    paddingBottom: 4,
+                    paddingLeft: 10,
+                    paddingRight: 10,
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: '-0.005em',
+                    fontFamily: 'var(--font-sans-system)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <RotateCcw size={11} />
+                  Restore checkpoint
+                </motion.button>
+              ) : null}
               <motion.button
                 type="button"
-                onClick={() => controller.handleRestoreLatestCheckpoint(controller.activeTab!.id)}
+                onClick={() => window.location.reload()}
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
                 transition={{ type: 'spring', stiffness: 480, damping: 22, mass: 0.5 }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 5,
-                  border: '0.5px solid rgba(37, 99, 235, 0.32)',
+                  border: '0.5px solid rgba(249, 115, 22, 0.32)',
                   borderRadius: 9,
-                  background: 'rgba(37, 99, 235, 0.10)',
-                  color: '#2563eb',
+                  background: 'rgba(249, 115, 22, 0.10)',
+                  color: '#f97316',
                   paddingTop: 4,
                   paddingBottom: 4,
                   paddingLeft: 10,
@@ -137,41 +181,13 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
                   fontSize: 11,
                   fontWeight: 600,
                   letterSpacing: '-0.005em',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   flexShrink: 0,
                 }}
               >
-                <RotateCcw size={11} />
-                Restore checkpoint
+                Reload workspace
               </motion.button>
-            ) : null}
-            <motion.button
-              type="button"
-              onClick={() => window.location.reload()}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              transition={{ type: 'spring', stiffness: 480, damping: 22, mass: 0.5 }}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                border: '0.5px solid rgba(249, 115, 22, 0.32)',
-                borderRadius: 9,
-                background: 'rgba(249, 115, 22, 0.10)',
-                color: '#f97316',
-                paddingTop: 4,
-                paddingBottom: 4,
-                paddingLeft: 10,
-                paddingRight: 10,
-                cursor: 'pointer',
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: '-0.005em',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                flexShrink: 0,
-              }}
-            >
-              Reload workspace
-            </motion.button>
+            </div>
           </motion.div>
         ) : null}
 

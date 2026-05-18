@@ -12,7 +12,7 @@
 import { memo, useState } from 'react';
 import { getRuntimeInstallInfo } from '@/lib/setup/runtime-install';
 
-const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif';
+const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, monospace';
 
 export interface DetectedRuntimeRow {
