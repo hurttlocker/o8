@@ -120,6 +120,11 @@ export interface TerminalTabHandle {
     label?: string;
     targetSessionKey?: string;
   }) => string;
+  openHistoryChat: (
+    historyTabId: string,
+    title: string,
+    repo?: { name?: string; localPath?: string; branch?: string | null; remoteUrl?: string | null } | null,
+  ) => string;
   injectIntoCliChat: (text: string, options?: {
     runtime?: Exclude<WorkspaceChatRuntime, 'chat'>;
     repo?: RegisteredRepo;

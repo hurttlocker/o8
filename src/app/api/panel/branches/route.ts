@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
-import { getWorktreeManager } from '@/lib/worktree/launch';
-import type { WorktreeInfo } from '@/lib/worktree/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,45 +42,6 @@ function diskSizeForPath(targetPath: string): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function gitLogSummary(repoPath: string): { age: string; message: string; unixMs: number } {
-  try {
-    const raw = execSync(
-      `git -C "${repoPath}" log -1 --format='%cr|||%s|||%ct'`,
-      { encoding: 'utf-8', timeout: 3000 },
-    ).trim();
-    const [age, message, unixStr] = raw.split('|||');
-    return {
-      age: age?.trim() ?? '',
-      message: (message?.trim() ?? '').split('\n')[0],
-      unixMs: parseInt(unixStr?.trim() ?? '0', 10) * 1000,
-    };
-  } catch {
-    return { age: '', message: '', unixMs: 0 };
-  }
-}
-
-function worktreeDiffStats(worktree: WorktreeInfo): { additions: number; deletions: number } {
-  const refs = [
-    `origin/${worktree.baseBranch}...HEAD`,
-    `${worktree.baseBranch}...HEAD`,
-  ];
-
-  for (const ref of refs) {
-    try {
-      const stats = execSync(
-        `git -C "${worktree.path}" diff --shortstat ${ref} 2>/dev/null`,
-        { encoding: 'utf-8', timeout: 3000 },
-      ).trim();
-      if (stats) return parseShortstat(stats);
-      return { additions: 0, deletions: 0 };
-    } catch {
-      // Try the next ref shape.
-    }
-  }
-
-  return { additions: 0, deletions: 0 };
 }
 
 export async function GET(req: NextRequest) {
@@ -132,11 +91,6 @@ export async function GET(req: NextRequest) {
       }
     } catch { /* no worktrees */ }
 
-    const trackedWorktrees = await getWorktreeManager(repoPath).list().catch(() => [] as WorktreeInfo[]);
-    for (const worktree of trackedWorktrees) {
-      worktrees.set(worktree.branch, worktree.path);
-    }
-
     const branches: BranchInfo[] = [];
     const branchNames = new Set<string>();
     const now = Date.now();
@@ -148,7 +102,8 @@ export async function GET(req: NextRequest) {
       const commitUnix = parseInt(unixStr?.trim() ?? '0', 10) * 1000;
       const daysSinceCommit = Math.floor((now - commitUnix) / (1000 * 60 * 60 * 24));
       const isCurrent = head?.trim() === '*';
-      const isWt = worktrees.has(trimmedName);
+      const worktreePath = worktrees.get(trimmedName);
+      const isWt = Boolean(worktreePath && worktreePath !== repoPath);
 
       // Orphaned managed-worktree branches pollute the sidebar with dead rows
       // for lanes that finished long ago. The `worktree/` prefix is our own
@@ -245,7 +200,7 @@ export async function GET(req: NextRequest) {
         lastCommitMessage: (message?.trim() ?? '').split('\n')[0],
         lastCommitUnix: commitUnix,
         isWorktree: isWt,
-        worktreePath: worktrees.get(trimmedName),
+        worktreePath: isWt ? worktreePath : undefined,
         ahead,
         behind,
         additions,
@@ -253,33 +208,6 @@ export async function GET(req: NextRequest) {
         isStale: !isCurrent && daysSinceCommit >= STALE_THRESHOLD_DAYS,
         staleDays: !isCurrent && daysSinceCommit >= STALE_THRESHOLD_DAYS ? daysSinceCommit : undefined,
         diskSize,
-      });
-    }
-
-    for (const worktree of trackedWorktrees) {
-      if (branchNames.has(worktree.branch)) continue;
-      branchNames.add(worktree.branch);
-
-      const log = gitLogSummary(worktree.path);
-      const commitUnix = log.unixMs || worktree.createdAt;
-      const daysSinceCommit = Math.floor((now - commitUnix) / (1000 * 60 * 60 * 24));
-      const diff = worktreeDiffStats(worktree);
-
-      branches.push({
-        name: worktree.branch,
-        current: false,
-        lastCommitAge: log.age || '',
-        lastCommitMessage: log.message,
-        lastCommitUnix: commitUnix,
-        isWorktree: true,
-        worktreePath: worktree.path,
-        ahead: 0,
-        behind: 0,
-        additions: diff.additions,
-        deletions: diff.deletions,
-        isStale: worktree.status === 'stale' || daysSinceCommit >= STALE_THRESHOLD_DAYS,
-        staleDays: daysSinceCommit >= STALE_THRESHOLD_DAYS ? daysSinceCommit : undefined,
-        diskSize: diskSizeForPath(worktree.path),
       });
     }
 

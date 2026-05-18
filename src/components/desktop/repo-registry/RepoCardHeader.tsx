@@ -194,7 +194,7 @@ function RepoCardHeaderBase({
     rowMetaSegments.push({ key: 'live', content: <span>{`${repoAgents.length} live`}</span> });
   }
   rowMetaSegments.splice(3);
-  const repoHeaderLeadingInset = 19;
+  const repoHeaderLeadingInset = 14;
   const showHeaderHover = hoveringHeader && hoverPreviewRect !== null;
 
   return (
@@ -203,15 +203,15 @@ function RepoCardHeaderBase({
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: 6,
-            padding: compactLayout ? '9px 14px 8px' : '10px 14px 9px',
+            gap: 4,
+            padding: compactLayout ? '7px 12px 6px' : '8px 12px 7px',
             cursor: 'pointer',
           }}
           onClick={onSelectRepo}
           onMouseEnter={(event) => schedulePreviewHover(event.currentTarget as HTMLDivElement, event.clientX, event.clientY)}
           onMouseLeave={closePreviewHover}
         >
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
             <div style={{ flex: 1, minWidth: 0, paddingLeft: repoHeaderLeadingInset }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
                 <span
@@ -220,11 +220,11 @@ function RepoCardHeaderBase({
                   onClick={(e) => { e.stopPropagation(); onSelectRepo(); }}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onSelectRepo(); } }}
                   style={{
-                    fontSize: 13,
-                    fontWeight: 540,
+                    fontSize: 12,
+                    fontWeight: 520,
                     color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
                     letterSpacing: '-0.008em',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                     minWidth: 0,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -253,8 +253,8 @@ function RepoCardHeaderBase({
                   }}
                 >
                   {expanded
-                    ? <ChevronDownIcon size={13} />
-                    : <ChevronRightIcon size={13} />}
+                    ? <ChevronDownIcon size={12} />
+                    : <ChevronRightIcon size={12} />}
                 </span>
                 {openPrCount > 0 ? (
                   <span
@@ -311,8 +311,8 @@ function RepoCardHeaderBase({
               </div>
               <div
                 style={{
-                  marginTop: 3,
-                  fontSize: 10.5,
+                  marginTop: 2,
+                  fontSize: 9.75,
                   fontWeight: 420,
                   lineHeight: 1.3,
                   color: 'var(--t-text-faint)',
@@ -320,7 +320,7 @@ function RepoCardHeaderBase({
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                   letterSpacing: '-0.005em',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               >
                 {rowMetaSegments.length > 0 ? (
@@ -347,18 +347,18 @@ function RepoCardHeaderBase({
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: 26,
-                height: 26,
+                width: 22,
+                height: 22,
                 borderRadius: 8,
                 border: 'none',
                 background: 'transparent',
                 color: '#9ca3af',
                 cursor: 'pointer',
                 flexShrink: 0,
-                fontSize: 18,
+                fontSize: 16,
                 fontWeight: 300,
                 lineHeight: 0,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 appearance: 'none',
                 WebkitAppearance: 'none',
                 marginRight: -2,
@@ -421,7 +421,7 @@ function RepoCardHeaderBase({
                   fontWeight: 500,
                   cursor: 'pointer',
                   padding: '2px 6px',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               >
                 Cancel
@@ -442,7 +442,7 @@ function RepoCardHeaderBase({
                   cursor: 'pointer',
                   padding: '2px 8px',
                   borderRadius: 6,
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               >
                 Remove

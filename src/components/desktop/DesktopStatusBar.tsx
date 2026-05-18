@@ -15,13 +15,14 @@
  * tabs.
  */
 
-import { memo } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { FolderPlus, GearSix } from '@phosphor-icons/react';
 import { Smartphone } from './lucide-shims';
 import { ChromeButton } from './chrome/ChromeButton';
 import { MergeActionCluster } from './MergeActionCluster';
 import { FooterPorts } from './desktop-status-bar/footer-ports';
 import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
+import { SettingsQuickDrawer } from './SettingsQuickDrawer';
 
 interface DesktopStatusBarProps {
   branchName: string | null;
@@ -33,6 +34,8 @@ interface DesktopStatusBarProps {
   leftColumnWidth?: number;
   /** Width of the right panel column when visible, in CSS px. */
   rightColumnWidth?: number;
+  /** Narrow desktop mode: keep only durable, terminal-like status chrome. */
+  compact?: boolean;
   onOpenSettings: () => void;
   onAddRepo: () => void;
   /** Open the full-screen mobile-pairing QR view (a canvas tab). */
@@ -46,11 +49,44 @@ function DesktopStatusBarBase({
   repoRemoteUrl = null,
   leftColumnWidth,
   rightColumnWidth,
+  compact = false,
   onOpenSettings,
   onAddRepo,
   onOpenMobilePairing,
   onPortPreview,
 }: DesktopStatusBarProps) {
+  const settingsButtonRef = useRef<HTMLDivElement | null>(null);
+  const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
+  const [settingsAnchorRect, setSettingsAnchorRect] = useState<DOMRect | null>(null);
+
+  const syncSettingsAnchor = useCallback(() => {
+    setSettingsAnchorRect(settingsButtonRef.current?.getBoundingClientRect() ?? null);
+  }, []);
+
+  const toggleSettingsDrawer = useCallback(() => {
+    syncSettingsAnchor();
+    setSettingsDrawerOpen((open) => !open);
+  }, [syncSettingsAnchor]);
+
+  const closeSettingsDrawer = useCallback(() => {
+    setSettingsDrawerOpen(false);
+  }, []);
+
+  const openFullSettings = useCallback(() => {
+    setSettingsDrawerOpen(false);
+    onOpenSettings();
+  }, [onOpenSettings]);
+
+  useEffect(() => {
+    if (!settingsDrawerOpen) return;
+    window.addEventListener('resize', syncSettingsAnchor);
+    window.addEventListener('scroll', syncSettingsAnchor, true);
+    return () => {
+      window.removeEventListener('resize', syncSettingsAnchor);
+      window.removeEventListener('scroll', syncSettingsAnchor, true);
+    };
+  }, [settingsDrawerOpen, syncSettingsAnchor]);
+
   // Three-column footer that mirrors the dashboard layout above. Left section
   // takes the AgentPanel's exact width, right section takes the right-panel's
   // width (or 0 when hidden), so the center section spans the same horizontal
@@ -72,12 +108,12 @@ function DesktopStatusBarBase({
         paddingLeft: 0,
         background: 'transparent',
         borderTopWidth: 0,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <div
         style={{
-          width: leftColumnWidth,
+          width: compact ? 'auto' : leftColumnWidth,
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
@@ -86,29 +122,42 @@ function DesktopStatusBarBase({
           paddingRight: 12,
         }}
       >
-        <ChromeButton
-          icon={<GearSix size={14} weight="bold" color="var(--t-text)" />}
-          label="Settings"
-          onClick={onOpenSettings}
-          size={22}
-          radius={6}
+        <div ref={settingsButtonRef} style={{ display: 'flex', alignItems: 'center' }}>
+          <ChromeButton
+            icon={<GearSix size={14} weight="bold" color="var(--t-text)" />}
+            label="Settings"
+            active={settingsDrawerOpen}
+            onClick={toggleSettingsDrawer}
+            size={22}
+            radius={6}
+          />
+        </div>
+        <SettingsQuickDrawer
+          open={settingsDrawerOpen}
+          anchorRect={settingsAnchorRect}
+          onClose={closeSettingsDrawer}
+          onOpenSettings={openFullSettings}
         />
-        <ChromeButton
-          icon={<Smartphone size={14} />}
-          label="Pair mobile device"
-          onClick={onOpenMobilePairing}
-          size={22}
-          radius={6}
-        />
-        <ChromeButton
-          icon={<FolderPlus size={14} weight="bold" color="var(--t-text)" />}
-          label="Add repository"
-          onClick={onAddRepo}
-          size={22}
-          radius={6}
-        />
-        <FooterPorts onPortPreview={onPortPreview} />
-        <SupervisorInboxBadge />
+        {!compact ? (
+          <>
+            <ChromeButton
+              icon={<Smartphone size={14} />}
+              label="Pair mobile device"
+              onClick={onOpenMobilePairing}
+              size={22}
+              radius={6}
+            />
+            <ChromeButton
+              icon={<FolderPlus size={14} weight="bold" color="var(--t-text)" />}
+              label="Add repository"
+              onClick={onAddRepo}
+              size={22}
+              radius={6}
+            />
+            <FooterPorts onPortPreview={onPortPreview} />
+            <SupervisorInboxBadge />
+          </>
+        ) : null}
       </div>
 
       <div
@@ -129,7 +178,7 @@ function DesktopStatusBarBase({
 
       <div
         style={{
-          width: rightColumnWidth ?? undefined,
+          width: compact ? 0 : (rightColumnWidth ?? undefined),
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',

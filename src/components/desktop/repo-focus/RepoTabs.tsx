@@ -4,6 +4,7 @@ import type { RepoFocusTabId } from './types';
 import { REPO_FOCUS_FONT } from './utils';
 
 const DEFAULT_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
+  { id: 'chats', label: 'Chats' },
   { id: 'agents', label: 'Packets' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
@@ -50,7 +51,7 @@ export function RepoTabs({ activeTab, onTabChange, tabs = DEFAULT_TABS }: RepoTa
             aria-selected={selected}
             onClick={() => onTabChange(tab.id)}
             style={{
-              minHeight: 44,
+              minHeight: 34,
               borderWidth: 0,
               borderRightWidth: isLast ? 0 : 1,
               borderRightStyle: 'solid',
@@ -59,8 +60,8 @@ export function RepoTabs({ activeTab, onTabChange, tabs = DEFAULT_TABS }: RepoTa
               color: selected ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text-muted)',
               cursor: 'pointer',
               fontFamily: REPO_FOCUS_FONT,
-              fontSize: 12,
-              fontWeight: selected ? 560 : 500,
+              fontSize: 10.5,
+              fontWeight: selected ? 540 : 500,
               letterSpacing: '-0.01em',
             }}
           >

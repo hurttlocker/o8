@@ -1,0 +1,512 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import type { CliUsageSnapshot, CliWindow } from '@/lib/usage/cli-scrape';
+import { ClaudeIcon, CodexIcon } from './repo-registry/shared';
+import {
+  ChevronDown,
+  ChevronRight,
+  Cpu,
+  Gauge,
+  RefreshCw,
+  Settings2,
+} from './lucide-shims';
+
+const FONT = 'var(--font-sans-system)';
+const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
+const POLL_MS = 30_000;
+const PANEL_BG = 'color-mix(in srgb, var(--t-panel-solid, var(--t-panel, rgba(255,255,255,0.92))) 94%, var(--t-bg, transparent) 6%)';
+const ROW_HOVER_BG = 'var(--t-panel-hover, rgba(15, 23, 42, 0.04))';
+const SUBTLE_BG = 'var(--t-bg-card, rgba(15, 23, 42, 0.04))';
+const BORDER = 'var(--t-panel-border, rgba(15, 23, 42, 0.1))';
+const TEXT = 'var(--t-text, #0f172a)';
+const MUTED = 'var(--t-text-muted, #64748b)';
+const FAINT = 'color-mix(in srgb, var(--t-text-muted, #64748b) 62%, transparent)';
+
+interface SettingsQuickDrawerProps {
+  open: boolean;
+  anchorRect: DOMRect | null;
+  onClose: () => void;
+  onOpenSettings: () => void;
+}
+
+type UsageState =
+  | { status: 'idle'; snapshot: null; error: null }
+  | { status: 'loading'; snapshot: CliUsageSnapshot | null; error: null }
+  | { status: 'ready'; snapshot: CliUsageSnapshot; error: null }
+  | { status: 'error'; snapshot: CliUsageSnapshot | null; error: string };
+
+function formatTokens(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'No data';
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
+function formatWindow(minutes: number | null | undefined): string {
+  if (minutes === 300) return '5h';
+  if (minutes === 10080) return 'Weekly';
+  if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes <= 0) return 'Window';
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes % 1440 === 0) return `${minutes / 1440}d`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
+}
+
+function formatResetTime(epochSeconds: number | null | undefined): string {
+  if (typeof epochSeconds !== 'number' || !Number.isFinite(epochSeconds)) return 'Rolling';
+  const resetDate = new Date(epochSeconds * 1000);
+  const deltaMs = resetDate.getTime() - Date.now();
+  if (deltaMs <= 0) return 'Now';
+  if (deltaMs < 24 * 60 * 60 * 1000) {
+    return resetDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  return resetDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function formatGeneratedAt(epochMs: number | null | undefined): string {
+  if (typeof epochMs !== 'number' || !Number.isFinite(epochMs)) return 'Not synced';
+  return new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function usageValue(window: CliWindow | null, mode: 'percent-or-tokens' | 'tokens'): string {
+  if (!window) return 'No data';
+  if (mode === 'percent-or-tokens' && typeof window.usedPercent === 'number') {
+    return `${Math.round(window.usedPercent)}%`;
+  }
+  return formatTokens(window.tokens);
+}
+
+function usagePercent(window: CliWindow | null): number | null {
+  if (!window || typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent)) return null;
+  return Math.max(0, Math.min(100, window.usedPercent));
+}
+
+function IconFrame({ children }: { children: ReactNode }) {
+  return (
+    <span
+      style={{
+        width: 17,
+        height: 17,
+        borderRadius: 6,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        background: SUBTLE_BG,
+        boxShadow: 'inset 0 1px 0 color-mix(in srgb, var(--t-panel-border, rgba(15,23,42,0.1)) 60%, transparent)',
+        color: MUTED,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function RowButton({
+  children,
+  onClick,
+  ariaExpanded,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  ariaExpanded?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={ariaExpanded}
+      style={{
+        width: '100%',
+        minHeight: 30,
+        border: 0,
+        borderRadius: 9,
+        padding: '0 7px',
+        background: 'transparent',
+        color: 'inherit',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        fontFamily: FONT,
+        fontSize: 11.5,
+        textAlign: 'left',
+      }}
+      onMouseEnter={(event) => {
+        event.currentTarget.style.background = ROW_HOVER_BG;
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = 'transparent';
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function MiniBar({ percent, tone }: { percent: number | null; tone: 'codex' | 'claude' }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        gridColumn: '1 / -1',
+        height: 2,
+        borderRadius: 999,
+        overflow: 'hidden',
+        background: 'color-mix(in srgb, var(--t-panel-border, rgba(15,23,42,0.1)) 70%, transparent)',
+      }}
+    >
+      <div
+        style={{
+          height: '100%',
+          width: `${percent ?? 100}%`,
+          opacity: percent === null ? 0.24 : 0.92,
+          borderRadius: 999,
+          background: tone === 'codex'
+            ? 'var(--t-accent, #2563eb)'
+            : 'var(--t-brand-orange, #f97316)',
+          transition: 'width 180ms ease-out',
+        }}
+      />
+    </div>
+  );
+}
+
+function UsageLine({
+  icon,
+  label,
+  reset,
+  value,
+  percent,
+  tone,
+}: {
+  icon?: ReactNode;
+  label: string;
+  reset: string;
+  value: string;
+  percent: number | null;
+  tone: 'codex' | 'claude';
+}) {
+  return (
+    <div
+      style={{
+        minHeight: 24,
+        display: 'grid',
+        gridTemplateColumns: 'minmax(82px, 1fr) auto auto',
+        alignItems: 'center',
+        columnGap: 6,
+        rowGap: 2,
+        minWidth: 0,
+      }}
+    >
+      <span
+        style={{
+          color: TEXT,
+          fontSize: 10.5,
+          fontWeight: 520,
+          whiteSpace: 'nowrap',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          minWidth: 0,
+        }}
+      >
+        <span style={{ width: 13, height: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {icon}
+        </span>
+        {label}
+      </span>
+      <span style={{ color: MUTED, fontSize: 10.5, fontWeight: 480, whiteSpace: 'nowrap' }}>
+        {value}
+      </span>
+      <span style={{ color: FAINT, fontFamily: MONO, fontSize: 9.5, whiteSpace: 'nowrap' }}>
+        {reset}
+      </span>
+      <MiniBar percent={percent} tone={tone} />
+    </div>
+  );
+}
+
+function RuntimeUsageCard({
+  icon,
+  title,
+  primary,
+  secondary,
+  valueMode,
+  tone,
+}: {
+  icon: ReactNode;
+  title: string;
+  primary: CliWindow | null;
+  secondary: CliWindow | null;
+  valueMode: 'percent-or-tokens' | 'tokens';
+  tone: 'codex' | 'claude';
+}) {
+  return (
+    <section
+      style={{
+        display: 'grid',
+        gap: 3,
+        padding: '0 4px',
+      }}
+    >
+      <UsageLine
+        icon={icon}
+        label={`${title} ${primary ? formatWindow(primary.windowMinutes) : '5h'}`}
+        value={usageValue(primary, valueMode)}
+        reset={formatResetTime(primary?.resetsAt)}
+        percent={usagePercent(primary)}
+        tone={tone}
+      />
+      <UsageLine
+        label={`${title} ${secondary ? formatWindow(secondary.windowMinutes) : 'Weekly'}`}
+        value={usageValue(secondary, valueMode)}
+        reset={formatResetTime(secondary?.resetsAt)}
+        percent={usagePercent(secondary)}
+        tone={tone}
+      />
+    </section>
+  );
+}
+
+function separatorStyle(): CSSProperties {
+  return {
+    height: 1,
+    width: '100%',
+    background: BORDER,
+  };
+}
+
+export function SettingsQuickDrawer({
+  open,
+  anchorRect,
+  onClose,
+  onOpenSettings,
+}: SettingsQuickDrawerProps) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [usageState, setUsageState] = useState<UsageState>({ status: 'idle', snapshot: null, error: null });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const loadUsage = useCallback(async (preserveSnapshot = true) => {
+    setUsageState((current) => ({
+      status: 'loading',
+      snapshot: preserveSnapshot ? current.snapshot : null,
+      error: null,
+    }));
+    try {
+      const res = await fetch('/api/panel/cli-usage', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok || !data?.codex || !data?.claude) {
+        throw new Error(data?.error || 'Usage data unavailable');
+      }
+      setUsageState({ status: 'ready', snapshot: data as CliUsageSnapshot, error: null });
+    } catch (err) {
+      setUsageState((current) => ({
+        status: 'error',
+        snapshot: current.snapshot,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open || !usageOpen) return;
+    void loadUsage();
+    const timer = window.setInterval(() => {
+      void loadUsage();
+    }, POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [loadUsage, open, usageOpen]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, open]);
+
+  const panelStyle = useMemo<CSSProperties>(() => {
+    const viewportWidth = typeof window === 'undefined' ? 640 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 700 : window.innerHeight;
+    const width = Math.max(246, Math.min(280, viewportWidth - 24));
+    const leftFromAnchor = anchorRect?.left ?? 12;
+    const left = Math.max(12, Math.min(leftFromAnchor, viewportWidth - width - 12));
+    const bottomFromAnchor = anchorRect ? viewportHeight - anchorRect.top + 8 : 42;
+    const bottom = Math.max(38, Math.min(bottomFromAnchor, Math.max(38, viewportHeight - 72)));
+    return {
+      position: 'fixed',
+      left,
+      bottom,
+      width,
+      maxWidth: 'calc(100vw - 24px)',
+      maxHeight: 'min(340px, calc(100vh - 64px))',
+      overflow: 'hidden',
+      zIndex: 11000,
+      borderRadius: 16,
+      background: PANEL_BG,
+      border: `1px solid ${BORDER}`,
+      boxShadow: 'var(--t-panel-shadow, 0 24px 60px rgba(15, 23, 42, 0.1))',
+      backdropFilter: 'blur(24px) saturate(150%)',
+      WebkitBackdropFilter: 'blur(24px) saturate(150%)',
+      color: TEXT,
+      fontFamily: FONT,
+    };
+  }, [anchorRect]);
+
+  const snapshot = usageState.snapshot;
+
+  if (!mounted || !open) return null;
+
+  return createPortal(
+    <div
+      data-settings-quick-drawer-root="true"
+      style={{ position: 'fixed', inset: 0, zIndex: 10999, pointerEvents: 'auto' }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div ref={panelRef} role="dialog" aria-label="Quick settings" style={panelStyle}>
+        <div
+          style={{
+            maxHeight: 'inherit',
+            overflowY: 'auto',
+            padding: 7,
+            display: 'grid',
+            gap: 4,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '2px 7px 1px',
+              minWidth: 0,
+            }}
+          >
+            <IconFrame><Cpu size={15} /></IconFrame>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  color: MUTED,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Local desktop profile
+              </div>
+              <div
+                style={{
+                  color: TEXT,
+                  fontSize: 12,
+                  fontWeight: 560,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Cortex IDE
+              </div>
+            </div>
+          </div>
+
+          <div style={separatorStyle()} />
+
+          <RowButton onClick={onOpenSettings}>
+            <IconFrame><Settings2 size={13} /></IconFrame>
+            <span style={{ flex: 1, color: TEXT, fontWeight: 540 }}>Settings</span>
+          </RowButton>
+
+          <div style={separatorStyle()} />
+
+          <RowButton
+            ariaExpanded={usageOpen}
+            onClick={() => {
+              setUsageOpen((value) => !value);
+            }}
+          >
+            <IconFrame><Gauge size={13} /></IconFrame>
+            <span style={{ flex: 1, color: TEXT, fontWeight: 540 }}>Usage remaining</span>
+            <span
+              style={{
+                color: MUTED,
+                fontFamily: MONO,
+                fontSize: 9.5,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {snapshot ? formatGeneratedAt(snapshot.generatedAt) : usageState.status === 'loading' ? 'Syncing' : 'Codex + Claude'}
+            </span>
+            {usageOpen ? <ChevronDown size={12} color={MUTED} /> : <ChevronRight size={12} color={MUTED} />}
+          </RowButton>
+
+          {usageOpen ? (
+            <div style={{ display: 'grid', gap: 4, padding: '0 4px 3px 28px' }}>
+              <RuntimeUsageCard
+                icon={<CodexIcon size={13} />}
+                title="Codex"
+                primary={snapshot?.codex.primary ?? null}
+                secondary={snapshot?.codex.secondary ?? null}
+                valueMode="percent-or-tokens"
+                tone="codex"
+              />
+              <RuntimeUsageCard
+                icon={<ClaudeIcon size={13} />}
+                title="Claude"
+                primary={snapshot?.claude.primary ?? null}
+                secondary={snapshot?.claude.secondary ?? null}
+                valueMode="tokens"
+                tone="claude"
+              />
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void loadUsage(false);
+                  }}
+                  style={{
+                    flex: 1,
+                    height: 24,
+                    border: 0,
+                    borderRadius: 8,
+                    background: SUBTLE_BG,
+                    color: TEXT,
+                    fontFamily: FONT,
+                    fontSize: 10.5,
+                    fontWeight: 540,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <RefreshCw size={10} />
+                  Refresh usage
+                </button>
+              </div>
+              {usageState.status === 'error' ? (
+                <div style={{ color: MUTED, fontSize: 11, lineHeight: 1.35 }}>
+                  {usageState.error}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
