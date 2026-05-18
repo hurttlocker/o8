@@ -10,6 +10,12 @@
  *   O8_API_BASE — e.g. http://localhost:3001 (default)
  */
 
+// MUST be first: neutralizes the `server-only` marker so this standalone Node
+// process (launched via `tsx` on the TS source in dev) doesn't crash when a
+// shared library module transitively imports `server-only`. See the module's
+// header for the full rationale.
+import './neutralize-server-only';
+
 import { createInterface } from 'node:readline';
 import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
