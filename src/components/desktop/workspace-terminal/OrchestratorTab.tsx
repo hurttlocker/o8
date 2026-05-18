@@ -66,6 +66,7 @@ interface OrchestratorTabProps {
   // Pinned OpenRouter model slug for chat-mode requests on this tab.
   // Empty/undefined = use server's env-configured fallback chain.
   initialChatOpenrouterModel?: string;
+  initialThreadId?: string | null;
   // Forwarded to ThoughtsChatPanel — fires with the latest user message
   // text in chat mode so the tab strip can show a 3-word summary instead
   // of the generic "Chat" label.
@@ -163,7 +164,7 @@ function HeaderToggleButton({
         fontWeight: 500,
         letterSpacing: '-0.005em',
         transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
       onMouseEnter={(event) => {
         if (active) return;
@@ -239,6 +240,7 @@ function OrchestratorTabInner({
   initialSingleRuntime,
   initialChatModelId,
   initialChatOpenrouterModel,
+  initialThreadId,
   onChatSummary,
 }: OrchestratorTabProps) {
   const data = useOrchestratorData();
@@ -275,6 +277,7 @@ function OrchestratorTabInner({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
+  const loadedInitialThreadRef = useRef<string | null>(null);
   const autoTiledComparisonGroupIdRef = useRef<string | null>(null);
 
   useEffect(() => subscribeOrchestratorRuntimePreference(setPreferredRuntime), []);
@@ -379,6 +382,28 @@ function OrchestratorTabInner({
     chatPanelRef.current?.loadThread(threadTabId);
     setTimeout(() => chatPanelRef.current?.focusInput(), 40);
   }, []);
+
+  useEffect(() => {
+    if (!active || !initialThreadId) return;
+    if (loadedInitialThreadRef.current === initialThreadId) return;
+    loadedInitialThreadRef.current = initialThreadId;
+    const timer = window.setTimeout(() => {
+      chatPanelRef.current?.loadThread(initialThreadId);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [active, initialThreadId]);
+
+  useEffect(() => {
+    const handleLoadHistoryThread = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string; historyTabId?: string }>).detail;
+      if (!detail?.historyTabId) return;
+      if (detail.tabId && detail.tabId !== tabId) return;
+      chatPanelRef.current?.loadThread(detail.historyTabId);
+      window.setTimeout(() => chatPanelRef.current?.focusInput(), 40);
+    };
+    window.addEventListener('o8:load-history-thread', handleLoadHistoryThread);
+    return () => window.removeEventListener('o8:load-history-thread', handleLoadHistoryThread);
+  }, [tabId]);
 
   const handleNewConversation = useCallback(async () => {
     try {
@@ -536,7 +561,7 @@ function OrchestratorTabInner({
             color: exportState === 'error' ? '#ef4444' : exportState === 'copied' ? 'var(--t-accent)' : 'var(--t-text-muted)',
             cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
             fontSize: 12, fontWeight: 500,
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             flexShrink: 0,
           }}
         >
@@ -552,7 +577,7 @@ function OrchestratorTabInner({
           borderColor: 'var(--t-border)', background: 'transparent', color: 'var(--t-text-muted)',
           cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
           fontSize: 12, fontWeight: 500,
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           flexShrink: 0,
         }}
       >

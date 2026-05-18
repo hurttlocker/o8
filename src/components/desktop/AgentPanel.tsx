@@ -6,7 +6,9 @@ import { motion } from 'framer-motion';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
 import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
+import { ChatsTab } from './repo-focus/tabs/ChatsTab';
 import { useLeftPanelProjectFocus } from './repo-focus/useLeftPanelProjectFocus';
+import { toRepoFocusRepo, type RepoFocusRepo } from './repo-focus/types';
 import { ProjectsBottomBar } from './repo-registry/ProjectsBottomBar';
 import { useProjects } from './repo-registry/useProjects';
 import {
@@ -17,6 +19,20 @@ import {
   useAgentPanelState,
 } from './agent-panel';
 
+const ORCHESTRATOR_HISTORY_SECTIONS = ['orchestrator'] as const;
+const CHAT_HISTORY_SECTIONS = ['chat'] as const;
+
+function repoFocusRepoFromPath(localPath: string): RepoFocusRepo {
+  const name = (localPath.split('/').filter(Boolean).pop() ?? localPath) || 'repo';
+  return {
+    id: `project-path:${localPath}`,
+    name,
+    localPath,
+    remoteUrl: null,
+    defaultBranch: 'main',
+  };
+}
+
 export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) {
   const {
     activeSessionKey,
@@ -26,6 +42,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onLaunchWorkspaceAgent,
     onLaunchWorkspaceTask,
     onSelectSession,
+    onOpenHistoryChat,
     onSelectIssue,
     onSelectCommit,
     onSelectPR,
@@ -83,6 +100,19 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     if (!projects.activeProject) return null;
     return new Set(projects.activeProject.repoPaths);
   }, [projects.activeProject]);
+  const activeProjectReposForChats = useMemo(() => {
+    const registryByPath = new Map(registeredRepos.map((repo) => [repo.localPath, repo]));
+    const projectPaths = projects.activeProject?.repoPaths ?? [];
+    if (projectPaths.length > 0) {
+      return projectPaths.map((repoPath) => {
+        const registeredRepo = registryByPath.get(repoPath);
+        return registeredRepo ? toRepoFocusRepo(registeredRepo) : repoFocusRepoFromPath(repoPath);
+      });
+    }
+    return registeredRepos
+      .filter((repo) => !activeProjectRepoSet || activeProjectRepoSet.has(repo.localPath))
+      .map(toRepoFocusRepo);
+  }, [activeProjectRepoSet, projects.activeProject?.repoPaths, registeredRepos]);
 
   // Stable callback so RepoRegistrySection doesn't see a new reference on
   // every render — its useEffect has this in the deps and the section
@@ -130,6 +160,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           ideWorkspaceSessions={ideWorkspaceSessions}
           activeSessionKey={activeSessionKey}
           onSelectSession={onSelectSession}
+          onOpenHistoryChat={onOpenHistoryChat}
           onSelectFile={props.onSelectFile}
           onOpenSpecInWorkspace={onOpenSpecInWorkspace}
         />
@@ -169,7 +200,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             paddingRight: 14,
             paddingBottom: 6,
             paddingLeft: 14,
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             fontSize: 10,
             fontWeight: 700,
             letterSpacing: '0.12em',
@@ -221,10 +252,23 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         } as CSSProperties}
         className="hide-scrollbar"
       >
-        {/* Workspaces section — the "Workspaces" title and its collapse
-            affordance were removed. The repo registry is the only content
-            of this panel, so it renders flush without a labelled header. */}
+        {/* Workspaces section — history groups frame the repo registry so the
+            minimal panel stays navigable when the focused drawer is hidden. */}
         <section style={{ display: 'flex', flexDirection: 'column' }}>
+          <ChatsTab
+            repos={activeProjectReposForChats}
+            ideWorkspaceSessions={ideWorkspaceSessions}
+            activeSessionKey={activeSessionKey}
+            onSelectSession={onSelectSession}
+            onOpenHistoryChat={onOpenHistoryChat}
+            variant="mini"
+            limit={3}
+            hideWhenEmpty
+            sectionLabel="Orchestrator"
+            sections={ORCHESTRATOR_HISTORY_SECTIONS}
+            showLiveSessions={false}
+          />
+
           {fleetMeta?.mode === 'stale' ? (
             <motion.div
               initial={{ opacity: 0, y: -4 }}
@@ -247,11 +291,20 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
                 color: 'var(--t-text)',
                 fontWeight: 500,
                 letterSpacing: '-0.005em',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               <StaleStatusDot />
-              <span style={{ flex: 1, minWidth: 0, lineHeight: 1.35 }}>
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  lineHeight: 1.35,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 <strong style={{ fontWeight: 600 }}>Showing cached state</strong>
                 <span style={{ color: 'var(--t-text-muted)', fontWeight: 400 }}> · gateway reconnecting</span>
               </span>
@@ -276,7 +329,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
                   fontSize: 11,
                   fontWeight: 600,
                   letterSpacing: '-0.005em',
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   flexShrink: 0,
                 }}
               >
@@ -294,7 +347,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
                 fontWeight: 440,
                 color: 'var(--t-text-faint)',
                 letterSpacing: '-0.005em',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               Loading workspaces...
@@ -341,6 +394,20 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             orchestratorPackets={orchestratorPackets}
             ideWorkspaceSessions={ideWorkspaceSessions}
             hideHeader
+          />
+
+          <ChatsTab
+            repos={activeProjectReposForChats}
+            ideWorkspaceSessions={ideWorkspaceSessions}
+            activeSessionKey={activeSessionKey}
+            onSelectSession={onSelectSession}
+            onOpenHistoryChat={onOpenHistoryChat}
+            variant="mini"
+            limit={5}
+            hideWhenEmpty
+            sectionLabel="Chats"
+            sections={CHAT_HISTORY_SECTIONS}
+            showLiveSessions={false}
           />
         </section>
 

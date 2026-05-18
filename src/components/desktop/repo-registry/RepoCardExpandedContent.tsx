@@ -1,13 +1,11 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo } from 'react';
 import { GitBranch } from '../lucide-shims';
 import {
-  FolderOpen,
   THEME_ACCENT,
   THEME_ACCENT_BORDER,
   THEME_ACCENT_SOFT,
-  AgentSpinner,
   orchestratorRuntimeTone,
   orchestratorStatusTone,
   packetMatchesBranch,
@@ -43,9 +41,6 @@ function RepoCardExpandedContentBase({
   orchestratorPackets = [],
   activeSessionKey = null,
   activeWorkspacePath = null,
-  activeWorkspaceTabKind = null,
-  onFocusOrchestratorTab,
-  onFocusAssistantTab,
   onSelectSession,
   model,
 }: RepoCardExpandedContentProps) {
@@ -86,7 +81,6 @@ function RepoCardExpandedContentBase({
     closeBranchHover,
     handleOpenDesktopPath,
   } = model;
-  const [showAllBranches, setShowAllBranches] = useState(false);
 
   const repoScopedPackets = useMemo(
     () => orchestratorPackets.filter((packet) => (
@@ -105,8 +99,6 @@ function RepoCardExpandedContentBase({
   // wrongly. Branch rail shows: current branch + branches with a live agent
   // task. The Packets tab owns packet visibility separately.
   // The "active" filter: current branch + branches with a live agent task.
-  // The hidden ones are idle branches the user can opt-in to via the
-  // "+ N idle" button at the bottom of the rail.
   const activeBranches = useMemo(
     () => branches.filter((branch) => {
       if (branch.current) return true;
@@ -115,18 +107,7 @@ function RepoCardExpandedContentBase({
     }),
     [agentsByBranch, branches],
   );
-  // What renders in the rail. When the user clicks "+ N idle" we honor the
-  // toggle and surface every branch — previously this filter ignored
-  // `showAllBranches`, so the button just made itself disappear without
-  // actually expanding the list.
-  const visibleBranches = useMemo(
-    () => (showAllBranches ? branches : activeBranches),
-    [showAllBranches, branches, activeBranches],
-  );
-  const hiddenBranchCount = useMemo(
-    () => branches.length - activeBranches.length,
-    [branches, activeBranches],
-  );
+  const visibleBranches = activeBranches;
   const unmatchedRepoPackets = useMemo(
     () => repoScopedPackets.filter((packet) => !visibleBranches.some((branch) => (
       packetMatchesBranch(packet, repo, branch, agentsByBranch?.get(branch.name) ?? [])
@@ -189,110 +170,6 @@ function RepoCardExpandedContentBase({
           </pre>
         </div>
       ) : null}
-
-      {/* Workspace tabs — Orchestrator + Assistant entry rows. The shimmer
-          only fires when (a) this repo is the focused workspace AND (b) the
-          matching kind of tab is the active one. That keeps the left rail
-          honest: click an agent tab, the agent row shimmers; click the
-          Assistant tab, only the Assistant row shimmers here. */}
-      {(() => {
-        const isActiveRepo = activeWorkspacePath === repo.localPath
-          || (activeWorkspacePath && activeWorkspacePath.startsWith(repo.localPath + '/'));
-        const orchestratorActive = Boolean(isActiveRepo && activeWorkspaceTabKind === 'orchestrator');
-        const assistantActive = Boolean(isActiveRepo && activeWorkspaceTabKind === 'llm-chat');
-        const orchestratorStatus = orchestratorActive ? 'Focused' : isActiveRepo ? 'Open' : 'Idle';
-        const orchestratorStatusColor = orchestratorActive ? '#22c55e' : 'var(--t-text-faint)';
-        const assistantStatus = assistantActive ? 'Focused' : isActiveRepo ? 'Open' : 'Idle';
-        const assistantStatusColor = assistantActive ? '#22c55e' : 'var(--t-text-faint)';
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 4 }}>
-            <button
-              type="button"
-              title={orchestratorActive ? 'Orchestrator tab is active' : 'Switch to the Orchestrator tab'}
-              onClick={() => onFocusOrchestratorTab?.()}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 9,
-                padding: '5px 8px',
-                borderRadius: 7,
-                background: orchestratorActive ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))' : 'transparent',
-                borderWidth: 0,
-                cursor: onFocusOrchestratorTab ? 'pointer' : 'default',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                textAlign: 'left',
-                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-              }}
-            >
-              <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
-                <AgentSpinner status={orchestratorActive ? 'running' : 'idle'} size={6} />
-              </span>
-              <ClaudeIcon size={12} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 440,
-                    color: 'var(--t-text)',
-                    letterSpacing: '-0.005em',
-                    lineHeight: 1.35,
-                    ...(orchestratorActive
-                      ? { animation: 'tab-label-shimmer 2.2s ease-in-out infinite' }
-                      : null),
-                  }}
-                >
-                  Orchestrator
-                </span>
-                <span style={{ fontSize: 10, fontWeight: 400, color: orchestratorStatusColor, letterSpacing: '-0.005em', lineHeight: 1.3 }}>
-                  {orchestratorStatus}
-                </span>
-              </div>
-            </button>
-            <button
-              type="button"
-              title={assistantActive ? 'Chat tab is active' : 'Switch to the Chat tab'}
-              onClick={() => onFocusAssistantTab?.()}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 9,
-                padding: '5px 8px',
-                borderRadius: 7,
-                background: assistantActive ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))' : 'transparent',
-                borderWidth: 0,
-                cursor: onFocusAssistantTab ? 'pointer' : 'default',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
-                textAlign: 'left',
-                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-              }}
-            >
-              <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
-                <AgentSpinner status={assistantActive ? 'running' : 'idle'} size={6} />
-              </span>
-              <ClaudeIcon size={12} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 440,
-                    color: 'var(--t-text)',
-                    letterSpacing: '-0.005em',
-                    lineHeight: 1.35,
-                    ...(assistantActive
-                      ? { animation: 'tab-label-shimmer 2.2s ease-in-out infinite' }
-                      : null),
-                  }}
-                >
-                  Chat
-                </span>
-                <span style={{ fontSize: 10, fontWeight: 400, color: assistantStatusColor, letterSpacing: '-0.005em', lineHeight: 1.3 }}>
-                  {assistantStatus}
-                </span>
-              </div>
-            </button>
-          </div>
-        );
-      })()}
 
       {unmatchedRepoPackets.length > 0 ? (
         <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -407,7 +284,7 @@ function RepoCardExpandedContentBase({
               paddingBottom: 6,
               paddingLeft: 42,
               letterSpacing: '-0.005em',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             Loading branches...
@@ -598,7 +475,7 @@ function RepoCardExpandedContentBase({
                 fontSize: 10,
                 fontWeight: 600,
                 cursor: 'pointer',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               Stash & switch
@@ -618,7 +495,7 @@ function RepoCardExpandedContentBase({
                 fontSize: 10,
                 fontWeight: 600,
                 cursor: 'pointer',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               Force
@@ -638,7 +515,7 @@ function RepoCardExpandedContentBase({
                 fontSize: 10,
                 fontWeight: 600,
                 cursor: 'pointer',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               Cancel
