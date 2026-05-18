@@ -519,60 +519,32 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   // to the log but cannot call `lane_command` to create the approval card.
   // Operator can still approve manually from the worktree; #1045 tracks the
   // MCP plumbing follow-up.
-  const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-  const useClaudeOrchestrator = resolveInAppOrchestratorEnabledSync();
+  // Backend selected via the orchestrator-backend registry (#1075). Behavior
+  // is byte-identical to the prior dual-path branch — see registry.ts.
+  const { getActiveOrchestratorBackend } = await import('./orchestrator-backends/registry');
+  const backend = getActiveOrchestratorBackend();
 
-  console.log(
-    `[auto-review] Routing lane ${lane.id} via ${useClaudeOrchestrator ? 'Claude (toggle on, SDK billing)' : 'Codex GPT-5.5 xhigh (default)'}`,
-  );
+  console.log(`[auto-review] Routing lane ${lane.id} via ${backend.label} orchestrator`);
 
-  if (useClaudeOrchestrator) {
-    const { ensureOrchestratorSession, sendToOrchestrator } = await import('./orchestrator-session');
-    const session = ensureOrchestratorSession(lane.repoPath);
-
-    if (session.status === 'busy') {
-      throw new Error('Orchestrator session busy — will retry');
-    }
-
-    if (session.status === 'dead') {
-      throw new Error('Orchestrator session dead — will retry after recovery');
-    }
-
-    console.log(`[auto-review] Sending review prompt to Claude orchestrator for lane ${lane.id}`);
-
-    await sendToOrchestrator(session, reviewPrompt, (event) => {
-      if (event.type === 'text') {
-        console.log(`[auto-review] Orchestrator: ${event.text.slice(0, 100)}`);
-      } else if (event.type === 'tool_use') {
-        console.log(`[auto-review] Orchestrator called tool: ${event.name}`);
-      } else if (event.type === 'error') {
-        console.error(`[auto-review] Orchestrator error: ${event.error}`);
-      }
-    });
-  } else {
-    const { ensureCodexOrchestratorSession, sendToCodexOrchestrator } = await import('./codex-orchestrator-session');
-    const session = ensureCodexOrchestratorSession(lane.repoPath);
-
-    if (session.status === 'busy') {
-      throw new Error('Codex orchestrator session busy — will retry');
-    }
-
-    if (session.status === 'dead') {
-      throw new Error('Codex orchestrator session dead — will retry after recovery');
-    }
-
-    console.log(`[auto-review] Sending review prompt to Codex orchestrator for lane ${lane.id}`);
-
-    await sendToCodexOrchestrator(session, reviewPrompt, (event) => {
-      if (event.type === 'text') {
-        console.log(`[auto-review] Codex: ${event.text.slice(0, 100)}`);
-      } else if (event.type === 'tool_use') {
-        console.log(`[auto-review] Codex called tool: ${event.name}`);
-      } else if (event.type === 'error') {
-        console.error(`[auto-review] Codex error: ${event.error}`);
-      }
-    });
+  const session = backend.ensureSession(lane.repoPath);
+  if (session.status === 'busy') {
+    throw new Error(`${backend.label} orchestrator session busy — will retry`);
   }
+  if (session.status === 'dead') {
+    throw new Error(`${backend.label} orchestrator session dead — will retry after recovery`);
+  }
+
+  console.log(`[auto-review] Sending review prompt to ${backend.label} orchestrator for lane ${lane.id}`);
+
+  await backend.sendTurn(lane.repoPath, reviewPrompt, (event) => {
+    if (event.type === 'text') {
+      console.log(`[auto-review] ${backend.label}: ${event.text.slice(0, 100)}`);
+    } else if (event.type === 'tool_use') {
+      console.log(`[auto-review] ${backend.label} called tool: ${event.name}`);
+    } else if (event.type === 'error') {
+      console.error(`[auto-review] ${backend.label} error: ${event.error}`);
+    }
+  });
 
   console.log(`[auto-review] Review complete for lane ${lane.id}`);
 }

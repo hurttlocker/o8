@@ -65,11 +65,16 @@ import type { MobileInboxSnapshot, MobileTranscriptEntry } from './lib/mobile/ty
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import {
-  ensureOrchestratorSession,
-  sendToOrchestrator,
   getOrchestratorSession,
   rehydrateOrchestratorSessions,
 } from './lib/lane/orchestrator-session';
+import {
+  getActiveOrchestratorBackend,
+  getOrchestratorBackend,
+  resolveOrchestratorBackendId,
+} from './lib/lane/orchestrator-backends/registry';
+import type { OrchestratorBackendId } from './lib/lane/orchestrator-backends/types';
+import type { OrchestratorEvent } from './lib/lane/orchestrator-stream-events';
 import {
   startSupervisorLoop,
   stopSupervisorLoop,
@@ -739,15 +744,52 @@ interface OrchestratorSubscription {
   clientId: string;
   repoPath: string;
   sessionName: string;
+  /** Which orchestrator backend this subscription is for. */
+  backend: OrchestratorBackendId;
 }
 
-const orchestratorSubscriptions = new Map<string, OrchestratorSubscription>(); // clientId → subscription
+// Keyed by `${clientId}::${backend}` — one client can hold a subscription per
+// backend at once (the default Orchestrator tab on codex AND the openclaw
+// surface, live together). `sessionName` is itself backend-distinct, so event
+// broadcast matches on it.
+const orchestratorSubscriptions = new Map<string, OrchestratorSubscription>();
 
-// #624 — In-flight AbortControllers keyed by repoPath. Attached when an
-// orchestrator-send turn starts; the orchestrator-interrupt handler calls
-// .abort() on the matching entry to terminate the streaming claude subprocess
-// within 1-2s. Entries are removed when the turn resolves (close/error/done).
-const orchestratorInflightAborts = new Map<string, AbortController>(); // repoPath → controller
+// #624 — In-flight AbortControllers keyed by `${repoPath}::${backend}`. Attached
+// when an orchestrator-send turn starts; orchestrator-interrupt calls .abort()
+// on the matching entry to terminate the streaming subprocess within 1-2s.
+// Per-backend so a codex turn and an openclaw turn on the same repo don't
+// clobber each other. Entries are removed when the turn resolves.
+const orchestratorInflightAborts = new Map<string, AbortController>();
+
+/** Composite key for `orchestratorSubscriptions`. */
+function orchestratorSubKey(clientId: string, backend: OrchestratorBackendId): string {
+  return `${clientId}::${backend}`;
+}
+
+/** Composite key for `orchestratorInflightAborts`. */
+function orchestratorAbortKey(repoPath: string, backend: OrchestratorBackendId): string {
+  return `${repoPath}::${backend}`;
+}
+
+/**
+ * Resolve the orchestrator backend id for one WS message. The explicit openclaw
+ * surface passes `backend`; the default Orchestrator tab omits it and falls
+ * back to the global default.
+ */
+function resolveMsgBackendId(msg: Record<string, unknown>): OrchestratorBackendId {
+  const raw = msg.backend;
+  if (raw === 'codex' || raw === 'claude' || raw === 'openclaw') return raw;
+  return resolveOrchestratorBackendId();
+}
+
+/** Send a raw WS message to every client subscribed to `sessionName`. */
+function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): void {
+  for (const sub of orchestratorSubscriptions.values()) {
+    if (sub.sessionName !== sessionName) continue;
+    const c = clients.get(sub.clientId);
+    if (c) sendRaw(c, rawMsg);
+  }
+}
 
 // ── Agent Supervisor auto-message queue ──
 
@@ -784,9 +826,10 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
   if (orchestratorAutoQueue.length === 0) return;
 
   const next = orchestratorAutoQueue[0];
-  let session = getOrchestratorSession(next.repoPath);
+  const backend = getActiveOrchestratorBackend();
+  let session = backend.peekSession(next.repoPath);
   if (!session || session.status === 'dead') {
-    session = ensureOrchestratorSession(next.repoPath);
+    session = backend.ensureSession(next.repoPath);
   }
   if (session.status === 'busy') return; // Wait for current message to finish
 
@@ -795,27 +838,21 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
   console.log(`[supervisor] Draining auto-message for ${next.repoPath}`);
 
   try {
-    await sendToOrchestrator(session, next.message, (event) => {
-      // Broadcast to all subscribed WS clients (same as handleOrchestratorSendMsg)
-      const subscribedClients: string[] = [];
-      for (const [cid, sub] of orchestratorSubscriptions) {
-        if (sub.sessionName === session!.sessionName) subscribedClients.push(cid);
-      }
-      if (subscribedClients.length === 0) return;
-
+    await backend.sendTurn(next.repoPath, next.message, (event) => {
+      const sessionName = session!.sessionName;
       let wsMsg: string | null = null;
       switch (event.type) {
         case 'text':
-          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: event.text, repoPath: next.repoPath, thinking: false } });
+          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: event.text, repoPath: next.repoPath, thinking: false, backend: backend.id } });
           break;
         case 'thinking':
-          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: event.text, repoPath: next.repoPath, thinking: true } });
+          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: event.text, repoPath: next.repoPath, thinking: true, backend: backend.id } });
           break;
         case 'tool_use':
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'tool-use',
-            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath: next.repoPath },
+            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath: next.repoPath, backend: backend.id },
           });
           break;
         case 'tool_result':
@@ -828,22 +865,18 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
               output: event.output,
               toolUseId: event.id ?? null,
               repoPath: next.repoPath,
+              backend: backend.id,
             },
           });
           break;
         case 'done':
-          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'status', data: { status: 'ready', repoPath: next.repoPath } });
+          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'status', data: { status: 'ready', repoPath: next.repoPath, backend: backend.id } });
           break;
         case 'error':
-          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'error', data: { error: event.error, repoPath: next.repoPath } });
+          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'error', data: { error: event.error, repoPath: next.repoPath, backend: backend.id } });
           break;
       }
-      if (wsMsg) {
-        for (const cid of subscribedClients) {
-          const c = clients.get(cid);
-          if (c) sendRaw(c, wsMsg);
-        }
-      }
+      if (wsMsg) broadcastToOrchestratorSession(sessionName, wsMsg);
     });
   } catch (err) {
     console.error('[supervisor] Auto-message failed:', err);
@@ -2064,7 +2097,7 @@ function handleClientMessage(client: ClientState, raw: string) {
       handleOrchestratorStatus(client, msg);
       break;
     case 'orchestrator-unsubscribe':
-      orchestratorSubscriptions.delete(client.id);
+      handleOrchestratorUnsubscribe(client, msg);
       break;
     case 'orchestrator-interrupt':
       handleOrchestratorInterrupt(client, msg);
@@ -2074,16 +2107,32 @@ function handleClientMessage(client: ClientState, raw: string) {
 
 // ── Orchestrator channel handlers ──
 
+function handleOrchestratorUnsubscribe(client: ClientState, msg: Record<string, unknown>) {
+  // With an explicit `backend`, drop just that surface's subscription; without
+  // one (legacy clients) drop every subscription for this client.
+  const raw = msg.backend;
+  if (raw === 'codex' || raw === 'claude' || raw === 'openclaw') {
+    orchestratorSubscriptions.delete(orchestratorSubKey(client.id, raw));
+  } else {
+    for (const key of orchestratorSubscriptions.keys()) {
+      if (key.startsWith(`${client.id}::`)) orchestratorSubscriptions.delete(key);
+    }
+  }
+}
+
 async function handleOrchestratorSubscribe(client: ClientState, msg: Record<string, unknown>) {
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
 
+  const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
+
   try {
-    const session = ensureOrchestratorSession(repoPath);
-    orchestratorSubscriptions.set(client.id, {
+    const session = backend.ensureSession(repoPath);
+    orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id), {
       clientId: client.id,
       repoPath,
       sessionName: session.sessionName,
+      backend: backend.id,
     });
 
     // No PTY to hook — the new approach spawns a process per message
@@ -2091,14 +2140,14 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
     send(client, {
       channel: 'orchestrator',
       event: 'status',
-      data: { status: session.status, repoPath, sessionName: session.sessionName },
+      data: { status: session.status, repoPath, sessionName: session.sessionName, backend: backend.id },
     });
-    console.log(`[ws-server] Client ${client.id} subscribed to orchestrator for ${repoPath}`);
+    console.log(`[ws-server] Client ${client.id} subscribed to orchestrator (${backend.id}) for ${repoPath}`);
   } catch (err) {
     send(client, {
       channel: 'orchestrator',
       event: 'error',
-      data: { error: err instanceof Error ? err.message : 'Failed to start orchestrator session', repoPath },
+      data: { error: err instanceof Error ? err.message : 'Failed to start orchestrator session', repoPath, backend: backend.id },
     });
   }
 }
@@ -2119,103 +2168,50 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     ? msg.model.trim()
     : undefined;
 
+  const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
+  const abortKey = orchestratorAbortKey(repoPath, backend.id);
+
   // #624 — Declared outside try so the catch can also release the entry.
   let turnController: AbortController | null = null;
 
   try {
-    type OrchestratorStreamEvent = Parameters<typeof sendToOrchestrator>[2] extends (event: infer Event) => void
-      ? Event
-      : never;
-    const useClaudeOrchestrator = resolveInAppOrchestratorEnabledSync();
+    console.log(`[ws-server][orchestrator] Routing chat via ${backend.label}`);
 
-    console.log(
-      `[ws-server][orchestrator] Routing chat via ${useClaudeOrchestrator ? 'Claude (toggle on)' : 'Codex GPT-5.5 xhigh (default)'}`,
-    );
-
-    let sessionName: string;
-    let sendTurn: (
-      onEvent: (event: OrchestratorStreamEvent) => void,
+    const sessionName = backend.ensureSession(repoPath).sessionName;
+    const sendTurn = (
+      onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
-    ) => Promise<void>;
+    ): Promise<void> => backend.sendTurn(repoPath, message, onEvent, { permissionMode, thinkingEffort, model, signal });
 
-    if (useClaudeOrchestrator) {
-      let session = getOrchestratorSession(repoPath);
-      if (!session || session.status === 'dead') {
-        session = ensureOrchestratorSession(repoPath);
-      }
-      sessionName = session.sessionName;
-      sendTurn = (onEvent, signal) => sendToOrchestrator(
-        session,
-        message,
-        onEvent,
-        { permissionMode, thinkingEffort, model, signal },
-      );
-    } else {
-      const {
-        ensureCodexOrchestratorSession,
-        getCodexOrchestratorSession,
-        sendToCodexOrchestrator,
-      } = await import('./lib/lane/codex-orchestrator-session');
-      let session = getCodexOrchestratorSession(repoPath);
-      if (!session || session.status === 'dead') {
-        session = ensureCodexOrchestratorSession(repoPath);
-      }
-      sessionName = session.sessionName;
-      sendTurn = (onEvent, signal) => sendToCodexOrchestrator(
-        session,
-        message,
-        onEvent,
-        { permissionMode, thinkingEffort, model, signal },
-      );
-    }
+    // Ensure a subscription exists for the selected backend.
+    orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id), {
+      clientId: client.id,
+      repoPath,
+      sessionName,
+      backend: backend.id,
+    });
 
-    // Ensure subscription exists for the selected backend.
-    const existingSubscription = orchestratorSubscriptions.get(client.id);
-    if (
-      !existingSubscription
-      || existingSubscription.repoPath !== repoPath
-      || existingSubscription.sessionName !== sessionName
-    ) {
-      orchestratorSubscriptions.set(client.id, {
-        clientId: client.id,
-        repoPath,
-        sessionName,
-      });
-    }
-
-    // Emit busy status
-    const busyMsg = JSON.stringify({
+    // Emit busy status.
+    broadcastToOrchestratorSession(sessionName, JSON.stringify({
       channel: 'orchestrator',
       event: 'status',
-      data: { status: 'busy', repoPath },
-    });
-    for (const [cid, sub] of orchestratorSubscriptions) {
-      if (sub.sessionName === sessionName) {
-        const c = clients.get(cid);
-        if (c) sendRaw(c, busyMsg);
-      }
-    }
+      data: { status: 'busy', repoPath, backend: backend.id },
+    }));
 
     // #624 — Attach an AbortController for this turn. Defensively abort any
-    // prior entry for the same repo so a stale subprocess never outlives a
-    // fresh send (shouldn't happen under normal flow because session.status
-    // serializes sends, but we stay guarded).
-    const priorController = orchestratorInflightAborts.get(repoPath);
+    // prior entry for the same repo+backend so a stale subprocess never
+    // outlives a fresh send.
+    const priorController = orchestratorInflightAborts.get(abortKey);
     if (priorController && !priorController.signal.aborted) {
       priorController.abort();
     }
     turnController = new AbortController();
-    orchestratorInflightAborts.set(repoPath, turnController);
+    orchestratorInflightAborts.set(abortKey, turnController);
 
-    // Spawn selected orchestrator process and stream structured JSON events to subscribers.
+    // Spawn the selected orchestrator and stream structured JSON events to
+    // subscribers. Every event is tagged with `backend` so a client watching
+    // two surfaces for the same repo renders each on the right one.
     await sendTurn((event) => {
-      // Find all subscribed clients for this session
-      const subscribedClients: string[] = [];
-      for (const [cid, sub] of orchestratorSubscriptions) {
-        if (sub.sessionName === sessionName) subscribedClients.push(cid);
-      }
-      if (subscribedClients.length === 0) return;
-
       let wsMsg: string | null = null;
 
       switch (event.type) {
@@ -2223,7 +2219,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'output',
-            data: { text: event.text, repoPath, thinking: false },
+            data: { text: event.text, repoPath, thinking: false, backend: backend.id },
           });
           break;
 
@@ -2231,7 +2227,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'output',
-            data: { text: event.text, repoPath, thinking: true },
+            data: { text: event.text, repoPath, thinking: true, backend: backend.id },
           });
           break;
 
@@ -2239,7 +2235,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'tool-use',
-            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath },
+            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, backend: backend.id },
           });
           break;
 
@@ -2253,6 +2249,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
               output: event.output,
               toolUseId: event.id ?? null,
               repoPath,
+              backend: backend.id,
             },
           });
           break;
@@ -2261,7 +2258,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath },
+            data: { status: 'ready', repoPath, backend: backend.id },
           });
           break;
 
@@ -2269,35 +2266,30 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'error',
-            data: { error: event.error, repoPath },
+            data: { error: event.error, repoPath, backend: backend.id },
           });
           break;
       }
 
-      if (wsMsg) {
-        for (const cid of subscribedClients) {
-          const c = clients.get(cid);
-          if (c) sendRaw(c, wsMsg);
-        }
-      }
+      if (wsMsg) broadcastToOrchestratorSession(sessionName, wsMsg);
     }, turnController.signal);
 
     // #624 — Release the in-flight controller. Keyed compare guards against a
     // newer turn having already replaced this entry.
-    if (orchestratorInflightAborts.get(repoPath) === turnController) {
-      orchestratorInflightAborts.delete(repoPath);
+    if (orchestratorInflightAborts.get(abortKey) === turnController) {
+      orchestratorInflightAborts.delete(abortKey);
     }
 
-    // After user message completes, drain any queued supervisor escalations
+    // After the user message completes, drain any queued supervisor escalations.
     void drainOrchestratorAutoQueue();
   } catch (err) {
-    if (turnController && orchestratorInflightAborts.get(repoPath) === turnController) {
-      orchestratorInflightAborts.delete(repoPath);
+    if (turnController && orchestratorInflightAborts.get(abortKey) === turnController) {
+      orchestratorInflightAborts.delete(abortKey);
     }
     send(client, {
       channel: 'orchestrator',
       event: 'error',
-      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath },
+      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath, backend: backend.id },
     });
   }
 }
@@ -2311,12 +2303,13 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
 function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, unknown>) {
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
-  const controller = orchestratorInflightAborts.get(repoPath);
+  const backendId = resolveMsgBackendId(msg);
+  const controller = orchestratorInflightAborts.get(orchestratorAbortKey(repoPath, backendId));
   if (!controller) {
-    console.log(`[ws-server] orchestrator-interrupt for ${repoPath} — no in-flight turn`);
+    console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${backendId}) — no in-flight turn`);
     return;
   }
-  console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (client ${client.id})`);
+  console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${backendId}, client ${client.id})`);
   controller.abort();
   // Leave the map entry in place; handleOrchestratorSendMsg removes it when
   // the turn resolves (the abort causes close to fire within 1-2s).
@@ -2326,26 +2319,12 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
 
-  // Mirror the dual-path from handleOrchestratorSendMsg (#1044 child 3.2):
-  // when `inAppOrchestratorEnabled` is off (default), the active chat backend
-  // is a CodexOrchestratorSession, not a (Claude) OrchestratorSession. If we
-  // only looked up the Claude session here, the mobile status indicator would
-  // always report `dead` in the default config.
-  const useClaudeOrchestrator = resolveInAppOrchestratorEnabledSync();
-
-  let status: 'ready' | 'busy' | 'dead' | string = 'dead';
-  let sessionName: string | null = null;
-
-  if (useClaudeOrchestrator) {
-    const session = getOrchestratorSession(repoPath);
-    status = session?.status ?? 'dead';
-    sessionName = session?.sessionName ?? null;
-  } else {
-    const { getCodexOrchestratorSession } = await import('./lib/lane/codex-orchestrator-session');
-    const session = getCodexOrchestratorSession(repoPath);
-    status = session?.status ?? 'dead';
-    sessionName = session?.sessionName ?? null;
-  }
+  // Status for the requested backend (#1075). The default Orchestrator tab
+  // omits `backend` → the global default; the openclaw surface passes it.
+  const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
+  const session = backend.peekSession(repoPath);
+  const status = session?.status ?? 'dead';
+  const sessionName = session?.sessionName ?? null;
 
   send(client, {
     channel: 'orchestrator',
@@ -2354,6 +2333,7 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
       status,
       repoPath,
       sessionName,
+      backend: backend.id,
     },
   });
 }
@@ -3272,15 +3252,18 @@ const httpServer = createServer((req, res) => {
           ? body.noticeId.trim()
           : `mcp-reload-${Date.now()}`;
 
-        // Abort any in-flight turn so the next user message respawns Claude
-        // Code with the latest MCP config. We don't null claudeSessionId —
+        // Abort any in-flight turn (any backend) so the next user message
+        // respawns with the latest MCP config. We don't null claudeSessionId —
         // the next turn passes `--resume <id>` and the transcript stays intact.
-        const controller = orchestratorInflightAborts.get(repoPath);
         let aborted = false;
-        if (controller && !controller.signal.aborted) {
+        for (const [key, controller] of orchestratorInflightAborts) {
+          if (!key.startsWith(`${repoPath}::`)) continue;
+          if (controller.signal.aborted) continue;
           controller.abort();
           aborted = true;
-          console.log(`[ws-server] orchestrator-reload aborted in-flight turn for ${repoPath}`);
+        }
+        if (aborted) {
+          console.log(`[ws-server] orchestrator-reload aborted in-flight turn(s) for ${repoPath}`);
         }
 
         const session = getOrchestratorSession(repoPath);
@@ -3300,10 +3283,10 @@ const httpServer = createServer((req, res) => {
           },
         });
         let delivered = 0;
-        for (const [cid, sub] of orchestratorSubscriptions) {
+        for (const sub of orchestratorSubscriptions.values()) {
           if (sessionName && sub.sessionName !== sessionName) continue;
           if (!sessionName && sub.repoPath !== repoPath) continue;
-          const c = clients.get(cid);
+          const c = clients.get(sub.clientId);
           if (c) {
             sendRaw(c, payload);
             delivered += 1;
@@ -3631,8 +3614,10 @@ wss.on('connection', (ws) => {
     for (const sessionName of client.terminalSessions) {
       removeClientFromTerminal(client.id, sessionName);
     }
-    // Clean up orchestrator subscription
-    orchestratorSubscriptions.delete(client.id);
+    // Clean up orchestrator subscriptions (one per backend the client used).
+    for (const key of orchestratorSubscriptions.keys()) {
+      if (key.startsWith(`${client.id}::`)) orchestratorSubscriptions.delete(key);
+    }
     clients.delete(client.id);
     console.log(`[ws-server] Client disconnected: ${client.id} (${clients.size} total)`);
   });

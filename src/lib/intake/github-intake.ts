@@ -105,34 +105,21 @@ export async function processAssignedIssue(
   // MCP tools are called by the orchestrator in this flow, so Codex has full
   // feature parity with Claude here (unlike auto-review, which still needs
   // MCP for approval-card creation per #1045).
-  const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-  const useClaudeOrchestrator = resolveInAppOrchestratorEnabledSync();
+  // Backend selected via the orchestrator-backend registry (#1075).
+  const { getActiveOrchestratorBackend } = await import('@/lib/lane/orchestrator-backends/registry');
+  const backend = getActiveOrchestratorBackend();
 
   const prompt = buildPlanningPrompt(issue, repoFullName);
   let fullText = '';
 
-  console.log(
-    `${LOG_PREFIX} Planning issue #${issue.number} via ${useClaudeOrchestrator ? 'Claude (toggle on, SDK billing)' : 'Codex GPT-5.5 xhigh (default)'}`,
-  );
+  console.log(`${LOG_PREFIX} Planning issue #${issue.number} via ${backend.label} orchestrator`);
 
   try {
-    if (useClaudeOrchestrator) {
-      const { ensureOrchestratorSession, sendToOrchestrator } = await import('@/lib/lane/orchestrator-session');
-      const session = ensureOrchestratorSession(repoPath);
-      await sendToOrchestrator(session, prompt, (event) => {
-        if (event.type === 'text') {
-          fullText += event.text;
-        }
-      });
-    } else {
-      const { ensureCodexOrchestratorSession, sendToCodexOrchestrator } = await import('@/lib/lane/codex-orchestrator-session');
-      const session = ensureCodexOrchestratorSession(repoPath);
-      await sendToCodexOrchestrator(session, prompt, (event) => {
-        if (event.type === 'text') {
-          fullText += event.text;
-        }
-      });
-    }
+    await backend.sendTurn(repoPath, prompt, (event) => {
+      if (event.type === 'text') {
+        fullText += event.text;
+      }
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Orchestrator failed';
     console.error(`${LOG_PREFIX} Orchestrator planning failed for #${issue.number}: ${message}`);
