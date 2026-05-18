@@ -6,15 +6,13 @@ import type {
 } from '@/components/desktop/workspace-terminal/types';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import {
-  isAgentRuntimeTab,
-  normalizeWorkspaceChatSessionKey,
-  resolveWorkspaceChatLaneStatus,
   sameOrchestrationPacketBadge,
 } from '@/components/desktop/workspace-terminal/utils';
 import {
   buildOrchestratorLaneSnapshots,
 } from '@/components/desktop/workspace-terminal/terminal-session-ops';
 import {
+  buildHistoryChatTab,
   computeChatRuntimeStatusUpdate,
   detectLocalhostPreviews,
 } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
@@ -87,6 +85,22 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     isRestoreSettled: () => deps.restoreSettledRef.current,
     openCliChatSession: (options) => deps.openWorkspaceCliChatSession(options),
     openLlmChatSession: (options) => deps.openWorkspaceLlmChatSession(options ?? {}),
+    openHistoryChat: (historyTabId, title, historyRepo) => {
+      const currentTab = deps.tabsRef.current.find((tab) => tab.id === deps.activeTabId)
+        ?? deps.tabsRef.current.find((tab) => tab.kind === 'llm-chat')
+        ?? deps.tabsRef.current[0];
+      if (!currentTab) return '';
+      const newTab = buildHistoryChatTab(currentTab, historyTabId, title, historyRepo);
+      deps.setTabs((previous) => {
+        if (previous.some((tab) => tab.id === historyTabId)) {
+          deps.setActiveTabId(historyTabId);
+          return previous;
+        }
+        return [...previous, newTab];
+      });
+      deps.setActiveTabId(historyTabId);
+      return historyTabId;
+    },
     injectIntoCliChat: (text, options) => (
       options?.targetSessionKey?.startsWith('llm-chat:')
         ? deps.openWorkspaceLlmChatSession({

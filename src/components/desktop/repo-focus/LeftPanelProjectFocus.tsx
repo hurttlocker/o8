@@ -6,11 +6,11 @@ import { RepoAnchorsRow } from './RepoAnchorsRow';
 import { RepoHeader } from './RepoHeader';
 import { RepoTabs } from './RepoTabs';
 import { AgentsTab } from './tabs/AgentsTab';
+import { ChatsTab } from './tabs/ChatsTab';
 import { ContextTab } from './tabs/ContextTab';
 import { MissionTab } from './tabs/MissionTab';
 import { SpecTab } from './tabs/SpecTab';
 import { FilesTab } from './tabs/FilesTab';
-import { RepoFocusUsageStrip } from './RepoFocusUsageStrip';
 import type { RepoFocusDataProps, RepoFocusRepo, RepoFocusTabId } from './types';
 import type { ProjectRecord } from '../repo-registry/useProjects';
 import { normalizeRepoPath, packetBelongsToRepo, REPO_FOCUS_FONT } from './utils';
@@ -24,6 +24,7 @@ interface LeftPanelProjectFocusProps extends RepoFocusDataProps {
 }
 
 const PROJECTWIDE_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
+  { id: 'chats', label: 'Chats' },
   { id: 'agents', label: 'Packets' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
@@ -31,6 +32,7 @@ const PROJECTWIDE_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
 ];
 
 const REPO_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
+  { id: 'chats', label: 'Chats' },
   { id: 'agents', label: 'Packets' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
@@ -49,6 +51,7 @@ export function LeftPanelProjectFocus({
   ideWorkspaceSessions,
   activeSessionKey,
   onSelectSession,
+  onOpenHistoryChat,
   onSelectFile,
   onOpenSpecInWorkspace,
 }: LeftPanelProjectFocusProps) {
@@ -59,16 +62,9 @@ export function LeftPanelProjectFocus({
   }, [repos, selectedRepoPath]);
 
   const tabsForMode = selectedRepo ? REPO_TABS : PROJECTWIDE_TABS;
-  const [activeTab, setActiveTab] = useState<RepoFocusTabId>('agents');
+  const [activeTab, setActiveTab] = useState<RepoFocusTabId>('chats');
 
-  // If the operator clicks a repo that's currently on the spec tab while
-  // we're in project-wide mode, the spec tab disappears — fall back to
-  // agents instead of leaving the panel on a hidden tab.
-  useEffect(() => {
-    if (!tabsForMode.some((tab) => tab.id === activeTab)) {
-      setActiveTab('agents');
-    }
-  }, [tabsForMode, activeTab]);
+  const visibleActiveTab = tabsForMode.some((tab) => tab.id === activeTab) ? activeTab : 'chats';
 
   // ESC closes the entire panel — same as the prior repo-focus panel.
   useEffect(() => {
@@ -154,10 +150,20 @@ export function LeftPanelProjectFocus({
         />
       ) : null}
 
-      <RepoTabs activeTab={activeTab} onTabChange={setActiveTab} tabs={tabsForMode} />
+      <RepoTabs activeTab={visibleActiveTab} onTabChange={setActiveTab} tabs={tabsForMode} />
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none' }}>
-        {activeTab === 'agents' ? (
+        {visibleActiveTab === 'chats' ? (
+          <ChatsTab
+            repos={repos}
+            selectedRepo={selectedRepo}
+            ideWorkspaceSessions={ideWorkspaceSessions}
+            activeSessionKey={activeSessionKey}
+            onSelectSession={onSelectSession}
+            onOpenHistoryChat={onOpenHistoryChat}
+          />
+        ) : null}
+        {visibleActiveTab === 'agents' ? (
           <AgentsTab
             repoPath={selectedRepo?.localPath ?? ''}
             packets={visiblePackets}
@@ -166,7 +172,7 @@ export function LeftPanelProjectFocus({
             onSelectSession={onSelectSession}
           />
         ) : null}
-        {activeTab === 'context' ? (
+        {visibleActiveTab === 'context' ? (
           selectedRepo ? (
             <ContextTab repoPath={selectedRepo.localPath} symbolText={symbolText} />
           ) : (
@@ -176,17 +182,17 @@ export function LeftPanelProjectFocus({
             />
           )
         ) : null}
-        {activeTab === 'mission' ? (
+        {visibleActiveTab === 'mission' ? (
           <MissionTab
             packets={allMissionPackets}
             missionState={missionState}
             onSelectSession={onSelectSession}
           />
         ) : null}
-        {activeTab === 'spec' && selectedRepo ? (
+        {visibleActiveTab === 'spec' && selectedRepo ? (
           <SpecTab repo={selectedRepo} onOpenInWorkspace={onOpenSpecInWorkspace} />
         ) : null}
-        {activeTab === 'files' ? (
+        {visibleActiveTab === 'files' ? (
           selectedRepo ? (
             <FilesTab
               repo={selectedRepo}
@@ -200,8 +206,6 @@ export function LeftPanelProjectFocus({
           )
         ) : null}
       </div>
-
-      <RepoFocusUsageStrip />
     </div>
   );
 }

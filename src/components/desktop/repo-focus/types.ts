@@ -6,8 +6,9 @@ import type {
   OrchestratorPacket,
 } from '@/lib/orchestrator/types';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
+import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 
-export type RepoFocusTabId = 'agents' | 'context' | 'mission' | 'spec' | 'files';
+export type RepoFocusTabId = 'chats' | 'agents' | 'context' | 'mission' | 'spec' | 'files';
 export type RepoFocusPacketState = 'queued' | 'running' | 'awaiting_review' | 'merged' | 'failed';
 export type IdeWorkspaceSession = MobileInboxSnapshot['sessions'][number];
 
@@ -34,6 +35,7 @@ export interface RepoFocusDataProps {
   ideWorkspaceSessions?: IdeWorkspaceSession[];
   activeSessionKey?: string | null;
   onSelectSession?: (sessionKey: string) => void;
+  onOpenHistoryChat?: (historyTabId: string, title: string, repo?: SavedChatRepoContext | null) => void;
   onSelectFile?: (filePath: string, workspace?: string) => void;
   onOpenSpecInWorkspace?: (repoPath: string) => void;
 }

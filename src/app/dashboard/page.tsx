@@ -108,6 +108,7 @@ import { useDesignMode } from '@/hooks/useDesignMode';
 import { createTileRegistry } from './tileRegistry';
 import { SettingsOverlay } from './SettingsOverlay';
 import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
+import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 
 // Mark the dashboard module load as early as possible. Runs once when the
 // bundle is first parsed, before the React component is even invoked, so
@@ -154,7 +155,7 @@ import {
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
 const DEFAULT_LEFT_PANEL_WIDTH = 240;
-const FOCUS_LEFT_PANEL_WIDTH = 440;
+const FOCUS_LEFT_PANEL_WIDTH = 320;
 const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
 const MIN_O8_PANEL_WIDTH = 400;
@@ -629,6 +630,38 @@ function DashboardInner() {
     const values = Object.values(workspaceActiveTabKindByTileId).filter((kind) => kind !== null);
     return values[0] ?? null;
   }, [activeTileId, workspaceActiveTabKindByTileId]);
+
+  const handleOpenHistoryChatFromPanel = useCallback((
+    historyTabId: string,
+    title: string,
+    repo?: SavedChatRepoContext | null,
+  ) => {
+    void (async () => {
+      try {
+        const target = await waitForWorkspaceTerminalTarget({
+          repoPath: repo?.localPath ?? null,
+          preferredTileId: activeTileId,
+          fallbackToAnyExisting: true,
+        });
+        const existing = target.handle.getTabsSnapshot().tabs.find((tab) => tab.id === historyTabId);
+        const tabId = existing
+          ? (target.handle.focusTab(existing.id) ? existing.id : '')
+          : target.handle.openHistoryChat(historyTabId, title, repo);
+        if (tabId) {
+          window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
+          const loadThread = () => {
+            window.dispatchEvent(new CustomEvent('o8:load-history-thread', {
+              detail: { tabId, historyTabId },
+            }));
+          };
+          loadThread();
+          window.setTimeout(loadThread, 120);
+        }
+      } catch {
+        // Best-effort sidebar navigation; the workspace terminal may still be mounting.
+      }
+    })();
+  }, [activeTileId, waitForWorkspaceTerminalTarget]);
 
   // ── Workspace tab hotkeys ──
   // Cmd+1..Cmd+9 jump to the Nth workspace tab, Cmd+Opt+Left / Right cycle
@@ -2739,6 +2772,7 @@ function DashboardInner() {
             onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
             onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
             onSelectSession={handleSelectSession}
+            onOpenHistoryChat={handleOpenHistoryChatFromPanel}
             onSelectRepo={handleAlignToRepo}
             onSelectIssue={handleSelectIssue}
             onSelectCommit={handleSelectCommit}

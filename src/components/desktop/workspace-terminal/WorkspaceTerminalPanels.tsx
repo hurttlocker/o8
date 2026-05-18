@@ -103,6 +103,7 @@ function WorkspaceTerminalPanelsBase({
               initialMode="chat"
               initialChatModelId={tab.chatModelId}
               initialChatOpenrouterModel={tab.chatOpenrouterModel}
+              initialThreadId={tab.id}
               onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
             />
           </Suspense>
@@ -303,7 +304,7 @@ function PendingTerminalPanel({
         justifyContent: 'center',
         color: 'var(--t-text-muted)',
         fontSize: 13,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
         flexDirection: 'column',
         gap: 8,
         textAlign: 'center',

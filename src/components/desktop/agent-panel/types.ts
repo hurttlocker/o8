@@ -1,4 +1,5 @@
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
+import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { OrchestratorMissionState, OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
@@ -182,6 +183,7 @@ export interface AgentPanelProps {
   onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   onLaunchWorkspaceTask?: (request: RepoTaskLaunchRequest) => Promise<void>;
   onSelectSession?: (sessionKey: string) => void;
+  onOpenHistoryChat?: (historyTabId: string, title: string, repo?: SavedChatRepoContext | null) => void;
   onSelectRepo?: (repoId: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
