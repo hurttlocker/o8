@@ -397,13 +397,13 @@ function OrchestratorTabInner({
     const handleLoadHistoryThread = (event: Event) => {
       const detail = (event as CustomEvent<{ tabId?: string; historyTabId?: string }>).detail;
       if (!detail?.historyTabId) return;
-      if (detail.tabId && detail.tabId !== tabId) return;
+      if (detail.tabId && detail.tabId !== tabId && !active) return;
       chatPanelRef.current?.loadThread(detail.historyTabId);
       window.setTimeout(() => chatPanelRef.current?.focusInput(), 40);
     };
     window.addEventListener('o8:load-history-thread', handleLoadHistoryThread);
     return () => window.removeEventListener('o8:load-history-thread', handleLoadHistoryThread);
-  }, [tabId]);
+  }, [active, tabId]);
 
   const handleNewConversation = useCallback(async () => {
     try {

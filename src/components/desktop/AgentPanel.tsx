@@ -3,7 +3,6 @@
 
 import { memo, useCallback, useMemo, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
-import { RepoRegistrySection } from './RepoRegistrySection';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
 import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
 import { ChatsTab } from './repo-focus/tabs/ChatsTab';
@@ -19,8 +18,7 @@ import {
   useAgentPanelState,
 } from './agent-panel';
 
-const ORCHESTRATOR_HISTORY_SECTIONS = ['orchestrator'] as const;
-const CHAT_HISTORY_SECTIONS = ['chat'] as const;
+const PROJECT_HISTORY_SECTIONS = ['orchestrator', 'chat'] as const;
 
 function repoFocusRepoFromPath(localPath: string): RepoFocusRepo {
   const name = (localPath.split('/').filter(Boolean).pop() ?? localPath) || 'repo';
@@ -47,6 +45,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onSelectCommit,
     onSelectPR,
     onReviewPR,
+    onSelectRepo,
     onRepoRemoved,
     onOpenSpecInWorkspace,
     orchestratorPackets = [],
@@ -114,14 +113,16 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       .map(toRepoFocusRepo);
   }, [activeProjectRepoSet, projects.activeProject?.repoPaths, registeredRepos]);
 
-  // Stable callback so RepoRegistrySection doesn't see a new reference on
-  // every render — its useEffect has this in the deps and the section
-  // would otherwise call back into here in an infinite loop.
-  const refreshProjects = projects.refresh;
-  const handleRegistryStateChange = useCallback((state: { loading: boolean; count: number; hasError: boolean }) => {
-    setRepoRegistryState(state);
-    void refreshProjects();
-  }, [refreshProjects, setRepoRegistryState]);
+  const activeProjectId = projects.activeProject?.id ?? null;
+  const handleProjectRepoSelect = useCallback((repo: RepoFocusRepo) => {
+    if (activeProjectId) {
+      leftPanelFocus.focusByProjectId(activeProjectId);
+      leftPanelFocus.setSelectedRepoPath(repo.localPath);
+    } else {
+      leftPanelFocus.focusByRepoId(repo.id || repo.localPath);
+    }
+    onSelectRepo?.(repo.id);
+  }, [activeProjectId, leftPanelFocus, onSelectRepo]);
 
   // When focus is active, the column itself widened — render the focus
   // surface inline so it occupies the whole AgentPanel column and keeps
@@ -252,21 +253,12 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         } as CSSProperties}
         className="hide-scrollbar"
       >
-        {/* Workspaces section — history groups frame the repo registry so the
-            minimal panel stays navigable when the focused drawer is hidden. */}
+        {/* Workspaces section — the minimal panel is a project conversation
+            stream with the repo context kept close to the project label. */}
         <section style={{ display: 'flex', flexDirection: 'column' }}>
-          <ChatsTab
+          <ProjectRepoContext
             repos={activeProjectReposForChats}
-            ideWorkspaceSessions={ideWorkspaceSessions}
-            activeSessionKey={activeSessionKey}
-            onSelectSession={onSelectSession}
-            onOpenHistoryChat={onOpenHistoryChat}
-            variant="mini"
-            limit={3}
-            hideWhenEmpty
-            sectionLabel="Orchestrator"
-            sections={ORCHESTRATOR_HISTORY_SECTIONS}
-            showLiveSessions={false}
+            onSelectRepo={handleProjectRepoSelect}
           />
 
           {fleetMeta?.mode === 'stale' ? (
@@ -354,48 +346,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             </div>
           ) : null}
 
-          <RepoRegistrySection
-            repoPathFilter={activeProjectRepoSet}
-            projectsForMove={projects.ledger?.projects.map((p) => ({
-              id: p.id,
-              name: p.name,
-              color: p.color,
-              repoPaths: p.repoPaths,
-            })) ?? []}
-            currentProjectId={projects.activeProject?.id ?? null}
-            activeProjectName={projects.activeProject?.name ?? null}
-            onMoveRepoToProject={async (repoPath, targetId) => {
-              await projects.moveRepoToProject(repoPath, targetId);
-            }}
-            onLaunchComplete={refreshNow}
-            onSelectSession={onSelectSession}
-            onSelectRepo={(repoId) => {
-              leftPanelFocus.focusByRepoId(repoId);
-              props.onSelectRepo?.(repoId);
-            }}
-            onSelectPR={onSelectPR}
-            onReviewPR={onReviewPR}
-            onRepoRemoved={(repo) => {
-              refreshNow();
-              void projects.refresh();
-              onRepoRemoved?.(repo);
-            }}
-            onLaunchWorkspaceAgent={onLaunchWorkspaceAgent}
-            onRegistryStateChange={handleRegistryStateChange}
-            activeSessionKey={activeSessionKey}
-            activeRepoLocalPath={currentLaunchRepoPath}
-            activeWorkspacePath={activeWorkspacePath ?? selectedRepoLocalPath ?? null}
-            activeWorkspaceTabKind={props.activeWorkspaceTabKind ?? null}
-            onFocusOrchestratorTab={props.onFocusOrchestratorTab}
-            onFocusAssistantTab={props.onFocusAssistantTab}
-            sectionOpen={reposOpen}
-            onSectionOpenChange={setReposOpen}
-            addIntent={addRepoIntent}
-            orchestratorPackets={orchestratorPackets}
-            ideWorkspaceSessions={ideWorkspaceSessions}
-            hideHeader
-          />
-
           <ChatsTab
             repos={activeProjectReposForChats}
             ideWorkspaceSessions={ideWorkspaceSessions}
@@ -403,11 +353,14 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             onSelectSession={onSelectSession}
             onOpenHistoryChat={onOpenHistoryChat}
             variant="mini"
-            limit={5}
+            limit={8}
             hideWhenEmpty
-            sectionLabel="Chats"
-            sections={CHAT_HISTORY_SECTIONS}
+            sectionLabel="Recent"
+            sections={PROJECT_HISTORY_SECTIONS}
             showLiveSessions={false}
+            groupMode="flat"
+            showKindInMeta
+            packets={orchestratorMissionState?.packets ?? orchestratorPackets}
           />
         </section>
 
@@ -472,4 +425,152 @@ function StaleStatusDot() {
       />
     </span>
   );
+}
+
+function ProjectRepoContext({
+  repos,
+  onSelectRepo,
+}: {
+  repos: RepoFocusRepo[];
+  onSelectRepo: (repo: RepoFocusRepo) => void;
+}) {
+  if (repos.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        paddingTop: 0,
+        paddingRight: 10,
+        paddingBottom: 8,
+        paddingLeft: 10,
+        borderBottom: '1px solid var(--t-divider-subtle)',
+        fontFamily: 'var(--font-sans-system)',
+      }}
+    >
+      <div
+        style={{
+          marginBottom: 6,
+          fontSize: 9.5,
+          lineHeight: '12px',
+          fontWeight: 500,
+          color: 'var(--t-text-faint)',
+          letterSpacing: 0,
+        }}
+      >
+        {repos.length} repo{repos.length === 1 ? '' : 's'} in this project
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 5,
+        }}
+      >
+        {repos.map((repo) => {
+          const tone = projectRepoChipTone(repo);
+          return (
+            <button
+              key={repo.localPath}
+              type="button"
+              onClick={() => onSelectRepo(repo)}
+              title={[`Open ${repo.name}`, repo.readiness?.summary].filter(Boolean).join(' · ')}
+              style={{
+                minWidth: 0,
+                maxWidth: '100%',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                paddingTop: 3,
+                paddingRight: 7,
+                paddingBottom: 3,
+                paddingLeft: 7,
+                borderRadius: 999,
+                border: `1px solid ${tone.border}`,
+                background: tone.background,
+                color: 'var(--t-text)',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-sans-system)',
+                fontSize: 10.5,
+                lineHeight: '14px',
+                fontWeight: 500,
+                letterSpacing: 0,
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = tone.hoverBackground;
+                event.currentTarget.style.borderColor = tone.hoverBorder;
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = tone.background;
+                event.currentTarget.style.borderColor = tone.border;
+              }}
+            >
+              {tone.dot !== 'transparent' ? (
+                <span
+                  aria-hidden
+                  style={{
+                    width: 5,
+                    height: 5,
+                    borderRadius: '50%',
+                    background: tone.dot,
+                    flexShrink: 0,
+                  }}
+                />
+              ) : null}
+              <span
+                style={{
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {repo.name}
+              </span>
+              <span
+                style={{
+                  flexShrink: 0,
+                  color: tone.meta,
+                  fontSize: 9.5,
+                  fontWeight: 500,
+                }}
+              >
+                {repo.readiness?.state === 'blocked' ? 'attention' : repo.defaultBranch || 'main'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function projectRepoChipTone(repo: RepoFocusRepo): {
+  dot: string;
+  meta: string;
+  border: string;
+  background: string;
+  hoverBorder: string;
+  hoverBackground: string;
+} {
+  switch (repo.readiness?.state) {
+    case 'blocked':
+    case 'needs_setup':
+      return {
+        dot: '#FF5A1F',
+        meta: '#FF5A1F',
+        border: 'rgba(255, 90, 31, 0.18)',
+        background: 'rgba(255, 90, 31, 0.055)',
+        hoverBorder: 'rgba(255, 90, 31, 0.28)',
+        hoverBackground: 'rgba(255, 90, 31, 0.08)',
+      };
+    default:
+      return {
+        dot: 'transparent',
+        meta: 'var(--t-text-faint)',
+        border: 'var(--t-divider-subtle)',
+        background: 'var(--t-input-bg)',
+        hoverBorder: 'var(--t-border-strong, rgba(148,163,184,0.22))',
+        hoverBackground: 'var(--t-hover, rgba(148,163,184,0.12))',
+      };
+  }
 }

@@ -179,6 +179,7 @@ export interface WorkspaceTerminalProps {
   onSplitHorizontal?: () => void;
   canCloseTile?: boolean;
   onCloseTile?: () => void;
+  conversationNavigation?: 'tabs' | 'sidebar';
   sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;

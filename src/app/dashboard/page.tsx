@@ -646,6 +646,7 @@ function DashboardInner() {
     title: string,
     repo?: SavedChatRepoContext | null,
   ) => {
+    setActiveSessionKey(`llm-chat:${historyTabId}`);
     void (async () => {
       try {
         const target = await waitForWorkspaceTerminalTarget({
@@ -653,9 +654,13 @@ function DashboardInner() {
           preferredTileId: activeTileId,
           fallbackToAnyExisting: true,
         });
-        const existing = target.handle.getTabsSnapshot().tabs.find((tab) => tab.id === historyTabId);
-        const tabId = existing
-          ? (target.handle.focusTab(existing.id) ? existing.id : '')
+        const snapshot = target.handle.getTabsSnapshot();
+        const primaryConversationTab = snapshot.tabs.find((tab) => tab.kind === 'orchestrator')
+          ?? snapshot.tabs.find((tab) => tab.kind === 'llm-chat' && tab.id !== historyTabId)
+          ?? snapshot.tabs.find((tab) => tab.kind === 'llm-chat')
+          ?? null;
+        const tabId = primaryConversationTab && target.handle.focusTab(primaryConversationTab.id)
+          ? primaryConversationTab.id
           : target.handle.openHistoryChat(historyTabId, title, repo);
         if (tabId) {
           window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
@@ -666,12 +671,13 @@ function DashboardInner() {
           };
           loadThread();
           window.setTimeout(loadThread, 120);
+          window.setTimeout(loadThread, 420);
         }
       } catch {
         // Best-effort sidebar navigation; the workspace terminal may still be mounting.
       }
     })();
-  }, [activeTileId, waitForWorkspaceTerminalTarget]);
+  }, [activeTileId, setActiveSessionKey, waitForWorkspaceTerminalTarget]);
 
   // ── Workspace tab hotkeys ──
   // Cmd+1..Cmd+9 jump to the Nth workspace tab, Cmd+Opt+Left / Right cycle
