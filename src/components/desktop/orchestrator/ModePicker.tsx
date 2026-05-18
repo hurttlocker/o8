@@ -107,7 +107,7 @@ function ModePickerBase({
         paddingRight: 14,
         paddingBottom: 8,
         paddingLeft: 14,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <ModeCard
@@ -166,7 +166,7 @@ function ModePickerBase({
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em',
                     cursor: 'pointer',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                   }}
                 >
                   {runtime.label}
@@ -224,7 +224,7 @@ function ModeCard({ active, title, copy, tag, onClick, glyph }: ModeCardProps) {
         color: 'var(--t-text)',
         cursor: 'pointer',
         textAlign: 'left',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
         transition: 'border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), background 150ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(event) => {

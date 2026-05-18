@@ -181,7 +181,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
             background: 'var(--t-bg-card)',
             boxShadow: 'var(--t-panel-shadow)',
             color: 'var(--t-text)',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           <div style={{

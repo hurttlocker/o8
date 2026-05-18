@@ -426,7 +426,7 @@ function UnifiedAgentsSidebarBase({
                           cursor: disabled ? 'default' : 'pointer',
                           opacity: disabled ? 0.7 : 1,
                           transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-                          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                          fontFamily: 'var(--font-sans-system)',
                         }}
                         onMouseEnter={(event) => {
                           if (disabled) return;

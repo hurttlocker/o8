@@ -166,7 +166,7 @@ export function ChatEmptyState({
               fontWeight: 700,
               letterSpacing: '-0.01em',
               cursor: 'pointer',
-              fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
@@ -212,7 +212,7 @@ export function ChatEmptyState({
                   justifyContent: 'space-between',
                   gap: 12,
                   textAlign: 'left',
-                  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
               >

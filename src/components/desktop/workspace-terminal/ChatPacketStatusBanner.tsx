@@ -124,7 +124,7 @@ export function ChatPacketStatusBanner({
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -175,7 +175,7 @@ export function ChatPacketStatusBanner({
               fontSize: 11,
               fontWeight: 700,
               cursor: pending !== null ? 'wait' : 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               letterSpacing: '-0.005em',
             }}
           >
@@ -199,7 +199,7 @@ export function ChatPacketStatusBanner({
               fontSize: 11,
               fontWeight: 600,
               cursor: pending !== null ? 'wait' : 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             {pending === 'create_pr' ? 'Creating PR…' : 'Create PR'}
@@ -220,7 +220,7 @@ export function ChatPacketStatusBanner({
                 fontSize: 11,
                 fontWeight: 500,
                 cursor: 'pointer',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               Open in Activity

@@ -180,7 +180,7 @@ export function UpdateBanner() {
     background: 'var(--t-panel-solid, var(--panel-strong))',
     boxShadow: 'var(--t-panel-shadow, var(--shadow))',
     color: 'var(--t-text, var(--text))',
-    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+    fontFamily: 'var(--font-sans-system)',
     transform: entered ? 'translate(-50%, 0)' : 'translate(-50%, -12px)',
     opacity: entered ? 1 : 0,
     transition: 'transform 200ms cubic-bezier(0.34, 1.36, 0.64, 1), opacity 160ms ease-out',

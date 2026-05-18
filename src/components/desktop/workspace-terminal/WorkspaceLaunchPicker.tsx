@@ -198,7 +198,7 @@ const menuButtonStyle = {
   background: 'transparent',
   color: 'var(--t-text)',
   fontSize: 13,
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  fontFamily: 'var(--font-sans-system)',
   cursor: 'pointer',
   textAlign: 'left' as const,
   transition: 'background 100ms',

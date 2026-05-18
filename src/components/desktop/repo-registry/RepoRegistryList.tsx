@@ -121,7 +121,7 @@ function RepoRegistryListBase({
               border: 'none',
               background: 'transparent',
               cursor: 'pointer',
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             <FolderOpen size={12} strokeWidth={2} color={reposOpen ? '#ef4444' : 'var(--t-text-muted)'} />
@@ -313,7 +313,7 @@ function RepoRegistryListBase({
                       fontSize: 11.5,
                       fontWeight: 600,
                       letterSpacing: '-0.005em',
-                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                      fontFamily: 'var(--font-sans-system)',
                     }}
                     onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover, rgba(148,163,184,0.12))'; }}
                     onMouseLeave={(event) => { event.currentTarget.style.background = 'var(--t-input-bg, transparent)'; }}
@@ -382,7 +382,7 @@ function RepoRegistryListBase({
                         color: 'var(--t-text)',
                         cursor: 'pointer',
                         textAlign: 'left',
-                        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                        fontFamily: 'var(--font-sans-system)',
                       }}
                       onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover, rgba(148,163,184,0.08))'; }}
                       onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}

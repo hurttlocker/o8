@@ -25,7 +25,7 @@ import { compactPacketLabel } from '@/lib/workspace-terminal/compact-packet-labe
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import type { OrchestratorMissionState, OrchestratorRuntime } from '@/lib/orchestrator/types';
 
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 const MAX_REPOS = 6;
 

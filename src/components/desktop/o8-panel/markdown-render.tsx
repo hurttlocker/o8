@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildPreviewSrcdoc, type HtmlStylePalette } from '@/lib/spec/html-style-presets';
 
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
 function inline(text: string): ReactNode[] {

@@ -12,7 +12,7 @@ interface O8SpecPaneProps {
 }
 
 const SAVE_DEBOUNCE_MS = 800;
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
 function savedLabel(savedAt: number | null, now: number) {

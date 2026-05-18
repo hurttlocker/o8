@@ -192,17 +192,17 @@ function ChatSurfaceBase({
               {shouldShowMissionCard && missionCard ? (
                 <motion.div key={missionCard.source} initial={{ opacity: 0, y: 18, scale: 0.985, height: 0 }} animate={{ opacity: 1, y: 0, scale: 1, height: 'auto' }} exit={{ opacity: 0, y: -12, scale: 0.985, height: 0 }} transition={{ type: 'spring', stiffness: 400, damping: 30 }} style={{ width: '100%', maxWidth: 520, overflow: 'hidden' }}>
                   <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 18, width: '100%', paddingTop: 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, borderRadius: 14, border: `1px solid ${THEME_GLASS_BORDER_STRONG}`, background: `linear-gradient(180deg, ${THEME_GLASS_ELEVATED} 0%, ${THEME_GLASS_MUTED} 100%)`, boxShadow: THEME_GLASS_SHADOW, backdropFilter: 'blur(24px) saturate(1.08)', WebkitBackdropFilter: 'blur(24px) saturate(1.08)' } as React.CSSProperties}>
-                    <button type="button" aria-label="Dismiss mission card" onClick={persistMissionDismissal} style={{ position: 'absolute', top: 12, right: 12, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, borderRadius: 12, border: `1px solid ${THEME_PANEL_BORDER}`, background: 'transparent', color: THEME_TEXT_FAINT, cursor: 'pointer', fontSize: 18, fontWeight: 500, fontFamily: 'system-ui, sans-serif', lineHeight: 1, paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0 }}>
+                    <button type="button" aria-label="Dismiss mission card" onClick={persistMissionDismissal} style={{ position: 'absolute', top: 12, right: 12, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, borderRadius: 12, border: `1px solid ${THEME_PANEL_BORDER}`, background: 'transparent', color: THEME_TEXT_FAINT, cursor: 'pointer', fontSize: 18, fontWeight: 500, fontFamily: 'var(--font-sans-system)', lineHeight: 1, paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0 }}>
                       <span aria-hidden="true">&times;</span>
                     </button>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 44 }}>
-                      <div style={{ alignSelf: 'flex-start', minHeight: 28, paddingTop: 6, paddingRight: 10, paddingBottom: 6, paddingLeft: 10, borderRadius: 10, background: THEME_ACCENT_SOFT, color: THEME_ACCENT, fontSize: 11, fontWeight: 700, fontFamily: 'system-ui, sans-serif', letterSpacing: '-0.01em' }}>{missionCard.eyebrow}</div>
-                      <div style={{ fontSize: 24, fontWeight: 600, color: THEME_TEXT, lineHeight: 1.12, letterSpacing: '-0.02em', fontFamily: 'system-ui, sans-serif' }}>{missionCard.title}</div>
-                      <div style={{ fontSize: 14, fontWeight: 400, color: THEME_TEXT_MUTED, lineHeight: 1.55, letterSpacing: '-0.01em', fontFamily: 'system-ui, sans-serif', display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' } as React.CSSProperties}>{missionCard.description}</div>
+                      <div style={{ alignSelf: 'flex-start', minHeight: 28, paddingTop: 6, paddingRight: 10, paddingBottom: 6, paddingLeft: 10, borderRadius: 10, background: THEME_ACCENT_SOFT, color: THEME_ACCENT, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-sans-system)', letterSpacing: '-0.01em' }}>{missionCard.eyebrow}</div>
+                      <div style={{ fontSize: 24, fontWeight: 600, color: THEME_TEXT, lineHeight: 1.12, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans-system)' }}>{missionCard.title}</div>
+                      <div style={{ fontSize: 14, fontWeight: 400, color: THEME_TEXT_MUTED, lineHeight: 1.55, letterSpacing: '-0.01em', fontFamily: 'var(--font-sans-system)', display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' } as React.CSSProperties}>{missionCard.description}</div>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                       {missionCard.actions.map((action, index) => (
-                        <button key={action.id} type="button" onClick={() => onMissionAction(action)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 44, paddingTop: 0, paddingRight: 16, paddingBottom: 0, paddingLeft: 16, borderRadius: 12, border: index === 0 ? 'none' : `1px solid ${THEME_PANEL_BORDER}`, background: index === 0 ? THEME_ACCENT : THEME_BG_CARD, color: index === 0 ? '#ffffff' : THEME_TEXT_SECONDARY, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'system-ui, sans-serif', letterSpacing: '-0.01em', boxShadow: index === 0 ? `0 12px 32px ${THEME_ACCENT_SOFT_STRONG}` : 'none' }}>
+                        <button key={action.id} type="button" onClick={() => onMissionAction(action)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 44, paddingTop: 0, paddingRight: 16, paddingBottom: 0, paddingLeft: 16, borderRadius: 12, border: index === 0 ? 'none' : `1px solid ${THEME_PANEL_BORDER}`, background: index === 0 ? THEME_ACCENT : THEME_BG_CARD, color: index === 0 ? '#ffffff' : THEME_TEXT_SECONDARY, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sans-system)', letterSpacing: '-0.01em', boxShadow: index === 0 ? `0 12px 32px ${THEME_ACCENT_SOFT_STRONG}` : 'none' }}>
                           <span>{action.label}</span>
                           <span aria-hidden="true">&rarr;</span>
                         </button>
@@ -235,7 +235,7 @@ function ChatSurfaceBase({
             const timeLabel = showTimeSeparator ? new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
             return (
               <div key={message.id} style={{ animation: 'llmFadeIn 250ms ease-out' }}>
-                {showTimeSeparator ? <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, marginBottom: 16 }}><div style={{ flex: 1, height: 1, background: '#f1f5f9' }} /><span style={{ fontSize: 11, color: '#cbd5e1', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', fontWeight: 500, flexShrink: 0 }}>{timeLabel}</span><div style={{ flex: 1, height: 1, background: '#f1f5f9' }} /></div> : null}
+                {showTimeSeparator ? <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, marginBottom: 16 }}><div style={{ flex: 1, height: 1, background: '#f1f5f9' }} /><span style={{ fontSize: 11, color: '#cbd5e1', fontFamily: 'var(--font-sans-system)', fontWeight: 500, flexShrink: 0 }}>{timeLabel}</span><div style={{ flex: 1, height: 1, background: '#f1f5f9' }} /></div> : null}
                 {message.isCompaction ? (
                   <CompactionNode compactedCount={message.compactedCount ?? 0} summary={message.content} />
                 ) : (
@@ -266,7 +266,7 @@ function ChatSurfaceBase({
                   Thinking of follow-ups...
                 </div>
               ) : followUps.map((question, index) => (
-                <button key={`${question}-${index}`} type="button" onClick={() => { onFollowUpSelect(question); onClearFollowUps(); setTimeout(() => inputRef.current?.focus(), 50); }} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingRight: 14, paddingBottom: 8, paddingLeft: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 20, fontSize: 12, color: '#475569', cursor: 'pointer', transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', animation: `llmFadeIn 300ms ease-out ${index * 80}ms both` }} onMouseEnter={(event) => { event.currentTarget.style.borderColor = '#3b82f6'; event.currentTarget.style.background = '#f0f9ff'; event.currentTarget.style.color = '#1e40af'; }} onMouseLeave={(event) => { event.currentTarget.style.borderColor = '#e2e8f0'; event.currentTarget.style.background = '#f8fafc'; event.currentTarget.style.color = '#475569'; }}>
+                <button key={`${question}-${index}`} type="button" onClick={() => { onFollowUpSelect(question); onClearFollowUps(); setTimeout(() => inputRef.current?.focus(), 50); }} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingRight: 14, paddingBottom: 8, paddingLeft: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 20, fontSize: 12, color: '#475569', cursor: 'pointer', transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)', fontFamily: 'var(--font-sans-system)', animation: `llmFadeIn 300ms ease-out ${index * 80}ms both` }} onMouseEnter={(event) => { event.currentTarget.style.borderColor = '#3b82f6'; event.currentTarget.style.background = '#f0f9ff'; event.currentTarget.style.color = '#1e40af'; }} onMouseLeave={(event) => { event.currentTarget.style.borderColor = '#e2e8f0'; event.currentTarget.style.background = '#f8fafc'; event.currentTarget.style.color = '#475569'; }}>
                   <SparklesIcon size={11} />
                   {question}
                 </button>
@@ -277,7 +277,7 @@ function ChatSurfaceBase({
           {isStreaming ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
               {liveFallbackNotice ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 6, paddingBottom: 4, paddingLeft: 2, fontSize: 11, color: 'var(--t-text-muted)', fontStyle: 'italic', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', animation: 'llmFadeIn 200ms ease-out' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 6, paddingBottom: 4, paddingLeft: 2, fontSize: 11, color: 'var(--t-text-muted)', fontStyle: 'italic', fontFamily: 'var(--font-sans-system)', animation: 'llmFadeIn 200ms ease-out' }}>
                   <svg width="12" height="12" viewBox="0 0 256 256" fill="none" style={{ flexShrink: 0, opacity: 0.7 }}>
                     <path d="M236.8 188.09 149.35 36.22a24.76 24.76 0 0 0-42.7 0L19.2 188.09a23.51 23.51 0 0 0 0 23.72A24.35 24.35 0 0 0 40.55 224h174.9a24.35 24.35 0 0 0 21.33-12.19 23.51 23.51 0 0 0 .02-23.72ZM120 104a8 8 0 0 1 16 0v40a8 8 0 0 1-16 0Zm8 88a12 12 0 1 1 12-12 12 12 0 0 1-12 12Z" fill="currentColor" />
                   </svg>
@@ -302,7 +302,7 @@ function ChatSurfaceBase({
             </div>
           ) : null}
           {permissionMode === 'plan' && model.provider === 'operator' && messages.length === 0 && !isStreaming ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, background: 'var(--t-bg-card)', border: '1px solid var(--t-panel-border)', borderRadius: 10, fontSize: 11, fontWeight: 500, color: 'var(--t-text-muted)', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, background: 'var(--t-bg-card)', border: '1px solid var(--t-panel-border)', borderRadius: 10, fontSize: 11, fontWeight: 500, color: 'var(--t-text-muted)', fontFamily: 'var(--font-sans-system)' }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.75 }}>
                 <rect x="3" y="11" width="18" height="11" rx="2" />
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -315,7 +315,7 @@ function ChatSurfaceBase({
 
       {isUserScrolledUp && messages.length > 0 ? (
         <div style={{ position: 'absolute', right: 30, bottom: 104, zIndex: 50, animation: 'llmFadeIn 150ms ease-out' }}>
-          <button type="button" onClick={onScrollToBottom} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 34, paddingTop: 7, paddingRight: 12, paddingBottom: 7, paddingLeft: 12, background: 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))', border: '1px solid rgba(96, 165, 250, 0.22)', borderRadius: 999, boxShadow: '0 12px 28px rgba(37, 99, 235, 0.16)', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#1d4ed8', fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif', transition: 'all 150ms' } as React.CSSProperties}>
+          <button type="button" onClick={onScrollToBottom} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 34, paddingTop: 7, paddingRight: 12, paddingBottom: 7, paddingLeft: 12, background: 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))', border: '1px solid rgba(96, 165, 250, 0.22)', borderRadius: 999, boxShadow: '0 12px 28px rgba(37, 99, 235, 0.16)', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#1d4ed8', fontFamily: 'var(--font-sans-system)', transition: 'all 150ms' } as React.CSSProperties}>
             <ArrowDownIcon size={13} />
             Bottom messages
           </button>

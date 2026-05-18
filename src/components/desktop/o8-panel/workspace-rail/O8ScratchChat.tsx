@@ -13,7 +13,7 @@ import {
 import { MarkdownRender } from '../markdown-render';
 import { useOrchestratorData } from '../../orchestrator-data-context';
 
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const O8_ICON_ACTIVE = 'var(--t-chat-surface-text, #0f172a)';
 const O8_ICON_INACTIVE = 'var(--t-chat-surface-text-secondary, #64748b)';

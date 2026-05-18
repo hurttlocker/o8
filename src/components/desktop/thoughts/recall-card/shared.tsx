@@ -65,7 +65,7 @@ export interface IndexState {
   entries: IndexEntry[];
 }
 
-export const FONT_FAMILY = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+export const FONT_FAMILY = 'var(--font-sans-system)';
 export const MONO_FAMILY = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
 export const rowChromeStyle: React.CSSProperties = {

@@ -473,7 +473,7 @@ export const InlineDiffViewer = memo(function InlineDiffViewer({
               color: 'var(--t-text-muted)',
               textAlign: 'center',
               marginTop: 32,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             Loading diff…
@@ -524,7 +524,7 @@ export const InlineDiffViewer = memo(function InlineDiffViewer({
               color: '#dc2626',
               fontSize: 12,
               lineHeight: 1.5,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             {fetchError}
@@ -538,7 +538,7 @@ export const InlineDiffViewer = memo(function InlineDiffViewer({
               color: 'var(--t-text-muted)',
               textAlign: 'center',
               marginTop: 32,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           >
             Worktree clean — nothing to review.
@@ -746,7 +746,7 @@ export const InlineDiffViewer = memo(function InlineDiffViewer({
             borderTopStyle: 'solid',
             borderTopColor: 'var(--t-divider-subtle)',
             flexShrink: 0,
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           {merge.message}

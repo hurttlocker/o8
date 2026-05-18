@@ -27,7 +27,7 @@ interface QuickActionPaletteProps {
   onPick: (action: QuickAction) => void;
 }
 
-const FONT_STACK = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const FONT_STACK = 'var(--font-sans-system)';
 
 export function QuickActionPalette({ open, onClose, onPick }: QuickActionPaletteProps) {
   const [query, setQuery] = useState('');

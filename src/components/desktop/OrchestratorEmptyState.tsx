@@ -131,7 +131,7 @@ function OrchestratorEmptyStateBase({
               color: 'var(--t-text-secondary)',
               letterSpacing: '-0.03em',
               lineHeight: 1.2,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               textAlign: 'center',
             }}
           >
@@ -188,7 +188,7 @@ function OrchestratorEmptyStateBase({
                 cursor: 'pointer',
                 textAlign: 'left',
                 transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 minHeight: 78,
               }}
               onMouseEnter={(e) => {

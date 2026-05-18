@@ -85,7 +85,7 @@ export function PacketHeaderCard({
           borderWidth: 0,
           cursor: 'pointer',
           textAlign: 'left',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

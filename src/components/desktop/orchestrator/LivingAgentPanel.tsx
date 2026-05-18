@@ -152,7 +152,7 @@ function LivingAgentPanelBase({ packet, toolCalls = [] }: LivingAgentPanelProps)
         paddingRight: 12,
         paddingBottom: 12,
         paddingLeft: 12,
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       {/* Activity */}

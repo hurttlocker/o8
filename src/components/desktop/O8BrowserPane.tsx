@@ -650,7 +650,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
             style={{
               flex: 1, border: 'none', background: 'transparent', outline: 'none',
               color: 'rgba(255,255,255,0.75)', fontSize: 12,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
             }}
           />
         </div>

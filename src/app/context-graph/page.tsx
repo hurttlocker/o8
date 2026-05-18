@@ -5,7 +5,7 @@
  *
  * Closes #767. Reference UX/IA: Augment's Context Engine landing graph
  * (https://www.augmentcode.com/context-engine). Theme is the o8 light-glass
- * spec from DESIGN.md — paper, ink, one orange, Plus Jakarta Sans.
+ * spec from DESIGN.md — paper, ink, one orange, system UI.
  *
  * Three columns:
  *   01 — Realtime Raw Context  (the inputs)

@@ -293,7 +293,7 @@ function RepoTargetChip({
           fontWeight: 500,
           letterSpacing: '-0.005em',
           whiteSpace: 'nowrap',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
@@ -361,7 +361,7 @@ function RepoTargetChip({
                     paddingBottom: 3,
                     paddingLeft: 8,
                     color: groupActive ? 'var(--t-accent)' : 'var(--t-text-muted)',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                   }}
                 >
                   <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 700 }}>
@@ -401,7 +401,7 @@ function RepoTargetChip({
                         color: active ? 'var(--t-accent)' : 'var(--t-text)',
                         cursor: 'pointer',
                         textAlign: 'left',
-                        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                        fontFamily: 'var(--font-sans-system)',
                       }}
                     >
                       <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -522,7 +522,7 @@ export function InputButtons({
             color: 'var(--t-text-faint)',
             letterSpacing: '-0.005em',
             whiteSpace: 'nowrap',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           {modelLabel}

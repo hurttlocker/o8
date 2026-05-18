@@ -514,7 +514,7 @@ export const UniversalSearch = memo(function UniversalSearch({
             outline: 'none',
             fontSize: isMobile ? 16 : 13,
             color: isMobile ? '#111827' : '#0f172a',
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
             fontWeight: 400,
             letterSpacing: '-0.01em',
             WebkitAppearance: 'none',
@@ -553,7 +553,7 @@ export const UniversalSearch = memo(function UniversalSearch({
               background: 'rgba(15, 23, 42, 0.06)',
               padding: '2px 5px',
               borderRadius: 4,
-              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               fontWeight: 600,
             }}
           >
@@ -681,7 +681,7 @@ export const UniversalSearch = memo(function UniversalSearch({
                     background: isSelected ? 'rgba(15, 23, 42, 0.04)' : 'transparent',
                     cursor: isDisabled ? 'default' : 'pointer',
                     textAlign: 'left',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                     transition: 'background 90ms ease',
                     WebkitTapHighlightColor: 'transparent',
                     minHeight: 44,

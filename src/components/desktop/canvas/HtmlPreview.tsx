@@ -17,7 +17,7 @@ import { useTheme } from '@/lib/theme/context';
 import { buildPreviewSrcdoc, type HtmlStylePalette } from '@/lib/spec/html-style-presets';
 import { FileViewer } from '@/components/desktop/FileViewer';
 
-const UI_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const UI_FONT = 'var(--font-sans-system)';
 
 type View = 'preview' | 'source';
 

@@ -51,7 +51,7 @@ export function SupervisorInboxBadge() {
         background,
         color: active ? 'var(--t-warning, #c2410c)' : 'var(--t-chrome-btn-text, var(--t-text))',
         cursor: 'pointer',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <WarningCircle size={11} weight={active ? 'fill' : 'bold'} />

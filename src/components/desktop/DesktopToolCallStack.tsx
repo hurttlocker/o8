@@ -334,7 +334,7 @@ function FileMutationLine({ tool }: { tool: MobileTranscriptToolCall }) {
           borderRadius: 11,
           background: expanded ? FILE_MUTATION_ROW_BACKGROUND_ACTIVE : FILE_MUTATION_ROW_BACKGROUND,
           boxShadow: 'none',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           textAlign: 'left',
           cursor: canExpand ? 'pointer' : 'default',
           transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -568,7 +568,7 @@ function BatchedToolLine({ tools }: { tools: MobileTranscriptToolCall[] }) {
           fontStyle: 'italic',
           fontWeight: 400,
           letterSpacing: '-0.005em',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
           cursor: 'pointer',
           textAlign: 'left',
         }}

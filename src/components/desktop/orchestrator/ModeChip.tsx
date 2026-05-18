@@ -34,7 +34,7 @@ const SINGLE_RUNTIMES: SingleRuntimeOption[] = [
   { id: 'opencode', label: 'opencode' },
 ];
 
-const FONT_FAMILY = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const FONT_FAMILY = 'var(--font-sans-system)';
 
 function chipLabel(mode: OrchestrationMode, runtime: OrchestratorRuntime): string {
   if (mode === 'fleet') return 'Fleet';

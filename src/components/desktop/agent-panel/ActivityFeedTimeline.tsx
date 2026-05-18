@@ -138,12 +138,13 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
       <div
         style={{
           padding: '16px 14px',
-          fontSize: 11,
+          fontSize: 14,
+          fontWeight: 400,
           color: 'var(--t-text-muted)',
           textAlign: 'center',
-          lineHeight: 1.5,
-          letterSpacing: '-0.01em',
-          fontFamily: 'system-ui, sans-serif',
+          lineHeight: '19px',
+          letterSpacing: 0,
+          fontFamily: 'var(--font-sans-system)',
         }}
       >
         {`${filter === 'all' ? 'Activity' : filter.charAt(0).toUpperCase() + filter.slice(1)} activity will appear here as ${repoLabel} work lands.`}
@@ -158,8 +159,8 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
           <div
             style={{
               padding: '6px 14px 3px',
-              fontSize: 10,
-              fontWeight: 700,
+              fontSize: 11,
+              fontWeight: 600,
               color: 'var(--t-text-faint)',
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
@@ -248,13 +249,13 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
-                      fontSize: 12,
+                      fontSize: 14,
                       color: 'var(--t-text)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
-                      lineHeight: 1.4,
-                      fontWeight: 500,
+                      lineHeight: '19px',
+                      fontWeight: 400,
                     }}
                   >
                     {activityItemTitle(item)}
@@ -265,10 +266,11 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                       alignItems: 'center',
                       gap: 6,
                       marginTop: 1,
-                      fontSize: 10,
+                      fontSize: 12,
+                      fontWeight: 400,
                       color: 'var(--t-text-muted)',
-                      fontFamily: '"SF Mono", ui-monospace, monospace',
-                      lineHeight: 1.4,
+                      fontFamily: 'var(--font-sans-system)',
+                      lineHeight: '16px',
                     }}
                   >
                     {item.kind === 'commit' ? (
@@ -295,7 +297,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                         <span
                           style={{
                             color: item.conclusion === 'success' ? '#22c55e' : item.conclusion === 'failure' ? '#ef4444' : '#f59e0b',
-                            fontWeight: 600,
+                            fontWeight: 400,
                           }}
                         >
                           {item.conclusion || item.status}
@@ -311,9 +313,9 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                               borderRadius: 4,
                               background: `#${label.color}18`,
                               color: `#${label.color}`,
-                              fontSize: 9,
+                              fontSize: 11,
                               fontWeight: 600,
-                              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                              fontFamily: 'var(--font-sans-system)',
                             }}
                           >
                             {label.name}
@@ -343,14 +345,14 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                     style={{
                       padding: '1px 6px',
                       borderRadius: 999,
-                      fontSize: 9,
-                      fontWeight: 700,
+                      fontSize: 11,
+                      fontWeight: 600,
                       flexShrink: 0,
                       marginTop: 2,
                       background: item.state === 'merged' ? 'rgba(139,92,246,0.1)' : item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
                       color: item.state === 'merged' ? '#8b5cf6' : item.state === 'open' ? '#22c55e' : '#ef4444',
                       textTransform: 'uppercase',
-                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                      fontFamily: 'var(--font-sans-system)',
                     }}
                   >
                     {item.state}
@@ -396,14 +398,14 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                     style={{
                       padding: '1px 6px',
                       borderRadius: 999,
-                      fontSize: 9,
-                      fontWeight: 700,
+                      fontSize: 11,
+                      fontWeight: 600,
                       flexShrink: 0,
                       marginTop: 2,
                       background: item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(139,92,246,0.1)',
                       color: item.state === 'open' ? '#22c55e' : '#8b5cf6',
                       textTransform: 'uppercase',
-                      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                      fontFamily: 'var(--font-sans-system)',
                     }}
                   >
                     {item.state}
@@ -527,7 +529,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                               color: severityColor[candidate.data.severity] ?? '#64748b',
                             }))}
                         />
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                        <div style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: '#1d4ed8' }}>
                           Next move: steer the active runtime lane if this event changes priority.
                         </div>
                       </>
@@ -542,8 +544,8 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                                 borderRadius: 999,
                                 background: `#${label.color}18`,
                                 color: `#${label.color}`,
-                                fontSize: 10,
-                                fontWeight: 700,
+                                fontSize: 11,
+                                fontWeight: 600,
                               }}
                             >
                               {label.name}
@@ -572,18 +574,18 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                           <span>Assignee: {item.assignees.length ? item.assignees.join(', ') : 'Unassigned'}</span>
                           <span>{item.comments} comment{item.comments === 1 ? '' : 's'}</span>
                         </div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                        <div style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: '#1d4ed8' }}>
                           Next move: assign or open the issue before it drifts out of the activity lane.
                         </div>
                       </>
                     ) : item.kind === 'ci' ? (
                       <>
                         <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
-                          {item.workflow} on <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{item.branch}</span>
+                          {item.workflow} on <span style={{ fontFamily: 'var(--font-mono-system)' }}>{item.branch}</span>
                         </div>
                         {ciDetail?.failingJobs?.length ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#dc2626' }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#dc2626' }}>
                               Failing jobs
                             </div>
                             {ciDetail.failingJobs.map((job) => (
@@ -597,7 +599,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                                   color: 'var(--t-text-secondary)',
                                 }}
                               >
-                                <div style={{ fontWeight: 700 }}>{job.name}</div>
+                                <div style={{ fontWeight: 600 }}>{job.name}</div>
                                 {job.failingStep ? (
                                   <div style={{ marginTop: 2, color: 'var(--t-text-muted)' }}>
                                     {job.failingStep}
@@ -621,7 +623,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                             {ciDetail.summaryLine}
                           </div>
                         ) : null}
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                        <div style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: '#1d4ed8' }}>
                           Next move: inspect the failing run and decide whether to review or steer the agent.
                         </div>
                       </>
@@ -636,7 +638,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                         />
                         {item.failingChecks && item.failingChecks.length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#dc2626' }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#dc2626' }}>
                               Top failing checks
                             </div>
                             {item.failingChecks.map((check) => (
@@ -657,11 +659,11 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                           </div>
                         ) : null}
                         <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
-                          Branch <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{item.branch}</span> has an active merge path.
+                          Branch <span style={{ fontFamily: 'var(--font-mono-system)' }}>{item.branch}</span> has an active merge path.
                         </div>
                         {prDetail?.files?.length ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#1d4ed8' }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#1d4ed8' }}>
                               Changed files
                             </div>
                             {prDetail.files.slice(0, 3).map((file) => (
@@ -680,13 +682,13 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text)' }}>
                                   {file.path}
                                 </span>
-                                <span style={{ color: '#16a34a', fontWeight: 700 }}>+{file.additions}</span>
-                                <span style={{ color: '#dc2626', fontWeight: 700 }}>-{file.deletions}</span>
+                                <span style={{ color: '#16a34a', fontWeight: 600 }}>+{file.additions}</span>
+                                <span style={{ color: '#dc2626', fontWeight: 600 }}>-{file.deletions}</span>
                               </div>
                             ))}
                           </div>
                         ) : null}
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                        <div style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: '#1d4ed8' }}>
                           Next move: {mergeRisk?.label === 'merge ready'
                             ? 'review and merge while the branch is green.'
                             : mergeRisk?.label === 'conflicts'
@@ -711,14 +713,14 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                                 background: commit.hash === item.hash ? 'var(--t-panel-active)' : 'var(--t-panel-hover)',
                               }}
                             >
-                              <span style={{ fontSize: 10, fontFamily: '"SF Mono", ui-monospace, monospace', color: '#1d4ed8', fontWeight: 700 }}>{commit.hash}</span>
-                              <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono-system)', color: '#1d4ed8', fontWeight: 600 }}>{commit.hash}</span>
+                              <span style={{ fontSize: 12, lineHeight: '16px', color: 'var(--t-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {commit.message}
                               </span>
                             </div>
                           ))}
                         </div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                        <div style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: '#1d4ed8' }}>
                           Next move: open the commit in canvas and compare it against the active workspace.
                         </div>
                       </>

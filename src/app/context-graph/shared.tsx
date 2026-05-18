@@ -50,7 +50,7 @@ export const PAPER = '#F4F2ED';
 export const BRAND_ORANGE = '#ef4444';
 
 export const FONT_SANS =
-  '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif';
+  'var(--font-sans-system)';
 export const FONT_MONO =
   'var(--font-mono, "SF Mono"), Menlo, Consolas, "Liberation Mono", monospace';
 

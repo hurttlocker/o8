@@ -214,7 +214,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
             border: '1px solid var(--t-panel-border)',
             boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
             zIndex: 9999,
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           <div
@@ -312,7 +312,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
                 fontWeight: 500,
                 cursor: 'pointer',
                 textAlign: 'left',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 userSelect: 'none',
                 WebkitUserSelect: 'none',
               }}
@@ -401,7 +401,7 @@ function PortActionPanel({
     fontWeight: 500,
     cursor: 'pointer',
     textAlign: 'left' as const,
-    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+    fontFamily: 'var(--font-sans-system)',
   };
 
   const toastTone = toast?.tone === 'success' ? '#16a34a' : '#dc2626';

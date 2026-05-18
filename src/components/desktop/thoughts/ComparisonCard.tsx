@@ -28,7 +28,7 @@ interface ComparisonCardProps {
   onPickWinner: (packetId: string) => void | Promise<void>;
 }
 
-const JAKARTA = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const JAKARTA = 'var(--font-sans-system)';
 
 function isComparisonPacketComplete(packet: OrchestratorPacket): boolean {
   return packet.status === 'awaiting_review'

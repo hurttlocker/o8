@@ -196,7 +196,7 @@ export function CompactionNode({
                   color: '#64748b',
                   whiteSpace: 'pre-wrap',
                   lineHeight: 1.7,
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}>
                   {displaySummary}
                 </div>

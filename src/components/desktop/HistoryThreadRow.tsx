@@ -119,7 +119,7 @@ function HistoryThreadRowBase({
             background: 'transparent',
             cursor: isDeleting ? 'default' : 'pointer',
             textAlign: 'left',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           <div
@@ -185,7 +185,7 @@ function HistoryThreadRowBase({
                   color: 'var(--t-text)',
                   fontSize: 11.5,
                   fontWeight: 500,
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                   letterSpacing: '-0.005em',
                   boxSizing: 'border-box',
                 }}

@@ -104,7 +104,7 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
         color: 'var(--t-text-muted)',
         textTransform: 'uppercase',
         letterSpacing: '0.06em',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
       }}>
         Slash commands
       </div>
@@ -185,7 +185,7 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
                     fontWeight: 700,
                     textTransform: 'uppercase',
                     letterSpacing: '0.05em',
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                   }}>
                     {groupLabel}
                   </span>
@@ -195,7 +195,7 @@ export function SlashCommandPicker({ suggestions, activeIndex, onSelect }: Slash
                   lineHeight: 1.35,
                   color: 'var(--t-text-muted)',
                   marginTop: 1,
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}>
                   {suggestion.description}
                 </div>

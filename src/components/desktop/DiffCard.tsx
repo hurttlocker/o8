@@ -64,7 +64,7 @@ const BUTTON_BASE: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
-  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+  fontFamily: 'var(--font-sans-system)',
   transition: 'color 150ms, background 150ms, opacity 150ms',
 };
 
@@ -247,7 +247,7 @@ export const DiffCard = memo(function DiffCard({ code, onApplyDiff, isStreaming,
                 fontSize: 10,
                 color: THEME_ACCENT,
                 fontWeight: 600,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
             >
               <span
@@ -270,7 +270,7 @@ export const DiffCard = memo(function DiffCard({ code, onApplyDiff, isStreaming,
                 gap: 6,
                 fontSize: 10,
                 color: 'var(--t-text-muted)',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 whiteSpace: 'nowrap',
               }}
             >

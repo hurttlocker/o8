@@ -159,7 +159,7 @@ export default function QaEvalsPage() {
       paddingRight: 32,
       paddingBottom: 32,
       paddingLeft: 32,
-      fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+      fontFamily: 'var(--font-sans-system)',
     }}>
       {/* Page header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 32 }}>

@@ -88,7 +88,7 @@ function ConnectionBannerBase({ connectionState }: ConnectionBannerProps) {
           style={{
             overflow: 'hidden',
             zIndex: 9100,
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           <div

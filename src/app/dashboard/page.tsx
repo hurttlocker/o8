@@ -160,6 +160,7 @@ const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
 const MIN_O8_PANEL_WIDTH = 400;
 const MAX_O8_PANEL_WIDTH = 1200;
+const COMPACT_SHELL_MEDIA_QUERY = '(max-width: 980px)';
 const O8_ACTIVE_TAB_STORAGE_KEY = 'o8ActiveTab';
 const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'pulse';
 
@@ -285,6 +286,15 @@ function DashboardInner() {
   useEffect(() => {
     try { window.localStorage.setItem('o8:right-panel:kind', rightPanelKind); } catch { /* ignore */ }
   }, [rightPanelKind]);
+  const [compactShell, setCompactShell] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const media = window.matchMedia(COMPACT_SHELL_MEDIA_QUERY);
+    const update = () => setCompactShell(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
   const [rightWidth, setRightWidth] = useState(() => {
     if (typeof window === 'undefined') return 280;
     try {
@@ -2441,6 +2451,10 @@ function DashboardInner() {
     };
   }, [openMobilePairing, handleOpenSettingsTab]);
 
+  const showSidebarColumn = sidebarVisible && !compactShell;
+  const showRightPanelColumn = chatVisible && !compactShell;
+  const workspaceInset = compactShell ? 2 : 4;
+
   return (
     <DictationHost>
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
@@ -2451,7 +2465,7 @@ function DashboardInner() {
       backdropFilter: 'blur(18px) saturate(1.02)',
       WebkitBackdropFilter: 'blur(18px) saturate(1.02)',
       color: 'var(--t-text)',
-      fontFamily: 'system-ui',
+      fontFamily: 'var(--font-sans-system)',
       overflow: 'hidden',
       position: 'relative',
     }}>
@@ -2469,15 +2483,16 @@ function DashboardInner() {
         onToggleSidebar={() => setSidebarVisible(v => !v)}
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
-        workspacePanelVisible={chatVisible && rightPanelKind === 'review'}
+        workspacePanelVisible={showRightPanelColumn && rightPanelKind === 'review'}
         onToggleWorkspacePanel={handleToggleWorkspacePanel}
-        o8PanelVisible={chatVisible && rightPanelKind === 'o8'}
+        o8PanelVisible={showRightPanelColumn && rightPanelKind === 'o8'}
         onToggleO8Panel={handleToggleO8Panel}
-        browserActive={chatVisible && rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
+        browserActive={showRightPanelColumn && rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
         o8ActiveTab={o8ActiveTab}
         onO8TabChange={setO8ActiveTab}
         browserPreviewUrl={o8BrowserHoverUrl}
         onOpenBrowser={handleOpenBrowser}
+        compact={compactShell}
         isAgentsSectionActive={activeNavSection === 'agents'}
         onOpenAgents={() => {
           setActiveNavSection('agents');
@@ -2634,7 +2649,7 @@ function DashboardInner() {
                 fontWeight: 600,
                 letterSpacing: '-0.01em',
                 cursor: 'pointer',
-                fontFamily: 'system-ui',
+                fontFamily: 'var(--font-sans-system)',
                 flexShrink: 0,
               }}
             >
@@ -2695,7 +2710,7 @@ function DashboardInner() {
           left column below. */}
 
       {/* ── Left: Agent Panel ── */}
-      {sidebarVisible && (() => {
+      {showSidebarColumn && (() => {
         // When a repo is focused, we want the column to behave like the
         // operator dragged the resizer wider — not an overlay sliding over
         // the workspace. The width is animated; the focus content renders
@@ -2800,7 +2815,7 @@ function DashboardInner() {
       })()}
 
       {/* ── Left drag handle ── */}
-      {sidebarVisible && <div
+      {showSidebarColumn && <div
         onMouseDown={startLeftDrag}
         onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '1'; }}
         onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '0'; }}
@@ -2837,10 +2852,10 @@ function DashboardInner() {
         // gradient with a small inset so the curve is visible against the
         // adjacent NavRail / chat columns and the status strip below.
         borderRadius: 14,
-        marginTop: 4,
-        marginBottom: 4,
-        marginLeft: 4,
-        marginRight: 4,
+        marginTop: workspaceInset,
+        marginBottom: workspaceInset,
+        marginLeft: workspaceInset,
+        marginRight: workspaceInset,
       }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
         <GuidedDiscoveryCoachmark
@@ -2882,7 +2897,7 @@ function DashboardInner() {
             selectedPacketId={selectedPacketId}
             onSelectedPacketChange={setSelectedPacketId}
             onOpenO8Panel={handleOpenO8Panel}
-            o8PanelVisible={chatVisible && rightPanelKind === 'o8'}
+            o8PanelVisible={showRightPanelColumn && rightPanelKind === 'o8'}
           >
             <TileContainer
               layout={tileLayout}
@@ -2906,7 +2921,7 @@ function DashboardInner() {
       </div>
 
       <AnimatePresence initial={false}>
-        {chatVisible ? (
+        {showRightPanelColumn ? (
           <motion.div
             key="right-panel-shell"
             initial={{ opacity: 0, x: 20 }}
@@ -3065,7 +3080,7 @@ function DashboardInner() {
 
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
-      <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
+      <AlertToast alerts={activeAlerts} compact={compactShell} onAction={handleAlertAction} />
       </div>{/* end main layout */}
 
       {/* ── Bottom chrome: transparent status strip with branch + chrome buttons ── */}
@@ -3073,8 +3088,9 @@ function DashboardInner() {
         branchName={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
-        leftColumnWidth={sidebarVisible ? (leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
-        rightColumnWidth={chatVisible ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
+        compact={compactShell}
+        leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
+        rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
         onOpenSettings={toggleSettingsOverlay}
         onOpenMobilePairing={openMobilePairing}
         onAddRepo={() => {

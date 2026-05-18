@@ -200,7 +200,7 @@ export function AttachFilesButton({
                 cursor: 'pointer',
                 fontSize: 12,
                 fontWeight: 650,
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
               onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-bg-card)'; }}
               onMouseLeave={(event) => { event.currentTarget.style.background = 'var(--t-input-bg)'; }}
@@ -243,7 +243,7 @@ export function AttachFilesButton({
                   background: 'transparent',
                   color: 'var(--t-text)',
                   fontSize: 12,
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               />
             </div>
@@ -257,7 +257,7 @@ export function AttachFilesButton({
                   paddingLeft: 8,
                   color: 'var(--t-text-faint)',
                   fontSize: 11,
-                  fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}>
                   {loading ? 'Searching...' : 'No files found'}
                 </div>

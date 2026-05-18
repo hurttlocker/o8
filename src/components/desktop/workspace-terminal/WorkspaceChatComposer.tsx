@@ -210,7 +210,7 @@ function WorkspaceChatComposerBase({
               background: 'transparent',
               color: 'var(--t-text)',
               fontSize: 13,
-              fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+              fontFamily: 'var(--font-sans-system)',
               lineHeight: 1.4,
               resize: 'none',
               boxSizing: 'border-box',
@@ -428,7 +428,7 @@ function WorkspaceChatComposerBase({
             color: 'var(--t-text-faint)',
             letterSpacing: '-0.005em',
             whiteSpace: 'nowrap',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           <span>{chat.runtimeLabel}</span>

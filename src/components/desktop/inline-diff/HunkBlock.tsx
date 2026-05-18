@@ -264,7 +264,7 @@ export const HunkBlock = memo(function HunkBlock({
                 fontSize: 11,
                 fontWeight: 600,
                 cursor: 'pointer',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
                 letterSpacing: '-0.01em',
               }}
             >

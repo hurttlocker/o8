@@ -26,7 +26,7 @@ import {
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { getRuntimeInstallInfo } from '@/lib/setup/runtime-install';
 
-const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif';
+const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, monospace';
 
 export interface OnboardingRuntimeDetection {

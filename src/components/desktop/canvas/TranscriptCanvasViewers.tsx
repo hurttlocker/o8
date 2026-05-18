@@ -218,7 +218,7 @@ export const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: {
                     paddingLeft: 16,
                     fontSize: 14,
                     lineHeight: 1.6,
-                    fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                     height: messageHeights[globalIdx] - TX_MARGIN_BOTTOM,
                     boxSizing: 'border-box',
                   }}
@@ -477,7 +477,7 @@ function CanvasEmptyBase({
                   fontWeight: 700,
                   letterSpacing: '0.08em',
                   textTransform: 'uppercase',
-                  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               >
                 <span
@@ -500,7 +500,7 @@ function CanvasEmptyBase({
                   fontWeight: 650,
                   letterSpacing: '-0.02em',
                   color: 'var(--t-text)',
-                  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               >
                 {title}
@@ -513,7 +513,7 @@ function CanvasEmptyBase({
                   lineHeight: 1.55,
                   color: 'var(--t-text-muted)',
                   letterSpacing: '-0.01em',
-                  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                  fontFamily: 'var(--font-sans-system)',
                 }}
               >
                 {subtitle}
@@ -614,7 +614,7 @@ function CanvasEmptyBase({
                       fontWeight: 700,
                       letterSpacing: '0.08em',
                       textTransform: 'uppercase',
-                      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontFamily: 'var(--font-sans-system)',
                     }}
                   >
                     {card.label}
@@ -648,7 +648,7 @@ function CanvasEmptyBase({
                       fontSize: 12,
                       fontWeight: 600,
                       letterSpacing: '-0.01em',
-                      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                      fontFamily: 'var(--font-sans-system)',
                     }}
                   >
                     <div
@@ -705,7 +705,7 @@ function CanvasEmptyBase({
                     lineHeight: 1.4,
                     color: 'var(--t-text-faint)',
                     letterSpacing: '-0.01em',
-                    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                    fontFamily: 'var(--font-sans-system)',
                   }}
                 >
                   <span>{card.footer}</span>

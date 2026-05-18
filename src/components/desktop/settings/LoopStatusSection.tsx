@@ -34,7 +34,7 @@
  *
  * Design rules followed:
  *   - Inline styles only / palette tokens only / Phosphor SVG only
- *   - Plus Jakarta Sans for chrome, MONO for hashes + counts
+ *   - system UI for chrome, MONO for hashes + counts
  *   - Issues-style rows: dot + uppercase mono label + value + hint
  *   - 800-line ceiling (this file lives well under it)
  */

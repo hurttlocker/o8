@@ -460,7 +460,7 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
                 fontWeight: 500,
                 cursor: 'pointer',
                 textAlign: 'left',
-                fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+                fontFamily: 'var(--font-sans-system)',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}

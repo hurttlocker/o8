@@ -17,7 +17,7 @@ import { toDataURL } from 'qrcode';
 import { Smartphone } from '../lucide-shims';
 import { OPEN_SETTINGS_TAB_EVENT, type OpenSettingsTabDetail } from '@/lib/desktop/events';
 
-const APP_FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const APP_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
 interface PairingPayload {

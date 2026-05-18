@@ -116,7 +116,7 @@ const ORIGIN_LABELS: Record<AgentOrigin, string> = {
   Cloud: 'Cloud',
 };
 
-const FONT = '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif';
+const FONT = 'var(--font-sans-system)';
 
 // ── Helpers ──
 

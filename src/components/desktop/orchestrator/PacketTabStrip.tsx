@@ -107,7 +107,7 @@ function PacketTab({ active, label, onClick, notification, countBadge }: PacketT
         background: active ? 'var(--t-accent-soft)' : 'transparent',
         color: active ? 'var(--t-accent)' : 'var(--t-text-muted)',
         cursor: 'pointer',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
         fontSize: 9,
         fontWeight: 700,
         textTransform: 'uppercase',

@@ -70,7 +70,7 @@ function ToolCallChipBase({ verb, argument, kind = 'generic', status = 'done', o
         background: 'var(--t-bg-card)',
         color: textColor,
         cursor: onClick ? 'pointer' : 'default',
-        fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+        fontFamily: 'var(--font-sans-system)',
         fontSize: 10.5,
         fontWeight: 500,
         letterSpacing: '-0.005em',

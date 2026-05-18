@@ -311,7 +311,7 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
           cursor: 'pointer',
           textAlign: 'left',
           transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1)',
-          fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+          fontFamily: 'var(--font-sans-system)',
         }}
         onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'rgba(37,99,235,0.04)'; }}
         onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}
@@ -359,13 +359,13 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              fontSize: 12,
+              fontSize: 14,
               color: 'var(--t-text)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              lineHeight: 1.4,
-              fontWeight: 500,
+              lineHeight: '19px',
+              fontWeight: 400,
             }}
           >
             {packet.title}
@@ -376,10 +376,11 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
               alignItems: 'center',
               gap: 6,
               marginTop: 1,
-              fontSize: 10,
+              fontSize: 12,
+              fontWeight: 400,
               color: 'var(--t-text-muted)',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-              lineHeight: 1.4,
+              fontFamily: 'var(--font-sans-system)',
+              lineHeight: '16px',
             }}
           >
             <span>{runtimeMeta.label}</span>
@@ -405,15 +406,15 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
             paddingBottom: 1,
             paddingLeft: 6,
             borderRadius: 999,
-            fontSize: 9,
-            fontWeight: 700,
+            fontSize: 11,
+            fontWeight: 600,
             flexShrink: 0,
             marginTop: 4,
             background: `${statusMeta.color}1a`,
             color: statusMeta.color,
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
-            fontFamily: '"Plus Jakarta Sans", -apple-system, system-ui, sans-serif',
+            fontFamily: 'var(--font-sans-system)',
           }}
         >
           {statusMeta.label}
