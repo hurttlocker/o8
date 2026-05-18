@@ -91,14 +91,14 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
         ?? deps.tabsRef.current[0];
       if (!currentTab) return '';
       const newTab = buildHistoryChatTab(currentTab, historyTabId, title, historyRepo);
-      deps.setTabs((previous) => {
-        if (previous.some((tab) => tab.id === historyTabId)) {
-          deps.setActiveTabId(historyTabId);
-          return previous;
-        }
-        return [...previous, newTab];
-      });
+      const previous = deps.tabsRef.current;
+      const nextTabs = previous.some((tab) => tab.id === historyTabId)
+        ? previous
+        : [...previous, newTab];
+      deps.tabsRef.current = nextTabs;
+      deps.setTabs(nextTabs);
       deps.setActiveTabId(historyTabId);
+      deps.persistTabsNow(nextTabs, historyTabId);
       return historyTabId;
     },
     injectIntoCliChat: (text, options) => (

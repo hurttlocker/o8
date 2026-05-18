@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/refs -- useWorkspaceTerminalController returns render state and stable refs through one controller object. */
 
 import { forwardRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
@@ -21,6 +22,9 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       spawnOrchestratorTab: controller.spawnOrchestratorTab,
       updateTabMode: controller.handleUpdateTabMode,
     }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnOrchestratorTab, controller.spawnSingleRuntimeTab]);
+    const conversationTabsOnly = controller.visibleTabs.length > 0
+      && controller.visibleTabs.every((tab) => tab.kind === 'orchestrator' || tab.kind === 'llm-chat');
+    const showTabBar = props.conversationNavigation !== 'sidebar' || !conversationTabsOnly;
 
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
@@ -191,21 +195,23 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           </motion.div>
         ) : null}
 
-        <TabBar
-          tabs={controller.visibleTabs}
-          activeTabId={controller.effectiveActiveTabId}
-          launchRequestKey={controller.launchRequestKey}
-          onSelectTab={controller.handleSelectTab}
-          onCloseTab={controller.handleCloseTab}
-          onNewTab={controller.handleNewTab}
-          onNewLLMChatTab={controller.handleNewLLMChatTab}
-          scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
-          onSplitVertical={props.onSplitVertical}
-          onSplitHorizontal={props.onSplitHorizontal}
-          canCloseTile={props.canCloseTile}
-          onCloseTile={props.onCloseTile}
-          onReorderTabs={controller.handleReorderTabs}
-        />
+        {showTabBar ? (
+          <TabBar
+            tabs={controller.visibleTabs}
+            activeTabId={controller.effectiveActiveTabId}
+            launchRequestKey={controller.launchRequestKey}
+            onSelectTab={controller.handleSelectTab}
+            onCloseTab={controller.handleCloseTab}
+            onNewTab={controller.handleNewTab}
+            onNewLLMChatTab={controller.handleNewLLMChatTab}
+            scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
+            onSplitVertical={props.onSplitVertical}
+            onSplitHorizontal={props.onSplitHorizontal}
+            canCloseTile={props.canCloseTile}
+            onCloseTile={props.onCloseTile}
+            onReorderTabs={controller.handleReorderTabs}
+          />
+        ) : null}
 
         <WorkspaceTerminalPanels
           visibleTabs={controller.visibleTabs}

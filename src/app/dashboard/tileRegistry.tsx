@@ -278,6 +278,7 @@ export function createTileRegistry({
             stateScope={tileId}
             defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
             autoCreateDefaultTab={tileId === 'tile-root' || workspaceScopeEntries.length > 0}
+            conversationNavigation={tileId === 'tile-root' ? 'sidebar' : 'tabs'}
             preferredRepo={tilePreferredRepo}
             splitCreated={content.kind === 'terminal' ? effectiveSplitCreated : false}
             availableRepos={workspaceScopeEntries}

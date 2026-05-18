@@ -941,15 +941,15 @@ export function useWorkspaceTerminalController(
     historyRepo?: { name?: string; localPath?: string; branch?: string | null; remoteUrl?: string | null } | null,
   ) => {
     const newTab = buildHistoryChatTab(currentTab, historyTabId, title, historyRepo);
-    setTabs((previous) => {
-      if (previous.some((tab) => tab.id === historyTabId)) {
-        setActiveTabIdFromUser(historyTabId);
-        return previous;
-      }
-      return [...previous, newTab];
-    });
+    const previous = tabsRef.current;
+    const nextTabs = previous.some((tab) => tab.id === historyTabId)
+      ? previous
+      : [...previous, newTab];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
     setActiveTabIdFromUser(historyTabId);
-  }, [setActiveTabIdFromUser]);
+    persistTabsNow(nextTabs, historyTabId);
+  }, [persistTabsNow, setActiveTabIdFromUser]);
 
   return {
     activeCheckpoint,
