@@ -14,8 +14,9 @@ import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mob
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import { launchCodexFromMobile, performRuntimeAction } from '@/lib/runtime/actions';
+import { launchCodexFromMobile, launchRuntimeSurface, performRuntimeAction } from '@/lib/runtime/actions';
 import { writePersistedLlmChat, type PersistedLlmChatHistory, type PersistedLlmChatMessage } from '@/lib/llm/chat-history-store';
+import type { RuntimeId } from '@/lib/runtimes';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 
@@ -417,14 +418,15 @@ export async function POST(request: NextRequest) {
       } else if (continuation?.kind === 'runtime' && action === 'approve') {
         try {
           if (continuation.action === 'launch' && continuation.prompt) {
-            const rt = getRuntime(continuation.runtimeId);
-            if (rt) {
-              const result = await rt.launch({
-                cwd: continuation.cwd || process.cwd(),
-                prompt: continuation.prompt,
-              });
-              decisionNote = result.note;
-            }
+            const cwd = continuation.cwd || process.cwd();
+            const result = await launchRuntimeSurface({
+              runtime: continuation.runtimeId as RuntimeId,
+              cwd,
+              repoPath: cwd,
+              prompt: continuation.prompt,
+              skipSetup: true,
+            });
+            decisionNote = result.note;
           } else if (continuation.action === 'resume' && continuation.message) {
             const rt = getRuntime(continuation.runtimeId);
             if (rt) {

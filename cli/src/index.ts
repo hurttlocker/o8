@@ -28,6 +28,7 @@ import { runPacketReport } from './commands/packet/report.js';
 import { runPacketReview } from './commands/packet/review.js';
 import { runPacketScope } from './commands/packet/scope.js';
 import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
+import { runTaskBrief, runTaskList } from './commands/task.js';
 import { printError, type OutputMode } from './output.js';
 import { CliError, EXIT } from './api.js';
 
@@ -80,6 +81,8 @@ commands:
   status               snapshot: running packets, lanes, merges, approvals
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
+  task list            current task pool grouped by ready/running/review/etc.
+  task brief <id>      project-backed task brief for a packet or lane
   packet info          info about the packet bound to the current worktree
   packet scope [id]    one-call worker context (auto-resolves from cwd)
   packet heartbeat     update the current packet lane heartbeat
@@ -128,6 +131,11 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'lane': {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
       throw unknownSubcommandError('lane', secondary);
+    }
+    case 'task': {
+      if (secondary === 'list') return runTaskList(args.mode, args.rest);
+      if (secondary === 'brief') return runTaskBrief(args.mode, args.rest);
+      throw unknownSubcommandError('task', secondary);
     }
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode);

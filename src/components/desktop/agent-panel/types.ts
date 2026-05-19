@@ -179,6 +179,8 @@ export interface AgentPanelProps {
   activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | null;
   onFocusOrchestratorTab?: () => void;
   onFocusAssistantTab?: () => void;
+  onOpenCommandPalette?: () => void;
+  onOpenProjectManagement?: () => void;
   selectedRepoReadiness?: RepoReadiness | null;
   onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   onLaunchWorkspaceTask?: (request: RepoTaskLaunchRequest) => Promise<void>;

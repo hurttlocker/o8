@@ -259,6 +259,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
       const lane = createLane({
         repoPath: command.repoPath,
+        projectId: command.projectId,
         branch: command.branch,
         baseBranch: command.baseBranch,
         runtime: command.runtime,
@@ -300,6 +301,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           runtime: lane.runtime,
           prompt: command.prompt,
           repoPath: lane.worktreePath ?? lane.repoPath,
+          projectRepoPath: lane.repoPath,
           // Bind the worktree to the lane's branch so the agent lands on
           // the correct branch from turn 0. Without this the manager fell
           // back to `worktree/<agent>/<slug>` and the agent had to self-
@@ -440,6 +442,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           runtime: lane.runtime,
           prompt,
           repoPath: lane.worktreePath ?? lane.repoPath,
+          projectRepoPath: lane.repoPath,
           baseBranch: lane.baseBranch,
           isolate: false,
           skipSetup: true,

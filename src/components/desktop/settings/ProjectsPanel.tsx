@@ -21,20 +21,19 @@
 
 import { useState } from 'react';
 import {
-  HairlineRule,
   RamsButton,
-  SectionLabel,
-  TabBreadcrumb,
-  TabHeading,
 } from './shared';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_ACCENT,
   RAMS_HAIRLINE,
+  RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   PlusGlyph,
   type ConfirmKind,
+  type ProjectContextView,
+  type ProjectLockView,
 } from './projects/shared';
 import { OrgSuggestionStrip } from './projects/OrgSuggestionStrip';
 import { ProjectCard } from './projects/ProjectCard';
@@ -47,6 +46,8 @@ export function ProjectsPanel() {
     projects,
     repos,
     reposById,
+    runtimeContext,
+    projectLocks,
     orgSuggestions,
     loading,
     topError,
@@ -54,6 +55,7 @@ export function ProjectsPanel() {
     submitCreate,
     submitEdit,
     handleDelete,
+    handleArchiveLock,
     handleDismissSuggestion,
     handleGroupSuggestion,
   } = data;
@@ -70,14 +72,80 @@ export function ProjectsPanel() {
       paddingLeft: 8,
       paddingRight: 32,
       paddingBottom: 40,
-      maxWidth: 880,
+      maxWidth: 820,
       fontFamily: APP_FONT_STACK,
     }}>
-      <TabBreadcrumb tab="projects" />
-      <TabHeading
-        title="projects"
-        subtitle="Group repos that belong to the same product. Decisions in one cascade through all of them — directives, outcomes, and dispatches scope to the project."
-      />
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 24,
+        marginBottom: 22,
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: '0.2em',
+            textTransform: 'uppercase',
+            color: RAMS_INK_QUIET,
+            marginBottom: 14,
+          }}>
+            Settings / Projects
+          </div>
+          <h1 style={{
+            margin: 0,
+            fontFamily: APP_FONT_STACK,
+            fontSize: 32,
+            lineHeight: 1.08,
+            letterSpacing: '-0.045em',
+            color: 'var(--t-text)',
+          }}>
+            Projects
+          </h1>
+          <p style={{
+            marginTop: 10,
+            marginBottom: 0,
+            maxWidth: 560,
+            fontFamily: APP_FONT_STACK,
+            fontSize: 14,
+            lineHeight: 1.55,
+            color: 'var(--t-text-secondary)',
+          }}>
+            A project is the shared context for a product: multiple repositories, standing instructions, and attached files.
+          </p>
+        </div>
+
+        {!isAnythingOpen ? (
+          <RamsButton
+            onClick={() => {
+              setEditingProjectId(null);
+              setCreating(true);
+            }}
+            icon={<PlusGlyph size={11} />}
+          >
+            New project
+          </RamsButton>
+        ) : null}
+      </div>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+        gap: 10,
+        marginBottom: 22,
+      }}>
+        <ProjectCapability label="Repositories" value={`${repos.length} available`} />
+        <ProjectCapability label="Context" value={runtimeContext ? `${runtimeContext.repos.length} scoped` : 'Resolving'} />
+        <ProjectCapability
+          label="Locks"
+          value={`${projectLocks.length} active${projectLocks.some((lock) => lock.stale) ? ' / stale' : ''}`}
+          muted={projectLocks.length === 0}
+        />
+      </div>
+
+      <RuntimeContextPanel context={runtimeContext} locks={projectLocks} />
 
       {topError ? (
         <div style={{
@@ -100,23 +168,14 @@ export function ProjectsPanel() {
       ) : null}
 
       <section>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 12 }}>
-          <SectionLabel number="01">PROJECTS</SectionLabel>
-          {!isAnythingOpen ? (
-            <RamsButton onClick={() => setCreating(true)} icon={<PlusGlyph size={11} />}>
-              New project
-            </RamsButton>
-          ) : null}
-        </div>
-
         {loading ? (
           <div style={{ paddingTop: 20, paddingBottom: 20, color: RAMS_INK_QUIET, fontSize: 13 }}>
-            Loading…
+            Loading...
           </div>
         ) : (
           <>
             {orgSuggestions.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
                 {orgSuggestions.map((suggestion) => (
                   <OrgSuggestionStrip
                     key={suggestion.fingerprint}
@@ -130,17 +189,19 @@ export function ProjectsPanel() {
             ) : null}
 
             {creating ? (
-              <ProjectForm
-                mode="create"
-                initial={emptyFormState()}
-                repos={repos}
-                busy={busyKey === 'create'}
-                onCancel={() => setCreating(false)}
-                onSubmit={async (state) => {
-                  await submitCreate(state, 'manual');
-                  setCreating(false);
-                }}
-              />
+              <div style={{ marginBottom: 16 }}>
+                <ProjectForm
+                  mode="create"
+                  initial={emptyFormState()}
+                  repos={repos}
+                  busy={busyKey === 'create'}
+                  onCancel={() => setCreating(false)}
+                  onSubmit={async (state) => {
+                    await submitCreate(state, 'manual');
+                    setCreating(false);
+                  }}
+                />
+              </div>
             ) : null}
 
             {projects.length === 0 && !creating ? (
@@ -148,16 +209,23 @@ export function ProjectsPanel() {
             ) : null}
 
             {projects.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: creating ? 14 : 0 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {projects.map((project) => {
                   const isEditing = editingProjectId === project.id;
                   const isDeleting = busyKey === `delete:${project.id}`;
                   const pendingConfirm = confirm?.kind === 'delete' && confirm.projectId === project.id;
+                  const locksForProject = projectLocks.filter((lock) => (
+                    lock.projectId === project.id
+                    || lock.runtimeProjectId === project.id
+                    || lock.projectName.toLowerCase() === project.name.toLowerCase()
+                  ));
                   return (
                     <ProjectCard
                       key={project.id}
                       project={project}
                       reposById={reposById}
+                      locks={locksForProject}
+                      onArchiveLock={(laneId) => { void handleArchiveLock(laneId); }}
                       onEdit={() => {
                         setCreating(false);
                         setEditingProjectId(project.id);
@@ -165,6 +233,9 @@ export function ProjectsPanel() {
                       onDelete={() => { void handleDelete(project.id); }}
                       isEditing={isEditing}
                       isDeleting={isDeleting}
+                      archivingLaneId={busyKey?.startsWith('archive-lock:')
+                        ? busyKey.slice('archive-lock:'.length)
+                        : null}
                       pendingConfirm={pendingConfirm}
                       onRequestConfirm={() => setConfirm({ kind: 'delete', projectId: project.id })}
                       onCancelConfirm={() => setConfirm(null)}
@@ -185,11 +256,199 @@ export function ProjectsPanel() {
             ) : null}
           </>
         )}
-
-        <div style={{ marginTop: 28 }}>
-          <HairlineRule />
-        </div>
       </section>
+    </div>
+  );
+}
+
+function RuntimeContextPanel({
+  context,
+  locks,
+}: {
+  context: ProjectContextView | null;
+  locks: ProjectLockView[];
+}) {
+  const staleCount = locks.filter((lock) => lock.stale).length;
+
+  return (
+    <section
+      style={{
+        borderRadius: 12,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: RAMS_HAIRLINE_SOFT,
+        paddingTop: 14,
+        paddingRight: 16,
+        paddingBottom: 14,
+        paddingLeft: 16,
+        marginBottom: 20,
+        background: 'color-mix(in srgb, var(--t-panel-solid, #fff) 72%, transparent)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 10,
+            fontWeight: 650,
+            letterSpacing: '0.16em',
+            textTransform: 'uppercase',
+            color: RAMS_INK_QUIET,
+            marginBottom: 8,
+          }}>
+            Runtime context
+          </div>
+          <div style={{
+            fontFamily: APP_FONT_STACK,
+            fontSize: 16,
+            fontWeight: 650,
+            color: 'var(--t-text)',
+            letterSpacing: '-0.02em',
+          }}>
+            {context?.name ?? 'Resolving project'}
+          </div>
+        </div>
+        <div style={{
+          fontFamily: MONO_FONT_STACK,
+          fontSize: 10,
+          fontWeight: 650,
+          letterSpacing: '0.1em',
+          textTransform: 'uppercase',
+          color: staleCount > 0 ? '#b45309' : RAMS_INK_QUIET,
+          whiteSpace: 'nowrap',
+        }}>
+          {locks.length} locks{staleCount > 0 ? ` / ${staleCount} stale` : ''}
+        </div>
+      </div>
+
+      {context ? (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+            {context.repos.map((repo) => (
+              <span
+                key={repo.id}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  minHeight: 24,
+                  padding: '4px 8px',
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: repo.isPrimary
+                    ? 'rgba(37, 99, 235, 0.24)'
+                    : repo.isCurrent
+                      ? 'rgba(249, 115, 22, 0.22)'
+                      : RAMS_HAIRLINE_SOFT,
+                  background: repo.isPrimary
+                    ? 'rgba(37, 99, 235, 0.055)'
+                    : repo.isCurrent
+                      ? 'rgba(249, 115, 22, 0.045)'
+                      : 'transparent',
+                  color: repo.isPrimary ? '#1d4ed8' : 'var(--t-text-secondary)',
+                  fontFamily: APP_FONT_STACK,
+                  fontSize: 12,
+                  fontWeight: repo.isPrimary ? 650 : 500,
+                }}
+              >
+                {repo.name}
+                {repo.isPrimary ? (
+                  <span style={{
+                    fontFamily: MONO_FONT_STACK,
+                    fontSize: 9,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    color: RAMS_INK_QUIET,
+                  }}>
+                    main
+                  </span>
+                ) : repo.isCurrent ? (
+                  <span style={{
+                    fontFamily: MONO_FONT_STACK,
+                    fontSize: 9,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    color: '#c2410c',
+                  }}>
+                    current
+                  </span>
+                ) : null}
+                {repo.role ? (
+                  <span style={{
+                    fontFamily: MONO_FONT_STACK,
+                    fontSize: 9,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    color: RAMS_INK_QUIET,
+                  }}>
+                    {repo.role}
+                  </span>
+                ) : null}
+              </span>
+            ))}
+          </div>
+
+          <div style={{
+            fontFamily: APP_FONT_STACK,
+            fontSize: 12.5,
+            lineHeight: 1.45,
+            color: 'var(--t-text-secondary)',
+          }}>
+            {context.instructions ? 'Project instructions are active in worker context.' : 'No project instructions yet. Add them on the project card before dispatching cross-repo work.'}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          marginTop: 12,
+          fontFamily: APP_FONT_STACK,
+          fontSize: 12.5,
+          lineHeight: 1.45,
+          color: RAMS_INK_QUIET,
+        }}>
+          The app is resolving the active project context.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ProjectCapability({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+  return (
+    <div style={{
+      borderRadius: 10,
+      borderWidth: 1,
+      borderStyle: 'solid',
+      borderColor: RAMS_HAIRLINE_SOFT,
+      paddingTop: 12,
+      paddingRight: 12,
+      paddingBottom: 12,
+      paddingLeft: 12,
+      background: 'transparent',
+      minWidth: 0,
+    }}>
+      <div style={{
+        fontFamily: MONO_FONT_STACK,
+        fontSize: 9.5,
+        fontWeight: 600,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        color: RAMS_INK_QUIET,
+        marginBottom: 5,
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontFamily: APP_FONT_STACK,
+        fontSize: 13,
+        fontWeight: 600,
+        color: muted ? RAMS_INK_QUIET : 'var(--t-text)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
+        {value}
+      </div>
     </div>
   );
 }

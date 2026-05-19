@@ -164,16 +164,20 @@ interface DocRow {
 function buildScope(input: RetrieverInput) {
   const active = getActiveProjectScopeForRepoSync(input.repoPath);
   const explicitRepoPath = input.repoPath?.trim();
+  const normalizedExplicitRepoPath = explicitRepoPath ? path.resolve(explicitRepoPath) : null;
+  const projectRepoPaths = active.repoPaths.map((repoPath) => path.resolve(repoPath));
   const repoPaths = explicitRepoPath
-    ? (active.repoInActiveProject ? [path.resolve(explicitRepoPath)] : [])
-    : active.repoPaths.map((repoPath) => path.resolve(repoPath));
+    ? (active.repoInActiveProject ? projectRepoPaths : [])
+    : projectRepoPaths;
   const repoNames = new Set(repoPaths.map((repoPath) => basename(repoPath).toLowerCase()));
+  const primaryRepoPath = active.repoInActiveProject ? normalizedExplicitRepoPath : null;
+  const primaryRepoName = primaryRepoPath ? basename(primaryRepoPath).toLowerCase() : null;
   const directiveScope: DirectiveProjectScope = {
     projectIds: new Set([active.projectId.toLowerCase()]),
     projectSlugs: new Set([active.projectSlug.toLowerCase()]),
     repoInActiveProject: active.repoInActiveProject,
   };
-  return { repoPaths: new Set(repoPaths), repoNames, directiveScope };
+  return { repoPaths: new Set(repoPaths), repoNames, primaryRepoPath, primaryRepoName, directiveScope };
 }
 
 function pathInScope(repoPath: string | null | undefined, scopedPaths: Set<string>): boolean {
@@ -192,6 +196,30 @@ function repoFullNameInScope(fullName: string | null | undefined, repoNames: Set
   if (!normalized) return false;
   const name = normalized.split('/').pop() ?? normalized;
   return repoNames.has(name);
+}
+
+function repoPathScoreMultiplier(
+  repoPath: string | null | undefined,
+  scope: ReturnType<typeof buildScope>,
+): number {
+  if (!scope.primaryRepoPath) return 1;
+  if (!repoPath?.trim()) return 1;
+  try {
+    return path.resolve(repoPath) === scope.primaryRepoPath ? 1.2 : 0.88;
+  } catch {
+    return 1;
+  }
+}
+
+function repoNameScoreMultiplier(
+  repoName: string | null | undefined,
+  scope: ReturnType<typeof buildScope>,
+): number {
+  if (!scope.primaryRepoName) return 1;
+  const normalized = repoName?.trim().toLowerCase();
+  if (!normalized) return 1;
+  const name = normalized.split('/').pop() ?? normalized;
+  return name === scope.primaryRepoName ? 1.2 : 0.88;
 }
 
 function readDirective(id: string): ParsedDirective | null {
@@ -323,7 +351,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
         const record = byId.get(id);
         if (!record) return;
         const hit = outcomesHits.get(id)!;
-        const score = 1 / (RRF_K + idx);
+        const score = (1 / (RRF_K + idx)) * repoPathScoreMultiplier(record.repo_path, scope);
         accumulate(`outcome:${id}`, score, {
           citation: {
             kind: 'outcome',
@@ -364,7 +392,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
           const record = byId.get(id);
           if (!record) return;
           const hit = prsHits.get(id)!;
-          const score = 1 / (RRF_K + idx);
+          const score = (1 / (RRF_K + idx)) * repoNameScoreMultiplier(record.repo_full_name, scope);
           accumulate(`pr:${id}`, score, {
             citation: {
               kind: 'pr',
@@ -407,7 +435,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
           const record = byId.get(id);
           if (!record) return;
           const hit = issuesHits.get(id)!;
-          const score = 1 / (RRF_K + idx);
+          const score = (1 / (RRF_K + idx)) * repoNameScoreMultiplier(record.repo_full_name, scope);
           accumulate(`issue:${id}`, score, {
             citation: {
               kind: 'issue',
@@ -450,7 +478,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
         const record = byId.get(id);
         if (!record) return;
         const hit = docsHits.get(id)!;
-        const score = 1 / (RRF_K + idx);
+        const score = (1 / (RRF_K + idx)) * repoNameScoreMultiplier(record.repo_name, scope);
         accumulate(`doc:${id}`, score, {
           citation: {
             kind: 'doc',
@@ -531,7 +559,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
           const record = byId.get(id);
           if (!record) return;
           const hit = commentsHits.get(id)!;
-          const score = 1 / (RRF_K + idx);
+          const score = (1 / (RRF_K + idx)) * repoNameScoreMultiplier(record.repo_full_name, scope);
           accumulate(`comment:${id}`, score, {
             citation: {
               kind: 'comment',

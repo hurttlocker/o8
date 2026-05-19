@@ -129,6 +129,7 @@ const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignMode
 const LazyO8Panel = lazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })));
 // #888/#895 — packet-mode right panel (Spec / Agent Overview / Changes).
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
+import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
 import { TileContainer } from '@/components/desktop/TileContainer';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import {
@@ -162,7 +163,7 @@ const MIN_O8_PANEL_WIDTH = 400;
 const MAX_O8_PANEL_WIDTH = 1200;
 const COMPACT_SHELL_MEDIA_QUERY = '(max-width: 980px)';
 const O8_ACTIVE_TAB_STORAGE_KEY = 'o8ActiveTab';
-const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'pulse';
+const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'activity';
 
 function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
   if (!raw) return null;
@@ -174,7 +175,6 @@ function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
     || raw === 'activity'
     || raw === 'inbox'
     || raw === 'spec'
-    || raw === 'pulse'
   ) {
     return raw;
   }
@@ -2505,7 +2505,6 @@ function DashboardInner() {
           if (!chatVisible) setChatVisible(true);
           setRightPanelMode('chat');
         }}
-        onOpenCommandPalette={handlePaletteOpen}
       />
 
       <ApprovalBanner />
@@ -2789,6 +2788,8 @@ function DashboardInner() {
                 window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
               }
             }}
+            onOpenCommandPalette={handlePaletteOpen}
+            onOpenProjectManagement={() => handleOpenSettingsTab('projects')}
             selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
             onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
             onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
@@ -3073,7 +3074,7 @@ function DashboardInner() {
                         onSelectedPacketChange={setSelectedPacketId}
             onOpenO8Panel={handleOpenO8Panel}
                       >
-                        <></>
+                        <ReviewPanel repoPath={currentO8RepoPath} />
                       </OrchestratorDataProvider>
                     </Suspense>
                   </motion.div>

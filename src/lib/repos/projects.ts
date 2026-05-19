@@ -184,8 +184,11 @@ export interface ActiveProjectScope {
 
 export function getActiveProjectScopeForRepoSync(repoPath?: string | null): ActiveProjectScope {
   const ledger = getProjectsLedgerSync();
-  const project = ledger.projects.find((candidate) => candidate.id === ledger.activeProjectId)
+  const activeProject = ledger.projects.find((candidate) => candidate.id === ledger.activeProjectId)
     ?? ledger.projects[0]!;
+  const project = repoPath
+    ? ledger.projects.find((candidate) => repoPathBelongsToProject(candidate, repoPath)) ?? activeProject
+    : activeProject;
   const repoInActiveProject = repoPath ? repoPathBelongsToProject(project, repoPath) : false;
   return {
     project,
@@ -198,8 +201,11 @@ export function getActiveProjectScopeForRepoSync(repoPath?: string | null): Acti
 
 export async function getActiveProjectScopeForRepo(repoPath?: string | null): Promise<ActiveProjectScope> {
   const ledger = await getProjectsLedger();
-  const project = ledger.projects.find((candidate) => candidate.id === ledger.activeProjectId)
+  const activeProject = ledger.projects.find((candidate) => candidate.id === ledger.activeProjectId)
     ?? ledger.projects[0]!;
+  const project = repoPath
+    ? ledger.projects.find((candidate) => repoPathBelongsToProject(candidate, repoPath)) ?? activeProject
+    : activeProject;
   const repoInActiveProject = repoPath ? repoPathBelongsToProject(project, repoPath) : false;
   return {
     project,
@@ -291,6 +297,51 @@ export async function setProjectRepos(projectId: string, repoPaths: string[]): P
   const next: ProjectsLedger = {
     ...ledger,
     projects: ledger.projects.map((p) => (p.id === projectId ? { ...p, repoPaths: normalized } : p)),
+  };
+  await writeLedger(next);
+  return next;
+}
+
+export async function upsertProjectLedgerRecord(input: {
+  id?: string | null;
+  name: string;
+  slug?: string | null;
+  repoPaths: string[];
+}): Promise<ProjectsLedger> {
+  const ledger = await getProjectsLedger();
+  const normalized = Array.from(new Set(input.repoPaths.map(normalizeRepoPath)));
+  const targetSlug = input.slug?.trim() || projectNameToSlug(input.name);
+  const existingIndex = ledger.projects.findIndex((project) => (
+    (input.id && project.id === input.id)
+    || projectNameToSlug(project.name) === targetSlug
+    || project.name.toLowerCase() === input.name.toLowerCase()
+  ));
+
+  if (existingIndex >= 0) {
+    const nextProjects = ledger.projects.map((project, index) => (
+      index === existingIndex
+        ? {
+            ...project,
+            repoPaths: normalized,
+          }
+        : project
+    ));
+    const next: ProjectsLedger = { ...ledger, projects: nextProjects };
+    await writeLedger(next);
+    return next;
+  }
+
+  const used = new Set<ProjectColor | undefined>(ledger.projects.map((project) => project.color));
+  const project: ProjectRecord = {
+    id: input.id?.trim() || makeId(),
+    name: input.name.trim(),
+    repoPaths: normalized,
+    createdAt: nowIso(),
+    color: pickAutoColor(used),
+  };
+  const next: ProjectsLedger = {
+    ...ledger,
+    projects: [...ledger.projects, project],
   };
   await writeLedger(next);
   return next;

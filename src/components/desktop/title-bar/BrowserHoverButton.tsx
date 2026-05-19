@@ -97,7 +97,6 @@ export function BrowserHoverButton({
         initial={false}
         animate={active ? 'active' : 'rest'}
         whileHover="hover"
-        whileTap="tap"
         variants={{
           rest: {
             background: 'rgba(0, 0, 0, 0)',
@@ -111,18 +110,17 @@ export function BrowserHoverButton({
             background: 'var(--t-panel-active, var(--t-input-bg))',
             color: 'var(--t-brand-orange, #FF5A1F)',
           },
-          tap: {},
         }}
-        transition={{ type: 'spring', stiffness: 460, damping: 26, mass: 0.6 }}
+        transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 32,
-          height: 32,
+          width: 28,
+          height: 28,
           padding: 0,
           border: 'none',
-          borderRadius: 8,
+          borderRadius: 7,
           cursor: 'pointer',
           flexShrink: 0,
           WebkitTapHighlightColor: 'transparent',
@@ -131,12 +129,11 @@ export function BrowserHoverButton({
       >
         <motion.span
           variants={{
-            rest: { rotate: 0, scale: 1 },
-            hover: { rotate: 18, scale: 1.06 },
-            tap: { scale: 0.88 },
-            active: { rotate: 8, scale: 1.04 },
+            rest: { opacity: 1 },
+            hover: { opacity: 1 },
+            active: { opacity: 1 },
           }}
-          transition={{ type: 'spring', stiffness: 420, damping: 20, mass: 0.6 }}
+          transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
           style={{ display: 'inline-flex' }}
         >
           <GlobeSimple size={16} weight="bold" color={active ? 'var(--t-brand-orange, #FF5A1F)' : 'currentColor'} />

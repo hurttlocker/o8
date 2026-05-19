@@ -12,6 +12,8 @@ import {
   resolveApproval,
 } from '@/lib/approvals/store';
 import type { CreateApprovalInput } from '@/lib/approvals/types';
+import { launchRuntimeSurface } from '@/lib/runtime/actions';
+import type { RuntimeId } from '@/lib/runtimes';
 import { getRuntime } from '@/lib/runtimes/registry';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -274,11 +276,15 @@ export async function POST(request: NextRequest) {
     } else if (continuation?.kind === 'runtime' && action === 'approve') {
       // Runtime continuation — launch or resume the session
       if (continuation.action === 'launch' && continuation.prompt) {
-        const rt = getRuntime(continuation.runtimeId);
-        if (rt) {
-          const result = await rt.launch({ cwd: continuation.cwd || process.cwd(), prompt: continuation.prompt });
-          decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
-        }
+        const cwd = continuation.cwd || process.cwd();
+        const result = await launchRuntimeSurface({
+          runtime: continuation.runtimeId as RuntimeId,
+          cwd,
+          repoPath: cwd,
+          prompt: continuation.prompt,
+          skipSetup: true,
+        });
+        decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
       } else if (continuation.action === 'resume' && continuation.message) {
         const rt = getRuntime(continuation.runtimeId);
         if (rt) {

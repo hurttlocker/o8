@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { removeRepoFromProject, setRepoRole } from '@/lib/projects/store';
+import { getProjectWithRepos, removeRepoFromProject, setRepoRole } from '@/lib/projects/store';
+import { syncPanelLedgerFromProjectStore } from '@/lib/projects/context';
 import type { ProjectRole } from '@/lib/projects/types';
 
 export const runtime = 'nodejs';
@@ -19,6 +20,10 @@ export async function DELETE(
   const removed = removeRepoFromProject(id, repoId);
   if (!removed) {
     return NextResponse.json({ error: 'Project repo link not found.' }, { status: 404 });
+  }
+  const project = getProjectWithRepos(id);
+  if (project) {
+    await syncPanelLedgerFromProjectStore(project);
   }
   return NextResponse.json({ ok: true }, { headers: NO_STORE });
 }
@@ -53,6 +58,10 @@ export async function PATCH(
   const link = setRepoRole(id, repoId, role);
   if (!link) {
     return NextResponse.json({ error: 'Project repo link not found.' }, { status: 404 });
+  }
+  const project = getProjectWithRepos(id);
+  if (project) {
+    await syncPanelLedgerFromProjectStore(project);
   }
   return NextResponse.json({ link }, { headers: NO_STORE });
 }
