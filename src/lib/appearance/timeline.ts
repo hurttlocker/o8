@@ -1,8 +1,30 @@
 export const TIMELINE_VISIBLE_STORAGE_KEY = 'o8:appearance:timeline-visible';
 export const TIMELINE_VISIBLE_EVENT = 'cortex:timeline-visible-changed';
 
+// #1094 — default the timeline off. Fresh users already see it hidden
+// (the read below returns false unless stored === '1'); this one-time
+// migration flips existing users who toggled it on at some point in the past.
+// Operators can re-toggle from the appearance toggle; the migration only
+// runs once per browser/profile (flagged by TIMELINE_DEFAULT_OFF_MIGRATION_KEY).
+const TIMELINE_DEFAULT_OFF_MIGRATION_KEY = 'o8:appearance:timeline-default-off-migrated';
+
+let migrationApplied = false;
+function applyDefaultOffMigrationOnce() {
+  if (migrationApplied || typeof window === 'undefined') return;
+  migrationApplied = true;
+  try {
+    if (window.localStorage.getItem(TIMELINE_DEFAULT_OFF_MIGRATION_KEY) !== '1') {
+      window.localStorage.setItem(TIMELINE_VISIBLE_STORAGE_KEY, '0');
+      window.localStorage.setItem(TIMELINE_DEFAULT_OFF_MIGRATION_KEY, '1');
+    }
+  } catch {
+    // Never block the read on a storage failure.
+  }
+}
+
 export function readTimelineVisible() {
   if (typeof window === 'undefined') return false;
+  applyDefaultOffMigrationOnce();
   try {
     const stored = window.localStorage.getItem(TIMELINE_VISIBLE_STORAGE_KEY);
     return stored === '1';
