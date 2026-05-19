@@ -614,6 +614,7 @@ async function sendToOpenclawOrchestrator(
   const thinking = thinkingFlag(options.thinkingEffort);
   if (thinking) args.push('--thinking', thinking);
   if (options.model?.trim()) args.push('--model', options.model.trim());
+  console.log(`[openclaw-diag] spawn args: ${args.map((a, i) => (args[i - 1] === '--message' ? `<message ${fullMessage.length} chars>` : a)).join(' ')}`);
 
   return new Promise<void>((promiseResolve, promiseReject) => {
     const proc = spawn(openclawBin, args, {
@@ -685,6 +686,10 @@ async function sendToOpenclawOrchestrator(
         }
       }
 
+      console.log(`[openclaw-diag] close: code=${code} stdoutBytes=${stdout.length} stderrBytes=${stderr.length} parsed=${parsed ? 'OK' : 'NULL'}`);
+      console.log(`[openclaw-diag] stdout head: ${JSON.stringify(stdout.slice(0, 600))}`);
+      if (stderr.trim()) console.log(`[openclaw-diag] stderr head: ${JSON.stringify(stderr.slice(0, 600))}`);
+
       if (parsed) {
         // Gateway mode wraps the result — `{ status, result: { payloads, meta } }`;
         // the embedded path was flat. Unwrap `result` when present.
@@ -696,6 +701,7 @@ async function sendToOpenclawOrchestrator(
         if (!text && typeof resultBlock.meta?.finalAssistantVisibleText === 'string') {
           text = resultBlock.meta.finalAssistantVisibleText;
         }
+        console.log(`[openclaw-diag] resultBlock keys=[${Object.keys(resultBlock).join(',')}] payloads=${(resultBlock.payloads ?? []).length} textLen=${text.length}`);
         if (text) {
           onEvent({ type: 'text', text });
         } else if (code === 0) {
