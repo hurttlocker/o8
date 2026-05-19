@@ -20,7 +20,9 @@ import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
 import { ThemeProvider } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
-import { TitleBar } from '@/components/desktop/TitleBar';
+import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
+import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
+import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { useProjects } from '@/components/desktop/repo-registry/useProjects';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
@@ -1479,12 +1481,6 @@ function DashboardInner() {
     setChatVisible(true);
   }, [chatVisible]);
 
-  const handleToggleWorkspacePanel = useCallback(() => {
-    // Open the narrow workspace side panel (Changes / Git Log).
-    setRightPanelKind('review');
-    setChatVisible(true);
-  }, []);
-
   const handleToggleO8Panel = useCallback(() => {
     if (chatVisible && rightPanelKind === 'o8') {
       // o8 → collapsed. Keep kind=o8 so next click re-opens straight to O8
@@ -2483,30 +2479,6 @@ function DashboardInner() {
           DesktopWebSocketContext; this only adds the chrome surface. ── */}
       <ConnectionBanner connectionState={wsStatus} />
 
-      {/* ── Title Bar ── */}
-      <TitleBar
-        sidebarVisible={sidebarVisible}
-        onToggleSidebar={() => setSidebarVisible(v => !v)}
-        bottomPanelVisible={bottomPanelVisible}
-        onToggleBottomPanel={toggleContextualPanelTile}
-        workspacePanelVisible={showRightPanelColumn && rightPanelKind === 'review'}
-        onToggleWorkspacePanel={handleToggleWorkspacePanel}
-        o8PanelVisible={showRightPanelColumn && rightPanelKind === 'o8'}
-        onToggleO8Panel={handleToggleO8Panel}
-        browserActive={showRightPanelColumn && rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
-        o8ActiveTab={o8ActiveTab}
-        onO8TabChange={setO8ActiveTab}
-        browserPreviewUrl={o8BrowserHoverUrl}
-        onOpenBrowser={handleOpenBrowser}
-        compact={compactShell}
-        isAgentsSectionActive={activeNavSection === 'agents'}
-        onOpenAgents={() => {
-          setActiveNavSection('agents');
-          if (!chatVisible) setChatVisible(true);
-          setRightPanelMode('chat');
-        }}
-      />
-
       <ApprovalBanner />
 
       {/* DesignModeOverlay only renders the actual overlay when design mode
@@ -2743,6 +2715,11 @@ function DashboardInner() {
             position: 'relative',
           }}
         >
+          <LeftHeaderStrip
+            sidebarVisible={sidebarVisible}
+            onToggleSidebar={() => setSidebarVisible(v => !v)}
+          />
+          <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <GuidedDiscoveryHalo active={showAgentPanelFtux} borderRadius={20} />
           <GuidedDiscoveryCoachmark
             visible={showAgentPanelFtux}
@@ -2817,6 +2794,7 @@ function DashboardInner() {
             ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
             leftPanelFocus={leftPanelFocus}
           />
+          </div>
         </motion.div>
       );
       })()}
@@ -2864,6 +2842,20 @@ function DashboardInner() {
         marginLeft: workspaceInset,
         marginRight: workspaceInset,
       }}>
+        <WorkspaceHeaderStrip
+          leadingInset={!showSidebarColumn}
+          sidebarVisible={sidebarVisible}
+          onToggleSidebar={!showSidebarColumn && !compactShell ? () => setSidebarVisible(v => !v) : undefined}
+          isAgentsSectionActive={activeNavSection === 'agents'}
+          onOpenAgents={compactShell ? undefined : () => {
+            setActiveNavSection('agents');
+            if (!chatVisible) setChatVisible(true);
+            setRightPanelMode('chat');
+          }}
+          bottomPanelVisible={bottomPanelVisible}
+          onToggleBottomPanel={toggleContextualPanelTile}
+        />
+        <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
         <GuidedDiscoveryCoachmark
           visible={showCanvasFtux}
@@ -2925,6 +2917,7 @@ function DashboardInner() {
             </Suspense>
           </SettingsOverlay>
         )}
+        </div>
       </div>
 
       <AnimatePresence initial={false}>
@@ -2982,6 +2975,16 @@ function DashboardInner() {
                 marginRight: 4,
               }}
             >
+              <PanelHeaderStrip
+                o8PanelVisible={rightPanelKind === 'o8'}
+                workspacePanelVisible={rightPanelKind === 'review'}
+                onToggleO8Panel={handleToggleO8Panel}
+                o8ActiveTab={o8ActiveTab}
+                onO8TabChange={rightPanelKind === 'o8' ? setO8ActiveTab : undefined}
+                browserActive={rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
+                browserPreviewUrl={o8BrowserHoverUrl}
+                onOpenBrowser={handleOpenBrowser}
+              />
               <AnimatePresence initial={false} mode="wait">
                 {rightPanelKind === 'o8' ? (
                   <motion.div
