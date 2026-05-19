@@ -40,14 +40,6 @@ function IconActivity({ size = 16, color = '#e2e8f0' }: { size?: number; color?:
   );
 }
 
-function IconPulse({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <path d="M3 12h4l3-9 4 18 3-9h4" />
-    </svg>
-  );
-}
-
 function IconInbox({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
@@ -146,7 +138,6 @@ export function O8HeaderTabs({
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
     >
-      <O8HeaderTabButton icon={(color) => <IconPulse size={16} color={color} />} active={activeTab === 'pulse'} onClick={() => onTabChange('pulse')} label="Pulse" />
       <O8HeaderTabButton icon={(color) => <IconWorkspace size={16} color={color} />} active={activeTab === 'workspace'} onClick={() => onTabChange('workspace')} label="Workspace" />
       <O8HeaderDivider />
       <O8HeaderTabButton icon={(color) => <IconGitPullRequest size={16} color={color} />} active={activeTab === 'prs'} onClick={() => onTabChange('prs')} label="PRs" />

@@ -7,13 +7,13 @@
  * Modeled after Cursor 3's right panel, adapted for governance.
  */
 
+import { useEffect } from 'react';
 import { O8ActivityPane } from './O8ActivityPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8PRPane } from './O8PRPane';
 import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
-import { O8PulsePane } from './o8-panel/O8PulsePane';
-import { O8WorkspacePane } from './o8-panel/O8WorkspacePane';
+import { ReviewPanel } from './review/ReviewPanel';
 import type { O8Tab } from './o8-panel/types';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -45,13 +45,19 @@ interface O8PanelProps {
 
 // ── Main Component ──
 
-export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile: externalSelectedFile, browserUrl, onBrowserActiveUrlChange, onSelectedFileChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
-  const activeTab = externalTab ?? 'pulse';
-  const selectedFile = externalSelectedFile ?? null;
+export function O8Panel({ repoPath, registeredRepos = [], previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl, onBrowserActiveUrlChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
+  const activeTab = externalTab ?? 'activity';
 
-  const handleSelectedFileChange = (filePath: string) => {
-    onSelectedFileChange?.(filePath);
-  };
+  // Phase 3 — file paths clicked in agent chat dispatch `o8:open-file`;
+  // route them to the dashboard's openInspectorTab via the onOpenFile prop.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const path = (event as CustomEvent<{ path?: string }>).detail?.path;
+      if (typeof path === 'string' && path) onOpenFile?.(path);
+    };
+    window.addEventListener('o8:open-file', handler);
+    return () => window.removeEventListener('o8:open-file', handler);
+  }, [onOpenFile]);
 
   return (
     <div
@@ -66,7 +72,7 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, prev
     >
       {/* Tab content — all tabs stay mounted to preserve state */}
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'workspace' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8WorkspacePane repoPath={repoPath} registeredRepos={registeredRepos} onRepoPathChange={onRepoPathChange} selectedFile={selectedFile} onSelectedFileChange={handleSelectedFileChange} />
+        <ReviewPanel repoPath={repoPath} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
@@ -82,9 +88,6 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, prev
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'spec' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8SpecPane repoPath={repoPath} />
-      </div>
-      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'pulse' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8PulsePane repoSlug={repoSlug} onSelectCommit={onSelectCommit} onSelectPR={onSelectPR} onSelectIssue={onSelectIssue} />
       </div>
     </div>
   );
