@@ -86,15 +86,57 @@ export function ChatImage({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+const FILE_PATH_RE = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.(?:tsx?|jsx?|mjs|cjs|mts|cts|json|css|scss|md|mdx|rs|toml|ya?ml)$/;
+
+/** True when a string looks like a source file path or filename. */
+function isFilePath(value: string): boolean {
+  return FILE_PATH_RE.test(value.trim());
+}
+
+/**
+ * A file path mentioned in chat, rendered clickable. Clicking dispatches the
+ * `o8:open-file` window event — O8Panel listens and routes it to
+ * openInspectorTab, opening the file as a header tab (Phase 3).
+ */
+function FileLink({ path }: { path: string }) {
+  return (
+    <button
+      type="button"
+      onClick={() => window.dispatchEvent(new CustomEvent('o8:open-file', { detail: { path } }))}
+      title={`Open ${path}`}
+      style={{
+        fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+        fontSize: '0.92em',
+        paddingTop: 1,
+        paddingBottom: 1,
+        paddingLeft: 5,
+        paddingRight: 5,
+        borderRadius: 5,
+        border: 'none',
+        background: 'var(--t-accent-soft, rgba(37, 99, 235, 0.12))',
+        color: 'var(--t-accent, #2563eb)',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {path}
+    </button>
+  );
+}
+
 export function renderInline(text: string): React.ReactNode {
-  const parts = sanitizeTranscriptText(text).split(/(!\[[^\]]*\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
+  const parts = sanitizeTranscriptText(text).split(/(!\[[^\]]*\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\.(?:tsx?|jsx?|mjs|cjs|mts|cts|json|css|scss|md|mdx|rs|toml|ya?ml))/g);
   return parts.map((part, i) => {
     const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
     if (imgMatch) {
       return <ChatImage key={i} alt={imgMatch[1]} src={imgMatch[2]} />;
     }
     if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={i} className="remodex-rich-inline-code">{part.slice(1, -1)}</code>;
+      const codeText = part.slice(1, -1);
+      if (isFilePath(codeText)) {
+        return <FileLink key={i} path={codeText} />;
+      }
+      return <code key={i} className="remodex-rich-inline-code">{codeText}</code>;
     }
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={i}>{part.slice(2, -2)}</strong>;
@@ -107,6 +149,9 @@ export function renderInline(text: string): React.ReactNode {
           {linkMatch[1]}
         </a>
       );
+    }
+    if (isFilePath(part)) {
+      return <FileLink key={i} path={part} />;
     }
     return <span key={i}>{part}</span>;
   });
