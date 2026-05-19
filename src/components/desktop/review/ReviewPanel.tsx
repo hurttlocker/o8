@@ -3,7 +3,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight } from '../lucide-shims';
-import { splitUnifiedDiff, diffLineTone, type DiffLine } from '../o8-panel/diff-render';
+import { splitUnifiedDiff, diffLineTone, wordDiffSegments, type DiffLine, type WordSegment } from '../o8-panel/diff-render';
 import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
 import { ReviewGitActions } from './ReviewGitActions';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
@@ -86,11 +86,29 @@ const NUM_CELL: CSSProperties = {
   userSelect: 'none',
 };
 
-function UnifiedDiff({ lines, wrap }: { lines: DiffLine[]; wrap: boolean }) {
+/** Renders a diff line's text with word-level change segments highlighted. */
+function WordDiffText({ line, segments }: { line: DiffLine; segments: WordSegment[] }) {
+  const strong = line.kind === 'add'
+    ? 'color-mix(in srgb, var(--t-terminal-ansi-green, #16a34a) 40%, transparent)'
+    : 'color-mix(in srgb, var(--t-brand-red, #ef4444) 40%, transparent)';
+  return (
+    <>
+      <span>{line.text.slice(0, 1)}</span>
+      {segments.map((segment, index) => (
+        <span key={index} style={segment.changed ? { background: strong, borderRadius: 2 } : undefined}>
+          {segment.text}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function UnifiedDiff({ lines, wrap, segMap }: { lines: DiffLine[]; wrap: boolean; segMap: Map<DiffLine, WordSegment[]> | null }) {
   return (
     <div style={{ fontFamily: MONO_FONT, fontSize: 11, lineHeight: 1.55, background: 'var(--t-bg-card)', borderTop: '1px solid var(--t-divider-subtle)' }}>
       {lines.map((line, index) => {
         const tone = diffLineTone(line.kind);
+        const segments = segMap?.get(line);
         return (
           <div
             key={index}
@@ -98,7 +116,9 @@ function UnifiedDiff({ lines, wrap }: { lines: DiffLine[]; wrap: boolean }) {
           >
             <span style={NUM_CELL}>{line.oldNumber ?? ''}</span>
             <span style={NUM_CELL}>{line.newNumber ?? ''}</span>
-            <span style={{ flex: 1, minWidth: 0, whiteSpace: wrap ? 'pre-wrap' : 'pre', overflowWrap: wrap ? 'anywhere' : 'normal' }}>{line.text || ' '}</span>
+            <span style={{ flex: 1, minWidth: 0, whiteSpace: wrap ? 'pre-wrap' : 'pre', overflowWrap: wrap ? 'anywhere' : 'normal' }}>
+              {segments ? <WordDiffText line={line} segments={segments} /> : (line.text || ' ')}
+            </span>
           </div>
         );
       })}
@@ -128,7 +148,7 @@ function sideRows(lines: DiffLine[]): Array<{ left: DiffLine | null; right: Diff
   return rows;
 }
 
-function SideDiff({ lines, wrap }: { lines: DiffLine[]; wrap: boolean }) {
+function SideDiff({ lines, wrap, segMap }: { lines: DiffLine[]; wrap: boolean; segMap: Map<DiffLine, WordSegment[]> | null }) {
   const rows = useMemo(() => sideRows(lines), [lines]);
   const textCell: CSSProperties = wrap
     ? { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', paddingRight: 8 }
@@ -139,12 +159,14 @@ function SideDiff({ lines, wrap }: { lines: DiffLine[]; wrap: boolean }) {
         {rows.map((row, index) => {
           const leftTone = diffLineTone(row.left?.kind ?? 'context');
           const rightTone = diffLineTone(row.right?.kind ?? 'context');
+          const leftSegs = row.left ? segMap?.get(row.left) : undefined;
+          const rightSegs = row.right ? segMap?.get(row.right) : undefined;
           return (
             <div key={index} style={{ display: 'grid', gridTemplateColumns: '30px minmax(0, 1fr) 30px minmax(0, 1fr)' }}>
               <span style={{ ...NUM_CELL, width: 'auto', paddingRight: 6 }}>{row.left?.oldNumber ?? ''}</span>
-              <span style={{ ...textCell, background: row.left ? leftTone.background : 'transparent', color: row.left ? leftTone.color : 'var(--t-text-faint)' }}>{row.left?.text || ' '}</span>
+              <span style={{ ...textCell, background: row.left ? leftTone.background : 'transparent', color: row.left ? leftTone.color : 'var(--t-text-faint)' }}>{leftSegs && row.left ? <WordDiffText line={row.left} segments={leftSegs} /> : (row.left?.text || ' ')}</span>
               <span style={{ ...NUM_CELL, width: 'auto', paddingRight: 6 }}>{row.right?.newNumber ?? ''}</span>
-              <span style={{ ...textCell, background: row.right ? rightTone.background : 'transparent', color: row.right ? rightTone.color : 'var(--t-text-faint)' }}>{row.right?.text || ' '}</span>
+              <span style={{ ...textCell, background: row.right ? rightTone.background : 'transparent', color: row.right ? rightTone.color : 'var(--t-text-faint)' }}>{rightSegs && row.right ? <WordDiffText line={row.right} segments={rightSegs} /> : (row.right?.text || ' ')}</span>
             </div>
           );
         })}
@@ -153,9 +175,12 @@ function SideDiff({ lines, wrap }: { lines: DiffLine[]; wrap: boolean }) {
   );
 }
 
-function DiffPatch({ patch, mode, wrap }: { patch: string; mode: DiffMode; wrap: boolean }) {
+function DiffPatch({ patch, mode, wrap, wordDiff }: { patch: string; mode: DiffMode; wrap: boolean; wordDiff: boolean }) {
   const lines = useMemo(() => splitUnifiedDiff(patch), [patch]);
-  return mode === 'side' ? <SideDiff lines={lines} wrap={wrap} /> : <UnifiedDiff lines={lines} wrap={wrap} />;
+  const segMap = useMemo(() => (wordDiff ? wordDiffSegments(lines) : null), [lines, wordDiff]);
+  return mode === 'side'
+    ? <SideDiff lines={lines} wrap={wrap} segMap={segMap} />
+    : <UnifiedDiff lines={lines} wrap={wrap} segMap={segMap} />;
 }
 
 function RowMessage({ text, tone }: { text: string; tone?: 'error' }) {
@@ -175,7 +200,7 @@ function PanelMessage({ text, tone }: { text: string; tone?: 'error' }) {
 }
 
 /** One changed file: a collapsible header + an inline diff loaded on expand. */
-const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode, wrap, collapseSignal }: { file: ReviewChangedFile; repoPath: string; mode: DiffMode; wrap: boolean; collapseSignal: CollapseSignal }) {
+const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode, wrap, wordDiff, hideWhitespace, collapseSignal }: { file: ReviewChangedFile; repoPath: string; mode: DiffMode; wrap: boolean; wordDiff: boolean; hideWhitespace: boolean; collapseSignal: CollapseSignal }) {
   const [open, setOpen] = useState(true);
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -194,6 +219,7 @@ const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode, wrap, 
     setError(null);
     setDiff(null);
     const params = new URLSearchParams({ path: file.path, workspace: repoPath });
+    if (hideWhitespace) params.set('ignoreWhitespace', '1');
     fetch(`/api/panel/file-diff?${params.toString()}`, { signal: controller.signal })
       .then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { diff?: string; stagedDiff?: string; error?: string };
@@ -217,7 +243,7 @@ const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode, wrap, 
       cancelled = true;
       controller.abort();
     };
-  }, [open, file.path, repoPath]);
+  }, [open, file.path, repoPath, hideWhitespace]);
 
   const accent = statusAccent(file.status);
 
@@ -244,7 +270,7 @@ const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode, wrap, 
         ) : error ? (
           <RowMessage text={error} tone="error" />
         ) : diff && diff.trim() ? (
-          <DiffPatch patch={diff} mode={mode} wrap={wrap} />
+          <DiffPatch patch={diff} mode={mode} wrap={wrap} wordDiff={wordDiff} />
         ) : (
           <RowMessage text="No diff available (binary file or too large)." />
         )
@@ -345,6 +371,8 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<DiffMode>('unified');
   const [wrap, setWrap] = useState(false);
+  const [wordDiff, setWordDiff] = useState(false);
+  const [hideWhitespace, setHideWhitespace] = useState(false);
   const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: true, nonce: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -380,6 +408,14 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
   };
   const handleWordWrap = () => {
     setWrap((value) => !value);
+    setMenuOpen(false);
+  };
+  const handleWordDiff = () => {
+    setWordDiff((value) => !value);
+    setMenuOpen(false);
+  };
+  const handleHideWhitespace = () => {
+    setHideWhitespace((value) => !value);
     setMenuOpen(false);
   };
   const handleRefresh = () => {
@@ -538,6 +574,8 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
               >
                 <MenuItem onClick={handleCollapseAll}>{collapseSignal.open ? 'Collapse all' : 'Expand all'}</MenuItem>
                 <MenuItem onClick={handleWordWrap} checked={wrap}>Word wrap</MenuItem>
+                <MenuItem onClick={handleWordDiff} checked={wordDiff}>Word diffs</MenuItem>
+                <MenuItem onClick={handleHideWhitespace} checked={hideWhitespace}>Hide whitespace</MenuItem>
                 <MenuItem onClick={handleRefresh}>Refresh</MenuItem>
               </div>
             ) : null}
@@ -568,7 +606,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
           />
         ) : (
           visible.map((file) => (
-            <ReviewFileRow key={file.path} file={file} repoPath={repoPath} mode={mode} wrap={wrap} collapseSignal={collapseSignal} />
+            <ReviewFileRow key={file.path} file={file} repoPath={repoPath} mode={mode} wrap={wrap} wordDiff={wordDiff} hideWhitespace={hideWhitespace} collapseSignal={collapseSignal} />
           ))
         )}
       </div>
