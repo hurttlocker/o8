@@ -57,7 +57,25 @@ export async function GET(request: Request) {
       isUntracked = status.startsWith('??');
     } catch { /* silent */ }
 
-    const combinedDiff = [stagedDiff, diff].filter(Boolean).join('\n');
+    // Untracked files are excluded from `git diff` — render them all-added
+    // via --no-index against /dev/null so they appear in the continuous diff.
+    let untrackedDiff = '';
+    if (isUntracked && !diff && !stagedDiff) {
+      try {
+        execSync(`git diff --no-color${wsFlag} --no-index /dev/null "${filePath}"`, {
+          cwd: root,
+          encoding: 'utf-8',
+          timeout: 5000,
+          maxBuffer: 512 * 1024,
+        });
+      } catch (noIndexErr) {
+        // `git diff --no-index` exits 1 when the files differ — expected;
+        // the all-added patch is on stdout.
+        untrackedDiff = (noIndexErr as { stdout?: string }).stdout ?? '';
+      }
+    }
+
+    const combinedDiff = [stagedDiff, diff, untrackedDiff].filter(Boolean).join('\n');
 
     if (combinedDiff.length > 50000) {
       return NextResponse.json({
