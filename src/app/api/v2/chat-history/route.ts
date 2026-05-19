@@ -30,9 +30,23 @@ function normalizePlanText(value: unknown): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function normalizeNullableDate(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 /** The orchestrator backend that produced this thread, if the client tagged it. */
 function normalizeBackend(value: unknown): 'codex' | 'claude' | 'openclaw' | undefined {
   return value === 'codex' || value === 'claude' || value === 'openclaw' ? value : undefined;
+}
+
+/** The openclaw agent id that produced this thread, if the client tagged it. */
+function normalizeAgent(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 128) : undefined;
 }
 
 export async function GET(request: NextRequest) {
@@ -56,6 +70,8 @@ export async function GET(request: NextRequest) {
       repoBranch: null,
       remoteUrl: null,
       backend: null,
+      agent: null,
+      archivedAt: null,
       exists: false,
     });
   }
@@ -94,6 +110,8 @@ export async function POST(request: NextRequest) {
   let repoBranch: string | undefined;
   let remoteUrl: string | null | undefined;
   let backend: 'codex' | 'claude' | 'openclaw' | undefined;
+  let agent: string | undefined;
+  let archivedAt: string | null | undefined;
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
     starred = existing.starred || false;
@@ -104,7 +122,12 @@ export async function POST(request: NextRequest) {
     repoBranch = existing.repoBranch;
     remoteUrl = existing.remoteUrl;
     backend = normalizeBackend(existing.backend);
+    agent = normalizeAgent(existing.agent);
+    archivedAt = normalizeNullableDate(existing.archivedAt);
   } catch { /* new file */ }
+  const nextArchivedAt = body.archivedAt !== undefined
+    ? normalizeNullableDate(body.archivedAt) ?? null
+    : archivedAt ?? null;
 
   writeFileSync(filePath, JSON.stringify({
     messages,
@@ -118,6 +141,8 @@ export async function POST(request: NextRequest) {
     repoBranch: body.repoBranch ?? repoBranch,
     remoteUrl: body.remoteUrl ?? remoteUrl ?? null,
     backend: normalizeBackend(body.backend) ?? backend ?? null,
+    agent: normalizeAgent(body.agent) ?? agent ?? null,
+    archivedAt: nextArchivedAt,
   }));
 
   return NextResponse.json({ ok: true });
@@ -139,6 +164,8 @@ export async function PATCH(request: NextRequest) {
     if (body.repoBranch !== undefined) data.repoBranch = body.repoBranch;
     if (body.remoteUrl !== undefined) data.remoteUrl = body.remoteUrl;
     if (body.backend !== undefined) data.backend = normalizeBackend(body.backend) ?? null;
+    if (body.agent !== undefined) data.agent = normalizeAgent(body.agent) ?? null;
+    if (body.archivedAt !== undefined) data.archivedAt = normalizeNullableDate(body.archivedAt) ?? null;
     writeFileSync(filePath, JSON.stringify(data));
     return NextResponse.json({ ok: true });
   } catch {
