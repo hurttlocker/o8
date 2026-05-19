@@ -446,20 +446,20 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
   if (tabs.length === 0) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
           <circle cx="12" cy="12" r="10" />
           <line x1="2" y1="12" x2="22" y2="12" />
           <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
         </svg>
-        <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>No active previews</span>
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 13 }}>No active previews</span>
         <button
           type="button"
           onClick={addNewTab}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
             paddingTop: 6, paddingRight: 14, paddingBottom: 6, paddingLeft: 14,
-            borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)',
-            background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.7)',
+            borderRadius: 8, border: '1px solid var(--t-divider)',
+            background: 'var(--t-hover)', color: 'var(--t-text)',
             fontSize: 12, fontWeight: 500, cursor: 'pointer',
           }}
         >
