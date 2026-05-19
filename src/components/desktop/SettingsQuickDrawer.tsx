@@ -417,7 +417,7 @@ export function SettingsQuickDrawer({
                   whiteSpace: 'nowrap',
                 }}
               >
-                Cortex IDE
+                o8
               </div>
             </div>
           </div>
