@@ -1,6 +1,6 @@
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type { MergeCheckResult } from '@/lib/lane/preview-merge';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { OrchestratorRuntime, WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
 
 export interface LoadedIssue {
   number: number;
@@ -15,6 +15,10 @@ export interface CreateMissionInput {
   issues: LoadedIssue[];
   repoPath: string;
   runtime: OrchestratorRuntime;
+  workerIntent?: WorkerIntent;
+  requestedProvider?: WorkerProvider | null;
+  requestedRuntime?: OrchestratorRuntime | null;
+  requestedModel?: string | null;
   constraints: string;
   /** When true, packets are chained sequentially (P2 after P1, etc.). Default: false (parallel). */
   sequential?: boolean;

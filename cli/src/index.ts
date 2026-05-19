@@ -28,7 +28,14 @@ import { runPacketReport } from './commands/packet/report.js';
 import { runPacketReview } from './commands/packet/review.js';
 import { runPacketScope } from './commands/packet/scope.js';
 import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
-import { runTaskBrief, runTaskList } from './commands/task.js';
+import {
+  runTaskBlock,
+  runTaskBrief,
+  runTaskClaim,
+  runTaskDispatch,
+  runTaskList,
+  runTaskReport,
+} from './commands/task.js';
 import { printError, type OutputMode } from './output.js';
 import { CliError, EXIT } from './api.js';
 
@@ -83,6 +90,10 @@ commands:
   lane touches         active lanes touching a path or packet diff
   task list            current task pool grouped by ready/running/review/etc.
   task brief <id>      project-backed task brief for a packet or lane
+  task claim <id>      bind/reserve a task to a lane
+  task dispatch <id>   launch the claimed task through Codex-only routing
+  task block <id>      mark a task blocked with --reason
+  task report <id>     append a structured task progress event
   packet info          info about the packet bound to the current worktree
   packet scope [id]    one-call worker context (auto-resolves from cwd)
   packet heartbeat     update the current packet lane heartbeat
@@ -135,6 +146,10 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'task': {
       if (secondary === 'list') return runTaskList(args.mode, args.rest);
       if (secondary === 'brief') return runTaskBrief(args.mode, args.rest);
+      if (secondary === 'claim') return runTaskClaim(args.mode, args.rest);
+      if (secondary === 'dispatch') return runTaskDispatch(args.mode, args.rest);
+      if (secondary === 'block') return runTaskBlock(args.mode, args.rest);
+      if (secondary === 'report') return runTaskReport(args.mode, args.rest);
       throw unknownSubcommandError('task', secondary);
     }
     case 'packet': {
