@@ -478,8 +478,8 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
       <div style={{
         display: 'flex', alignItems: 'center', height: 34,
         paddingLeft: 6, paddingRight: 6, gap: 1,
-        borderBottom: '1px solid rgba(255,255,255,0.08)',
-        background: 'rgba(0,0,0,0.15)', flexShrink: 0,
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'transparent', flexShrink: 0,
         overflow: 'hidden',
       }}>
         {tabs.map(tab => {
@@ -495,13 +495,13 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
                 display: 'flex', alignItems: 'center', gap: 6,
                 height: 26, paddingLeft: 10, paddingRight: 6,
                 borderRadius: 6, cursor: 'pointer',
-                background: isActive ? 'rgba(255,255,255,0.1)' : isHovered ? 'rgba(255,255,255,0.05)' : 'transparent',
+                background: isActive ? 'var(--t-panel-active, var(--t-input-bg))' : isHovered ? 'var(--t-hover)' : 'transparent',
                 maxWidth: 180, minWidth: 0, flexShrink: 1,
                 transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               {/* Globe favicon */}
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block', width: 12, height: 12, minWidth: 12 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block', width: 12, height: 12, minWidth: 12 }}>
                 <circle cx="12" cy="12" r="10" />
                 <line x1="2" y1="12" x2="22" y2="12" />
                 <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
@@ -509,7 +509,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
               <span style={{
                 flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 fontSize: 11, fontWeight: 500,
-                color: isActive ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)',
+                color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
               }}>
                 {tab.title}
               </span>
@@ -523,10 +523,10 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
                     width: 20, height: 20, border: 'none', borderRadius: 4,
                     background: 'transparent', cursor: 'pointer', flexShrink: 0, padding: 0,
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.15)'; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                 >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="3" strokeLinecap="round" style={{ display: 'block', width: 10, height: 10, minWidth: 10, minHeight: 10 }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="3" strokeLinecap="round" style={{ display: 'block', width: 10, height: 10, minWidth: 10, minHeight: 10 }}>
                     <line x1="18" y1="6" x2="6" y2="18" />
                     <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
@@ -546,10 +546,10 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
             background: 'transparent', cursor: 'pointer', flexShrink: 0, padding: 0,
             marginLeft: 2,
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2.5" strokeLinecap="round" style={{ display: 'block' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2.5" strokeLinecap="round" style={{ display: 'block' }}>
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
@@ -560,7 +560,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
       <div style={{
         display: 'flex', alignItems: 'center', gap: 4,
         height: 36, paddingLeft: 6, paddingRight: 6,
-        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        borderBottom: '1px solid var(--t-divider)',
         flexShrink: 0,
       }}>
         {/* Element Picker toggle */}
@@ -574,10 +574,10 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
             background: pickerActive ? 'rgba(37,99,235,0.2)' : 'transparent',
             cursor: 'pointer', padding: 0,
           }}
-          onMouseEnter={(e) => { if (!pickerActive) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+          onMouseEnter={(e) => { if (!pickerActive) e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { if (!pickerActive) e.currentTarget.style.background = 'transparent'; }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={pickerActive ? '#3b82f6' : 'rgba(255,255,255,0.5)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: 14, height: 14, minWidth: 14, minHeight: 14, flexShrink: 0 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={pickerActive ? '#3b82f6' : 'var(--t-text-secondary)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: 14, height: 14, minWidth: 14, minHeight: 14, flexShrink: 0 }}>
             <circle cx="12" cy="12" r="10" />
             <line x1="22" y1="12" x2="18" y2="12" />
             <line x1="6" y1="12" x2="2" y2="12" />
@@ -599,10 +599,10 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
             padding: 0,
             opacity: activeTab?.url && isLoopbackUrl(activeTab.url) ? 1 : 0.35,
           }}
-          onMouseEnter={(e) => { if (!annotationActive && activeTab?.url && isLoopbackUrl(activeTab.url)) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+          onMouseEnter={(e) => { if (!annotationActive && activeTab?.url && isLoopbackUrl(activeTab.url)) e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { if (!annotationActive) e.currentTarget.style.background = 'transparent'; }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={annotationActive ? '#f97316' : 'rgba(255,255,255,0.5)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: 14, height: 14, minWidth: 14, minHeight: 14, flexShrink: 0 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={annotationActive ? '#f97316' : 'var(--t-text-secondary)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: 14, height: 14, minWidth: 14, minHeight: 14, flexShrink: 0 }}>
             <path d="M4 20 20 4" />
             <path d="M14 4h6v6" />
             <path d="M5 15c3-1 4 3 7 1" />
@@ -618,10 +618,10 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
             width: 26, height: 26, border: 'none', borderRadius: 6,
             background: 'transparent', cursor: 'pointer', padding: 0,
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
             <polyline points="23 4 23 10 17 10" />
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
           </svg>
@@ -630,11 +630,11 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
         <div style={{
           flex: 1, display: 'flex', alignItems: 'center',
           height: 26, paddingLeft: 10, paddingRight: 10,
-          borderRadius: 8, background: 'rgba(255,255,255,0.06)',
-          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 8, background: 'var(--t-input-bg)',
+          border: '1px solid var(--t-divider)',
         }}>
           {/* Lock/globe icon */}
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block', marginRight: 6 }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block', marginRight: 6 }}>
             <circle cx="12" cy="12" r="10" />
             <line x1="2" y1="12" x2="22" y2="12" />
             <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
@@ -649,7 +649,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
             placeholder="Enter URL or search..."
             style={{
               flex: 1, border: 'none', background: 'transparent', outline: 'none',
-              color: 'rgba(255,255,255,0.75)', fontSize: 12,
+              color: 'var(--t-text)', fontSize: 12,
               fontFamily: 'var(--font-sans-system)',
             }}
           />
@@ -665,11 +665,11 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
             background: 'transparent', cursor: 'pointer', padding: 0,
             opacity: activeTab?.url ? 1 : 0.3,
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           {/* External link icon */}
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
             <polyline points="15 3 21 3 21 9" />
             <line x1="10" y1="14" x2="21" y2="3" />
