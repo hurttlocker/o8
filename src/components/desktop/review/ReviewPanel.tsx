@@ -26,6 +26,9 @@ type CollapseSignal = { open: boolean; nonce: number };
 type ReviewScope = 'all' | 'staged' | 'unstaged';
 const SCOPE_LABELS: Record<ReviewScope, string> = { all: 'All changes', staged: 'Staged', unstaged: 'Unstaged' };
 const SCOPE_ORDER: ReviewScope[] = ['all', 'staged', 'unstaged'];
+// Above this many visible rows, files default to collapsed so the panel
+// doesn't fire N concurrent /api/panel/file-diff requests on mount (#1084).
+const BIG_CHANGESET = 25;
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
@@ -201,15 +204,22 @@ function PanelMessage({ text, tone }: { text: string; tone?: 'error' }) {
 }
 
 /** One changed file: a collapsible header + an inline diff loaded on expand. */
-const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode, wrap, wordDiff, hideWhitespace, collapseSignal }: { file: ReviewChangedFile; repoPath: string; mode: DiffMode; wrap: boolean; wordDiff: boolean; hideWhitespace: boolean; collapseSignal: CollapseSignal }) {
-  const [open, setOpen] = useState(true);
+const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode, wrap, wordDiff, hideWhitespace, initialOpen, collapseSignal }: { file: ReviewChangedFile; repoPath: string; mode: DiffMode; wrap: boolean; wordDiff: boolean; hideWhitespace: boolean; initialOpen: boolean; collapseSignal: CollapseSignal }) {
+  const [open, setOpen] = useState(initialOpen);
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Apply the panel-level bulk collapse/expand signal whenever it changes.
+  // Apply the panel-level bulk collapse/expand signal only when it actually
+  // changes — never on mount, so the #1084 `initialOpen` default holds.
+  // Comparing the previous value (not a first-run flag) stays correct under
+  // React StrictMode's double-invoked mount effects.
+  const lastSignal = useRef(collapseSignal);
   useEffect(() => {
-    setOpen(collapseSignal.open);
+    if (collapseSignal !== lastSignal.current) {
+      lastSignal.current = collapseSignal;
+      setOpen(collapseSignal.open);
+    }
   }, [collapseSignal]);
 
   useEffect(() => {
@@ -244,7 +254,9 @@ const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode, wrap, 
       cancelled = true;
       controller.abort();
     };
-  }, [open, file.path, repoPath, hideWhitespace]);
+    // file.additions/deletions are deps so the row re-fetches when
+    // useWorkspaceChanges reports the file's diff stats changed (#1084).
+  }, [open, file.path, repoPath, hideWhitespace, file.additions, file.deletions]);
 
   const accent = statusAccent(file.status);
 
@@ -457,6 +469,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
     [visible],
   );
   const hasFiles = changes.files.length > 0;
+  const denseChangeset = visible.length > BIG_CHANGESET;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg)' }}>
@@ -672,7 +685,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
           />
         ) : (
           visible.map((file) => (
-            <ReviewFileRow key={file.path} file={file} repoPath={repoPath} mode={mode} wrap={wrap} wordDiff={wordDiff} hideWhitespace={hideWhitespace} collapseSignal={collapseSignal} />
+            <ReviewFileRow key={file.path} file={file} repoPath={repoPath} mode={mode} wrap={wrap} wordDiff={wordDiff} hideWhitespace={hideWhitespace} initialOpen={!denseChangeset} collapseSignal={collapseSignal} />
           ))
         )}
       </div>
