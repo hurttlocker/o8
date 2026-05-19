@@ -21,6 +21,9 @@ import type { ReviewChangedFile } from '@/lib/fleet/types';
 type DiffMode = 'unified' | 'side';
 /** Panel → row signal for bulk collapse/expand; rows re-apply `open` on each new identity. */
 type CollapseSignal = { open: boolean; nonce: number };
+type ReviewScope = 'all' | 'staged' | 'unstaged';
+const SCOPE_LABELS: Record<ReviewScope, string> = { all: 'All changes', staged: 'Staged', unstaged: 'Unstaged' };
+const SCOPE_ORDER: ReviewScope[] = ['all', 'staged', 'unstaged'];
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
@@ -344,15 +347,23 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
   const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: true, nonce: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [scope, setScope] = useState<ReviewScope>('all');
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const scopeRef = useRef<HTMLDivElement | null>(null);
 
-  // Close the `···` overflow menu on outside-click or Escape.
+  // Close the header menus on outside-click or Escape.
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen && !scopeOpen) return;
     const onPointer = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
+      const target = event.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target)) setMenuOpen(false);
+      if (scopeRef.current && !scopeRef.current.contains(target)) setScopeOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false);
+      if (event.key === 'Escape') {
+        setMenuOpen(false);
+        setScopeOpen(false);
+      }
     };
     document.addEventListener('mousedown', onPointer);
     document.addEventListener('keydown', onKey);
@@ -360,7 +371,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
       document.removeEventListener('mousedown', onPointer);
       document.removeEventListener('keydown', onKey);
     };
-  }, [menuOpen]);
+  }, [menuOpen, scopeOpen]);
 
   const handleCollapseAll = () => {
     setCollapseSignal((signal) => ({ open: !signal.open, nonce: signal.nonce + 1 }));
@@ -374,11 +385,28 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
     void changes.refresh();
     setMenuOpen(false);
   };
+  const handleSelectScope = (next: ReviewScope) => {
+    setScope(next);
+    setScopeOpen(false);
+  };
 
   const trimmed = query.trim().toLowerCase();
-  const visible = useMemo(
-    () => (trimmed ? changes.files.filter((file) => file.path.toLowerCase().includes(trimmed)) : changes.files),
-    [changes.files, trimmed],
+  const visible = useMemo(() => {
+    let list = changes.files;
+    if (scope === 'staged') list = list.filter((file) => file.staged);
+    else if (scope === 'unstaged') list = list.filter((file) => file.unstaged);
+    if (trimmed) list = list.filter((file) => file.path.toLowerCase().includes(trimmed));
+    return list;
+  }, [changes.files, trimmed, scope]);
+  const visibleStats = useMemo(
+    () => visible.reduce(
+      (acc, file) => ({
+        additions: acc.additions + (file.additions ?? 0),
+        deletions: acc.deletions + (file.deletions ?? 0),
+      }),
+      { additions: 0, deletions: 0 },
+    ),
+    [visible],
   );
   const hasFiles = changes.files.length > 0;
 
@@ -386,10 +414,63 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg)' }}>
       {hasFiles ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, paddingTop: 6, paddingBottom: 6, paddingLeft: 14, paddingRight: 10, borderBottom: '1px solid var(--t-divider-subtle)', flexShrink: 0 }}>
-          <span style={{ fontFamily: UI_FONT, fontSize: 12, fontWeight: 650, color: 'var(--t-text)', flexShrink: 0 }}>
-            {trimmed ? `${visible.length} of ${changes.files.length}` : `${changes.files.length} ${changes.files.length === 1 ? 'file' : 'files'} changed`}
+          <div ref={scopeRef} style={{ position: 'relative', flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => setScopeOpen((open) => !open)}
+              title="Change review scope"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                height: 28,
+                paddingLeft: 9,
+                paddingRight: 7,
+                border: 'none',
+                borderRadius: 8,
+                background: scopeOpen ? 'var(--t-input-bg)' : 'transparent',
+                color: 'var(--t-text)',
+                fontFamily: UI_FONT,
+                fontSize: 12,
+                fontWeight: 650,
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(event) => { if (!scopeOpen) event.currentTarget.style.background = 'var(--t-hover)'; }}
+              onMouseLeave={(event) => { if (!scopeOpen) event.currentTarget.style.background = 'transparent'; }}
+            >
+              {SCOPE_LABELS[scope]}
+              <ChevronDown size={12} strokeWidth={2} />
+            </button>
+            {scopeOpen ? (
+              <div
+                role="menu"
+                style={{
+                  position: 'absolute',
+                  top: 34,
+                  left: 0,
+                  minWidth: 156,
+                  padding: 4,
+                  borderRadius: 10,
+                  background: 'var(--t-bg-card)',
+                  border: '1px solid var(--t-divider)',
+                  boxShadow: '0 10px 28px rgba(0, 0, 0, 0.22)',
+                  zIndex: 50,
+                }}
+              >
+                {SCOPE_ORDER.map((option) => (
+                  <MenuItem key={option} checked={scope === option} onClick={() => handleSelectScope(option)}>
+                    {SCOPE_LABELS[option]}
+                  </MenuItem>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <span style={{ fontFamily: UI_FONT, fontSize: 11.5, fontWeight: 500, color: 'var(--t-text-muted)', flexShrink: 0 }}>
+            {scope !== 'all' || trimmed
+              ? `${visible.length} of ${changes.files.length}`
+              : `${changes.files.length} ${changes.files.length === 1 ? 'file' : 'files'}`}
           </span>
-          <DiffStatBadge additions={changes.totalAdditions} deletions={changes.totalDeletions} />
+          <DiffStatBadge additions={visibleStats.additions} deletions={visibleStats.deletions} />
           <div style={{ flex: 1, minWidth: 8 }} />
           <div
             style={{
@@ -472,7 +553,17 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
         ) : !hasFiles ? (
           <PanelMessage text="Working tree clean — nothing to review." />
         ) : visible.length === 0 ? (
-          <PanelMessage text={`No files match "${query.trim()}".`} />
+          <PanelMessage
+            text={
+              query.trim()
+                ? `No files match "${query.trim()}".`
+                : scope === 'staged'
+                  ? 'No staged changes.'
+                  : scope === 'unstaged'
+                    ? 'No unstaged changes.'
+                    : 'No files match.'
+            }
+          />
         ) : (
           visible.map((file) => (
             <ReviewFileRow key={file.path} file={file} repoPath={repoPath} mode={mode} wrap={wrap} collapseSignal={collapseSignal} />
