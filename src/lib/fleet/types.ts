@@ -187,6 +187,10 @@ export interface ReviewChangedFile {
   status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
   additions?: number | null;
   deletions?: number | null;
+  /** Has staged (index) changes. Set by the local working-tree snapshot path. */
+  staged?: boolean;
+  /** Has unstaged (working-tree) changes; untracked files count as unstaged. */
+  unstaged?: boolean;
 }
 
 export interface ReviewWorktreeSummary {

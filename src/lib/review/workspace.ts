@@ -209,7 +209,7 @@ function isReviewNoisePath(path: string) {
   return REVIEW_NOISE_PATHS.has(path.trim());
 }
 
-function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string) {
+function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string, stagedPaths?: Set<string>, unstagedPaths?: Set<string>) {
   const changed = new Map<string, ReviewChangedFile>();
 
   for (const line of nameStatusRaw.split('\n').filter(Boolean)) {
@@ -264,7 +264,31 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
     });
   }
 
+  if (stagedPaths || unstagedPaths) {
+    for (const entry of changed.values()) {
+      if (entry.status === 'untracked') {
+        entry.staged = false;
+        entry.unstaged = true;
+      } else {
+        entry.staged = stagedPaths?.has(entry.path) ?? false;
+        entry.unstaged = unstagedPaths?.has(entry.path) ?? false;
+      }
+    }
+  }
+
   return Array.from(changed.values());
+}
+
+/** Path set from a `git diff --name-status` blob, keyed identically to parseChangedFiles. */
+function changedPathSet(nameStatusRaw: string): Set<string> {
+  const paths = new Set<string>();
+  for (const line of nameStatusRaw.split('\n').filter(Boolean)) {
+    const [statusToken, firstPath, secondPath] = line.split('\t');
+    if (!statusToken || !firstPath) continue;
+    const status = statusToken[0];
+    paths.add(status === 'R' && secondPath ? `${firstPath} → ${secondPath}` : secondPath ?? firstPath);
+  }
+  return paths;
 }
 
 function parseReviewPath(reviewPath: string) {
@@ -611,6 +635,8 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     worktreesRaw,
     branchPrsRaw,
     fallbackPrsRaw,
+    stagedNameStatusRaw,
+    unstagedNameStatusRaw,
   ] = await Promise.all([
     tryRunInContext('git', ['diff', '--name-status', '--relative', '-M', 'HEAD']),
     tryRunInContext('git', ['diff', '--numstat', '--relative', '-M', 'HEAD']),
@@ -647,9 +673,13 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
           'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state,body',
         ])
       : Promise.resolve(''),
+    tryRunInContext('git', ['diff', '--name-status', '--cached', '--relative', '-M', 'HEAD']),
+    tryRunInContext('git', ['diff', '--name-status', '--relative', '-M']),
   ]);
 
-  const parsedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
+  const stagedPaths = changedPathSet(stagedNameStatusRaw);
+  const unstagedPaths = changedPathSet(unstagedNameStatusRaw);
+  const parsedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw, stagedPaths, unstagedPaths);
   const localChangedFiles = await sortChangedFilesByTouchedAt(parsedFiles, repoRoot);
   _cachedChangedFiles = localChangedFiles;
   _cachedChangedFilesAt = Date.now();
