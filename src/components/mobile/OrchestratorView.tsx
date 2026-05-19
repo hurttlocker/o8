@@ -328,6 +328,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
         lastMessageAt: new Date().toISOString(),
         messageCount: 0,
         backend: null,
+        agent: null,
       };
       setLocalThread(freshThread);
       setActiveThreadId(freshThreadId);
