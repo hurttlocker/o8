@@ -5,6 +5,7 @@ import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type Re
 import { ChevronDown, ChevronRight } from '../lucide-shims';
 import { splitUnifiedDiff, diffLineTone, type DiffLine } from '../o8-panel/diff-render';
 import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
+import { ReviewGitActions } from './ReviewGitActions';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
 
 /**
@@ -541,6 +542,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
               </div>
             ) : null}
           </div>
+          <ReviewGitActions repoPath={repoPath} branch={changes.branch} repoSlug={changes.repoSlug} onChanged={changes.refresh} />
         </div>
       ) : null}
       <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
