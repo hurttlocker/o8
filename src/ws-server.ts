@@ -798,10 +798,16 @@ function resolveMsgAgentId(msg: Record<string, unknown>, backendId: Orchestrator
 
 /** Send a raw WS message to every client subscribed to `sessionName`. */
 function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): void {
+  let matched = 0;
+  let delivered = 0;
   for (const sub of orchestratorSubscriptions.values()) {
     if (sub.sessionName !== sessionName) continue;
+    matched++;
     const c = clients.get(sub.clientId);
-    if (c) sendRaw(c, rawMsg);
+    if (c) { sendRaw(c, rawMsg); delivered++; }
+  }
+  if (sessionName.includes('openclaw')) {
+    console.log(`[openclaw-diag] broadcast session=${sessionName} matchedSubs=${matched} delivered=${delivered} totalSubs=${orchestratorSubscriptions.size} msg=${rawMsg.slice(0, 110)}`);
   }
 }
 
@@ -2161,6 +2167,9 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
       backend: backend.id,
       agent: agentId,
     });
+    if (backend.id === 'openclaw') {
+      console.log(`[openclaw-diag] subscribe key=${orchestratorSubKey(client.id, backend.id, agentId)} sessionName=${session.sessionName}`);
+    }
 
     // No PTY to hook — the new approach spawns a process per message
     // and streams structured JSON events directly to WS subscribers.
@@ -2220,6 +2229,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       backend: backend.id,
       agent: agentId,
     });
+    if (backend.id === 'openclaw') {
+      console.log(`[openclaw-diag] send key=${orchestratorSubKey(client.id, backend.id, agentId)} sessionName=${sessionName} clientId=${client.id}`);
+    }
 
     // Emit busy status.
     broadcastToOrchestratorSession(sessionName, JSON.stringify({
@@ -2242,6 +2254,14 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     // subscribers. Every event is tagged with `backend` (and `agent`, for
     // openclaw) so a client watching multiple surfaces renders each correctly.
     await sendTurn((event) => {
+      if (backend.id === 'openclaw') {
+        const detail = event.type === 'text'
+          ? ` textLen=${event.text.length}`
+          : event.type === 'error'
+            ? ` err=${String(event.error).slice(0, 120)}`
+            : '';
+        console.log(`[openclaw-diag] ws recv event=${event.type}${detail}`);
+      }
       let wsMsg: string | null = null;
 
       switch (event.type) {
