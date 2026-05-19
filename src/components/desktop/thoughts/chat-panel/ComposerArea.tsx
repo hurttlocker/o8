@@ -4,6 +4,7 @@ import { forwardRef, isValidElement, useEffect, useId, useMemo, useRef, useState
 import { InputButtons, ThinkingChip, type ThinkingEffort } from '../InputButtons';
 import { useTokenEstimate } from '../useTokenEstimate';
 import { SlashCommandPicker } from './SlashCommandPicker';
+import { PendingSteerCard, type PendingSteer } from './PendingSteerCard';
 import type { ThoughtsChatPermissionMode } from './types';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
@@ -220,6 +221,18 @@ interface ComposerAreaProps {
   selectedRepoPath?: string | null;
   onSelectRepoPath?: (next: string) => void;
   composerLeadingExtras?: React.ReactNode;
+  /** ⌘⏎ in the composer fires this. Consumer enqueues when busy, sends when idle. */
+  onSteer?: () => void;
+  /** Queued steers waiting for an idle agent. Rendered as a card above the composer. */
+  pendingSteers?: PendingSteer[];
+  /** Preempt: abort the running turn + bump this steer to fire next. */
+  onSteerNow?: (id: string) => void;
+  /** Discard a queued steer without firing. */
+  onDeleteSteer?: (id: string) => void;
+  /** Commit an inline-edit on a queued steer. */
+  onEditSteer?: (id: string, text: string) => void;
+  /** Notify the consumer when a row enters/leaves inline-edit. Used to pause auto-fire of the head while it's being edited. */
+  onEditingSteerChange?: (id: string | null) => void;
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
@@ -262,6 +275,12 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   selectedRepoPath,
   onSelectRepoPath,
   composerLeadingExtras,
+  onSteer,
+  pendingSteers,
+  onSteerNow,
+  onDeleteSteer,
+  onEditSteer,
+  onEditingSteerChange,
 }, inputRef) {
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
@@ -301,7 +320,11 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     ];
   }, [dismissedSlashInput, input, isOrchestratorMode]);
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
-  const isDisabled = (displayWaiting || runningTools.length > 0) || (!acceptsDirectInput && !targetAgentExists);
+  // Textarea stays typeable while the agent is busy so the user can compose a
+  // steer (⌘⏎). Plain Enter is still blocked via the isWorkingLocked guard in
+  // onKeyDown — only the no-target case disables the textarea outright.
+  // The Send button itself still flips to Stop via `working` on InputButtons.
+  const isDisabled = !acceptsDirectInput && !targetAgentExists;
   const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
   const isWorkingLocked = acceptsDirectInput && (displayWaiting || runningTools.length > 0);
   const workingTargetLabel = activeTargetLabel.trim() || 'The agent';
@@ -570,6 +593,16 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             </div>
           ) : null}
 
+          {pendingSteers && pendingSteers.length > 0 && onSteerNow && onDeleteSteer && onEditSteer ? (
+            <PendingSteerCard
+              steers={pendingSteers}
+              onSteerNow={onSteerNow}
+              onDelete={onDeleteSteer}
+              onEdit={onEditSteer}
+              onEditingChange={onEditingSteerChange}
+            />
+          ) : null}
+
           {isWorkingLocked ? (
             <div
               id={workingLockHintId}
@@ -664,8 +697,26 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 if (lastUserMsg) updateInput(lastUserMsg.text);
                 return;
               }
+              // ⌘⏎ / Ctrl+Enter — steer. Routes around the busy-Enter lockout and
+              // through the parent's enqueue path. Fires before the slash-suggestions
+              // and plain-Enter handlers so it works even when the textarea is
+              // disabled (which it is while displayWaiting).
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                if (!input.trim() || !onSteer) return;
+                onSteer();
+                if (event.currentTarget) {
+                  event.currentTarget.style.height = 'auto';
+                }
+                return;
+              }
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
+                // Plain Enter is locked while the agent is busy. User options
+                // are: Stop (the bottom Send-toggled-to-Stop button) or Steer
+                // (⌘⏎, handled above). Matches operator's "either stop or
+                // steer" call ([[borrow_conductor_steer_queue]]).
+                if (isWorkingLocked) return;
                 if (slashSuggestions.length > 0 && activeSlashCommand) {
                   const normalized = input.trim();
                   const [commandToken] = normalized.split(/\s+/, 1);

@@ -26,6 +26,7 @@ import type {
   OrchestratorWorkspaceTarget,
 } from '@/lib/orchestrator/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { PendingSteer } from './chat-panel/PendingSteerCard';
 import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
 import {
   executeOrchestratorSlashCommand,
@@ -322,6 +323,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [planText, setPlanText] = useState<string | null>(null);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [targetAgentKey, setTargetAgentKey] = useState<string>('__claude__');
+  // ⌘⏎ steer queue. Held locally; not persisted across reloads (ephemeral
+  // intent). Head fires automatically when the agent goes idle (auto-fire
+  // useEffect below sendNow). editingSteerId pauses the auto-fire while the
+  // head row is being edited inline ([[borrow_conductor_steer_queue]]).
+  const [pendingSteers, setPendingSteers] = useState<PendingSteer[]>([]);
+  const [editingSteerId, setEditingSteerId] = useState<string | null>(null);
   const thinkingPreferenceTouchedRef = useRef(false);
   const pollRef = useRef<number | null>(null);
   const pollDelayRef = useRef<number | null>(null);
@@ -1435,6 +1442,71 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => { void handleTaskSend(msg); }, 0);
   }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, waitingForReply]);
 
+  // ⌘⏎ steer handlers. enqueueSteer routes the typed input through the queue:
+  // idle → fire immediately via sendNow; busy → push onto pendingSteers and let
+  // the auto-fire effect drain it when displayWaiting falls. handleSteerNow
+  // preempts the running turn by interrupting it; the steered row stays in the
+  // queue and gets picked up by the same auto-fire path on the next idle tick.
+  // Edit/Delete operate on the queue without touching the runtime.
+  const enqueueSteer = useCallback(() => {
+    const msg = latestInputRef.current.trim();
+    if (!msg) return;
+    setInput('');
+    latestInputRef.current = '';
+    if (displayWaiting) {
+      const id = `steer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      setPendingSteers((prev) => [...prev, { id, text: msg }]);
+      return;
+    }
+    sendNow(msg);
+  }, [displayWaiting, sendNow]);
+
+  const handleSteerNow = useCallback((id: string) => {
+    // Move the target steer to head so the auto-fire effect picks it up first.
+    setPendingSteers((prev) => {
+      const idx = prev.findIndex((s) => s.id === id);
+      if (idx < 0) return prev;
+      if (idx === 0) return prev;
+      const target = prev[idx];
+      return [target, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
+    });
+    // Interrupt the running turn so displayWaiting flips false. The effect
+    // below will then dequeue + sendNow on the next render.
+    if (isOrchestratorMode) {
+      orchStream.interrupt?.();
+    } else if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  }, [isOrchestratorMode, orchStream]);
+
+  const handleDeleteSteer = useCallback((id: string) => {
+    setPendingSteers((prev) => prev.filter((s) => s.id !== id));
+    setEditingSteerId((curr) => (curr === id ? null : curr));
+  }, []);
+
+  const handleEditSteer = useCallback((id: string, text: string) => {
+    const next = text.trim();
+    if (!next) {
+      // Empty edit = delete (Conductor matches this).
+      setPendingSteers((prev) => prev.filter((s) => s.id !== id));
+      return;
+    }
+    setPendingSteers((prev) => prev.map((s) => (s.id === id ? { ...s, text: next } : s)));
+  }, []);
+
+  // Auto-fire: when the agent goes idle and the queue has work, dequeue head
+  // and call sendNow. Skip if the head row is being inline-edited (Conductor's
+  // "queue pauses during edits" pattern).
+  useEffect(() => {
+    if (displayWaiting) return;
+    if (pendingSteers.length === 0) return;
+    const head = pendingSteers[0];
+    if (editingSteerId === head.id) return;
+    setPendingSteers((prev) => prev.slice(1));
+    sendNow(head.text);
+  }, [displayWaiting, pendingSteers, editingSteerId, sendNow]);
+
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
   const fillInput = useCallback((text: string) => {
@@ -1638,6 +1710,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onUndoEnhance={handleUndoEnhance}
         onSubmit={() => { void handleTaskSend(); }}
         onStop={orchStream.interrupt}
+        onSteer={enqueueSteer}
+        pendingSteers={pendingSteers}
+        onSteerNow={handleSteerNow}
+        onDeleteSteer={handleDeleteSteer}
+        onEditSteer={handleEditSteer}
+        onEditingSteerChange={setEditingSteerId}
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? formatModelLabel(orchestratorModel) : activeTargetLabel}
         effort={thinkingEffort}
