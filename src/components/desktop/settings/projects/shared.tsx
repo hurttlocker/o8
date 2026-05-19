@@ -35,6 +35,54 @@ export interface DismissedApiResponse {
   error?: string;
 }
 
+export interface ProjectContextRepoView {
+  id: string;
+  name: string;
+  role: ProjectRole | null;
+  isPrimary: boolean;
+  isCurrent: boolean;
+}
+
+export interface ProjectContextView {
+  id: string;
+  name: string;
+  runtimeProjectId: string;
+  settingsProjectId: string | null;
+  instructions: string | null;
+  repos: ProjectContextRepoView[];
+  primaryRepo: ProjectContextRepoView | null;
+  currentRepo: ProjectContextRepoView | null;
+  relatedRepos: ProjectContextRepoView[];
+  source: {
+    warnings: string[];
+  };
+}
+
+export interface ProjectContextApiResponse {
+  context?: ProjectContextView;
+  taskBrief?: string;
+  error?: string;
+}
+
+export interface ProjectLockView {
+  projectId: string;
+  runtimeProjectId: string;
+  projectName: string;
+  repoName: string;
+  laneId: string;
+  packetId: string | null;
+  label: string;
+  status: string;
+  runtime: string;
+  branch: string;
+  stale: boolean;
+}
+
+export interface ProjectLocksApiResponse {
+  locks?: ProjectLockView[];
+  error?: string;
+}
+
 // ── Suggestions ──
 
 export interface OrgSuggestion {

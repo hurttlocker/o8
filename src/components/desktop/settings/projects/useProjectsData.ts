@@ -12,6 +12,10 @@ import {
   parseGithubOrg,
   type DismissedApiResponse,
   type OrgSuggestion,
+  type ProjectContextApiResponse,
+  type ProjectContextView,
+  type ProjectLocksApiResponse,
+  type ProjectLockView,
   type ProjectsApiResponse,
   type RepoApiResponse,
 } from './shared';
@@ -27,6 +31,8 @@ export interface ProjectsDataState {
   projects: ProjectWithRepos[];
   repos: RepoRegistryEntry[];
   reposById: Map<string, RepoRegistryEntry>;
+  runtimeContext: ProjectContextView | null;
+  projectLocks: ProjectLockView[];
   orgSuggestions: OrgSuggestion[];
   loading: boolean;
   topError: string | null;
@@ -36,6 +42,7 @@ export interface ProjectsDataState {
   submitCreate: (state: FormState, suggestionOrigin?: SuggestionOrigin) => Promise<void>;
   submitEdit: (projectId: string, before: ProjectWithRepos, state: FormState) => Promise<void>;
   handleDelete: (projectId: string) => Promise<void>;
+  handleArchiveLock: (laneId: string) => Promise<void>;
   handleDismissSuggestion: (suggestion: OrgSuggestion) => Promise<void>;
   handleGroupSuggestion: (suggestion: OrgSuggestion) => Promise<void>;
 }
@@ -43,6 +50,8 @@ export interface ProjectsDataState {
 export function useProjectsData(): ProjectsDataState {
   const [projects, setProjects] = useState<ProjectWithRepos[]>([]);
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
+  const [runtimeContext, setRuntimeContext] = useState<ProjectContextView | null>(null);
+  const [projectLocks, setProjectLocks] = useState<ProjectLockView[]>([]);
   const [dismissedFingerprints, setDismissedFingerprints] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [topError, setTopError] = useState<string | null>(null);
@@ -71,6 +80,22 @@ export function useProjectsData(): ProjectsDataState {
       setProjects(projData.projects ?? []);
       setRepos(repoData.repos ?? []);
       setDismissedFingerprints(new Set(dismissedData.fingerprints ?? []));
+      const [contextResult, locksResult] = await Promise.allSettled([
+        fetch('/api/projects/context', { cache: 'no-store' }),
+        fetch('/api/projects/locks', { cache: 'no-store' }),
+      ]);
+      if (contextResult.status === 'fulfilled') {
+        const contextData = (await contextResult.value.json().catch(() => ({}))) as ProjectContextApiResponse;
+        setRuntimeContext(contextResult.value.ok ? contextData.context ?? null : null);
+      } else {
+        setRuntimeContext(null);
+      }
+      if (locksResult.status === 'fulfilled') {
+        const locksData = (await locksResult.value.json().catch(() => ({}))) as ProjectLocksApiResponse;
+        setProjectLocks(locksResult.value.ok ? locksData.locks ?? [] : []);
+      } else {
+        setProjectLocks([]);
+      }
       setTopError(null);
     } catch (err) {
       setTopError(err instanceof Error ? err.message : 'Failed to load projects.');
@@ -101,19 +126,22 @@ export function useProjectsData(): ProjectsDataState {
     for (const [org, orgRepos] of reposByOrg.entries()) {
       if (orgRepos.length < 2) continue;
 
-      // Suppress when an existing project already covers ALL of these repos.
       const orgRepoIds = new Set(orgRepos.map((r) => r.id));
-      const fullyCovered = projects.some((project) => {
-        const projectRepoIds = new Set(project.repos.map((link) => link.repoId));
-        for (const id of orgRepoIds) if (!projectRepoIds.has(id)) return false;
-        return true;
-      });
-      if (fullyCovered) continue;
+      const assignedRepoIds = new Set(projects.flatMap((project) => (
+        project.repos.map((link) => link.repoId)
+      )));
+      const existingMultiRepoProject = projects.some((project) => (
+        project.repos.filter((link) => orgRepoIds.has(link.repoId)).length >= 2
+      ));
+      if (existingMultiRepoProject) continue;
 
-      const fingerprint = fingerprintOrgSuggestion(org, orgRepos.map((r) => r.id));
+      const candidateRepos = orgRepos.filter((repo) => !assignedRepoIds.has(repo.id));
+      if (candidateRepos.length < 2) continue;
+
+      const fingerprint = fingerprintOrgSuggestion(org, candidateRepos.map((r) => r.id));
       if (dismissedFingerprints.has(fingerprint)) continue;
 
-      out.push({ org, repos: orgRepos, fingerprint });
+      out.push({ org, repos: candidateRepos, fingerprint });
     }
     out.sort((a, b) => a.org.localeCompare(b.org));
     return out;
@@ -135,6 +163,7 @@ export function useProjectsData(): ProjectsDataState {
           name: state.name.trim(),
           slug: state.slug.trim() || undefined,
           description: state.description.trim() || null,
+          mainRepoId: state.mainRepoId,
           repoIds,
           roles,
           suggestionOrigin,
@@ -188,6 +217,18 @@ export function useProjectsData(): ProjectsDataState {
           });
         }
       }
+      const nextMainRepoId = state.mainRepoId && state.selected.has(state.mainRepoId)
+        ? state.mainRepoId
+        : null;
+      if ((before.mainRepoId ?? null) !== nextMainRepoId) {
+        const mainRes = await fetch(`/api/projects/${projectId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mainRepoId: nextMainRepoId }),
+        });
+        const mainData = (await mainRes.json().catch(() => ({}))) as { error?: string };
+        if (!mainRes.ok) throw new Error(mainData.error ?? 'Failed to update main repo.');
+      }
       await refresh();
     } finally {
       setBusyKey(null);
@@ -205,6 +246,24 @@ export function useProjectsData(): ProjectsDataState {
       await refresh();
     } catch (err) {
       setTopError(err instanceof Error ? err.message : 'Failed to delete project.');
+    } finally {
+      setBusyKey(null);
+    }
+  }, [refresh]);
+
+  const handleArchiveLock = useCallback(async (laneId: string) => {
+    setBusyKey(`archive-lock:${laneId}`);
+    try {
+      const res = await fetch(`/api/projects/locks/${laneId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'archive_stale' }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to archive lock.');
+      await refresh();
+    } catch (err) {
+      setTopError(err instanceof Error ? err.message : 'Failed to archive lock.');
     } finally {
       setBusyKey(null);
     }
@@ -260,6 +319,8 @@ export function useProjectsData(): ProjectsDataState {
     projects,
     repos,
     reposById,
+    runtimeContext,
+    projectLocks,
     orgSuggestions,
     loading,
     topError,
@@ -269,6 +330,7 @@ export function useProjectsData(): ProjectsDataState {
     submitCreate,
     submitEdit,
     handleDelete,
+    handleArchiveLock,
     handleDismissSuggestion,
     handleGroupSuggestion,
   };

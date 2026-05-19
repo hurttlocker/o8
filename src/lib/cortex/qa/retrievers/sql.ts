@@ -28,6 +28,7 @@ import path from 'node:path';
 
 import type { RetrieverInput, RetrieverResult, TypedRow } from '@/lib/cortex/qa/types';
 import { getSqlite } from '@/lib/db';
+import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 
 const DEFAULT_LIMIT = 20;
 
@@ -297,10 +298,22 @@ export async function sqlRetriever(input: RetrieverInput): Promise<RetrieverResu
     const sqlite = getSqlite();
     const params: Array<string | number> = [];
     const where: string[] = ['so.valid_to IS NULL'];
+    const orderParams: Array<string | number> = [];
 
     if (input.repoPath) {
-      where.push('so.repo_path = ?');
-      params.push(input.repoPath);
+      const active = getActiveProjectScopeForRepoSync(input.repoPath);
+      if (active.repoInActiveProject && active.repoPaths.length > 0) {
+        const scopedRepoPaths = Array.from(new Set([
+          path.resolve(input.repoPath),
+          ...active.repoPaths.map((repoPath) => path.resolve(repoPath)),
+        ]));
+        where.push(`so.repo_path IN (${scopedRepoPaths.map(() => '?').join(',')})`);
+        params.push(...scopedRepoPaths);
+        orderParams.push(path.resolve(input.repoPath));
+      } else {
+        where.push('so.repo_path = ?');
+        params.push(input.repoPath);
+      }
     }
     if (input.projectId) {
       where.push('so.project_id = ?');
@@ -336,10 +349,10 @@ export async function sqlRetriever(input: RetrieverInput): Promise<RetrieverResu
         )
       ) pr ON pr.head_ref_name = so.branch
       WHERE ${where.join(' AND ')}
-      ORDER BY so.completed_at DESC
+      ORDER BY ${orderParams.length > 0 ? 'CASE WHEN so.repo_path = ? THEN 0 ELSE 1 END,' : ''} so.completed_at DESC
       LIMIT ?
     `;
-    params.push(limit);
+    params.push(...orderParams, limit);
 
     const records = sqlite.prepare(sql).all(...params) as OutcomeRow[];
 

@@ -80,13 +80,21 @@ interface FactRow {
   embedding: Buffer | null;
 }
 
-function buildScopedRepoPaths(input: RetrieverInput): Set<string> {
+function buildScopedRepoScope(input: RetrieverInput): {
+  repoPaths: Set<string>;
+  primaryRepoPath: string | null;
+} {
   const active = getActiveProjectScopeForRepoSync(input.repoPath);
   const explicitRepoPath = input.repoPath?.trim();
+  const normalizedExplicitRepoPath = explicitRepoPath ? path.resolve(explicitRepoPath) : null;
+  const projectRepoPaths = active.repoPaths.map((repoPath) => path.resolve(repoPath));
   const repoPaths = explicitRepoPath
-    ? (active.repoInActiveProject ? [explicitRepoPath] : [])
-    : active.repoPaths;
-  return new Set(repoPaths.map((repoPath) => path.resolve(repoPath)));
+    ? (active.repoInActiveProject ? projectRepoPaths : [])
+    : projectRepoPaths;
+  return {
+    repoPaths: new Set(repoPaths),
+    primaryRepoPath: active.repoInActiveProject ? normalizedExplicitRepoPath : null,
+  };
 }
 
 function factRepoInScope(repoPath: string | null, scopedRepoPaths: Set<string>): boolean {
@@ -96,6 +104,16 @@ function factRepoInScope(repoPath: string | null, scopedRepoPaths: Set<string>):
     return scopedRepoPaths.has(path.resolve(repoPath));
   } catch {
     return false;
+  }
+}
+
+function repoPathScoreMultiplier(repoPath: string | null, primaryRepoPath: string | null): number {
+  if (!primaryRepoPath) return 1;
+  if (!repoPath?.trim()) return 1;
+  try {
+    return path.resolve(repoPath) === primaryRepoPath ? 1.2 : 0.88;
+  } catch {
+    return 1;
   }
 }
 
@@ -156,7 +174,7 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
 
   try {
     const sqlite = getSqlite();
-    const scopedRepoPaths = buildScopedRepoPaths(input);
+    const scopedRepoScope = buildScopedRepoScope(input);
     if (!isFts5Available(sqlite)) {
       // FTS5 missing — facts_fts wasn't created. Worker writes still go to
       // `facts`, but we have no BM25 index to search. Return empty.
@@ -247,28 +265,29 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
       const hit = hits.get(id)!;
       const bm25Norm = maxBm25 > 0 ? hit.rank / maxBm25 : 0;
 
+      const record = byId.get(id);
       let hybridScore = hit.rank; // default: pure BM25 rank (unnormalised)
       if (questionVec !== null) {
-        const record = byId.get(id);
         const factVec = record ? decodeEmbedding(record.embedding ?? null) : null;
         const cosine = factVec ? cosineSimilarity(questionVec, factVec) : 0;
         // Blend: BM25 normalised × 0.6 + cosine × 0.4
         hybridScore = bm25Norm * 0.6 + cosine * 0.4;
       }
-      scored.push({ id, score: hybridScore });
+      const repoMultiplier = record
+        ? repoPathScoreMultiplier(record.repo_path, scopedRepoScope.primaryRepoPath)
+        : 1;
+      scored.push({ id, score: hybridScore * repoMultiplier });
     }
 
-    // Re-sort by hybrid score (descending). When hybrid scorer is off, the
-    // BM25 rank is preserved as the sort key (same order as before).
-    if (questionVec !== null) {
-      scored.sort((a, b) => b.score - a.score);
-    }
+    // Re-sort by score. Without the hybrid scorer this preserves BM25 while
+    // nudging the repo the operator is currently in above sibling repos.
+    scored.sort((a, b) => b.score - a.score);
 
     for (const { id, score } of scored) {
       if (rows.length >= limit) break;
       const record = byId.get(id);
       if (!record) continue;
-      if (!factRepoInScope(record.repo_path, scopedRepoPaths)) continue;
+      if (!factRepoInScope(record.repo_path, scopedRepoScope.repoPaths)) continue;
       if (record.confidence < CONFIDENCE_FLOOR) continue;
 
       const hit = hits.get(id)!;

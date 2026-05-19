@@ -48,6 +48,7 @@ export type LaneRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 
 export interface Lane {
   id: string;
+  projectId: string | null;
   label: string;
   repoPath: string;
   worktreePath: string | null;
@@ -85,6 +86,7 @@ export type LaneCommand =
   | {
       verb: 'open_lane';
       repoPath: string;
+      projectId?: string | null;
       branch: string;
       baseBranch?: string;
       runtime: LaneRuntime;

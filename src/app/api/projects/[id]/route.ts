@@ -5,6 +5,7 @@ import {
   getProjectWithRepos,
   updateProject,
 } from '@/lib/projects/store';
+import { syncPanelLedgerFromProjectStore } from '@/lib/projects/context';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,6 +30,7 @@ export async function GET(
 interface UpdateProjectBody {
   name?: unknown;
   description?: unknown;
+  mainRepoId?: unknown;
 }
 
 export async function PATCH(
@@ -46,7 +48,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
-  const updates: { name?: string; description?: string | null } = {};
+  const updates: { name?: string; description?: string | null; mainRepoId?: string | null } = {};
   if (body.name !== undefined) {
     if (typeof body.name !== 'string') {
       return NextResponse.json({ error: 'name must be a string.' }, { status: 400 });
@@ -59,6 +61,12 @@ export async function PATCH(
     }
     updates.description = body.description as string | null;
   }
+  if (body.mainRepoId !== undefined) {
+    if (body.mainRepoId !== null && typeof body.mainRepoId !== 'string') {
+      return NextResponse.json({ error: 'mainRepoId must be a string or null.' }, { status: 400 });
+    }
+    updates.mainRepoId = body.mainRepoId as string | null;
+  }
 
   try {
     const project = updateProject(id, updates);
@@ -66,6 +74,9 @@ export async function PATCH(
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
     }
     const withRepos = getProjectWithRepos(id);
+    if (withRepos) {
+      await syncPanelLedgerFromProjectStore(withRepos);
+    }
     return NextResponse.json({ project: withRepos ?? project }, { headers: NO_STORE });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to update project.';

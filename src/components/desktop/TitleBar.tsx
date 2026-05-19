@@ -5,7 +5,7 @@
  *
  * Layout (matching Cursor/Claude Code pattern):
  * Left:  [78px traffic light spacer] [Sidebar toggle] [← Back] [→ Forward]
- * Center: [Search button / Cmd+K trigger]
+ * Center: drag region
  * Right: [Bottom panel toggle] [Chat toggle] [Settings gear (red)]
  *
  * Sits ABOVE everything. Height: 44px. Frosted glass.
@@ -16,7 +16,7 @@ import { motion } from 'framer-motion';
 import { UsersThree } from '@phosphor-icons/react';
 import { O8HeaderTabs } from './o8-panel/O8HeaderTabs';
 import type { O8Tab } from './o8-panel/types';
-import { IconPanelLeft, IconSearch, IconTerminal } from './title-bar/icons';
+import { IconPanelLeft, IconTerminal } from './title-bar/icons';
 import { TitleBarButton } from './title-bar/TitleBarButton';
 import { BrowserHoverButton } from './title-bar/BrowserHoverButton';
 import { RightPanelMorphButton } from './title-bar/RightPanelMorphButton';
@@ -44,7 +44,6 @@ interface TitleBarProps {
   // Agents slot — migrated out of the NavRail.
   isAgentsSectionActive?: boolean;
   onOpenAgents?: () => void;
-  onOpenCommandPalette?: () => void;
   o8ActiveTab?: O8Tab;
   onO8TabChange?: (tab: O8Tab) => void;
   compact?: boolean;
@@ -65,7 +64,6 @@ export function TitleBar({
   onOpenBrowser,
   isAgentsSectionActive = false,
   onOpenAgents,
-  onOpenCommandPalette,
   o8ActiveTab = 'workspace',
   onO8TabChange,
   compact = false,
@@ -145,12 +143,11 @@ export function TitleBar({
             icon={
               <motion.span
                 variants={{
-                  rest: { scale: 1, rotate: 0 },
-                  hover: { scale: 1.08, rotate: -3 },
-                  tap: { scale: 0.9 },
-                  active: { scale: 1.04, rotate: 0 },
+                  rest: { opacity: 1 },
+                  hover: { opacity: 1 },
+                  active: { opacity: 1 },
                 }}
-                transition={{ type: 'spring', stiffness: 520, damping: 18, mass: 0.5 }}
+                transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
                 style={{ display: 'inline-flex' }}
               >
                 <UsersThree
@@ -169,7 +166,7 @@ export function TitleBar({
 
       </div>
 
-      {/* ── Center — Search trigger ── */}
+      {/* ── Center — quiet drag region. Search lives in the left rail. ── */}
       <div
         data-chrome-surface="true"
         style={{
@@ -179,81 +176,7 @@ export function TitleBar({
           justifyContent: 'center',
           minWidth: 0,
         }}
-      >
-        <motion.button
-          type="button"
-          aria-label="Open search"
-          title="Open search (Cmd+K)"
-          onClick={onOpenCommandPalette}
-          disabled={!onOpenCommandPalette}
-          initial="rest"
-          animate="rest"
-          whileHover={onOpenCommandPalette ? 'hover' : undefined}
-          whileTap={onOpenCommandPalette ? 'tap' : undefined}
-          variants={{
-            rest: {
-              background: 'var(--t-chrome-btn-bg)',
-              boxShadow: 'var(--t-chrome-btn-shadow)',
-              scale: 1,
-            },
-            hover: {
-              background: 'var(--t-chrome-btn-hover-bg)',
-              boxShadow: 'var(--t-chrome-btn-hover-shadow)',
-              scale: 1,
-            },
-            tap: { scale: 0.97 },
-          }}
-          transition={{ type: 'spring', stiffness: 460, damping: 26, mass: 0.6 }}
-          style={{
-            height: 32,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            paddingTop: 0,
-            paddingRight: 10,
-            paddingBottom: 0,
-            paddingLeft: 10,
-            border: 'none',
-            borderRadius: 10,
-            color: 'var(--t-chrome-btn-text, var(--t-text))',
-            cursor: onOpenCommandPalette ? 'pointer' : 'default',
-            opacity: onOpenCommandPalette ? 1 : 0.54,
-            WebkitTapHighlightColor: 'transparent',
-            ['WebkitAppRegion' as string]: 'no-drag',
-          }}
-        >
-          <IconSearch size={15} />
-          <motion.span
-            variants={{
-              rest: { y: 0, opacity: 0.78 },
-              hover: { y: -1, opacity: 1 },
-              tap: { y: 0, opacity: 1 },
-            }}
-            transition={{ type: 'spring', stiffness: 520, damping: 22 }}
-            style={{ display: 'inline-flex' }}
-          >
-            <kbd
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: 'var(--t-kbd-color)',
-                background: 'var(--t-kbd-bg)',
-                border: '1px solid var(--t-kbd-border)',
-                borderRadius: 5,
-                paddingTop: 1,
-                paddingRight: 5,
-                paddingBottom: 1,
-                paddingLeft: 5,
-                lineHeight: 1.2,
-                fontFamily: 'var(--font-sans-system)',
-              }}
-            >
-              ⌘K
-            </kbd>
-          </motion.span>
-        </motion.button>
-      </div>
+      />
 
       {/* Open In — moved to Command Palette (⌘K → "open in") */}
 

@@ -249,6 +249,7 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
 
   return (
     <div
+      className="cortex-scroll-fade-y cortex-themed-scroll"
       style={{
         height: '100%',
         overflow: 'auto',

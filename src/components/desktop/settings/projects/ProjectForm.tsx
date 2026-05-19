@@ -14,7 +14,6 @@ import { RamsButton } from '../shared';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
-  RAMS_ACCENT,
   RAMS_HAIRLINE,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
@@ -30,10 +29,11 @@ export interface FormState {
   slugTouched: boolean;
   description: string;
   selected: Map<string, ProjectRole | null>;
+  mainRepoId: string | null;
 }
 
 export function emptyFormState(): FormState {
-  return { name: '', slug: '', slugTouched: false, description: '', selected: new Map() };
+  return { name: '', slug: '', slugTouched: false, description: '', selected: new Map(), mainRepoId: null };
 }
 
 export function formStateFromProject(project: ProjectWithRepos): FormState {
@@ -47,6 +47,7 @@ export function formStateFromProject(project: ProjectWithRepos): FormState {
     slugTouched: true,
     description: project.description ?? '',
     selected,
+    mainRepoId: project.mainRepoId ?? project.repos[0]?.repoId ?? null,
   };
 }
 
@@ -84,9 +85,17 @@ export function ProjectForm({
   const toggleRepo = (repoId: string) => {
     setState((current) => {
       const next = new Map(current.selected);
-      if (next.has(repoId)) next.delete(repoId);
-      else next.set(repoId, null);
-      return { ...current, selected: next };
+      let mainRepoId = current.mainRepoId;
+      if (next.has(repoId)) {
+        next.delete(repoId);
+        if (mainRepoId === repoId) {
+          mainRepoId = next.keys().next().value ?? null;
+        }
+      } else {
+        next.set(repoId, null);
+        if (!mainRepoId) mainRepoId = repoId;
+      }
+      return { ...current, selected: next, mainRepoId };
     });
   };
   const setRepoRole = (repoId: string, role: ProjectRole | null) => {
@@ -94,6 +103,12 @@ export function ProjectForm({
       const next = new Map(current.selected);
       next.set(repoId, role);
       return { ...current, selected: next };
+    });
+  };
+  const setMainRepo = (repoId: string) => {
+    setState((current) => {
+      if (!current.selected.has(repoId)) return current;
+      return { ...current, mainRepoId: repoId };
     });
   };
 
@@ -116,7 +131,7 @@ export function ProjectForm({
     paddingRight: 12,
     paddingBottom: 8,
     paddingLeft: 12,
-    borderRadius: 4,
+    borderRadius: 8,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: RAMS_HAIRLINE,
@@ -137,68 +152,85 @@ export function ProjectForm({
         paddingRight: 18,
         paddingBottom: 18,
         paddingLeft: 18,
-        borderRadius: 4,
+        borderRadius: 12,
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: RAMS_HAIRLINE_SOFT,
-        background: 'transparent',
+        background: 'color-mix(in srgb, var(--t-panel-solid, #fff) 72%, transparent)',
         display: 'flex',
         flexDirection: 'column',
         gap: 16,
       }}
     >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{
+          fontFamily: APP_FONT_STACK,
+          fontSize: 18,
+          fontWeight: 650,
+          letterSpacing: '-0.025em',
+          color: 'var(--t-text)',
+          lineHeight: 1.15,
+        }}>
+          {mode === 'create' ? 'Create project context' : 'Edit project context'}
+        </div>
+        <div style={{
+          fontFamily: APP_FONT_STACK,
+          fontSize: 12.5,
+          lineHeight: 1.45,
+          color: RAMS_INK_QUIET,
+          maxWidth: 560,
+        }}>
+          Combine repositories, project instructions, and file context for the work agents should understand together.
+        </div>
+      </div>
+
       <div style={{
-        fontFamily: MONO_FONT_STACK,
-        fontSize: 10,
-        fontWeight: 500,
-        letterSpacing: '0.18em',
-        textTransform: 'uppercase',
-        color: RAMS_ACCENT,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        gap: 12,
       }}>
-        {mode === 'create' ? '[ NEW PROJECT ]' : '[ EDIT PROJECT ]'}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
+            Name
+          </span>
+          <input
+            autoFocus
+            value={state.name}
+            onChange={(e) => updateName(e.target.value)}
+            placeholder="o8"
+            style={inputStyle}
+          />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
+            Slug
+          </span>
+          <input
+            value={state.slug}
+            onChange={(e) => updateSlug(e.target.value)}
+            placeholder="o8"
+            style={{ ...inputStyle, fontFamily: MONO_FONT_STACK, fontSize: 12 }}
+          />
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
-          Name
-        </span>
-        <input
-          autoFocus
-          value={state.name}
-          onChange={(e) => updateName(e.target.value)}
-          placeholder="o8"
-          style={inputStyle}
-        />
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
-          Slug
-        </span>
-        <input
-          value={state.slug}
-          onChange={(e) => updateSlug(e.target.value)}
-          placeholder="o8"
-          style={{ ...inputStyle, fontFamily: MONO_FONT_STACK, fontSize: 12 }}
-        />
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
-          Description (optional)
+          Instructions
         </span>
         <textarea
           value={state.description}
           onChange={(e) => updateDescription(e.target.value)}
-          rows={2}
-          placeholder="What does this product surface include?"
-          style={{ ...inputStyle, resize: 'vertical', minHeight: 60, lineHeight: 1.5 }}
+          rows={4}
+          placeholder="Tell agents how to work in this project."
+          style={{ ...inputStyle, resize: 'vertical', minHeight: 96, lineHeight: 1.5 }}
         />
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
-          Repos
+          Repositories
         </span>
         {repos.length === 0 ? (
           <div style={{
@@ -229,12 +261,52 @@ export function ProjectForm({
                 repo={repo}
                 checked={state.selected.has(repo.id)}
                 role={state.selected.get(repo.id) ?? null}
+                isMain={state.mainRepoId === repo.id}
                 onToggle={() => toggleRepo(repo.id)}
+                onSetMain={() => setMainRepo(repo.id)}
                 onChangeRole={(role) => setRepoRole(repo.id, role)}
               />
             ))}
           </div>
         )}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
+          Files
+        </span>
+        <button
+          type="button"
+          disabled
+          style={{
+            minHeight: 70,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderStyle: 'dashed',
+            borderColor: RAMS_HAIRLINE_SOFT,
+            background: 'transparent',
+            color: RAMS_INK_QUIET,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            fontFamily: APP_FONT_STACK,
+            fontSize: 13,
+            cursor: 'default',
+          }}
+        >
+          <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>+</span>
+          Add files
+          <span style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 9.5,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: RAMS_INK_QUIET,
+          }}>
+            soon
+          </span>
+        </button>
       </div>
 
       {error ? (

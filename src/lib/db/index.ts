@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 21;
+const DB_SCHEMA_VERSION = 22;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -624,6 +624,7 @@ function ensureTables(sqlite: Database.Database): void {
       name TEXT NOT NULL,
       slug TEXT NOT NULL UNIQUE,
       description TEXT,
+      main_repo_id TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -968,6 +969,7 @@ function ensureProjectsTables(sqlite: Database.Database): void {
       name TEXT NOT NULL,
       slug TEXT NOT NULL UNIQUE,
       description TEXT,
+      main_repo_id TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -988,6 +990,38 @@ function ensureProjectsTables(sqlite: Database.Database): void {
       dismissed_at INTEGER NOT NULL,
       reason TEXT
     );
+  `);
+
+  if (!tableColumnExists(sqlite, 'projects', 'main_repo_id')) {
+    sqlite.exec('ALTER TABLE projects ADD COLUMN main_repo_id TEXT');
+  }
+  sqlite.exec(`
+    UPDATE projects
+    SET main_repo_id = (
+      SELECT repo_id
+      FROM project_repos
+      WHERE project_repos.project_id = projects.id
+      ORDER BY
+        CASE role
+          WHEN 'fullstack' THEN 0
+          WHEN 'backend' THEN 1
+          WHEN 'service' THEN 2
+          WHEN 'frontend' THEN 3
+          WHEN 'shared' THEN 4
+          WHEN 'library' THEN 5
+          WHEN 'mobile' THEN 6
+          WHEN 'site' THEN 7
+          WHEN 'docs' THEN 8
+          WHEN 'infra' THEN 9
+          ELSE 10
+        END,
+        added_at ASC
+      LIMIT 1
+    )
+    WHERE (main_repo_id IS NULL OR main_repo_id = '')
+      AND EXISTS (
+        SELECT 1 FROM project_repos WHERE project_repos.project_id = projects.id
+      )
   `);
 }
 

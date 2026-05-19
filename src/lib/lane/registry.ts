@@ -8,6 +8,7 @@ import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
 import { recordDispatchRule } from '@/lib/dispatch/rules-store';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
+import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { publishPacketTailEvent } from './packet-tail';
 import { publishLaneLifecycleEvent } from './lifecycle';
 import { extractLaneReviewScreenshot } from './review-screenshot';
@@ -74,6 +75,7 @@ function mapLaneRow(row: LaneRow | undefined): Lane | null {
 
   return {
     id: row.id,
+    projectId: row.projectId,
     label: row.label,
     repoPath: row.repoPath,
     worktreePath: row.worktreePath,
@@ -264,6 +266,7 @@ function getFilteredLaneList(
 
 export function createLane(opts: {
   repoPath: string;
+  projectId?: string | null;
   branch: string;
   baseBranch?: string;
   runtime: LaneRuntime;
@@ -277,8 +280,10 @@ export function createLane(opts: {
   const db = getSqlite();
   const id = generateLaneId();
   const now = nowIso();
+  const projectId = opts.projectId?.trim() || getActiveProjectScopeForRepoSync(opts.repoPath).projectId;
   const lane: Lane = {
     id,
+    projectId,
     label: opts.label || `${opts.runtime} — ${opts.branch}`,
     repoPath: opts.repoPath,
     worktreePath: opts.worktreePath ?? null,
@@ -300,6 +305,7 @@ export function createLane(opts: {
   db.transaction(() => {
     getLaneDb().insert(lanes).values(lane).run();
     appendEvent(id, 'open_lane', opts.actor ?? 'system', {
+      projectId,
       repoPath: opts.repoPath,
       branch: opts.branch,
       runtime: opts.runtime,

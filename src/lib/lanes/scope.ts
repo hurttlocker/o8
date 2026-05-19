@@ -12,6 +12,8 @@ import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/preservation-envelope';
 import { currentMissionState } from '@/lib/orchestrator/operator-mission-service/shared';
 import type { OrchestratorPacket, OrchestratorPacketStatus } from '@/lib/orchestrator/types';
+import { buildProjectTaskBrief, getProjectContext, type ProjectContextRepo } from '@/lib/projects/context';
+import { listProjectLocks, type ProjectLock } from '@/lib/projects/locks';
 import { getRuntimeProcessForWorktree, type RuntimeProcessOwner } from '@/lib/runtime/registry';
 
 const execFileAsync = promisify(execFile);
@@ -42,6 +44,49 @@ export interface RelatedPacketScope {
   overlappingPaths: string[];
 }
 
+export interface PacketScopeProjectRepo {
+  id: string;
+  name: string;
+  localPath: string;
+  role: string | null;
+  isMain: boolean;
+  isCurrent: boolean;
+}
+
+export interface PacketScopeProjectLock {
+  laneId: string;
+  packetId: string | null;
+  label: string;
+  repoName: string;
+  repoPath: string;
+  runtime: string;
+  branch: string;
+  status: LaneStatus;
+  stale: boolean;
+  isCurrentLane: boolean;
+  lastHeartbeatAt: number | null;
+  lastEventAt: string | null;
+}
+
+export interface PacketScopeProject {
+  id: string;
+  name: string;
+  slug: string;
+  runtimeProjectId: string;
+  mainRepo: PacketScopeProjectRepo | null;
+  currentRepo: PacketScopeProjectRepo | null;
+  relatedRepos: PacketScopeProjectRepo[];
+  instructions: string | null;
+  taskBrief: string;
+  locks: PacketScopeProjectLock[];
+  files: {
+    enabled: boolean;
+    note: string;
+  };
+  definitionOfDone: string[];
+  doNotTouch: string[];
+}
+
 export interface PacketScope {
   schema: typeof PACKET_SCOPE_SCHEMA;
   packetId: string | null;
@@ -57,6 +102,7 @@ export interface PacketScope {
   blockedPaths: string[];
   directives: PacketScopeDirective[];
   relatedPackets: RelatedPacketScope[];
+  project: PacketScopeProject;
 }
 
 export interface GetPacketScopeInput {
@@ -210,6 +256,39 @@ function relatedPacketsFor(
   });
 }
 
+function toProjectRepo(
+  repo: ProjectContextRepo | null,
+  primaryRepoId: string | null,
+  currentRepoId: string | null,
+): PacketScopeProjectRepo | null {
+  if (!repo) return null;
+  return {
+    id: repo.id,
+    name: repo.name,
+    localPath: repo.localPath,
+    role: repo.role,
+    isMain: repo.id === primaryRepoId,
+    isCurrent: repo.id === currentRepoId,
+  };
+}
+
+function toProjectLock(lock: ProjectLock, currentLaneId: string): PacketScopeProjectLock {
+  return {
+    laneId: lock.laneId,
+    packetId: lock.packetId,
+    label: lock.label,
+    repoName: lock.repoName,
+    repoPath: lock.repoPath,
+    runtime: lock.runtime,
+    branch: lock.branch,
+    status: lock.status,
+    stale: lock.stale,
+    isCurrentLane: lock.laneId === currentLaneId,
+    lastHeartbeatAt: lock.lastHeartbeatAt,
+    lastEventAt: lock.lastEventAt,
+  };
+}
+
 export async function getPacketScope(input: GetPacketScopeInput): Promise<PacketScope | null> {
   const packetIdInput = normalizeId(input.packetId);
   const laneIdInput = normalizeId(input.laneId);
@@ -228,6 +307,22 @@ export async function getPacketScope(input: GetPacketScopeInput): Promise<Packet
   ]);
   const declaredRuntime = packet?.runtime ?? lane.runtime;
   const actualRuntime = runtimeProcess?.runtime ?? null;
+  const projectContext = await getProjectContext({
+    repoPath: lane.repoPath,
+    projectId: lane.projectId,
+  });
+  const projectBrief = buildProjectTaskBrief(projectContext, {
+    repoPath: lane.repoPath,
+    taskTitle: packet?.title ?? lane.label,
+    taskBody: packet?.summary ?? null,
+  });
+  const projectLocks = await listProjectLocks(projectContext.id);
+  const primaryRepoId = projectContext.primaryRepo?.id ?? null;
+  const currentRepoId = projectContext.currentRepo?.id ?? null;
+  const relatedRepos = projectContext.repos
+    .filter((repo) => repo.id !== primaryRepoId && repo.id !== currentRepoId)
+    .map((repo) => toProjectRepo(repo, primaryRepoId, currentRepoId))
+    .filter((repo): repo is PacketScopeProjectRepo => Boolean(repo));
 
   recordRuntimeDriftOnce(lane, declaredRuntime, actualRuntime, runtimeProcess);
 
@@ -246,5 +341,31 @@ export async function getPacketScope(input: GetPacketScopeInput): Promise<Packet
     blockedPaths: BLOCKED_PATHS,
     directives,
     relatedPackets: relatedPacketsFor(packetId, allowedPaths, mission.packets),
+    project: {
+      id: projectContext.id,
+      name: projectContext.name,
+      slug: projectContext.slug,
+      runtimeProjectId: projectContext.runtimeProjectId,
+      mainRepo: toProjectRepo(projectContext.primaryRepo, primaryRepoId, currentRepoId),
+      currentRepo: toProjectRepo(projectContext.currentRepo, primaryRepoId, currentRepoId),
+      relatedRepos,
+      instructions: projectContext.instructions,
+      taskBrief: projectBrief,
+      locks: projectLocks.map((lock) => toProjectLock(lock, lane.id)),
+      files: {
+        enabled: projectContext.files.enabled,
+        note: projectContext.files.note,
+      },
+      definitionOfDone: [
+        'Stay inside allowed paths unless the task explicitly requires a scoped expansion.',
+        'Run targeted checks for the changed surface, or report why checks were not possible.',
+        'Report changed repos, locks/conflicts, and review handoffs before completion.',
+      ],
+      doNotTouch: [
+        ...BLOCKED_PATHS,
+        'Sibling repos unless the task explicitly requires cross-repo edits.',
+        'Unrelated user or agent changes already present in the worktree.',
+      ],
+    },
   };
 }

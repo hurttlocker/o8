@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope';
+import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 export const runtime = 'nodejs';
@@ -104,6 +105,18 @@ export async function POST(request: NextRequest) {
       depth: 1,
     });
     const edgeCaseSites = edgeCaseResult.sites.length > 0 ? edgeCaseResult.sites : undefined;
+    const projectContext = await getProjectContext({ repoPath });
+    const projectBrief = buildProjectTaskBrief(projectContext, {
+      repoPath,
+      taskTitle: taskName,
+      taskBody: prompt,
+    });
+    const launchPrompt = [
+      '## Project Brief',
+      projectBrief,
+      '## Task',
+      prompt,
+    ].join('\n\n');
 
     const packet: OrchestratorPacket = {
       id: packetId,
@@ -129,6 +142,7 @@ export async function POST(request: NextRequest) {
       predictedFiles: predictedFiles.length > 0 ? predictedFiles : undefined,
       readBudget,
       edgeCaseSites,
+      prompt: launchPrompt,
     };
 
     // Append the packet by MUTATING the state object passed into the
@@ -157,6 +171,7 @@ export async function POST(request: NextRequest) {
       branch,
       baseBranch,
       runtime: 'codex',
+      projectId: projectContext.id,
       label: taskName,
       packetId,
       actor: 'orchestrator',
@@ -176,7 +191,7 @@ export async function POST(request: NextRequest) {
     const launchResult = await dispatch({
       verb: 'launch_session',
       laneId,
-      prompt,
+      prompt: launchPrompt,
       actor: 'orchestrator',
     });
 

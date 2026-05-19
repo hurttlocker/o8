@@ -27,13 +27,17 @@ export function RepoPickerRow({
   repo,
   checked,
   role,
+  isMain,
   onToggle,
+  onSetMain,
   onChangeRole,
 }: {
   repo: RepoRegistryEntry;
   checked: boolean;
   role: ProjectRole | null;
+  isMain: boolean;
   onToggle: () => void;
+  onSetMain: () => void;
   onChangeRole: (role: ProjectRole | null) => void;
 }) {
   const [openPopover, setOpenPopover] = useState(false);
@@ -104,6 +108,35 @@ export function RepoPickerRow({
           {repo.localPath}
         </span>
       </button>
+
+      {checked ? (
+        <button
+          type="button"
+          onClick={onSetMain}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            paddingTop: 4,
+            paddingRight: 8,
+            paddingBottom: 4,
+            paddingLeft: 8,
+            borderRadius: 4,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: isMain ? 'rgba(37, 99, 235, 0.26)' : RAMS_HAIRLINE_SOFT,
+            background: isMain ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+            color: isMain ? '#1d4ed8' : RAMS_INK_QUIET,
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 9.5,
+            fontWeight: 650,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            cursor: isMain ? 'default' : 'pointer',
+          }}
+        >
+          {isMain ? 'main' : 'set main'}
+        </button>
+      ) : null}
 
       {checked ? (
         <button

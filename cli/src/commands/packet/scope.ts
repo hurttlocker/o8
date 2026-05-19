@@ -35,6 +35,49 @@ interface RelatedPacketScope {
   overlappingPaths: string[];
 }
 
+interface PacketScopeProjectRepo {
+  id: string;
+  name: string;
+  localPath: string;
+  role: string | null;
+  isMain: boolean;
+  isCurrent: boolean;
+}
+
+interface PacketScopeProjectLock {
+  laneId: string;
+  packetId: string | null;
+  label: string;
+  repoName: string;
+  repoPath: string;
+  runtime: string;
+  branch: string;
+  status: string;
+  stale: boolean;
+  isCurrentLane: boolean;
+  lastHeartbeatAt: number | null;
+  lastEventAt: string | null;
+}
+
+interface PacketScopeProject {
+  id: string;
+  name: string;
+  slug: string;
+  runtimeProjectId: string;
+  mainRepo: PacketScopeProjectRepo | null;
+  currentRepo: PacketScopeProjectRepo | null;
+  relatedRepos: PacketScopeProjectRepo[];
+  instructions: string | null;
+  taskBrief: string;
+  locks: PacketScopeProjectLock[];
+  files: {
+    enabled: boolean;
+    note: string;
+  };
+  definitionOfDone: string[];
+  doNotTouch: string[];
+}
+
 interface PacketScope {
   schema: 'o8/packet.scope/v1';
   packetId: string | null;
@@ -50,6 +93,7 @@ interface PacketScope {
   blockedPaths: string[];
   directives: PacketScopeDirective[];
   relatedPackets: RelatedPacketScope[];
+  project?: PacketScopeProject;
 }
 
 async function resolveScopeId(rest: string[]): Promise<string> {
@@ -81,6 +125,45 @@ function printHumanScope(scope: PacketScope): void {
     ['worktree', scope.worktreePath ?? '(none)'],
     ['file ceiling', `${scope.fileLineCeiling} lines`],
   ]);
+
+  if (scope.project) {
+    const project = scope.project;
+    const related = project.relatedRepos.map((repo) => (
+      repo.role ? `${repo.name} (${repo.role})` : repo.name
+    )).join(', ');
+    const locks = project.locks.length === 0
+      ? 'none'
+      : `${project.locks.length} active${project.locks.some((lock) => lock.stale) ? ' (stale present)' : ''}`;
+
+    printHumanHeading('project');
+    printHumanKv([
+      ['name', project.name],
+      ['main repo', project.mainRepo ? `${project.mainRepo.name} — ${project.mainRepo.localPath}` : '(none)'],
+      ['current repo', project.currentRepo ? `${project.currentRepo.name} — ${project.currentRepo.localPath}` : '(none)'],
+      ['related repos', related || '(none)'],
+      ['locks', locks],
+      ['files', project.files.enabled ? 'enabled' : project.files.note],
+    ]);
+
+    if (project.instructions) {
+      process.stdout.write(`  instructions: ${project.instructions}\n`);
+    }
+
+    printHumanHeading('task brief');
+    process.stdout.write(project.taskBrief.split('\n').map((line) => `  ${line}`).join('\n') + '\n');
+
+    printHumanHeading(`project locks (${project.locks.length})`);
+    if (project.locks.length === 0) {
+      process.stdout.write('  (none)\n');
+    } else {
+      for (const lock of project.locks) {
+        const stale = lock.stale ? ' stale' : '';
+        const current = lock.isCurrentLane ? ' current' : '';
+        process.stdout.write(`  ${lock.repoName} ${lock.branch} ${lock.status}${stale}${current}\n`);
+        process.stdout.write(`    lane=${lock.laneId} packet=${lock.packetId ?? '(none)'} runtime=${lock.runtime}\n`);
+      }
+    }
+  }
 
   printHumanHeading(`allowed paths (${scope.allowedPaths.length})`);
   process.stdout.write(scope.allowedPaths.length > 0
