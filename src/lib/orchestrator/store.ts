@@ -1,6 +1,12 @@
 import { normalizeDecompositionMetadata, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
+import {
+  normalizeRequestedRuntime,
+  normalizeWorkerIntent,
+  normalizeWorkerProvider,
+  resolveWorkerRouting,
+} from '@/lib/agents/routing';
 import type {
   OrchestratorLaneBinding,
   OrchestratorLaneSnapshot,
@@ -12,6 +18,7 @@ import type {
   OrchestratorRuntime,
   OrchestratorRuntimeTruth,
   OrchestratorStateApiResponse,
+  WorkerRouting,
 } from '@/lib/orchestrator/types';
 
 const VALID_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode']);
@@ -196,6 +203,28 @@ function normalizeComparisonModels(value: unknown): string[] | undefined {
   return models.length > 0 ? models : undefined;
 }
 
+function normalizeWorkerRouting(value: unknown, runtime: OrchestratorRuntime, workerIntent: unknown): WorkerRouting {
+  if (!value || typeof value !== 'object') {
+    return resolveWorkerRouting({
+      workerIntent,
+      requestedRuntime: runtime,
+      source: 'orchestrator-state',
+    });
+  }
+  const routing = value as Partial<WorkerRouting>;
+  const confidence = routing.confidence === 'high' || routing.confidence === 'medium' || routing.confidence === 'low'
+    ? routing.confidence
+    : undefined;
+  return resolveWorkerRouting({
+    workerIntent: routing.workerIntent ?? workerIntent,
+    requestedProvider: normalizeWorkerProvider(routing.requestedProvider),
+    requestedRuntime: normalizeRequestedRuntime(routing.requestedRuntime) ?? runtime,
+    requestedModel: routing.requestedModel,
+    confidence,
+    source: 'orchestrator-state',
+  });
+}
+
 function normalizeReleaseStatePayload(value: unknown): OrchestratorPacket['releaseStatePayload'] {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<NonNullable<OrchestratorPacket['releaseStatePayload']>>;
@@ -218,6 +247,9 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     : nextPacketReferenceLabel(existing);
   const queueState = normalizeQueueState(packet.queueState, packet.status === 'queued' ? 'queued' : packet.status === 'running' || packet.status === 'awaiting_review' ? 'queued' : packet.status === 'blocked' ? 'held' : 'draft');
   const branchTarget = typeof packet.branchTarget === 'string' ? packet.branchTarget.trim() : '';
+  const runtime = normalizeRuntime(packet.runtime);
+  const workerIntent = normalizeWorkerIntent(packet.workerIntent);
+  const workerRouting = normalizeWorkerRouting(packet.workerRouting, runtime, workerIntent);
   return {
     id: typeof packet.id === 'string' && packet.id.trim() ? packet.id.trim() : `pkt-${Date.now()}-${index + 1}`,
     referenceLabel,
@@ -225,7 +257,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     summary: typeof packet.summary === 'string' ? packet.summary : '',
     workspaceTargetPath: typeof packet.workspaceTargetPath === 'string' && packet.workspaceTargetPath.trim() ? packet.workspaceTargetPath : null,
     branchTarget: branchTarget || (queueState === 'draft' ? '' : 'main'),
-    runtime: normalizeRuntime(packet.runtime),
+    runtime: workerRouting.selectedRuntime,
     dependencyLabels: Array.isArray(packet.dependencyLabels)
       ? packet.dependencyLabels.map((label) => String(label).trim()).filter(Boolean).slice(0, 8)
       : [],
@@ -271,6 +303,8 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     assignedModel: typeof packet.assignedModel === 'string' && packet.assignedModel.trim()
       ? packet.assignedModel.trim()
       : null,
+    workerIntent,
+    workerRouting,
     prompt: typeof packet.prompt === 'string' && packet.prompt.trim() ? packet.prompt : undefined,
     allowedFiles: Array.isArray(packet.allowedFiles)
       ? packet.allowedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)

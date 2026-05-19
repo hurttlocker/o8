@@ -54,6 +54,16 @@ interface TaskPoolTask {
   group: TaskPoolGroup;
   status: string;
   runtime: string;
+  workerIntent: string | null;
+  workerRouting: {
+    requestedProvider: string | null;
+    requestedRuntime: string | null;
+    selectedProvider: string;
+    selectedRuntime: string;
+    enforcement: string;
+    confidence: string;
+    reason: string;
+  } | null;
   branch: string | null;
   baseBranch: string | null;
   repoPath: string | null;
@@ -81,6 +91,35 @@ interface TaskDetail {
   task: TaskPoolTask;
 }
 
+interface TaskMutation {
+  schema: 'o8/task.mutation/v1';
+  ok: boolean;
+  action: 'claim' | 'dispatch' | 'block' | 'report';
+  taskId: string;
+  packetId: string | null;
+  laneId: string | null;
+  note: string;
+  eventId?: string;
+  statusChanged?: boolean;
+  workerRouting?: TaskPoolTask['workerRouting'];
+  task: TaskPoolTask | null;
+}
+
+const VALUE_FLAGS = new Set([
+  '--project',
+  '--repo',
+  '--note',
+  '--message',
+  '--model',
+  '--worker',
+  '--provider',
+  '--runtime',
+  '--reason',
+  '--code',
+  '--event',
+  '--status',
+]);
+
 function hasFlag(rest: string[], name: string): boolean {
   return rest.includes(name);
 }
@@ -104,14 +143,29 @@ function taskQuery(rest: string[]): string {
   return query ? `?${query}` : '';
 }
 
-function taskIdFromRest(rest: string[]): string {
-  const id = rest.find((entry) => entry && !entry.startsWith('-'))?.trim();
+function positionalArgs(rest: string[]): string[] {
+  const args: string[] = [];
+  for (let index = 0; index < rest.length; index += 1) {
+    const entry = rest[index];
+    if (!entry) continue;
+    if (VALUE_FLAGS.has(entry)) {
+      index += 1;
+      continue;
+    }
+    if (entry.startsWith('-')) continue;
+    args.push(entry);
+  }
+  return args;
+}
+
+function taskIdFromRest(rest: string[], command: string): string {
+  const id = positionalArgs(rest)[0]?.trim();
   if (!id) {
     throw new CliError(
       'invalid_args',
-      'o8 task brief <id> needs a packet, lane, or task id.',
+      `o8 task ${command} <id> needs a packet, lane, or task id.`,
       EXIT.INVALID_ARGS,
-      'Example: o8 task brief pkt-abc --human',
+      `Example: o8 task ${command} pkt-abc --human`,
     );
   }
   return id;
@@ -122,6 +176,9 @@ function printTaskLine(task: TaskPoolTask): void {
   const repo = task.repoName ?? 'no repo';
   const project = task.project?.name ?? 'no project';
   process.stdout.write(`  ${id}  ${task.status}  ${repo}  ${project}\n`);
+  if (task.workerIntent || task.workerRouting) {
+    process.stdout.write(`    worker=${task.workerIntent ?? 'unknown'} selected=${task.workerRouting?.selectedRuntime ?? task.runtime}\n`);
+  }
   process.stdout.write(`    ${task.title}\n`);
 }
 
@@ -157,6 +214,8 @@ function printHumanTaskDetail(detail: TaskDetail): void {
     ['group', task.group],
     ['status', task.status],
     ['runtime', task.runtime],
+    ['worker', task.workerIntent ?? '(none)'],
+    ['selected runtime', task.workerRouting?.selectedRuntime ?? '(none)'],
     ['repo', task.repoName ?? '(none)'],
     ['project', task.project?.name ?? '(none)'],
     ['branch', task.branch ?? '(none)'],
@@ -167,6 +226,49 @@ function printHumanTaskDetail(detail: TaskDetail): void {
     printHumanHeading('brief');
     process.stdout.write(task.taskBrief.split('\n').map((line) => `  ${line}`).join('\n') + '\n');
   }
+}
+
+function printHumanMutation(result: TaskMutation): void {
+  printHumanHeading(`task ${result.action}`);
+  printHumanKv([
+    ['ok', String(result.ok)],
+    ['task', result.taskId],
+    ['packet', result.packetId ?? '(none)'],
+    ['lane', result.laneId ?? '(none)'],
+    ['note', result.note],
+    ['selected runtime', result.workerRouting?.selectedRuntime ?? result.task?.workerRouting?.selectedRuntime ?? '(none)'],
+  ]);
+  if (result.task) {
+    process.stdout.write(`\n${result.task.title}\n`);
+    process.stdout.write(`  status: ${result.task.status} · group: ${result.task.group}\n`);
+  }
+}
+
+async function runTaskMutation(
+  mode: OutputMode,
+  action: TaskMutation['action'],
+  rest: string[],
+  body: Record<string, unknown>,
+): Promise<number> {
+  const id = taskIdFromRest(rest, action);
+  const cfg = resolveConfig();
+  const res = await apiFetch<TaskMutation>(
+    cfg,
+    `/api/tasks/${encodeURIComponent(id)}/${action}`,
+    { method: 'POST', body },
+  );
+  if (!res.data) {
+    throw new CliError('invalid_response', `Server returned an empty ${action} result.`, EXIT.INVALID_ARGS);
+  }
+  if (!res.data.ok) {
+    throw new CliError('mutation_failed', res.data.note || `Task ${action} failed.`, EXIT.CONFLICT);
+  }
+  if (mode.human) {
+    printHumanMutation(res.data);
+  } else {
+    printJson(res.data);
+  }
+  return 0;
 }
 
 export async function runTaskList(mode: OutputMode, rest: string[]): Promise<number> {
@@ -184,7 +286,7 @@ export async function runTaskList(mode: OutputMode, rest: string[]): Promise<num
 }
 
 export async function runTaskBrief(mode: OutputMode, rest: string[]): Promise<number> {
-  const id = taskIdFromRest(rest);
+  const id = taskIdFromRest(rest, 'brief');
   const cfg = resolveConfig();
   const res = await apiFetch<TaskDetail>(cfg, `/api/tasks/${encodeURIComponent(id)}${taskQuery(rest)}`);
   if (!res.data) {
@@ -196,4 +298,57 @@ export async function runTaskBrief(mode: OutputMode, rest: string[]): Promise<nu
     printJson(res.data);
   }
   return 0;
+}
+
+export async function runTaskClaim(mode: OutputMode, rest: string[]): Promise<number> {
+  return runTaskMutation(mode, 'claim', rest, {
+    actor: 'orchestrator',
+    projectId: readFlagValue(rest, '--project'),
+    repoPath: readFlagValue(rest, '--repo'),
+    note: readFlagValue(rest, '--note'),
+  });
+}
+
+export async function runTaskDispatch(mode: OutputMode, rest: string[]): Promise<number> {
+  return runTaskMutation(mode, 'dispatch', rest, {
+    actor: 'orchestrator',
+    projectId: readFlagValue(rest, '--project'),
+    repoPath: readFlagValue(rest, '--repo'),
+    message: readFlagValue(rest, '--message'),
+    model: readFlagValue(rest, '--model'),
+    workerIntent: readFlagValue(rest, '--worker'),
+    requestedProvider: readFlagValue(rest, '--provider'),
+    requestedRuntime: readFlagValue(rest, '--runtime'),
+  });
+}
+
+export async function runTaskBlock(mode: OutputMode, rest: string[]): Promise<number> {
+  const reason = readFlagValue(rest, '--reason');
+  if (!reason) {
+    throw new CliError(
+      'invalid_args',
+      'o8 task block <id> requires --reason.',
+      EXIT.INVALID_ARGS,
+      'Example: o8 task block pkt-abc --reason "Waiting on API key"',
+    );
+  }
+  return runTaskMutation(mode, 'block', rest, {
+    actor: 'orchestrator',
+    projectId: readFlagValue(rest, '--project'),
+    repoPath: readFlagValue(rest, '--repo'),
+    reason,
+    code: readFlagValue(rest, '--code'),
+  });
+}
+
+export async function runTaskReport(mode: OutputMode, rest: string[]): Promise<number> {
+  return runTaskMutation(mode, 'report', rest, {
+    actor: 'orchestrator',
+    projectId: readFlagValue(rest, '--project'),
+    repoPath: readFlagValue(rest, '--repo'),
+    event: readFlagValue(rest, '--event'),
+    status: readFlagValue(rest, '--status'),
+    reason: readFlagValue(rest, '--reason'),
+    message: readFlagValue(rest, '--message'),
+  });
 }

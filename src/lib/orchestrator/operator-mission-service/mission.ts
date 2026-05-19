@@ -1,4 +1,5 @@
 import { aggregateMissionCost } from '@/lib/orchestrator/cost-aggregator';
+import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
@@ -72,6 +73,13 @@ export async function createMission(input: CreateMissionInput) {
   const referenceLabelByIssueNumber = new Map(loadedIssues.map((issue, index) => [issue.number, referenceLabels[index] as string]));
   const branchTargets = loadedIssues.map((issue) => branchTargetForIssue(issue));
   const priorState = currentMissionState();
+  const workerRouting = resolveWorkerRouting({
+    workerIntent: input.workerIntent,
+    requestedProvider: input.requestedProvider,
+    requestedRuntime: input.requestedRuntime ?? input.runtime,
+    requestedModel: input.requestedModel,
+    source: 'mission-create',
+  });
   const branchPreparation = await prepareMissionBranches({
     repoPath,
     candidates: loadedIssues.map((issue, index) => ({
@@ -128,7 +136,7 @@ export async function createMission(input: CreateMissionInput) {
       summary: packetSummary,
       workspaceTargetPath: repoPath,
       branchTarget,
-      runtime: input.runtime,
+      runtime: workerRouting.selectedRuntime,
       dependencyLabels: dependencyNumbers.map((dependency) => referenceLabelByIssueNumber.get(dependency) ?? `#${dependency}`),
       dependencyPacketIds: dependencyNumbers.map((dependency) => packetIdByIssueNumber.get(dependency) ?? '').filter(Boolean),
       queueState: 'queued',
@@ -140,6 +148,8 @@ export async function createMission(input: CreateMissionInput) {
       archivedAt: null,
       review: null,
       lane: null,
+      workerIntent: workerRouting.workerIntent,
+      workerRouting,
       prompt: [issue.title, packetSummary].map((part) => part.trim()).filter(Boolean).join('\n\n'),
       ...(learnedRules.length > 0 ? { learnedRules } : {}),
       ...(issueMeta ? { issue: issueMeta } : {}),
@@ -152,7 +162,7 @@ export async function createMission(input: CreateMissionInput) {
     prompt: buildMissionPrompt(loadedIssues, repoPath, input.constraints),
     summary: buildMissionSummary(loadedIssues, repoPath),
     repoPath,
-    runtime: input.runtime,
+    runtime: workerRouting.selectedRuntime,
     constraints: input.constraints,
     packets,
     updatedAt: new Date().toISOString(),

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/lib/orchestrator/operator-mission-service';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -8,15 +9,11 @@ import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_uti
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// claude-code is intentionally excluded from dispatch runtimes (issue #650).
-// The orchestrator (which is itself Claude) can spawn native Claude
-// sub-agents inline via the Agent tool when that's the right fit; we don't
-// need to wrap claude-code as a dispatched fleet worker.
-const VALID_DISPATCH_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'gemini', 'opencode']);
+const VALID_REQUESTED_RUNTIMES = new Set<OrchestratorRuntime>(['codex', 'claude-code', 'gemini', 'opencode']);
 const VALID_EXISTING_BRANCH_POLICIES = new Set<ExistingBranchPolicy>(['auto', 'reset', 'continue', 'error']);
 
 function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
-  if (typeof value === 'string' && VALID_DISPATCH_RUNTIMES.has(value as OrchestratorRuntime)) {
+  if (typeof value === 'string' && VALID_REQUESTED_RUNTIMES.has(value as OrchestratorRuntime)) {
     return value as OrchestratorRuntime;
   }
   return null;
@@ -65,21 +62,23 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'issues must be a non-empty array.', 400);
   }
 
-  // When runtime is omitted, fall back to the operator-configured default so
-  // callers that don't want to pin a runtime get the user's preferred CLI.
-  const runtimeValue = record.runtime === undefined || record.runtime === null || record.runtime === ''
+  // When runtime is omitted, preserve the operator default as requested
+  // routing metadata. The worker-routing layer still launches Codex today.
+  const requestedRuntimeRaw = record.requestedRuntime ?? record.runtime;
+  const requestedModel = record.requestedModel ?? record.model;
+  const requestedRuntime = requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === ''
     ? resolveDefaultDispatchRuntimeSync()
-    : normalizeRuntime(record.runtime);
-  if (!runtimeValue) {
-    if (typeof record.runtime === 'string' && record.runtime === 'claude-code') {
-      return operatorError(
-        'invalid_request',
-        'claude-code is no longer dispatchable (#650). Use "codex", "gemini", or "opencode" — or run the work inline via the orchestrator (it is Claude Code under the hood and can spawn native Claude sub-agents).',
-        400,
-      );
-    }
-    return operatorError('invalid_request', 'runtime must be one of: "codex", "gemini", "opencode".', 400);
+    : normalizeRuntime(requestedRuntimeRaw);
+  if (!requestedRuntime) {
+    return operatorError('invalid_request', 'runtime must be one of: "codex", "claude-code", "gemini", "opencode".', 400);
   }
+  const workerRouting = resolveWorkerRouting({
+    workerIntent: record.workerIntent,
+    requestedProvider: record.requestedProvider,
+    requestedRuntime,
+    requestedModel,
+    source: 'create-mission-api',
+  });
   const existingBranchPolicy = normalizeExistingBranchPolicy(record.existingBranchPolicy);
   if (record.existingBranchPolicy !== undefined && !existingBranchPolicy) {
     return operatorError('invalid_request', 'existingBranchPolicy must be one of: "auto", "reset", "continue", "error".', 400);
@@ -89,7 +88,11 @@ export async function POST(request: NextRequest) {
     const result = await createMission({
       issues,
       repoPath,
-      runtime: runtimeValue,
+      runtime: workerRouting.selectedRuntime,
+      workerIntent: workerRouting.workerIntent,
+      requestedProvider: workerRouting.requestedProvider,
+      requestedRuntime,
+      requestedModel: workerRouting.requestedModel,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
       sequential: record.sequential === true,
       existingBranchPolicy,

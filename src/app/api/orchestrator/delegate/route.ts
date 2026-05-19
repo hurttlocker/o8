@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope';
+import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -80,6 +81,13 @@ export async function POST(request: NextRequest) {
     // and hides state from the UI.
     const packetId = `pkt-${randomUUID()}`;
     const now = new Date().toISOString();
+    const workerRouting = resolveWorkerRouting({
+      workerIntent: body.workerIntent,
+      requestedProvider: body.requestedProvider,
+      requestedRuntime: body.runtime,
+      requestedModel: body.model,
+      source: 'delegate-api',
+    });
 
     // #535 — Compute a read budget at dispatch time so weaker models don't
     // start writing before reading the adjacent surface. The helper returns
@@ -90,7 +98,10 @@ export async function POST(request: NextRequest) {
       title: taskName,
       summary: prompt,
     } as OrchestratorPacket);
-    const modelTier = resolveModelTier({ runtime: 'codex', assignedModel: null });
+    const modelTier = resolveModelTier({
+      runtime: workerRouting.selectedRuntime,
+      assignedModel: workerRouting.selectedModel,
+    });
     const readBudget = computeReadBudget({
       repoPath,
       targetFiles: predictedFiles,
@@ -125,7 +136,7 @@ export async function POST(request: NextRequest) {
       summary: prompt,
       workspaceTargetPath: repoPath,
       branchTarget: branch,
-      runtime: 'codex',
+      runtime: workerRouting.selectedRuntime,
       dependencyLabels: [],
       dependencyPacketIds: [],
       queueState: 'queued',
@@ -142,6 +153,8 @@ export async function POST(request: NextRequest) {
       predictedFiles: predictedFiles.length > 0 ? predictedFiles : undefined,
       readBudget,
       edgeCaseSites,
+      workerIntent: workerRouting.workerIntent,
+      workerRouting,
       prompt: launchPrompt,
     };
 
@@ -158,7 +171,7 @@ export async function POST(request: NextRequest) {
       if (!current.prompt) current.prompt = `Delegated work: ${taskName}`;
       if (!current.summary) current.summary = `Delegate dispatches routed through /api/orchestrator/delegate.`;
       if (!current.repoPath) current.repoPath = repoPath;
-      if (!current.runtime) current.runtime = 'codex';
+      if (!current.runtime) current.runtime = workerRouting.selectedRuntime;
       current.updatedAt = now;
     });
 
@@ -170,7 +183,7 @@ export async function POST(request: NextRequest) {
       repoPath,
       branch,
       baseBranch,
-      runtime: 'codex',
+      runtime: workerRouting.selectedRuntime,
       projectId: projectContext.id,
       label: taskName,
       packetId,
@@ -192,6 +205,7 @@ export async function POST(request: NextRequest) {
       verb: 'launch_session',
       laneId,
       prompt: launchPrompt,
+      model: workerRouting.selectedModel ?? undefined,
       actor: 'orchestrator',
     });
 
@@ -223,7 +237,7 @@ export async function POST(request: NextRequest) {
         mutationId: `delegate-${laneId}-${Date.now()}`,
         source: 'desktop',
         action: 'launch',
-        runtime: 'codex',
+        runtime: workerRouting.selectedRuntime,
         surfaceId: launchResult.lane?.sessionKey || laneId,
         sessionKey: launchResult.lane?.sessionKey || laneId,
         status: 'queued',
@@ -244,6 +258,7 @@ export async function POST(request: NextRequest) {
       worktreePath: launchResult.lane?.worktreePath || null,
       branch,
       baseBranch,
+      workerRouting,
       note: launchResult.note,
     });
   } catch (err) {

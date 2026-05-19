@@ -198,7 +198,7 @@ export const TOOLS: ToolDef[] = [
         message: { type: 'string', description: 'Message text (for send_turn)' },
         repoPath: { type: 'string', description: 'Repository path (for open_lane)' },
         branch: { type: 'string', description: 'Branch name (for open_lane)' },
-        runtime: { type: 'string', description: 'Runtime: codex or claude-code (for open_lane)' },
+        runtime: { type: 'string', description: 'Future runtime hint for open_lane. Production launch is restricted to Codex.' },
         label: { type: 'string', description: 'Human-readable label (for open_lane)' },
         reviewSummary: { type: 'string', description: 'Orchestrator review verdict (for merge/create_pr). Shown on the approval card so the operator understands what was done without reading code.' },
       },
@@ -394,12 +394,11 @@ async function executeDispatchCodexTask(args: Record<string, unknown>): Promise<
   if (!repoPath) return { content: 'Error: repoPath is required.' };
   if (!task) return { content: 'Error: task is required.' };
 
-  const { resolveDefaultDispatchRuntimeSync } = await import('@/lib/operator/defaults');
-  const validRuntimes = ['codex', 'claude-code', 'gemini', 'opencode'] as const;
-  type DispatchRuntime = (typeof validRuntimes)[number];
-  const runtime: DispatchRuntime = runtimeOverride && (validRuntimes as readonly string[]).includes(runtimeOverride)
-    ? (runtimeOverride as DispatchRuntime)
-    : resolveDefaultDispatchRuntimeSync();
+  const { resolveWorkerRouting } = await import('@/lib/agents/routing');
+  const workerRouting = resolveWorkerRouting({
+    requestedRuntime: runtimeOverride,
+    source: 'dispatch-codex-task',
+  });
 
   try {
     const { dispatch } = await import('@/lib/lane/commands');
@@ -409,13 +408,13 @@ async function executeDispatchCodexTask(args: Record<string, unknown>): Promise<
       verb: 'open_lane',
       repoPath,
       branch,
-      runtime,
+      runtime: workerRouting.selectedRuntime,
       label,
       actor: 'orchestrator',
     });
 
     if (!openResult.ok || !openResult.lane) {
-      return { content: `Failed to open lane for ${runtime} dispatch: ${openResult.note}` };
+      return { content: `Failed to open lane for ${workerRouting.selectedRuntime} dispatch: ${openResult.note}` };
     }
 
     const laneId = openResult.lane.id;
@@ -429,14 +428,14 @@ async function executeDispatchCodexTask(args: Record<string, unknown>): Promise<
     });
 
     if (!launchResult.ok) {
-      return { content: `Lane ${laneId} opened but ${runtime} launch failed: ${launchResult.note}` };
+      return { content: `Lane ${laneId} opened but ${workerRouting.selectedRuntime} launch failed: ${launchResult.note}` };
     }
 
     return {
-      content: `Dispatched to ${runtime}. Lane ${laneId} is executing "${label}" in ${repoPath} on branch ${branch}. Track progress in the Agents panel.`,
+      content: `Dispatched to ${workerRouting.selectedRuntime}. Lane ${laneId} is executing "${label}" in ${repoPath} on branch ${branch}. ${workerRouting.reason}`,
     };
   } catch (err) {
-    return { content: `Error dispatching ${runtime} task: ${err instanceof Error ? err.message : 'unknown'}` };
+    return { content: `Error dispatching Codex task: ${err instanceof Error ? err.message : 'unknown'}` };
   }
 }
 

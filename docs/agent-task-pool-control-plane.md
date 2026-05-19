@@ -28,6 +28,8 @@ run scoped tasks through the same packet, lane, lock, and review pipeline.
      diagnostic, or orchestrator.
    - Runtime routing can later map those intents to Codex, Kimi, MiniMax,
      Claude Code, Gemini, or opencode without changing task semantics.
+   - Production currently enforces Codex as the selected runtime for every
+     spawned worker, regardless of caller.
 
 ## Existing Surfaces To Reuse
 
@@ -68,9 +70,9 @@ Acceptance:
 - For the o8 project, `cortex-ide` remains main and `o8-mobile` can be current.
 - Locks are visible in the scope payload.
 
-## Phase 2: Task Pool View
+## Phase 2: Task Pool Mutations
 
-Status: first read surface implemented.
+Status: read surface plus claim/dispatch/block/report mutations implemented.
 
 Create a thin projection over packets and lanes, not a new task store.
 
@@ -88,38 +90,42 @@ API:
 - `GET /api/tasks` is implemented.
 - `GET /api/tasks/:id` is implemented.
 - `POST /api/tasks` is next.
-- `POST /api/tasks/:id/claim` is next.
-- `POST /api/tasks/:id/dispatch` is next.
-- `POST /api/tasks/:id/block` is next.
-- `POST /api/tasks/:id/report` is next.
+- `POST /api/tasks/:id/claim` is implemented.
+- `POST /api/tasks/:id/dispatch` is implemented.
+- `POST /api/tasks/:id/block` is implemented.
+- `POST /api/tasks/:id/report` is implemented.
 
 CLI:
 
 - `o8 task list` is implemented.
 - `o8 task brief <id>` is implemented.
-- `o8 task claim <id>`
-- `o8 task dispatch <id> --worker <intent>`
-- `o8 task report --status <status> --reason <reason>`
+- `o8 task claim <id>` is implemented.
+- `o8 task dispatch <id> [--message "..."] [--model "..."] [--worker heavy_worker] [--provider kimi] [--runtime gemini]` is implemented.
+- `o8 task block <id> --reason "..." [--code needs_clarification]` is implemented.
+- `o8 task report <id> [--event progress] [--message "..."]` is implemented.
 
 MCP:
 
 - `o8_task_list` is implemented.
 - `o8_task_brief` is implemented.
 - `o8_task_create`
-- `o8_task_claim`
-- `o8_task_dispatch`
-- `o8_task_report`
+- `o8_task_claim` is implemented.
+- `o8_task_dispatch` is implemented.
+- `o8_task_block` is implemented.
+- `o8_task_report` is implemented.
 
 Acceptance:
 
 - Dashboard, mobile, CLI, and MCP all read the same task pool.
 - Creating or dispatching a task creates/updates a packet, not a second model.
-- Claiming a task creates a visible lock.
+- Claiming a packet binds it to a lane, which prevents scheduler double-dispatch.
 - Reporting blocked work appends lane/packet events.
+- Non-blocking reports update the lane last-event label so the pool does not
+  look stale after a progress update.
 
 ## Phase 3: Worker Routing
 
-Status: planned.
+Status: scaffolded with Codex-only production enforcement.
 
 Add worker intent to packet metadata:
 
@@ -136,11 +142,22 @@ Routing policy can map intent to runtime/model later:
 - Claude: orchestrator/reviewer.
 - Codex: default coding worker until model-specific adapters are enabled.
 
+Current production rule:
+
+- `src/lib/agents/routing.ts` is the single routing resolver.
+- `selectedProvider` and `selectedRuntime` always resolve to Codex.
+- `requestedProvider`, `requestedRuntime`, and `requestedModel` are preserved
+  as metadata for future routing, audit, and UI explanation.
+- `open_lane`, scheduler dispatch, delegate dispatch, mission creation,
+  task dispatch, CLI, MCP, and the chat-side `dispatch_codex_task` helper all
+  flow through this rule before any session can launch.
+
 Acceptance:
 
-- Dispatch can choose worker intent independently from runtime.
+- Dispatch can choose worker intent independently from the selected runtime.
 - The task brief tells the worker why it was routed that way.
-- Review surfaces show worker intent next to runtime.
+- Task pool API/CLI/MCP results expose worker intent and selected runtime.
+- Non-Codex requested providers are recorded but cannot spawn in production.
 
 ## Phase 4: Control Room
 

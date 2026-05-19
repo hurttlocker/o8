@@ -35,6 +35,7 @@ import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
+import { PRODUCTION_AGENT_RUNTIME, resolveWorkerRouting } from '@/lib/agents/routing';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { fetchWorkerRun } from '@/lib/worker/runs';
@@ -246,11 +247,23 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
   switch (command.verb) {
     case 'open_lane': {
+      const workerRouting = resolveWorkerRouting({
+        requestedRuntime: command.runtime,
+        source: 'lane-open',
+      });
       const existing = (await import('@/lib/lane/registry')).findLaneByRepoAndBranch(
         command.repoPath,
         command.branch,
       );
       if (existing) {
+        if (existing.runtime !== PRODUCTION_AGENT_RUNTIME) {
+          return {
+            ok: false,
+            laneId: existing.id,
+            note: `Production agent spawning is restricted to Codex. Existing lane ${existing.id} is ${existing.runtime}; archive or migrate it before launching new work.`,
+            lane: existing,
+          };
+        }
         const updatedExisting = command.packetId && existing.packetId !== command.packetId
           ? updateLane(existing.id, { packetId: command.packetId }, actor) ?? existing
           : existing;
@@ -262,14 +275,14 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         projectId: command.projectId,
         branch: command.branch,
         baseBranch: command.baseBranch,
-        runtime: command.runtime,
+        runtime: workerRouting.selectedRuntime,
         label: command.label,
         packetId: command.packetId,
         ownership: command.ownership,
         actor,
       });
 
-      return { ok: true, laneId: lane.id, note: `Lane opened: ${lane.label}`, lane };
+      return { ok: true, laneId: lane.id, note: `Lane opened: ${lane.label}. ${workerRouting.reason}`, lane };
     }
 
     case 'bind_worktree': {
@@ -287,6 +300,14 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
     case 'launch_session': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+      if (lane.runtime !== PRODUCTION_AGENT_RUNTIME) {
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `Production agent spawning is restricted to Codex. ${lane.runtime} is scaffolded for later but cannot launch yet.`,
+          lane,
+        };
+      }
 
       const policy = getLanePolicy(lane.branch);
       if (!policy.branchWritable && !policy.requiresApproval) {

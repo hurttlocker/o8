@@ -14,6 +14,12 @@ import {
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
 import { getPacketScope } from '@/lib/lanes/scope';
+import {
+  blockTask,
+  claimTask,
+  dispatchTask,
+  reportTask,
+} from '@/lib/tasks/actions';
 import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
 import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
 import {
@@ -29,6 +35,7 @@ import {
   requiredString,
   textResult,
 } from './shared';
+import type { WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
 
 export const MISSION_TOOLS: McpTool[] = [
   {
@@ -62,7 +69,17 @@ export const MISSION_TOOLS: McpTool[] = [
         runtime: {
           type: 'string',
           enum: ['codex', 'claude-code', 'gemini', 'opencode'],
-          description: 'Runtime to assign to all mission packets. Defaults to codex.',
+          description: 'Requested runtime hint for all mission packets. Production currently launches Codex and preserves this as routing metadata.',
+        },
+        workerIntent: {
+          type: 'string',
+          enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'],
+          description: 'Desired worker type. Production still selects Codex as the runtime.',
+        },
+        requestedProvider: {
+          type: 'string',
+          enum: ['codex', 'kimi', 'minimax', 'claude', 'gemini', 'opencode'],
+          description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
         },
         constraints: {
           type: 'string',
@@ -197,6 +214,173 @@ export const MISSION_TOOLS: McpTool[] = [
         taskId: {
           type: 'string',
           description: 'Packet id, lane id, or task id.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Optional project id or slug filter.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Optional absolute repo path filter.',
+        },
+      },
+      required: ['taskId'],
+    },
+  },
+  {
+    name: 'o8_task_claim',
+    description:
+      'Claim a task from the o8 task pool by binding/reserving it to a lane without launching a runtime. Use before dispatch when an agent wants an explicit ownership point.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Packet id, lane id, or task id.',
+        },
+        note: {
+          type: 'string',
+          description: 'Optional claim note.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Optional project id or slug filter.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Optional absolute repo path filter.',
+        },
+      },
+      required: ['taskId'],
+    },
+  },
+  {
+    name: 'o8_task_dispatch',
+    description:
+      'Dispatch a task from the o8 task pool through Codex-only production routing. This launches the lane and injects the project-backed task brief.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Packet id, lane id, or task id.',
+        },
+        message: {
+          type: 'string',
+          description: 'Optional dispatch note appended to the task brief.',
+        },
+        model: {
+          type: 'string',
+          description: 'Optional runtime model override.',
+        },
+        workerIntent: {
+          type: 'string',
+          enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'],
+          description: 'Desired worker type. Production still selects Codex as the runtime.',
+        },
+        requestedProvider: {
+          type: 'string',
+          enum: ['codex', 'kimi', 'minimax', 'claude', 'gemini', 'opencode'],
+          description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
+        },
+        requestedRuntime: {
+          type: 'string',
+          enum: ['codex', 'claude-code', 'gemini', 'opencode'],
+          description: 'Future runtime hint. Preserved in routing metadata; production still selects Codex.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Optional project id or slug filter.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Optional absolute repo path filter.',
+        },
+      },
+      required: ['taskId'],
+    },
+  },
+  {
+    name: 'o8_task_block',
+    description:
+      'Mark a task blocked with a human-readable reason. This moves the lane to awaiting_orchestrator and updates the task pool blocked group.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Packet id, lane id, or task id.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Human-readable block reason.',
+        },
+        code: {
+          type: 'string',
+          enum: [
+            'needs_clarification',
+            'missing_context',
+            'out_of_scope',
+            'dependency_blocked',
+            'context_full',
+            'nondeterministic_test',
+            'external_api_down',
+            'unknown',
+          ],
+          description: 'Optional normalized blocker code.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Optional project id or slug filter.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Optional absolute repo path filter.',
+        },
+      },
+      required: ['taskId', 'reason'],
+    },
+  },
+  {
+    name: 'o8_task_report',
+    description:
+      'Append a structured progress report to a task lane. event:"blocked" or event:"question" also moves the task to awaiting_orchestrator.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Packet id, lane id, or task id.',
+        },
+        event: {
+          type: 'string',
+          description: 'Report event, for example progress, blocked, question, or handoff.',
+        },
+        status: {
+          type: 'string',
+          description: 'Alias for event when callers think in status terms.',
+        },
+        reason: {
+          type: 'string',
+          enum: [
+            'needs_clarification',
+            'missing_context',
+            'out_of_scope',
+            'dependency_blocked',
+            'context_full',
+            'nondeterministic_test',
+            'external_api_down',
+            'unknown',
+          ],
+          description: 'Optional normalized report reason.',
+        },
+        message: {
+          type: 'string',
+          description: 'Optional human-readable detail.',
+        },
+        metadata: {
+          type: 'object',
+          description: 'Optional structured metadata to attach to the report.',
         },
         projectId: {
           type: 'string',
@@ -422,10 +606,41 @@ function parseExistingBranchPolicy(value: unknown): ExistingBranchPolicy | undef
   throw new Error('existingBranchPolicy must be one of: auto, reset, continue, error.');
 }
 
+function parseWorkerIntent(value: unknown): WorkerIntent | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (
+    value === 'light_worker'
+    || value === 'heavy_worker'
+    || value === 'reviewer'
+    || value === 'diagnostic'
+    || value === 'orchestrator'
+  ) {
+    return value;
+  }
+  throw new Error('workerIntent must be one of: light_worker, heavy_worker, reviewer, diagnostic, orchestrator.');
+}
+
+function parseWorkerProvider(value: unknown): WorkerProvider | null | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (
+    value === 'codex'
+    || value === 'kimi'
+    || value === 'minimax'
+    || value === 'claude'
+    || value === 'gemini'
+    || value === 'opencode'
+  ) {
+    return value;
+  }
+  throw new Error('requestedProvider must be one of: codex, kimi, minimax, claude, gemini, opencode.');
+}
+
 export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const repoPath = requiredString(args, 'repoPath');
     const runtime = parseMissionRuntime(args.runtime);
+    const workerIntent = parseWorkerIntent(args.workerIntent);
+    const requestedProvider = parseWorkerProvider(args.requestedProvider);
     const constraints = optionalString(args, 'constraints');
 
     // #453 — Support inline issues (no GitHub dependency)
@@ -454,6 +669,9 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         issues_inline: parsed,
         repoPath,
         runtime,
+        workerIntent,
+        requestedProvider,
+        requestedRuntime: runtime,
         constraints,
         sequential,
         existingBranchPolicy,
@@ -480,6 +698,9 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       issues: parseIssueList(args.issues),
       repoPath,
       runtime,
+      workerIntent,
+      requestedProvider,
+      requestedRuntime: runtime,
       constraints,
       sequential,
       existingBranchPolicy,
@@ -616,6 +837,89 @@ export async function handleTaskBrief(args: Record<string, unknown>): Promise<Mc
   } catch (error) {
     console.error(`${'[mcp-operator]'} o8_task_brief failed: ${errorText(error)}`);
     return textResult(`Failed to read task brief: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleTaskClaim(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const result = await claimTask(requiredString(args, 'taskId'), {
+      actor: 'orchestrator',
+      note: optionalString(args, 'note') || null,
+      projectId: optionalString(args, 'projectId') || null,
+      repoPath: optionalString(args, 'repoPath') || null,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_task_claim failed: ${errorText(error)}`);
+    return textResult(`Failed to claim task: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleTaskDispatch(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const result = await dispatchTask(requiredString(args, 'taskId'), {
+      actor: 'orchestrator',
+      message: optionalString(args, 'message') || null,
+      model: optionalString(args, 'model') || null,
+      workerIntent: optionalString(args, 'workerIntent') || null,
+      requestedProvider: optionalString(args, 'requestedProvider') || null,
+      requestedRuntime: optionalString(args, 'requestedRuntime') || null,
+      projectId: optionalString(args, 'projectId') || null,
+      repoPath: optionalString(args, 'repoPath') || null,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_task_dispatch failed: ${errorText(error)}`);
+    return textResult(`Failed to dispatch task: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleTaskBlock(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const code = optionalString(args, 'code') || undefined;
+    if (code !== undefined && !isAgentReportReason(code)) {
+      throw new Error('code must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
+    }
+    const result = await blockTask(requiredString(args, 'taskId'), {
+      actor: 'orchestrator',
+      reason: requiredString(args, 'reason'),
+      code,
+      projectId: optionalString(args, 'projectId') || null,
+      repoPath: optionalString(args, 'repoPath') || null,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_task_block failed: ${errorText(error)}`);
+    return textResult(`Failed to block task: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleTaskReport(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const reason = optionalString(args, 'reason') || undefined;
+    if (reason !== undefined && !isAgentReportReason(reason)) {
+      throw new Error('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
+    }
+    const metadata = args.metadata === undefined || args.metadata === null
+      ? undefined
+      : normalizeAgentReportMetadata(args.metadata);
+    if (args.metadata !== undefined && args.metadata !== null && !metadata) {
+      throw new Error('metadata must be an object');
+    }
+    const result = await reportTask(requiredString(args, 'taskId'), {
+      actor: 'orchestrator',
+      event: optionalString(args, 'event') || null,
+      status: optionalString(args, 'status') || null,
+      reason,
+      message: optionalString(args, 'message') || null,
+      metadata: metadata ?? null,
+      projectId: optionalString(args, 'projectId') || null,
+      repoPath: optionalString(args, 'repoPath') || null,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_task_report failed: ${errorText(error)}`);
+    return textResult(`Failed to report task: ${errorText(error)}`, true);
   }
 }
 

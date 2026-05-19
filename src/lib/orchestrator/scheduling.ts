@@ -11,10 +11,12 @@ import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/d
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import { getProjectContext } from '@/lib/projects/context';
+import { resolveWorkerRouting } from '@/lib/agents/routing';
 import type {
   OrchestratorLaneBinding,
   OrchestratorMissionState,
   OrchestratorPacket,
+  WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 
@@ -92,7 +94,12 @@ function fanOutComparisonPackets(state: OrchestratorMissionState): OrchestratorM
   });
 }
 
-function createLaneBinding(packet: OrchestratorPacket, laneId: string, sessionKey?: string | null): OrchestratorLaneBinding {
+function createLaneBinding(
+  packet: OrchestratorPacket,
+  laneId: string,
+  sessionKey?: string | null,
+  workerRouting?: WorkerRouting,
+): OrchestratorLaneBinding {
   // Read the SQLite lane row so the binding reflects what `updateLane` already
   // persisted (most importantly `worktreePath`, written in commands.ts during
   // `bind_worktree` / `launch_session`). Without this, MCP-dispatched packets
@@ -105,7 +112,7 @@ function createLaneBinding(packet: OrchestratorPacket, laneId: string, sessionKe
     tabId: '',
     repoPath: packet.workspaceTargetPath,
     worktreePath: laneRow?.worktreePath ?? null,
-    runtime: packet.runtime,
+    runtime: workerRouting?.selectedRuntime ?? packet.runtime,
     laneId,
     sessionKey: sessionKey ?? null,
     lastHeartbeatAt: null,
@@ -114,16 +121,26 @@ function createLaneBinding(packet: OrchestratorPacket, laneId: string, sessionKe
   };
 }
 
-interface DispatchResult {
-  kind: 'launched' | 'awaiting_review';
+interface AwaitingReviewDispatchResult {
+  kind: 'awaiting_review';
   laneId: string | null;
   sessionKey: string | null;
   lane?: OrchestratorLaneBinding | null;
 }
 
+interface LaunchedDispatchResult {
+  kind: 'launched';
+  laneId: string;
+  sessionKey: string | null;
+  workerRouting: WorkerRouting;
+}
+
+type DispatchResult = AwaitingReviewDispatchResult | LaunchedDispatchResult;
+
 interface LaunchDispatchResult {
   laneId: string;
   sessionKey: string | null;
+  workerRouting: WorkerRouting;
 }
 
 interface RecoveryDispatchContext {
@@ -194,6 +211,7 @@ async function dispatchOrRecoverPacket(
     kind: 'launched',
     laneId: launchResult.laneId,
     sessionKey: launchResult.sessionKey,
+    workerRouting: launchResult.workerRouting,
   };
 }
 
@@ -201,6 +219,13 @@ async function dispatchPacket(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
 ): Promise<LaunchDispatchResult> {
+  const workerRouting = resolveWorkerRouting({
+    workerIntent: packet.workerIntent,
+    requestedProvider: packet.workerRouting?.requestedProvider,
+    requestedRuntime: packet.workerRouting?.requestedRuntime ?? packet.runtime,
+    requestedModel: packet.workerRouting?.requestedModel ?? packet.assignedModel,
+    source: 'scheduler-dispatch',
+  });
   const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
   const laneResult = await dispatchLaneCommand({
     verb: 'open_lane',
@@ -208,7 +233,7 @@ async function dispatchPacket(
     repoPath: packet.workspaceTargetPath!,
     projectId: projectContext.runtimeProjectId,
     branch: packet.branchTarget,
-    runtime: packet.runtime,
+    runtime: workerRouting.selectedRuntime,
     label: packet.title,
     actor: 'orchestrator',
   });
@@ -229,7 +254,7 @@ async function dispatchPacket(
     // Fallback ladder: explicit packet model → capability-map default → undefined.
     // This ensures Gemini/opencode dispatches actually pin the flagship model
     // from the capability map instead of letting the CLI pick a cheaper default.
-    model: (packet.assignedModel ?? getRuntimeCapability(packet.runtime).defaultModel) ?? undefined,
+    model: (workerRouting.selectedModel ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel) ?? undefined,
     actor: 'orchestrator',
   });
 
@@ -240,6 +265,7 @@ async function dispatchPacket(
   return {
     laneId: laneResult.laneId,
     sessionKey: launchResult.lane?.sessionKey ?? null,
+    workerRouting,
   };
 }
 
@@ -332,9 +358,16 @@ export async function runDispatchTick(
       const repoPath = packet.workspaceTargetPath;
       const targetFiles = packet.predictedFiles ?? [];
       if (!repoPath || targetFiles.length === 0) return packet;
-      const tier = resolveModelTier({ runtime: packet.runtime, assignedModel: packet.assignedModel });
+      const routing = resolveWorkerRouting({
+        workerIntent: packet.workerIntent,
+        requestedProvider: packet.workerRouting?.requestedProvider,
+        requestedRuntime: packet.workerRouting?.requestedRuntime ?? packet.runtime,
+        requestedModel: packet.workerRouting?.requestedModel ?? packet.assignedModel,
+        source: 'scheduler-enrichment',
+      });
+      const tier = resolveModelTier({ runtime: routing.selectedRuntime, assignedModel: routing.selectedModel });
       const budget = computeReadBudget({ repoPath, targetFiles, tier });
-      return budget ? { ...packet, readBudget: budget } : packet;
+      return budget ? { ...packet, runtime: routing.selectedRuntime, workerIntent: routing.workerIntent, workerRouting: routing, readBudget: budget } : { ...packet, runtime: routing.selectedRuntime, workerIntent: routing.workerIntent, workerRouting: routing };
     }),
   };
 
@@ -465,6 +498,7 @@ export async function runDispatchTick(
               lane: result.value.lane ?? candidate.lane ?? null,
             };
           }
+          const workerRouting = result.value.workerRouting;
 
           void publishRealtimeMutation({
             mutation: {
@@ -472,7 +506,7 @@ export async function runDispatchTick(
               source: 'server',
               action: 'packet-dispatch',
               status: 'completed',
-              runtime: candidate.runtime,
+              runtime: workerRouting.selectedRuntime,
               surfaceId: result.value.sessionKey ?? undefined,
               sessionKey: result.value.sessionKey ?? undefined,
               laneId: result.value.laneId ?? undefined,
@@ -481,7 +515,7 @@ export async function runDispatchTick(
               packetReferenceLabel: candidate.referenceLabel,
               repoPath: candidate.workspaceTargetPath ?? undefined,
               branch: candidate.branchTarget,
-              note: `Dispatched ${candidate.referenceLabel} to ${candidate.runtime}`,
+              note: `Dispatched ${candidate.referenceLabel} to ${workerRouting.selectedRuntime}`,
               createdAt: new Date().toISOString(),
               settledAt: new Date().toISOString(),
             },
@@ -492,9 +526,12 @@ export async function runDispatchTick(
           return {
             ...candidate,
             ...recoveryFields,
+            runtime: workerRouting.selectedRuntime,
+            workerIntent: workerRouting.workerIntent,
+            workerRouting,
             status: 'launching',
             blockedReason: null,
-            lane: createLaneBinding(candidate, result.value.laneId!, result.value.sessionKey),
+            lane: createLaneBinding(candidate, result.value.laneId!, result.value.sessionKey, workerRouting),
           };
         }
 

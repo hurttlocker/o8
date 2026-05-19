@@ -78,6 +78,7 @@ import type {
   SubmitReviewInput,
 } from '@/lib/orchestrator/operator-mission-service';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
 
 const execFileAsync = promisify(execFile);
 const GH_MAX_BUFFER = 10 * 1024 * 1024;
@@ -101,6 +102,10 @@ interface CreateMissionInput {
   issues: string[];
   repoPath: string;
   runtime: OrchestratorRuntime;
+  workerIntent?: WorkerIntent;
+  requestedProvider?: WorkerProvider | null;
+  requestedRuntime?: OrchestratorRuntime | null;
+  requestedModel?: string | null;
   constraints: string;
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
@@ -116,6 +121,10 @@ interface CreateMissionInlineInput {
   issues_inline: InlineIssue[];
   repoPath: string;
   runtime: OrchestratorRuntime;
+  workerIntent?: WorkerIntent;
+  requestedProvider?: WorkerProvider | null;
+  requestedRuntime?: OrchestratorRuntime | null;
+  requestedModel?: string | null;
   constraints: string;
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
@@ -364,6 +373,10 @@ export async function createMission(input: CreateMissionInput) {
           issues: loadedIssues,
           repoPath,
           runtime: input.runtime,
+          workerIntent: input.workerIntent,
+          requestedProvider: input.requestedProvider,
+          requestedRuntime: input.requestedRuntime,
+          requestedModel: input.requestedModel,
           constraints: input.constraints,
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
@@ -400,6 +413,10 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           issues: loadedIssues,
           repoPath,
           runtime: input.runtime,
+          workerIntent: input.workerIntent,
+          requestedProvider: input.requestedProvider,
+          requestedRuntime: input.requestedRuntime,
+          requestedModel: input.requestedModel,
           constraints: input.constraints,
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
