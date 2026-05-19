@@ -45,7 +45,7 @@ interface O8PanelProps {
 
 // ── Main Component ──
 
-export function O8Panel({ repoPath, registeredRepos = [], previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl, onBrowserActiveUrlChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
+export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl, onBrowserActiveUrlChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
   const activeTab = externalTab ?? 'activity';
 
   // Phase 3 — file paths clicked in agent chat dispatch `o8:open-file`;
@@ -72,7 +72,7 @@ export function O8Panel({ repoPath, registeredRepos = [], previews = [], onEditW
     >
       {/* Tab content — all tabs stay mounted to preserve state */}
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'workspace' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <ReviewPanel repoPath={repoPath} />
+        <ReviewPanel repoPath={repoPath} registeredRepos={registeredRepos} onRepoPathChange={onRepoPathChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />

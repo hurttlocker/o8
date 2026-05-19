@@ -7,6 +7,7 @@ import { splitUnifiedDiff, diffLineTone, wordDiffSegments, type DiffLine, type W
 import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
 import { ReviewGitActions } from './ReviewGitActions';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
 
 /**
  * ReviewPanel — the dedicated Review surface for the right panel's `review`
@@ -366,7 +367,7 @@ function MenuItem({ onClick, checked, children }: { onClick: () => void; checked
   );
 }
 
-export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: string | null }) {
+export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos = [], onRepoPathChange }: { repoPath?: string | null; registeredRepos?: RepoRegistryEntry[]; onRepoPathChange?: (repoPath: string) => void }) {
   const changes = useWorkspaceChanges(repoPath);
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<DiffMode>('unified');
@@ -379,19 +380,23 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
   const [scope, setScope] = useState<ReviewScope>('all');
   const [scopeOpen, setScopeOpen] = useState(false);
   const scopeRef = useRef<HTMLDivElement | null>(null);
+  const [repoMenuOpen, setRepoMenuOpen] = useState(false);
+  const repoMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Close the header menus on outside-click or Escape.
   useEffect(() => {
-    if (!menuOpen && !scopeOpen) return;
+    if (!menuOpen && !scopeOpen && !repoMenuOpen) return;
     const onPointer = (event: MouseEvent) => {
       const target = event.target as Node;
       if (menuRef.current && !menuRef.current.contains(target)) setMenuOpen(false);
       if (scopeRef.current && !scopeRef.current.contains(target)) setScopeOpen(false);
+      if (repoMenuRef.current && !repoMenuRef.current.contains(target)) setRepoMenuOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setMenuOpen(false);
         setScopeOpen(false);
+        setRepoMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', onPointer);
@@ -400,7 +405,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
       document.removeEventListener('mousedown', onPointer);
       document.removeEventListener('keydown', onKey);
     };
-  }, [menuOpen, scopeOpen]);
+  }, [menuOpen, scopeOpen, repoMenuOpen]);
 
   const handleCollapseAll = () => {
     setCollapseSignal((signal) => ({ open: !signal.open, nonce: signal.nonce + 1 }));
@@ -426,6 +431,12 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
     setScope(next);
     setScopeOpen(false);
   };
+  const handleSelectRepo = (path: string) => {
+    onRepoPathChange?.(path);
+    setRepoMenuOpen(false);
+  };
+  const currentRepo = registeredRepos.find((repo) => repo.localPath === repoPath);
+  const repoLabel = currentRepo?.name ?? (repoPath ? (repoPath.split('/').filter(Boolean).pop() ?? 'Repo') : 'Repo');
 
   const trimmed = query.trim().toLowerCase();
   const visible = useMemo(() => {
@@ -451,6 +462,61 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg)' }}>
       {hasFiles ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, paddingTop: 6, paddingBottom: 6, paddingLeft: 14, paddingRight: 10, borderBottom: '1px solid var(--t-divider-subtle)', flexShrink: 0 }}>
+          {registeredRepos.length > 1 ? (
+            <div ref={repoMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setRepoMenuOpen((open) => !open)}
+                title="Switch repository"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  height: 28,
+                  maxWidth: 168,
+                  paddingLeft: 9,
+                  paddingRight: 7,
+                  border: 'none',
+                  borderRadius: 8,
+                  background: repoMenuOpen ? 'var(--t-input-bg)' : 'transparent',
+                  color: 'var(--t-text)',
+                  fontFamily: UI_FONT,
+                  fontSize: 12,
+                  fontWeight: 650,
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(event) => { if (!repoMenuOpen) event.currentTarget.style.background = 'var(--t-hover)'; }}
+                onMouseLeave={(event) => { if (!repoMenuOpen) event.currentTarget.style.background = 'transparent'; }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{repoLabel}</span>
+                <ChevronDown size={12} strokeWidth={2} />
+              </button>
+              {repoMenuOpen ? (
+                <div
+                  role="menu"
+                  style={{
+                    position: 'absolute',
+                    top: 34,
+                    left: 0,
+                    minWidth: 180,
+                    maxWidth: 300,
+                    padding: 4,
+                    borderRadius: 10,
+                    background: 'var(--t-bg-card)',
+                    border: '1px solid var(--t-divider)',
+                    boxShadow: '0 10px 28px rgba(0, 0, 0, 0.22)',
+                    zIndex: 50,
+                  }}
+                >
+                  {registeredRepos.map((repo) => (
+                    <MenuItem key={repo.id} checked={repo.localPath === repoPath} onClick={() => handleSelectRepo(repo.localPath)}>
+                      {repo.name}
+                    </MenuItem>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div ref={scopeRef} style={{ position: 'relative', flexShrink: 0 }}>
             <button
               type="button"
