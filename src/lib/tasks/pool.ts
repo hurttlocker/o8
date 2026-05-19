@@ -9,6 +9,8 @@ import type {
   OrchestratorPacket,
   OrchestratorPacketStatus,
   OrchestratorRuntime,
+  WorkerIntent,
+  WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext, type ProjectContext } from '@/lib/projects/context';
 
@@ -55,6 +57,8 @@ export interface TaskPoolTask {
   group: TaskPoolGroup;
   status: OrchestratorPacketStatus | LaneStatus;
   runtime: OrchestratorRuntime | Lane['runtime'];
+  workerIntent: WorkerIntent | null;
+  workerRouting: WorkerRouting | null;
   branch: string | null;
   baseBranch: string | null;
   repoPath: string | null;
@@ -238,6 +242,8 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       group,
       status: lane?.status ?? packet.status,
       runtime: lane?.runtime ?? packet.runtime,
+      workerIntent: packet.workerIntent ?? null,
+      workerRouting: packet.workerRouting ?? null,
       branch: lane?.branch ?? packet.branchTarget ?? null,
       baseBranch: lane?.baseBranch ?? null,
       repoPath,
@@ -279,6 +285,8 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       group,
       status: lane.status,
       runtime: lane.runtime,
+      workerIntent: null,
+      workerRouting: null,
       branch: lane.branch,
       baseBranch: lane.baseBranch,
       repoPath,

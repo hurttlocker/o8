@@ -4,6 +4,23 @@ import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 export type OrchestrationMode = 'fleet' | 'single' | 'chat';
 export type OrchestratorPacketReviewSeverity = 'info' | 'warning' | 'high';
+export type WorkerIntent = 'light_worker' | 'heavy_worker' | 'reviewer' | 'diagnostic' | 'orchestrator';
+export type WorkerProvider = 'codex' | 'kimi' | 'minimax' | 'claude' | 'gemini' | 'opencode';
+export type WorkerRoutingConfidence = 'high' | 'medium' | 'low';
+
+export interface WorkerRouting {
+  workerIntent: WorkerIntent;
+  requestedProvider: WorkerProvider | null;
+  requestedRuntime: OrchestratorRuntime | null;
+  requestedModel: string | null;
+  selectedProvider: WorkerProvider;
+  selectedRuntime: OrchestratorRuntime;
+  selectedModel: string | null;
+  enforcement: 'codex_only_production';
+  confidence: WorkerRoutingConfidence;
+  reason: string;
+  decidedAt: string;
+}
 
 export type OrchestratorPacketStatus =
   | 'draft'
@@ -135,6 +152,13 @@ export interface OrchestratorPacket {
   assignedModel?: string | null;
   /** Files predicted to be touched, computed from packet scope vs skeleton cache */
   predictedFiles?: string[];
+  /** Routing scaffold: what kind of worker this task wants before runtime selection. */
+  workerIntent?: WorkerIntent;
+  /**
+   * Provider/runtime routing decision. Production currently enforces Codex as
+   * the selected runtime while preserving requested future providers.
+   */
+  workerRouting?: WorkerRouting;
   /** Rendered packet prompt body (surfaced in details popover). Optional. */
   prompt?: string;
   /** Files allowed to be touched by this packet. Alias of predictedFiles when present. */

@@ -47,11 +47,8 @@ function readPanelToken(): string | null {
     return _cachedPanelToken.value || null;
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { join } = require('node:path') as typeof import('node:path');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { homedir } = require('node:os') as typeof import('node:os');
     // Match middleware's lookup order: CORTEX_IDE_DATA_DIR override, else ~/.o8.
     const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
@@ -83,11 +80,8 @@ function resolveApiBaseLive(): string {
   const now = Date.now();
   if (_apiBaseCache && now - _apiBaseCache.ts < 1000) return _apiBaseCache.value;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { join } = require('node:path') as typeof import('node:path');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { homedir } = require('node:os') as typeof import('node:os');
     const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
     const portFile = join(dataDir, 'api-port');
@@ -200,10 +194,9 @@ export function optionalString(args: Record<string, unknown>, key: string) {
 
 export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
   if (value === undefined || value === null || value === '') {
-    // Fall back to the operator's configured default — respects users who
-    // don't have a Codex subscription and set e.g. Gemini or Claude Code.
+    // Preserve the operator's configured runtime as a requested-routing hint.
+    // Production spawn still resolves to Codex in the worker-routing layer.
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { resolveDefaultDispatchRuntimeSync } = require('@/lib/operator/defaults') as typeof import('@/lib/operator/defaults');
       return resolveDefaultDispatchRuntimeSync();
     } catch {

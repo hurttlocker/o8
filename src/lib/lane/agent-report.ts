@@ -1,5 +1,5 @@
-import { appendEvent, findLaneByPacket, getLane, setLaneStatus } from './registry';
-import type { AgentReportReason, Lane, LaneEvent } from './types';
+import { appendEvent, findLaneByPacket, getLane, setLaneStatus, updateLane } from './registry';
+import type { AgentReportReason, Lane, LaneEvent, LaneEventActor } from './types';
 
 export const AGENT_REPORT_REASONS: readonly AgentReportReason[] = [
   'needs_clarification',
@@ -17,6 +17,7 @@ const BLOCKING_AGENT_REPORT_EVENTS = new Set(['blocked', 'question']);
 export interface AgentReportInput {
   laneId?: string;
   packetId?: string;
+  actor?: LaneEventActor;
   event: string;
   reason?: AgentReportReason;
   message?: string;
@@ -49,6 +50,7 @@ export function normalizeAgentReportMetadata(value: unknown): Record<string, unk
 }
 
 export function reportAgentEvent(input: AgentReportInput): AgentReportResult | null {
+  const actor = input.actor ?? 'system';
   const lane = input.laneId
     ? getLane(input.laneId)
     : input.packetId
@@ -67,15 +69,20 @@ export function reportAgentEvent(input: AgentReportInput): AgentReportResult | n
   if (input.message) payload.message = input.message;
   if (input.metadata) payload.metadata = input.metadata;
 
-  const event = appendEvent(lane.id, 'agent_report', 'system', payload);
+  const event = appendEvent(lane.id, 'agent_report', actor, payload);
   if (!BLOCKING_AGENT_REPORT_EVENTS.has(input.event)) {
-    return { lane, event, statusChanged: false };
+    const updatedLane = updateLane(
+      lane.id,
+      { lastEventAt: event.timestamp, lastEventLabel: input.event },
+      actor,
+    ) ?? lane;
+    return { lane: updatedLane, event, statusChanged: false };
   }
 
   const updatedLane = setLaneStatus(
     lane.id,
     'awaiting_orchestrator',
-    'system',
+    actor,
     input.reason ?? input.event,
   ) ?? lane;
 
