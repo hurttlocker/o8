@@ -20,6 +20,8 @@ const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
 interface WorkspaceReviewResponse {
   changedFiles?: ReviewChangedFile[];
+  branch?: string;
+  repoSlug?: string;
 }
 
 export interface WorkspaceChangesState {
@@ -29,6 +31,8 @@ export interface WorkspaceChangesState {
   totalAdditions: number;
   totalDeletions: number;
   dirtyFileSet: Set<string>;
+  branch: string | null;
+  repoSlug: string | null;
   refresh: () => Promise<void>;
 }
 
@@ -73,11 +77,15 @@ export function useWorkspaceChanges(repoPath?: string | null): WorkspaceChangesS
   const [sourceRepoPath, setSourceRepoPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [branch, setBranch] = useState<string | null>(null);
+  const [repoSlug, setRepoSlug] = useState<string | null>(null);
   const currentRepoPath = repoPath ?? null;
 
   const refresh = useCallback(async () => {
     if (!repoPath) {
       setFiles([]);
+      setBranch(null);
+      setRepoSlug(null);
       setSourceRepoPath(null);
       setError(null);
       setLoading(false);
@@ -93,9 +101,13 @@ export function useWorkspaceChanges(repoPath?: string | null): WorkspaceChangesS
       const data = await response.json() as WorkspaceReviewResponse;
       setSourceRepoPath(repoPath);
       setFiles(Array.isArray(data.changedFiles) ? data.changedFiles : []);
+      setBranch(typeof data.branch === 'string' ? data.branch : null);
+      setRepoSlug(typeof data.repoSlug === 'string' ? data.repoSlug : null);
     } catch (err) {
       setSourceRepoPath(repoPath);
       setFiles([]);
+      setBranch(null);
+      setRepoSlug(null);
       setError(err instanceof Error ? err.message : 'Unable to load workspace changes');
     } finally {
       setLoading(false);
@@ -137,6 +149,8 @@ export function useWorkspaceChanges(repoPath?: string | null): WorkspaceChangesS
     totalAdditions,
     totalDeletions,
     dirtyFileSet,
+    branch: sourceRepoPath === currentRepoPath ? branch : null,
+    repoSlug: sourceRepoPath === currentRepoPath ? repoSlug : null,
     refresh,
   };
 }
