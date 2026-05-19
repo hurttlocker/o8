@@ -14,6 +14,7 @@ import {
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
 import { getPacketScope } from '@/lib/lanes/scope';
+import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
 import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
 import {
   apiFetch,
@@ -142,7 +143,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'get_packet_scope',
     description:
-      'Return one-call worker context for a packet or lane: branch, base, head SHA, worktree, file ceiling, allowed/blocked paths, repo-filtered directives, and active related packets with overlapping files. Provide packetId or laneId.',
+      'Return one-call worker context for a packet or lane: project brief, main/current/related repos, active locks, branch, base, head SHA, worktree, file ceiling, allowed/blocked paths, repo-filtered directives, and active related packets with overlapping files. Provide packetId or laneId.',
     inputSchema: {
       // No top-level anyOf — OpenAI strict function-calling rejects oneOf /
       // anyOf / allOf siblings to `type: 'object'`. Handler validates that
@@ -158,6 +159,55 @@ export const MISSION_TOOLS: McpTool[] = [
           description: 'Lane id, for example lane-xyz. Either packetId or laneId is required.',
         },
       },
+    },
+  },
+  {
+    name: 'o8_task_list',
+    description:
+      'Return the simple o8 task pool grouped as ready, running, review, blocked, and done. This is a projection of packets and lanes, not a separate task store. Use it before claiming or dispatching work.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: {
+          type: 'string',
+          description: 'Optional project id or slug filter.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Optional absolute repo path filter.',
+        },
+        includeDone: {
+          type: 'boolean',
+          description: 'Include released/completed/archived tasks. Default false.',
+        },
+        includeBrief: {
+          type: 'boolean',
+          description: 'Include full project-backed task briefs on each task. Default false; prefer o8_task_brief for one task.',
+        },
+      },
+    },
+  },
+  {
+    name: 'o8_task_brief',
+    description:
+      'Return one project-backed task brief for a packet or lane id. Use this when a worker needs the exact main repo, current repo, related repo, and output policy before editing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Packet id, lane id, or task id.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Optional project id or slug filter.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Optional absolute repo path filter.',
+        },
+      },
+      required: ['taskId'],
     },
   },
   {
@@ -533,6 +583,39 @@ export async function handleGetPacketScope(args: Record<string, unknown>): Promi
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_packet_scope failed: ${errorText(error)}`);
     return textResult(`Failed to read packet scope: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleTaskList(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const projectId = optionalString(args, 'projectId') || null;
+    const repoPath = optionalString(args, 'repoPath') || null;
+    const includeDone = args.includeDone === true;
+    const includeBrief = args.includeBrief === true;
+    const result = await getTaskPool({ projectId, repoPath, includeDone, includeBrief });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_task_list failed: ${errorText(error)}`);
+    return textResult(`Failed to read task pool: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleTaskBrief(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const taskId = requiredString(args, 'taskId');
+    const projectId = optionalString(args, 'projectId') || null;
+    const repoPath = optionalString(args, 'repoPath') || null;
+    const task = await getTaskPoolTask(taskId, { projectId, repoPath });
+    if (!task) {
+      return textResult('Task not found', true);
+    }
+    return jsonResult({
+      schema: 'o8/task.detail/v1',
+      task,
+    });
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_task_brief failed: ${errorText(error)}`);
+    return textResult(`Failed to read task brief: ${errorText(error)}`, true);
   }
 }
 

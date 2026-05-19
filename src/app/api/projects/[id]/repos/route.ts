@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { addRepoToProject } from '@/lib/projects/store';
+import { addRepoToProject, getProjectWithRepos } from '@/lib/projects/store';
+import { syncPanelLedgerFromProjectStore } from '@/lib/projects/context';
 import type { ProjectRole, SuggestionOrigin } from '@/lib/projects/types';
 
 export const runtime = 'nodejs';
@@ -43,6 +44,10 @@ export async function POST(
 
   try {
     const link = addRepoToProject(id, repoId, role, suggestionOrigin);
+    const project = getProjectWithRepos(id);
+    if (project) {
+      await syncPanelLedgerFromProjectStore(project);
+    }
     return NextResponse.json({ link }, { status: 201, headers: NO_STORE });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to add repo.';

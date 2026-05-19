@@ -10,6 +10,7 @@ import { getLane } from '@/lib/lane/registry';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
+import { getProjectContext } from '@/lib/projects/context';
 import type {
   OrchestratorLaneBinding,
   OrchestratorMissionState,
@@ -200,10 +201,12 @@ async function dispatchPacket(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
 ): Promise<LaunchDispatchResult> {
+  const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
   const laneResult = await dispatchLaneCommand({
     verb: 'open_lane',
     packetId: packet.id,
     repoPath: packet.workspaceTargetPath!,
+    projectId: projectContext.runtimeProjectId,
     branch: packet.branchTarget,
     runtime: packet.runtime,
     label: packet.title,

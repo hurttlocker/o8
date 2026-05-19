@@ -3,8 +3,14 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import {
   addRepoToProject,
   createProject,
+  getProjectWithRepos,
   listProjects,
+  setProjectMainRepo,
 } from '@/lib/projects/store';
+import {
+  syncPanelLedgerFromProjectStore,
+  syncProjectStoreFromPanelLedger,
+} from '@/lib/projects/context';
 import type { ProjectRole, SuggestionOrigin } from '@/lib/projects/types';
 
 export const runtime = 'nodejs';
@@ -17,6 +23,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   try {
+    await syncProjectStoreFromPanelLedger();
     const projects = listProjects();
     return NextResponse.json({ projects }, { headers: NO_STORE });
   } catch (err) {
@@ -40,6 +47,7 @@ interface CreateProjectBody {
    * at once — pick one or you'll get a 400.
    */
   repos?: unknown;
+  mainRepoId?: unknown;
   suggestionOrigin?: unknown;
 }
 
@@ -179,9 +187,17 @@ export async function POST(req: NextRequest) {
       const role = resolveRoleForRepo(repoId, index, rolesSource);
       return addRepoToProject(project.id, repoId, role, suggestionOrigin);
     });
+    const mainRepoId = asString(body.mainRepoId)?.trim();
+    if (mainRepoId && resolvedRepoIds.includes(mainRepoId)) {
+      setProjectMainRepo(project.id, mainRepoId);
+    }
+    const withRepos = getProjectWithRepos(project.id);
+    if (withRepos) {
+      await syncPanelLedgerFromProjectStore(withRepos);
+    }
 
     return NextResponse.json(
-      { project: { ...project, repos } },
+      { project: withRepos ?? { ...project, repos } },
       { status: 201, headers: NO_STORE },
     );
   } catch (err) {

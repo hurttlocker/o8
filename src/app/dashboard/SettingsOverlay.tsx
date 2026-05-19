@@ -2,7 +2,7 @@
 
 import type { ReactNode, RefObject } from 'react';
 
-const SETTINGS_OVERLAY_TOP_OFFSET = 38;
+const SETTINGS_OVERLAY_INSET = 8;
 
 export function SettingsOverlay({
   children,
@@ -15,17 +15,16 @@ export function SettingsOverlay({
     <div
       style={{
         position: 'absolute',
-        top: SETTINGS_OVERLAY_TOP_OFFSET,
+        top: 0,
         right: 0,
         bottom: 0,
         left: 0,
         zIndex: 45,
         display: 'flex',
-        justifyContent: 'center',
-        paddingTop: 12,
-        paddingRight: 12,
-        paddingBottom: 12,
-        paddingLeft: 12,
+        paddingTop: SETTINGS_OVERLAY_INSET,
+        paddingRight: SETTINGS_OVERLAY_INSET,
+        paddingBottom: SETTINGS_OVERLAY_INSET,
+        paddingLeft: SETTINGS_OVERLAY_INSET,
         boxSizing: 'border-box',
         pointerEvents: 'none',
       }}
@@ -35,7 +34,8 @@ export function SettingsOverlay({
         role="dialog"
         aria-label="settings panel"
         style={{
-          width: 'min(1180px, 100%)',
+          width: '100%',
+          height: '100%',
           minWidth: 0,
           minHeight: 0,
           display: 'flex',

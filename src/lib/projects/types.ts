@@ -33,6 +33,7 @@ export interface Project {
   name: string;
   slug: string;
   description: string | null;
+  mainRepoId: string | null;
   createdAt: number;
   updatedAt: number;
 }

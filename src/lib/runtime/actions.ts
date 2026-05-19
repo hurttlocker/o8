@@ -3,6 +3,11 @@ import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexRev
 import { markRepoOriginConfigured, markRepoOriginMissing } from '@/lib/repos/origin-readiness';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
+import {
+  buildProjectTaskBrief,
+  getProjectContext,
+  type ProjectContext,
+} from '@/lib/projects/context';
 import { selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
 import {
   linkSessionToWorktree,
@@ -49,6 +54,8 @@ export interface RuntimeLaunchRequest {
   clientMutationId?: string;
   cwd?: string;
   repoPath?: string;
+  /** Canonical repo root for project context when cwd/repoPath points at an isolated worktree. */
+  projectRepoPath?: string;
   taskName?: string;
   /**
    * Pre-assigned lane branch the worktree must check out before the agent
@@ -90,6 +97,7 @@ export interface RuntimeLaunchResult {
 const FETCH_UNREACHABLE_COOLDOWN_MS = 5 * 60_000;
 const fetchUnreachableFailures = new Map<string, number>();
 const loggedOriginMissingRepos = new Set<string>();
+const PROJECT_BRIEF_HEADING_PATTERN = /(?:^|\n)##\s+Project Brief\b/i;
 
 function fetchCooldownRetrySeconds(repoPath: string): number | null {
   const lastFailureMs = fetchUnreachableFailures.get(repoPath);
@@ -131,6 +139,53 @@ function summarizeTaskName(prompt: string) {
   return cleaned.replace(/\s+/g, ' ').slice(0, 80);
 }
 
+async function resolveProjectContextForLaunch(
+  payload: RuntimeLaunchRequest,
+  repoPath: string,
+): Promise<ProjectContext | null> {
+  const contextRepoPath = payload.projectRepoPath?.trim() || repoPath;
+  try {
+    return await getProjectContext({ repoPath: contextRepoPath });
+  } catch (error) {
+    console.warn(
+      '[runtime-actions] Project context unavailable for launch:',
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
+async function buildLaunchPromptWithProjectBrief(
+  payload: RuntimeLaunchRequest,
+  prompt: string,
+  repoPath: string,
+): Promise<{ prompt: string; projectContext: ProjectContext | null }> {
+  const projectContext = await resolveProjectContextForLaunch(payload, repoPath);
+  if (PROJECT_BRIEF_HEADING_PATTERN.test(prompt)) {
+    return { prompt, projectContext };
+  }
+
+  if (!projectContext) {
+    return { prompt, projectContext: null };
+  }
+
+  const projectBrief = buildProjectTaskBrief(projectContext, {
+    repoPath: payload.projectRepoPath?.trim() || repoPath,
+    taskTitle: payload.taskName?.trim() || summarizeTaskName(prompt),
+    taskBody: prompt,
+  });
+
+  return {
+    projectContext,
+    prompt: [
+      '## Project Brief',
+      projectBrief,
+      '## Task',
+      prompt,
+    ].join('\n\n'),
+  };
+}
+
 export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
   const runtimeId = payload.runtime;
   const prompt = payload.prompt?.trim();
@@ -154,6 +209,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     throw new Error(`Runtime ${runtimeId} does not support launch.`);
   }
 
+  const { prompt: launchPrompt, projectContext } = await buildLaunchPromptWithProjectBrief(payload, prompt, repoPath);
   const supportsWorktrees = runtimeId === 'codex'
     || runtimeId === 'claude-code'
     || runtimeId === 'gemini'
@@ -337,7 +393,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   const cwd = launchWorktree?.cwd ?? repoPath;
   const result = await runtime.launch({
     cwd,
-    prompt,
+    prompt: launchPrompt,
     model: payload.model,
     worktreeFlag: launchWorktree?.claudeWorktreeFlag,
     worktreePath: launchWorktree?.worktree?.path,
@@ -370,6 +426,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
       const implicitLabel = payload.taskName?.trim() || summarizeTaskName(prompt);
       const lane = createLane({
         repoPath,
+        projectId: projectContext?.id ?? null,
         branch: launchWorktree.worktree.branch,
         baseBranch: payload.baseBranch?.trim() || 'main',
         runtime: laneRuntime,

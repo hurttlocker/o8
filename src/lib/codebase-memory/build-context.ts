@@ -50,7 +50,7 @@ import {
   directiveAppliesToRepo,
   resolveActiveDirectiveProjectScope,
 } from '@/lib/cortex/directives/filter';
-import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
+import { getProjectContext, type ProjectContext } from '@/lib/projects/context';
 
 import { extractGraphResolvedSymbols, type SymbolEdge } from './client';
 
@@ -273,13 +273,34 @@ function renderSymbolGraphSection(edges: SymbolEdge[]): string[] {
   return lines;
 }
 
+function renderProjectScopeSection(context: ProjectContext): string[] {
+  if (context.repos.length === 0) return [];
+  const siblingRepos = context.relatedRepos.filter((repo) => repo.id !== context.currentRepo?.id);
+  const lines = ['## Project Scope'];
+  lines.push(`- Project: ${context.name} (${context.repos.length} repo${context.repos.length === 1 ? '' : 's'})`);
+  if (context.primaryRepo) {
+    lines.push(`- Main repo: ${context.primaryRepo.name}${context.primaryRepo.role ? ` [${context.primaryRepo.role}]` : ''}`);
+  }
+  if (context.currentRepo && context.currentRepo.id !== context.primaryRepo?.id) {
+    lines.push(`- Current repo: ${context.currentRepo.name}${context.currentRepo.role ? ` [${context.currentRepo.role}]` : ''}`);
+  }
+  if (siblingRepos.length > 0) {
+    lines.push(`- Sibling repos: ${siblingRepos.map((repo) => `${repo.name}${repo.role ? ` [${repo.role}]` : ''}`).join(', ')}`);
+  }
+  if (context.instructions) {
+    lines.push(`- Project instructions: ${clampLine(context.instructions, 360)}`);
+  }
+  lines.push('- Repo policy: treat the main repo as the product anchor; use the current repo for repo-specific work; edit siblings only when the task explicitly requires cross-repo changes.');
+  return lines;
+}
+
 /**
  * Truncate the rendered block from the bottom (Symbol Graph first, then
  * Outcomes, then Directives) until it fits inside MAX_BLOCK_CHARS. The
  * `<context>` wrapper is included in the budget.
  */
-function fitWithinBudget(sections: { heading: 'directives' | 'outcomes' | 'symbols'; lines: string[] }[]): string {
-  const order: typeof sections[number]['heading'][] = ['symbols', 'outcomes', 'directives'];
+function fitWithinBudget(sections: { heading: 'project' | 'directives' | 'outcomes' | 'symbols'; lines: string[] }[]): string {
+  const order: typeof sections[number]['heading'][] = ['symbols', 'outcomes', 'directives', 'project'];
   const drop: Set<typeof sections[number]['heading']> = new Set();
 
   const render = () => {
@@ -314,8 +335,8 @@ export async function buildContextBlock({
   projectId,
 }: BuildContextBlockInput): Promise<string> {
   if (!repoPath?.trim()) return '';
-  const activeScope = await getActiveProjectScopeForRepo(repoPath);
-  const activeProjectId = projectId?.trim() || activeScope.projectId;
+  const projectContext = await getProjectContext({ repoPath, projectId });
+  const activeProjectId = projectContext.runtimeProjectId;
 
   // #849 — when the path doesn't match a registered repo (and isn't our own
   // checkout), drop the directives leg. Global directives are intentionally
@@ -336,7 +357,7 @@ export async function buildContextBlock({
   try {
     const resolved = await withTiming(
       'recall.symbol-graph',
-      () => activeScope.repoInActiveProject
+      () => projectContext.repoInProject
         ? extractGraphResolvedSymbols(packetBody, repoPath, MAX_SYMBOLS)
         : Promise.resolve({ symbols: [], edges: [], unavailable: false }),
     );
@@ -346,6 +367,7 @@ export async function buildContextBlock({
   }
 
   return fitWithinBudget([
+    { heading: 'project', lines: renderProjectScopeSection(projectContext) },
     { heading: 'directives', lines: renderDirectivesSection(directives) },
     { heading: 'outcomes', lines: renderOutcomesSection(outcomes) },
     { heading: 'symbols', lines: renderSymbolGraphSection(edges) },
