@@ -2,6 +2,8 @@
 
 import type { O8Tab } from './types';
 
+// ── Inline SVG icons (Tauri webview doesn't reliably render React icon components) ──
+
 function IconWorkspace({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
@@ -49,44 +51,60 @@ function IconInbox({ size = 16, color = '#e2e8f0' }: { size?: number; color?: st
   );
 }
 
-// Active icon picks up the palette text color (dark on paper, light on
-// graphite). Was hardcoded #e2e8f0 which rendered invisible on light + solid.
+// Icon colors track the palette text color (dark on paper, light on graphite).
 const O8_ICON_ACTIVE = 'var(--t-text)';
 const O8_ICON_INACTIVE = 'var(--t-text-muted)';
 
-function O8HeaderTabButton({
-  icon,
+interface O8TabDef {
+  id: O8Tab;
+  label: string;
+  icon: (color: string) => React.ReactNode;
+}
+
+// Codex-style header tabs — the active tab expands to an icon + label pill;
+// the rest stay icon-only so the row fits the panel width. No dividers.
+const O8_TABS: O8TabDef[] = [
+  { id: 'workspace', label: 'Workspace', icon: (c) => <IconWorkspace size={15} color={c} /> },
+  { id: 'prs', label: 'PRs', icon: (c) => <IconGitPullRequest size={15} color={c} /> },
+  { id: 'inbox', label: 'Inbox', icon: (c) => <IconInbox size={15} color={c} /> },
+  { id: 'activity', label: 'Activity', icon: (c) => <IconActivity size={15} color={c} /> },
+  { id: 'spec', label: 'o8.md', icon: (c) => <IconFiles size={15} color={c} /> },
+];
+
+function O8TabPill({
+  def,
   active,
   onClick,
-  label,
 }: {
-  icon: (color: string) => React.ReactNode;
+  def: O8TabDef;
   active: boolean;
   onClick: () => void;
-  label: string;
 }) {
+  const color = active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE;
   return (
     <button
       type="button"
+      role="tab"
       onClick={onClick}
-      title={label}
-      aria-label={label}
-      aria-pressed={active}
+      title={def.label}
+      aria-label={def.label}
+      aria-selected={active}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 32,
-        height: 32,
-        padding: 0,
+        gap: active ? 6 : 0,
+        height: 30,
+        width: active ? 'auto' : 30,
+        paddingLeft: active ? 9 : 0,
+        paddingRight: active ? 11 : 0,
         border: 'none',
-        borderRadius: 10,
+        borderRadius: 8,
         background: active ? 'var(--t-panel-active, var(--t-input-bg))' : 'transparent',
-        color: active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE,
+        color,
         cursor: 'pointer',
-        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
-        position: 'relative',
         flexShrink: 0,
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         WebkitTapHighlightColor: 'transparent',
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
@@ -97,24 +115,21 @@ function O8HeaderTabButton({
         if (!active) event.currentTarget.style.background = 'transparent';
       }}
     >
-      {icon(active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE)}
+      {def.icon(color)}
+      {active ? (
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: '-0.01em',
+            fontFamily: 'var(--font-sans-system)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {def.label}
+        </span>
+      ) : null}
     </button>
-  );
-}
-
-function O8HeaderDivider() {
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        width: 1,
-        height: 18,
-        background: 'var(--t-divider-subtle)',
-        marginLeft: 6,
-        marginRight: 6,
-        flexShrink: 0,
-      }}
-    />
   );
 }
 
@@ -132,19 +147,20 @@ export function O8HeaderTabs({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 2,
+        gap: 3,
         height: 32,
         flexShrink: 0,
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
     >
-      <O8HeaderTabButton icon={(color) => <IconWorkspace size={16} color={color} />} active={activeTab === 'workspace'} onClick={() => onTabChange('workspace')} label="Workspace" />
-      <O8HeaderDivider />
-      <O8HeaderTabButton icon={(color) => <IconGitPullRequest size={16} color={color} />} active={activeTab === 'prs'} onClick={() => onTabChange('prs')} label="PRs" />
-      <O8HeaderTabButton icon={(color) => <IconInbox size={16} color={color} />} active={activeTab === 'inbox'} onClick={() => onTabChange('inbox')} label="Inbox" />
-      <O8HeaderTabButton icon={(color) => <IconActivity size={16} color={color} />} active={activeTab === 'activity'} onClick={() => onTabChange('activity')} label="Activity" />
-      <O8HeaderDivider />
-      <O8HeaderTabButton icon={(color) => <IconFiles size={16} color={color} />} active={activeTab === 'spec'} onClick={() => onTabChange('spec')} label="o8.md" />
+      {O8_TABS.map((def) => (
+        <O8TabPill
+          key={def.id}
+          def={def}
+          active={activeTab === def.id}
+          onClick={() => onTabChange(def.id)}
+        />
+      ))}
     </div>
   );
 }
