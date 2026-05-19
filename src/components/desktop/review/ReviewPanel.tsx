@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/set-state-in-effect -- the async per-file diff fetch intentionally toggles loading/error/diff state */
 
-import { memo, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight } from '../lucide-shims';
 import { splitUnifiedDiff, diffLineTone, type DiffLine } from '../o8-panel/diff-render';
 import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
@@ -19,6 +19,8 @@ import type { ReviewChangedFile } from '@/lib/fleet/types';
  */
 
 type DiffMode = 'unified' | 'side';
+/** Panel → row signal for bulk collapse/expand; rows re-apply `open` on each new identity. */
+type CollapseSignal = { open: boolean; nonce: number };
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
@@ -80,7 +82,7 @@ const NUM_CELL: CSSProperties = {
   userSelect: 'none',
 };
 
-function UnifiedDiff({ lines }: { lines: DiffLine[] }) {
+function UnifiedDiff({ lines, wrap }: { lines: DiffLine[]; wrap: boolean }) {
   return (
     <div style={{ fontFamily: MONO_FONT, fontSize: 11, lineHeight: 1.55, background: 'var(--t-bg-card)', borderTop: '1px solid var(--t-divider-subtle)' }}>
       {lines.map((line, index) => {
@@ -92,7 +94,7 @@ function UnifiedDiff({ lines }: { lines: DiffLine[] }) {
           >
             <span style={NUM_CELL}>{line.oldNumber ?? ''}</span>
             <span style={NUM_CELL}>{line.newNumber ?? ''}</span>
-            <span style={{ flex: 1, minWidth: 0 }}>{line.text || ' '}</span>
+            <span style={{ flex: 1, minWidth: 0, whiteSpace: wrap ? 'pre-wrap' : 'pre', overflowWrap: wrap ? 'anywhere' : 'normal' }}>{line.text || ' '}</span>
           </div>
         );
       })}
@@ -122,20 +124,23 @@ function sideRows(lines: DiffLine[]): Array<{ left: DiffLine | null; right: Diff
   return rows;
 }
 
-function SideDiff({ lines }: { lines: DiffLine[] }) {
+function SideDiff({ lines, wrap }: { lines: DiffLine[]; wrap: boolean }) {
   const rows = useMemo(() => sideRows(lines), [lines]);
+  const textCell: CSSProperties = wrap
+    ? { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', paddingRight: 8 }
+    : { whiteSpace: 'pre', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 };
   return (
     <div className="cortex-themed-scroll" style={{ background: 'var(--t-bg-card)', borderTop: '1px solid var(--t-divider-subtle)', overflowX: 'auto' }}>
-      <div style={{ minWidth: 680, fontFamily: MONO_FONT, fontSize: 11, lineHeight: 1.55 }}>
+      <div style={{ minWidth: wrap ? 0 : 680, fontFamily: MONO_FONT, fontSize: 11, lineHeight: 1.55 }}>
         {rows.map((row, index) => {
           const leftTone = diffLineTone(row.left?.kind ?? 'context');
           const rightTone = diffLineTone(row.right?.kind ?? 'context');
           return (
             <div key={index} style={{ display: 'grid', gridTemplateColumns: '30px minmax(0, 1fr) 30px minmax(0, 1fr)' }}>
               <span style={{ ...NUM_CELL, width: 'auto', paddingRight: 6 }}>{row.left?.oldNumber ?? ''}</span>
-              <span style={{ whiteSpace: 'pre', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8, background: row.left ? leftTone.background : 'transparent', color: row.left ? leftTone.color : 'var(--t-text-faint)' }}>{row.left?.text || ' '}</span>
+              <span style={{ ...textCell, background: row.left ? leftTone.background : 'transparent', color: row.left ? leftTone.color : 'var(--t-text-faint)' }}>{row.left?.text || ' '}</span>
               <span style={{ ...NUM_CELL, width: 'auto', paddingRight: 6 }}>{row.right?.newNumber ?? ''}</span>
-              <span style={{ whiteSpace: 'pre', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8, background: row.right ? rightTone.background : 'transparent', color: row.right ? rightTone.color : 'var(--t-text-faint)' }}>{row.right?.text || ' '}</span>
+              <span style={{ ...textCell, background: row.right ? rightTone.background : 'transparent', color: row.right ? rightTone.color : 'var(--t-text-faint)' }}>{row.right?.text || ' '}</span>
             </div>
           );
         })}
@@ -144,9 +149,9 @@ function SideDiff({ lines }: { lines: DiffLine[] }) {
   );
 }
 
-function DiffPatch({ patch, mode }: { patch: string; mode: DiffMode }) {
+function DiffPatch({ patch, mode, wrap }: { patch: string; mode: DiffMode; wrap: boolean }) {
   const lines = useMemo(() => splitUnifiedDiff(patch), [patch]);
-  return mode === 'side' ? <SideDiff lines={lines} /> : <UnifiedDiff lines={lines} />;
+  return mode === 'side' ? <SideDiff lines={lines} wrap={wrap} /> : <UnifiedDiff lines={lines} wrap={wrap} />;
 }
 
 function RowMessage({ text, tone }: { text: string; tone?: 'error' }) {
@@ -166,11 +171,16 @@ function PanelMessage({ text, tone }: { text: string; tone?: 'error' }) {
 }
 
 /** One changed file: a collapsible header + an inline diff loaded on expand. */
-const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode }: { file: ReviewChangedFile; repoPath: string; mode: DiffMode }) {
+const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode, wrap, collapseSignal }: { file: ReviewChangedFile; repoPath: string; mode: DiffMode; wrap: boolean; collapseSignal: CollapseSignal }) {
   const [open, setOpen] = useState(true);
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Apply the panel-level bulk collapse/expand signal whenever it changes.
+  useEffect(() => {
+    setOpen(collapseSignal.open);
+  }, [collapseSignal]);
 
   useEffect(() => {
     if (!open) return;
@@ -230,7 +240,7 @@ const ReviewFileRow = memo(function ReviewFileRow({ file, repoPath, mode }: { fi
         ) : error ? (
           <RowMessage text={error} tone="error" />
         ) : diff && diff.trim() ? (
-          <DiffPatch patch={diff} mode={mode} />
+          <DiffPatch patch={diff} mode={mode} wrap={wrap} />
         ) : (
           <RowMessage text="No diff available (binary file or too large)." />
         )
@@ -271,10 +281,99 @@ function ToolbarButton({ active, title, onClick, children }: { active?: boolean;
   );
 }
 
+function IconMore({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" style={{ display: 'block', flexShrink: 0 }}>
+      <circle cx="5" cy="12" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="19" cy="12" r="1.7" />
+    </svg>
+  );
+}
+
+function IconCheck({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+/** One row of the `···` overflow menu. Toggle items pass `checked`; plain actions omit it. */
+function MenuItem({ onClick, checked, children }: { onClick: () => void; checked?: boolean; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        width: '100%',
+        height: 30,
+        paddingLeft: 9,
+        paddingRight: 8,
+        border: 'none',
+        borderRadius: 7,
+        background: 'transparent',
+        color: 'var(--t-text)',
+        fontFamily: UI_FONT,
+        fontSize: 12,
+        cursor: 'pointer',
+        textAlign: 'left',
+      }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+    >
+      <span style={{ flex: 1, minWidth: 0 }}>{children}</span>
+      {checked !== undefined ? (
+        <span style={{ display: 'inline-flex', width: 14, justifyContent: 'center', color: checked ? 'var(--t-accent)' : 'transparent' }}>
+          <IconCheck size={13} />
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
 export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: string | null }) {
   const changes = useWorkspaceChanges(repoPath);
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<DiffMode>('unified');
+  const [wrap, setWrap] = useState(false);
+  const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: true, nonce: 0 });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the `···` overflow menu on outside-click or Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointer = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+
+  const handleCollapseAll = () => {
+    setCollapseSignal((signal) => ({ open: !signal.open, nonce: signal.nonce + 1 }));
+    setMenuOpen(false);
+  };
+  const handleWordWrap = () => {
+    setWrap((value) => !value);
+    setMenuOpen(false);
+  };
+  const handleRefresh = () => {
+    void changes.refresh();
+    setMenuOpen(false);
+  };
 
   const trimmed = query.trim().toLowerCase();
   const visible = useMemo(
@@ -335,6 +434,32 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
           >
             {mode === 'unified' ? <IconSplit size={14} /> : <IconUnified size={14} />}
           </ToolbarButton>
+          <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
+            <ToolbarButton title="More" active={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+              <IconMore size={15} />
+            </ToolbarButton>
+            {menuOpen ? (
+              <div
+                role="menu"
+                style={{
+                  position: 'absolute',
+                  top: 34,
+                  right: 0,
+                  minWidth: 168,
+                  padding: 4,
+                  borderRadius: 10,
+                  background: 'var(--t-bg-card)',
+                  border: '1px solid var(--t-divider)',
+                  boxShadow: '0 10px 28px rgba(0, 0, 0, 0.22)',
+                  zIndex: 50,
+                }}
+              >
+                <MenuItem onClick={handleCollapseAll}>{collapseSignal.open ? 'Collapse all' : 'Expand all'}</MenuItem>
+                <MenuItem onClick={handleWordWrap} checked={wrap}>Word wrap</MenuItem>
+                <MenuItem onClick={handleRefresh}>Refresh</MenuItem>
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
       <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
@@ -350,7 +475,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath }: { repoPath?: 
           <PanelMessage text={`No files match "${query.trim()}".`} />
         ) : (
           visible.map((file) => (
-            <ReviewFileRow key={file.path} file={file} repoPath={repoPath} mode={mode} />
+            <ReviewFileRow key={file.path} file={file} repoPath={repoPath} mode={mode} wrap={wrap} collapseSignal={collapseSignal} />
           ))
         )}
       </div>
