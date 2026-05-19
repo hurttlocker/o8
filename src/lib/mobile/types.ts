@@ -293,6 +293,8 @@ export interface MobileOrchestratorThread {
   repoBranch: string | null;
   /** Orchestrator backend, when the thread was tagged; null for legacy threads. */
   backend: MobileOrchestratorBackend | null;
+  /** openclaw agent id that ran the thread; null for non-openclaw/untagged. */
+  agent: string | null;
 }
 
 /**

@@ -746,29 +746,32 @@ interface OrchestratorSubscription {
   sessionName: string;
   /** Which orchestrator backend this subscription is for. */
   backend: OrchestratorBackendId;
+  /** openclaw agent id (openclaw backend only; '' for codex/claude). */
+  agent: string;
 }
 
-// Keyed by `${clientId}::${backend}` — one client can hold a subscription per
-// backend at once (the default Orchestrator tab on codex AND the openclaw
-// surface, live together). `sessionName` is itself backend-distinct, so event
-// broadcast matches on it.
+// Keyed by `${clientId}::${backend}::${agent}` — one client can hold a
+// subscription per backend AND per openclaw agent at once (the default
+// Orchestrator tab on codex AND multiple openclaw agent groups, live together).
+// `agent` is '' for codex/claude. `sessionName` is itself backend+agent-distinct,
+// so event broadcast matches on it.
 const orchestratorSubscriptions = new Map<string, OrchestratorSubscription>();
 
-// #624 — In-flight AbortControllers keyed by `${repoPath}::${backend}`. Attached
-// when an orchestrator-send turn starts; orchestrator-interrupt calls .abort()
-// on the matching entry to terminate the streaming subprocess within 1-2s.
-// Per-backend so a codex turn and an openclaw turn on the same repo don't
-// clobber each other. Entries are removed when the turn resolves.
+// #624 — In-flight AbortControllers keyed by `${repoPath}::${backend}::${agent}`.
+// Attached when an orchestrator-send turn starts; orchestrator-interrupt calls
+// .abort() on the matching entry to terminate the streaming subprocess within
+// 1-2s. Per-backend AND per-openclaw-agent so concurrent turns on the same repo
+// don't clobber each other. Entries are removed when the turn resolves.
 const orchestratorInflightAborts = new Map<string, AbortController>();
 
-/** Composite key for `orchestratorSubscriptions`. */
-function orchestratorSubKey(clientId: string, backend: OrchestratorBackendId): string {
-  return `${clientId}::${backend}`;
+/** Composite key for `orchestratorSubscriptions` (`agent` is '' for codex/claude). */
+function orchestratorSubKey(clientId: string, backend: OrchestratorBackendId, agent: string): string {
+  return `${clientId}::${backend}::${agent}`;
 }
 
-/** Composite key for `orchestratorInflightAborts`. */
-function orchestratorAbortKey(repoPath: string, backend: OrchestratorBackendId): string {
-  return `${repoPath}::${backend}`;
+/** Composite key for `orchestratorInflightAborts` (`agent` is '' for codex/claude). */
+function orchestratorAbortKey(repoPath: string, backend: OrchestratorBackendId, agent: string): string {
+  return `${repoPath}::${backend}::${agent}`;
 }
 
 /**
@@ -780,6 +783,17 @@ function resolveMsgBackendId(msg: Record<string, unknown>): OrchestratorBackendI
   const raw = msg.backend;
   if (raw === 'codex' || raw === 'claude' || raw === 'openclaw') return raw;
   return resolveOrchestratorBackendId();
+}
+
+/**
+ * Resolve the openclaw agent id for one WS message — the openclaw surface
+ * passes `agent` per request. Empty string for codex/claude (no agent
+ * dimension) and for an openclaw message that omits it (the backend then falls
+ * back to its default agent). Third component of the composite sub/abort keys.
+ */
+function resolveMsgAgentId(msg: Record<string, unknown>, backendId: OrchestratorBackendId): string {
+  if (backendId !== 'openclaw') return '';
+  return typeof msg.agent === 'string' && msg.agent.trim() ? msg.agent.trim() : '';
 }
 
 /** Send a raw WS message to every client subscribed to `sessionName`. */
@@ -2108,14 +2122,24 @@ function handleClientMessage(client: ClientState, raw: string) {
 // ── Orchestrator channel handlers ──
 
 function handleOrchestratorUnsubscribe(client: ClientState, msg: Record<string, unknown>) {
-  // With an explicit `backend`, drop just that surface's subscription; without
-  // one (legacy clients) drop every subscription for this client.
+  // With `backend` + `agent`, drop just that one surface's subscription; with
+  // `backend` alone, drop every subscription for that backend; without either
+  // (legacy clients) drop every subscription for this client.
   const raw = msg.backend;
-  if (raw === 'codex' || raw === 'claude' || raw === 'openclaw') {
-    orchestratorSubscriptions.delete(orchestratorSubKey(client.id, raw));
-  } else {
+  if (raw !== 'codex' && raw !== 'claude' && raw !== 'openclaw') {
     for (const key of orchestratorSubscriptions.keys()) {
       if (key.startsWith(`${client.id}::`)) orchestratorSubscriptions.delete(key);
+    }
+    return;
+  }
+  const agent = resolveMsgAgentId(msg, raw);
+  if (agent) {
+    orchestratorSubscriptions.delete(orchestratorSubKey(client.id, raw, agent));
+  } else {
+    // No specific agent — drop every subscription for this backend.
+    const prefix = `${client.id}::${raw}::`;
+    for (const key of orchestratorSubscriptions.keys()) {
+      if (key.startsWith(prefix)) orchestratorSubscriptions.delete(key);
     }
   }
 }
@@ -2125,14 +2149,17 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
   if (!repoPath) return;
 
   const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
+  const agentId = resolveMsgAgentId(msg, backend.id);
+  const agentTag = agentId || undefined;
 
   try {
-    const session = backend.ensureSession(repoPath);
-    orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id), {
+    const session = backend.ensureSession(repoPath, agentTag);
+    orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
       clientId: client.id,
       repoPath,
       sessionName: session.sessionName,
       backend: backend.id,
+      agent: agentId,
     });
 
     // No PTY to hook — the new approach spawns a process per message
@@ -2140,14 +2167,14 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
     send(client, {
       channel: 'orchestrator',
       event: 'status',
-      data: { status: session.status, repoPath, sessionName: session.sessionName, backend: backend.id },
+      data: { status: session.status, repoPath, sessionName: session.sessionName, backend: backend.id, agent: agentTag },
     });
-    console.log(`[ws-server] Client ${client.id} subscribed to orchestrator (${backend.id}) for ${repoPath}`);
+    console.log(`[ws-server] Client ${client.id} subscribed to orchestrator (${backend.id}${agentId ? `/${agentId}` : ''}) for ${repoPath}`);
   } catch (err) {
     send(client, {
       channel: 'orchestrator',
       event: 'error',
-      data: { error: err instanceof Error ? err.message : 'Failed to start orchestrator session', repoPath, backend: backend.id },
+      data: { error: err instanceof Error ? err.message : 'Failed to start orchestrator session', repoPath, backend: backend.id, agent: agentTag },
     });
   }
 }
@@ -2169,37 +2196,40 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     : undefined;
 
   const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
-  const abortKey = orchestratorAbortKey(repoPath, backend.id);
+  const agentId = resolveMsgAgentId(msg, backend.id);
+  const agentTag = agentId || undefined;
+  const abortKey = orchestratorAbortKey(repoPath, backend.id, agentId);
 
   // #624 — Declared outside try so the catch can also release the entry.
   let turnController: AbortController | null = null;
 
   try {
-    console.log(`[ws-server][orchestrator] Routing chat via ${backend.label}`);
+    console.log(`[ws-server][orchestrator] Routing chat via ${backend.label}${agentId ? ` (agent ${agentId})` : ''}`);
 
-    const sessionName = backend.ensureSession(repoPath).sessionName;
+    const sessionName = backend.ensureSession(repoPath, agentTag).sessionName;
     const sendTurn = (
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
-    ): Promise<void> => backend.sendTurn(repoPath, message, onEvent, { permissionMode, thinkingEffort, model, signal });
+    ): Promise<void> => backend.sendTurn(repoPath, message, onEvent, { permissionMode, thinkingEffort, model, agent: agentTag, signal });
 
-    // Ensure a subscription exists for the selected backend.
-    orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id), {
+    // Ensure a subscription exists for the selected backend + agent.
+    orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
       clientId: client.id,
       repoPath,
       sessionName,
       backend: backend.id,
+      agent: agentId,
     });
 
     // Emit busy status.
     broadcastToOrchestratorSession(sessionName, JSON.stringify({
       channel: 'orchestrator',
       event: 'status',
-      data: { status: 'busy', repoPath, backend: backend.id },
+      data: { status: 'busy', repoPath, backend: backend.id, agent: agentTag },
     }));
 
     // #624 — Attach an AbortController for this turn. Defensively abort any
-    // prior entry for the same repo+backend so a stale subprocess never
+    // prior entry for the same repo+backend+agent so a stale subprocess never
     // outlives a fresh send.
     const priorController = orchestratorInflightAborts.get(abortKey);
     if (priorController && !priorController.signal.aborted) {
@@ -2209,8 +2239,8 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     orchestratorInflightAborts.set(abortKey, turnController);
 
     // Spawn the selected orchestrator and stream structured JSON events to
-    // subscribers. Every event is tagged with `backend` so a client watching
-    // two surfaces for the same repo renders each on the right one.
+    // subscribers. Every event is tagged with `backend` (and `agent`, for
+    // openclaw) so a client watching multiple surfaces renders each correctly.
     await sendTurn((event) => {
       let wsMsg: string | null = null;
 
@@ -2219,7 +2249,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'output',
-            data: { text: event.text, repoPath, thinking: false, backend: backend.id },
+            data: { text: event.text, repoPath, thinking: false, backend: backend.id, agent: agentTag },
           });
           break;
 
@@ -2227,7 +2257,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'output',
-            data: { text: event.text, repoPath, thinking: true, backend: backend.id },
+            data: { text: event.text, repoPath, thinking: true, backend: backend.id, agent: agentTag },
           });
           break;
 
@@ -2235,7 +2265,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'tool-use',
-            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, backend: backend.id },
+            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, backend: backend.id, agent: agentTag },
           });
           break;
 
@@ -2250,6 +2280,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
               toolUseId: event.id ?? null,
               repoPath,
               backend: backend.id,
+              agent: agentTag,
             },
           });
           break;
@@ -2258,7 +2289,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, backend: backend.id },
+            data: { status: 'ready', repoPath, backend: backend.id, agent: agentTag },
           });
           break;
 
@@ -2266,7 +2297,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'error',
-            data: { error: event.error, repoPath, backend: backend.id },
+            data: { error: event.error, repoPath, backend: backend.id, agent: agentTag },
           });
           break;
       }
@@ -2289,7 +2320,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     send(client, {
       channel: 'orchestrator',
       event: 'error',
-      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath, backend: backend.id },
+      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath, backend: backend.id, agent: agentTag },
     });
   }
 }
@@ -2304,12 +2335,14 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
   const backendId = resolveMsgBackendId(msg);
-  const controller = orchestratorInflightAborts.get(orchestratorAbortKey(repoPath, backendId));
+  const agentId = resolveMsgAgentId(msg, backendId);
+  const label = `${backendId}${agentId ? `/${agentId}` : ''}`;
+  const controller = orchestratorInflightAborts.get(orchestratorAbortKey(repoPath, backendId, agentId));
   if (!controller) {
-    console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${backendId}) — no in-flight turn`);
+    console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${label}) — no in-flight turn`);
     return;
   }
-  console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${backendId}, client ${client.id})`);
+  console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${label}, client ${client.id})`);
   controller.abort();
   // Leave the map entry in place; handleOrchestratorSendMsg removes it when
   // the turn resolves (the abort causes close to fire within 1-2s).
@@ -2319,10 +2352,13 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
   const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
 
-  // Status for the requested backend (#1075). The default Orchestrator tab
-  // omits `backend` → the global default; the openclaw surface passes it.
+  // Status for the requested backend (#1075) + openclaw agent. The default
+  // Orchestrator tab omits `backend`/`agent` → the global default; the openclaw
+  // surface passes both.
   const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
-  const session = backend.peekSession(repoPath);
+  const agentId = resolveMsgAgentId(msg, backend.id);
+  const agentTag = agentId || undefined;
+  const session = backend.peekSession(repoPath, agentTag);
   const status = session?.status ?? 'dead';
   const sessionName = session?.sessionName ?? null;
 
@@ -2334,6 +2370,7 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
       repoPath,
       sessionName,
       backend: backend.id,
+      agent: agentTag,
     },
   });
 }

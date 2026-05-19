@@ -65,12 +65,15 @@ export async function GET(request: NextRequest) {
           repoName?: string | null;
           repoBranch?: string | null;
           backend?: string;
+          agent?: string;
         };
 
         const threadBackend: MobileOrchestratorThread['backend'] =
           data.backend === 'openclaw' || data.backend === 'codex' || data.backend === 'claude'
             ? data.backend
             : null;
+        const threadAgent: MobileOrchestratorThread['agent'] =
+          typeof data.agent === 'string' && data.agent.trim() ? data.agent : null;
         // Two surfaces: ?backend=openclaw gets only openclaw threads; the
         // default surface gets everything else (untagged/legacy included).
         if (wantOpenclaw ? threadBackend !== 'openclaw' : threadBackend === 'openclaw') {
@@ -99,6 +102,7 @@ export async function GET(request: NextRequest) {
           repoName: typeof data.repoName === 'string' ? data.repoName : null,
           repoBranch: typeof data.repoBranch === 'string' ? data.repoBranch : null,
           backend: threadBackend,
+          agent: threadAgent,
         });
       } catch {
         // skip unreadable files
