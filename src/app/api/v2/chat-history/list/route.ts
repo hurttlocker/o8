@@ -31,11 +31,15 @@ interface ChatHistoryEntry {
   repoPath?: string | null;
   repoBranch?: string | null;
   remoteUrl?: string | null;
+  archivedAt?: string | null;
 }
 
 export async function GET(request: NextRequest) {
   const searchQuery = request.nextUrl.searchParams.get('q')?.toLowerCase();
   const includeOrchestrator = request.nextUrl.searchParams.get('include') === 'orchestrator';
+  const archivedParam = request.nextUrl.searchParams.get('archived');
+  const includeArchived = archivedParam === 'include' || archivedParam === 'true' || archivedParam === '1';
+  const onlyArchived = archivedParam === 'only';
   // surface=mobile-assistant restricts the list to mobile-chat-* files where
   // the model is NOT an orchestrator brand. The mobile Assistant tab uses
   // this so desktop LLM tabs (llm-*), orchestrator threads (thoughts-*),
@@ -75,6 +79,15 @@ export async function GET(request: NextRequest) {
         const firstUserMsg = messages.find(m => m.role === 'user');
         const lastMsg = messages[messages.length - 1];
         const isEmpty = messages.length === 0;
+        const archivedAt = typeof data.archivedAt === 'string' && data.archivedAt.trim()
+          ? data.archivedAt
+          : null;
+        const staleEmptyThread = isEmpty && Date.now() - stat.mtime.getTime() > 24 * 60 * 60 * 1000;
+        if (onlyArchived) {
+          if (!archivedAt) continue;
+        } else if (!includeArchived && (archivedAt || staleEmptyThread)) {
+          continue;
+        }
 
         // Placeholder title for empty threads (created via + New but not typed into yet).
         // Gets replaced by the first user message once the operator types.
@@ -120,12 +133,14 @@ export async function GET(request: NextRequest) {
           repoPath: data.repoPath || null,
           repoBranch: data.repoBranch || null,
           remoteUrl: data.remoteUrl || null,
+          archivedAt,
         });
       } catch { /* skip bad files */ }
     }
 
-    // Sort: starred first, then by date descending
+    // Sort: pinned/starred first, then by date descending.
     conversations.sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       if (a.starred !== b.starred) return a.starred ? -1 : 1;
       return new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime();
     });

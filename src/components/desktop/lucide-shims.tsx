@@ -17,6 +17,7 @@ type IconNode = ReadonlyArray<readonly [string, IconNodeAttrs]>;
 import { __iconNode as ActivityNode } from 'lucide-react/dist/esm/icons/activity.js';
 import { __iconNode as AlertCircleNode } from 'lucide-react/dist/esm/icons/circle-alert.js';
 import { __iconNode as AlertTriangleNode } from 'lucide-react/dist/esm/icons/triangle-alert.js';
+import { __iconNode as ArchiveNode } from 'lucide-react/dist/esm/icons/archive.js';
 import { __iconNode as ArrowDownNode } from 'lucide-react/dist/esm/icons/arrow-down.js';
 import { __iconNode as ArrowRightNode } from 'lucide-react/dist/esm/icons/arrow-right.js';
 import { __iconNode as ArrowUpNode } from 'lucide-react/dist/esm/icons/arrow-up.js';
@@ -117,22 +118,25 @@ function makeIcon(node: IconNode, displayName: string): LucideIcon {
     strokeWidth = 2,
     absoluteStrokeWidth: _absoluteStrokeWidth,
     ...rest
-  }: LucideProps) => (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke={color}
-      strokeWidth={strokeWidth}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...rest}
-    >
-      {node.map(([tag, attrs], i) => createElement(tag, { ...attrs, key: typeof attrs.key === "string" ? attrs.key : i }))}
-    </svg>
-  );
+  }: LucideProps) => {
+    void _absoluteStrokeWidth;
+    return (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        {...rest}
+      >
+        {node.map(([tag, attrs], i) => createElement(tag, { ...attrs, key: typeof attrs.key === "string" ? attrs.key : i }))}
+      </svg>
+    );
+  };
   Icon.displayName = displayName;
   return Icon;
 }
@@ -140,6 +144,7 @@ function makeIcon(node: IconNode, displayName: string): LucideIcon {
 export const Activity: LucideIcon = makeIcon(ActivityNode as IconNode, 'Activity');
 export const AlertCircle: LucideIcon = makeIcon(AlertCircleNode as IconNode, 'AlertCircle');
 export const AlertTriangle: LucideIcon = makeIcon(AlertTriangleNode as IconNode, 'AlertTriangle');
+export const Archive: LucideIcon = makeIcon(ArchiveNode as IconNode, 'Archive');
 export const ArrowDown: LucideIcon = makeIcon(ArrowDownNode as IconNode, 'ArrowDown');
 export const ArrowRight: LucideIcon = makeIcon(ArrowRightNode as IconNode, 'ArrowRight');
 export const ArrowUp: LucideIcon = makeIcon(ArrowUpNode as IconNode, 'ArrowUp');
