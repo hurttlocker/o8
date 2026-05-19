@@ -29,20 +29,26 @@ export function RepoTabs({ activeTab, onTabChange, tabs = DEFAULT_TABS }: RepoTa
       role="tablist"
       aria-label="Repo focus tabs"
       style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
         borderTopWidth: 1,
         borderTopStyle: 'solid',
         borderTopColor: 'var(--t-divider-subtle)',
         borderBottomWidth: 1,
         borderBottomStyle: 'solid',
         borderBottomColor: 'var(--t-divider-subtle)',
-        background: 'var(--t-panel)',
+        background: 'color-mix(in srgb, var(--t-panel) 92%, transparent)',
+        paddingTop: 4,
+        paddingRight: 10,
+        paddingBottom: 4,
+        paddingLeft: 10,
+        overflowX: 'auto',
+        scrollbarWidth: 'none',
       }}
     >
-      {tabs.map((tab, index) => {
+      {tabs.map((tab) => {
         const selected = tab.id === activeTab;
-        const isLast = index === tabs.length - 1;
         return (
           <button
             key={tab.id}
@@ -51,21 +57,38 @@ export function RepoTabs({ activeTab, onTabChange, tabs = DEFAULT_TABS }: RepoTa
             aria-selected={selected}
             onClick={() => onTabChange(tab.id)}
             style={{
-              minHeight: 34,
+              position: 'relative',
+              minHeight: 28,
               borderWidth: 0,
-              borderRightWidth: isLast ? 0 : 1,
-              borderRightStyle: 'solid',
-              borderRightColor: 'var(--t-divider-subtle)',
-              background: selected ? 'var(--t-input-bg)' : 'transparent',
+              background: 'transparent',
               color: selected ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text-muted)',
               cursor: 'pointer',
               fontFamily: REPO_FOCUS_FONT,
               fontSize: 10.5,
-              fontWeight: selected ? 540 : 500,
+              fontWeight: selected ? 620 : 500,
               letterSpacing: '-0.01em',
+              paddingTop: 0,
+              paddingRight: 10,
+              paddingBottom: 0,
+              paddingLeft: 10,
+              whiteSpace: 'nowrap',
             }}
           >
             {tab.label}
+            {selected ? (
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  left: 10,
+                  right: 10,
+                  bottom: 2,
+                  height: 2,
+                  borderRadius: 999,
+                  background: 'var(--t-brand-orange, #FF5A1F)',
+                }}
+              />
+            ) : null}
           </button>
         );
       })}

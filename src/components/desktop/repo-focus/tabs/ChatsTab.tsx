@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
-import { ChevronDown, ChevronRight } from '../../lucide-shims';
+import { Archive, CheckCircle2, ChevronDown, ChevronRight, RotateCcw, Star, Trash2 } from '../../lucide-shims';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession, RepoFocusRepo } from '../types';
@@ -32,6 +32,7 @@ interface ChatHistoryItem {
   repoPath?: string | null;
   repoBranch?: string | null;
   remoteUrl?: string | null;
+  archivedAt?: string | null;
 }
 
 interface ChatsTabProps {
@@ -119,13 +120,27 @@ const HISTORY_ROW_TONES: Record<HistoryToneKey, HistoryRowTone> = {
   },
   active: {
     key: 'active',
-    accent: 'var(--t-accent)',
+    accent: 'transparent',
     background: 'var(--t-input-bg)',
-    border: 'var(--t-accent-soft)',
-    iconBackground: 'var(--t-accent-soft)',
+    border: 'var(--t-divider-subtle)',
+    iconBackground: 'color-mix(in srgb, var(--t-accent) 10%, transparent)',
     iconColor: 'var(--t-accent)',
   },
 };
+
+type HistoryGroupKey = 'chat' | 'orchestrator' | 'merged' | 'archived';
+
+function shimmerTextStyle(base = 'var(--t-text)', flare = 'var(--t-accent)'): CSSProperties {
+  return {
+    backgroundImage: `linear-gradient(110deg, ${base} 0%, ${base} 34%, ${flare} 50%, ${base} 66%, ${base} 100%)`,
+    backgroundSize: '220% 100%',
+    WebkitBackgroundClip: 'text',
+    backgroundClip: 'text',
+    color: 'transparent',
+    WebkitTextFillColor: 'transparent',
+    animation: 'o8-text-shimmer 2.35s linear infinite',
+  };
+}
 
 function pathBasename(path: string | null | undefined): string {
   return normalizeRepoPath(path).split('/').filter(Boolean).pop()?.toLowerCase() ?? '';
@@ -221,6 +236,29 @@ function packetStateTone(packet: OrchestratorPacket | null | undefined): History
   }
 }
 
+function packetRepoLabel(packet: OrchestratorPacket): string {
+  return pathDisplayName(packet.workspaceTargetPath) || packet.lane?.repoPath?.split('/').filter(Boolean).pop() || 'project';
+}
+
+function packetTimestamp(packet: OrchestratorPacket): string | null {
+  return packet.releaseStatePayload?.releasedAt
+    ?? packet.archivedAt
+    ?? packet.lastEventAt
+    ?? packet.lane?.lastEventAt
+    ?? null;
+}
+
+function packetSortTime(packet: OrchestratorPacket): number {
+  const timestamp = packetTimestamp(packet);
+  const parsed = timestamp ? Date.parse(timestamp) : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatElapsedAgo(timestamp: string): string {
+  const elapsed = formatElapsed(timestamp);
+  return elapsed === 'now' ? 'just now' : `${elapsed} ago`;
+}
+
 function packetMatchScore(item: ChatHistoryItem, packet: OrchestratorPacket): number {
   const itemIds = new Set([item.tabId, `llm-chat:${item.tabId}`, `codex:${item.tabId}`]);
   if (packet.lane?.sessionKey && itemIds.has(packet.lane.sessionKey)) return 100;
@@ -230,9 +268,12 @@ function packetMatchScore(item: ChatHistoryItem, packet: OrchestratorPacket): nu
   if (itemRepo && !packetBelongsToRepo(packet, itemRepo)) return 0;
 
   const title = normalizeComparableText(item.title);
+  const firstUserMessage = normalizeComparableText(item.firstUserMessage);
   const packetTitle = normalizeComparableText(packet.title);
-  if (title.length < 12 || packetTitle.length < 12) return 0;
-  if (packetTitle.includes(title) || title.includes(packetTitle)) return 80;
+  if (packetTitle.length < 12) return 0;
+  if (title.length >= 12 && (packetTitle.includes(title) || title.includes(packetTitle))) return 80;
+  if (firstUserMessage.length >= 20 && (firstUserMessage.includes(packetTitle) || packetTitle.includes(firstUserMessage.slice(0, 80)))) return 72;
+  if (title.length < 12) return 0;
 
   const titleLead = title.slice(0, 42);
   const packetLead = packetTitle.slice(0, 42);
@@ -283,30 +324,92 @@ export function ChatsTab({
   packets = [],
 }: ChatsTabProps) {
   const [historyItems, setHistoryItems] = useState<ChatHistoryItem[]>([]);
+  const [archivedHistoryItems, setArchivedHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<'chat' | 'orchestrator', boolean>>({
+  const [busyHistoryIds, setBusyHistoryIds] = useState<Set<string>>(() => new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<HistoryGroupKey, boolean>>({
     chat: false,
     orchestrator: false,
+    merged: false,
+    archived: true,
   });
+
+  const fetchHistory = useCallback(async (cancelled?: () => boolean) => {
+    setLoading(true);
+    try {
+      const [activeResponse, archivedResponse] = await Promise.all([
+        fetch('/api/v2/chat-history/list?include=orchestrator', { cache: 'no-store' }),
+        fetch('/api/v2/chat-history/list?include=orchestrator&archived=only', { cache: 'no-store' }),
+      ]);
+      const activePayload = activeResponse.ok
+        ? await activeResponse.json() as { conversations?: ChatHistoryItem[] }
+        : { conversations: [] };
+      const archivedPayload = archivedResponse.ok
+        ? await archivedResponse.json() as { conversations?: ChatHistoryItem[] }
+        : { conversations: [] };
+      if (cancelled?.()) return;
+      setHistoryItems(activePayload.conversations ?? []);
+      setArchivedHistoryItems(archivedPayload.conversations ?? []);
+    } catch {
+      if (cancelled?.()) return;
+      setHistoryItems([]);
+      setArchivedHistoryItems([]);
+    } finally {
+      if (!cancelled?.()) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      try {
-        const response = await fetch('/api/v2/chat-history/list?include=orchestrator', { cache: 'no-store' });
-        if (!response.ok) return;
-        const payload = await response.json() as { conversations?: ChatHistoryItem[] };
-        if (!cancelled) setHistoryItems(payload.conversations ?? []);
-      } catch {
-        if (!cancelled) setHistoryItems([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
+    void fetchHistory(() => cancelled);
     return () => {
       cancelled = true;
     };
+  }, [fetchHistory]);
+
+  const withHistoryBusy = useCallback(async (tabId: string, action: () => Promise<void>) => {
+    setBusyHistoryIds((prev) => new Set(prev).add(tabId));
+    try {
+      await action();
+      await fetchHistory();
+    } finally {
+      setBusyHistoryIds((prev) => {
+        const next = new Set(prev);
+        next.delete(tabId);
+        return next;
+      });
+    }
+  }, [fetchHistory]);
+
+  const patchHistoryItem = useCallback(async (tabId: string, patch: Record<string, unknown>) => {
+    const response = await fetch('/api/v2/chat-history', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tabId, ...patch }),
+    });
+    if (!response.ok) throw new Error('Unable to update chat history');
   }, []);
+
+  const archiveHistoryItem = useCallback((item: ChatHistoryItem) => (
+    withHistoryBusy(item.tabId, () => patchHistoryItem(item.tabId, { archivedAt: new Date().toISOString() }))
+  ), [patchHistoryItem, withHistoryBusy]);
+
+  const restoreHistoryItem = useCallback((item: ChatHistoryItem) => (
+    withHistoryBusy(item.tabId, () => patchHistoryItem(item.tabId, { archivedAt: null }))
+  ), [patchHistoryItem, withHistoryBusy]);
+
+  const togglePinnedHistoryItem = useCallback((item: ChatHistoryItem) => (
+    withHistoryBusy(item.tabId, () => patchHistoryItem(item.tabId, { pinned: !item.pinned, starred: !item.pinned ? true : item.starred }))
+  ), [patchHistoryItem, withHistoryBusy]);
+
+  const deleteHistoryItem = useCallback((item: ChatHistoryItem) => {
+    const confirmed = window.confirm(`Delete "${item.title}" from chat history?`);
+    if (!confirmed) return;
+    void withHistoryBusy(item.tabId, async () => {
+      const response = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(item.tabId)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Unable to delete chat history');
+    });
+  }, [withHistoryBusy]);
 
   const targetRepos = useMemo(() => (
     selectedRepo ? [selectedRepo] : repos
@@ -318,6 +421,9 @@ export function ChatsTab({
   const visibleHistory = useMemo(() => (
     historyItems.filter((item) => targetRepos.some((repo) => historyBelongsToRepo(item, repo)))
   ), [historyItems, targetRepos]);
+  const visibleArchivedHistory = useMemo(() => (
+    archivedHistoryItems.filter((item) => targetRepos.some((repo) => historyBelongsToRepo(item, repo)))
+  ), [archivedHistoryItems, targetRepos]);
   const allowedSections = useMemo(() => new Set(sections), [sections]);
   const visibleFlatHistory = useMemo(() => (
     visibleHistory
@@ -331,6 +437,12 @@ export function ChatsTab({
   const visibleOrchestratorHistory = useMemo(() => (
     visibleHistory.filter((item) => historySection(item) === 'orchestrator')
   ), [visibleHistory]);
+  const visibleMergedPackets = useMemo(() => (
+    visiblePackets
+      .filter((packet) => packetVisualState(packet) === 'merged')
+      .slice()
+      .sort((a, b) => packetSortTime(b) - packetSortTime(a))
+  ), [visiblePackets]);
 
   const visibleHistoryIds = useMemo(() => new Set(visibleHistory.map((item) => item.tabId)), [visibleHistory]);
 
@@ -380,12 +492,14 @@ export function ChatsTab({
     }
     return groups.filter((group) => group.items.length > 0);
   }, [allowedSections, remainingHistorySlots, sectionLabel, visibleChatHistory, visibleOrchestratorHistory]);
+  const showMergedPackets = groupMode === 'sections' && !compact && visibleMergedPackets.length > 0;
+  const showArchivedHistory = groupMode === 'sections' && !compact && visibleArchivedHistory.length > 0;
   const hasContent = displayedSessions.length > 0 || (
     groupMode === 'flat'
       ? flatHistoryItems.length > 0
       : historyGroups.some((group) => group.items.length > 0)
-  );
-  const toggleGroup = (key: 'chat' | 'orchestrator') => {
+  ) || showMergedPackets || showArchivedHistory;
+  const toggleGroup = (key: HistoryGroupKey) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
@@ -437,8 +551,29 @@ export function ChatsTab({
               showKindInMeta={showKindInMeta}
               tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
               onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+              onArchive={() => void archiveHistoryItem(item)}
+              onDelete={() => deleteHistoryItem(item)}
+              onTogglePin={() => void togglePinnedHistoryItem(item)}
+              busy={busyHistoryIds.has(item.tabId)}
             />
           ))}
+        </div>
+      ) : null}
+
+      {showMergedPackets ? (
+        <div>
+          <SectionLabel
+            label="Merged"
+            compact={compact}
+            count={visibleMergedPackets.length}
+            collapsed={collapsedGroups.merged}
+            onToggle={() => toggleGroup('merged')}
+          />
+          {collapsedGroups.merged ? null : (
+            visibleMergedPackets.slice(0, 8).map((packet) => (
+              <MergedPacketRow key={packet.id} packet={packet} compact={compact} />
+            ))
+          )}
         </div>
       ) : null}
 
@@ -462,11 +597,46 @@ export function ChatsTab({
                 showKindInMeta={showKindInMeta}
                 tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
                 onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                onArchive={() => void archiveHistoryItem(item)}
+                onDelete={() => deleteHistoryItem(item)}
+                onTogglePin={() => void togglePinnedHistoryItem(item)}
+                busy={busyHistoryIds.has(item.tabId)}
               />
             ))
           )}
         </div>
       )) : null}
+
+      {showArchivedHistory ? (
+        <div>
+          <SectionLabel
+            label="Archived"
+            compact={compact}
+            count={visibleArchivedHistory.length}
+            collapsed={collapsedGroups.archived}
+            onToggle={() => toggleGroup('archived')}
+          />
+          {collapsedGroups.archived ? null : (
+            visibleArchivedHistory.slice(0, 12).map((item) => (
+              <HistoryChatRow
+                key={item.tabId}
+                item={item}
+                compact={compact}
+                disabled={!onOpenHistoryChat}
+                active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
+                showKindInMeta={showKindInMeta}
+                tone={HISTORY_ROW_TONES.neutral}
+                archived
+                onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                onArchive={() => void restoreHistoryItem(item)}
+                onDelete={() => deleteHistoryItem(item)}
+                onTogglePin={() => void togglePinnedHistoryItem(item)}
+                busy={busyHistoryIds.has(item.tabId)}
+              />
+            ))
+          )}
+        </div>
+      ) : null}
 
       {!hasContent ? (
         <div
@@ -579,6 +749,81 @@ function SectionLabel({
   );
 }
 
+function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacket; compact: boolean }) {
+  const releasedAt = packetTimestamp(packet);
+  const meta = releasedAt
+    ? `${packetRepoLabel(packet)} · Merged · ${formatElapsedAgo(releasedAt)}`
+    : `${packetRepoLabel(packet)} · Merged`;
+  return (
+    <div
+      title={packet.title}
+      style={{
+        width: '100%',
+        minHeight: compact ? 36 : 42,
+        display: 'flex',
+        alignItems: 'center',
+        gap: compact ? 7 : 8,
+        borderBottomWidth: 1,
+        borderBottomStyle: 'solid',
+        borderBottomColor: 'var(--t-divider-subtle)',
+        background: 'transparent',
+        color: 'var(--t-text)',
+        textAlign: 'left',
+        fontFamily: REPO_FOCUS_FONT,
+        paddingTop: compact ? 4 : 5,
+        paddingRight: compact ? 10 : 12,
+        paddingBottom: compact ? 4 : 5,
+        paddingLeft: compact ? 10 : 12,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: compact ? 18 : 20,
+          height: compact ? 18 : 20,
+          borderRadius: 6,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          color: '#16a34a',
+        }}
+      >
+        <CheckCircle2 size={compact ? 13 : 14} strokeWidth={2.1} />
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span
+          style={{
+            display: 'block',
+            fontSize: compact ? 11.25 : 12,
+            lineHeight: compact ? '15px' : '16px',
+            fontWeight: 500,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {packet.title}
+        </span>
+        <span
+          style={{
+            display: 'block',
+            marginTop: 1,
+            color: 'var(--t-text-faint)',
+            fontSize: compact ? 9.75 : 10.25,
+            lineHeight: compact ? '12px' : '13px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {meta}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function HistoryChatRow({
   item,
   active,
@@ -586,7 +831,12 @@ function HistoryChatRow({
   compact,
   showKindInMeta = false,
   tone,
+  archived = false,
+  busy = false,
   onOpen,
+  onArchive,
+  onDelete,
+  onTogglePin,
 }: {
   item: ChatHistoryItem;
   active: boolean;
@@ -594,8 +844,14 @@ function HistoryChatRow({
   compact: boolean;
   showKindInMeta?: boolean;
   tone?: HistoryRowTone | null;
+  archived?: boolean;
+  busy?: boolean;
   onOpen: () => void;
+  onArchive?: () => void;
+  onDelete?: () => void;
+  onTogglePin?: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
   const rowTone = active
     ? HISTORY_ROW_TONES.active
     : (tone ?? (historySection(item) === 'orchestrator' ? HISTORY_ROW_TONES.activity : HISTORY_ROW_TONES.neutral));
@@ -604,15 +860,27 @@ function HistoryChatRow({
     showKindInMeta ? { text: historyKindLabel(item), status: false } : null,
     rowTone.label ? { text: rowTone.label, status: true } : null,
     { text: item.messageCount > 0 ? `${item.messageCount} msg${item.messageCount === 1 ? '' : 's'}` : 'empty', status: false },
-    { text: `${formatElapsed(item.modifiedAt)} ago`, status: false },
+    { text: formatElapsedAgo(item.modifiedAt), status: false },
   ].filter((part): part is { text: string; status: boolean } => Boolean(part?.text));
   const shimmerStatus = rowTone.key === 'running' || rowTone.key === 'review';
+  const showActions = hovered || item.pinned || busy;
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      disabled={disabled}
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      onClick={() => {
+        if (!disabled) onOpen();
+      }}
+      onKeyDown={(event) => {
+        if (disabled) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onOpen();
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-disabled={disabled}
       title={item.title}
       style={{
         width: '100%',
@@ -620,10 +888,6 @@ function HistoryChatRow({
         display: 'flex',
         alignItems: 'center',
         gap: compact ? 7 : 8,
-        borderWidth: 0,
-        borderLeftWidth: 2,
-        borderLeftStyle: 'solid',
-        borderLeftColor: rowTone.accent,
         borderBottomWidth: 1,
         borderBottomStyle: 'solid',
         borderBottomColor: rowTone.border,
@@ -635,9 +899,10 @@ function HistoryChatRow({
         outline: 'none',
         fontFamily: REPO_FOCUS_FONT,
         paddingTop: compact ? 4 : 5,
-        paddingRight: compact ? 10 : 12,
+        paddingRight: compact ? 7 : 9,
         paddingBottom: compact ? 4 : 5,
         paddingLeft: compact ? 10 : 12,
+        transition: 'background 180ms ease, opacity 180ms ease',
       }}
     >
       <span
@@ -658,6 +923,7 @@ function HistoryChatRow({
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
+          className={active ? 'o8-text-shimmer' : undefined}
           style={{
             display: 'block',
             fontSize: compact ? 11.25 : 12,
@@ -666,6 +932,7 @@ function HistoryChatRow({
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
+            ...(active ? shimmerTextStyle('var(--t-text)', 'var(--t-accent)') : {}),
           }}
         >
           {item.title}
@@ -686,10 +953,11 @@ function HistoryChatRow({
             <span key={`${part.text}-${index}`}>
               {index > 0 ? <span>{' · '}</span> : null}
               <span
+                className={part.status && shimmerStatus ? 'o8-text-shimmer' : undefined}
                 style={part.status ? {
                   color: rowTone.iconColor,
                   fontWeight: 650,
-                  animation: shimmerStatus ? 'tab-label-shimmer 1.55s ease-in-out infinite' : undefined,
+                  ...(shimmerStatus ? shimmerTextStyle(rowTone.iconColor, 'var(--t-text)') : {}),
                 } : undefined}
               >
                 {part.text}
@@ -698,6 +966,89 @@ function HistoryChatRow({
           ))}
         </span>
       </span>
+      <span
+        aria-hidden={!showActions}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          flexShrink: 0,
+          opacity: showActions ? 1 : 0,
+          pointerEvents: showActions ? 'auto' : 'none',
+          transition: 'opacity 160ms ease',
+        }}
+      >
+        <HistoryRowAction
+          title={item.pinned ? 'Unpin chat' : 'Pin chat'}
+          busy={busy}
+          active={item.pinned}
+          onClick={onTogglePin}
+        >
+          <Star size={compact ? 11 : 12} fill={item.pinned ? 'currentColor' : 'none'} />
+        </HistoryRowAction>
+        <HistoryRowAction
+          title={archived ? 'Restore chat' : 'Archive chat'}
+          busy={busy}
+          onClick={onArchive}
+        >
+          {archived ? <RotateCcw size={compact ? 11 : 12} /> : <Archive size={compact ? 11 : 12} />}
+        </HistoryRowAction>
+        <HistoryRowAction
+          title="Delete chat"
+          busy={busy}
+          danger
+          onClick={onDelete}
+        >
+          <Trash2 size={compact ? 11 : 12} />
+        </HistoryRowAction>
+      </span>
+    </div>
+  );
+}
+
+function HistoryRowAction({
+  title,
+  busy,
+  active = false,
+  danger = false,
+  onClick,
+  children,
+}: {
+  title: string;
+  busy: boolean;
+  active?: boolean;
+  danger?: boolean;
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={busy || !onClick}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.();
+      }}
+      style={{
+        width: 20,
+        height: 20,
+        borderRadius: 7,
+        borderWidth: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: active
+          ? 'color-mix(in srgb, var(--t-accent) 14%, transparent)'
+          : 'transparent',
+        color: danger ? '#ef4444' : active ? 'var(--t-accent)' : 'var(--t-text-faint)',
+        cursor: busy || !onClick ? 'default' : 'pointer',
+        opacity: busy ? 0.5 : 1,
+        fontFamily: REPO_FOCUS_FONT,
+        padding: 0,
+      }}
+    >
+      {children}
     </button>
   );
 }

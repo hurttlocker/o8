@@ -1732,3 +1732,18 @@ button.workflow-file-item.workflow-file-item-active {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.45; }
 }
+
+@keyframes o8-text-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .o8-text-shimmer {
+    animation: none !important;
+  }
+}
