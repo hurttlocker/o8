@@ -13,6 +13,7 @@ import { O8BrowserPane } from './O8BrowserPane';
 import { O8PRPane } from './O8PRPane';
 import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
+import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { ReviewPanel } from './review/ReviewPanel';
 import type { O8Tab } from './o8-panel/types';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
@@ -45,7 +46,7 @@ interface O8PanelProps {
 
 // ── Main Component ──
 
-export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, browserUrl, onBrowserActiveUrlChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
+export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile, browserUrl, onBrowserActiveUrlChange, onSelectCommit, onSelectPR, onSelectIssue }: O8PanelProps) {
   const activeTab = externalTab ?? 'activity';
 
   // Phase 3 — file paths clicked in agent chat dispatch `o8:open-file`;
@@ -63,6 +64,7 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, prev
     <div
       data-chrome-surface="true"
       style={{
+        position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
@@ -70,6 +72,18 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, prev
         borderLeft: '1px solid var(--t-divider)',
       }}
     >
+      {/* Scratch chat — floating Ask-o8 button + dialog, sits across all tabs.
+          Operator restored post-#1089 ([[borrow_conductor_steer_queue]]
+          sibling — same restore-after-rework pattern). Mounts once per panel;
+          internal Cmd+E hotkey + button click open the floating dialog. */}
+      <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5 }}>
+        <O8ScratchChat
+          repoPath={repoPath}
+          selectedFile={selectedFile ?? null}
+          surface="diff"
+        />
+      </div>
+
       {/* Tab content — all tabs stay mounted to preserve state */}
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'workspace' ? 'flex' : 'none', flexDirection: 'column' }}>
         <ReviewPanel repoPath={repoPath} registeredRepos={registeredRepos} onRepoPathChange={onRepoPathChange} />
