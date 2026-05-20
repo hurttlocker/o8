@@ -711,27 +711,33 @@ export function ChatsTab({
         <div>
           {compact ? (
             <>
-              {/* Group-by picker — borrowed from Claude's sidebar
-                  ⚙ pattern. Operator chose what 'group by' the rail
-                  uses; persisted to localStorage. */}
-              <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
               {chatGroupBy === 'flat' ? (
-                flatHistoryItems.map((item) => (
-                  <HistoryChatRow
-                    key={item.tabId}
-                    item={item}
-                    compact={compact}
-                    disabled={!onOpenHistoryChat}
-                    active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                    tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                    onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
-                    onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
-                  />
-                ))
+                <>
+                  {/* No group header in flat mode — render the picker as
+                      its own thin row aligned right. */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8, paddingRight: 10, paddingBottom: 2 }}>
+                    <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
+                  </div>
+                  {flatHistoryItems.map((item) => (
+                    <HistoryChatRow
+                      key={item.tabId}
+                      item={item}
+                      compact={compact}
+                      disabled={!onOpenHistoryChat}
+                      active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
+                      tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                      onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                      onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
+                    />
+                  ))}
+                </>
               ) : chatGroupBy === 'date' ? (
-                flatHistoryDateGroups.map((group) => (
+                flatHistoryDateGroups.map((group, index) => (
                   <div key={group.key}>
-                    <RepoGroupLabel label={group.label} />
+                    <RepoGroupLabel
+                      label={group.label}
+                      trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
+                    />
                     {group.items.map((item) => (
                       <HistoryChatRow
                         key={item.tabId}
@@ -747,12 +753,15 @@ export function ChatsTab({
                   </div>
                 ))
               ) : (
-                flatHistoryRepoGroups.map((group) => {
+                flatHistoryRepoGroups.map((group, index) => {
                   const repoArchivedLanes = archivedLanesByRepoKey.get(group.key) ?? [];
                   const archivedExpanded = archivedLanesExpanded.has(group.key);
                   return (
                     <div key={group.key}>
-                      <RepoGroupLabel label={group.label} />
+                      <RepoGroupLabel
+                        label={group.label}
+                        trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
+                      />
                       {group.items.map((item) => (
                         <HistoryChatRow
                           key={item.tabId}
@@ -1017,10 +1026,10 @@ function SectionLabel({
   );
 }
 
-/** Group-by picker — small ⚙-style chip rendered at the top of the
- *  flat-mini chat list. Click opens a popover with three radio options:
- *  Repo / Date / Flat. Borrowed from Claude's sidebar pattern in the
- *  operator's reference video — same idea, less density. */
+/** Group-by picker — vertical-sliders icon rendered inline at the
+ *  right of the FIRST group header. Click opens a popover with three
+ *  radio options: Repo / Date / Flat. Matches Claude's sidebar
+ *  pattern from the operator's reference video. */
 function ChatGroupPicker({
   mode,
   onChange,
@@ -1049,20 +1058,8 @@ function ChatGroupPicker({
     };
   }, [open]);
 
-  const label = mode === 'repo' ? 'Group: Repo' : mode === 'date' ? 'Group: Date' : 'Flat';
   return (
-    <div
-      ref={wrapperRef}
-      style={{
-        position: 'relative',
-        display: 'flex',
-        justifyContent: 'flex-end',
-        paddingTop: 6,
-        paddingRight: 10,
-        paddingBottom: 2,
-        paddingLeft: 10,
-      }}
-    >
+    <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -1070,29 +1067,32 @@ function ChatGroupPicker({
         onMouseLeave={() => setHovered(false)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label="Change chat grouping"
+        title="Change chat grouping"
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 4,
-          height: 20,
-          paddingLeft: 6,
-          paddingRight: 5,
-          borderRadius: 5,
+          justifyContent: 'center',
+          width: 18,
+          height: 18,
+          borderRadius: 4,
           borderWidth: 0,
           background: open || hovered ? 'var(--t-hover)' : 'transparent',
           color: 'var(--t-text-muted)',
           cursor: 'pointer',
-          fontSize: 10,
-          fontWeight: 600,
-          letterSpacing: '0.04em',
-          textTransform: 'uppercase',
-          fontFamily: REPO_FOCUS_FONT,
-          transition: 'background 120ms ease',
+          padding: 0,
+          flexShrink: 0,
+          transition: 'background 120ms ease, color 120ms ease',
         }}
       >
-        <span>{label}</span>
-        <svg width={9} height={9} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="m6 9 6 6 6-6" />
+        {/* Vertical sliders — matches Claude's filter icon affordance */}
+        <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <line x1="7" y1="4" x2="7" y2="14" />
+          <line x1="7" y1="18" x2="7" y2="20" />
+          <line x1="17" y1="4" x2="17" y2="10" />
+          <line x1="17" y1="14" x2="17" y2="20" />
+          <circle cx="7" cy="16" r="2" />
+          <circle cx="17" cy="12" r="2" />
         </svg>
       </button>
       {open ? (
@@ -1101,8 +1101,8 @@ function ChatGroupPicker({
           style={{
             position: 'absolute',
             top: '100%',
-            right: 10,
-            marginTop: 2,
+            right: 0,
+            marginTop: 4,
             minWidth: 168,
             borderRadius: 8,
             borderWidth: 1,
@@ -1114,6 +1114,8 @@ function ChatGroupPicker({
             paddingBottom: 4,
             zIndex: 50,
             fontFamily: REPO_FOCUS_FONT,
+            textTransform: 'none',
+            letterSpacing: 0,
           }}
         >
           <ChatGroupPickerItem label="Group by repo" selected={mode === 'repo'} onClick={() => { onChange('repo'); setOpen(false); }} />
@@ -1180,7 +1182,7 @@ function ChatGroupPickerItem({
   );
 }
 
-function RepoGroupLabel({ label }: { label: string }) {
+function RepoGroupLabel({ label, trailing }: { label: string; trailing?: React.ReactNode }) {
   return (
     <div
       style={{
@@ -1189,7 +1191,7 @@ function RepoGroupLabel({ label }: { label: string }) {
         gap: 6,
         minHeight: 22,
         paddingTop: 10,
-        paddingRight: 10,
+        paddingRight: 8,
         paddingBottom: 3,
         paddingLeft: 14,
         color: 'var(--t-text-faint)',
@@ -1198,6 +1200,7 @@ function RepoGroupLabel({ label }: { label: string }) {
     >
       <span
         style={{
+          flex: 1,
           minWidth: 0,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -1211,6 +1214,7 @@ function RepoGroupLabel({ label }: { label: string }) {
       >
         {label}
       </span>
+      {trailing}
     </div>
   );
 }
