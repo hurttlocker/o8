@@ -3199,14 +3199,6 @@ function DashboardInner() {
           </SettingsOverlay>
         )}
 
-        {/* Bottom-center floating terminal toggle — pulled out of the
-            column header so the chrome stays light. Sits below the
-            composer in the workspace card with no background, just the
-            icon. */}
-        <BottomCenterTerminalToggle
-          active={bottomPanelVisible}
-          onClick={toggleContextualPanelTile}
-        />
         </div>
       </div>
 
@@ -3389,6 +3381,8 @@ function DashboardInner() {
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
         compact={compactShell}
+        bottomPanelVisible={bottomPanelVisible}
+        onToggleBottomPanel={toggleContextualPanelTile}
         leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
         rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
         onOpenSettings={toggleSettingsOverlay}
