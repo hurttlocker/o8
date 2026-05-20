@@ -900,6 +900,15 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:open-inbox-tab', handleOpenInbox);
   }, []);
 
+  // Automations nav entry (lives in AgentPanel's MiniAgentPanelHeader) dispatches
+  // o8:open-automations when clicked. Flip the activeNavSection so the
+  // AutomationsPage takes the workspace center. Codex-style page-takeover.
+  useEffect(() => {
+    const handler = () => setActiveNavSection('automations');
+    window.addEventListener('o8:open-automations', handler);
+    return () => window.removeEventListener('o8:open-automations', handler);
+  }, [setActiveNavSection]);
+
   const handleRepoRemoved = useCallback((removedRepo: RepoRegistryEntry) => {
     const removedRepoPath = removedRepo.localPath;
     const nextGlobalRepoEntries = globalRepoEntries.filter((repo) => repo.id !== removedRepo.id);
