@@ -8,6 +8,7 @@ import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane
 import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
+import { WorkspaceLaunchPicker } from '@/components/desktop/workspace-terminal/WorkspaceLaunchPicker';
 import { WorkspaceSpawnProvider, type WorkspaceSpawnHandlers } from '@/components/desktop/workspace-terminal/spawn-context';
 import { workspaceConversationHeaderLabel } from '@/components/desktop/workspace-terminal/utils';
 import type { TerminalTabHandle, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
@@ -154,6 +155,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           flexDirection: 'column',
           overflow: 'hidden',
           background: 'var(--t-bg-gradient)',
+          position: 'relative',
         }}
       >
         {hasPreviews ? (
@@ -310,6 +312,66 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
               </motion.button>
             </div>
           </motion.div>
+        ) : null}
+
+        {props.canCloseTile === true ? (
+          // Split-pane inline controls — no strip / no background, just
+          // floating ▶ play + × close at the top-right corner of the
+          // pane. Operator: "right under the header in the split but
+          // its not with a background so the selctions just sit there"
+          <div
+            style={{
+              position: 'absolute',
+              top: 6,
+              right: 8,
+              zIndex: 20,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 2,
+              pointerEvents: 'auto',
+            }}
+          >
+            <WorkspaceLaunchPicker
+              launchRequestKey={controller.launchRequestKey}
+              scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
+              onNewTab={controller.handleNewTab}
+              onNewLLMChatTab={controller.handleNewLLMChatTab}
+            />
+            {props.onCloseTile ? (
+              <button
+                type="button"
+                onClick={props.onCloseTile}
+                aria-label="Close split"
+                title="Close split"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 24,
+                  height: 24,
+                  borderRadius: 6,
+                  borderWidth: 0,
+                  background: 'transparent',
+                  color: 'var(--t-text-secondary)',
+                  cursor: 'pointer',
+                  padding: 0,
+                  transition: 'background 120ms ease, color 120ms ease',
+                }}
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.background = 'var(--t-hover)';
+                  event.currentTarget.style.color = 'var(--t-text)';
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.background = 'transparent';
+                  event.currentTarget.style.color = 'var(--t-text-secondary)';
+                }}
+              >
+                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            ) : null}
+          </div>
         ) : null}
 
         <WorkspaceTerminalPanels
