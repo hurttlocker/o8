@@ -140,6 +140,8 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       if (typeof window === 'undefined') return;
       const onRename = (event: Event) => {
         const detail = (event as CustomEvent<{ tabId?: string; title?: string }>).detail;
+        // eslint-disable-next-line no-console
+        console.log('[workspace-terminal] chat-history-updated', detail);
         if (!detail?.tabId || typeof detail.title !== 'string') return;
         handleUpdateTabLabel(detail.tabId, detail.title);
       };
