@@ -192,15 +192,6 @@ function UsersThreeIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-function PlusIcon({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }} aria-hidden="true">
-      <path d="M12 5v14" />
-      <path d="M5 12h14" />
-    </svg>
-  );
-}
-
 export function OrchestratorTab(props: OrchestratorTabProps) {
   return (
     <OrchestratorContextResidencyProvider>
@@ -251,7 +242,6 @@ function OrchestratorTabInner({
     orchestratorBusyState: null,
   });
   const [contextUsage, setContextUsage] = useState({ tokenCount: 0, runningTotal: 0 });
-  const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
@@ -259,6 +249,20 @@ function OrchestratorTabInner({
   const autoTiledComparisonGroupIdRef = useRef<string | null>(null);
 
   useEffect(() => subscribeOrchestratorRuntimePreference(setPreferredRuntime), []);
+
+  // Broadcast the chat-history thread id whenever it changes so the
+  // dashboard's rename / archive / share menu can target the correct
+  // file in ~/.o8/chat-history/. The workspace tab id (e.g.
+  // `orchestrator-f5d7d5c7-…`) is NOT the same as the chat-history
+  // thread id (e.g. `thoughts-1779296462456`). Without this bridge the
+  // PATCH writes to the wrong file (issue #1100).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!active) return;
+    window.dispatchEvent(new CustomEvent('o8:workspace-thread-id', {
+      detail: { tabId, threadId: chatChromeState.threadId },
+    }));
+  }, [active, tabId, chatChromeState.threadId]);
 
   useEffect(() => {
     if (!active) return;
@@ -370,25 +374,6 @@ function OrchestratorTabInner({
     return () => window.removeEventListener('o8:load-history-thread', handleLoadHistoryThread);
   }, [active, tabId]);
 
-  const handleNewConversation = useCallback(async () => {
-    try {
-      const response = await fetch('/api/orchestrator/reset-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(repoPath ? { repoPath } : {}),
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-        throw new Error(payload?.error?.message ?? 'Unable to reset orchestrator session.');
-      }
-
-      chatPanelRef.current?.reset();
-      setTimeout(() => chatPanelRef.current?.focusInput(), 30);
-    } catch (error) {
-      console.error('[orchestrator] Failed to reset orchestrator conversation.', error);
-    }
-  }, [repoPath]);
-
   const handleQuickAction = useCallback((prompt: string) => {
     chatPanelRef.current?.sendNow(prompt);
   }, []);
@@ -480,54 +465,18 @@ function OrchestratorTabInner({
 
   const hasMessages = chatChromeState.hasMessages;
 
-  const handleHeaderCopyMarkdown = useCallback(async () => {
-    const ok = await chatPanelRef.current?.copyAsMarkdown?.();
-    if (ok === false) {
-      setExportState('error');
-      setTimeout(() => setExportState('idle'), 1400);
-    } else {
-      setExportState('copying');
-      setTimeout(() => setExportState('copied'), 120);
-      setTimeout(() => setExportState('idle'), 1600);
-    }
-  }, []);
-
   const thoughtsBodyBackground = 'linear-gradient(180deg, var(--t-glass-muted) 0%, rgba(0, 0, 0, 0) 100%)';
   const thoughtsElevatedSurface = 'var(--t-glass-elevated)';
   const thoughtsElevatedBorder = '1px solid var(--t-glass-border-strong)';
   const thoughtsElevatedShadow = 'var(--t-glass-shadow)';
   const thoughtsMutedGlass = 'var(--t-glass-muted-strong)';
 
-  const composerLeadingExtras = (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      {lockedMode === 'chat' && spawnHandlers ? (
-        <ChatOpenRouterPicker
-          selectedSlug={initialChatOpenrouterModel}
-          onSelect={handlePickChatOpenRouterModel}
-        />
-      ) : null}
-      {/* Copy-transcript button removed per composer-simplification pass —
-          if reintroduced, mount under a discoverable affordance (e.g. thread
-          overflow menu) instead of in the leading strip. handleHeaderCopyMarkdown
-          + exportState are still wired and used by the imperative handle. */}
-      <button
-        type="button"
-        onClick={() => { void handleNewConversation(); }}
-        title="New thread"
-        style={{
-          height: 26, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 9, borderRadius: 8, borderWidth: 1, borderStyle: 'solid',
-          borderColor: 'var(--t-border)', background: 'transparent', color: 'var(--t-text-muted)',
-          cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
-          fontSize: 12, fontWeight: 500,
-          fontFamily: 'var(--font-sans-system)',
-          flexShrink: 0,
-        }}
-      >
-        <PlusIcon size={11} />
-        <span>New</span>
-      </button>
-    </div>
-  );
+  const composerLeadingExtras = lockedMode === 'chat' && spawnHandlers ? (
+    <ChatOpenRouterPicker
+      selectedSlug={initialChatOpenrouterModel}
+      onSelect={handlePickChatOpenRouterModel}
+    />
+  ) : null;
 
   const isFullAccess = permissionMode === 'full';
 

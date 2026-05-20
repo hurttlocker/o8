@@ -381,38 +381,59 @@ function DashboardInner() {
     && Boolean(workspaceHeaderActive.tabId);
 
   const handleTitleArchive = useCallback(async () => {
-    const tabId = workspaceHeaderActive.tabId;
-    if (!tabId) return;
+    const workspaceTabId = workspaceHeaderActive.tabId;
+    if (!workspaceTabId) return;
+    const threadId = threadIdByTabRef.current.get(workspaceTabId) ?? workspaceTabId;
     try {
       await fetch('/api/v2/chat-history', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tabId, archivedAt: new Date().toISOString() }),
+        body: JSON.stringify({ tabId: threadId, archivedAt: new Date().toISOString() }),
       });
+      window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
+        detail: { tabId: workspaceTabId, threadId, archived: true },
+      }));
     } catch {
       // silent — operator will see staleness on next refresh
     }
   }, [workspaceHeaderActive.tabId]);
 
+  // Workspace tab id → chat-history thread id map. OrchestratorTab
+  // broadcasts 'o8:workspace-thread-id' whenever its loaded thread
+  // changes; we use the map to PATCH the canonical chat-history file
+  // (issue #1100). Workspace tab id ≠ chat-history thread id — without
+  // this lookup the PATCH writes to the wrong file.
+  const threadIdByTabRef = useRef<Map<string, string | null>>(new Map());
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string; threadId?: string | null }>).detail;
+      if (!detail?.tabId) return;
+      threadIdByTabRef.current.set(detail.tabId, detail.threadId ?? null);
+    };
+    window.addEventListener('o8:workspace-thread-id', handler as EventListener);
+    return () => window.removeEventListener('o8:workspace-thread-id', handler as EventListener);
+  }, []);
+
   const handleTitleRenameSubmit = useCallback(async (newTitle: string) => {
     // The header strip flipped its label into an inline input and the
     // operator committed a new value. PATCH the chat-history record
-    // and broadcast a generic chat-history-updated nudge so other
-    // surfaces (left rail Chats tab, archived strip) refetch.
-    const tabId = workspaceHeaderActive.tabId;
+    // keyed by THREAD id (chat-history file key), not the workspace
+    // tab id. Broadcast updates so other surfaces refetch.
+    const workspaceTabId = workspaceHeaderActive.tabId;
     const trimmed = newTitle.trim();
-    if (!tabId || !trimmed) return;
+    if (!workspaceTabId || !trimmed) return;
+    const threadId = threadIdByTabRef.current.get(workspaceTabId) ?? workspaceTabId;
     const res = await fetch('/api/v2/chat-history', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tabId, title: trimmed }),
+      body: JSON.stringify({ tabId: threadId, title: trimmed }),
     });
     if (!res.ok) throw new Error('rename failed');
-    // Surfaces that show the chat title need to refetch — fire both a
-    // generic chat-history update event and the workspace-active-label
-    // refresh so the global header strip picks up the new title.
+    // Include both the workspace tab id (for in-memory label updates)
+    // and the thread id (for chat-history-keyed surfaces) so both
+    // listeners can fire correctly.
     window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
-      detail: { tabId, title: trimmed },
+      detail: { tabId: workspaceTabId, threadId, title: trimmed },
     }));
   }, [workspaceHeaderActive.tabId]);
 
@@ -429,10 +450,11 @@ function DashboardInner() {
   const handleSpawnTerminal = useCallback(() => dispatchSpawn('terminal'), [dispatchSpawn]);
 
   const handleTitleShare = useCallback(async () => {
-    const tabId = workspaceHeaderActive.tabId;
-    if (!tabId) return;
+    const workspaceTabId = workspaceHeaderActive.tabId;
+    if (!workspaceTabId) return;
+    const threadId = threadIdByTabRef.current.get(workspaceTabId) ?? workspaceTabId;
     try {
-      const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`);
+      const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`);
       if (!res.ok) return;
       const data = await res.json();
       const messages = Array.isArray(data?.messages) ? data.messages : [];
