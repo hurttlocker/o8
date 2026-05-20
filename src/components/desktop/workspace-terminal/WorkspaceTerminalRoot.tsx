@@ -120,21 +120,31 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       };
     }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsForBroadcast]);
 
-    // Listen for global-header pill clicks. Dashboard dispatches
-    // 'o8:request-select-tab' { tabId } when the operator clicks a pill;
-    // we route it to the controller's tab-select handler.
+    // Listen for header pill clicks. In single mode (no split) we
+    // accept events that omit workspaceId; in split mode each pane
+    // claims only events carrying its own workspaceId. Lets two
+    // SplitHeaderPillStrips in the global header drive both panes
+    // without crosstalk.
     const handleSelectTab = controller.handleSelectTab;
     const handleCloseTab = controller.handleCloseTab;
     useEffect(() => {
       if (typeof window === 'undefined') return;
-      if (props.canCloseTile === true) return; // split panes skip — their own lower TabBar handles selection
+      const matchWorkspace = (eventWorkspaceId: string | null | undefined) => {
+        if (!eventWorkspaceId) {
+          // Untargeted event — only the single pane should claim it.
+          return props.canCloseTile !== true;
+        }
+        return eventWorkspaceId === workspaceInstanceId;
+      };
       const onSelect = (event: Event) => {
-        const tabId = (event as CustomEvent<{ tabId?: string }>).detail?.tabId;
-        if (tabId) handleSelectTab(tabId);
+        const detail = (event as CustomEvent<{ tabId?: string; workspaceId?: string }>).detail;
+        if (!matchWorkspace(detail?.workspaceId)) return;
+        if (detail?.tabId) handleSelectTab(detail.tabId);
       };
       const onClose = (event: Event) => {
-        const tabId = (event as CustomEvent<{ tabId?: string }>).detail?.tabId;
-        if (tabId) handleCloseTab(tabId);
+        const detail = (event as CustomEvent<{ tabId?: string; workspaceId?: string }>).detail;
+        if (!matchWorkspace(detail?.workspaceId)) return;
+        if (detail?.tabId) handleCloseTab(detail.tabId);
       };
       window.addEventListener('o8:request-select-tab', onSelect as EventListener);
       window.addEventListener('o8:request-close-tab', onClose as EventListener);
@@ -142,7 +152,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         window.removeEventListener('o8:request-select-tab', onSelect as EventListener);
         window.removeEventListener('o8:request-close-tab', onClose as EventListener);
       };
-    }, [props.canCloseTile, handleSelectTab, handleCloseTab]);
+    }, [props.canCloseTile, handleSelectTab, handleCloseTab, workspaceInstanceId]);
 
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
