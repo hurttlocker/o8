@@ -28,12 +28,10 @@ import {
   OrchestratorEmptyState,
   timeOfDayGreeting,
 } from '@/components/desktop/OrchestratorEmptyState';
-import { OrchestratorHistorySidebar } from '@/components/desktop/OrchestratorHistorySidebar';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
 import { QuickActionPalette } from '@/components/desktop/orchestrator/QuickActionPalette';
 import type { QuickAction } from '@/lib/orchestrator/quick-actions';
 import { OrchestratorContextResidencyProvider } from '@/components/desktop/orchestrator/context-residency';
-import { ThreadsDropdown } from '@/components/desktop/orchestrator/ThreadsDropdown';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { BranchDetailsLauncher } from '@/components/desktop/BranchDetailsLauncher';
 import {
@@ -96,26 +94,7 @@ function persistPermissionMode(tabId: string, mode: ThoughtsChatPermissionMode):
   }
 }
 
-const HISTORY_OPEN_KEY = 'o8:orchestrator:history-open';
 const USERS_THREE_ICON_PATH = 'M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z';
-
-function readBooleanPref(key: string): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(key) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function writeBooleanPref(key: string, value: boolean): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(key, value ? '1' : '0');
-  } catch {
-    // ignore
-  }
-}
 
 function isComparisonPacketComplete(packet: OrchestratorPacket): boolean {
   return packet.status === 'awaiting_review'
@@ -273,7 +252,6 @@ function OrchestratorTabInner({
   });
   const [contextUsage, setContextUsage] = useState({ tokenCount: 0, runningTotal: 0 });
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
-  const [historyOpen, setHistoryOpen] = useState(() => readBooleanPref(HISTORY_OPEN_KEY));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
@@ -369,19 +347,6 @@ function OrchestratorTabInner({
       return next;
     });
   }, [tabId]);
-
-  const handleToggleHistory = useCallback(() => {
-    setHistoryOpen((prev) => {
-      const next = !prev;
-      writeBooleanPref(HISTORY_OPEN_KEY, next);
-      return next;
-    });
-  }, []);
-
-  const handleSelectThread = useCallback((threadTabId: string) => {
-    chatPanelRef.current?.loadThread(threadTabId);
-    setTimeout(() => chatPanelRef.current?.focusInput(), 40);
-  }, []);
 
   useEffect(() => {
     if (!active || !initialThreadId) return;
@@ -535,10 +500,6 @@ function OrchestratorTabInner({
 
   const composerLeadingExtras = (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <ThreadsDropdown
-        historyOpen={historyOpen}
-        onToggleHistory={handleToggleHistory}
-      />
       {lockedMode === 'chat' && spawnHandlers ? (
         <ChatOpenRouterPicker
           selectedSlug={initialChatOpenrouterModel}
@@ -704,7 +665,8 @@ function OrchestratorTabInner({
         </div>
       ) : null}
 
-      {/* 4-pane body: History | Agents | Chat | Mission */}
+      {/* Body: chat (flex) | branch details (self-hides). Threads/Archive
+          moved into LeftPanelProjectFocus → Chats + Agents tabs. */}
       <div
         style={{
           flex: 1,
@@ -713,18 +675,7 @@ function OrchestratorTabInner({
           flexDirection: 'row',
         }}
       >
-        {/* Left: history sidebar */}
-        <OrchestratorHistorySidebar
-          open={historyOpen}
-          currentThreadId={chatChromeState.threadId}
-          onClose={handleToggleHistory}
-          onSelectThread={handleSelectThread}
-          onSelectArchivedLane={data.onSelectSession
-            ? (sessionKey) => data.onSelectSession?.(sessionKey)
-            : undefined}
-        />
-
-        {/* Center: chat body */}
+        {/* Chat body */}
         <div
           style={{
             flex: 1,
