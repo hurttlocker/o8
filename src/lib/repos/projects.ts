@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { readRepoPathRegistry } from './repo-path-registry';
+import { listProjects as listSqliteProjects } from '@/lib/projects/store';
+import { listRepos } from './registry';
 
 const PROJECTS_DIR = path.join(os.homedir(), '.o8');
 const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
@@ -81,6 +83,12 @@ function normalizeProjectRecord(entry: ProjectRecord): ProjectRecord {
   };
 }
 
+function preferConcreteActiveProject(ledger: ProjectsLedger): ProjectsLedger {
+  if (ledger.activeProjectId !== DEFAULT_PROJECT_ID) return ledger;
+  const concreteProject = ledger.projects.find((project) => project.id !== DEFAULT_PROJECT_ID);
+  return concreteProject ? { ...ledger, activeProjectId: concreteProject.id } : ledger;
+}
+
 function ensureDir() {
   if (!existsSync(PROJECTS_DIR)) {
     mkdirSync(PROJECTS_DIR, { recursive: true });
@@ -136,8 +144,53 @@ async function bootstrapDefaultLedger(): Promise<ProjectsLedger> {
 
 export async function getProjectsLedger(): Promise<ProjectsLedger> {
   const existing = await readRawLedger();
-  if (existing) return existing;
-  return bootstrapDefaultLedger();
+  const base = existing ?? await bootstrapDefaultLedger();
+  return enrichLedgerWithSqliteRepoPaths(base);
+}
+
+/**
+ * Live-derive `repoPaths` for each project from the SQLite project_repos
+ * table so the panel ledger never lags behind the settings dialog. SQLite
+ * is the canonical store for project↔repo membership; the JSON ledger now
+ * acts as a metadata sidecar (activeProjectId + color + ordering).
+ *
+ * Projects unique to the JSON ledger (no SQLite slug match) keep their
+ * stored repoPaths so legacy data isn't silently dropped.
+ */
+async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<ProjectsLedger> {
+  let sqliteProjects;
+  try {
+    sqliteProjects = listSqliteProjects();
+  } catch {
+    return ledger;
+  }
+  if (sqliteProjects.length === 0) return ledger;
+
+  let repos;
+  try {
+    repos = await listRepos();
+  } catch {
+    return ledger;
+  }
+  const repoById = new Map(repos.map((repo) => [repo.id, repo]));
+
+  const repoPathsBySlug = new Map<string, string[]>();
+  for (const sp of sqliteProjects) {
+    const paths = sp.repos
+      .map((link) => repoById.get(link.repoId)?.localPath ?? null)
+      .filter((repoPath): repoPath is string => Boolean(repoPath?.trim()))
+      .map(normalizeRepoPath);
+    repoPathsBySlug.set(sp.slug, paths);
+  }
+
+  return {
+    ...ledger,
+    projects: ledger.projects.map((project) => {
+      const slug = projectNameToSlug(project.name);
+      const fresh = repoPathsBySlug.get(slug);
+      return fresh !== undefined ? { ...project, repoPaths: fresh } : project;
+    }),
+  };
 }
 
 export function getProjectsLedgerSync(): ProjectsLedger {
@@ -302,6 +355,24 @@ export async function setProjectRepos(projectId: string, repoPaths: string[]): P
   return next;
 }
 
+export async function removeRepoPathFromProjects(repoPath: string): Promise<ProjectsLedger> {
+  const ledger = await getProjectsLedger();
+  const normalizedRepoPath = normalizeRepoPath(repoPath);
+  let mutated = false;
+  const projects = ledger.projects.map((project) => {
+    const repoPaths = project.repoPaths.filter((candidate) => normalizeRepoPath(candidate) !== normalizedRepoPath);
+    if (repoPaths.length !== project.repoPaths.length) {
+      mutated = true;
+      return { ...project, repoPaths };
+    }
+    return project;
+  });
+  const next = preferConcreteActiveProject({ ...ledger, projects });
+  if (!mutated && next.activeProjectId === ledger.activeProjectId) return ledger;
+  await writeLedger(next);
+  return next;
+}
+
 export async function upsertProjectLedgerRecord(input: {
   id?: string | null;
   name: string;
@@ -355,7 +426,14 @@ export async function upsertProjectLedgerRecord(input: {
 export async function reconcileProjectsWithRegistry(): Promise<ProjectsLedger> {
   const ledger = await getProjectsLedger();
   const registry = await readRepoPathRegistry();
-  if (!registry.ok) return ledger;
+  if (!registry.ok) {
+    const normalizedActive = preferConcreteActiveProject(ledger);
+    if (normalizedActive.activeProjectId !== ledger.activeProjectId) {
+      await writeLedger(normalizedActive);
+      return normalizedActive;
+    }
+    return ledger;
+  }
   const knownPaths = new Set(registry.repos.map((entry) => normalizeRepoPath(entry.path)));
   const claimed = new Set<string>();
   for (const project of ledger.projects) {
@@ -374,9 +452,14 @@ export async function reconcileProjectsWithRegistry(): Promise<ProjectsLedger> {
       return project;
     });
     if (mutated) {
-      const next: ProjectsLedger = { ...ledger, projects };
+      const next = preferConcreteActiveProject({ ...ledger, projects });
       await writeLedger(next);
       return next;
+    }
+    const normalizedActive = preferConcreteActiveProject(ledger);
+    if (normalizedActive.activeProjectId !== ledger.activeProjectId) {
+      await writeLedger(normalizedActive);
+      return normalizedActive;
     }
     return ledger;
   }
@@ -387,7 +470,7 @@ export async function reconcileProjectsWithRegistry(): Promise<ProjectsLedger> {
     const merged = Array.from(new Set([...project.repoPaths.filter((p) => knownPaths.has(p)), ...orphans]));
     return { ...project, repoPaths: merged };
   });
-  const next: ProjectsLedger = { ...ledger, projects };
+  const next = preferConcreteActiveProject({ ...ledger, projects });
   await writeLedger(next);
   return next;
 }
