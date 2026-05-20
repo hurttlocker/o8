@@ -298,7 +298,11 @@ export function O8ScratchChat({
   const [handoffNote, setHandoffNote] = useState<string | null>(null);
   const [selectionSnapshot, setSelectionSnapshot] = useState('');
   const [panelPosition, setPanelPosition] = useState({ top: 0, right: 12 });
-  const disabled = !repoPath || !selectedFile;
+  // Re-mounted post-#1089 — operator restored after ReviewPanel rework dropped
+  // the original mount. Repo presence is the only hard requirement; the chat
+  // operates against general repo context when no file is selected (file/diff
+  // hydration in readPanelContext already short-circuits on null selectedFile).
+  const disabled = !repoPath;
 
   const scopeLabel = useMemo(() => compactPath(selectedFile), [selectedFile]);
 

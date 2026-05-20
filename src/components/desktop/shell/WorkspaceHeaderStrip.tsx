@@ -15,6 +15,7 @@ import { UsersThree } from '@phosphor-icons/react';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
 import { IconPanelLeft, IconTerminal } from '../title-bar/icons';
+import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 
 interface WorkspaceHeaderStripProps {
   /** Render the 78px macOS traffic-light spacer — set when this strip is leftmost. */
@@ -28,6 +29,15 @@ interface WorkspaceHeaderStripProps {
   /** Terminal toggle — shown only when a handler is provided. */
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
+  /**
+   * O8 panel re-open toggle. Rendered as the rightmost icon ONLY when the
+   * panel is collapsed — when it's open, the toggle in PanelHeaderStrip is
+   * already visible, so we don't duplicate. Operator regression catch
+   * post-#1089: when the panel column disappears, its toggle goes with it,
+   * leaving no re-open affordance.
+   */
+  rightPanelOpen?: boolean;
+  onToggleRightPanel?: () => void;
 }
 
 export function WorkspaceHeaderStrip({
@@ -38,7 +48,10 @@ export function WorkspaceHeaderStrip({
   onOpenAgents,
   bottomPanelVisible = true,
   onToggleBottomPanel,
+  rightPanelOpen = false,
+  onToggleRightPanel,
 }: WorkspaceHeaderStripProps) {
+  const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
   return (
     <ColumnHeaderStrip
       drag
@@ -81,13 +94,24 @@ export function WorkspaceHeaderStrip({
         </>
       }
       right={
-        onToggleBottomPanel ? (
-          <TitleBarButton
-            icon={<IconTerminal />}
-            label="Toggle terminal"
-            onClick={onToggleBottomPanel}
-            active={bottomPanelVisible}
-          />
+        onToggleBottomPanel || showRightPanelFallbackToggle ? (
+          <>
+            {onToggleBottomPanel ? (
+              <TitleBarButton
+                icon={<IconTerminal />}
+                label="Toggle terminal"
+                onClick={onToggleBottomPanel}
+                active={bottomPanelVisible}
+              />
+            ) : null}
+            {showRightPanelFallbackToggle ? (
+              <RightPanelMorphButton
+                workspacePanelVisible={false}
+                o8PanelVisible={false}
+                onToggleO8Panel={onToggleRightPanel}
+              />
+            ) : null}
+          </>
         ) : null
       }
     />

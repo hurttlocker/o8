@@ -2854,6 +2854,8 @@ function DashboardInner() {
           }}
           bottomPanelVisible={bottomPanelVisible}
           onToggleBottomPanel={toggleContextualPanelTile}
+          rightPanelOpen={showRightPanelColumn}
+          onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
         />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
