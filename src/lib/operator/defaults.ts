@@ -60,13 +60,14 @@ export interface OperatorDefaults {
    */
   classAComposer: ClassAComposer;
   /**
-   * In-app orchestrator chat (the assistant panel that spawns `claude -p`).
-   * Off by default — after Anthropic's June 15 2026 pricing change, every
-   * turn bills against the user's Agent SDK credit pool ($20-$200/mo cap by
-   * plan). The recommended path is to talk to Claude in Claude Code TUI or
-   * Claude Desktop and let it operate o8 via the operator MCP server, which
-   * keeps everything on the unlimited interactive pool. When this toggle is
-   * on the chat works as before with a banner warning about SDK billing.
+   * In-app orchestrator chat — the assistant panel that drives the
+   * orchestrator session. **On by default as of v0.1.152.** Spawns
+   * `claude --input-format stream-json` (no `-p`) so every turn bills
+   * against the user's Claude Code MAX subscription pool — the same line
+   * `claude` in Terminal uses, NOT the gated Agent SDK pool. Requires the
+   * `claude` CLI to be installed and signed in; the spawn will error if
+   * it's missing. Flip off to fall back to Codex GPT-5.5 xhigh as the
+   * orchestrator brain (free for ChatGPT Plus / Codex subscribers).
    */
   inAppOrchestratorEnabled: boolean;
 }
@@ -83,13 +84,18 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   overlapGate: 'advisory',
   healBotEnabled: true,
   supervisorAutoEscalate: false,
-  thinkingEffort: 'high',
+  // Operator-pinned: Opus 4.7 with max thinking is the default orchestrator
+  // brain. Subscription-billed via the REPL migration, so cost is the user's
+  // existing Claude Code MAX plan — not a per-token API charge.
+  thinkingEffort: 'max',
   promptCachingEnabled: true,
   orchestratorModel: 'claude-opus-4-7',
   defaultDispatchRuntime: 'codex',
   experimentalOpencode: false,
   classAComposer: 'auto',
-  inAppOrchestratorEnabled: false,
+  // ON by default post-#1097. Subscription pool, not Agent SDK pool. See the
+  // docstring above on the field for the rationale.
+  inAppOrchestratorEnabled: true,
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
