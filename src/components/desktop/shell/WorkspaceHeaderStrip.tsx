@@ -67,6 +67,11 @@ interface WorkspaceHeaderStripProps {
   onSpawnOrchestrator?: () => void;
   onSpawnChat?: () => void;
   onSpawnTerminal?: () => void;
+  /** Right-click handler on the play button — operator-driven power
+   *  feature: secondary-click ▶ opens the current workspace AS a split
+   *  pane. The split-button affordance is hidden under this gesture
+   *  rather than promoted as a primary toolbar icon. */
+  onPlayContextMenu?: () => void;
 }
 
 export function WorkspaceHeaderStrip({
@@ -85,6 +90,7 @@ export function WorkspaceHeaderStrip({
   onSpawnOrchestrator,
   onSpawnChat,
   onSpawnTerminal,
+  onPlayContextMenu,
   headerTabs,
   headerActiveTabId,
 }: WorkspaceHeaderStripProps) {
@@ -133,6 +139,7 @@ export function WorkspaceHeaderStrip({
                 onSpawnOrchestrator={onSpawnOrchestrator}
                 onSpawnChat={onSpawnChat}
                 onSpawnTerminal={onSpawnTerminal}
+                onContextMenu={onPlayContextMenu}
               />
             ) : null}
             {onToggleBottomPanel ? (
@@ -396,10 +403,12 @@ function HeaderPlayButton({
   onSpawnOrchestrator,
   onSpawnChat,
   onSpawnTerminal,
+  onContextMenu,
 }: {
   onSpawnOrchestrator?: () => void;
   onSpawnChat?: () => void;
   onSpawnTerminal?: () => void;
+  onContextMenu?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -432,10 +441,16 @@ function HeaderPlayButton({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        onContextMenu={(event) => {
+          if (!onContextMenu) return;
+          event.preventDefault();
+          setOpen(false);
+          onContextMenu();
+        }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-label="New tab"
-        title="New tab"
+        title={onContextMenu ? 'New tab · right-click to split' : 'New tab'}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
