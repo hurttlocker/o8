@@ -187,7 +187,9 @@ export function WorkspaceHeaderStrip({
 /** Split-mode header — two HeaderPillStrips side by side, with a small
  *  vertical divider between them mirroring the visual split below.
  *  Each strip dispatches with its own workspaceId so the right
- *  WorkspaceTerminalRoot claims the click. */
+ *  WorkspaceTerminalRoot claims the click. Per-pane ▶ play sits at the
+ *  right edge of each section; × close-pane shows on non-first panes
+ *  only (closing the first/primary doesn't make sense). */
 function SplitHeaderPillStrips({
   workspaces,
 }: {
@@ -197,29 +199,84 @@ function SplitHeaderPillStrips({
     activeTabId: string | null;
   }>;
 }) {
+  const dispatchSpawn = useCallback((workspaceId: string, kind: 'orchestrator' | 'chat' | 'terminal') => {
+    window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind, workspaceId } }));
+  }, []);
+  const dispatchClose = useCallback((workspaceId: string) => {
+    window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId } }));
+  }, []);
+
   return (
     <div data-no-drag style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
-      {workspaces.map((workspace, index) => (
-        <div
-          key={workspace.workspaceId}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            display: 'flex',
-            alignItems: 'center',
-            borderLeftWidth: index === 0 ? 0 : 1,
-            borderLeftStyle: 'solid',
-            borderLeftColor: 'var(--t-divider)',
-          }}
-        >
-          <HeaderPillStrip
-            tabs={workspace.tabs}
-            activeTabId={workspace.activeTabId}
-            workspaceId={workspace.workspaceId}
-          />
-        </div>
-      ))}
+      {workspaces.map((workspace, index) => {
+        const canClose = index !== 0;
+        return (
+          <div
+            key={workspace.workspaceId}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: 'flex',
+              alignItems: 'center',
+              borderLeftWidth: index === 0 ? 0 : 1,
+              borderLeftStyle: 'solid',
+              borderLeftColor: 'var(--t-divider)',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
+              <HeaderPillStrip
+                tabs={workspace.tabs}
+                activeTabId={workspace.activeTabId}
+                workspaceId={workspace.workspaceId}
+              />
+            </div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingLeft: 4, paddingRight: 6, flexShrink: 0 }}>
+              <HeaderPlayButton
+                onSpawnOrchestrator={() => dispatchSpawn(workspace.workspaceId, 'orchestrator')}
+                onSpawnChat={() => dispatchSpawn(workspace.workspaceId, 'chat')}
+                onSpawnTerminal={() => dispatchSpawn(workspace.workspaceId, 'terminal')}
+              />
+              {canClose ? (
+                <SplitPaneCloseButton onClick={() => dispatchClose(workspace.workspaceId)} />
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+function SplitPaneCloseButton({ onClick }: { onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      data-no-drag
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-label="Close split"
+      title="Close split"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        borderWidth: 0,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        color: hovered ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        padding: 0,
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+    >
+      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    </button>
   );
 }
 
