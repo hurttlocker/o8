@@ -545,29 +545,10 @@ function OrchestratorTabInner({
           onSelect={handlePickChatOpenRouterModel}
         />
       ) : null}
-      {hasMessages ? (
-        <button
-          type="button"
-          onClick={handleHeaderCopyMarkdown}
-          title={
-            exportState === 'error' ? 'Copy failed — clipboard permission denied'
-              : exportState === 'copied' ? 'Copied transcript'
-              : 'Copy transcript as Markdown'
-          }
-          style={{
-            height: 26, paddingTop: 0, paddingRight: 9, paddingBottom: 0, paddingLeft: 9, borderRadius: 8, borderWidth: 1, borderStyle: 'solid',
-            borderColor: exportState === 'error' ? 'rgba(239, 68, 68, 0.32)' : 'var(--t-border)',
-            background: 'transparent',
-            color: exportState === 'error' ? '#ef4444' : exportState === 'copied' ? 'var(--t-accent)' : 'var(--t-text-muted)',
-            cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
-            fontSize: 12, fontWeight: 500,
-            fontFamily: 'var(--font-sans-system)',
-            flexShrink: 0,
-          }}
-        >
-          {exportState === 'copied' ? 'Copied' : exportState === 'error' ? 'Copy failed' : 'Copy'}
-        </button>
-      ) : null}
+      {/* Copy-transcript button removed per composer-simplification pass —
+          if reintroduced, mount under a discoverable affordance (e.g. thread
+          overflow menu) instead of in the leading strip. handleHeaderCopyMarkdown
+          + exportState are still wired and used by the imperative handle. */}
       <button
         type="button"
         onClick={() => { void handleNewConversation(); }}
