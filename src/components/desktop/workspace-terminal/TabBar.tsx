@@ -46,6 +46,27 @@ function formatDispatchedAt(epochMs: number): string {
   }
 }
 
+// Render the in-header chat title. If the label is "<repo> / <title>"
+// (common pattern from workspaceConversationHeaderLabel) the repo gets
+// emphasized and the title softens — same treatment Codex uses for
+// its breadcrumb-style header.
+function HeaderLabelText({ label }: { label: string }) {
+  const separator = ' / ';
+  const separatorIndex = label.indexOf(separator);
+  if (separatorIndex < 0) {
+    return <span style={{ color: 'var(--t-text)', fontWeight: 500 }}>{label}</span>;
+  }
+  const repo = label.slice(0, separatorIndex);
+  const title = label.slice(separatorIndex + separator.length);
+  return (
+    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span style={{ color: 'var(--t-text)', fontWeight: 500 }}>{repo}</span>
+      <span style={{ color: 'var(--t-text-faint)', fontWeight: 400 }}> / </span>
+      <span style={{ color: 'var(--t-text-secondary)', fontWeight: 400 }}>{title}</span>
+    </span>
+  );
+}
+
 interface TabBarProps {
   tabs: TerminalTab[];
   activeTabId: string;
@@ -63,6 +84,10 @@ interface TabBarProps {
    *  This is how the wide-viewport path keeps per-workspace play / close-split
    *  buttons even when the tab list itself is collapsed away. */
   showTabList?: boolean;
+  /** Conversation/session label rendered inline in the header strip when
+   *  the tab list is collapsed. Mirrors how Codex / Claude desktop apps
+   *  put the chat title IN the header instead of below it. */
+  headerLabel?: string | null;
 }
 
 export const TabBar = memo(function TabBar({
@@ -78,6 +103,7 @@ export const TabBar = memo(function TabBar({
   onCloseTile,
   onReorderTabs,
   showTabList = true,
+  headerLabel = null,
 }: TabBarProps) {
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -146,9 +172,33 @@ export const TabBar = memo(function TabBar({
     >
       <div style={{ position: 'relative', display: 'flex', flex: 1, overflow: 'visible' }}>
         {!showTabList ? (
-          // Empty spacer so the launch picker + close-tile button stay
-          // right-aligned in the header strip when the tab list is hidden.
-          <div style={{ flex: 1 }} aria-hidden />
+          // Chat / conversation title sits IN the header strip (Codex /
+          // Claude pattern), filling the dead space between the left edge
+          // and the play + close-tile controls on the right. When no label
+          // is available the flex spacer keeps the controls right-aligned.
+          <div
+            title={headerLabel ?? undefined}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              paddingLeft: 14,
+              paddingRight: 10,
+              color: 'var(--t-text-secondary)',
+              fontFamily: 'var(--font-sans-system)',
+              fontSize: 12,
+              lineHeight: '16px',
+              fontWeight: 400,
+              letterSpacing: 0,
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {headerLabel ? <HeaderLabelText label={headerLabel} /> : null}
+          </div>
         ) : null}
         {showTabList && canScrollLeft ? (
           <div
