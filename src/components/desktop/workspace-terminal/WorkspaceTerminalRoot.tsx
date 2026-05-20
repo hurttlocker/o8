@@ -8,7 +8,6 @@ import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane
 import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
-import { WorkspaceLaunchPicker } from '@/components/desktop/workspace-terminal/WorkspaceLaunchPicker';
 import { WorkspaceSpawnProvider, type WorkspaceSpawnHandlers } from '@/components/desktop/workspace-terminal/spawn-context';
 import { workspaceConversationHeaderLabel } from '@/components/desktop/workspace-terminal/utils';
 import type { TerminalTabHandle, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
@@ -43,39 +42,51 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       return repoName ? `${repoName} / ${kindLabel}` : kindLabel;
     })();
 
-    // Listen for global-header spawn requests when this is the sole
-    // workspace (single mode). The global header's ▶ button dispatches
-    // 'o8:request-spawn-tab' with { kind } and we route to the matching
-    // controller handler. Split panes ignore — each split carries its
-    // own lower TabBar play button.
-    const handleNewTab = controller.handleNewTab;
-    const handleNewLLMChatTab = controller.handleNewLLMChatTab;
-    const spawnOrchestratorTab = controller.spawnOrchestratorTab;
-    const activeRepo = controller.activeRepo;
-    const preferredRepo = props.preferredRepo;
-    useEffect(() => {
-      if (typeof window === 'undefined') return;
-      if (props.canCloseTile === true) return; // split panes skip
-      const onRequest = (event: Event) => {
-        const kind = (event as CustomEvent<{ kind?: string }>).detail?.kind;
-        const repo = preferredRepo ?? activeRepo ?? undefined;
-        if (kind === 'orchestrator') spawnOrchestratorTab?.();
-        else if (kind === 'chat') handleNewLLMChatTab(repo ?? undefined);
-        else if (kind === 'terminal') handleNewTab('shell', repo ?? undefined);
-      };
-      window.addEventListener('o8:request-spawn-tab', onRequest as EventListener);
-      return () => window.removeEventListener('o8:request-spawn-tab', onRequest as EventListener);
-    }, [props.canCloseTile, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, activeRepo, preferredRepo]);
-
-    // Stable workspace instance id so the dashboard can track this
-    // pane's active label separately from its siblings (splits). Without
-    // this each WorkspaceTerminalRoot mount would overwrite the others'
-    // titles in the global header.
+    // Stable workspace instance id — declared early so the spawn /
+    // close event listeners below can use it.
     const workspaceIdRef = useRef<string>('');
     if (!workspaceIdRef.current) {
       workspaceIdRef.current = `ws-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
     }
     const workspaceInstanceId = workspaceIdRef.current;
+
+    // Listen for header spawn / close-workspace requests. Events
+    // include an optional workspaceId — when set, only the matching
+    // pane responds. Untargeted events (single-mode global play) only
+    // the lone pane responds (canCloseTile = false). Lets two split
+    // panes' header play buttons drive their own spawns.
+    const handleNewTab = controller.handleNewTab;
+    const handleNewLLMChatTab = controller.handleNewLLMChatTab;
+    const spawnOrchestratorTab = controller.spawnOrchestratorTab;
+    const activeRepo = controller.activeRepo;
+    const preferredRepo = props.preferredRepo;
+    const onCloseTile = props.onCloseTile;
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      const matchWorkspace = (eventWorkspaceId: string | null | undefined) => {
+        if (!eventWorkspaceId) return props.canCloseTile !== true;
+        return eventWorkspaceId === workspaceInstanceId;
+      };
+      const onSpawn = (event: Event) => {
+        const detail = (event as CustomEvent<{ kind?: string; workspaceId?: string }>).detail;
+        if (!matchWorkspace(detail?.workspaceId)) return;
+        const repo = preferredRepo ?? activeRepo ?? undefined;
+        if (detail?.kind === 'orchestrator') spawnOrchestratorTab?.();
+        else if (detail?.kind === 'chat') handleNewLLMChatTab(repo ?? undefined);
+        else if (detail?.kind === 'terminal') handleNewTab('shell', repo ?? undefined);
+      };
+      const onCloseWorkspace = (event: Event) => {
+        const detail = (event as CustomEvent<{ workspaceId?: string }>).detail;
+        if (detail?.workspaceId !== workspaceInstanceId) return;
+        onCloseTile?.();
+      };
+      window.addEventListener('o8:request-spawn-tab', onSpawn as EventListener);
+      window.addEventListener('o8:request-close-workspace', onCloseWorkspace as EventListener);
+      return () => {
+        window.removeEventListener('o8:request-spawn-tab', onSpawn as EventListener);
+        window.removeEventListener('o8:request-close-workspace', onCloseWorkspace as EventListener);
+      };
+    }, [props.canCloseTile, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, activeRepo, preferredRepo, onCloseTile, workspaceInstanceId]);
 
     // Broadcast the active-tab label + tabId + kind + workspaceId + full
     // tabs list so the dashboard can route the title to the column-level
@@ -322,66 +333,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
               </motion.button>
             </div>
           </motion.div>
-        ) : null}
-
-        {props.canCloseTile === true ? (
-          // Split-pane inline controls — no strip / no background, just
-          // floating ▶ play + × close at the top-right corner of the
-          // pane. Operator: "right under the header in the split but
-          // its not with a background so the selctions just sit there"
-          <div
-            style={{
-              position: 'absolute',
-              top: 6,
-              right: 8,
-              zIndex: 20,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 2,
-              pointerEvents: 'auto',
-            }}
-          >
-            <WorkspaceLaunchPicker
-              launchRequestKey={controller.launchRequestKey}
-              scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
-              onNewTab={controller.handleNewTab}
-              onNewLLMChatTab={controller.handleNewLLMChatTab}
-            />
-            {props.onCloseTile ? (
-              <button
-                type="button"
-                onClick={props.onCloseTile}
-                aria-label="Close split"
-                title="Close split"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 24,
-                  height: 24,
-                  borderRadius: 6,
-                  borderWidth: 0,
-                  background: 'transparent',
-                  color: 'var(--t-text-secondary)',
-                  cursor: 'pointer',
-                  padding: 0,
-                  transition: 'background 120ms ease, color 120ms ease',
-                }}
-                onMouseEnter={(event) => {
-                  event.currentTarget.style.background = 'var(--t-hover)';
-                  event.currentTarget.style.color = 'var(--t-text)';
-                }}
-                onMouseLeave={(event) => {
-                  event.currentTarget.style.background = 'transparent';
-                  event.currentTarget.style.color = 'var(--t-text-secondary)';
-                }}
-              >
-                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            ) : null}
-          </div>
         ) : null}
 
         <WorkspaceTerminalPanels
