@@ -10,6 +10,7 @@
  * the dashboard gate compact mode / sidebar-collapsed state from the call site.
  */
 
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
 import { IconColumns, IconPanelLeft, IconTerminal } from '../title-bar/icons';
@@ -39,6 +40,12 @@ interface WorkspaceHeaderStripProps {
    *  put the conversation name in the title bar itself instead of a
    *  separate strip below. Supports "repo / chat" split styling. */
   headerLabel?: string | null;
+  /** Optional action callbacks for the `…` menu next to the title.
+   *  Items only render when the corresponding callback is provided —
+   *  the menu hides entirely when none are set. */
+  onTitleRename?: () => void;
+  onTitleArchive?: () => void;
+  onTitleShare?: () => void;
 }
 
 export function WorkspaceHeaderStrip({
@@ -51,8 +58,12 @@ export function WorkspaceHeaderStrip({
   rightPanelOpen = false,
   onToggleRightPanel,
   headerLabel,
+  onTitleRename,
+  onTitleArchive,
+  onTitleShare,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
+  const hasTitleMenu = headerLabel && (onTitleRename || onTitleArchive || onTitleShare);
   return (
     <ColumnHeaderStrip
       drag
@@ -69,7 +80,18 @@ export function WorkspaceHeaderStrip({
           ) : null}
         </>
       }
-      center={headerLabel ? <HeaderLabelText label={headerLabel} /> : null}
+      center={headerLabel ? (
+        <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+          <HeaderLabelText label={headerLabel} />
+          {hasTitleMenu ? (
+            <TitleMenuButton
+              onRename={onTitleRename}
+              onArchive={onTitleArchive}
+              onShare={onTitleShare}
+            />
+          ) : null}
+        </div>
+      ) : null}
       right={
         onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
           <>
@@ -99,6 +121,143 @@ export function WorkspaceHeaderStrip({
         ) : null
       }
     />
+  );
+}
+
+/** `…` overflow menu next to the workspace title. Codex puts a small
+ *  action chevron right of the conversation name for Rename / Archive /
+ *  Share. We render the matching three items, each gated on its handler
+ *  prop so the dashboard can wire them piecemeal. */
+function TitleMenuButton({
+  onRename,
+  onArchive,
+  onShare,
+}: {
+  onRename?: () => void;
+  onArchive?: () => void;
+  onShare?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  // Outside-click closes the menu.
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (event: MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDocDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDocDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const handlePick = useCallback((action?: () => void) => () => {
+    setOpen(false);
+    action?.();
+  }, []);
+
+  return (
+    <div ref={wrapperRef} data-no-drag style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        aria-label="Conversation actions"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 22,
+          height: 22,
+          borderRadius: 6,
+          borderWidth: 0,
+          background: open || hovered ? 'var(--t-hover)' : 'transparent',
+          color: 'var(--t-text-secondary)',
+          cursor: 'pointer',
+          padding: 0,
+          transition: 'background 120ms ease',
+        }}
+      >
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="5" cy="12" r="1.2" />
+          <circle cx="12" cy="12" r="1.2" />
+          <circle cx="19" cy="12" r="1.2" />
+        </svg>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            marginTop: 4,
+            minWidth: 168,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider)',
+            background: 'var(--t-panel)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+            paddingTop: 4,
+            paddingBottom: 4,
+            zIndex: 100,
+            fontFamily: 'var(--font-sans-system)',
+          }}
+        >
+          {onRename ? (
+            <TitleMenuItem label="Rename" onClick={handlePick(onRename)} />
+          ) : null}
+          {onArchive ? (
+            <TitleMenuItem label="Archive" onClick={handlePick(onArchive)} />
+          ) : null}
+          {onShare ? (
+            <TitleMenuItem label="Share session" onClick={handlePick(onShare)} />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TitleMenuItem({ label, onClick }: { label: string; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'block',
+        width: '100%',
+        textAlign: 'left',
+        borderWidth: 0,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        color: 'var(--t-text)',
+        cursor: 'pointer',
+        paddingTop: 6,
+        paddingBottom: 6,
+        paddingLeft: 12,
+        paddingRight: 12,
+        fontSize: 12,
+        fontWeight: 500,
+        letterSpacing: 0,
+        fontFamily: 'var(--font-sans-system)',
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
