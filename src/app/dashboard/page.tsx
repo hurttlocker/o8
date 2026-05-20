@@ -1518,6 +1518,10 @@ function DashboardInner() {
   }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
 
   const handleSplitWorkspaceFromHeader = useCallback(() => {
+    // Cap at 1 split (max 2 workspace panes). The split is a power
+    // feature now reached via right-clicking the play button — refuse
+    // further splits to keep the layout sane on typical screen widths.
+    if (workspaceActiveMap.size >= 2) return;
     const activeNode = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
     const activeWorkspaceLeaf = activeNode?.type === 'leaf' && activeNode.content.kind === 'terminal'
       ? activeNode
@@ -1526,7 +1530,7 @@ function DashboardInner() {
     const targetLeaf = activeWorkspaceLeaf ?? fallbackWorkspaceLeaf;
     if (!targetLeaf) return;
     handleSplitTile(targetLeaf.id, 'vertical');
-  }, [activeTileId, handleSplitTile, tileLayout.root]);
+  }, [activeTileId, handleSplitTile, tileLayout.root, workspaceActiveMap.size]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     setRightPanelKind('review');
