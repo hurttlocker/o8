@@ -101,12 +101,24 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     }
     const workspaceInstanceId = workspaceIdRef.current;
 
-    // Broadcast the active-tab label + tabId + kind + workspaceId so the
-    // dashboard can route the title to the column-level header strip
-    // (one workspace) or hide it on splits (more than one), and drive
-    // the `…` menu actions when applicable.
+    // Broadcast the active-tab label + tabId + kind + workspaceId + full
+    // tabs list so the dashboard can route the title to the column-level
+    // header strip (one workspace) or hide it on splits (more than one),
+    // surface the multi-tab pill strip when 2+ tabs exist, and drive the
+    // `…` / right-click menu actions when applicable.
     const activeTabId = controller.activeTab?.id ?? null;
     const activeTabKind = controller.activeTab?.kind ?? null;
+    const tabsForBroadcast = useMemo(() => (
+      controller.visibleTabs.map((tab) => ({
+        id: tab.id,
+        label: tab.label ?? '',
+        kind: tab.kind,
+        runtime: tab.kind === 'orchestrator'
+          ? (tab.singleRuntime ?? 'claude-code')
+          : (tab.chatRuntime ?? null),
+        packetStatus: tab.orchestrationPacket?.status ?? null,
+      }))
+    ), [controller.visibleTabs]);
     useEffect(() => {
       if (typeof window === 'undefined') return;
       window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
@@ -115,6 +127,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           label: conversationHeaderLabel,
           tabId: activeTabId,
           kind: activeTabKind,
+          tabs: tabsForBroadcast,
         },
       }));
       return () => {
@@ -124,11 +137,36 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
             label: null,
             tabId: null,
             kind: null,
+            tabs: [],
             removed: true,
           },
         }));
       };
-    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId]);
+    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsForBroadcast]);
+
+    // Listen for global-header pill clicks. Dashboard dispatches
+    // 'o8:request-select-tab' { tabId } when the operator clicks a pill;
+    // we route it to the controller's tab-select handler.
+    const handleSelectTab = controller.handleSelectTab;
+    const handleCloseTab = controller.handleCloseTab;
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      if (props.canCloseTile === true) return; // split panes skip — their own lower TabBar handles selection
+      const onSelect = (event: Event) => {
+        const tabId = (event as CustomEvent<{ tabId?: string }>).detail?.tabId;
+        if (tabId) handleSelectTab(tabId);
+      };
+      const onClose = (event: Event) => {
+        const tabId = (event as CustomEvent<{ tabId?: string }>).detail?.tabId;
+        if (tabId) handleCloseTab(tabId);
+      };
+      window.addEventListener('o8:request-select-tab', onSelect as EventListener);
+      window.addEventListener('o8:request-close-tab', onClose as EventListener);
+      return () => {
+        window.removeEventListener('o8:request-select-tab', onSelect as EventListener);
+        window.removeEventListener('o8:request-close-tab', onClose as EventListener);
+      };
+    }, [props.canCloseTile, handleSelectTab, handleCloseTab]);
 
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
