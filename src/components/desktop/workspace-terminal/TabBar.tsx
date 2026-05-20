@@ -11,7 +11,6 @@ import {
 import { WorkspaceLaunchPicker } from '@/components/desktop/workspace-terminal/WorkspaceLaunchPicker';
 import { describeWorkspaceChatTab, workspaceTabPrimaryLabel } from '@/components/desktop/workspace-terminal/utils';
 import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
-import { chromeNeoSurface, chromeNeoHoverSurface } from '@/components/desktop/chrome/ChromeButton';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { compactPacketLabel } from '@/lib/workspace-terminal/compact-packet-label';
 import { packetStateColorScheme, type PacketStateKey } from '@/lib/packet-state-colors';
@@ -31,8 +30,11 @@ function tabStateKey(status: OrchestratorPacketStatus | null | undefined, isLate
 }
 const TAB_BAR_HEIGHT = 38;
 const TAB_GAP = 4;
-const TAB_TOP_RADIUS = 15;
-const PRIMARY_TAB_MIN_WIDTH = 214;
+// Codex-style flat tabs: no paper-card chrome, active = subtle pill,
+// inactive = transparent text + icon only. Tighter density so the
+// bar fits inline without competing with the workspace below.
+const FLAT_TAB_HEIGHT = 30;
+const FLAT_TAB_RADIUS = 8;
 
 function formatDispatchedAt(epochMs: number): string {
   try {
@@ -210,9 +212,8 @@ export const TabBar = memo(function TabBar({
             scrollbarWidth: 'none',
           }}
         >
-          {tabs.map((tab, index) => {
+          {tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
-            const isFirstTab = index === 0;
             const isOrchestrator = tab.kind === 'orchestrator';
             const isSingleRuntimeTab = isOrchestrator && tab.mode === 'single';
             const isPermanentOrchestrator = isOrchestrator && tab.mode !== 'single';
@@ -239,10 +240,6 @@ export const TabBar = memo(function TabBar({
             const isLatestDispatch = !!tab.orchestrationPacket
               && latestDispatchedTabId !== null
               && (latestDispatchedTabId === tab.id || latestDispatchedTabId === tab.chatSessionKey);
-            // Terminal "this work shipped" signal — wins over orange so a
-            // merged packet's tab reads green even if it's still the most
-            // recent dispatch by time.
-            const isMergedDispatch = tab.orchestrationPacket?.status === 'released';
             const dispatchTooltip = isLatestDispatch && latestDispatchedAt
               ? formatDispatchedAt(latestDispatchedAt)
               : null;
@@ -253,31 +250,29 @@ export const TabBar = memo(function TabBar({
               || primaryLabel
               || tab.label;
 
-            const neoSurface = chromeNeoSurface(isActive);
             const isFlashing = flashTabId === tab.id;
             const stateKey = tabStateKey(tab.orchestrationPacket?.status, isLatestDispatch);
             const stateScheme = packetStateColorScheme(stateKey);
             const hasStateColor = stateKey !== 'neutral';
-            const isPlainActive = isActive && !hasStateColor;
-            const baseBoxShadow = hasStateColor
-              ? `inset 0 0 0 1px ${stateScheme.tabBorder}`
-              : (isPlainActive
-                ? 'inset 0 1px 0 rgba(255, 255, 255, 0.18)'
-                : neoSurface.boxShadow);
-            const tabBackground = hasStateColor
-              ? stateScheme.tabBg
-              : (isActive
-                ? 'var(--t-panel)'
-                : neoSurface.background);
+            // Codex-flat surfaces: active tab gets a subtle pill bg, inactive
+            // stays transparent except for the optional state tint that lets
+            // a glance pick out review-orange / merged-green / failed-red.
+            const activeNeutralBg = 'var(--t-input-bg)';
+            const tabBackground = isActive
+              ? (hasStateColor ? stateScheme.tabBg : activeNeutralBg)
+              : (hasStateColor ? stateScheme.tabBg : 'transparent');
             const tabBoxShadow = isFlashing
-              ? `${baseBoxShadow}, 0 0 0 2px var(--t-accent-soft, rgba(37, 99, 235, 0.22)), 0 6px 18px rgba(37, 99, 235, 0.28)`
-              : baseBoxShadow;
+              ? '0 0 0 2px var(--t-accent-soft, rgba(37, 99, 235, 0.22)), 0 6px 18px rgba(37, 99, 235, 0.28)'
+              : 'none';
             const tabTextColor = hasStateColor
               ? stateScheme.tabText
               : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)');
-            const tabBorderColor = hasStateColor
+            // Border lives only on tabs with state OR on the active tab —
+            // inactive neutral tabs are pure text. Separator between
+            // adjacent tabs comes from the wrapping strip, not each row.
+            const tabBorderColor = isActive && hasStateColor
               ? stateScheme.tabBorder
-              : 'var(--t-divider-subtle)';
+              : 'transparent';
             return (
               <button
                 type="button"
@@ -310,53 +305,40 @@ export const TabBar = memo(function TabBar({
                   alignItems: 'center',
                   gap: 6,
                   boxSizing: 'border-box',
-                  height: isActive ? TAB_BAR_HEIGHT + 1 : TAB_BAR_HEIGHT,
-                  minHeight: isActive ? TAB_BAR_HEIGHT + 1 : TAB_BAR_HEIGHT,
-                  minWidth: isFirstTab ? PRIMARY_TAB_MIN_WIDTH : undefined,
-                  paddingTop: 8,
-                  paddingBottom: 8,
-                  paddingLeft: isFirstTab ? 22 : 10,
+                  height: FLAT_TAB_HEIGHT,
+                  minHeight: FLAT_TAB_HEIGHT,
+                  paddingTop: 4,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
                   paddingRight: 8,
                   marginTop: 0,
-                  marginBottom: isActive ? -1 : 0,
+                  marginBottom: 0,
                   marginLeft: 0,
                   marginRight: 0,
                   borderWidth: 1,
                   borderStyle: 'solid',
                   borderColor: tabBorderColor,
-                  borderBottomWidth: isActive ? 0 : 1,
-                  // Top corners keep the Apple-style squircle while the fill
-                  // matches the header surface, avoiding a visible edge bite.
-                  borderTopLeftRadius: TAB_TOP_RADIUS,
-                  borderTopRightRadius: TAB_TOP_RADIUS,
-                  borderBottomLeftRadius: 0,
-                  borderBottomRightRadius: 0,
-                  borderLeftWidth: dragOverTabId === tab.id ? 2 : 1,
-                  borderLeftStyle: 'solid',
-                  borderLeftColor: dragOverTabId === tab.id ? '#2563eb' : tabBorderColor,
+                  borderRadius: FLAT_TAB_RADIUS,
                   background: tabBackground,
                   boxShadow: tabBoxShadow,
                   color: tabTextColor,
-                  fontSize: 11,
+                  fontSize: 11.5,
                   fontWeight: isActive ? 560 : 500,
                   fontFamily: 'var(--font-sans-system)',
                   letterSpacing: '-0.01em',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
-                  transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   position: 'relative',
                   zIndex: isActive ? 2 : 1,
                 }}
                 onMouseEnter={(event) => {
-                  if (isActive || isLatestDispatch || isMergedDispatch) return;
-                  const hover = chromeNeoHoverSurface();
-                  event.currentTarget.style.background = hover.background;
-                  event.currentTarget.style.boxShadow = hover.boxShadow;
+                  if (isActive || hasStateColor) return;
+                  event.currentTarget.style.background = 'var(--t-hover)';
                 }}
                 onMouseLeave={(event) => {
-                  if (isActive || isLatestDispatch || isMergedDispatch) return;
-                  event.currentTarget.style.background = neoSurface.background;
-                  event.currentTarget.style.boxShadow = neoSurface.boxShadow;
+                  if (isActive || hasStateColor) return;
+                  event.currentTarget.style.background = 'transparent';
                 }}
               >
                 {tab.unseen ? (
