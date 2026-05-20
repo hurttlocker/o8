@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { CheckCircle2, ChevronDown, ChevronRight, Folder } from '../../lucide-shims';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
@@ -356,6 +356,27 @@ export function ChatsTab({
   const [archivedHistoryItems, setArchivedHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [archivedLanes, setArchivedLanes] = useState<ArchivedLaneRow[]>([]);
   const [archivedLanesExpanded, setArchivedLanesExpanded] = useState<Set<string>>(() => new Set());
+
+  // Group-by mode for the left-rail chat list (mini / flat variant).
+  // Three modes, persisted to localStorage. Borrowed from Claude's
+  // sidebar pattern in the operator's reference video — the ⚙ filter
+  // icon on a group header opens a Group by / Sort by popover.
+  type ChatGroupBy = 'repo' | 'date' | 'flat';
+  const CHAT_GROUP_BY_KEY = 'o8:chat-group-by';
+  const [chatGroupBy, setChatGroupBy] = useState<ChatGroupBy>('repo');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = window.localStorage.getItem(CHAT_GROUP_BY_KEY);
+    if (stored === 'repo' || stored === 'date' || stored === 'flat') {
+      setChatGroupBy(stored);
+    }
+  }, []);
+  const updateChatGroupBy = useCallback((next: ChatGroupBy) => {
+    setChatGroupBy(next);
+    if (typeof window !== 'undefined') {
+      try { window.localStorage.setItem(CHAT_GROUP_BY_KEY, next); } catch { /* ignore */ }
+    }
+  }, []);
   const [loading, setLoading] = useState(true);
   const [busyHistoryIds, setBusyHistoryIds] = useState<Set<string>>(() => new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Record<HistoryGroupKey, boolean>>({
@@ -556,6 +577,39 @@ export function ChatsTab({
     return [...groups.values()];
   }, [flatHistoryItems, targetRepos]);
 
+  // Date-bucket grouping — Today / Yesterday / This week / Older.
+  // Used when chatGroupBy === 'date'. Same shape as repo groups so the
+  // render loop can stay generic.
+  const flatHistoryDateGroups = useMemo<RepoHistoryGroup[]>(() => {
+    const today: ChatHistoryItem[] = [];
+    const yesterday: ChatHistoryItem[] = [];
+    const thisWeek: ChatHistoryItem[] = [];
+    const older: ChatHistoryItem[] = [];
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+    const startOfWeek = startOfToday - 7 * 24 * 60 * 60 * 1000;
+
+    for (const item of flatHistoryItems) {
+      const ts = Date.parse(item.modifiedAt);
+      if (!Number.isFinite(ts)) {
+        older.push(item);
+        continue;
+      }
+      if (ts >= startOfToday) today.push(item);
+      else if (ts >= startOfYesterday) yesterday.push(item);
+      else if (ts >= startOfWeek) thisWeek.push(item);
+      else older.push(item);
+    }
+    const groups: RepoHistoryGroup[] = [];
+    if (today.length > 0) groups.push({ key: 'today', label: 'Today', items: today });
+    if (yesterday.length > 0) groups.push({ key: 'yesterday', label: 'Yesterday', items: yesterday });
+    if (thisWeek.length > 0) groups.push({ key: 'this-week', label: 'This week', items: thisWeek });
+    if (older.length > 0) groups.push({ key: 'older', label: 'Older', items: older });
+    return groups;
+  }, [flatHistoryItems]);
+
   // Group archived lanes by the same repo-label key used by
   // flatHistoryRepoGroups so we can render them inline under each repo.
   const archivedLanesByRepoKey = useMemo(() => {
@@ -656,45 +710,84 @@ export function ChatsTab({
       {groupMode === 'flat' && flatHistoryItems.length > 0 ? (
         <div>
           {compact ? (
-            flatHistoryRepoGroups.map((group) => {
-              const repoArchivedLanes = archivedLanesByRepoKey.get(group.key) ?? [];
-              const archivedExpanded = archivedLanesExpanded.has(group.key);
-              return (
-                <div key={group.key}>
-                  <RepoGroupLabel label={group.label} />
-                  {group.items.map((item) => (
-                    <HistoryChatRow
-                      key={item.tabId}
-                      item={item}
-                      compact={compact}
-                      disabled={!onOpenHistoryChat}
-                      active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                      tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                      onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
-                      onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
-                    />
-                  ))}
-                  {repoArchivedLanes.length > 0 ? (
-                    <>
-                      <SectionLabel
-                        label="Archived"
+            <>
+              {/* Group-by picker — borrowed from Claude's sidebar
+                  ⚙ pattern. Operator chose what 'group by' the rail
+                  uses; persisted to localStorage. */}
+              <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
+              {chatGroupBy === 'flat' ? (
+                flatHistoryItems.map((item) => (
+                  <HistoryChatRow
+                    key={item.tabId}
+                    item={item}
+                    compact={compact}
+                    disabled={!onOpenHistoryChat}
+                    active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
+                    tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                    onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                    onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
+                  />
+                ))
+              ) : chatGroupBy === 'date' ? (
+                flatHistoryDateGroups.map((group) => (
+                  <div key={group.key}>
+                    <RepoGroupLabel label={group.label} />
+                    {group.items.map((item) => (
+                      <HistoryChatRow
+                        key={item.tabId}
+                        item={item}
                         compact={compact}
-                        count={repoArchivedLanes.length}
-                        collapsed={!archivedExpanded}
-                        onToggle={() => toggleArchivedLanes(group.key)}
+                        disabled={!onOpenHistoryChat}
+                        active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
+                        tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                        onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                        onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                       />
-                      {archivedExpanded ? repoArchivedLanes.map((lane) => (
-                        <ArchivedLaneCompactRow
-                          key={lane.id}
-                          lane={lane}
-                          onSelectSession={onSelectSession}
+                    ))}
+                  </div>
+                ))
+              ) : (
+                flatHistoryRepoGroups.map((group) => {
+                  const repoArchivedLanes = archivedLanesByRepoKey.get(group.key) ?? [];
+                  const archivedExpanded = archivedLanesExpanded.has(group.key);
+                  return (
+                    <div key={group.key}>
+                      <RepoGroupLabel label={group.label} />
+                      {group.items.map((item) => (
+                        <HistoryChatRow
+                          key={item.tabId}
+                          item={item}
+                          compact={compact}
+                          disabled={!onOpenHistoryChat}
+                          active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
+                          tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                          onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                          onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                         />
-                      )) : null}
-                    </>
-                  ) : null}
-                </div>
-              );
-            })
+                      ))}
+                      {repoArchivedLanes.length > 0 ? (
+                        <>
+                          <SectionLabel
+                            label="Archived"
+                            compact={compact}
+                            count={repoArchivedLanes.length}
+                            collapsed={!archivedExpanded}
+                            onToggle={() => toggleArchivedLanes(group.key)}
+                          />
+                          {archivedExpanded ? repoArchivedLanes.map((lane) => (
+                            <ArchivedLaneCompactRow
+                              key={lane.id}
+                              lane={lane}
+                              onSelectSession={onSelectSession}
+                            />
+                          )) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  );
+                })
+              )}
+            </>
           ) : (
             <>
               {sectionLabel ? (
@@ -924,6 +1017,169 @@ function SectionLabel({
   );
 }
 
+/** Group-by picker — small ⚙-style chip rendered at the top of the
+ *  flat-mini chat list. Click opens a popover with three radio options:
+ *  Repo / Date / Flat. Borrowed from Claude's sidebar pattern in the
+ *  operator's reference video — same idea, less density. */
+function ChatGroupPicker({
+  mode,
+  onChange,
+}: {
+  mode: 'repo' | 'date' | 'flat';
+  onChange: (next: 'repo' | 'date' | 'flat') => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (event: globalThis.MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDocDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDocDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const label = mode === 'repo' ? 'Group: Repo' : mode === 'date' ? 'Group: Date' : 'Flat';
+  return (
+    <div
+      ref={wrapperRef}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        justifyContent: 'flex-end',
+        paddingTop: 6,
+        paddingRight: 10,
+        paddingBottom: 2,
+        paddingLeft: 10,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          height: 20,
+          paddingLeft: 6,
+          paddingRight: 5,
+          borderRadius: 5,
+          borderWidth: 0,
+          background: open || hovered ? 'var(--t-hover)' : 'transparent',
+          color: 'var(--t-text-muted)',
+          cursor: 'pointer',
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          fontFamily: REPO_FOCUS_FONT,
+          transition: 'background 120ms ease',
+        }}
+      >
+        <span>{label}</span>
+        <svg width={9} height={9} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            right: 10,
+            marginTop: 2,
+            minWidth: 168,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider)',
+            background: 'var(--t-panel)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+            paddingTop: 4,
+            paddingBottom: 4,
+            zIndex: 50,
+            fontFamily: REPO_FOCUS_FONT,
+          }}
+        >
+          <ChatGroupPickerItem label="Group by repo" selected={mode === 'repo'} onClick={() => { onChange('repo'); setOpen(false); }} />
+          <ChatGroupPickerItem label="Group by date" selected={mode === 'date'} onClick={() => { onChange('date'); setOpen(false); }} />
+          <ChatGroupPickerItem label="Flat (no groups)" selected={mode === 'flat'} onClick={() => { onChange('flat'); setOpen(false); }} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChatGroupPickerItem({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={selected}
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        width: '100%',
+        paddingTop: 6,
+        paddingBottom: 6,
+        paddingLeft: 10,
+        paddingRight: 10,
+        borderWidth: 0,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        color: 'var(--t-text)',
+        cursor: 'pointer',
+        textAlign: 'left',
+        fontSize: 12,
+        fontFamily: REPO_FOCUS_FONT,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 14,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: selected ? 'var(--t-accent)' : 'transparent',
+        }}
+      >
+        <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function RepoGroupLabel({ label }: { label: string }) {
   return (
     <div
@@ -932,25 +1188,25 @@ function RepoGroupLabel({ label }: { label: string }) {
         alignItems: 'center',
         gap: 6,
         minHeight: 22,
-        paddingTop: 7,
+        paddingTop: 10,
         paddingRight: 10,
         paddingBottom: 3,
-        paddingLeft: 10,
-        color: 'var(--t-text-secondary)',
+        paddingLeft: 14,
+        color: 'var(--t-text-faint)',
         fontFamily: REPO_FOCUS_FONT,
       }}
     >
-      <Folder size={12} strokeWidth={1.9} color="var(--t-text-faint)" />
       <span
         style={{
           minWidth: 0,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontSize: 11,
-          lineHeight: '14px',
-          fontWeight: 500,
-          letterSpacing: 0,
+          fontSize: 9.5,
+          lineHeight: '12px',
+          fontWeight: 700,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
         }}
       >
         {label}
