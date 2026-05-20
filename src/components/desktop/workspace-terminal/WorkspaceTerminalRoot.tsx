@@ -38,9 +38,25 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // the viewport breakpoint AND when we have non-primary tabs to
     // surface. Above the breakpoint, the strip is just controls.
     const showTabList = widthAllowsTabs && topBarTabs.length > 0;
-    const conversationHeaderLabel = controller.activeTab
-      ? workspaceConversationHeaderLabel(controller.activeTab)
-      : null;
+    const activeTab = controller.activeTab;
+    // workspaceConversationHeaderLabel only knows chat-shaped tabs
+    // (orchestrator / llm-chat / single-runtime chat). For terminals
+    // and canvas tabs we fall back to "<repo> / Shell" or "<repo> /
+    // Canvas" so the title strip never reads blank.
+    const conversationHeaderLabel = (() => {
+      if (!activeTab) return null;
+      const chatLabel = workspaceConversationHeaderLabel(activeTab);
+      if (chatLabel) return chatLabel;
+      const repoName = activeTab.repo?.name
+        ?? (activeTab.repo?.localPath ? activeTab.repo.localPath.split('/').filter(Boolean).pop() ?? null : null);
+      const kindLabel = activeTab.kind === 'terminal'
+        ? 'Shell'
+        : activeTab.kind === 'canvas'
+          ? 'Canvas'
+          : null;
+      if (!kindLabel) return null;
+      return repoName ? `${repoName} / ${kindLabel}` : kindLabel;
+    })();
 
     // Broadcast the active-tab label + tabId + kind so the column-level
     // header strip (WorkspaceHeaderStrip) can mirror Codex / Claude and
