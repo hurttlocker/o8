@@ -8,9 +8,15 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
+
+// Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
+// after this window — gives the operator time to come back to a fresh tab
+// and type, while preventing indefinite accumulation. Pinned / starred
+// empties are exempt and never deleted.
+const EMPTY_FILE_GC_MS = 60 * 60 * 1000; // 1 hour
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
@@ -51,6 +57,9 @@ export async function GET(request: NextRequest) {
   try {
     const files = readdirSync(HISTORY_DIR).filter(f => f.endsWith('.json'));
     const conversations: ChatHistoryEntry[] = [];
+    // Empty files older than EMPTY_FILE_GC_MS get deleted at the end —
+    // can't unlink mid-loop without surprising readdirSync.
+    const filesToDelete: string[] = [];
 
     for (const file of files) {
       try {
@@ -88,7 +97,15 @@ export async function GET(request: NextRequest) {
         // threads are noise in the left rail until they have content.
         // Pinned / starred empties stay visible (operator explicitly cared).
         const explicitlyKept = data.pinned === true || data.starred === true;
-        if (isEmpty && !explicitlyKept) continue;
+        if (isEmpty && !explicitlyKept) {
+          // Garbage-collect long-orphaned empty placeholders so they don't
+          // accumulate on disk forever. Anything newer than the TTL stays
+          // around in case the operator returns to the open tab and types.
+          if (Date.now() - stat.mtime.getTime() > EMPTY_FILE_GC_MS) {
+            filesToDelete.push(filePath);
+          }
+          continue;
+        }
         if (onlyArchived) {
           if (!archivedAt) continue;
         } else if (!includeArchived && archivedAt) {
@@ -150,6 +167,12 @@ export async function GET(request: NextRequest) {
       if (a.starred !== b.starred) return a.starred ? -1 : 1;
       return new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime();
     });
+
+    // Opportunistic disk cleanup of orphan empty placeholders. Best-effort —
+    // a failure here is silent because the list itself still rendered correctly.
+    for (const path of filesToDelete) {
+      try { unlinkSync(path); } catch { /* ignore */ }
+    }
 
     return NextResponse.json({ conversations });
   } catch {
