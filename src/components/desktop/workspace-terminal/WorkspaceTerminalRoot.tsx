@@ -32,11 +32,13 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       [controller.visibleTabs],
     );
     const { widthAllowsTabs } = useTabBarVisibility();
-    // Top tab bar only renders when (a) the viewport is narrow AND
-    // (b) there's at least one non-primary tab to show. Above the
-    // breakpoint the left rail fully serves nav.
-    const showTabBar = widthAllowsTabs && topBarTabs.length > 0;
-    const conversationHeaderLabel = !showTabBar && controller.activeTab
+    // The TabBar component ALWAYS renders to host the per-workspace
+    // header controls (play / launch picker + close-split tile button).
+    // Its tab-list portion is gated separately: tabs only show below
+    // the viewport breakpoint AND when we have non-primary tabs to
+    // surface. Above the breakpoint, the strip is just controls.
+    const showTabList = widthAllowsTabs && topBarTabs.length > 0;
+    const conversationHeaderLabel = !showTabList && controller.activeTab
       ? workspaceConversationHeaderLabel(controller.activeTab)
       : null;
 
@@ -246,21 +248,20 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           </div>
         ) : null}
 
-        {showTabBar ? (
-          <TabBar
-            tabs={topBarTabs}
-            activeTabId={controller.effectiveActiveTabId}
-            launchRequestKey={controller.launchRequestKey}
-            onSelectTab={controller.handleSelectTab}
-            onCloseTab={controller.handleCloseTab}
-            onNewTab={controller.handleNewTab}
-            onNewLLMChatTab={controller.handleNewLLMChatTab}
-            scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
-            canCloseTile={props.canCloseTile}
-            onCloseTile={props.onCloseTile}
-            onReorderTabs={controller.handleReorderTabs}
-          />
-        ) : null}
+        <TabBar
+          tabs={topBarTabs}
+          activeTabId={controller.effectiveActiveTabId}
+          launchRequestKey={controller.launchRequestKey}
+          onSelectTab={controller.handleSelectTab}
+          onCloseTab={controller.handleCloseTab}
+          onNewTab={controller.handleNewTab}
+          onNewLLMChatTab={controller.handleNewLLMChatTab}
+          scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
+          canCloseTile={props.canCloseTile}
+          onCloseTile={props.onCloseTile}
+          onReorderTabs={controller.handleReorderTabs}
+          showTabList={showTabList}
+        />
 
         <WorkspaceTerminalPanels
           visibleTabs={controller.visibleTabs}

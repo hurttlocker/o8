@@ -58,6 +58,11 @@ interface TabBarProps {
   canCloseTile?: boolean;
   onCloseTile?: () => void;
   onReorderTabs?: (draggedTabId: string, dropTargetTabId: string) => void;
+  /** When false, the tab list scroll area is hidden but the workspace
+   *  header strip still renders the launch picker + close-tile control.
+   *  This is how the wide-viewport path keeps per-workspace play / close-split
+   *  buttons even when the tab list itself is collapsed away. */
+  showTabList?: boolean;
 }
 
 export const TabBar = memo(function TabBar({
@@ -72,6 +77,7 @@ export const TabBar = memo(function TabBar({
   canCloseTile,
   onCloseTile,
   onReorderTabs,
+  showTabList = true,
 }: TabBarProps) {
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -139,7 +145,12 @@ export const TabBar = memo(function TabBar({
       }}
     >
       <div style={{ position: 'relative', display: 'flex', flex: 1, overflow: 'visible' }}>
-        {canScrollLeft ? (
+        {!showTabList ? (
+          // Empty spacer so the launch picker + close-tile button stay
+          // right-aligned in the header strip when the tab list is hidden.
+          <div style={{ flex: 1 }} aria-hidden />
+        ) : null}
+        {showTabList && canScrollLeft ? (
           <div
             role="button"
             tabIndex={0}
@@ -165,7 +176,7 @@ export const TabBar = memo(function TabBar({
             <PhosphorCaretLeft size={12} />
           </div>
         ) : null}
-        {canScrollRight ? (
+        {showTabList && canScrollRight ? (
           <div
             role="button"
             tabIndex={0}
@@ -197,7 +208,7 @@ export const TabBar = memo(function TabBar({
           onScroll={syncTabScroll}
           onMouseEnter={syncTabScroll}
           style={{
-            display: 'flex',
+            display: showTabList ? 'flex' : 'none',
             flex: 1,
             gap: TAB_GAP,
             height: TAB_BAR_HEIGHT + 1,
